@@ -63,8 +63,8 @@ enough to implement, review, and commit independently.
 
 ## 4. Complexity assessment and routing
 
-- [ ] Execute the complexity assessment with `complexityDecisionSchema`.
-- [ ] Emit started, succeeded, and failed complexity progress events.
+- [x] Execute the complexity assessment with `complexityDecisionSchema`.
+- [x] Emit started, succeeded, and failed complexity progress events.
 - [ ] Store the decision and rationale in the issue artifact store.
 - [ ] Route complexity 0–3 to `ImplementationExecutor`.
 - [ ] Route complexity 4–5 to `DecompositionExecutor`.
