@@ -30,7 +30,7 @@ enough to implement, review, and commit independently.
 
 ## 2. OpenCode task/session layer
 
-- [ ] Add a shared helper for creating a fresh OpenCode session in the repository
+- [x] Add a shared helper for creating a fresh OpenCode session in the repository
       directory with the selected agent, model, and variant.
 - [ ] Add a helper for non-structured agent tasks that returns session metadata
       and the final response.
@@ -43,7 +43,7 @@ enough to implement, review, and commit independently.
       pushing, changing branches, or mutating GitHub directly.
 - [ ] Verify repository branch and `HEAD` invariants after every agent session.
 - [ ] Decide whether successful sessions are retained for inspection or deleted.
-- [ ] Add mocked SDK tests for fresh-session behavior and selection propagation.
+- [x] Add mocked SDK tests for fresh-session behavior and selection propagation.
 
 ## 3. Prompt construction
 
