@@ -196,6 +196,44 @@ describe("OpenCode structured output", () => {
     });
   });
 
+  test("threads an AbortSignal to session creation and prompt", async () => {
+    const controller = new AbortController();
+    let createOptions: unknown;
+    let promptOptions: unknown;
+    const client = {
+      session: {
+        create: async (_parameters: unknown, options: unknown) => {
+          createOptions = options;
+          return { data: { id: "session-1" } };
+        },
+        prompt: async (_parameters: unknown, options: unknown) => {
+          promptOptions = options;
+          return {
+            data: {
+              info: assistantInfo({
+                decision: ProbeDecision.Proceed,
+                confidence: 1,
+                reason: "The condition is true.",
+              }),
+              parts: [],
+            },
+          };
+        },
+      },
+    } as unknown as OpencodeClient;
+
+    await requestStructuredOutput(client, {
+      directory: "/workspace",
+      title: "Test decision",
+      prompt: "Make a decision.",
+      schema: decisionSchema,
+      signal: controller.signal,
+    }).pipe(Effect.runPromise);
+
+    expect(createOptions).toEqual({ signal: controller.signal });
+    expect(promptOptions).toEqual({ signal: controller.signal });
+  });
+
   test("rejects structured output that does not match the schema", async () => {
     const client = {
       session: {

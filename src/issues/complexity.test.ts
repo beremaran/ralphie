@@ -15,6 +15,7 @@ import {
 } from "./complexity.ts";
 import { ComplexityLevel } from "./decisions.ts";
 import type { IssueExecutionContext } from "./execution.ts";
+import { makeOpenCodeSessionDiagnostics } from "../opencode/task-session.ts";
 
 const assistantInfo = (structured: unknown) => ({
   id: "message-1",
@@ -37,7 +38,10 @@ const assistantInfo = (structured: unknown) => ({
   structured,
 });
 
-const context = (client: OpencodeClient): IssueExecutionContext => ({
+const context = (
+  client: OpencodeClient,
+  overrides: Partial<Pick<IssueExecutionContext, "openCodeDiagnostics" | "repositoryInvariant">> = {},
+): IssueExecutionContext => ({
   issue: {
     number: 42,
     title: "Fix token refresh",
@@ -53,6 +57,11 @@ const context = (client: OpencodeClient): IssueExecutionContext => ({
   octokit: {} as Octokit,
   openCode: client,
   openCodeSelection: { agent: "build" },
+  openCodeDiagnostics: overrides.openCodeDiagnostics ?? makeOpenCodeSessionDiagnostics(() => "now"),
+  repositoryInvariant: overrides.repositoryInvariant ?? {
+    capture: () => Effect.succeed({ branch: "main", head: "abc123" }),
+    verify: () => Effect.void,
+  },
 });
 
 const assessmentLayer = (events: ProgressUpdate[]) =>
@@ -126,5 +135,48 @@ describe("complexity assessment", () => {
 
     expect(Exit.isFailure(exit)).toBe(true);
     expect(events.at(-1)?.status).toBe(ProgressStatus.Failed);
+  });
+
+  test("records the assessment session and verifies its checkout invariant", async () => {
+    const diagnostics = makeOpenCodeSessionDiagnostics(() => "now");
+    let verified: unknown;
+    const result = await Effect.gen(function* () {
+      const assessment = yield* ComplexityAssessment;
+      return yield* assessment.assess(
+        context(
+          {
+            session: {
+              create: async () => ({ data: { id: "session-1" } }),
+              prompt: async () => ({
+                data: {
+                  info: assistantInfo({
+                    complexity: ComplexityLevel.Level2,
+                    rationale: "The change is localized.",
+                  }),
+                  parts: [],
+                },
+              }),
+            },
+          } as unknown as OpencodeClient,
+          {
+            openCodeDiagnostics: diagnostics,
+            repositoryInvariant: {
+              capture: () => Effect.succeed({ branch: "main", head: "abc123" }),
+              verify: (directory, invariant) =>
+                Effect.sync(() => {
+                  verified = { directory, invariant };
+                }),
+            },
+          },
+        ),
+      );
+    }).pipe(Effect.provide(assessmentLayer([])), Effect.runPromise);
+
+    expect(result.sessionID).toBe("session-1");
+    expect(diagnostics.list("run-1")).toHaveLength(1);
+    expect(verified).toEqual({
+      directory: "/workspace/repo",
+      invariant: { branch: "main", head: "abc123" },
+    });
   });
 });

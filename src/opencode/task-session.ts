@@ -21,6 +21,7 @@ export type OpenCodeTaskSessionRequest = {
   readonly selection: OpenCodeSelection;
   readonly runId?: string;
   readonly diagnostics?: OpenCodeSessionDiagnostics;
+  readonly signal?: AbortSignal;
 };
 
 export type OpenCodeTaskSession = {
@@ -279,7 +280,7 @@ export const createOpenCodeTaskSession = (
         ...(request.selection.model === undefined
           ? {}
           : { model: createSessionModel(request.selection.model) }),
-      });
+      }, request.signal === undefined ? undefined : { signal: request.signal });
 
       if (response.error !== undefined || response.data === undefined) {
         throw new Error(
@@ -333,6 +334,7 @@ export const runOpenCodeTask = (
           taskSessionPromptParameters(session, {
             parts: [{ type: "text", text: request.prompt }],
           }),
+          request.signal === undefined ? undefined : { signal: request.signal },
         );
 
         if (response.error !== undefined || response.data === undefined) {

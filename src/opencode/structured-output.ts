@@ -28,6 +28,7 @@ export type StructuredOutputRequest<Output> = {
   readonly variant?: string;
   readonly runId?: string;
   readonly diagnostics?: OpenCodeSessionDiagnostics;
+  readonly signal?: AbortSignal;
   readonly repositoryInvariant?: OpenCodeRepositoryInvariant;
   readonly verifyRepositoryInvariant?: (
     repositoryPath: string,
@@ -71,7 +72,7 @@ export const requestStructuredOutput = <Output>(
         title: request.title,
         ...(request.agent === undefined ? {} : { agent: request.agent }),
         permission: OPEN_CODE_TASK_PERMISSION_POLICY,
-      });
+      }, request.signal === undefined ? undefined : { signal: request.signal });
 
       if (session.error !== undefined || session.data === undefined) {
         throw new Error(
@@ -101,7 +102,7 @@ export const requestStructuredOutput = <Output>(
           retryCount: request.retryCount ?? 2,
         },
         parts: [{ type: "text", text: request.prompt }],
-      });
+      }, request.signal === undefined ? undefined : { signal: request.signal });
 
       if (response.error !== undefined || response.data === undefined) {
         throw new Error(

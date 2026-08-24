@@ -292,6 +292,35 @@ describe("OpenCode task sessions", () => {
     });
   });
 
+  test("threads an AbortSignal to session creation and prompt", async () => {
+    const controller = new AbortController();
+    let createOptions: unknown;
+    let promptOptions: unknown;
+    const client = {
+      session: {
+        create: async (_parameters: unknown, options: unknown) => {
+          createOptions = options;
+          return { data: { id: "session-1" } };
+        },
+        prompt: async (_parameters: unknown, options: unknown) => {
+          promptOptions = options;
+          return { data: { info: assistantResponse(), parts: responseParts } };
+        },
+      },
+    } as unknown as OpencodeClient;
+
+    await runOpenCodeTask(client, {
+      directory: "/workspace/repository",
+      title: "Implement issue #42",
+      prompt: "Implement the issue.",
+      selection: { agent: "build" },
+      signal: controller.signal,
+    }).pipe(Effect.runPromise);
+
+    expect(createOptions).toEqual({ signal: controller.signal });
+    expect(promptOptions).toEqual({ signal: controller.signal });
+  });
+
   test("emits a useful progress failure when the agent session fails", async () => {
     const events: unknown[] = [];
     const client = {

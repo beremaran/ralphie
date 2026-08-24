@@ -3,6 +3,8 @@ import type { OpencodeClient } from "@opencode-ai/sdk/v2";
 
 import type { GitHubIssue } from "../github/issues.ts";
 import type { OpenCodeSelection } from "../opencode/model.ts";
+import type { OpenCodeSessionDiagnostics } from "../opencode/task-session.ts";
+import type { GitRepositoryInvariantService } from "../git/repository-invariant.ts";
 
 /**
  * The terminal state reported by an issue executor.
@@ -63,4 +65,7 @@ export type IssueExecutionContext = {
   readonly octokit: Octokit;
   readonly openCode: OpencodeClient;
   readonly openCodeSelection: OpenCodeSelection;
+  readonly openCodeDiagnostics: OpenCodeSessionDiagnostics;
+  readonly repositoryInvariant: GitRepositoryInvariantService;
+  readonly signal?: AbortSignal;
 };

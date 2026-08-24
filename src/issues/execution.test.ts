@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { Effect } from "effect";
+
+import { makeOpenCodeSessionDiagnostics } from "../opencode/task-session.ts";
 
 import {
   IssueExecutionOutcomeKind,
@@ -72,6 +75,11 @@ describe("issue execution domain types", () => {
       octokit: {} as IssueExecutionContext["octokit"],
       openCode: {} as IssueExecutionContext["openCode"],
       openCodeSelection: { agent: "build" },
+      openCodeDiagnostics: makeOpenCodeSessionDiagnostics(),
+      repositoryInvariant: {
+        capture: () => Effect.succeed({ branch: "main", head: "abc123" }),
+        verify: () => Effect.void,
+      },
     };
 
     expect(context.issue.number).toBe(42);

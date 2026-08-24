@@ -7,7 +7,7 @@ import {
   ProgressStage,
   ProgressStatus,
 } from "../progress/progress.ts";
-import type { RalphieError } from "../shared/error.ts";
+import { RalphieError } from "../shared/error.ts";
 import {
   complexityDecisionSchema,
   type ComplexityDecision,
@@ -53,18 +53,37 @@ export const ComplexityAssessmentLive = Layer.effect(
           })
           .pipe(
             Effect.zipRight(
-              requestStructuredOutput(context.openCode, {
-                directory: context.repositoryPath,
-                title: `Assess issue #${context.issue.number}`,
-                prompt: buildComplexityPrompt({
-                  issue: context.issue,
-                  repositoryPath: context.repositoryPath,
-                  targetBranch: context.targetBranch,
-                }),
-                schema: complexityDecisionSchema,
-                agent: context.openCodeSelection.agent,
-                model: context.openCodeSelection.model,
-                variant: context.openCodeSelection.variant,
+              Effect.gen(function* () {
+                const checkpoint = yield* context.repositoryInvariant.capture(
+                  context.repositoryPath,
+                );
+                if (checkpoint.branch !== context.targetBranch) {
+                  return yield* new RalphieError({
+                    message: `Complexity assessment requires branch ${context.targetBranch}, but checkout is on ${checkpoint.branch}.`,
+                  });
+                }
+
+                return yield* requestStructuredOutput(context.openCode, {
+                  directory: context.repositoryPath,
+                  title: `Assess issue #${context.issue.number}`,
+                  prompt: buildComplexityPrompt({
+                    issue: context.issue,
+                    repositoryPath: context.repositoryPath,
+                    targetBranch: context.targetBranch,
+                  }),
+                  schema: complexityDecisionSchema,
+                  agent: context.openCodeSelection.agent,
+                  model: context.openCodeSelection.model,
+                  variant: context.openCodeSelection.variant,
+                  runId: context.runId,
+                  diagnostics: context.openCodeDiagnostics,
+                  repositoryInvariant: checkpoint,
+                  verifyRepositoryInvariant: context.repositoryInvariant.verify,
+                  progress,
+                  progressStage: ProgressStage.ComplexityAssessment,
+                  progressIssue: issueProgress.issue,
+                  signal: context.signal,
+                });
               }),
             ),
             Effect.map(({ output, sessionID }) => ({

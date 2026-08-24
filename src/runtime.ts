@@ -1,6 +1,7 @@
 import { Layer } from "effect";
 
 import { GitRepositoryLive } from "./git/repository.ts";
+import { GitRepositoryInvariantLive } from "./git/repository-invariant.ts";
 import { GitHubClientLive } from "./github/client.ts";
 import { GitHubIssuesLive } from "./github/issues.ts";
 import { OpenCodeLive } from "./opencode/server.ts";
@@ -16,10 +17,14 @@ const GitRepositoryLiveWithCommandRunner = GitRepositoryLive.pipe(
   Layer.provide(CommandRunnerLive),
 );
 
+const GitRepositoryInvariantLiveWithCommandRunner =
+  GitRepositoryInvariantLive.pipe(Layer.provide(CommandRunnerLive));
+
 export const LiveRuntime = Layer.mergeAll(
   GitHubClientLiveWithCommandRunner,
   GitHubIssuesLive,
   GitRepositoryLiveWithCommandRunner,
+  GitRepositoryInvariantLiveWithCommandRunner,
   IssuePipelineLive,
   OpenCodeLive,
   WorkspaceLive,
