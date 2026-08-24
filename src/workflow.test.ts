@@ -5,6 +5,7 @@ import type { Octokit } from "octokit";
 
 import { GitRepository } from "./git/repository.ts";
 import { GitRepositoryInvariant } from "./git/repository-invariant.ts";
+import { GitIssueCheckpoint } from "./git/issue-checkpoint.ts";
 import { GitHubClient } from "./github/client.ts";
 import { GitHubIssues, type GitHubIssue, IssueOrder, IssueSort } from "./github/issues.ts";
 import { type IssueExecutionOutcome, IssueExecutionOutcomeKind } from "./issues/execution.ts";
@@ -37,6 +38,7 @@ type TestRuntimeOptions = {
   readonly gitFailure?: RalphieError;
   readonly startFailure?: RalphieError;
   readonly removeFailure?: RalphieError;
+  readonly abortOnExecute?: AbortController;
 };
 
 function testRuntime(
@@ -82,6 +84,14 @@ function testRuntime(
         Effect.sync(() => ({ branch: "develop", head: `head-${captureIndex++}` })),
       verify: () => Effect.void,
     }),
+    Layer.succeed(GitIssueCheckpoint, {
+      capture: () => Effect.succeed({ branch: "develop", sha: "a".repeat(40) }),
+      createPatch: () => Effect.succeed(""),
+      restore: (_path, _checkpoint) => {
+        calls.push("restoreCheckout");
+        return Effect.void;
+      },
+    }),
     Layer.succeed(GitHubIssues, {
       listDecompositionChildren: () => Effect.succeed([]),
       listOpen: (_client, repo, filters) => {
@@ -95,10 +105,14 @@ function testRuntime(
     }),
     Layer.succeed(IssueExecutor, {
       execute: ({ issue, repositoryPath, targetBranch, openCodeSelection }) =>
-        Effect.sync(() => {
+        Effect.gen(function* () {
           calls.push(
             `executeIssue:${issue.number}:${repositoryPath}:${targetBranch}:${openCodeSelection.agent}`,
           );
+          if (options.abortOnExecute !== undefined) {
+            options.abortOnExecute.abort();
+            return yield* new RalphieError({ message: "agent interrupted" });
+          }
           const result = outcomes[Math.min(outcomeIndex, outcomes.length - 1)];
           outcomeIndex += 1;
           if (result === undefined) throw new Error("Missing test outcome");
@@ -230,6 +244,8 @@ describe("workflow", () => {
     expect(Exit.isFailure(exit)).toBeTrue();
     expect(states.at(-1)?.status).toBe(RunStateStatus.Active);
     expect(states.at(-1)?.activeIssue?.issueNumber).toBe(42);
+    expect(states.at(-1)?.queue.pending.map(({ number }) => number)).toEqual([42]);
+    expect(states.at(-1)?.queue.processedCount).toBe(0);
     expect(calls.at(-1)).toBe("closeServer");
   });
 
@@ -276,5 +292,44 @@ describe("workflow", () => {
 
     expect(Exit.isFailure(exit)).toBeTrue();
     expect(calls).toEqual(["initializeGitHub"]);
+  });
+
+  test("restores the active checkout and saves resumable state on cancellation", async () => {
+    const calls: string[] = [];
+    const states: RunState[] = [];
+    const controller = new AbortController();
+    const exit = await workflow({
+      ...baseOptions,
+      cleanup: true,
+      signal: controller.signal,
+    }).pipe(
+      Effect.provide(
+        testRuntime(calls, states, { abortOnExecute: controller }),
+      ),
+      Effect.runPromiseExit,
+    );
+
+    expect(Exit.isFailure(exit)).toBeTrue();
+    expect(states.at(-1)?.status).toBe(RunStateStatus.Active);
+    expect(states.at(-1)?.activeIssue?.issueNumber).toBe(42);
+    expect(calls).toContain("restoreCheckout");
+    expect(calls).not.toContain("removeWorkspace:/tmp/ralphie");
+  });
+
+  test("fails before side effects when already cancelled", async () => {
+    const calls: string[] = [];
+    const controller = new AbortController();
+    controller.abort();
+
+    const exit = await workflow({
+      ...baseOptions,
+      signal: controller.signal,
+    }).pipe(
+      Effect.provide(testRuntime(calls, [])),
+      Effect.runPromiseExit,
+    );
+
+    expect(Exit.isFailure(exit)).toBeTrue();
+    expect(calls).toEqual([]);
   });
 });

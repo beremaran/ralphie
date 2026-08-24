@@ -3,8 +3,13 @@ import { join } from "node:path";
 
 import { GitRepository } from "./git/repository.ts";
 import { GitRepositoryInvariant } from "./git/repository-invariant.ts";
+import { GitIssueCheckpoint } from "./git/issue-checkpoint.ts";
 import { GitHubClient } from "./github/client.ts";
-import { GitHubIssues, type IssueFilters } from "./github/issues.ts";
+import {
+  type GitHubIssue,
+  GitHubIssues,
+  type IssueFilters,
+} from "./github/issues.ts";
 import {
   IssueExecutionOutcomeKind,
   type IssueExecutionOutcome,
@@ -199,6 +204,15 @@ export const workflow = ({
       },
     });
 
+    let activeIssue: RunState["activeIssue"] | undefined;
+    let activeQueueIssue: GitHubIssue | undefined;
+    let persistCancellationState:
+      | (() => Effect.Effect<void, RalphieError>)
+      | undefined;
+    let restoreCancellationCheckout:
+      | (() => Effect.Effect<void, RalphieError>)
+      | undefined;
+
     const run = Effect.gen(function* () {
       yield* checkCancellation(signal);
       if (startClean) {
@@ -254,6 +268,7 @@ export const workflow = ({
       );
 
       const invariantService = yield* GitRepositoryInvariant;
+      const checkpoints = yield* GitIssueCheckpoint;
       let checkout = yield* invariantService.capture(prepared.path);
       if (resumeState !== undefined) {
         const reconciliation = reconcileRunState(resumeState, {
@@ -297,6 +312,21 @@ export const workflow = ({
         activeIssue?: RunState["activeIssue"],
       ) => {
         const snapshot = queue.snapshot();
+        const hasActiveQueueIssue =
+          activeIssue !== undefined && activeQueueIssue !== undefined;
+        const pending = snapshot.pending.map(({ issue }) => ({
+          ...issue,
+          labels: [...issue.labels],
+        }));
+        if (
+          hasActiveQueueIssue &&
+          !pending.some(({ number }) => number === activeQueueIssue.number)
+        ) {
+          pending.unshift({
+            ...activeQueueIssue,
+            labels: [...activeQueueIssue.labels],
+          });
+        }
         return stateStore.save(statePath, {
           version: RUN_STATE_VERSION,
           status,
@@ -308,12 +338,11 @@ export const workflow = ({
             ? {}
             : { maxIssues: resumeState?.maxIssues ?? maxIssues }),
           queue: {
-            pending: snapshot.pending.map(({ issue }) => ({
-              ...issue,
-              labels: [...issue.labels],
-            })),
+            pending,
             completedIssueNumbers: [...snapshot.completedIssueNumbers],
-            processedCount: snapshot.processedCount,
+            processedCount: hasActiveQueueIssue
+              ? Math.max(0, snapshot.processedCount - 1)
+              : snapshot.processedCount,
           },
           outcomes: outcomes.map(({ issueNumber, outcome }) => ({
             issueNumber,
@@ -324,6 +353,9 @@ export const workflow = ({
           updatedAt: new Date().toISOString(),
         });
       };
+
+      persistCancellationState = () =>
+        persistState(RunStateStatus.Active, activeIssue);
 
       yield* persistState(RunStateStatus.Active);
       const openCode = yield* OpenCode;
@@ -343,13 +375,20 @@ export const workflow = ({
               yield* checkCancellation(signal);
               const issue = queue.next();
               if (issue === undefined) break;
+              activeQueueIssue = issue;
               const current = queue.processedCount();
               const total =
                 resumeState?.maxIssues ?? maxIssues ?? current + queue.pendingCount();
-              yield* persistState(RunStateStatus.Active, {
+              activeIssue = {
                 issueNumber: issue.number,
                 stage: ProgressStage.ComplexityAssessment,
-              });
+              };
+              restoreCancellationCheckout = () =>
+                checkpoints.restore(prepared.path, {
+                  branch: checkout.branch,
+                  sha: checkout.head,
+                });
+              yield* persistState(RunStateStatus.Active, activeIssue);
               const outcome = yield* track(
                 progress,
                 ProgressStage.IssueExecution,
@@ -397,6 +436,9 @@ export const workflow = ({
                   });
                 }
               } else {
+                activeIssue = undefined;
+                activeQueueIssue = undefined;
+                restoreCancellationCheckout = undefined;
                 checkout = yield* invariantService.capture(prepared.path);
                 yield* persistState(RunStateStatus.Active);
               }
@@ -434,6 +476,9 @@ export const workflow = ({
       }
 
       yield* persistState(RunStateStatus.Complete);
+      activeIssue = undefined;
+      activeQueueIssue = undefined;
+      restoreCancellationCheckout = undefined;
       const summary = summarize(actualRunId, outcomes);
       if (cleanup) {
         const workspaceService = yield* Workspace;
@@ -448,7 +493,34 @@ export const workflow = ({
       return summary;
     });
 
+    const recoverCancellation = (error: RalphieError) => {
+      if (!signal?.aborted) return Effect.fail(error);
+
+      return Effect.gen(function* () {
+        let restoreError: RalphieError | undefined;
+        if (activeIssue !== undefined && restoreCancellationCheckout !== undefined) {
+          yield* restoreCancellationCheckout().pipe(
+            Effect.catchAll((failure) =>
+              Effect.sync(() => {
+                restoreError = failure;
+              }),
+            ),
+          );
+        }
+        if (persistCancellationState !== undefined) {
+          yield* persistCancellationState();
+        }
+        return yield* new RalphieError({
+          message: restoreError === undefined
+            ? "Run cancelled; active checkout was preserved and resumable state was saved."
+            : "Run cancelled; resumable state was saved but active checkout restoration failed.",
+          cause: restoreError ?? error,
+        });
+      });
+    };
+
     return yield* run.pipe(
+      Effect.catchAll(recoverCancellation),
       Effect.tap((summary) =>
         progress.emit({
           stage: ProgressStage.Run,
