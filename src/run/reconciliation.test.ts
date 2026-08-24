@@ -35,11 +35,23 @@ const state: RunState = {
 
 describe("run-state reconciliation", () => {
   test.each([
-    ["repository", { repository: "other/repo", branch: "main" }, RunReconciliationStatus.RepositoryMismatch],
-    ["branch", { repository: "owner/repo", branch: "develop" }, RunReconciliationStatus.BranchMismatch],
+    [
+      "repository",
+      { repository: "other/repo", branch: "main" },
+      RunReconciliationStatus.RepositoryMismatch,
+    ],
+    [
+      "branch",
+      { repository: "owner/repo", branch: "develop" },
+      RunReconciliationStatus.BranchMismatch,
+    ],
     [
       "Git checkout",
-      { repository: "owner/repo", branch: "main", git: { branch: "main", head: "def456" } },
+      {
+        repository: "owner/repo",
+        branch: "main",
+        git: { branch: "main", head: "def456" },
+      },
       RunReconciliationStatus.GitMismatch,
     ],
     [
@@ -62,7 +74,11 @@ describe("run-state reconciliation", () => {
         git: { branch: "main", head: "abc123" },
         github: { openIssueNumbers: [2, 3] },
       }),
-    ).toEqual({ compatible: true, status: RunReconciliationStatus.Compatible, reasons: [] });
+    ).toEqual({
+      compatible: true,
+      status: RunReconciliationStatus.Compatible,
+      reasons: [],
+    });
   });
 
   test("detects stale active state", () => {
@@ -78,7 +94,10 @@ describe("run-state reconciliation", () => {
   test("exposes reconciliation behind an Effect service", async () => {
     const result = await Effect.gen(function* () {
       const service = makeRunReconciliationService();
-      return yield* service.reconcile(state, { repository: "owner/repo", branch: "main" });
+      return yield* service.reconcile(state, {
+        repository: "owner/repo",
+        branch: "main",
+      });
     }).pipe(Effect.runPromise);
     expect(result.compatible).toBe(true);
   });

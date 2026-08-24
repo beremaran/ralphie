@@ -1,10 +1,7 @@
 import { Context, Effect, Layer } from "effect";
 import { Octokit } from "octokit";
 
-import {
-  CommandRunner,
-  requireSuccessfulCommand,
-} from "../process/command-runner.ts";
+import { CommandRunner, requireSuccessfulCommand } from "../process/command-runner.ts";
 import { RalphieError } from "../shared/error.ts";
 
 export type GitHubClientService = {

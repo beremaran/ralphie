@@ -3,10 +3,7 @@ import { Effect, Exit, Layer } from "effect";
 import { Octokit } from "octokit";
 
 import { GitHubClient, GitHubClientLive } from "./client.ts";
-import {
-  CommandRunner,
-  type CommandResult,
-} from "../process/command-runner.ts";
+import { CommandRunner, type CommandResult } from "../process/command-runner.ts";
 
 const testLayer = (calls: string[], results: CommandResult[]) =>
   GitHubClientLive.pipe(
@@ -48,9 +45,7 @@ describe("GitHub client", () => {
     const calls: string[] = [];
     const exit = await initialize.pipe(
       Effect.provide(
-        testLayer(calls, [
-          { exitCode: 1, stdout: "", stderr: "not logged in" },
-        ]),
+        testLayer(calls, [{ exitCode: 1, stdout: "", stderr: "not logged in" }]),
       ),
       Effect.runPromiseExit,
     );

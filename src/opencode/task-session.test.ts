@@ -1,9 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type {
-  AssistantMessage,
-  OpencodeClient,
-  Part,
-} from "@opencode-ai/sdk/v2";
+import type { AssistantMessage, OpencodeClient, Part } from "@opencode-ai/sdk/v2";
 import { Effect, Exit } from "effect";
 
 import {
@@ -178,16 +174,15 @@ describe("OpenCode task sessions", () => {
         title: "Task",
         selection: { agent: "build" },
       });
-    }).pipe(
-      Effect.provide(makeOpenCodeTaskSessionLayer(client)),
-      Effect.runPromise,
-    );
+    }).pipe(Effect.provide(makeOpenCodeTaskSessionLayer(client)), Effect.runPromise);
 
     expect(session.sessionID).toBe("session-from-service");
   });
 
   test("records every created session under its run ID", async () => {
-    const diagnostics = makeOpenCodeSessionDiagnostics(() => "2026-08-24T00:00:00.000Z");
+    const diagnostics = makeOpenCodeSessionDiagnostics(
+      () => "2026-08-24T00:00:00.000Z",
+    );
     const client = {
       session: {
         create: async () => ({ data: { id: "session-diagnostics" } }),
@@ -257,9 +252,7 @@ describe("OpenCode task sessions", () => {
         modelID: "anthropic/claude-sonnet",
       },
       variant: "high",
-      parts: [
-        { type: "text", text: "Implement the issue and explain the result." },
-      ],
+      parts: [{ type: "text", text: "Implement the issue and explain the result." }],
     });
   });
 

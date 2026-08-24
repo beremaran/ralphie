@@ -1,8 +1,5 @@
 import type { IssueArtifactStore } from "./artifacts.ts";
-import type {
-  IssueExecutionContext,
-  IssueExecutionOutcome,
-} from "./execution.ts";
+import type { IssueExecutionContext, IssueExecutionOutcome } from "./execution.ts";
 
 /**
  * Inputs shared by the concrete per-issue workflow executors.

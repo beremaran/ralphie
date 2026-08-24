@@ -66,11 +66,9 @@ const runGit = (
   trimStdout = true,
 ) =>
   Effect.gen(function* () {
-    const result = yield* runner.run(
-      "git",
-      ["-C", repositoryPath, ...args],
-      { trimStdout },
-    );
+    const result = yield* runner.run("git", ["-C", repositoryPath, ...args], {
+      trimStdout,
+    });
     if (result.exitCode !== 0) {
       const detail = result.stderr ? ` ${result.stderr}` : "";
       return yield* new RalphieError({ message: `${failureMessage}.${detail}` });
@@ -113,10 +111,13 @@ export const GitIssueOperationsLive = Layer.effect(
 
       hasStagedChanges: (repositoryPath) =>
         Effect.gen(function* () {
-          const result = yield* runner.run(
-            "git",
-            ["-C", repositoryPath, "diff", "--cached", "--quiet"],
-          );
+          const result = yield* runner.run("git", [
+            "-C",
+            repositoryPath,
+            "diff",
+            "--cached",
+            "--quiet",
+          ]);
           if (result.exitCode === 0) return false;
           if (result.exitCode === 1) return true;
           const detail = result.stderr ? ` ${result.stderr}` : "";
@@ -164,8 +165,7 @@ export const GitIssueOperationsLive = Layer.effect(
           );
           if (actualTree !== expectedTree) {
             return yield* new RalphieError({
-              message:
-                `Created issue commit ${sha} does not contain the expected staged tree.`,
+              message: `Created issue commit ${sha} does not contain the expected staged tree.`,
             });
           }
           const status = yield* runGit(
@@ -189,17 +189,14 @@ export const GitIssueOperationsLive = Layer.effect(
               message: "Cannot push an issue commit to an empty branch name.",
             });
           }
-          const result = yield* runner.run(
-            "git",
-            [
-              "-C",
-              repositoryPath,
-              "push",
-              "--no-force",
-              "origin",
-              `HEAD:refs/heads/${branch}`,
-            ],
-          );
+          const result = yield* runner.run("git", [
+            "-C",
+            repositoryPath,
+            "push",
+            "--no-force",
+            "origin",
+            `HEAD:refs/heads/${branch}`,
+          ]);
           if (result.exitCode !== 0) {
             const output = [result.stdout, result.stderr].filter(Boolean).join("\n");
             const kind = isNonFastForward(output)
@@ -225,8 +222,7 @@ export const GitIssueOperationsLive = Layer.effect(
           const remoteSha = remote.split(/\s+/)[0] ?? "";
           if (remoteSha.toLowerCase() !== expectedCommitSha.toLowerCase()) {
             return yield* new RalphieError({
-              message:
-                `Remote origin/${branch} points to ${remoteSha || "no commit"}, expected ${expectedCommitSha}.`,
+              message: `Remote origin/${branch} points to ${remoteSha || "no commit"}, expected ${expectedCommitSha}.`,
             });
           }
           const status = yield* runGit(

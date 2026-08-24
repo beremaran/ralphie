@@ -1,18 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Exit, Layer } from "effect";
 
-import {
-  GitIssueCheckpoint,
-  GitIssueCheckpointLive,
-} from "./issue-checkpoint.ts";
+import { GitIssueCheckpoint, GitIssueCheckpointLive } from "./issue-checkpoint.ts";
 import { CommandRunner, type CommandResult } from "../process/command-runner.ts";
 
 const sha = "0123456789abcdef0123456789abcdef01234567";
 
-const testLayer = (
-  calls: string[],
-  responses: CommandResult[],
-) =>
+const testLayer = (calls: string[], responses: CommandResult[]) =>
   GitIssueCheckpointLive.pipe(
     Layer.provide(
       Layer.succeed(CommandRunner, {
@@ -76,8 +70,6 @@ describe("Git issue checkpoints", () => {
     }).pipe(Effect.provide(layer), Effect.runPromiseExit);
 
     expect(Exit.isFailure(exit)).toBe(true);
-    expect(calls).toEqual([
-      "git -C /workspace/repo rev-parse --abbrev-ref HEAD",
-    ]);
+    expect(calls).toEqual(["git -C /workspace/repo rev-parse --abbrev-ref HEAD"]);
   });
 });

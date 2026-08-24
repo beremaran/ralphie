@@ -26,9 +26,7 @@ describe("Git repository invariants", () => {
       return yield* service.capture("/workspace/repo");
     }).pipe(
       Effect.provide(
-        GitRepositoryInvariantLive.pipe(
-          Layer.provide(runnerLayer(["main", "abc123"])),
-        ),
+        GitRepositoryInvariantLive.pipe(Layer.provide(runnerLayer(["main", "abc123"]))),
       ),
       Effect.runPromise,
     );

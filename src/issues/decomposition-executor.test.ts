@@ -8,15 +8,16 @@ import {
   type IssueArtifactStore,
   makeIssueArtifactStore,
 } from "./artifacts.ts";
-import { ImplementationComplexityLevel, ReviewFindingSeverity, ReviewVerdict } from "./decisions.ts";
+import {
+  ImplementationComplexityLevel,
+  ReviewFindingSeverity,
+  ReviewVerdict,
+} from "./decisions.ts";
 import {
   DecompositionExecutor,
   DecompositionExecutorLive,
 } from "./decomposition-executor.ts";
-import {
-  IssueExecutionOutcomeKind,
-  type IssueExecutionContext,
-} from "./execution.ts";
+import { IssueExecutionOutcomeKind, type IssueExecutionContext } from "./execution.ts";
 import {
   GitHubMutationRecoveryError,
   GitHubIssueMutations,
@@ -134,7 +135,11 @@ describe("decomposition executor", () => {
           create: async (parameters: Record<string, unknown>) => {
             requests.push({ method: "create", parameters });
             const number = parameters.title === "Migrate storage" ? 101 : 102;
-            return issueResponse(number, String(parameters.title), String(parameters.body));
+            return issueResponse(
+              number,
+              String(parameters.title),
+              String(parameters.body),
+            );
           },
           update: async (parameters: Record<string, unknown>) => {
             requests.push({ method: "update", parameters });
@@ -149,11 +154,17 @@ describe("decomposition executor", () => {
     } as unknown as Octokit;
     const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
     await Effect.runPromise(
-      run(openCodeClient((value) => (prompt = value)), octokit, artifacts),
+      run(
+        openCodeClient((value) => (prompt = value)),
+        octokit,
+        artifacts,
+      ),
     );
 
     expect(prompt).toContain("Break down the GitHub issue");
-    expect(requests.map(({ method, parameters }) => [method, parameters.issue_number])).toEqual([
+    expect(
+      requests.map(({ method, parameters }) => [method, parameters.issue_number]),
+    ).toEqual([
       ["create", undefined],
       ["create", undefined],
       ["update", 101],
@@ -198,7 +209,9 @@ describe("decomposition executor", () => {
       rest: {
         issues: {
           create: async () => {
-            breakdownPersisted = artifacts.has(IssueArtifactKind.IssueBreakdownDecision);
+            breakdownPersisted = artifacts.has(
+              IssueArtifactKind.IssueBreakdownDecision,
+            );
             return issueResponse(101, "Child", "Child");
           },
           update: async () => issueResponse(101, "Child", "Child"),
@@ -257,9 +270,7 @@ describe("decomposition executor", () => {
     });
     expect(createCount).toBe(0);
     expect(
-      await Effect.runPromise(
-        artifacts.read(IssueArtifactKind.CreatedIssueNumbers),
-      ),
+      await Effect.runPromise(artifacts.read(IssueArtifactKind.CreatedIssueNumbers)),
     ).toEqual({ storage: 101, api: 102 });
   });
 
@@ -273,7 +284,11 @@ describe("decomposition executor", () => {
         issues: {
           create: async (parameters: Record<string, unknown>) => {
             createCount += 1;
-            return issueResponse(parameters.title === "Migrate storage" ? 101 : 102, "Child", "Child");
+            return issueResponse(
+              parameters.title === "Migrate storage" ? 101 : 102,
+              "Child",
+              "Child",
+            );
           },
           update: async (parameters: Record<string, unknown>) => {
             if (parameters.issue_number === 42) originalUpdated = true;
@@ -288,9 +303,7 @@ describe("decomposition executor", () => {
     } as unknown as Octokit;
     const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
 
-    const exit = await Effect.runPromiseExit(
-      run(openCodeClient(), octokit, artifacts),
-    );
+    const exit = await Effect.runPromiseExit(run(openCodeClient(), octokit, artifacts));
     expect(Exit.isFailure(exit)).toBeTrue();
     expect(originalUpdated).toBeFalse();
     expect(closeCount).toBe(0);

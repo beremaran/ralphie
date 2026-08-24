@@ -64,9 +64,7 @@ export const createIssueQueue = (
       if (maxIssues !== undefined && processed >= maxIssues) return undefined;
 
       const readyIndex = pending.findIndex((candidate) =>
-        (candidate.dependsOn ?? []).every((dependency) =>
-          completed.has(dependency),
-        ),
+        (candidate.dependsOn ?? []).every((dependency) => completed.has(dependency)),
       );
       if (readyIndex === -1) return undefined;
 
@@ -88,9 +86,7 @@ export const createIssueQueue = (
       }
       if (pending.length === 0) return IssueQueueState.Exhausted;
       return pending.some((candidate) =>
-        (candidate.dependsOn ?? []).every((dependency) =>
-          completed.has(dependency),
-        ),
+        (candidate.dependsOn ?? []).every((dependency) => completed.has(dependency)),
       )
         ? IssueQueueState.Ready
         : IssueQueueState.DependencyBlocked;

@@ -4,14 +4,8 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import {
-  CommandRunner,
-  CommandRunnerLive,
-} from "../process/command-runner.ts";
-import {
-  GitIssueCheckpoint,
-  GitIssueCheckpointLive,
-} from "./issue-checkpoint.ts";
+import { CommandRunner, CommandRunnerLive } from "../process/command-runner.ts";
+import { GitIssueCheckpoint, GitIssueCheckpointLive } from "./issue-checkpoint.ts";
 import {
   GitPushError,
   GitPushFailureKind,
@@ -167,9 +161,7 @@ describe("deterministic Git issue operations", () => {
   test("classifies non-fast-forward rejection and halts instead of retrying", async () => {
     const repositoryPath = await setupRepository();
     const remotePath = await mkdtemp(join(tmpdir(), "ralphie-git-remote-"));
-    const otherRepositoryPath = await mkdtemp(
-      join(tmpdir(), "ralphie-git-other-"),
-    );
+    const otherRepositoryPath = await mkdtemp(join(tmpdir(), "ralphie-git-other-"));
     try {
       await runGit(remotePath, ["init", "--bare"]);
       await runGit(repositoryPath, ["remote", "add", "origin", remotePath]);
@@ -253,7 +245,9 @@ describe("deterministic Git issue operations", () => {
         Effect.provide(CommandRunnerLive),
         Effect.runPromise,
       );
-      expect((await runGit(repositoryPath, ["status", "--porcelain=v1"])).stdout).toBe("");
+      expect((await runGit(repositoryPath, ["status", "--porcelain=v1"])).stdout).toBe(
+        "",
+      );
       expect((await runGit(repositoryPath, ["rev-parse", "HEAD"])).stdout).toBe(
         checkpoint.sha,
       );
@@ -281,7 +275,9 @@ describe("deterministic Git issue operations", () => {
       expect((await runGit(remotePath, ["rev-parse", "refs/heads/main"])).stdout).toBe(
         commit.sha,
       );
-      expect((await runGit(repositoryPath, ["status", "--porcelain=v1"])).stdout).toBe("");
+      expect((await runGit(repositoryPath, ["status", "--porcelain=v1"])).stdout).toBe(
+        "",
+      );
     } finally {
       await rm(repositoryPath, { recursive: true, force: true });
       await rm(remotePath, { recursive: true, force: true });

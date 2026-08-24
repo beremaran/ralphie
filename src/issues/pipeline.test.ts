@@ -3,10 +3,7 @@ import { Effect } from "effect";
 
 import { GitIssueAction, GitIssueOutput } from "../git/issue-task.ts";
 import type { GitHubIssue } from "../github/issues.ts";
-import {
-  GitHubIssueAction,
-  IssueLinkStrategy,
-} from "../github/issue-task.ts";
+import { GitHubIssueAction, IssueLinkStrategy } from "../github/issue-task.ts";
 import {
   OpenCodeSessionContext,
   OpenCodeSessionPurpose,
@@ -154,9 +151,9 @@ describe("issue pipeline", () => {
         action: GitHubIssueAction.CloseOriginalAsDuplicate,
       },
     ]);
-    expect(
-      selectWorkflowByKind(plan, IssueWorkflowKind.Decomposition)?.kind,
-    ).toBe(IssueWorkflowKind.Decomposition);
+    expect(selectWorkflowByKind(plan, IssueWorkflowKind.Decomposition)?.kind).toBe(
+      IssueWorkflowKind.Decomposition,
+    );
   });
 
   test("does not route invalid complexity values", async () => {

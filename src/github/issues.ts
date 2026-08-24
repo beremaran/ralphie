@@ -68,9 +68,7 @@ export const GitHubIssuesLive = Layer.succeed(GitHubIssues, {
           sort: filters.sort,
           direction: filters.order,
           per_page: 100,
-          ...(filters.labels.length > 0
-            ? { labels: filters.labels.join(",") }
-            : {}),
+          ...(filters.labels.length > 0 ? { labels: filters.labels.join(",") } : {}),
         });
 
         return data
@@ -91,7 +89,7 @@ export const GitHubIssuesLive = Layer.succeed(GitHubIssues, {
           : new RalphieError({
               message: `Failed to fetch open issues for ${repository}.`,
               cause,
-      }),
+            }),
     }),
 
   listDecompositionChildren: (client, repository, query) =>

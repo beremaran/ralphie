@@ -1,13 +1,8 @@
 import { Context, Effect, Layer } from "effect";
 
-import {
-  IssueArtifactKind,
-  IssueArtifactStore,
-} from "../issues/artifacts.ts";
+import { IssueArtifactKind, IssueArtifactStore } from "../issues/artifacts.ts";
 import type { IssueCheckpoint } from "./issue-checkpoint.ts";
-import {
-  GitIssueCheckpoint,
-} from "./issue-checkpoint.ts";
+import { GitIssueCheckpoint } from "./issue-checkpoint.ts";
 import { RalphieError } from "../shared/error.ts";
 
 export type IssuePreparationInput = {
@@ -23,10 +18,9 @@ export type GitIssuePreparationService = {
   ) => Effect.Effect<IssueCheckpoint, RalphieError>;
 };
 
-export const GitIssuePreparation =
-  Context.GenericTag<GitIssuePreparationService>(
-    "ralphie/GitIssuePreparation",
-  );
+export const GitIssuePreparation = Context.GenericTag<GitIssuePreparationService>(
+  "ralphie/GitIssuePreparation",
+);
 
 export const GitIssuePreparationLive = Layer.effect(
   GitIssuePreparation,
@@ -49,8 +43,7 @@ export const GitIssuePreparationLive = Layer.effect(
               existing.sha.toLowerCase() !== checkpoint.sha.toLowerCase()
             ) {
               return yield* new RalphieError({
-                message:
-                  `Issue ${input.issueNumber} already has a different clean issue-base checkpoint.`,
+                message: `Issue ${input.issueNumber} already has a different clean issue-base checkpoint.`,
               });
             }
             return checkpoint;

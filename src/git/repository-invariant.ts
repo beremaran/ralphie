@@ -57,7 +57,8 @@ const readInvariant = (
 
     if (!branch || !head) {
       return yield* new RalphieError({
-        message: "Git returned an empty branch or HEAD while checking the repository invariant.",
+        message:
+          "Git returned an empty branch or HEAD while checking the repository invariant.",
       });
     }
 

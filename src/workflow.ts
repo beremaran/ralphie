@@ -5,22 +5,14 @@ import { GitRepository } from "./git/repository.ts";
 import { GitRepositoryInvariant } from "./git/repository-invariant.ts";
 import { GitIssueCheckpoint } from "./git/issue-checkpoint.ts";
 import { GitHubClient } from "./github/client.ts";
-import {
-  type GitHubIssue,
-  GitHubIssues,
-  type IssueFilters,
-} from "./github/issues.ts";
+import { type GitHubIssue, GitHubIssues, type IssueFilters } from "./github/issues.ts";
 import {
   IssueExecutionOutcomeKind,
   type IssueExecutionOutcome,
 } from "./issues/execution.ts";
 import { IssueExecutor } from "./issues/executor.ts";
 import { DryRunIssueExecutor } from "./issues/dry-run-executor.ts";
-import {
-  createIssueQueue,
-  IssueQueueState,
-  toQueuedIssues,
-} from "./issues/queue.ts";
+import { createIssueQueue, IssueQueueState, toQueuedIssues } from "./issues/queue.ts";
 import type { OpenCodeModel } from "./opencode/model.ts";
 import { OpenCode, type OpenCodeServer } from "./opencode/server.ts";
 import { makeOpenCodeSessionDiagnostics } from "./opencode/task-session.ts";
@@ -58,7 +50,9 @@ const checkCancellation = (signal: AbortSignal | undefined) =>
       }),
   });
 
-const copyOutcome = (outcome: IssueExecutionOutcome): RunState["outcomes"][number]["outcome"] => {
+const copyOutcome = (
+  outcome: IssueExecutionOutcome,
+): RunState["outcomes"][number]["outcome"] => {
   switch (outcome.kind) {
     case IssueExecutionOutcomeKind.Decomposed:
       return { ...outcome, childIssueNumbers: [...outcome.childIssueNumbers] };
@@ -197,9 +191,7 @@ export const workflow = ({
         repository: repo,
         branch,
         workspace,
-        model: model
-          ? `${model.providerID}/${model.modelID}`
-          : "OpenCode default",
+        model: model ? `${model.providerID}/${model.modelID}` : "OpenCode default",
         variant: modelVariant ?? "OpenCode default",
         agent,
         issueLimit: maxIssues ?? "unlimited",
@@ -211,9 +203,7 @@ export const workflow = ({
 
     let activeIssue: RunState["activeIssue"] | undefined;
     let activeQueueIssue: GitHubIssue | undefined;
-    let persistCancellationState:
-      | (() => Effect.Effect<void, RalphieError>)
-      | undefined;
+    let persistCancellationState: (() => Effect.Effect<void, RalphieError>) | undefined;
     let restoreCancellationCheckout:
       | (() => Effect.Effect<void, RalphieError>)
       | undefined;
@@ -292,17 +282,14 @@ export const workflow = ({
       }
 
       const initialIssues =
-        resumeState === undefined
-          ? discoveredIssues
-          : resumeState.queue.pending;
+        resumeState === undefined ? discoveredIssues : resumeState.queue.pending;
       const queue = createIssueQueue(
         toQueuedIssues(initialIssues),
         resumeState?.maxIssues ?? maxIssues,
         resumeState === undefined
           ? undefined
           : {
-              completedIssueNumbers:
-                resumeState.queue.completedIssueNumbers,
+              completedIssueNumbers: resumeState.queue.completedIssueNumbers,
               processedCount: resumeState.queue.processedCount,
             },
       );
@@ -361,8 +348,7 @@ export const workflow = ({
         });
       };
 
-      persistCancellationState = () =>
-        persistState(RunStateStatus.Active, activeIssue);
+      persistCancellationState = () => persistState(RunStateStatus.Active, activeIssue);
 
       yield* persistState(RunStateStatus.Active);
       const openCode = yield* OpenCode;
@@ -520,9 +506,10 @@ export const workflow = ({
           yield* persistCancellationState();
         }
         return yield* new RalphieError({
-          message: restoreError === undefined
-            ? "Run cancelled; active checkout was preserved and resumable state was saved."
-            : "Run cancelled; resumable state was saved but active checkout restoration failed.",
+          message:
+            restoreError === undefined
+              ? "Run cancelled; active checkout was preserved and resumable state was saved."
+              : "Run cancelled; resumable state was saved but active checkout restoration failed.",
           cause: restoreError ?? error,
         });
       });

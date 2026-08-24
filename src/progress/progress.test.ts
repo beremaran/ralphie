@@ -80,9 +80,7 @@ describe("progress reporting", () => {
       });
     }).pipe(Effect.provide(layer), Effect.runPromise);
 
-    expect(output).toBe(
-      '✓ [1/3] #42 Issue prepared. {"branch":"main"}\n',
-    );
+    expect(output).toBe('✓ [1/3] #42 Issue prepared. {"branch":"main"}\n');
   });
 
   test("uses a spinner for interactive stage transitions", async () => {

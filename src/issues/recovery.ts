@@ -2,10 +2,7 @@ import { Context, Effect, Layer } from "effect";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import {
-  GitIssueCheckpoint,
-  type IssueCheckpoint,
-} from "../git/issue-checkpoint.ts";
+import { GitIssueCheckpoint, type IssueCheckpoint } from "../git/issue-checkpoint.ts";
 import type { GitHubIssue } from "../github/issues.ts";
 import {
   ProgressReporter,
@@ -99,9 +96,7 @@ export const IssueRecoveryLive = Layer.effect(
           });
 
           const patch = yield* git.createPatch(input.repositoryPath);
-          if (
-            Buffer.byteLength(patch) > REVIEW_DIAGNOSTIC_PATCH_LIMIT_BYTES
-          ) {
+          if (Buffer.byteLength(patch) > REVIEW_DIAGNOSTIC_PATCH_LIMIT_BYTES) {
             return yield* new RalphieError({
               message: `Review diagnostic patch exceeds ${REVIEW_DIAGNOSTIC_PATCH_LIMIT_BYTES} bytes. Checkout was not restored.`,
             });
@@ -116,9 +111,7 @@ export const IssueRecoveryLive = Layer.effect(
             null,
             2,
           )}\n`;
-          if (
-            Buffer.byteLength(metadata) > REVIEW_DIAGNOSTIC_METADATA_LIMIT_BYTES
-          ) {
+          if (Buffer.byteLength(metadata) > REVIEW_DIAGNOSTIC_METADATA_LIMIT_BYTES) {
             return yield* new RalphieError({
               message: `Review diagnostic metadata exceeds ${REVIEW_DIAGNOSTIC_METADATA_LIMIT_BYTES} bytes. Checkout was not restored.`,
             });

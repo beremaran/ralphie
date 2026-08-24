@@ -6,7 +6,10 @@ export type RepositorySlug = {
 };
 
 export const parseRepositorySlug = (repository: string): RepositorySlug => {
-  const value = repository.trim().replace(/\/$/, "").replace(/\.git$/, "");
+  const value = repository
+    .trim()
+    .replace(/\/$/, "")
+    .replace(/\.git$/, "");
   const match =
     value.match(/^https?:\/\/github\.com\/([^/]+)\/([^/]+)$/i) ??
     value.match(/^git@github\.com:([^/]+)\/([^/]+)$/i) ??

@@ -61,10 +61,9 @@ export type GitHubIssueMutationService = {
   ) => Effect.Effect<GitHubIssue, RalphieError>;
 };
 
-export const GitHubIssueMutations =
-  Context.GenericTag<GitHubIssueMutationService>(
-    "ralphie/GitHubIssueMutations",
-  );
+export const GitHubIssueMutations = Context.GenericTag<GitHubIssueMutationService>(
+  "ralphie/GitHubIssueMutations",
+);
 
 const mapIssue = (issue: {
   readonly number: number;
@@ -91,9 +90,7 @@ const repositoryParameters = (repository: string) => {
 };
 
 const mutationError = (message: string, cause: unknown): RalphieError =>
-  cause instanceof RalphieError
-    ? cause
-    : new RalphieError({ message, cause });
+  cause instanceof RalphieError ? cause : new RalphieError({ message, cause });
 
 export const GitHubIssueMutationsLive = Layer.succeed(GitHubIssueMutations, {
   create: (client, repository, input) =>
@@ -146,9 +143,6 @@ export const GitHubIssueMutationsLive = Layer.succeed(GitHubIssueMutations, {
         return mapIssue(response.data);
       },
       catch: (cause) =>
-        mutationError(
-          `Failed to close issue #${issueNumber} in ${repository}.`,
-          cause,
-        ),
+        mutationError(`Failed to close issue #${issueNumber} in ${repository}.`, cause),
     }),
 });

@@ -14,9 +14,7 @@ export type GitIssueCheckpointService = {
     repositoryPath: string,
     branch: string,
   ) => Effect.Effect<IssueCheckpoint, RalphieError>;
-  readonly createPatch: (
-    repositoryPath: string,
-  ) => Effect.Effect<string, RalphieError>;
+  readonly createPatch: (repositoryPath: string) => Effect.Effect<string, RalphieError>;
   readonly restore: (
     repositoryPath: string,
     checkpoint: IssueCheckpoint,
@@ -35,11 +33,9 @@ const runGit = (
   trimStdout = true,
 ) =>
   Effect.gen(function* () {
-    const result = yield* runner.run(
-      "git",
-      ["-C", repositoryPath, ...args],
-      { trimStdout },
-    );
+    const result = yield* runner.run("git", ["-C", repositoryPath, ...args], {
+      trimStdout,
+    });
     if (result.exitCode !== 0) {
       const detail = result.stderr ? ` ${result.stderr}` : "";
       return yield* new RalphieError({ message: `${failureMessage}.${detail}` });
@@ -148,7 +144,8 @@ export const GitIssueCheckpointLive = Layer.effect(
             restoredStatus !== ""
           ) {
             return yield* new RalphieError({
-              message: "Issue checkout restoration did not produce the expected clean state.",
+              message:
+                "Issue checkout restoration did not produce the expected clean state.",
             });
           }
         }),

@@ -3,14 +3,21 @@ import { Effect, Layer } from "effect";
 import type { Octokit } from "octokit";
 import type { OpencodeClient } from "@opencode-ai/sdk/v2";
 
-import { IssueArtifactKind, IssueArtifactStore, makeIssueArtifactStore } from "./artifacts.ts";
+import {
+  IssueArtifactKind,
+  IssueArtifactStore,
+  makeIssueArtifactStore,
+} from "./artifacts.ts";
 import { ComplexityAssessment } from "./complexity.ts";
 import { ComplexityLevel } from "./decisions.ts";
 import { DryRunIssueExecutor, DryRunIssueExecutorLive } from "./dry-run-executor.ts";
 import { IssueExecutionOutcomeKind, type IssueExecutionContext } from "./execution.ts";
 import { ImplementationExecutor } from "./implementation-executor.ts";
 import { DecompositionExecutor } from "./decomposition-executor.ts";
-import { makeProgressRecorderLayer, type ProgressUpdate } from "../progress/progress.ts";
+import {
+  makeProgressRecorderLayer,
+  type ProgressUpdate,
+} from "../progress/progress.ts";
 
 const context = (number: number): IssueExecutionContext => ({
   issue: {

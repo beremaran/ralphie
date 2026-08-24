@@ -8,6 +8,7 @@
     "ralphie": "./index.ts"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.5.10",
     "@types/bun": "latest",
     "bunli": "^0.9.1"
   },
@@ -28,6 +29,9 @@
     "start": "bun run index.ts",
     "dev": "bunli dev --entry ./src/cli.ts",
     "build": "bunli build --targets native",
+    "check": "bun run format:check && bun run typecheck && bun test && bun run build",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
     "probe:structured-output": "bun run scripts/probe-structured-output.ts",
     "test": "bun test",
     "typecheck": "bunx tsc --noEmit"

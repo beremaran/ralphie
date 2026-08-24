@@ -21,10 +21,7 @@ import {
   ProgressStatus,
 } from "../progress/progress.ts";
 import { RalphieError } from "../shared/error.ts";
-import {
-  IssueArtifactKind,
-  type CreatedIssueNumberMapping,
-} from "./artifacts.ts";
+import { IssueArtifactKind, type CreatedIssueNumberMapping } from "./artifacts.ts";
 import { issueBreakdownDecisionSchema } from "./decisions.ts";
 import { IssueExecutionOutcomeKind } from "./execution.ts";
 import type {
@@ -38,10 +35,9 @@ export type DecompositionExecutorService = {
   ) => Effect.Effect<WorkflowExecutorResult, RalphieError>;
 };
 
-export const DecompositionExecutor =
-  Context.GenericTag<DecompositionExecutorService>(
-    "ralphie/DecompositionExecutor",
-  );
+export const DecompositionExecutor = Context.GenericTag<DecompositionExecutorService>(
+  "ralphie/DecompositionExecutor",
+);
 
 const existingMapping = (
   input: WorkflowExecutorInput,
@@ -57,51 +53,29 @@ export const DecompositionExecutorLive = Layer.effect(
     const issues = yield* GitHubIssues;
     const progress = yield* ProgressReporter;
 
-    const recoverableMutation = <Output,>(
+    function recoverableMutation<Output>(
       operation: string,
       effect: Effect.Effect<Output, RalphieError>,
       input: WorkflowExecutorInput,
-    ): Effect.Effect<Output, RalphieError> =>
-      progress.emit({
-        issue: {
-          number: input.context.issue.number,
-          title: input.context.issue.title,
-        },
-        stage:
-          operation === "close-original"
-            ? ProgressStage.IssueClosure
-            : ProgressStage.IssueCreation,
-        status: ProgressStatus.Started,
-        message: `Applying GitHub mutation ${operation}...`,
-        details: { operation },
-      }).pipe(
-        Effect.zipRight(effect),
-        Effect.tap((output) =>
-          progress.emit({
-            issue: {
-              number: input.context.issue.number,
-              title: input.context.issue.title,
-            },
-            stage:
-              operation === "close-original"
-                ? ProgressStage.IssueClosure
-                : ProgressStage.IssueCreation,
-            status: ProgressStatus.Succeeded,
-            message: `GitHub mutation ${operation} completed.`,
-            details: {
-              operation,
-              ...(typeof output === "object" &&
-              output !== null &&
-              "number" in output &&
-              typeof output.number === "number"
-                ? { createdIssueNumber: output.number }
-                : {}),
-            },
-          }),
-        ),
-        Effect.catchTag("RalphieError", (error) =>
-          Effect.gen(function* () {
-            yield* progress.emit({
+    ): Effect.Effect<Output, RalphieError> {
+      return progress
+        .emit({
+          issue: {
+            number: input.context.issue.number,
+            title: input.context.issue.title,
+          },
+          stage:
+            operation === "close-original"
+              ? ProgressStage.IssueClosure
+              : ProgressStage.IssueCreation,
+          status: ProgressStatus.Started,
+          message: `Applying GitHub mutation ${operation}...`,
+          details: { operation },
+        })
+        .pipe(
+          Effect.zipRight(effect),
+          Effect.tap((output) =>
+            progress.emit({
               issue: {
                 number: input.context.issue.number,
                 title: input.context.issue.title,
@@ -110,21 +84,46 @@ export const DecompositionExecutorLive = Layer.effect(
                 operation === "close-original"
                   ? ProgressStage.IssueClosure
                   : ProgressStage.IssueCreation,
-              status: ProgressStatus.Failed,
-              message: `GitHub mutation ${operation} requires recovery: ${error.message}`,
+              status: ProgressStatus.Succeeded,
+              message: `GitHub mutation ${operation} completed.`,
               details: {
-                outcome: GitHubMutationRecoveryOutcome.RecoveryRequired,
                 operation,
+                ...(typeof output === "object" &&
+                output !== null &&
+                "number" in output &&
+                typeof output.number === "number"
+                  ? { createdIssueNumber: output.number }
+                  : {}),
               },
-            });
-            return yield* new GitHubMutationRecoveryError({
-              message: `GitHub mutation ${operation} may have partially succeeded; recovery is required.`,
-              operation,
-              cause: error,
-            });
-          }),
-        ),
-      );
+            }),
+          ),
+          Effect.catchTag("RalphieError", (error) =>
+            Effect.gen(function* () {
+              yield* progress.emit({
+                issue: {
+                  number: input.context.issue.number,
+                  title: input.context.issue.title,
+                },
+                stage:
+                  operation === "close-original"
+                    ? ProgressStage.IssueClosure
+                    : ProgressStage.IssueCreation,
+                status: ProgressStatus.Failed,
+                message: `GitHub mutation ${operation} requires recovery: ${error.message}`,
+                details: {
+                  outcome: GitHubMutationRecoveryOutcome.RecoveryRequired,
+                  operation,
+                },
+              });
+              return yield* new GitHubMutationRecoveryError({
+                message: `GitHub mutation ${operation} may have partially succeeded; recovery is required.`,
+                operation,
+                cause: error,
+              });
+            }),
+          ),
+        );
+    }
 
     const ambiguous = (
       input: WorkflowExecutorInput,
@@ -161,9 +160,7 @@ export const DecompositionExecutorLive = Layer.effect(
             ? yield* artifacts.read(IssueArtifactKind.ReviewAttempts)
             : [];
 
-          const breakdown = artifacts.has(
-            IssueArtifactKind.IssueBreakdownDecision,
-          )
+          const breakdown = artifacts.has(IssueArtifactKind.IssueBreakdownDecision)
             ? yield* artifacts.read(IssueArtifactKind.IssueBreakdownDecision)
             : yield* Effect.gen(function* () {
                 const invariant = yield* context.repositoryInvariant.capture(
@@ -192,8 +189,7 @@ export const DecompositionExecutorLive = Layer.effect(
                   runId: context.runId,
                   diagnostics: context.openCodeDiagnostics,
                   repositoryInvariant: invariant,
-                  verifyRepositoryInvariant:
-                    context.repositoryInvariant.verify,
+                  verifyRepositoryInvariant: context.repositoryInvariant.verify,
                   progress,
                   progressStage: ProgressStage.Decomposition,
                   progressIssue: {
@@ -205,10 +201,7 @@ export const DecompositionExecutorLive = Layer.effect(
               }).pipe(
                 Effect.map(({ output }) => output),
                 Effect.tap((decision) =>
-                  artifacts.write(
-                    IssueArtifactKind.IssueBreakdownDecision,
-                    decision,
-                  ),
+                  artifacts.write(IssueArtifactKind.IssueBreakdownDecision, decision),
                 ),
               );
 
@@ -220,7 +213,9 @@ export const DecompositionExecutorLive = Layer.effect(
           );
           const discoveredByKey = new Map<string, number>();
           for (const child of discovered) {
-            if (!breakdown.issues.some((issue) => issue.key === child.decompositionKey)) {
+            if (
+              !breakdown.issues.some((issue) => issue.key === child.decompositionKey)
+            ) {
               return yield* ambiguous(
                 input,
                 `Found generated child ${child.number} with unexpected key ${child.decompositionKey}.`,
@@ -298,14 +293,19 @@ export const DecompositionExecutorLive = Layer.effect(
 
           yield* recoverableMutation(
             "rewrite-original",
-            mutations.update(context.octokit, context.repository, context.issue.number, {
-              body: renderDecomposedOriginalBody({
-                original: context.issue,
-                breakdown,
-                issueNumbers: mapping,
-                lineage,
-              }),
-            }),
+            mutations.update(
+              context.octokit,
+              context.repository,
+              context.issue.number,
+              {
+                body: renderDecomposedOriginalBody({
+                  original: context.issue,
+                  breakdown,
+                  issueNumbers: mapping,
+                  lineage,
+                }),
+              },
+            ),
             input,
           );
           yield* recoverableMutation(
@@ -321,9 +321,7 @@ export const DecompositionExecutorLive = Layer.effect(
 
           return {
             kind: IssueExecutionOutcomeKind.Decomposed,
-            childIssueNumbers: breakdown.issues.map(
-              (child) => mapping[child.key]!,
-            ),
+            childIssueNumbers: breakdown.issues.map((child) => mapping[child.key]!),
           } as const;
         }),
     } satisfies DecompositionExecutorService;

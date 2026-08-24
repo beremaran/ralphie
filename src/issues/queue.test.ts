@@ -59,10 +59,7 @@ describe("refreshable issue queue", () => {
 
     expect(queue.next()?.number).toBe(1);
     queue.complete(1);
-    queue.refresh([
-      { issue: issue(2) },
-      { issue: issue(3), dependsOn: [2] },
-    ]);
+    queue.refresh([{ issue: issue(2) }, { issue: issue(3), dependsOn: [2] }]);
     expect(queue.next()?.number).toBe(2);
     queue.complete(2);
     queue.refresh([

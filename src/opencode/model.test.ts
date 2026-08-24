@@ -13,12 +13,10 @@ describe("OpenCode model selection", () => {
   });
 
   test("splits provider from the complete model identifier", () => {
-    expect(openCodeModelSchema.parse("openrouter/anthropic/claude-sonnet")).toEqual(
-      {
-        providerID: "openrouter",
-        modelID: "anthropic/claude-sonnet",
-      },
-    );
+    expect(openCodeModelSchema.parse("openrouter/anthropic/claude-sonnet")).toEqual({
+      providerID: "openrouter",
+      modelID: "anthropic/claude-sonnet",
+    });
   });
 
   test("rejects model identifiers without a provider", () => {

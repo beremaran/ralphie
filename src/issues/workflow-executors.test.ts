@@ -3,10 +3,7 @@ import { Effect, Layer } from "effect";
 
 import { makeIssueArtifactStore } from "./artifacts.ts";
 import { DecompositionExecutor } from "./decomposition-executor.ts";
-import {
-  IssueExecutionOutcomeKind,
-  type IssueExecutionContext,
-} from "./execution.ts";
+import { IssueExecutionOutcomeKind, type IssueExecutionContext } from "./execution.ts";
 import { ImplementationExecutor } from "./implementation-executor.ts";
 
 const context = {

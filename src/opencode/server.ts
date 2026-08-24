@@ -13,8 +13,7 @@ export type OpenCodeService = {
   readonly start: Effect.Effect<OpenCodeServer, RalphieError>;
 };
 
-export const OpenCode =
-  Context.GenericTag<OpenCodeService>("ralphie/OpenCode");
+export const OpenCode = Context.GenericTag<OpenCodeService>("ralphie/OpenCode");
 
 export const OpenCodeLive = Layer.succeed(OpenCode, {
   start: Effect.tryPromise({

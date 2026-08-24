@@ -60,86 +60,90 @@ const describeApiError = (error: unknown): string => {
   return `${name}: ${message}`;
 };
 
-export const requestStructuredOutput = <Output,>(
+export function requestStructuredOutput<Output>(
   client: OpencodeClient,
   request: StructuredOutputRequest<Output>,
-): Effect.Effect<StructuredOutputResult<Output>, RalphieError> =>
-  Effect.gen(function* () {
+): Effect.Effect<StructuredOutputResult<Output>, RalphieError> {
+  return Effect.gen(function* () {
     const result = yield* Effect.tryPromise({
-    try: async () => {
-      const session = await client.session.create({
-        directory: request.directory,
-        title: request.title,
-        ...(request.agent === undefined ? {} : { agent: request.agent }),
-        permission: OPEN_CODE_DECISION_PERMISSION_POLICY,
-      }, request.signal === undefined ? undefined : { signal: request.signal });
-
-      if (session.error !== undefined || session.data === undefined) {
-        throw new Error(
-          `Could not create OpenCode session: ${describeApiError(session.error)}`,
+      try: async () => {
+        const session = await client.session.create(
+          {
+            directory: request.directory,
+            title: request.title,
+            ...(request.agent === undefined ? {} : { agent: request.agent }),
+            permission: OPEN_CODE_DECISION_PERMISSION_POLICY,
+          },
+          request.signal === undefined ? undefined : { signal: request.signal },
         );
-      }
 
-      if (request.runId !== undefined && request.diagnostics !== undefined) {
-        request.diagnostics.record(request.runId, {
+        if (session.error !== undefined || session.data === undefined) {
+          throw new Error(
+            `Could not create OpenCode session: ${describeApiError(session.error)}`,
+          );
+        }
+
+        if (request.runId !== undefined && request.diagnostics !== undefined) {
+          request.diagnostics.record(request.runId, {
+            sessionID: session.data.id,
+            directory: request.directory,
+            ...(request.agent === undefined ? {} : { agent: request.agent }),
+            ...(request.model === undefined ? {} : { model: request.model }),
+            ...(request.variant === undefined ? {} : { variant: request.variant }),
+          });
+        }
+
+        const response = await client.session.prompt(
+          {
+            sessionID: session.data.id,
+            directory: request.directory,
+            ...(request.agent === undefined ? {} : { agent: request.agent }),
+            ...(request.model === undefined ? {} : { model: request.model }),
+            ...(request.variant === undefined ? {} : { variant: request.variant }),
+            format: {
+              type: "json_schema",
+              schema: z.toJSONSchema(request.schema),
+              retryCount: request.retryCount ?? 2,
+            },
+            parts: [{ type: "text", text: request.prompt }],
+          },
+          request.signal === undefined ? undefined : { signal: request.signal },
+        );
+
+        if (response.error !== undefined || response.data === undefined) {
+          throw new Error(
+            `OpenCode prompt failed: ${describeApiError(response.error)}`,
+          );
+        }
+
+        if (response.data.info.error !== undefined) {
+          const assistantError = toOpenCodeAssistantError(response.data.info.error);
+          throw new RalphieError({
+            message: `OpenCode assistant failed (${assistantError.kind}): ${assistantError.message}`,
+            cause: assistantError,
+          });
+        }
+
+        const parsed = request.schema.safeParse(response.data.info.structured);
+        if (!parsed.success) {
+          throw new Error(
+            `OpenCode returned invalid structured output: ${z.prettifyError(parsed.error)}`,
+          );
+        }
+
+        return {
           sessionID: session.data.id,
-          directory: request.directory,
-          ...(request.agent === undefined ? {} : { agent: request.agent }),
-          ...(request.model === undefined ? {} : { model: request.model }),
-          ...(request.variant === undefined ? {} : { variant: request.variant }),
-        });
-      }
-
-      const response = await client.session.prompt({
-        sessionID: session.data.id,
-        directory: request.directory,
-        ...(request.agent === undefined ? {} : { agent: request.agent }),
-        ...(request.model === undefined ? {} : { model: request.model }),
-        ...(request.variant === undefined ? {} : { variant: request.variant }),
-        format: {
-          type: "json_schema",
-          schema: z.toJSONSchema(request.schema),
-          retryCount: request.retryCount ?? 2,
-        },
-        parts: [{ type: "text", text: request.prompt }],
-      }, request.signal === undefined ? undefined : { signal: request.signal });
-
-      if (response.error !== undefined || response.data === undefined) {
-        throw new Error(
-          `OpenCode prompt failed: ${describeApiError(response.error)}`,
-        );
-      }
-
-      if (response.data.info.error !== undefined) {
-        const assistantError = toOpenCodeAssistantError(response.data.info.error);
-        throw new RalphieError({
-          message: `OpenCode assistant failed (${assistantError.kind}): ${assistantError.message}`,
-          cause: assistantError,
-        });
-      }
-
-      const parsed = request.schema.safeParse(response.data.info.structured);
-      if (!parsed.success) {
-        throw new Error(
-          `OpenCode returned invalid structured output: ${z.prettifyError(parsed.error)}`,
-        );
-      }
-
-      return {
-        sessionID: session.data.id,
-        output: parsed.data,
-      };
-    },
-    catch: (cause) =>
-      cause instanceof RalphieError
-        ? cause
-        : new RalphieError({
-            message: "Failed to get structured output from OpenCode.",
-            cause,
-          }),
-    }).pipe(
-      Effect.tapError((error) => reportOpenCodeFailure(request, error)),
-    );
+          output: parsed.data,
+        };
+      },
+      catch: (cause) =>
+        cause instanceof RalphieError
+          ? cause
+          : new RalphieError({
+              message: "Failed to get structured output from OpenCode.",
+              cause,
+            }),
+    }).pipe(Effect.tapError((error) => reportOpenCodeFailure(request, error)));
 
     if (
       request.repositoryInvariant !== undefined &&
@@ -153,3 +157,4 @@ export const requestStructuredOutput = <Output,>(
 
     return result;
   });
+}

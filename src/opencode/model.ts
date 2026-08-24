@@ -16,10 +16,7 @@ export const DEFAULT_OPENCODE_AGENT = "build";
 export const openCodeModelSchema = z
   .string()
   .trim()
-  .regex(
-    /^[^/\s]+\/[^\s]+$/,
-    "Model must use OpenCode's provider/model format.",
-  )
+  .regex(/^[^/\s]+\/[^\s]+$/, "Model must use OpenCode's provider/model format.")
   .transform((value): OpenCodeModel => {
     const separator = value.indexOf("/");
     return {

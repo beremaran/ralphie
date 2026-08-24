@@ -20,8 +20,9 @@ export type CommandRunnerService = {
   ) => Effect.Effect<CommandResult, RalphieError>;
 };
 
-export const CommandRunner =
-  Context.GenericTag<CommandRunnerService>("ralphie/CommandRunner");
+export const CommandRunner = Context.GenericTag<CommandRunnerService>(
+  "ralphie/CommandRunner",
+);
 
 export const CommandRunnerLive = Layer.succeed(CommandRunner, {
   run: (command, args, options) =>

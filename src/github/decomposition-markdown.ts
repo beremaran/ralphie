@@ -30,9 +30,7 @@ export const decompositionMarker = (
 };
 
 /** Derive lineage for the children of an issue, including recursively generated children. */
-export const nextDecompositionLineage = (
-  issue: GitHubIssue,
-): DecompositionLineage => {
+export const nextDecompositionLineage = (issue: GitHubIssue): DecompositionLineage => {
   const marker = issue.body?.match(
     /<!-- ralphie:decomposition root=(\d+) parent=(\d+) key="[^"]+" depth=(\d+) -->/,
   );
@@ -56,8 +54,8 @@ export const parseGeneratedIssueDependencies = (
     .split("## Dependencies\n\n")[1]
     ?.split("\n\n## ")[0];
   if (dependencySection === undefined) return [];
-  return [...dependencySection.matchAll(/^- #(\d+)(?:\s|$)/gm)].map(
-    (match) => Number(match[1]),
+  return [...dependencySection.matchAll(/^- #(\d+)(?:\s|$)/gm)].map((match) =>
+    Number(match[1]),
   );
 };
 

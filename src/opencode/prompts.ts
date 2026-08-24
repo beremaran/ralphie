@@ -30,11 +30,7 @@ export const PROMPT_ISSUE_BODY_LIMIT = 12_000;
 /** Maximum staged-diff content included in an agent prompt. */
 export const PROMPT_DIFF_LIMIT = 100_000;
 
-const truncatePromptValue = (
-  value: string,
-  limit: number,
-  label: string,
-): string => {
+const truncatePromptValue = (value: string, limit: number, label: string): string => {
   if (value.length <= limit) return value;
 
   const marker = `\n...[${label} truncated]...\n`;

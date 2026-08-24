@@ -6,23 +6,20 @@ import { join } from "node:path";
 import simpleGit from "simple-git";
 
 import { CommandRunnerLive } from "../process/command-runner.ts";
-import {
-  GitHubClient,
-  GitHubClientLive,
-} from "../github/client.ts";
+import { GitHubClient, GitHubClientLive } from "../github/client.ts";
 import {
   GitHubIssues,
   GitHubIssuesLive,
   IssueOrder,
   IssueSort,
 } from "../github/issues.ts";
-import {
-  OpenCode,
-  OpenCodeLive,
-  type OpenCodeServer,
-} from "../opencode/server.ts";
+import { OpenCode, OpenCodeLive, type OpenCodeServer } from "../opencode/server.ts";
 import { openCodeModelSchema } from "../opencode/model.ts";
-import { buildComplexityPrompt, buildImplementationPrompt, buildReviewPrompt } from "../opencode/prompts.ts";
+import {
+  buildComplexityPrompt,
+  buildImplementationPrompt,
+  buildReviewPrompt,
+} from "../opencode/prompts.ts";
 import { requestStructuredOutput } from "../opencode/structured-output.ts";
 import { runOpenCodeTask } from "../opencode/task-session.ts";
 import {
@@ -47,9 +44,8 @@ const defineOptInTest = (
 
 const modelSelection = () => {
   const rawModel = process.env.RALPHIE_OPENCODE_SMOKE_MODEL;
-  const parsedModel = rawModel === undefined
-    ? undefined
-    : openCodeModelSchema.parse(rawModel);
+  const parsedModel =
+    rawModel === undefined ? undefined : openCodeModelSchema.parse(rawModel);
   return {
     agent: process.env.RALPHIE_OPENCODE_SMOKE_AGENT?.trim() || "build",
     ...(parsedModel === undefined ? {} : { model: parsedModel }),
@@ -73,7 +69,10 @@ const createDisposableRepository = async (): Promise<string> => {
   await git.init(["-b", "main"]);
   await git.addConfig("user.email", "ralphie-smoke@example.test");
   await git.addConfig("user.name", "Ralphie Smoke Test");
-  await writeFile(join(repositoryPath, "README.md"), "Disposable smoke-test repository.\n");
+  await writeFile(
+    join(repositoryPath, "README.md"),
+    "Disposable smoke-test repository.\n",
+  );
   await git.add("README.md");
   await git.commit("initialize disposable smoke repository");
   return repositoryPath;
@@ -87,9 +86,7 @@ const smokeIssue = {
   labels: ["smoke-test"],
 } as const;
 
-const opencodeComplexityEnabled = envFlag(
-  "RALPHIE_RUN_OPENCODE_COMPLEXITY_SMOKE",
-);
+const opencodeComplexityEnabled = envFlag("RALPHIE_RUN_OPENCODE_COMPLEXITY_SMOKE");
 const opencodeImplementationEnabled = envFlag(
   "RALPHIE_RUN_OPENCODE_IMPLEMENTATION_SMOKE",
 );
@@ -98,8 +95,7 @@ const githubRepository = process.env.RALPHIE_GITHUB_TEST_REPOSITORY?.trim();
 const safeGithubRepository =
   githubRepository !== undefined &&
   /(?:test|sandbox|fixture|integration|smoke)/i.test(githubRepository);
-const githubEnabled =
-  envFlag("RALPHIE_RUN_GITHUB_INTEGRATION") && safeGithubRepository;
+const githubEnabled = envFlag("RALPHIE_RUN_GITHUB_INTEGRATION") && safeGithubRepository;
 
 describe("opt-in network smoke tests", () => {
   defineOptInTest(
@@ -122,12 +118,8 @@ describe("opt-in network smoke tests", () => {
           ...modelSelection(),
         }).pipe(Effect.runPromise);
 
-        expect(result.output.complexity).toBeGreaterThanOrEqual(
-          ComplexityLevel.Level0,
-        );
-        expect(result.output.complexity).toBeLessThanOrEqual(
-          ComplexityLevel.Level5,
-        );
+        expect(result.output.complexity).toBeGreaterThanOrEqual(ComplexityLevel.Level0);
+        expect(result.output.complexity).toBeLessThanOrEqual(ComplexityLevel.Level5);
         expect(result.sessionID).toBeString();
       } finally {
         server?.close();

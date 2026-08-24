@@ -2,10 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import type { Octokit } from "octokit";
 
-import {
-  GitHubIssues,
-  GitHubIssuesLive,
-} from "./issues.ts";
+import { GitHubIssues, GitHubIssuesLive } from "./issues.ts";
 
 describe("GitHub decomposition issue discovery", () => {
   test("finds matching generated children and ignores unrelated issues", async () => {

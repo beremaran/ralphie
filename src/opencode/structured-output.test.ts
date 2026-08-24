@@ -22,10 +22,7 @@ const decisionSchema = z.object({
   reason: z.string().min(1),
 });
 
-const assistantInfo = (
-  structured: unknown,
-  error?: Record<string, unknown>,
-) => ({
+const assistantInfo = (structured: unknown, error?: Record<string, unknown>) => ({
   id: "message-1",
   sessionID: "session-1",
   role: "assistant" as const,
@@ -159,7 +156,9 @@ describe("OpenCode structured output", () => {
   });
 
   test("records the session and verifies repository invariants", async () => {
-    const diagnostics = makeOpenCodeSessionDiagnostics(() => "2026-08-24T00:00:00.000Z");
+    const diagnostics = makeOpenCodeSessionDiagnostics(
+      () => "2026-08-24T00:00:00.000Z",
+    );
     let verified: unknown;
     const client = {
       session: {

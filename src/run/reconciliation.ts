@@ -111,7 +111,10 @@ export const makeRunReconciliationService = (): RunReconciliationService => ({
         if (!result.compatible) {
           return result;
         }
-        if (state.status !== RunStateStatus.Active && state.status !== RunStateStatus.Complete) {
+        if (
+          state.status !== RunStateStatus.Active &&
+          state.status !== RunStateStatus.Complete
+        ) {
           throw new Error("Unsupported run-state status.");
         }
         return result;

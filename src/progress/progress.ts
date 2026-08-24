@@ -197,9 +197,7 @@ export const makeProgressReporterLayer = ({
     };
   });
 
-export const makeProgressRecorderLayer = (
-  events: ProgressUpdate[],
-) =>
+export const makeProgressRecorderLayer = (events: ProgressUpdate[]) =>
   Layer.succeed(ProgressReporter, {
     emit: (event) =>
       Effect.sync(() => {

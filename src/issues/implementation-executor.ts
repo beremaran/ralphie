@@ -9,7 +9,12 @@ import {
   type GitIssuePreparationService,
 } from "../git/issue-preparation.ts";
 import { GitPushMode, GitRemoteSafety } from "../git/remote-safety.ts";
-import { buildCommitMessagePrompt, buildImplementationPrompt, buildReviewFixPrompt, buildReviewPrompt } from "../opencode/prompts.ts";
+import {
+  buildCommitMessagePrompt,
+  buildImplementationPrompt,
+  buildReviewFixPrompt,
+  buildReviewPrompt,
+} from "../opencode/prompts.ts";
 import { requestStructuredOutput } from "../opencode/structured-output.ts";
 import { runOpenCodeTask } from "../opencode/task-session.ts";
 import {
@@ -23,9 +28,7 @@ import type {
   WorkflowExecutorInput,
   WorkflowExecutorResult,
 } from "./workflow-executor-input.ts";
-import {
-  IssueArtifactKind,
-} from "./artifacts.ts";
+import { IssueArtifactKind } from "./artifacts.ts";
 import {
   commitMessageDecisionSchema,
   reviewDecisionSchema,
@@ -42,10 +45,9 @@ export type ImplementationExecutorService = {
   ) => Effect.Effect<WorkflowExecutorResult, RalphieError>;
 };
 
-export const ImplementationExecutor =
-  Context.GenericTag<ImplementationExecutorService>(
-    "ralphie/ImplementationExecutor",
-  );
+export const ImplementationExecutor = Context.GenericTag<ImplementationExecutorService>(
+  "ralphie/ImplementationExecutor",
+);
 
 const asRalphieError = (error: unknown): RalphieError => {
   if (error instanceof RalphieError) return error;
@@ -62,14 +64,16 @@ const issueProgress = (input: WorkflowExecutorInput) => ({
   },
 });
 
-const checkSignal = (signal: AbortSignal | undefined): Effect.Effect<void, RalphieError> =>
+const checkSignal = (
+  signal: AbortSignal | undefined,
+): Effect.Effect<void, RalphieError> =>
   Effect.try({
     try: () => signal?.throwIfAborted(),
     catch: (cause) =>
       new RalphieError({ message: "Issue execution was aborted.", cause }),
   }).pipe(Effect.asVoid);
 
-const stage = <A,>(
+function stage<A>(
   progress: ProgressReporterService,
   input: WorkflowExecutorInput,
   progressStage: ProgressStage,
@@ -78,13 +82,11 @@ const stage = <A,>(
   succeededMessage: string | ((value: A) => string),
   details?: Readonly<Record<string, unknown>>,
   attempt?: number,
-): Effect.Effect<A, RalphieError> => {
+): Effect.Effect<A, RalphieError> {
   const base = {
     ...issueProgress(input),
     stage: progressStage,
-    ...(attempt === undefined
-      ? {}
-      : { attempt, maxAttempts: REVIEW_ITERATION_LIMIT }),
+    ...(attempt === undefined ? {} : { attempt, maxAttempts: REVIEW_ITERATION_LIMIT }),
     ...(details === undefined ? {} : { details }),
   };
   return progress
@@ -109,7 +111,7 @@ const stage = <A,>(
         }),
       ),
     );
-};
+}
 
 const readCheckpoint = (
   preparation: GitIssuePreparationService,
@@ -146,23 +148,22 @@ export const ImplementationExecutorLive = Layer.effect(
             branch: checkpoint.branch,
             head: checkpoint.sha,
           };
-          yield* context.repositoryInvariant.verify(
-            context.repositoryPath,
-            invariant,
-          );
+          yield* context.repositoryInvariant.verify(context.repositoryPath, invariant);
           yield* stage(
             progress,
             input,
             ProgressStage.RemoteSafety,
             "Verifying direct-push safety...",
-            remoteSafety.verifyDirectPush({
-              client: context.octokit,
-              repository: context.repository,
-              repositoryPath: context.repositoryPath,
-              branch: context.targetBranch,
-              intendedBaseSha: checkpoint.sha,
-              pushMode: GitPushMode.NonForce,
-            }).pipe(Effect.mapError(asRalphieError)),
+            remoteSafety
+              .verifyDirectPush({
+                client: context.octokit,
+                repository: context.repository,
+                repositoryPath: context.repositoryPath,
+                branch: context.targetBranch,
+                intendedBaseSha: checkpoint.sha,
+                pushMode: GitPushMode.NonForce,
+              })
+              .pipe(Effect.mapError(asRalphieError)),
             "Direct-push safety verified.",
           );
 
@@ -201,15 +202,14 @@ export const ImplementationExecutorLive = Layer.effect(
             operations.stageAll(context.repositoryPath),
             "Implementation changes staged.",
           );
-          const hasChanges = yield* operations.hasStagedChanges(
-            context.repositoryPath,
-          );
+          const hasChanges = yield* operations.hasStagedChanges(context.repositoryPath);
           if (!hasChanges) {
             yield* progress.emit({
               ...issueProgress(input),
               stage: ProgressStage.ChangeStaging,
               status: ProgressStatus.Skipped,
-              message: "Implementation produced no changes; skipping review and commit.",
+              message:
+                "Implementation produced no changes; skipping review and commit.",
             });
             return {
               kind: IssueExecutionOutcomeKind.Skipped,
@@ -250,7 +250,8 @@ export const ImplementationExecutorLive = Layer.effect(
                 progressIssue: issueProgress(input).issue,
                 signal: context.signal,
               }),
-              ({ output }) => `Review ${attempt}/${REVIEW_ITERATION_LIMIT}: ${output.verdict}.`,
+              ({ output }) =>
+                `Review ${attempt}/${REVIEW_ITERATION_LIMIT}: ${output.verdict}.`,
               undefined,
               attempt,
             );
@@ -319,22 +320,24 @@ export const ImplementationExecutorLive = Layer.effect(
                 input,
                 ProgressStage.Push,
                 `Pushing ${context.targetBranch}...`,
-                remoteSafety.verifyDirectPush({
-                  client: context.octokit,
-                  repository: context.repository,
-                  repositoryPath: context.repositoryPath,
-                  branch: context.targetBranch,
-                  intendedBaseSha: checkpoint.sha,
-                  expectedCommitSha: commit.sha,
-                  pushMode: GitPushMode.NonForce,
-                }).pipe(
-                  Effect.mapError(asRalphieError),
-                  Effect.zipRight(
-                    operations
-                      .push(context.repositoryPath, context.targetBranch, commit.sha)
-                      .pipe(Effect.mapError(asRalphieError)),
+                remoteSafety
+                  .verifyDirectPush({
+                    client: context.octokit,
+                    repository: context.repository,
+                    repositoryPath: context.repositoryPath,
+                    branch: context.targetBranch,
+                    intendedBaseSha: checkpoint.sha,
+                    expectedCommitSha: commit.sha,
+                    pushMode: GitPushMode.NonForce,
+                  })
+                  .pipe(
+                    Effect.mapError(asRalphieError),
+                    Effect.zipRight(
+                      operations
+                        .push(context.repositoryPath, context.targetBranch, commit.sha)
+                        .pipe(Effect.mapError(asRalphieError)),
+                    ),
                   ),
-                ),
                 `Pushed ${context.targetBranch}.`,
                 { commitSha: commit.sha },
               );

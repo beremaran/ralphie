@@ -2,17 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { Effect, Exit } from "effect";
 import type { Octokit } from "octokit";
 
-import {
-  GitHubIssues,
-  GitHubIssuesLive,
-  IssueOrder,
-  IssueSort,
-} from "./issues.ts";
+import { GitHubIssues, GitHubIssuesLive, IssueOrder, IssueSort } from "./issues.ts";
 
-const listOpen = (
-  client: Octokit,
-  labels: ReadonlyArray<string> = [],
-) =>
+const listOpen = (client: Octokit, labels: ReadonlyArray<string> = []) =>
   Effect.gen(function* () {
     const issues = yield* GitHubIssues;
     return yield* issues.listOpen(client, "owner/repository", {
@@ -47,9 +39,7 @@ describe("GitHub issues", () => {
       },
     } as unknown as Octokit;
 
-    const issues = await listOpen(client, ["bug", "priority"]).pipe(
-      Effect.runPromise,
-    );
+    const issues = await listOpen(client, ["bug", "priority"]).pipe(Effect.runPromise);
 
     expect(request).toEqual({
       owner: "owner",

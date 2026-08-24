@@ -9,10 +9,7 @@ import {
 import { ComplexityAssessment } from "./complexity.ts";
 import { ComplexityLevel } from "./decisions.ts";
 import { DecompositionExecutor } from "./decomposition-executor.ts";
-import {
-  IssueExecutionOutcomeKind,
-  type IssueExecutionContext,
-} from "./execution.ts";
+import { IssueExecutionOutcomeKind, type IssueExecutionContext } from "./execution.ts";
 import { IssueExecutor, IssueExecutorLive } from "./executor.ts";
 import { ImplementationExecutor } from "./implementation-executor.ts";
 import { RalphieError } from "../shared/error.ts";
@@ -90,9 +87,7 @@ describe("IssueExecutor", () => {
         const outcome = yield* executor.execute(context);
         const stores = yield* IssueArtifactStore;
         const artifacts = yield* stores.forIssue(context.issue.number);
-        const decision = yield* artifacts.read(
-          IssueArtifactKind.ComplexityDecision,
-        );
+        const decision = yield* artifacts.read(IssueArtifactKind.ComplexityDecision);
         return { outcome, decision };
       }).pipe(
         Effect.provide(IssueExecutorLive),
@@ -169,9 +164,7 @@ describe("IssueExecutor", () => {
       IssueArtifactStoreLive,
       Layer.succeed(ComplexityAssessment, {
         assess: () =>
-          Effect.fail(
-            new RalphieError({ message: "Structured decision is missing." }),
-          ),
+          Effect.fail(new RalphieError({ message: "Structured decision is missing." })),
       }),
       Layer.succeed(ImplementationExecutor, {
         execute: () => {

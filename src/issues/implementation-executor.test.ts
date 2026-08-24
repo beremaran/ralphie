@@ -25,10 +25,7 @@ import {
   type GitRemoteSafetyInput,
   type GitRemoteSafetyService,
 } from "../git/remote-safety.ts";
-import {
-  IssueExecutionOutcomeKind,
-  type IssueExecutionContext,
-} from "./execution.ts";
+import { IssueExecutionOutcomeKind, type IssueExecutionContext } from "./execution.ts";
 import type { WorkflowExecutorResult } from "./workflow-executor-input.ts";
 import {
   ImplementationExecutor,
@@ -39,10 +36,7 @@ import {
   ReviewExhaustionOutcome,
   type IssueRecoveryService,
 } from "./recovery.ts";
-import {
-  IssueQueueResumeStrategy,
-  IssueWorkflowKind,
-} from "./stage.ts";
+import { IssueQueueResumeStrategy, IssueWorkflowKind } from "./stage.ts";
 import { RalphieError } from "../shared/error.ts";
 import { makeOpenCodeSessionDiagnostics } from "../opencode/task-session.ts";
 import {
@@ -72,8 +66,7 @@ const review = (verdict: "approved" | "changes_requested") => ({
 
 const issueContext = (
   openCode: OpencodeClient,
-  verify: IssueExecutionContext["repositoryInvariant"]["verify"] = () =>
-    Effect.void,
+  verify: IssueExecutionContext["repositoryInvariant"]["verify"] = () => Effect.void,
 ): IssueExecutionContext => ({
   issue: {
     number: 42,
@@ -97,10 +90,7 @@ const issueContext = (
   },
 });
 
-const openCodeClient = (
-  outputs: ReadonlyArray<unknown>,
-  sessions?: string[],
-) => {
+const openCodeClient = (outputs: ReadonlyArray<unknown>, sessions?: string[]) => {
   let index = 0;
   let sessionIndex = 0;
   const client = {
@@ -114,10 +104,7 @@ const openCodeClient = (
         const output = outputs[index++];
         return {
           data: {
-            info:
-              parameters.format === undefined
-                ? {}
-                : { structured: output },
+            info: parameters.format === undefined ? {} : { structured: output },
             parts: [],
           },
         };
@@ -162,15 +149,15 @@ const services = (options: {
       Effect.sync(() => {
         options.safetyInputs?.push(input);
         return {
-        repository: input.repository,
-        branch: input.branch,
-        origin: "https://github.com/owner/repository.git",
-        protected: false,
-        activeBranchRules: 0,
-        hasPushPermission: true,
-        commitsBehindBase: 0,
-        commitsAheadBase: input.expectedCommitSha === undefined ? 0 : 1,
-        pushMode: GitPushMode.NonForce,
+          repository: input.repository,
+          branch: input.branch,
+          origin: "https://github.com/owner/repository.git",
+          protected: false,
+          activeBranchRules: 0,
+          hasPushPermission: true,
+          commitsBehindBase: 0,
+          commitsAheadBase: input.expectedCommitSha === undefined ? 0 : 1,
+          pushMode: GitPushMode.NonForce,
         } as const;
       }),
     ...options.remoteSafety,
@@ -214,7 +201,11 @@ describe("implementation executor", () => {
     const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
     const result = await Effect.runPromise(
       run(
-        openCodeClient([undefined, review("approved"), { subject: "fix token refresh" }]),
+        openCodeClient([
+          undefined,
+          review("approved"),
+          { subject: "fix token refresh" },
+        ]),
         artifacts,
         setup.layer,
       ),
@@ -225,11 +216,17 @@ describe("implementation executor", () => {
       commitSha: "commit-1",
       reviewCount: 1,
     });
-    expect(await Effect.runPromise(artifacts.read(IssueArtifactKind.ReviewAttempts))).toHaveLength(1);
-    expect(await Effect.runPromise(artifacts.read(IssueArtifactKind.CommitMessageDecision))).toEqual({
+    expect(
+      await Effect.runPromise(artifacts.read(IssueArtifactKind.ReviewAttempts)),
+    ).toHaveLength(1);
+    expect(
+      await Effect.runPromise(artifacts.read(IssueArtifactKind.CommitMessageDecision)),
+    ).toEqual({
       subject: "fix token refresh",
     });
-    expect(events.some((event) => event.stage === "review" && event.status === "succeeded")).toBe(true);
+    expect(
+      events.some((event) => event.stage === "review" && event.status === "succeeded"),
+    ).toBe(true);
     expect(safetyInputs.map(({ expectedCommitSha }) => expectedCommitSha)).toEqual([
       undefined,
       "commit-1",
@@ -267,7 +264,13 @@ describe("implementation executor", () => {
     const result = await Effect.runPromise(
       run(
         openCodeClient(
-          [undefined, review("changes_requested"), undefined, review("approved"), { subject: "fix token refresh" }],
+          [
+            undefined,
+            review("changes_requested"),
+            undefined,
+            review("approved"),
+            { subject: "fix token refresh" },
+          ],
           sessions,
         ),
         artifacts,
@@ -280,7 +283,9 @@ describe("implementation executor", () => {
       reviewCount: 2,
     });
     expect(sessions).toHaveLength(5);
-    expect(await Effect.runPromise(artifacts.read(IssueArtifactKind.ReviewAttempts))).toHaveLength(2);
+    expect(
+      await Effect.runPromise(artifacts.read(IssueArtifactKind.ReviewAttempts)),
+    ).toHaveLength(2);
   });
 
   test("returns skipped without review or commit when implementation makes no changes", async () => {
@@ -319,7 +324,10 @@ describe("implementation executor", () => {
         prompt: async () => ({
           data: {
             info: {
-              error: { name: "MessageOutputLengthError", data: { message: "too long" } },
+              error: {
+                name: "MessageOutputLengthError",
+                data: { message: "too long" },
+              },
             },
             parts: [],
           },
@@ -357,7 +365,11 @@ describe("implementation executor", () => {
     });
     const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
     const exit = await Effect.runPromiseExit(
-      run(openCodeClient([undefined, review("approved"), { subject: "fix" }]), artifacts, setup.layer),
+      run(
+        openCodeClient([undefined, review("approved"), { subject: "fix" }]),
+        artifacts,
+        setup.layer,
+      ),
     );
 
     expect(Exit.isFailure(exit)).toBe(true);
@@ -380,7 +392,11 @@ describe("implementation executor", () => {
     });
     const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
     const exit = await Effect.runPromiseExit(
-      run(openCodeClient([undefined, review("approved"), { subject: "fix" }]), artifacts, setup.layer),
+      run(
+        openCodeClient([undefined, review("approved"), { subject: "fix" }]),
+        artifacts,
+        setup.layer,
+      ),
     );
 
     expect(Exit.isFailure(exit)).toBe(true);

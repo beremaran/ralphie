@@ -28,10 +28,7 @@ import {
   ReviewLoopExhaustion,
 } from "./stage.ts";
 
-export type IssueAtomicStage =
-  | GitIssueStage
-  | GitHubIssueStage
-  | OpenCodeSessionStage;
+export type IssueAtomicStage = GitIssueStage | GitHubIssueStage | OpenCodeSessionStage;
 
 export type ReviewLoopStage = {
   readonly kind: IssueStageKind.ReviewLoop;
@@ -80,8 +77,9 @@ export type IssuePipelineService = {
   }) => Effect.Effect<IssueExecutionPlan>;
 };
 
-export const IssuePipeline =
-  Context.GenericTag<IssuePipelineService>("ralphie/IssuePipeline");
+export const IssuePipeline = Context.GenericTag<IssuePipelineService>(
+  "ralphie/IssuePipeline",
+);
 
 const assessment: OpenCodeSessionStage = {
   kind: IssueStageKind.OpenCodeSession,

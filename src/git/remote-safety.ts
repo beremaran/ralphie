@@ -28,9 +28,7 @@ export enum GitPushMode {
   Force = "force",
 }
 
-export class GitRemoteSafetyError extends Data.TaggedError(
-  "GitRemoteSafetyError",
-)<{
+export class GitRemoteSafetyError extends Data.TaggedError("GitRemoteSafetyError")<{
   readonly kind: GitRemoteSafetyFailureKind;
   readonly policy: GitDirectPushPolicy;
   readonly message: string;
@@ -113,14 +111,15 @@ const repositoryParameters = (repository: string) => {
   return { owner, repo, slug };
 };
 
-const githubRequest = <Output,>(
+function githubRequest<Output>(
   request: () => Promise<Output>,
   message: string,
-): Effect.Effect<Output, RalphieError> =>
-  Effect.tryPromise({
+): Effect.Effect<Output, RalphieError> {
+  return Effect.tryPromise({
     try: request,
     catch: (cause) => new RalphieError({ message, cause }),
   });
+}
 
 export const GitRemoteSafetyLive = Layer.effect(
   GitRemoteSafety,
@@ -230,12 +229,7 @@ export const GitRemoteSafetyLive = Layer.effect(
           const countsOutput = yield* runGit(
             runner,
             input.repositoryPath,
-            [
-              "rev-list",
-              "--left-right",
-              "--count",
-              `${input.intendedBaseSha}...HEAD`,
-            ],
+            ["rev-list", "--left-right", "--count", `${input.intendedBaseSha}...HEAD`],
             "Failed to compare the checkout with its intended base.",
           );
           const counts = parseCounts(countsOutput);

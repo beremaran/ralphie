@@ -13,9 +13,7 @@ const mutations = Effect.runSync(
 );
 
 const runMutation = <T, E>(
-  operation: (
-    mutations: typeof GitHubIssueMutations.Service,
-  ) => Effect.Effect<T, E>,
+  operation: (mutations: typeof GitHubIssueMutations.Service) => Effect.Effect<T, E>,
 ) => operation(mutations);
 
 const issueResponse = (number: number, title: string, body: string | null) => ({

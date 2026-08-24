@@ -9,19 +9,12 @@ import {
   openCodeModelSchema,
   openCodeModelVariantSchema,
 } from "./opencode/model.ts";
-import {
-  makeProgressReporterLayer,
-  ProgressRenderMode,
-} from "./progress/progress.ts";
+import { makeProgressReporterLayer, ProgressRenderMode } from "./progress/progress.ts";
 import { LiveRuntime } from "./runtime.ts";
 import { exitCodeForFailure } from "./process/exit-code.ts";
 import { workflow } from "./workflow.ts";
 import { redactSensitiveText } from "./shared/redaction.ts";
-import {
-  type RunState,
-  RunStateStore,
-  RunStateStoreLive,
-} from "./run/state.ts";
+import { type RunState, RunStateStore, RunStateStoreLive } from "./run/state.ts";
 import { reconcileRunState } from "./run/reconciliation.ts";
 import { resolveWorkspacePath } from "./workspace/workspace.ts";
 
@@ -125,15 +118,16 @@ export const runCommand = defineCommand({
           ? ProgressRenderMode.Interactive
           : ProgressRenderMode.Plain;
     const runId = resumeState?.runId ?? crypto.randomUUID();
-    const eventLogPath = flags.resume === undefined
-      ? join(
-          resolveWorkspacePath(flags.workspace),
-          ".ralphie",
-          "runs",
-          runId,
-          "events.jsonl",
-        )
-      : join(dirname(flags.resume), "events.jsonl");
+    const eventLogPath =
+      flags.resume === undefined
+        ? join(
+            resolveWorkspacePath(flags.workspace),
+            ".ralphie",
+            "runs",
+            runId,
+            "events.jsonl",
+          )
+        : join(dirname(flags.resume), "events.jsonl");
     const progressLayer = makeProgressReporterLayer({
       mode: progressMode,
       verbose: flags.verbose,

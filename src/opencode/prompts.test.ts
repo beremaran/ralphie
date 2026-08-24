@@ -1,9 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import {
-  ReviewFindingSeverity,
-  ReviewVerdict,
-} from "../issues/decisions.ts";
+import { ReviewFindingSeverity, ReviewVerdict } from "../issues/decisions.ts";
 import {
   buildCommitMessagePrompt,
   buildComplexityPrompt,
@@ -70,7 +67,7 @@ describe("OpenCode prompts", () => {
       targetBranch: "main",
     });
 
-    expect(prompt).toContain('Issue labels: []');
+    expect(prompt).toContain("Issue labels: []");
     expect(prompt).toContain('Issue body: ""');
   });
 

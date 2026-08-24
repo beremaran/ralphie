@@ -73,9 +73,7 @@ export const runStateSchema = z.object({
   activeIssue: z
     .object({ issueNumber: z.number().int().positive(), stage: z.string().min(1) })
     .optional(),
-  checkout: z
-    .object({ branch: z.string().min(1), head: z.string().min(1) })
-    .optional(),
+  checkout: z.object({ branch: z.string().min(1), head: z.string().min(1) }).optional(),
   updatedAt: z.string().datetime(),
 });
 
@@ -109,6 +107,9 @@ export const RunStateStoreLive = Layer.succeed(RunStateStore, {
     Effect.tryPromise({
       try: async () => runStateSchema.parse(JSON.parse(await readFile(path, "utf8"))),
       catch: (cause) =>
-        new RalphieError({ message: `Run state at ${path} is invalid or unreadable.`, cause }),
+        new RalphieError({
+          message: `Run state at ${path} is invalid or unreadable.`,
+          cause,
+        }),
     }),
 });

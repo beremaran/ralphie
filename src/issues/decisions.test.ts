@@ -21,12 +21,10 @@ describe("issue pipeline decisions", () => {
       }).success,
     ).toBe(true);
     expect(
-      complexityDecisionSchema.safeParse({ complexity: 3.5, rationale: "No" })
-        .success,
+      complexityDecisionSchema.safeParse({ complexity: 3.5, rationale: "No" }).success,
     ).toBe(false);
     expect(
-      complexityDecisionSchema.safeParse({ complexity: 6, rationale: "No" })
-        .success,
+      complexityDecisionSchema.safeParse({ complexity: 6, rationale: "No" }).success,
     ).toBe(false);
   });
 
@@ -77,19 +75,13 @@ describe("issue pipeline decisions", () => {
     expect(
       issueBreakdownDecisionSchema.safeParse({
         ...valid,
-        issues: [
-          valid.issues[0],
-          { ...valid.issues[1], dependsOn: ["missing"] },
-        ],
+        issues: [valid.issues[0], { ...valid.issues[1], dependsOn: ["missing"] }],
       }).success,
     ).toBe(false);
     expect(
       issueBreakdownDecisionSchema.safeParse({
         ...valid,
-        issues: [
-          { ...valid.issues[0], dependsOn: ["integration"] },
-          valid.issues[1],
-        ],
+        issues: [{ ...valid.issues[0], dependsOn: ["integration"] }, valid.issues[1]],
       }).success,
     ).toBe(false);
     expect(

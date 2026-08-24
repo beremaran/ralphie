@@ -48,14 +48,16 @@ export const reviewDecisionSchema = z
   .object({
     verdict: z.enum(ReviewVerdict),
     summary: z.string().min(1).max(AGENT_TEXT_LIMIT),
-    findings: z.array(
-      z.object({
-        severity: z.enum(ReviewFindingSeverity),
+    findings: z
+      .array(
+        z.object({
+          severity: z.enum(ReviewFindingSeverity),
           description: z.string().min(1).max(AGENT_TEXT_LIMIT),
-        file: z.string().min(1).optional(),
-        line: z.number().int().positive().optional(),
-      }),
-    ).max(AGENT_REVIEW_FINDING_LIMIT),
+          file: z.string().min(1).optional(),
+          line: z.number().int().positive().optional(),
+        }),
+      )
+      .max(AGENT_REVIEW_FINDING_LIMIT),
   })
   .superRefine((decision, context) => {
     const hasBlockingFinding = decision.findings.some(
@@ -68,10 +70,7 @@ export const reviewDecisionSchema = z
         path: ["findings"],
       });
     }
-    if (
-      decision.verdict === ReviewVerdict.ChangesRequested &&
-      !hasBlockingFinding
-    ) {
+    if (decision.verdict === ReviewVerdict.ChangesRequested && !hasBlockingFinding) {
       context.addIssue({
         code: "custom",
         message: "A changes-requested review needs a blocking finding.",
@@ -87,9 +86,7 @@ export const commitMessageDecisionSchema = z.object({
   body: z.string().min(1).max(AGENT_TEXT_LIMIT).optional(),
 });
 
-export type CommitMessageDecision = z.infer<
-  typeof commitMessageDecisionSchema
->;
+export type CommitMessageDecision = z.infer<typeof commitMessageDecisionSchema>;
 
 export const issueBreakdownDecisionSchema = z
   .object({
@@ -165,6 +162,4 @@ export const issueBreakdownDecisionSchema = z
     }
   });
 
-export type IssueBreakdownDecision = z.infer<
-  typeof issueBreakdownDecisionSchema
->;
+export type IssueBreakdownDecision = z.infer<typeof issueBreakdownDecisionSchema>;

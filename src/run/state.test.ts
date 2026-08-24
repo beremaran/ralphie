@@ -23,9 +23,7 @@ const state: RunState = {
   selection: { agent: "build" },
   maxIssues: 3,
   queue: {
-    pending: [
-      { number: 2, title: "Next", url: "issue/2", body: null, labels: [] },
-    ],
+    pending: [{ number: 2, title: "Next", url: "issue/2", body: null, labels: [] }],
     completedIssueNumbers: [1],
     processedCount: 1,
   },

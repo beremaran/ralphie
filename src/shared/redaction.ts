@@ -1,5 +1,6 @@
 const REDACTED = "[REDACTED]";
-const sensitiveKey = /(?:token|authorization|password|passwd|secret|credential|api[-_]?key)/i;
+const sensitiveKey =
+  /(?:token|authorization|password|passwd|secret|credential|api[-_]?key)/i;
 
 export const redactSensitiveText = (value: string): string => {
   let redacted = value
@@ -20,10 +21,7 @@ export const redactSensitiveText = (value: string): string => {
   return redacted;
 };
 
-export const redactSensitiveValue = (
-  value: unknown,
-  key?: string,
-): unknown => {
+export const redactSensitiveValue = (value: unknown, key?: string): unknown => {
   if (key !== undefined && sensitiveKey.test(key)) return REDACTED;
   if (typeof value === "string") return redactSensitiveText(value);
   if (Array.isArray(value)) {

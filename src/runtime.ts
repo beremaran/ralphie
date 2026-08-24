@@ -29,8 +29,9 @@ const GitRepositoryLiveWithCommandRunner = GitRepositoryLive.pipe(
   Layer.provide(CommandRunnerLive),
 );
 
-const GitRepositoryInvariantLiveWithCommandRunner =
-  GitRepositoryInvariantLive.pipe(Layer.provide(CommandRunnerLive));
+const GitRepositoryInvariantLiveWithCommandRunner = GitRepositoryInvariantLive.pipe(
+  Layer.provide(CommandRunnerLive),
+);
 
 const GitIssueCheckpointLiveWithCommandRunner = GitIssueCheckpointLive.pipe(
   Layer.provide(CommandRunnerLive),
@@ -43,10 +44,7 @@ const GitRemoteSafetyLiveWithCommandRunner = GitRemoteSafetyLive.pipe(
 );
 const GitIssuePreparationRuntime = GitIssuePreparationLive.pipe(
   Layer.provideMerge(
-    Layer.merge(
-      GitIssueCheckpointLiveWithCommandRunner,
-      IssueArtifactStoreLive,
-    ),
+    Layer.merge(GitIssueCheckpointLiveWithCommandRunner, IssueArtifactStoreLive),
   ),
 );
 const IssueRecoveryRuntime = IssueRecoveryLive.pipe(
@@ -63,9 +61,7 @@ const ImplementationExecutorRuntime = ImplementationExecutorLive.pipe(
   ),
 );
 const DecompositionExecutorRuntime = DecompositionExecutorLive.pipe(
-  Layer.provideMerge(
-    Layer.merge(GitHubIssueMutationsLive, GitHubIssuesLive),
-  ),
+  Layer.provideMerge(Layer.merge(GitHubIssueMutationsLive, GitHubIssuesLive)),
 );
 const IssueExecutorRuntime = IssueExecutorLive.pipe(
   Layer.provideMerge(

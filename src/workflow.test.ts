@@ -7,8 +7,16 @@ import { GitRepository } from "./git/repository.ts";
 import { GitRepositoryInvariant } from "./git/repository-invariant.ts";
 import { GitIssueCheckpoint } from "./git/issue-checkpoint.ts";
 import { GitHubClient } from "./github/client.ts";
-import { GitHubIssues, type GitHubIssue, IssueOrder, IssueSort } from "./github/issues.ts";
-import { type IssueExecutionOutcome, IssueExecutionOutcomeKind } from "./issues/execution.ts";
+import {
+  GitHubIssues,
+  type GitHubIssue,
+  IssueOrder,
+  IssueSort,
+} from "./github/issues.ts";
+import {
+  type IssueExecutionOutcome,
+  IssueExecutionOutcomeKind,
+} from "./issues/execution.ts";
 import { IssueExecutor } from "./issues/executor.ts";
 import { DryRunIssueExecutor } from "./issues/dry-run-executor.ts";
 import { DEFAULT_OPENCODE_AGENT } from "./opencode/model.ts";
@@ -186,10 +194,7 @@ describe("workflow", () => {
       agent: "reviewer",
       cleanup: true,
       startClean: true,
-    }).pipe(
-      Effect.provide(testRuntime(calls, states, {}, events)),
-      Effect.runPromise,
-    );
+    }).pipe(Effect.provide(testRuntime(calls, states, {}, events)), Effect.runPromise);
 
     expect(summary.counts.completed).toBe(1);
     expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
@@ -205,7 +210,9 @@ describe("workflow", () => {
       "closeServer",
       "removeWorkspace:/tmp/ralphie",
     ]);
-    expect(events.some(({ stage }) => stage === ProgressStage.IssueExecution)).toBeTrue();
+    expect(
+      events.some(({ stage }) => stage === ProgressStage.IssueExecution),
+    ).toBeTrue();
     expect(events.at(-1)?.status).toBe(ProgressStatus.Succeeded);
   });
 
@@ -215,10 +222,7 @@ describe("workflow", () => {
     const summary = await workflow({
       ...baseOptions,
       dryRun: true,
-    }).pipe(
-      Effect.provide(testRuntime(calls, states)),
-      Effect.runPromise,
-    );
+    }).pipe(Effect.provide(testRuntime(calls, states)), Effect.runPromise);
 
     expect(summary.outcomes).toEqual([
       {
@@ -235,14 +239,16 @@ describe("workflow", () => {
   test.each([
     [{ kind: IssueExecutionOutcomeKind.Completed, commitSha: "abc" }],
     [{ kind: IssueExecutionOutcomeKind.Decomposed, childIssueNumbers: [51] }],
-    [{
-      kind: IssueExecutionOutcomeKind.Escalated,
-      diagnosticsPath: "/tmp/diagnostics.json",
-      reason: "review budget exhausted",
-      childIssueNumbers: [52],
-    }],
+    [
+      {
+        kind: IssueExecutionOutcomeKind.Escalated,
+        diagnosticsPath: "/tmp/diagnostics.json",
+        reason: "review budget exhausted",
+        childIssueNumbers: [52],
+      },
+    ],
     [{ kind: IssueExecutionOutcomeKind.Skipped, reason: "no changes" }],
-  ] satisfies ReadonlyArray<readonly [IssueExecutionOutcome]>) (
+  ] satisfies ReadonlyArray<readonly [IssueExecutionOutcome]>)(
     "records the executor outcome",
     async (outcome) => {
       const calls: string[] = [];
@@ -268,9 +274,11 @@ describe("workflow", () => {
     const calls: string[] = [];
     const states: RunState[] = [];
     const exit = await workflow(baseOptions).pipe(
-      Effect.provide(testRuntime(calls, states, {
-        outcomes: [{ kind: IssueExecutionOutcomeKind.Failed, message: "boom" }],
-      })),
+      Effect.provide(
+        testRuntime(calls, states, {
+          outcomes: [{ kind: IssueExecutionOutcomeKind.Failed, message: "boom" }],
+        }),
+      ),
       Effect.runPromiseExit,
     );
 
@@ -287,13 +295,15 @@ describe("workflow", () => {
     const states: RunState[] = [];
     const child = { ...firstIssue, number: 51, title: "Child" };
     const summary = await workflow({ ...baseOptions, maxIssues: 2 }).pipe(
-      Effect.provide(testRuntime(calls, states, {
-        issueLists: [[firstIssue], [child]],
-        outcomes: [
-          { kind: IssueExecutionOutcomeKind.Decomposed, childIssueNumbers: [51] },
-          { kind: IssueExecutionOutcomeKind.Completed, commitSha: "child-sha" },
-        ],
-      })),
+      Effect.provide(
+        testRuntime(calls, states, {
+          issueLists: [[firstIssue], [child]],
+          outcomes: [
+            { kind: IssueExecutionOutcomeKind.Decomposed, childIssueNumbers: [51] },
+            { kind: IssueExecutionOutcomeKind.Completed, commitSha: "child-sha" },
+          ],
+        }),
+      ),
       Effect.runPromise,
     );
 
@@ -304,9 +314,11 @@ describe("workflow", () => {
   test("stops before other work when start-clean fails", async () => {
     const calls: string[] = [];
     const exit = await workflow({ ...baseOptions, startClean: true }).pipe(
-      Effect.provide(testRuntime(calls, [], {
-        removeFailure: new RalphieError({ message: "cleanup failed" }),
-      })),
+      Effect.provide(
+        testRuntime(calls, [], {
+          removeFailure: new RalphieError({ message: "cleanup failed" }),
+        }),
+      ),
       Effect.runPromiseExit,
     );
 
@@ -317,9 +329,11 @@ describe("workflow", () => {
   test("stops when preflight authentication fails", async () => {
     const calls: string[] = [];
     const exit = await workflow(baseOptions).pipe(
-      Effect.provide(testRuntime(calls, [], {
-        githubFailure: new RalphieError({ message: "not logged in" }),
-      })),
+      Effect.provide(
+        testRuntime(calls, [], {
+          githubFailure: new RalphieError({ message: "not logged in" }),
+        }),
+      ),
       Effect.runPromiseExit,
     );
 
@@ -336,9 +350,7 @@ describe("workflow", () => {
       cleanup: true,
       signal: controller.signal,
     }).pipe(
-      Effect.provide(
-        testRuntime(calls, states, { abortOnExecute: controller }),
-      ),
+      Effect.provide(testRuntime(calls, states, { abortOnExecute: controller })),
       Effect.runPromiseExit,
     );
 
@@ -357,10 +369,7 @@ describe("workflow", () => {
     const exit = await workflow({
       ...baseOptions,
       signal: controller.signal,
-    }).pipe(
-      Effect.provide(testRuntime(calls, [])),
-      Effect.runPromiseExit,
-    );
+    }).pipe(Effect.provide(testRuntime(calls, [])), Effect.runPromiseExit);
 
     expect(Exit.isFailure(exit)).toBeTrue();
     expect(calls).toEqual([]);

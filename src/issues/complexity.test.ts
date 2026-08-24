@@ -9,10 +9,7 @@ import {
   ProgressStage,
   ProgressStatus,
 } from "../progress/progress.ts";
-import {
-  ComplexityAssessment,
-  ComplexityAssessmentLive,
-} from "./complexity.ts";
+import { ComplexityAssessment, ComplexityAssessmentLive } from "./complexity.ts";
 import { ComplexityLevel } from "./decisions.ts";
 import type { IssueExecutionContext } from "./execution.ts";
 import { makeOpenCodeSessionDiagnostics } from "../opencode/task-session.ts";
@@ -40,7 +37,9 @@ const assistantInfo = (structured: unknown) => ({
 
 const context = (
   client: OpencodeClient,
-  overrides: Partial<Pick<IssueExecutionContext, "openCodeDiagnostics" | "repositoryInvariant">> = {},
+  overrides: Partial<
+    Pick<IssueExecutionContext, "openCodeDiagnostics" | "repositoryInvariant">
+  > = {},
 ): IssueExecutionContext => ({
   issue: {
     number: 42,
@@ -57,7 +56,8 @@ const context = (
   octokit: {} as Octokit,
   openCode: client,
   openCodeSelection: { agent: "build" },
-  openCodeDiagnostics: overrides.openCodeDiagnostics ?? makeOpenCodeSessionDiagnostics(() => "now"),
+  openCodeDiagnostics:
+    overrides.openCodeDiagnostics ?? makeOpenCodeSessionDiagnostics(() => "now"),
   repositoryInvariant: overrides.repositoryInvariant ?? {
     capture: () => Effect.succeed({ branch: "main", head: "abc123" }),
     verify: () => Effect.void,
@@ -65,9 +65,7 @@ const context = (
 });
 
 const assessmentLayer = (events: ProgressUpdate[]) =>
-  ComplexityAssessmentLive.pipe(
-    Layer.provide(makeProgressRecorderLayer(events)),
-  );
+  ComplexityAssessmentLive.pipe(Layer.provide(makeProgressRecorderLayer(events)));
 
 describe("complexity assessment", () => {
   test("gets a schema-validated decision and reports progress", async () => {
@@ -128,10 +126,7 @@ describe("complexity assessment", () => {
     const exit = await Effect.gen(function* () {
       const assessment = yield* ComplexityAssessment;
       yield* assessment.assess(context(client));
-    }).pipe(
-      Effect.provide(assessmentLayer(events)),
-      Effect.runPromiseExit,
-    );
+    }).pipe(Effect.provide(assessmentLayer(events)), Effect.runPromiseExit);
 
     expect(Exit.isFailure(exit)).toBe(true);
     expect(events.at(-1)?.status).toBe(ProgressStatus.Failed);

@@ -3,17 +3,11 @@ import { Effect, Exit } from "effect";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 
-import {
-  resolveWorkspacePath,
-  Workspace,
-  WorkspaceLive,
-} from "./workspace.ts";
+import { resolveWorkspacePath, Workspace, WorkspaceLive } from "./workspace.ts";
 
 describe("workspace cleanup", () => {
   test("expands the default workspace path", () => {
-    expect(resolveWorkspacePath("~/.ralphie")).toBe(
-      resolve(homedir(), ".ralphie"),
-    );
+    expect(resolveWorkspacePath("~/.ralphie")).toBe(resolve(homedir(), ".ralphie"));
   });
 
   test.each(["/", homedir(), resolve(process.cwd(), ".."), process.cwd()])(

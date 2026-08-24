@@ -10,9 +10,7 @@ enum ProbeDecision {
 }
 
 const decisionSchema = z.object({
-  decision: z
-    .enum(ProbeDecision)
-    .describe("Whether the stated condition is true."),
+  decision: z.enum(ProbeDecision).describe("Whether the stated condition is true."),
   confidence: z
     .number()
     .min(0)

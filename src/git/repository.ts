@@ -4,10 +4,7 @@ import { join } from "node:path";
 import simpleGit from "simple-git";
 
 import { parseRepositorySlug } from "../github/repository.ts";
-import {
-  CommandRunner,
-  requireSuccessfulCommand,
-} from "../process/command-runner.ts";
+import { CommandRunner, requireSuccessfulCommand } from "../process/command-runner.ts";
 import { RalphieError } from "../shared/error.ts";
 import { resolveWorkspacePath } from "../workspace/workspace.ts";
 
@@ -27,8 +24,9 @@ export type GitRepositoryService = {
   ) => Effect.Effect<PreparedRepository, RalphieError>;
 };
 
-export const GitRepository =
-  Context.GenericTag<GitRepositoryService>("ralphie/GitRepository");
+export const GitRepository = Context.GenericTag<GitRepositoryService>(
+  "ralphie/GitRepository",
+);
 
 const pathExists = async (path: string): Promise<boolean> => {
   try {

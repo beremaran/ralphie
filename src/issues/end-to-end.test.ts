@@ -8,14 +8,8 @@ import {
   makeIssueArtifactStore,
   type IssueArtifactStore,
 } from "./artifacts.ts";
-import {
-  ComplexityAssessment,
-  ComplexityAssessmentLive,
-} from "./complexity.ts";
-import {
-  ComplexityLevel,
-  ImplementationComplexityLevel,
-} from "./decisions.ts";
+import { ComplexityAssessment, ComplexityAssessmentLive } from "./complexity.ts";
+import { ComplexityLevel, ImplementationComplexityLevel } from "./decisions.ts";
 import {
   DecompositionExecutor,
   DecompositionExecutorLive,
@@ -30,18 +24,12 @@ import {
   type GitIssuePreparationService,
 } from "../git/issue-preparation.ts";
 import type { IssueCheckpoint } from "../git/issue-checkpoint.ts";
-import {
-  GitPushMode,
-  GitRemoteSafety,
-} from "../git/remote-safety.ts";
+import { GitPushMode, GitRemoteSafety } from "../git/remote-safety.ts";
 import {
   GitHubIssueMutations,
   type GitHubIssueMutationService,
 } from "../github/issue-mutations.ts";
-import {
-  GitHubIssues,
-  type GitHubIssuesService,
-} from "../github/issues.ts";
+import { GitHubIssues, type GitHubIssuesService } from "../github/issues.ts";
 import { makeOpenCodeSessionDiagnostics } from "../opencode/task-session.ts";
 import {
   makeProgressRecorderLayer,
@@ -49,13 +37,13 @@ import {
 } from "../progress/progress.ts";
 import { createIssueQueue, toQueuedIssues } from "./queue.ts";
 import { IssueExecutionOutcomeKind } from "./execution.ts";
-import { ImplementationExecutor, ImplementationExecutorLive } from "./implementation-executor.ts";
+import {
+  ImplementationExecutor,
+  ImplementationExecutorLive,
+} from "./implementation-executor.ts";
 import { IssueRecovery, type IssueRecoveryService } from "./recovery.ts";
 import { ReviewExhaustionOutcome } from "./recovery.ts";
-import {
-  IssueQueueResumeStrategy,
-  IssueWorkflowKind,
-} from "./stage.ts";
+import { IssueQueueResumeStrategy, IssueWorkflowKind } from "./stage.ts";
 import { RalphieError } from "../shared/error.ts";
 
 const checkpoint: IssueCheckpoint = { branch: "main", sha: "abc123" };
@@ -68,7 +56,10 @@ const issue = (number: number, title: string, body = "Task body") => ({
   labels: [],
 });
 
-const context = (client: OpencodeClient, current = issue(42, "Complete task")): IssueExecutionContext => ({
+const context = (
+  client: OpencodeClient,
+  current = issue(42, "Complete task"),
+): IssueExecutionContext => ({
   issue: current,
   repository: "owner/repository",
   repositoryPath: "/workspace/repository",
@@ -132,17 +123,18 @@ const implementationServices = (
     Layer.succeed(GitIssuePreparation, preparation),
     Layer.succeed(GitIssueOperations, git),
     Layer.succeed(GitRemoteSafety, {
-      verifyDirectPush: (input) => Effect.succeed({
-        repository: input.repository,
-        branch: input.branch,
-        origin: "https://github.com/owner/repository.git",
-        protected: false,
-        activeBranchRules: 0,
-        hasPushPermission: true,
-        commitsBehindBase: 0,
-        commitsAheadBase: input.expectedCommitSha === undefined ? 0 : 1,
-        pushMode: GitPushMode.NonForce,
-      }),
+      verifyDirectPush: (input) =>
+        Effect.succeed({
+          repository: input.repository,
+          branch: input.branch,
+          origin: "https://github.com/owner/repository.git",
+          protected: false,
+          activeBranchRules: 0,
+          hasPushPermission: true,
+          commitsBehindBase: 0,
+          commitsAheadBase: input.expectedCommitSha === undefined ? 0 : 1,
+          pushMode: GitPushMode.NonForce,
+        }),
     }),
     Layer.succeed(IssueRecovery, recovery),
     makeProgressRecorderLayer(progress),
@@ -155,10 +147,7 @@ const reviewApproved = {
   findings: [],
 };
 
-const runComplexity = (
-  client: OpencodeClient,
-  progress: ProgressUpdate[],
-) =>
+const runComplexity = (client: OpencodeClient, progress: ProgressUpdate[]) =>
   Effect.gen(function* () {
     const service = yield* ComplexityAssessment;
     return yield* service.assess(context(client));
@@ -202,7 +191,7 @@ const decompositionServices = (state: {
       }),
     update: (_client, _repository, issueNumber, input) =>
       state.failSecondLink?.value && issueNumber === 102
-      ? Effect.gen(function* () {
+        ? Effect.gen(function* () {
             state.failSecondLink!.value = false;
             return yield* new RalphieError({ message: "link failed" });
           })
@@ -222,10 +211,7 @@ const decompositionServices = (state: {
   };
   return Layer.merge(
     Layer.succeed(GitHubIssueMutations, mutations),
-    Layer.merge(
-      Layer.succeed(GitHubIssues, issues),
-      makeProgressRecorderLayer([]),
-    ),
+    Layer.merge(Layer.succeed(GitHubIssues, issues), makeProgressRecorderLayer([])),
   );
 };
 
@@ -256,7 +242,7 @@ describe("mocked end-to-end issue workflows", () => {
 
     const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
     await Effect.runPromise(
-      (Effect.gen(function* () {
+      Effect.gen(function* () {
         const executor = yield* ImplementationExecutor;
         return yield* executor.execute({ context: context(client), artifacts });
       }).pipe(
@@ -266,7 +252,7 @@ describe("mocked end-to-end issue workflows", () => {
             push: () => Effect.void,
           }) as any,
         ),
-      ) as any),
+      ) as any,
     ).then((result) => {
       expect(result).toEqual({
         kind: IssueExecutionOutcomeKind.Completed,
@@ -324,7 +310,9 @@ describe("mocked end-to-end issue workflows", () => {
     const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
     const client = clientFor([breakdown]);
     const layer = decompositionServices(state);
-    const first = await Effect.runPromiseExit(runDecomposition(client, artifacts, layer));
+    const first = await Effect.runPromiseExit(
+      runDecomposition(client, artifacts, layer),
+    );
     expect(first._tag).toBe("Failure");
     expect(state.created).toEqual([101, 102]);
     await Effect.runPromise(runDecomposition(client, artifacts, layer));

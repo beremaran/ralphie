@@ -9,18 +9,9 @@ import {
   IssueArtifactStore,
   IssueArtifactStoreLive,
 } from "../issues/artifacts.ts";
-import {
-  CommandRunner,
-  CommandRunnerLive,
-} from "../process/command-runner.ts";
-import {
-  GitIssueCheckpoint,
-  GitIssueCheckpointLive,
-} from "./issue-checkpoint.ts";
-import {
-  GitIssuePreparation,
-  GitIssuePreparationLive,
-} from "./issue-preparation.ts";
+import { CommandRunner, CommandRunnerLive } from "../process/command-runner.ts";
+import { GitIssueCheckpoint, GitIssueCheckpointLive } from "./issue-checkpoint.ts";
+import { GitIssuePreparation, GitIssuePreparationLive } from "./issue-preparation.ts";
 
 const runGit = (repositoryPath: string, args: ReadonlyArray<string>) =>
   Effect.gen(function* () {

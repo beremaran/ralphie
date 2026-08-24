@@ -12,7 +12,9 @@ import {
 } from "./remote-safety.ts";
 
 const repositoryResponse = (push: boolean) => ({ data: { permissions: { push } } });
-const branchResponse = (protectedBranch: boolean) => ({ data: { protected: protectedBranch } });
+const branchResponse = (protectedBranch: boolean) => ({
+  data: { protected: protectedBranch },
+});
 const rulesResponse = (rules: ReadonlyArray<unknown>) => ({ data: rules });
 
 const client = ({
@@ -53,17 +55,19 @@ const runner = (
   };
 };
 
-const verify = (input: {
-  readonly client?: Octokit;
-  readonly counts?: string;
-  readonly origin?: string;
-  readonly remoteSha?: string;
-  readonly push?: boolean;
-  readonly protectedBranch?: boolean;
-  readonly rules?: ReadonlyArray<unknown>;
-  readonly expectedCommitSha?: string;
-  readonly pushMode?: GitPushMode;
-} = {}) => {
+const verify = (
+  input: {
+    readonly client?: Octokit;
+    readonly counts?: string;
+    readonly origin?: string;
+    readonly remoteSha?: string;
+    readonly push?: boolean;
+    readonly protectedBranch?: boolean;
+    readonly rules?: ReadonlyArray<unknown>;
+    readonly expectedCommitSha?: string;
+    readonly pushMode?: GitPushMode;
+  } = {},
+) => {
   const commands = runner(input.counts, input.origin, input.remoteSha);
   return Effect.gen(function* () {
     const safety = yield* GitRemoteSafety;
@@ -104,9 +108,21 @@ describe("Git remote safety", () => {
   });
 
   test.each([
-    ["protected branch", { protectedBranch: true }, GitRemoteSafetyFailureKind.ProtectedBranch],
-    ["active branch rules", { rules: [{ type: "required_status_checks" }] }, GitRemoteSafetyFailureKind.BranchRules],
-    ["missing push permission", { push: false }, GitRemoteSafetyFailureKind.PushPermission],
+    [
+      "protected branch",
+      { protectedBranch: true },
+      GitRemoteSafetyFailureKind.ProtectedBranch,
+    ],
+    [
+      "active branch rules",
+      { rules: [{ type: "required_status_checks" }] },
+      GitRemoteSafetyFailureKind.BranchRules,
+    ],
+    [
+      "missing push permission",
+      { push: false },
+      GitRemoteSafetyFailureKind.PushPermission,
+    ],
     ["diverged base", { counts: "1 2" }, GitRemoteSafetyFailureKind.DivergedBase],
     ["moved remote", { remoteSha: "newbase" }, GitRemoteSafetyFailureKind.DivergedBase],
   ])("refuses %s", async (_name, options, kind) => {
@@ -118,9 +134,7 @@ describe("Git remote safety", () => {
   });
 
   test("refuses a force-push mode before any remote checks", async () => {
-    const exit = await Effect.runPromiseExit(
-      verify({ pushMode: GitPushMode.Force }),
-    );
+    const exit = await Effect.runPromiseExit(verify({ pushMode: GitPushMode.Force }));
     expect(Exit.isFailure(exit)).toBeTrue();
     if (Exit.isFailure(exit)) {
       const text = JSON.stringify(exit.cause);

@@ -205,9 +205,7 @@ describe("per-issue artifact store", () => {
       ).toEqual([review(1)]);
 
       await Effect.runPromise(reloaded.resetImplementationAttempt());
-      const reset = await Effect.runPromise(
-        makeDurableIssueArtifactStore(42, scope),
-      );
+      const reset = await Effect.runPromise(makeDurableIssueArtifactStore(42, scope));
       expect(reset.has(IssueArtifactKind.ReviewAttempts)).toBe(false);
       expect(
         await Effect.runPromise(reset.read(IssueArtifactKind.ComplexityDecision)),

@@ -1,8 +1,4 @@
-import type {
-  AssistantMessage,
-  OpencodeClient,
-  Part,
-} from "@opencode-ai/sdk/v2";
+import type { AssistantMessage, OpencodeClient, Part } from "@opencode-ai/sdk/v2";
 import { Context, Data, Effect, Layer } from "effect";
 import type { PermissionRuleset } from "@opencode-ai/sdk/v2";
 
@@ -52,9 +48,7 @@ export enum OpenCodeAssistantErrorKind {
   Other = "other",
 }
 
-export class OpenCodeAssistantError extends Data.TaggedError(
-  "OpenCodeAssistantError",
-)<{
+export class OpenCodeAssistantError extends Data.TaggedError("OpenCodeAssistantError")<{
   readonly kind: OpenCodeAssistantErrorKind;
   readonly message: string;
   readonly errorName: string;
@@ -92,14 +86,10 @@ export enum OpenCodeSessionRetentionPolicy {
   Retain = "retain",
 }
 
-export const OPEN_CODE_SESSION_RETENTION_POLICY =
-  OpenCodeSessionRetentionPolicy.Retain;
+export const OPEN_CODE_SESSION_RETENTION_POLICY = OpenCodeSessionRetentionPolicy.Retain;
 
 export type OpenCodeSessionDiagnostics = {
-  readonly record: (
-    runId: string,
-    session: OpenCodeSessionDiagnosticInput,
-  ) => void;
+  readonly record: (runId: string, session: OpenCodeSessionDiagnosticInput) => void;
   readonly list: (runId: string) => ReadonlyArray<OpenCodeSessionDiagnostic>;
 };
 
@@ -143,9 +133,7 @@ export const OPEN_CODE_DECISION_PERMISSION_POLICY: PermissionRuleset = [
   ...OPEN_CODE_TASK_PERMISSION_POLICY,
 ];
 
-type OpenCodePromptParameters = Parameters<
-  OpencodeClient["session"]["prompt"]
->[0];
+type OpenCodePromptParameters = Parameters<OpencodeClient["session"]["prompt"]>[0];
 
 export type OpenCodeTaskPromptInput = Omit<
   OpenCodePromptParameters,
@@ -184,9 +172,7 @@ export const toOpenCodeAssistantError = (
     kind,
     message: describeApiError(error),
     errorName: error.name,
-    ...(error.name === "StructuredOutputError"
-      ? { retries: error.data.retries }
-      : {}),
+    ...(error.name === "StructuredOutputError" ? { retries: error.data.retries } : {}),
     sdkError: error,
   });
 };
@@ -259,9 +245,7 @@ export const taskSessionPromptParameters = (
   sessionID: session.sessionID,
   directory: session.directory,
   agent: session.selection.agent,
-  ...(session.selection.model === undefined
-    ? {}
-    : { model: session.selection.model }),
+  ...(session.selection.model === undefined ? {} : { model: session.selection.model }),
   ...(session.selection.variant === undefined
     ? {}
     : { variant: session.selection.variant }),
@@ -280,15 +264,18 @@ export const createOpenCodeTaskSession = (
 ): Effect.Effect<OpenCodeTaskSession, RalphieError> =>
   Effect.tryPromise({
     try: async () => {
-      const response = await client.session.create({
-        directory: request.directory,
-        title: request.title,
-        agent: request.selection.agent,
-        permission: OPEN_CODE_TASK_PERMISSION_POLICY,
-        ...(request.selection.model === undefined
-          ? {}
-          : { model: createSessionModel(request.selection.model) }),
-      }, request.signal === undefined ? undefined : { signal: request.signal });
+      const response = await client.session.create(
+        {
+          directory: request.directory,
+          title: request.title,
+          agent: request.selection.agent,
+          permission: OPEN_CODE_TASK_PERMISSION_POLICY,
+          ...(request.selection.model === undefined
+            ? {}
+            : { model: createSessionModel(request.selection.model) }),
+        },
+        request.signal === undefined ? undefined : { signal: request.signal },
+      );
 
       if (response.error !== undefined || response.data === undefined) {
         throw new Error(
@@ -357,7 +344,7 @@ export const runOpenCodeTask = (
         new RalphieError({
           message: "Failed to run an OpenCode task.",
           cause,
-      }),
+        }),
     });
 
     if (response.info.error !== undefined) {
@@ -381,9 +368,7 @@ export const runOpenCodeTask = (
       response: response.info,
       parts: response.parts,
     };
-  }).pipe(
-    Effect.tapError((error) => reportOpenCodeFailure(request, error)),
-  );
+  }).pipe(Effect.tapError((error) => reportOpenCodeFailure(request, error)));
 
 export type OpenCodeTaskSessionService = {
   readonly create: (
@@ -405,9 +390,7 @@ export const makeOpenCodeTaskSessionLayer = (client: OpencodeClient) =>
     const withDiagnostics = <Request extends OpenCodeTaskSessionRequest>(
       request: Request,
     ): Request =>
-      request.diagnostics === undefined
-        ? { ...request, diagnostics }
-        : request;
+      request.diagnostics === undefined ? { ...request, diagnostics } : request;
 
     return {
       diagnostics,
