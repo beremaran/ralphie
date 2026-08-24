@@ -15,7 +15,11 @@ import {
 import { LiveRuntime } from "./runtime.ts";
 import { workflow } from "./workflow.ts";
 import { redactSensitiveText } from "./shared/redaction.ts";
-import { RunStateStore, RunStateStoreLive } from "./run/state.ts";
+import {
+  type RunState,
+  RunStateStore,
+  RunStateStoreLive,
+} from "./run/state.ts";
 import { reconcileRunState } from "./run/reconciliation.ts";
 
 export const runCommand = defineCommand({
@@ -88,19 +92,20 @@ export const runCommand = defineCommand({
       throw new Error("--json and --quiet cannot be used together.");
     }
 
+    let resumeState: RunState | undefined;
     if (flags.resume !== undefined) {
       const resumePath = flags.resume;
-      const savedState = await Effect.gen(function* () {
+      resumeState = await Effect.gen(function* () {
         const store = yield* RunStateStore;
         return yield* store.load(resumePath);
       }).pipe(Effect.provide(RunStateStoreLive), Effect.runPromise);
-      const reconciliation = reconcileRunState(savedState, {
+      const reconciliation = reconcileRunState(resumeState, {
         repository: repo,
         branch: flags.branch,
       });
       if (!reconciliation.compatible) {
         throw new Error(
-          `Cannot resume run ${savedState.runId}: ${reconciliation.reasons.join("; ")}.`,
+          `Cannot resume run ${resumeState.runId}: ${reconciliation.reasons.join("; ")}.`,
         );
       }
     }
@@ -112,6 +117,7 @@ export const runCommand = defineCommand({
         : terminal.isInteractive
           ? ProgressRenderMode.Interactive
           : ProgressRenderMode.Plain;
+    const runId = resumeState?.runId ?? crypto.randomUUID();
     const progressLayer = makeProgressReporterLayer({
       mode: progressMode,
       verbose: flags.verbose,
@@ -119,6 +125,7 @@ export const runCommand = defineCommand({
       write: flags.json
         ? (text) => process.stdout.write(text)
         : (text) => process.stderr.write(text),
+      runId,
     });
 
     await workflow({
@@ -137,8 +144,11 @@ export const runCommand = defineCommand({
       cleanup: flags.cleanup,
       startClean: flags["start-clean"],
       signal,
+      runId,
+      resumeState,
+      resumePath: flags.resume,
     }).pipe(
-      Effect.provide(Layer.merge(LiveRuntime, progressLayer)),
+      Effect.provide(LiveRuntime.pipe(Layer.provideMerge(progressLayer))),
       Effect.catchAll((error) =>
         Effect.fail(new Error(redactSensitiveText(error.message))),
       ),

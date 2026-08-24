@@ -2,11 +2,21 @@ import { Layer } from "effect";
 
 import { GitRepositoryLive } from "./git/repository.ts";
 import { GitRepositoryInvariantLive } from "./git/repository-invariant.ts";
+import { GitIssueCheckpointLive } from "./git/issue-checkpoint.ts";
+import { GitIssueOperationsLive } from "./git/issue-operations.ts";
+import { GitIssuePreparationLive } from "./git/issue-preparation.ts";
 import { GitHubClientLive } from "./github/client.ts";
+import { GitHubIssueMutationsLive } from "./github/issue-mutations.ts";
 import { GitHubIssuesLive } from "./github/issues.ts";
 import { OpenCodeLive } from "./opencode/server.ts";
-import { IssuePipelineLive } from "./issues/pipeline.ts";
+import { IssueArtifactStoreLive } from "./issues/artifacts.ts";
+import { ComplexityAssessmentLive } from "./issues/complexity.ts";
+import { DecompositionExecutorLive } from "./issues/decomposition-executor.ts";
+import { IssueExecutorLive } from "./issues/executor.ts";
+import { ImplementationExecutorLive } from "./issues/implementation-executor.ts";
+import { IssueRecoveryLive } from "./issues/recovery.ts";
 import { CommandRunnerLive } from "./process/command-runner.ts";
+import { RunStateStoreLive } from "./run/state.ts";
 import { WorkspaceLive } from "./workspace/workspace.ts";
 
 const GitHubClientLiveWithCommandRunner = GitHubClientLive.pipe(
@@ -20,12 +30,55 @@ const GitRepositoryLiveWithCommandRunner = GitRepositoryLive.pipe(
 const GitRepositoryInvariantLiveWithCommandRunner =
   GitRepositoryInvariantLive.pipe(Layer.provide(CommandRunnerLive));
 
+const GitIssueCheckpointLiveWithCommandRunner = GitIssueCheckpointLive.pipe(
+  Layer.provide(CommandRunnerLive),
+);
+const GitIssueOperationsLiveWithCommandRunner = GitIssueOperationsLive.pipe(
+  Layer.provide(CommandRunnerLive),
+);
+const GitIssuePreparationRuntime = GitIssuePreparationLive.pipe(
+  Layer.provideMerge(
+    Layer.merge(
+      GitIssueCheckpointLiveWithCommandRunner,
+      IssueArtifactStoreLive,
+    ),
+  ),
+);
+const IssueRecoveryRuntime = IssueRecoveryLive.pipe(
+  Layer.provideMerge(GitIssueCheckpointLiveWithCommandRunner),
+);
+const ImplementationExecutorRuntime = ImplementationExecutorLive.pipe(
+  Layer.provideMerge(
+    Layer.mergeAll(
+      GitIssuePreparationRuntime,
+      GitIssueOperationsLiveWithCommandRunner,
+      IssueRecoveryRuntime,
+    ),
+  ),
+);
+const DecompositionExecutorRuntime = DecompositionExecutorLive.pipe(
+  Layer.provideMerge(
+    Layer.merge(GitHubIssueMutationsLive, GitHubIssuesLive),
+  ),
+);
+const IssueExecutorRuntime = IssueExecutorLive.pipe(
+  Layer.provideMerge(
+    Layer.mergeAll(
+      IssueArtifactStoreLive,
+      ComplexityAssessmentLive,
+      ImplementationExecutorRuntime,
+      DecompositionExecutorRuntime,
+    ),
+  ),
+);
+
 export const LiveRuntime = Layer.mergeAll(
   GitHubClientLiveWithCommandRunner,
   GitHubIssuesLive,
   GitRepositoryLiveWithCommandRunner,
   GitRepositoryInvariantLiveWithCommandRunner,
-  IssuePipelineLive,
+  IssueExecutorRuntime,
   OpenCodeLive,
+  RunStateStoreLive,
   WorkspaceLive,
 );

@@ -1,10 +1,8 @@
 # Ralphie implementation backlog
 
-Ralphie currently performs preflight checks, prepares a clean checkout, fetches
-open issues, starts OpenCode, builds typed workflow plans, and reports progress.
-The services and schemas for structured output, review-exhaustion recovery, and
-refreshable issue queues exist, but they are not yet connected by a live issue
-executor.
+Ralphie now connects its typed executors to a resumable, refreshable issue loop.
+The remaining work focuses on interruption recovery, progress completeness,
+remote safety checks, end-to-end validation, and release readiness.
 
 The tasks below are ordered roughly by dependency. Each checkbox should be small
 enough to implement, review, and commit independently.
@@ -19,14 +17,14 @@ enough to implement, review, and commit independently.
 - [x] Add an `IssueExecutor` Effect service that accepts an execution context and
       returns an `IssueExecutionOutcome`.
 - [x] Add explicit `ImplementationExecutor` and `DecompositionExecutor` services.
-- [ ] Keep stage enums as the audit/progress vocabulary rather than building an
+- [x] Keep stage enums as the audit/progress vocabulary rather than building an
       untyped generic stage interpreter.
 - [x] Add a typed per-issue artifact store for complexity, checkpoints, reviews,
       commit messages, breakdowns, and created issue numbers.
 - [x] Reject reads of artifacts that have not been produced yet.
-- [ ] Assemble executor services in the live runtime.
-- [ ] Replace the workflow's plan-only logging with calls to `IssueExecutor`.
-- [ ] Add mocked executor tests proving the workflow handles every outcome.
+- [x] Assemble executor services in the live runtime.
+- [x] Replace the workflow's plan-only logging with calls to `IssueExecutor`.
+- [x] Add mocked executor tests proving the workflow handles every outcome.
 
 ## 2. OpenCode task/session layer
 
@@ -81,7 +79,7 @@ enough to implement, review, and commit independently.
 - [x] Add a deterministic `git add --all` operation.
 - [x] Add an operation to read the exact staged binary diff.
 - [x] Add an operation to detect an empty staged change set.
-- [ ] Define behavior for an agent that reports success but produces no changes.
+- [x] Define behavior for an agent that reports success but produces no changes.
 - [x] Add a deterministic commit operation that accepts the validated generated
       subject and optional body.
 - [x] Verify the created commit contains the expected staged tree.
@@ -166,18 +164,18 @@ enough to implement, review, and commit independently.
 
 ## 10. Refreshable main issue loop
 
-- [ ] Replace `selectIssues` snapshot iteration with `createIssueQueue`.
+- [x] Replace `selectIssues` snapshot iteration with `createIssueQueue`.
 - [x] Count an issue against `--max-issues` when execution begins.
-- [ ] Mark successfully completed, decomposed, and escalated parent issues as
+- [x] Mark successfully completed, decomposed, and escalated parent issues as
       completed in the queue.
-- [ ] Refetch open issues after decomposition succeeds.
+- [x] Refetch open issues after decomposition succeeds.
 - [x] Add newly discovered child issues without duplicating known issues.
 - [x] Translate created dependency keys into GitHub issue-number dependencies.
 - [x] Skip queued issues whose dependencies are still open.
 - [x] Re-evaluate blocked issues after each dependency completes.
 - [x] Define the result when all remaining issues are dependency-blocked.
 - [x] Preserve the configured sorting policy when refreshing the queue.
-- [ ] Add tests for refresh, dependency ordering, recursive decomposition, and
+- [x] Add tests for refresh, dependency ordering, recursive decomposition, and
       issue-budget exhaustion.
 
 ## 11. Run state and resume
@@ -189,11 +187,11 @@ enough to implement, review, and commit independently.
 - [x] Validate persisted state before loading it.
 - [x] Add a `--resume` flag or a separate resume command.
 - [x] Refuse resume when repository or branch arguments do not match the run.
-- [ ] Reconcile saved state with current Git and GitHub state.
+- [x] Reconcile saved state with current Git and GitHub state.
 - [ ] Define recovery for interruption during agent work, commit, push, child
       creation, linking, and original closure.
-- [ ] Mark successful runs complete without deleting diagnostics unexpectedly.
-- [ ] Decide how `--cleanup` interacts with resumable and completed run state.
+- [x] Mark successful runs complete without deleting diagnostics unexpectedly.
+- [x] Decide how `--cleanup` interacts with resumable and completed run state.
 - [x] Add tests for corrupted, stale, partially written, and incompatible state.
 
 ## 12. Progress and diagnostics integration
@@ -206,21 +204,21 @@ enough to implement, review, and commit independently.
 - [x] Ensure secrets and the GitHub token can never appear in progress details.
 - [ ] Keep interactive spinner transitions balanced on success and failure.
 - [ ] Ensure non-TTY output remains append-only and readable.
-- [ ] Add a final summary of completed, decomposed, escalated, skipped, and failed
+- [x] Add a final summary of completed, decomposed, escalated, skipped, and failed
       issues.
-- [ ] Decide whether one issue failure halts the run or can be configured to
+- [x] Decide whether one issue failure halts the run or can be configured to
       continue.
 - [ ] Persist JSON Lines events when resumability is enabled.
 - [ ] Add snapshot tests for representative human-readable runs.
 
 ## 13. Cancellation and process lifecycle
 
-- [ ] Pass Bunli's `AbortSignal` into the workflow and executors.
-- [ ] Abort active OpenCode prompts when the user presses Ctrl-C.
-- [ ] Stop the OpenCode server on success, failure, cancellation, and defects.
+- [x] Pass Bunli's `AbortSignal` into the workflow and executors.
+- [x] Abort active OpenCode prompts when the user presses Ctrl-C.
+- [x] Stop the OpenCode server on success, failure, cancellation, and defects.
 - [ ] Preserve or restore the active issue checkout on cancellation.
 - [ ] Persist resumable state before exiting after cancellation.
-- [ ] Avoid starting another issue once cancellation is requested.
+- [x] Avoid starting another issue once cancellation is requested.
 - [ ] Return conventional non-zero exit codes for failure and cancellation.
 - [ ] Add cancellation tests at each long-running boundary.
 

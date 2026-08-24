@@ -1,42 +1,58 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Exit, Layer } from "effect";
 import type { OpencodeClient } from "@opencode-ai/sdk/v2";
+import { Effect, Exit, Layer } from "effect";
 import type { Octokit } from "octokit";
 
 import { GitRepository } from "./git/repository.ts";
+import { GitRepositoryInvariant } from "./git/repository-invariant.ts";
 import { GitHubClient } from "./github/client.ts";
-import { GitHubIssues, IssueOrder, IssueSort } from "./github/issues.ts";
-import { ComplexityLevel } from "./issues/decisions.ts";
-import { IssuePipeline } from "./issues/pipeline.ts";
-import { IssueStageKind, IssueWorkflowKind } from "./issues/stage.ts";
-import { OpenCode } from "./opencode/server.ts";
+import { GitHubIssues, type GitHubIssue, IssueOrder, IssueSort } from "./github/issues.ts";
+import { type IssueExecutionOutcome, IssueExecutionOutcomeKind } from "./issues/execution.ts";
+import { IssueExecutor } from "./issues/executor.ts";
 import { DEFAULT_OPENCODE_AGENT } from "./opencode/model.ts";
-import {
-  OpenCodeSessionPurpose,
-  StructuredOutputName,
-} from "./opencode/session.ts";
+import { OpenCode } from "./opencode/server.ts";
 import {
   makeProgressRecorderLayer,
   type ProgressUpdate,
   ProgressStage,
   ProgressStatus,
 } from "./progress/progress.ts";
+import { type RunState, RunStateStatus, RunStateStore } from "./run/state.ts";
 import { RalphieError } from "./shared/error.ts";
 import { Workspace } from "./workspace/workspace.ts";
 import { workflow } from "./workflow.ts";
 
+const firstIssue: GitHubIssue = {
+  number: 42,
+  title: "Test issue",
+  url: "https://github.com/owner/repo/issues/42",
+  body: "Test body",
+  labels: ["bug"],
+};
+
 type TestRuntimeOptions = {
-  githubFailure?: RalphieError;
-  gitFailure?: RalphieError;
-  startFailure?: RalphieError;
-  removeFailure?: RalphieError;
+  readonly outcomes?: ReadonlyArray<IssueExecutionOutcome>;
+  readonly issueLists?: ReadonlyArray<ReadonlyArray<GitHubIssue>>;
+  readonly githubFailure?: RalphieError;
+  readonly gitFailure?: RalphieError;
+  readonly startFailure?: RalphieError;
+  readonly removeFailure?: RalphieError;
 };
 
 function testRuntime(
   calls: string[],
+  savedStates: RunState[],
   options: TestRuntimeOptions = {},
   progressEvents: ProgressUpdate[] = [],
 ) {
+  let listIndex = 0;
+  let outcomeIndex = 0;
+  let captureIndex = 0;
+  const outcomes = options.outcomes ?? [
+    { kind: IssueExecutionOutcomeKind.Completed, commitSha: "abc123", reviewCount: 1 },
+  ];
+  const issueLists = options.issueLists ?? [[firstIssue]];
+
   return Layer.mergeAll(
     Layer.succeed(GitHubClient, {
       initialize: Effect.suspend(() => {
@@ -49,9 +65,7 @@ function testRuntime(
     Layer.succeed(GitRepository, {
       verifyInstalled: Effect.suspend(() => {
         calls.push("verifyGitInstalled");
-        return options.gitFailure
-          ? Effect.fail(options.gitFailure)
-          : Effect.void;
+        return options.gitFailure ? Effect.fail(options.gitFailure) : Effect.void;
       }),
       prepare: (repo, branch, workspace) => {
         calls.push(`prepareRepository:${repo}:${branch}:${workspace}`);
@@ -63,65 +77,33 @@ function testRuntime(
         });
       },
     }),
+    Layer.succeed(GitRepositoryInvariant, {
+      capture: () =>
+        Effect.sync(() => ({ branch: "develop", head: `head-${captureIndex++}` })),
+      verify: () => Effect.void,
+    }),
     Layer.succeed(GitHubIssues, {
       listDecompositionChildren: () => Effect.succeed([]),
       listOpen: (_client, repo, filters) => {
         calls.push(
           `listIssues:${repo}:${filters.labels.join(",")}:${filters.sort}:${filters.order}`,
         );
-        return Effect.succeed([
-          {
-            number: 42,
-            title: "Test issue",
-            url: "https://github.com/owner/repo/issues/42",
-            body: "Test body",
-            labels: ["bug"],
-          },
-          {
-            number: 43,
-            title: "Second issue",
-            url: "https://github.com/owner/repo/issues/43",
-            body: null,
-            labels: [],
-          },
-        ]);
+        const result = issueLists[Math.min(listIndex, issueLists.length - 1)] ?? [];
+        listIndex += 1;
+        return Effect.succeed(result);
       },
     }),
-    Layer.succeed(IssuePipeline, {
-      plan: ({ issue, repositoryPath, targetBranch, openCode }) => {
-        calls.push(
-          `planIssue:${issue.number}:${repositoryPath}:${targetBranch}:${openCode.agent}:${openCode.model?.providerID}/${openCode.model?.modelID}:${openCode.variant}`,
-        );
-        return Effect.succeed({
-          issue,
-          repositoryPath,
-          targetBranch,
-          openCode,
-          assessment: {
-            kind: IssueStageKind.OpenCodeSession,
-            purpose: OpenCodeSessionPurpose.AssessComplexity,
-            output: StructuredOutputName.ComplexityDecision,
-          },
-          workflows: [
-            {
-              kind: IssueWorkflowKind.Implementation,
-              complexity: {
-                min: ComplexityLevel.Level0,
-                max: ComplexityLevel.Level3,
-              },
-              stages: [],
-            },
-            {
-              kind: IssueWorkflowKind.Decomposition,
-              complexity: {
-                min: ComplexityLevel.Level4,
-                max: ComplexityLevel.Level5,
-              },
-              stages: [],
-            },
-          ],
-        });
-      },
+    Layer.succeed(IssueExecutor, {
+      execute: ({ issue, repositoryPath, targetBranch, openCodeSelection }) =>
+        Effect.sync(() => {
+          calls.push(
+            `executeIssue:${issue.number}:${repositoryPath}:${targetBranch}:${openCodeSelection.agent}`,
+          );
+          const result = outcomes[Math.min(outcomeIndex, outcomes.length - 1)];
+          outcomeIndex += 1;
+          if (result === undefined) throw new Error("Missing test outcome");
+          return result;
+        }),
     }),
     Layer.succeed(OpenCode, {
       start: options.startFailure
@@ -133,45 +115,61 @@ function testRuntime(
               client: {} as OpencodeClient,
               close: () => calls.push("closeServer"),
             };
+          }),
+    }),
+    Layer.succeed(RunStateStore, {
+      load: () => Effect.fail(new RalphieError({ message: "unused" })),
+      save: (_path, state) =>
+        Effect.sync(() => {
+          savedStates.push(structuredClone(state));
         }),
     }),
     Layer.succeed(Workspace, {
       remove: (workspace) => {
         calls.push(`removeWorkspace:${workspace}`);
-        return options.removeFailure
-          ? Effect.fail(options.removeFailure)
-          : Effect.void;
+        return options.removeFailure ? Effect.fail(options.removeFailure) : Effect.void;
       },
     }),
     makeProgressRecorderLayer(progressEvents),
   );
 }
 
-describe("workflow", () => {
-  test("checks dependencies, starts OpenCode, and releases it", async () => {
-    const calls: string[] = [];
-    const progressEvents: ProgressUpdate[] = [];
+const baseOptions = {
+  repo: "owner/repo",
+  branch: "develop",
+  maxIssues: 1,
+  issueFilters: {
+    labels: ["bug"],
+    sort: IssueSort.Created,
+    order: IssueOrder.Ascending,
+  },
+  agent: DEFAULT_OPENCODE_AGENT,
+  workspace: "/tmp/ralphie",
+  cleanup: false,
+  startClean: false,
+  runId: "test-run",
+} as const;
 
-    await workflow({
-      repo: "owner/repo",
-      branch: "develop",
-      maxIssues: 1,
-      issueFilters: {
-        labels: ["bug"],
-        sort: IssueSort.Created,
-        order: IssueOrder.Ascending,
-      },
+describe("workflow", () => {
+  test("executes an issue, persists completion, releases OpenCode, and cleans up", async () => {
+    const calls: string[] = [];
+    const states: RunState[] = [];
+    const events: ProgressUpdate[] = [];
+    const summary = await workflow({
+      ...baseOptions,
       model: { providerID: "openai", modelID: "gpt-5" },
       modelVariant: "high",
       agent: "reviewer",
-      workspace: "/tmp/ralphie",
       cleanup: true,
       startClean: true,
     }).pipe(
-      Effect.provide(testRuntime(calls, {}, progressEvents)),
+      Effect.provide(testRuntime(calls, states, {}, events)),
       Effect.runPromise,
     );
 
+    expect(summary.counts.completed).toBe(1);
+    expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
+    expect(states.at(-1)?.queue.completedIssueNumbers).toEqual([42]);
     expect(calls).toEqual([
       "removeWorkspace:/tmp/ralphie",
       "initializeGitHub",
@@ -179,160 +177,104 @@ describe("workflow", () => {
       "prepareRepository:owner/repo:develop:/tmp/ralphie",
       "listIssues:owner/repo:bug:created:asc",
       "startServer",
-      "planIssue:42:/tmp/ralphie/repo:develop:reviewer:openai/gpt-5:high",
+      "executeIssue:42:/tmp/ralphie/repo:develop:reviewer",
       "closeServer",
       "removeWorkspace:/tmp/ralphie",
     ]);
-    expect(
-      progressEvents.map(({ stage, status }) => ({ stage, status })),
-    ).toEqual([
-      { stage: ProgressStage.Run, status: ProgressStatus.Info },
-      {
-        stage: ProgressStage.WorkspaceCleanup,
-        status: ProgressStatus.Started,
-      },
-      {
-        stage: ProgressStage.WorkspaceCleanup,
-        status: ProgressStatus.Succeeded,
-      },
-      {
-        stage: ProgressStage.GitHubAuthentication,
-        status: ProgressStatus.Started,
-      },
-      {
-        stage: ProgressStage.GitHubAuthentication,
-        status: ProgressStatus.Succeeded,
-      },
-      { stage: ProgressStage.GitVerification, status: ProgressStatus.Started },
-      {
-        stage: ProgressStage.GitVerification,
-        status: ProgressStatus.Succeeded,
-      },
-      {
-        stage: ProgressStage.RepositoryPreparation,
-        status: ProgressStatus.Started,
-      },
-      {
-        stage: ProgressStage.RepositoryPreparation,
-        status: ProgressStatus.Succeeded,
-      },
-      { stage: ProgressStage.IssueDiscovery, status: ProgressStatus.Started },
-      {
-        stage: ProgressStage.IssueDiscovery,
-        status: ProgressStatus.Succeeded,
-      },
-      { stage: ProgressStage.OpenCodeServer, status: ProgressStatus.Started },
-      {
-        stage: ProgressStage.OpenCodeServer,
-        status: ProgressStatus.Succeeded,
-      },
-      { stage: ProgressStage.IssuePlanning, status: ProgressStatus.Started },
-      {
-        stage: ProgressStage.IssuePlanning,
-        status: ProgressStatus.Succeeded,
-      },
-      {
-        stage: ProgressStage.WorkspaceCleanup,
-        status: ProgressStatus.Started,
-      },
-      {
-        stage: ProgressStage.WorkspaceCleanup,
-        status: ProgressStatus.Succeeded,
-      },
-      { stage: ProgressStage.Run, status: ProgressStatus.Succeeded },
-    ]);
+    expect(events.some(({ stage }) => stage === ProgressStage.IssueExecution)).toBeTrue();
+    expect(events.at(-1)?.status).toBe(ProgressStatus.Succeeded);
   });
 
-  test("stops when GitHub authentication fails", async () => {
+  test.each([
+    [{ kind: IssueExecutionOutcomeKind.Completed, commitSha: "abc" }],
+    [{ kind: IssueExecutionOutcomeKind.Decomposed, childIssueNumbers: [51] }],
+    [{
+      kind: IssueExecutionOutcomeKind.Escalated,
+      diagnosticsPath: "/tmp/diagnostics.json",
+      reason: "review budget exhausted",
+      childIssueNumbers: [52],
+    }],
+    [{ kind: IssueExecutionOutcomeKind.Skipped, reason: "no changes" }],
+  ] satisfies ReadonlyArray<readonly [IssueExecutionOutcome]>) (
+    "records the executor outcome",
+    async (outcome) => {
+      const calls: string[] = [];
+      const states: RunState[] = [];
+      const summary = await workflow(baseOptions).pipe(
+        Effect.provide(testRuntime(calls, states, { outcomes: [outcome] })),
+        Effect.runPromise,
+      );
+
+      expect(summary.outcomes).toEqual([{ issueNumber: 42, outcome }]);
+      expect(summary.counts[outcome.kind]).toBe(1);
+      expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
+      if (
+        outcome.kind === IssueExecutionOutcomeKind.Decomposed ||
+        outcome.kind === IssueExecutionOutcomeKind.Escalated
+      ) {
+        expect(calls.filter((call) => call.startsWith("listIssues:"))).toHaveLength(2);
+      }
+    },
+  );
+
+  test("halts, persists the active issue, and releases OpenCode on failure", async () => {
     const calls: string[] = [];
-    const progressEvents: ProgressUpdate[] = [];
-    const exit = await workflow({
-      repo: "owner/repo",
-      branch: "main",
-      agent: DEFAULT_OPENCODE_AGENT,
-      workspace: "~/.ralphie",
-      issueFilters: {
-        labels: [],
-        sort: IssueSort.Created,
-        order: IssueOrder.Ascending,
-      },
-      cleanup: true,
-      startClean: false,
-    }).pipe(
-      Effect.provide(
-        testRuntime(
-          calls,
-          { githubFailure: new RalphieError({ message: "not logged in" }) },
-          progressEvents,
-        ),
-      ),
+    const states: RunState[] = [];
+    const exit = await workflow(baseOptions).pipe(
+      Effect.provide(testRuntime(calls, states, {
+        outcomes: [{ kind: IssueExecutionOutcomeKind.Failed, message: "boom" }],
+      })),
       Effect.runPromiseExit,
     );
 
     expect(Exit.isFailure(exit)).toBeTrue();
-    expect(calls).toEqual(["initializeGitHub"]);
-    expect(progressEvents.at(-2)?.status).toBe(ProgressStatus.Failed);
-    expect(progressEvents.at(-2)?.stage).toBe(
-      ProgressStage.GitHubAuthentication,
-    );
-    expect(progressEvents.at(-1)?.status).toBe(ProgressStatus.Failed);
-    expect(progressEvents.at(-1)?.stage).toBe(ProgressStage.Run);
+    expect(states.at(-1)?.status).toBe(RunStateStatus.Active);
+    expect(states.at(-1)?.activeIssue?.issueNumber).toBe(42);
+    expect(calls.at(-1)).toBe("closeServer");
   });
 
-  test("stops when git is unavailable", async () => {
+  test("refreshes the queue after decomposition and runs a new child within budget", async () => {
     const calls: string[] = [];
-    const exit = await workflow({
-      repo: "owner/repo",
-      branch: "main",
-      agent: DEFAULT_OPENCODE_AGENT,
-      workspace: "~/.ralphie",
-      issueFilters: {
-        labels: [],
-        sort: IssueSort.Created,
-        order: IssueOrder.Ascending,
-      },
-      cleanup: false,
-      startClean: false,
-    }).pipe(
-      Effect.provide(
-        testRuntime(calls, {
-          gitFailure: new RalphieError({ message: "git unavailable" }),
-        }),
-      ),
-      Effect.runPromiseExit,
+    const states: RunState[] = [];
+    const child = { ...firstIssue, number: 51, title: "Child" };
+    const summary = await workflow({ ...baseOptions, maxIssues: 2 }).pipe(
+      Effect.provide(testRuntime(calls, states, {
+        issueLists: [[firstIssue], [child]],
+        outcomes: [
+          { kind: IssueExecutionOutcomeKind.Decomposed, childIssueNumbers: [51] },
+          { kind: IssueExecutionOutcomeKind.Completed, commitSha: "child-sha" },
+        ],
+      })),
+      Effect.runPromise,
     );
 
-    expect(Exit.isFailure(exit)).toBeTrue();
-    expect(calls).toEqual([
-      "initializeGitHub",
-      "verifyGitInstalled",
-    ]);
+    expect(summary.outcomes.map(({ issueNumber }) => issueNumber)).toEqual([42, 51]);
+    expect(states.at(-1)?.queue.processedCount).toBe(2);
   });
 
   test("stops before other work when start-clean fails", async () => {
     const calls: string[] = [];
-    const exit = await workflow({
-      repo: "owner/repo",
-      branch: "main",
-      agent: DEFAULT_OPENCODE_AGENT,
-      workspace: "/tmp/ralphie",
-      issueFilters: {
-        labels: [],
-        sort: IssueSort.Created,
-        order: IssueOrder.Ascending,
-      },
-      cleanup: false,
-      startClean: true,
-    }).pipe(
-      Effect.provide(
-        testRuntime(calls, {
-          removeFailure: new RalphieError({ message: "cleanup failed" }),
-        }),
-      ),
+    const exit = await workflow({ ...baseOptions, startClean: true }).pipe(
+      Effect.provide(testRuntime(calls, [], {
+        removeFailure: new RalphieError({ message: "cleanup failed" }),
+      })),
       Effect.runPromiseExit,
     );
 
     expect(Exit.isFailure(exit)).toBeTrue();
     expect(calls).toEqual(["removeWorkspace:/tmp/ralphie"]);
+  });
+
+  test("stops when preflight authentication fails", async () => {
+    const calls: string[] = [];
+    const exit = await workflow(baseOptions).pipe(
+      Effect.provide(testRuntime(calls, [], {
+        githubFailure: new RalphieError({ message: "not logged in" }),
+      })),
+      Effect.runPromiseExit,
+    );
+
+    expect(Exit.isFailure(exit)).toBeTrue();
+    expect(calls).toEqual(["initializeGitHub"]);
   });
 });

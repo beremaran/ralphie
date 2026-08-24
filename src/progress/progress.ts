@@ -11,6 +11,8 @@ export enum ProgressStage {
   IssueDiscovery = "issue-discovery",
   OpenCodeServer = "opencode-server",
   IssuePlanning = "issue-planning",
+  IssueExecution = "issue-execution",
+  IssueQueue = "issue-queue",
   ComplexityAssessment = "complexity-assessment",
   Implementation = "implementation",
   ChangeStaging = "change-staging",

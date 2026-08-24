@@ -1,14 +1,23 @@
 import { Effect } from "effect";
+import { join } from "node:path";
 
 import { GitRepository } from "./git/repository.ts";
+import { GitRepositoryInvariant } from "./git/repository-invariant.ts";
 import { GitHubClient } from "./github/client.ts";
+import { GitHubIssues, type IssueFilters } from "./github/issues.ts";
 import {
-  GitHubIssues,
-  type IssueFilters,
-} from "./github/issues.ts";
-import { IssuePipeline, selectIssues } from "./issues/pipeline.ts";
+  IssueExecutionOutcomeKind,
+  type IssueExecutionOutcome,
+} from "./issues/execution.ts";
+import { IssueExecutor } from "./issues/executor.ts";
+import {
+  createIssueQueue,
+  IssueQueueState,
+  toQueuedIssues,
+} from "./issues/queue.ts";
 import type { OpenCodeModel } from "./opencode/model.ts";
 import { OpenCode, type OpenCodeServer } from "./opencode/server.ts";
+import { makeOpenCodeSessionDiagnostics } from "./opencode/task-session.ts";
 import {
   ProgressReporter,
   type ProgressReporterService,
@@ -16,15 +25,50 @@ import {
   ProgressStatus,
   type ProgressUpdate,
 } from "./progress/progress.ts";
-import { Workspace } from "./workspace/workspace.ts";
+import { reconcileRunState } from "./run/reconciliation.ts";
+import {
+  RUN_STATE_VERSION,
+  type RunState,
+  RunStateStatus,
+  RunStateStore,
+} from "./run/state.ts";
+import { RalphieError } from "./shared/error.ts";
+import { Workspace, resolveWorkspacePath } from "./workspace/workspace.ts";
 
-const closeServer = (server: OpenCodeServer) =>
-  Effect.sync(() => server.close());
+const closeServer = (server: OpenCodeServer) => Effect.sync(() => server.close());
 
 type ProgressContext = Omit<ProgressUpdate, "stage" | "status" | "message">;
 
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
+
+const checkCancellation = (signal: AbortSignal | undefined) =>
+  Effect.try({
+    try: () => signal?.throwIfAborted(),
+    catch: (cause) =>
+      new RalphieError({
+        message: "Run cancelled before the next operation started.",
+        cause,
+      }),
+  });
+
+const copyOutcome = (outcome: IssueExecutionOutcome): RunState["outcomes"][number]["outcome"] => {
+  switch (outcome.kind) {
+    case IssueExecutionOutcomeKind.Decomposed:
+      return { ...outcome, childIssueNumbers: [...outcome.childIssueNumbers] };
+    case IssueExecutionOutcomeKind.Escalated:
+      return {
+        kind: outcome.kind,
+        diagnosticsPath: outcome.diagnosticsPath,
+        reason: outcome.reason,
+        ...(outcome.childIssueNumbers === undefined
+          ? {}
+          : { childIssueNumbers: [...outcome.childIssueNumbers] }),
+      };
+    default:
+      return { ...outcome };
+  }
+};
 
 const track = <Result, Error, Requirements>(
   progress: ProgressReporterService,
@@ -64,6 +108,30 @@ const track = <Result, Error, Requirements>(
       ),
     );
 
+export enum IssueFailurePolicy {
+  Halt = "halt",
+}
+
+export type WorkflowSummary = {
+  readonly runId: string;
+  readonly outcomes: ReadonlyArray<{
+    readonly issueNumber: number;
+    readonly outcome: IssueExecutionOutcome;
+  }>;
+  readonly counts: Readonly<Record<IssueExecutionOutcomeKind, number>>;
+};
+
+const summarize = (
+  runId: string,
+  outcomes: WorkflowSummary["outcomes"],
+): WorkflowSummary => {
+  const counts = Object.fromEntries(
+    Object.values(IssueExecutionOutcomeKind).map((kind) => [kind, 0]),
+  ) as Record<IssueExecutionOutcomeKind, number>;
+  for (const { outcome } of outcomes) counts[outcome.kind] += 1;
+  return { runId, outcomes, counts };
+};
+
 export type WorkflowOptions = {
   readonly repo: string;
   readonly branch: string;
@@ -76,6 +144,10 @@ export type WorkflowOptions = {
   readonly cleanup: boolean;
   readonly startClean: boolean;
   readonly signal?: AbortSignal;
+  readonly runId?: string;
+  readonly resumeState?: RunState;
+  readonly resumePath?: string;
+  readonly issueFailurePolicy?: IssueFailurePolicy;
 };
 
 export const workflow = ({
@@ -90,9 +162,24 @@ export const workflow = ({
   cleanup,
   startClean,
   signal,
+  runId = crypto.randomUUID(),
+  resumeState,
+  resumePath,
+  issueFailurePolicy = IssueFailurePolicy.Halt,
 }: WorkflowOptions) =>
   Effect.gen(function* () {
     const progress = yield* ProgressReporter;
+    const stateStore = yield* RunStateStore;
+    const actualRunId = resumeState?.runId ?? runId;
+    const statePath =
+      resumePath ??
+      join(
+        resolveWorkspacePath(workspace),
+        ".ralphie",
+        "runs",
+        actualRunId,
+        "state.json",
+      );
     yield* progress.emit({
       stage: ProgressStage.Run,
       status: ProgressStatus.Info,
@@ -107,11 +194,13 @@ export const workflow = ({
         variant: modelVariant ?? "OpenCode default",
         agent,
         issueLimit: maxIssues ?? "unlimited",
+        runId: actualRunId,
+        ...(resumeState === undefined ? {} : { resumed: true, statePath }),
       },
     });
 
     const run = Effect.gen(function* () {
-      signal?.throwIfAborted();
+      yield* checkCancellation(signal);
       if (startClean) {
         const workspaceService = yield* Workspace;
         yield* track(
@@ -152,7 +241,7 @@ export const workflow = ({
       );
 
       const githubIssues = yield* GitHubIssues;
-      const issues = yield* track(
+      const discoveredIssues = yield* track(
         progress,
         ProgressStage.IssueDiscovery,
         "Fetching matching open issues...",
@@ -163,10 +252,83 @@ export const workflow = ({
             : `Found ${result.length} matching open issues; first is #${result[0]!.number} ${result[0]!.title}.`,
         { details: { filters: issueFilters } },
       );
-      const selectedIssues = selectIssues(issues, maxIssues);
 
+      const invariantService = yield* GitRepositoryInvariant;
+      let checkout = yield* invariantService.capture(prepared.path);
+      if (resumeState !== undefined) {
+        const reconciliation = reconcileRunState(resumeState, {
+          repository: repo,
+          branch,
+          git: checkout,
+          github: {
+            openIssueNumbers: discoveredIssues.map(({ number }) => number),
+          },
+        });
+        if (!reconciliation.compatible) {
+          return yield* new RalphieError({
+            message: `Cannot resume run ${resumeState.runId}: ${reconciliation.reasons.join("; ")}.`,
+          });
+        }
+      }
+
+      const initialIssues =
+        resumeState === undefined
+          ? discoveredIssues
+          : resumeState.queue.pending;
+      const queue = createIssueQueue(
+        toQueuedIssues(initialIssues),
+        resumeState?.maxIssues ?? maxIssues,
+        resumeState === undefined
+          ? undefined
+          : {
+              completedIssueNumbers:
+                resumeState.queue.completedIssueNumbers,
+              processedCount: resumeState.queue.processedCount,
+            },
+      );
+      const outcomes: Array<{
+        readonly issueNumber: number;
+        readonly outcome: IssueExecutionOutcome;
+      }> = [...(resumeState?.outcomes ?? [])];
+      const selection = { agent, model, variant: modelVariant };
+
+      const persistState = (
+        status: RunStateStatus,
+        activeIssue?: RunState["activeIssue"],
+      ) => {
+        const snapshot = queue.snapshot();
+        return stateStore.save(statePath, {
+          version: RUN_STATE_VERSION,
+          status,
+          runId: actualRunId,
+          repository: repo,
+          branch,
+          selection,
+          ...((resumeState?.maxIssues ?? maxIssues) === undefined
+            ? {}
+            : { maxIssues: resumeState?.maxIssues ?? maxIssues }),
+          queue: {
+            pending: snapshot.pending.map(({ issue }) => ({
+              ...issue,
+              labels: [...issue.labels],
+            })),
+            completedIssueNumbers: [...snapshot.completedIssueNumbers],
+            processedCount: snapshot.processedCount,
+          },
+          outcomes: outcomes.map(({ issueNumber, outcome }) => ({
+            issueNumber,
+            outcome: copyOutcome(outcome),
+          })),
+          ...(activeIssue === undefined ? {} : { activeIssue }),
+          checkout,
+          updatedAt: new Date().toISOString(),
+        });
+      };
+
+      yield* persistState(RunStateStatus.Active);
       const openCode = yield* OpenCode;
-      const issuePipeline = yield* IssuePipeline;
+      const issueExecutor = yield* IssueExecutor;
+      const diagnostics = makeOpenCodeSessionDiagnostics();
       yield* Effect.acquireUseRelease(
         track(
           progress,
@@ -175,33 +337,104 @@ export const workflow = ({
           openCode.start,
           (server) => `OpenCode server started at ${server.url}.`,
         ),
-        () =>
-          Effect.forEach(selectedIssues, (issue, index) => {
-            signal?.throwIfAborted();
-            const issueContext = {
-              issue: { number: issue.number, title: issue.title },
-              current: index + 1,
-              total: selectedIssues.length,
-              details: { url: issue.url },
-            };
-            return track(
-              progress,
-              ProgressStage.IssuePlanning,
-              `Preparing #${issue.number} ${issue.title}...`,
-              issuePipeline.plan({
-                issue,
-                repositoryPath: prepared.path,
-                targetBranch: branch,
-                openCode: { agent, model, variant: modelVariant },
-              }),
-              (plan) =>
-                `Prepared #${issue.number} for complexity assessment on ${plan.targetBranch}.`,
-              issueContext,
-            );
-          }, { discard: true }),
+        (server) =>
+          Effect.gen(function* () {
+            while (queue.state() === IssueQueueState.Ready) {
+              yield* checkCancellation(signal);
+              const issue = queue.next();
+              if (issue === undefined) break;
+              const current = queue.processedCount();
+              const total =
+                resumeState?.maxIssues ?? maxIssues ?? current + queue.pendingCount();
+              yield* persistState(RunStateStatus.Active, {
+                issueNumber: issue.number,
+                stage: ProgressStage.ComplexityAssessment,
+              });
+              const outcome = yield* track(
+                progress,
+                ProgressStage.IssueExecution,
+                `Executing #${issue.number} ${issue.title}...`,
+                issueExecutor.execute({
+                  issue,
+                  repository: repo,
+                  repositoryPath: prepared.path,
+                  targetBranch: branch,
+                  workspace,
+                  runId: actualRunId,
+                  octokit,
+                  openCode: server.client,
+                  openCodeSelection: selection,
+                  openCodeDiagnostics: diagnostics,
+                  repositoryInvariant: invariantService,
+                  signal,
+                }),
+                (result) =>
+                  `Issue #${issue.number} finished with outcome ${result.kind}.`,
+                {
+                  issue: { number: issue.number, title: issue.title },
+                  current,
+                  total,
+                },
+              );
+              outcomes.push({ issueNumber: issue.number, outcome });
+
+              if (
+                outcome.kind === IssueExecutionOutcomeKind.Completed ||
+                outcome.kind === IssueExecutionOutcomeKind.Decomposed ||
+                outcome.kind === IssueExecutionOutcomeKind.Escalated
+              ) {
+                queue.complete(issue.number);
+              }
+
+              if (outcome.kind === IssueExecutionOutcomeKind.Failed) {
+                yield* persistState(RunStateStatus.Active, {
+                  issueNumber: issue.number,
+                  stage: ProgressStage.IssueExecution,
+                });
+                if (issueFailurePolicy === IssueFailurePolicy.Halt) {
+                  return yield* new RalphieError({
+                    message: `Issue #${issue.number} failed: ${outcome.message}`,
+                  });
+                }
+              } else {
+                checkout = yield* invariantService.capture(prepared.path);
+                yield* persistState(RunStateStatus.Active);
+              }
+
+              if (
+                outcome.kind === IssueExecutionOutcomeKind.Decomposed ||
+                outcome.kind === IssueExecutionOutcomeKind.Escalated
+              ) {
+                const refreshed = yield* track(
+                  progress,
+                  ProgressStage.IssueDiscovery,
+                  "Refreshing open issues after decomposition...",
+                  githubIssues.listOpen(octokit, repo, issueFilters),
+                  (result) => `Refreshed ${result.length} matching open issues.`,
+                );
+                const added = queue.refresh(toQueuedIssues(refreshed));
+                yield* progress.emit({
+                  stage: ProgressStage.IssueQueue,
+                  status: ProgressStatus.Info,
+                  message: `Issue queue refreshed; added ${added} new issues.`,
+                  details: { added, pending: queue.pendingCount() },
+                });
+                yield* persistState(RunStateStatus.Active);
+              }
+            }
+          }),
         closeServer,
       );
 
+      if (queue.state() === IssueQueueState.DependencyBlocked) {
+        yield* persistState(RunStateStatus.Active);
+        return yield* new RalphieError({
+          message: `${queue.pendingCount()} pending issues are blocked by open dependencies.`,
+        });
+      }
+
+      yield* persistState(RunStateStatus.Complete);
+      const summary = summarize(actualRunId, outcomes);
       if (cleanup) {
         const workspaceService = yield* Workspace;
         yield* track(
@@ -212,17 +445,19 @@ export const workflow = ({
           `Workspace removed: ${workspace}.`,
         );
       }
-
-      return selectedIssues.length;
+      return summary;
     });
 
     return yield* run.pipe(
-      Effect.tap((issueCount) =>
+      Effect.tap((summary) =>
         progress.emit({
           stage: ProgressStage.Run,
           status: ProgressStatus.Succeeded,
-          message: `Run completed successfully; ${issueCount} issues prepared.`,
-          details: { issueCount },
+          message:
+            `Run completed: ${summary.counts.completed} completed, ` +
+            `${summary.counts.decomposed} decomposed, ${summary.counts.escalated} escalated, ` +
+            `${summary.counts.skipped} skipped, ${summary.counts.failed} failed.`,
+          details: { runId: summary.runId, counts: summary.counts, statePath },
         }),
       ),
       Effect.tapError((error) =>
@@ -230,6 +465,7 @@ export const workflow = ({
           stage: ProgressStage.Run,
           status: ProgressStatus.Failed,
           message: `Run failed: ${errorMessage(error)}`,
+          details: { runId: actualRunId, statePath },
         }),
       ),
     );
