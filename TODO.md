@@ -52,9 +52,9 @@ enough to implement, review, and commit independently.
 - [x] Document the 0–5 complexity rubric in the complexity prompt.
 - [x] Add a prompt builder for issue implementation with explicit scope and Git
       restrictions.
-- [ ] Add a review prompt that receives only the issue and staged diff.
-- [ ] Add a fresh-context review-fix prompt containing the structured review.
-- [ ] Add a commit-message prompt based on the issue and final staged diff.
+- [x] Add a review prompt that receives only the issue and staged diff.
+- [x] Add a fresh-context review-fix prompt containing the structured review.
+- [x] Add a commit-message prompt based on the issue and final staged diff.
 - [ ] Add a decomposition prompt that requires independently actionable 0–3
       child issues and an acyclic dependency graph.
 - [ ] Include failed review summaries when escalation invokes decomposition.
