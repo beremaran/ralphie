@@ -18,7 +18,7 @@ enough to implement, review, and commit independently.
       model/agent selection.
 - [x] Add an `IssueExecutor` Effect service that accepts an execution context and
       returns an `IssueExecutionOutcome`.
-- [ ] Add explicit `ImplementationExecutor` and `DecompositionExecutor` services.
+- [x] Add explicit `ImplementationExecutor` and `DecompositionExecutor` services.
 - [ ] Keep stage enums as the audit/progress vocabulary rather than building an
       untyped generic stage interpreter.
 - [x] Add a typed per-issue artifact store for complexity, checkpoints, reviews,
