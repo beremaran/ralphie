@@ -136,7 +136,7 @@ enough to implement, review, and commit independently.
 - [x] Add a GitHub service for creating issues through Octokit.
 - [x] Add a GitHub service for updating issue titles and bodies.
 - [x] Add a GitHub service for closing the original issue with the chosen reason.
-- [ ] Define the rendered Markdown format for parent, sibling, and dependency
+- [x] Define the rendered Markdown format for parent, sibling, and dependency
       links.
 - [ ] Create child issues in a deterministic order.
 - [ ] Record the mapping from breakdown keys to GitHub issue numbers immediately
@@ -145,9 +145,9 @@ enough to implement, review, and commit independently.
       child links the parent, siblings, and dependencies.
 - [ ] Rewrite the original issue with the complete child-issue stack.
 - [ ] Close the original only after every child has been created and linked.
-- [ ] Preserve the original issue content in the rewritten body.
-- [ ] Include decomposition lineage/depth metadata in generated issue bodies.
-- [ ] Add a maximum decomposition depth to prevent recursive splitting forever.
+- [x] Preserve the original issue content in the rewritten body.
+- [x] Include decomposition lineage/depth metadata in generated issue bodies.
+- [x] Add a maximum decomposition depth to prevent recursive splitting forever.
 - [ ] Define what happens if a child is reassessed as complexity 4 or 5.
 - [ ] Add Octokit tests for successful creation, linking, rewriting, and closure.
 
@@ -155,7 +155,7 @@ enough to implement, review, and commit independently.
 
 - [ ] Persist decomposition progress before the first GitHub mutation.
 - [ ] Persist each created issue number as soon as GitHub returns it.
-- [ ] Add a stable marker to generated issue bodies so reruns can identify them.
+- [x] Add a stable marker to generated issue bodies so reruns can identify them.
 - [ ] On retry, discover already-created children instead of duplicating them.
 - [ ] Resume linking when creation succeeded but updates failed.
 - [ ] Leave the original issue open when child creation or linking is incomplete.
