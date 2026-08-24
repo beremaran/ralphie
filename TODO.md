@@ -187,14 +187,14 @@ enough to implement, review, and commit independently.
       completed outcomes, and active issue state.
 - [x] Write state atomically using a temporary file and rename.
 - [x] Validate persisted state before loading it.
-- [ ] Add a `--resume` flag or a separate resume command.
-- [ ] Refuse resume when repository or branch arguments do not match the run.
+- [x] Add a `--resume` flag or a separate resume command.
+- [x] Refuse resume when repository or branch arguments do not match the run.
 - [ ] Reconcile saved state with current Git and GitHub state.
 - [ ] Define recovery for interruption during agent work, commit, push, child
       creation, linking, and original closure.
 - [ ] Mark successful runs complete without deleting diagnostics unexpectedly.
 - [ ] Decide how `--cleanup` interacts with resumable and completed run state.
-- [ ] Add tests for corrupted, stale, partially written, and incompatible state.
+- [x] Add tests for corrupted, stale, partially written, and incompatible state.
 
 ## 12. Progress and diagnostics integration
 

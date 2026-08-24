@@ -70,6 +70,9 @@ export const runStateSchema = z.object({
   activeIssue: z
     .object({ issueNumber: z.number().int().positive(), stage: z.string().min(1) })
     .optional(),
+  checkout: z
+    .object({ branch: z.string().min(1), head: z.string().min(1) })
+    .optional(),
   updatedAt: z.string().datetime(),
 });
 

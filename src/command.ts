@@ -89,9 +89,10 @@ export const runCommand = defineCommand({
     }
 
     if (flags.resume !== undefined) {
+      const resumePath = flags.resume;
       const savedState = await Effect.gen(function* () {
         const store = yield* RunStateStore;
-        return yield* store.load(flags.resume!);
+        return yield* store.load(resumePath);
       }).pipe(Effect.provide(RunStateStoreLive), Effect.runPromise);
       const reconciliation = reconcileRunState(savedState, {
         repository: repo,
