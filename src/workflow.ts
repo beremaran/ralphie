@@ -90,14 +90,10 @@ export const workflow = ({
               const plan = yield* issuePipeline.plan({
                 issue,
                 repositoryPath: prepared.path,
-                baseBranch: branch,
+                targetBranch: branch,
               });
-              const sessionCount = plan.stages.filter(
-                (stage) => stage.kind === "opencode-session",
-              ).length;
-              const deterministicCount = plan.stages.length - sessionCount;
               yield* Console.log(
-                `Prepared issue #${issue.number}: ${sessionCount} OpenCode sessions and ${deterministicCount} deterministic tasks.`,
+                `Prepared issue #${issue.number} for complexity assessment on ${plan.targetBranch}; complexity 0-3 uses implementation and 4-5 uses decomposition.`,
               );
             }),
           );

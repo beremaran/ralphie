@@ -6,6 +6,7 @@ import {
   IssuePipeline,
   IssuePipelineLive,
   selectIssues,
+  selectWorkflow,
 } from "./pipeline.ts";
 
 const issues: GitHubIssue[] = [
@@ -14,27 +15,107 @@ const issues: GitHubIssue[] = [
   { number: 3, title: "Three", url: "issue/3", body: null, labels: [] },
 ];
 
-describe("issue pipeline", () => {
-  test("defines mixed OpenCode, Git, and GitHub stages", async () => {
-    const plan = await Effect.gen(function* () {
-      const pipeline = yield* IssuePipeline;
-      return yield* pipeline.plan({
-        issue: issues[0]!,
-        repositoryPath: "/workspace/repository",
-        baseBranch: "main",
-      });
-    }).pipe(Effect.provide(IssuePipelineLive), Effect.runPromise);
+const makePlan = () =>
+  Effect.gen(function* () {
+    const pipeline = yield* IssuePipeline;
+    return yield* pipeline.plan({
+      issue: issues[0]!,
+      repositoryPath: "/workspace/repository",
+      targetBranch: "main",
+    });
+  }).pipe(Effect.provide(IssuePipelineLive), Effect.runPromise);
 
-    expect(plan.issueBranch).toBe("ralphie/issue-1");
-    expect(plan.stages).toEqual([
-      { kind: "git-task", action: "prepare-branch" },
-      { kind: "github-task", action: "mark-in-progress" },
-      { kind: "opencode-session", purpose: "plan" },
+describe("issue pipeline", () => {
+  test("assesses complexity and works directly on the requested branch", async () => {
+    const plan = await makePlan();
+
+    expect(plan.targetBranch).toBe("main");
+    expect(plan).not.toHaveProperty("issueBranch");
+    expect(plan.assessment).toEqual({
+      kind: "opencode-session",
+      purpose: "assess-complexity",
+      output: "complexity-decision",
+    });
+  });
+
+  test("routes complexity 0-3 through the bounded review workflow", async () => {
+    const plan = await makePlan();
+
+    for (const complexity of [0, 1, 2, 3]) {
+      expect(selectWorkflow(plan, complexity)?.kind).toBe("implementation");
+    }
+
+    expect(selectWorkflow(plan, 3)?.stages).toEqual([
       { kind: "opencode-session", purpose: "implement" },
-      { kind: "git-task", action: "validate" },
-      { kind: "git-task", action: "commit" },
-      { kind: "github-task", action: "publish-result" },
+      {
+        kind: "review-loop",
+        maxIterations: 5,
+        onExhausted: "fail",
+        convergeWhen: {
+          output: "review-decision",
+          verdict: "approved",
+        },
+        stageChanges: { kind: "git-task", action: "stage-all" },
+        review: {
+          kind: "opencode-session",
+          purpose: "review-diff",
+          output: "review-decision",
+        },
+        onChangesRequested: {
+          kind: "opencode-session",
+          purpose: "address-review",
+          context: "fresh",
+          input: "review-decision",
+        },
+      },
+      {
+        kind: "opencode-session",
+        purpose: "generate-commit-message",
+        output: "commit-message-decision",
+      },
+      {
+        kind: "git-task",
+        action: "commit",
+        messageFrom: "commit-message-decision",
+      },
+      { kind: "git-task", action: "push" },
     ]);
+  });
+
+  test("routes complexity 4-5 through dependency-aware decomposition", async () => {
+    const plan = await makePlan();
+
+    for (const complexity of [4, 5]) {
+      expect(selectWorkflow(plan, complexity)?.kind).toBe("decomposition");
+    }
+    expect(selectWorkflow(plan, 4)?.stages).toEqual([
+      {
+        kind: "opencode-session",
+        purpose: "decompose-issue",
+        output: "issue-breakdown-decision",
+      },
+      {
+        kind: "github-task",
+        action: "create-breakdown-issues",
+        input: "issue-breakdown-decision",
+        links: "original-and-siblings",
+        includeDependencies: true,
+      },
+      {
+        kind: "github-task",
+        action: "rewrite-original-as-duplicate",
+        input: "issue-breakdown-decision",
+      },
+      { kind: "github-task", action: "close-original-as-duplicate" },
+    ]);
+  });
+
+  test("does not route invalid complexity values", async () => {
+    const plan = await makePlan();
+
+    expect(selectWorkflow(plan, -1)).toBeUndefined();
+    expect(selectWorkflow(plan, 2.5)).toBeUndefined();
+    expect(selectWorkflow(plan, 6)).toBeUndefined();
   });
 
   test("selects all issues by default", () => {

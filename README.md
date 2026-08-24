@@ -81,7 +81,12 @@ Functionality is grouped by domain under `src/`:
 `workflow.ts` orchestrates these domain services, while `runtime.ts` assembles
 their live Effect layers.
 
-The issue pipeline currently prepares a typed sequence for each selected issue:
-deterministic Git branch preparation, a GitHub status action, separate planning
-and implementation OpenCode sessions, Git validation and commit tasks, and a
-final GitHub publication action. Stage execution will be implemented next.
+The issue pipeline works directly on `--branch`; it does not create issue
+branches, worktrees, or pull requests. An OpenCode session first assigns a
+schema-validated complexity from 0 to 5. Complexity 0-3 enters the implementation
+workflow: implement, stage, review with structured output, and address review in
+a fresh session until approval or five passes, then generate a structured commit
+message, commit, and push. Complexity 4-5 enters the decomposition workflow:
+generate a dependency-aware issue breakdown, create and cross-link the resulting
+issues, then rewrite and close the original as a duplicate. Newly created issues
+are intended to re-enter the main open-issue loop when stage execution is added.

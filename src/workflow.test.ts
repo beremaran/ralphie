@@ -70,17 +70,20 @@ function testRuntime(calls: string[], options: TestRuntimeOptions = {}) {
       },
     }),
     Layer.succeed(IssuePipeline, {
-      plan: ({ issue, repositoryPath, baseBranch }) => {
-        calls.push(`planIssue:${issue.number}:${repositoryPath}:${baseBranch}`);
+      plan: ({ issue, repositoryPath, targetBranch }) => {
+        calls.push(`planIssue:${issue.number}:${repositoryPath}:${targetBranch}`);
         return Effect.succeed({
           issue,
           repositoryPath,
-          baseBranch,
-          issueBranch: `ralphie/issue-${issue.number}`,
-          stages: [
-            { kind: "opencode-session", purpose: "plan" },
-            { kind: "opencode-session", purpose: "implement" },
-            { kind: "git-task", action: "commit" },
+          targetBranch,
+          assessment: {
+            kind: "opencode-session",
+            purpose: "assess-complexity",
+            output: "complexity-decision",
+          },
+          workflows: [
+            { kind: "implementation", complexity: { min: 0, max: 3 }, stages: [] },
+            { kind: "decomposition", complexity: { min: 4, max: 5 }, stages: [] },
           ],
         });
       },
