@@ -5,6 +5,7 @@ import type { Octokit } from "octokit";
 
 import {
   IssueArtifactKind,
+  IssueArtifactStore as IssueArtifactStoreTag,
   makeIssueArtifactStore,
   type IssueArtifactStore,
 } from "./artifacts.ts";
@@ -41,6 +42,7 @@ import {
   ImplementationExecutor,
   ImplementationExecutorLive,
 } from "./implementation-executor.ts";
+import { IssueExecutor, IssueExecutorLive } from "./executor.ts";
 import { IssueRecovery, type IssueRecoveryService } from "./recovery.ts";
 import { ReviewExhaustionOutcome } from "./recovery.ts";
 import { IssueQueueResumeStrategy, IssueWorkflowKind } from "./stage.ts";
@@ -318,5 +320,102 @@ describe("mocked end-to-end issue workflows", () => {
     await Effect.runPromise(runDecomposition(client, artifacts, layer));
     expect(state.created).toEqual([101, 102]);
     expect(state.closeCount.value).toBe(1);
+  });
+
+  test("hands five-review exhaustion from the real implementation executor to decomposition without commit or push", async () => {
+    const client = clientFor([
+      { complexity: ComplexityLevel.Level2, rationale: "Small enough to implement." },
+      undefined,
+      {
+        verdict: "changes_requested",
+        summary: "Blocker remains.",
+        findings: [{ severity: "blocking", description: "Fix it." }],
+      },
+      undefined,
+      {
+        verdict: "changes_requested",
+        summary: "Blocker remains.",
+        findings: [{ severity: "blocking", description: "Fix it." }],
+      },
+      undefined,
+      {
+        verdict: "changes_requested",
+        summary: "Blocker remains.",
+        findings: [{ severity: "blocking", description: "Fix it." }],
+      },
+      undefined,
+      {
+        verdict: "changes_requested",
+        summary: "Blocker remains.",
+        findings: [{ severity: "blocking", description: "Fix it." }],
+      },
+      undefined,
+      {
+        verdict: "changes_requested",
+        summary: "Blocker remains.",
+        findings: [{ severity: "blocking", description: "Fix it." }],
+      },
+    ]);
+    const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
+    let commitCalls = 0;
+    let pushCalls = 0;
+    let decompositionCalls = 0;
+    const progress: ProgressUpdate[] = [];
+    const implementationLayer = implementationServices(
+      {
+        commit: () => {
+          commitCalls += 1;
+          return Effect.succeed({ sha: "unexpected", treeSha: "unexpected" });
+        },
+        push: () => {
+          pushCalls += 1;
+          return Effect.void;
+        },
+      },
+      progress,
+    );
+    const complexityLayer = ComplexityAssessmentLive.pipe(
+      Layer.provide(makeProgressRecorderLayer([])),
+    );
+    const runtime = IssueExecutorLive.pipe(
+      Layer.provideMerge(
+        Layer.mergeAll(
+          Layer.succeed(IssueArtifactStoreTag, {
+            forIssue: () => Effect.succeed(artifacts),
+          }),
+          complexityLayer,
+          ImplementationExecutorLive.pipe(Layer.provideMerge(implementationLayer)),
+          Layer.succeed(DecompositionExecutor, {
+            execute: () => {
+              decompositionCalls += 1;
+              return Effect.succeed({
+                kind: IssueExecutionOutcomeKind.Decomposed,
+                childIssueNumbers: [101, 102],
+              });
+            },
+          }),
+        ),
+      ),
+    );
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const executor = yield* IssueExecutor;
+        return yield* executor.execute(context(client));
+      }).pipe(Effect.provide(runtime as any)) as any,
+    );
+
+    expect(result).toEqual({
+      kind: IssueExecutionOutcomeKind.Escalated,
+      diagnosticsPath: "/workspace/recovery",
+      reason: "Review did not converge within the review iteration budget.",
+      childIssueNumbers: [101, 102],
+    });
+    expect(decompositionCalls).toBe(1);
+    expect(commitCalls).toBe(0);
+    expect(pushCalls).toBe(0);
+    expect(
+      await Effect.runPromise(artifacts.read(IssueArtifactKind.ReviewAttempts)),
+    ).toHaveLength(5);
   });
 });
