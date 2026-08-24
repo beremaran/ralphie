@@ -1,6 +1,10 @@
 import { Context, Effect, Layer } from "effect";
 
-import { GitIssueAction, type GitIssueStage } from "../git/issue-task.ts";
+import {
+  GitIssueAction,
+  type GitIssueStage,
+  GitIssueOutput,
+} from "../git/issue-task.ts";
 import type { GitHubIssue } from "../github/issues.ts";
 import {
   GitHubIssueAction,
@@ -16,8 +20,11 @@ import {
 import type { OpenCodeSelection } from "../opencode/model.ts";
 import { ComplexityLevel, ReviewVerdict } from "./decisions.ts";
 import {
+  CheckoutRestorePoint,
   IssueStageKind,
+  IssueQueueResumeStrategy,
   IssueWorkflowKind,
+  REVIEW_ITERATION_LIMIT,
   ReviewLoopExhaustion,
 } from "./stage.ts";
 
@@ -28,8 +35,13 @@ export type IssueAtomicStage =
 
 export type ReviewLoopStage = {
   readonly kind: IssueStageKind.ReviewLoop;
-  readonly maxIterations: 5;
-  readonly onExhausted: ReviewLoopExhaustion.Fail;
+  readonly maxIterations: typeof REVIEW_ITERATION_LIMIT;
+  readonly onExhausted: {
+    readonly action: ReviewLoopExhaustion.EscalateToDecomposition;
+    readonly preserveDiagnostics: true;
+    readonly restore: CheckoutRestorePoint.IssueBase;
+    readonly resume: IssueQueueResumeStrategy.RefreshOpenIssues;
+  };
   readonly convergeWhen: {
     readonly output: StructuredOutputName.ReviewDecision;
     readonly verdict: ReviewVerdict.Approved;
@@ -82,13 +94,23 @@ const implementationWorkflow: IssueWorkflow = {
   complexity: { min: ComplexityLevel.Level0, max: ComplexityLevel.Level3 },
   stages: [
     {
+      kind: IssueStageKind.GitTask,
+      action: GitIssueAction.CaptureIssueBase,
+      output: GitIssueOutput.IssueBase,
+    },
+    {
       kind: IssueStageKind.OpenCodeSession,
       purpose: OpenCodeSessionPurpose.Implement,
     },
     {
       kind: IssueStageKind.ReviewLoop,
-      maxIterations: 5,
-      onExhausted: ReviewLoopExhaustion.Fail,
+      maxIterations: REVIEW_ITERATION_LIMIT,
+      onExhausted: {
+        action: ReviewLoopExhaustion.EscalateToDecomposition,
+        preserveDiagnostics: true,
+        restore: CheckoutRestorePoint.IssueBase,
+        resume: IssueQueueResumeStrategy.RefreshOpenIssues,
+      },
       convergeWhen: {
         output: StructuredOutputName.ReviewDecision,
         verdict: ReviewVerdict.Approved,
@@ -174,6 +196,12 @@ export const selectWorkflow = (
           complexity <= workflow.complexity.max,
       )
     : undefined;
+
+export const selectWorkflowByKind = (
+  plan: IssueExecutionPlan,
+  kind: IssueWorkflowKind,
+): IssueWorkflow | undefined =>
+  plan.workflows.find((workflow) => workflow.kind === kind);
 
 export const selectIssues = (
   issues: ReadonlyArray<GitHubIssue>,

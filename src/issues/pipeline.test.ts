@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 
-import { GitIssueAction } from "../git/issue-task.ts";
+import { GitIssueAction, GitIssueOutput } from "../git/issue-task.ts";
 import type { GitHubIssue } from "../github/issues.ts";
 import {
   GitHubIssueAction,
@@ -18,10 +18,14 @@ import {
   IssuePipelineLive,
   selectIssues,
   selectWorkflow,
+  selectWorkflowByKind,
 } from "./pipeline.ts";
 import {
+  CheckoutRestorePoint,
+  IssueQueueResumeStrategy,
   IssueStageKind,
   IssueWorkflowKind,
+  REVIEW_ITERATION_LIMIT,
   ReviewLoopExhaustion,
 } from "./stage.ts";
 
@@ -67,13 +71,23 @@ describe("issue pipeline", () => {
 
     expect(selectWorkflow(plan, 3)?.stages).toEqual([
       {
+        kind: IssueStageKind.GitTask,
+        action: GitIssueAction.CaptureIssueBase,
+        output: GitIssueOutput.IssueBase,
+      },
+      {
         kind: IssueStageKind.OpenCodeSession,
         purpose: OpenCodeSessionPurpose.Implement,
       },
       {
         kind: IssueStageKind.ReviewLoop,
-        maxIterations: 5,
-        onExhausted: ReviewLoopExhaustion.Fail,
+        maxIterations: REVIEW_ITERATION_LIMIT,
+        onExhausted: {
+          action: ReviewLoopExhaustion.EscalateToDecomposition,
+          preserveDiagnostics: true,
+          restore: CheckoutRestorePoint.IssueBase,
+          resume: IssueQueueResumeStrategy.RefreshOpenIssues,
+        },
         convergeWhen: {
           output: StructuredOutputName.ReviewDecision,
           verdict: ReviewVerdict.Approved,
@@ -139,6 +153,9 @@ describe("issue pipeline", () => {
         action: GitHubIssueAction.CloseOriginalAsDuplicate,
       },
     ]);
+    expect(
+      selectWorkflowByKind(plan, IssueWorkflowKind.Decomposition)?.kind,
+    ).toBe(IssueWorkflowKind.Decomposition);
   });
 
   test("does not route invalid complexity values", async () => {

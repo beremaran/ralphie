@@ -8,10 +8,15 @@ export type CommandResult = {
   readonly stderr: string;
 };
 
+export type CommandRunOptions = {
+  readonly trimStdout?: boolean;
+};
+
 export type CommandRunnerService = {
   readonly run: (
     command: string,
     args: ReadonlyArray<string>,
+    options?: CommandRunOptions,
   ) => Effect.Effect<CommandResult, RalphieError>;
 };
 
@@ -19,7 +24,7 @@ export const CommandRunner =
   Context.GenericTag<CommandRunnerService>("ralphie/CommandRunner");
 
 export const CommandRunnerLive = Layer.succeed(CommandRunner, {
-  run: (command, args) =>
+  run: (command, args, options) =>
     Effect.try({
       try: () => {
         const result = Bun.spawnSync([command, ...args], {
@@ -29,7 +34,10 @@ export const CommandRunnerLive = Layer.succeed(CommandRunner, {
 
         return {
           exitCode: result.exitCode,
-          stdout: result.stdout.toString().trim(),
+          stdout:
+            options?.trimStdout === false
+              ? result.stdout.toString()
+              : result.stdout.toString().trim(),
           stderr: result.stderr.toString().trim(),
         };
       },

@@ -11,5 +11,15 @@ export enum IssueWorkflowKind {
 }
 
 export enum ReviewLoopExhaustion {
-  Fail = "fail",
+  EscalateToDecomposition = "escalate-to-decomposition",
 }
+
+export enum CheckoutRestorePoint {
+  IssueBase = "issue-base",
+}
+
+export enum IssueQueueResumeStrategy {
+  RefreshOpenIssues = "refresh-open-issues",
+}
+
+export const REVIEW_ITERATION_LIMIT = 5;

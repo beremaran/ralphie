@@ -97,3 +97,12 @@ message, commit, and push. Complexity 4-5 enters the decomposition workflow:
 generate a dependency-aware issue breakdown, create and cross-link the resulting
 issues, then rewrite and close the original as a duplicate. Newly created issues
 are intended to re-enter the main open-issue loop when stage execution is added.
+
+Before implementation, Ralphie records the clean checkout branch and exact HEAD.
+If the fifth review still requests changes, it saves the staged binary patch and
+structured review history under `<workspace>/.ralphie/runs/<run-id>/`, restores
+and verifies that exact issue base, and escalates the original issue to the
+decomposition workflow. The refreshable issue queue deduplicates newly created
+issues, respects dependency completion, and retains the `--max-issues` budget.
+If diagnostics cannot be preserved, restoration does not begin; if restoration
+fails, the run stops rather than continuing with a contaminated checkout.

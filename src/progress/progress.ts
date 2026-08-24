@@ -15,6 +15,8 @@ export enum ProgressStage {
   ChangeStaging = "change-staging",
   Review = "review",
   ReviewFix = "review-fix",
+  ReviewExhaustion = "review-exhaustion",
+  CheckoutRestore = "checkout-restore",
   CommitMessage = "commit-message",
   Commit = "commit",
   Push = "push",
