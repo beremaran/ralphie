@@ -172,7 +172,7 @@ enough to implement, review, and commit independently.
       completed in the queue.
 - [ ] Refetch open issues after decomposition succeeds.
 - [x] Add newly discovered child issues without duplicating known issues.
-- [ ] Translate created dependency keys into GitHub issue-number dependencies.
+- [x] Translate created dependency keys into GitHub issue-number dependencies.
 - [x] Skip queued issues whose dependencies are still open.
 - [x] Re-evaluate blocked issues after each dependency completes.
 - [x] Define the result when all remaining issues are dependency-blocked.

@@ -47,6 +47,20 @@ export const nextDecompositionLineage = (
   };
 };
 
+/** Read GitHub issue-number dependencies from a generated child body. */
+export const parseGeneratedIssueDependencies = (
+  issue: GitHubIssue,
+): ReadonlyArray<number> => {
+  if (!issue.body?.includes(`<!-- ${RALPHIE_DECOMPOSITION_MARKER} `)) return [];
+  const dependencySection = issue.body
+    .split("## Dependencies\n\n")[1]
+    ?.split("\n\n## ")[0];
+  if (dependencySection === undefined) return [];
+  return [...dependencySection.matchAll(/^- #(\d+)(?:\s|$)/gm)].map(
+    (match) => Number(match[1]),
+  );
+};
+
 export const renderChildIssueBody = (input: {
   readonly child: IssueBreakdownDecision["issues"][number];
   readonly lineage: DecompositionLineage;

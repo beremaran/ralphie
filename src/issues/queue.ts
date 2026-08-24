@@ -1,4 +1,5 @@
 import type { GitHubIssue } from "../github/issues.ts";
+import { parseGeneratedIssueDependencies } from "../github/decomposition-markdown.ts";
 
 export type QueuedIssue = {
   readonly issue: GitHubIssue;
@@ -81,4 +82,17 @@ export const createIssueQueue = (
         : IssueQueueState.DependencyBlocked;
     },
   };
+};
+
+/** Preserve GitHub ordering while attaching dependencies that are still open. */
+export const toQueuedIssues = (
+  issues: ReadonlyArray<GitHubIssue>,
+): ReadonlyArray<QueuedIssue> => {
+  const openIssueNumbers = new Set(issues.map(({ number }) => number));
+  return issues.map((issue) => ({
+    issue,
+    dependsOn: parseGeneratedIssueDependencies(issue).filter((number) =>
+      openIssueNumbers.has(number),
+    ),
+  }));
 };

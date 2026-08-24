@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 
 import type { GitHubIssue } from "../github/issues.ts";
-import { createIssueQueue, IssueQueueState } from "./queue.ts";
+import { createIssueQueue, IssueQueueState, toQueuedIssues } from "./queue.ts";
+import { renderChildIssueBody } from "../github/decomposition-markdown.ts";
+import { ImplementationComplexityLevel } from "./decisions.ts";
 
 const issue = (number: number): GitHubIssue => ({
   number,
@@ -71,5 +73,29 @@ describe("refreshable issue queue", () => {
     expect(queue.next()?.number).toBe(3);
     queue.complete(3);
     expect(queue.next()?.number).toBe(4);
+  });
+
+  test("translates generated dependency keys into open GitHub issue dependencies", () => {
+    const dependency = issue(11);
+    const child = {
+      ...issue(12),
+      body: renderChildIssueBody({
+        child: {
+          key: "api",
+          title: "API",
+          body: "Update API.",
+          estimatedComplexity: ImplementationComplexityLevel.Level2,
+          dependsOn: ["storage"],
+        },
+        lineage: { rootIssueNumber: 10, parentIssueNumber: 10, depth: 1 },
+        issueNumbers: { storage: 11, api: 12 },
+      }),
+    };
+
+    expect(toQueuedIssues([dependency, child])).toEqual([
+      { issue: dependency, dependsOn: [] },
+      { issue: child, dependsOn: [11] },
+    ]);
+    expect(toQueuedIssues([child])).toEqual([{ issue: child, dependsOn: [] }]);
   });
 });

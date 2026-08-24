@@ -9,6 +9,7 @@ import {
   MAX_DECOMPOSITION_DEPTH,
   RALPHIE_DECOMPOSITION_MARKER,
   nextDecompositionLineage,
+  parseGeneratedIssueDependencies,
   renderChildIssueBody,
   renderDecomposedOriginalBody,
 } from "./decomposition-markdown.ts";
@@ -108,5 +109,15 @@ describe("decomposition Markdown", () => {
       parentIssueNumber: 12,
       depth: 2,
     });
+  });
+
+  test("parses dependency issue numbers only from generated child issues", () => {
+    const body = renderChildIssueBody({
+      child: breakdown.issues[1]!,
+      lineage,
+      issueNumbers,
+    });
+    expect(parseGeneratedIssueDependencies({ ...original, body })).toEqual([11]);
+    expect(parseGeneratedIssueDependencies(original)).toEqual([]);
   });
 });
