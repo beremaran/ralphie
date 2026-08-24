@@ -481,13 +481,29 @@ export const workflow = ({
       const summary = summarize(actualRunId, outcomes);
       if (cleanup) {
         const workspaceService = yield* Workspace;
-        yield* track(
-          progress,
-          ProgressStage.WorkspaceCleanup,
-          `Removing workspace ${workspace}...`,
-          workspaceService.remove(workspace),
-          `Workspace removed: ${workspace}.`,
+        const startedMessage = `Removing workspace ${workspace}...`;
+        yield* progress.emit({
+          stage: ProgressStage.WorkspaceCleanup,
+          status: ProgressStatus.Started,
+          message: startedMessage,
+        });
+        yield* workspaceService.remove(workspace).pipe(
+          Effect.tapError((error) =>
+            progress.emit({
+              stage: ProgressStage.WorkspaceCleanup,
+              status: ProgressStatus.Failed,
+              message: `${startedMessage.replace(/\.{3}$/, "")} failed: ${errorMessage(error)}`,
+            }),
+          ),
         );
+        // The event log lives inside the workspace. Disable durable writes after
+        // removal so the cleanup-success and run-success events cannot recreate it.
+        yield* progress.stopPersisting;
+        yield* progress.emit({
+          stage: ProgressStage.WorkspaceCleanup,
+          status: ProgressStatus.Succeeded,
+          message: `Workspace removed: ${workspace}.`,
+        });
       }
       return summary;
     });

@@ -70,6 +70,8 @@ export type ProgressEvent = ProgressUpdate & {
 
 export type ProgressReporterService = {
   readonly emit: (update: ProgressUpdate) => Effect.Effect<void>;
+  /** Stop writing durable events while continuing to render progress. */
+  readonly stopPersisting: Effect.Effect<void>;
 };
 
 export const ProgressReporter = Context.GenericTag<ProgressReporterService>(
@@ -117,6 +119,7 @@ export const makeProgressReporterLayer = ({
 }: ProgressRendererOptions) =>
   Layer.sync(ProgressReporter, () => {
     let activeSpinner: ReturnType<PromptSpinnerFactory> | undefined;
+    let persistEvents = true;
 
     const renderLine = (event: ProgressEvent): string => {
       const issue = event.issue ? ` #${event.issue.number}` : "";
@@ -149,7 +152,7 @@ export const makeProgressReporterLayer = ({
             timestamp: now().toISOString(),
           };
 
-          if (eventLogPath !== undefined) {
+          if (eventLogPath !== undefined && persistEvents) {
             mkdirSync(dirname(eventLogPath), { recursive: true });
             appendFileSync(eventLogPath, `${JSON.stringify(event)}\n`, "utf8");
           }
@@ -194,6 +197,9 @@ export const makeProgressReporterLayer = ({
 
           write(`${line}\n`);
         }),
+      stopPersisting: Effect.sync(() => {
+        persistEvents = false;
+      }),
     };
   });
 
@@ -203,4 +209,5 @@ export const makeProgressRecorderLayer = (events: ProgressUpdate[]) =>
       Effect.sync(() => {
         events.push(event);
       }),
+    stopPersisting: Effect.void,
   });

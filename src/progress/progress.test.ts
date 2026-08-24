@@ -233,6 +233,53 @@ describe("progress reporting", () => {
     }
   });
 
+  test("keeps rendering without recreating storage after persistence stops", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "ralphie-progress-stop-"));
+    const runDirectory = join(directory, "run");
+    const eventLogPath = join(runDirectory, "events.jsonl");
+    let output = "";
+    try {
+      const layer = makeProgressReporterLayer({
+        mode: ProgressRenderMode.Json,
+        verbose: false,
+        spinner: unusedSpinner,
+        write: (text) => {
+          output += text;
+        },
+        runId: "run-cleanup",
+        eventLogPath,
+      });
+
+      await Effect.gen(function* () {
+        const progress = yield* ProgressReporter;
+        yield* progress.emit({
+          stage: ProgressStage.WorkspaceCleanup,
+          status: ProgressStatus.Started,
+          message: "Removing workspace...",
+        });
+        yield* progress.stopPersisting;
+        yield* Effect.promise(() => rm(runDirectory, { recursive: true, force: true }));
+        yield* progress.emit({
+          stage: ProgressStage.WorkspaceCleanup,
+          status: ProgressStatus.Succeeded,
+          message: "Workspace removed.",
+        });
+        yield* progress.emit({
+          stage: ProgressStage.Run,
+          status: ProgressStatus.Succeeded,
+          message: "Run completed.",
+        });
+      }).pipe(Effect.provide(layer), Effect.runPromise);
+
+      expect(output).toContain("Removing workspace...");
+      expect(output).toContain("Workspace removed.");
+      expect(output).toContain("Run completed.");
+      expect(await Bun.file(eventLogPath).exists()).toBeFalse();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   test("renders a representative non-interactive run as append-only lines", async () => {
     let output = "";
     const layer = makeProgressReporterLayer({

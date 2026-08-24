@@ -14,4 +14,9 @@ All notable changes to Ralphie are documented here. The project follows
 - Typed progress events, JSON Lines output, diagnostics, and credential
   redaction.
 
+### Fixed
+
+- Prevent final progress events from recreating a workspace removed by
+  `--cleanup`.
+
 [Unreleased]: https://github.com/beremaran/ralphie/commits/main

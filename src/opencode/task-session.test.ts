@@ -341,6 +341,7 @@ describe("OpenCode task sessions", () => {
           Effect.sync(() => {
             events.push(event);
           }),
+        stopPersisting: Effect.void,
       },
     }).pipe(Effect.runPromiseExit);
 

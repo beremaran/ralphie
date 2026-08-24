@@ -22,7 +22,7 @@ import { DryRunIssueExecutor } from "./issues/dry-run-executor.ts";
 import { DEFAULT_OPENCODE_AGENT } from "./opencode/model.ts";
 import { OpenCode } from "./opencode/server.ts";
 import {
-  makeProgressRecorderLayer,
+  ProgressReporter,
   type ProgressUpdate,
   ProgressStage,
   ProgressStatus,
@@ -169,7 +169,15 @@ function testRuntime(
         return options.removeFailure ? Effect.fail(options.removeFailure) : Effect.void;
       },
     }),
-    makeProgressRecorderLayer(progressEvents),
+    Layer.succeed(ProgressReporter, {
+      emit: (event) =>
+        Effect.sync(() => {
+          progressEvents.push(event);
+        }),
+      stopPersisting: Effect.sync(() => {
+        calls.push("stopPersisting");
+      }),
+    }),
   );
 }
 
@@ -216,6 +224,7 @@ describe("workflow", () => {
       "executeIssue:42:/tmp/ralphie/repo:develop:reviewer",
       "closeServer",
       "removeWorkspace:/tmp/ralphie",
+      "stopPersisting",
     ]);
     expect(
       events.some(({ stage }) => stage === ProgressStage.IssueExecution),
