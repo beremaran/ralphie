@@ -23,6 +23,8 @@ enough to implement, review, and commit independently.
       commit messages, breakdowns, and created issue numbers.
 - [x] Reject reads of artifacts that have not been produced yet.
 - [x] Assemble executor services in the live runtime.
+- [x] Load repeatable CLI settings from an optional validated JSON config file,
+      with explicit CLI values taking precedence.
 - [x] Replace the workflow's plan-only logging with calls to `IssueExecutor`.
 - [x] Add mocked executor tests proving the workflow handles every outcome.
 

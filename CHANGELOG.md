@@ -14,6 +14,7 @@ All notable changes to Ralphie are documented here. The project follows
 - Typed progress events, JSON Lines output, diagnostics, and credential
   redaction.
 - Structured no-change resolution verification with persisted evidence.
+- Optional, strictly validated JSON configuration with CLI override precedence.
 
 ### Changed
 

@@ -1,0 +1,18 @@
+{
+  "repo": "owner/repository",
+  "branch": "main",
+  "maxIssues": 10,
+  "issueLabels": ["bug"],
+  "issueSort": "created",
+  "issueOrder": "asc",
+  "model": "openai/gpt-5",
+  "modelVariant": "medium",
+  "agent": "build",
+  "workspace": "~/.ralphie",
+  "startClean": false,
+  "cleanup": false,
+  "dryRun": false,
+  "verbose": false,
+  "json": false,
+  "quiet": false
+}

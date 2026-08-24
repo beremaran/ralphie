@@ -265,6 +265,45 @@ dry run.
 
 ## Common recipes
 
+### Reusable JSON configuration
+
+Put repeatable options in a JSON file and pass it explicitly:
+
+```bash
+ralphie --config ./ralphie.json
+```
+
+```json
+{
+  "repo": "owner/repository",
+  "branch": "develop",
+  "maxIssues": 10,
+  "issueLabels": ["bug", "backend"],
+  "issueSort": "created",
+  "issueOrder": "asc",
+  "model": "openai/gpt-5",
+  "modelVariant": "medium",
+  "agent": "build",
+  "workspace": "~/.ralphie",
+  "startClean": true,
+  "cleanup": true
+}
+```
+
+The file is optional and has no implicit discovery location. Unknown keys,
+invalid enum values, malformed model identifiers, and incompatible output modes
+are rejected before preflight begins. Explicit command-line values override the
+file, and omitted values fall back to Ralphie's normal defaults:
+
+```bash
+ralphie --config ./ralphie.json --branch main --max-issues 2
+```
+
+The positional repository also overrides `repo` from the file. Boolean values
+can be explicitly disabled when overriding a file, for example
+`--cleanup=false`. See [ralphie.example.json](./ralphie.example.json) for every
+supported key.
+
 Process bugs from oldest to newest on a non-default branch:
 
 ```bash
@@ -327,13 +366,15 @@ already have reached the remote before continuing.
 ## CLI reference
 
 ```text
-ralphie <repository> [options]
+ralphie [repository] [options]
 ```
 
-`<repository>` accepts an `owner/name` slug or a GitHub HTTPS/SSH clone URL.
+`[repository]` accepts an `owner/name` slug or a GitHub HTTPS/SSH clone URL. It
+may be omitted when `repo` is present in `--config`.
 
 | Option | Default | Description |
 | --- | --- | --- |
+| `--config <path>` | none | Load reusable options from a validated JSON file. |
 | `-b, --branch <name>` | `main` | Branch to clean, edit, commit, and push directly. |
 | `--max-issues <count>` | unlimited | Positive maximum number of issues charged to this run. |
 | `--issue-label <label>` | none | Require a label; repeat the flag to require multiple labels. |

@@ -3,12 +3,13 @@ import { Effect, Layer } from "effect";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 
-import { IssueOrder, IssueSort } from "./github/issues.ts";
 import {
-  openCodeAgentSchema,
-  openCodeModelSchema,
-  openCodeModelVariantSchema,
-} from "./opencode/model.ts";
+  RalphieConfigFile,
+  RalphieConfigFileLive,
+  resolveRalphieConfig,
+} from "./config/config.ts";
+import { IssueOrder, IssueSort } from "./github/issues.ts";
+import { openCodeModelSchema, openCodeModelVariantSchema } from "./opencode/model.ts";
 import { makeProgressReporterLayer, ProgressRenderMode } from "./progress/progress.ts";
 import { LiveRuntime } from "./runtime.ts";
 import { exitCodeForFailure } from "./process/exit-code.ts";
@@ -22,21 +23,24 @@ export const runCommand = defineCommand({
   name: "run",
   description: "Run Ralphie against a GitHub repository",
   options: {
-    branch: option(z.string().min(1).default("main"), {
+    config: option(z.string().trim().min(1).optional(), {
+      description: "Load repeatable options from a JSON config file",
+    }),
+    branch: option(z.string().min(1).optional(), {
       short: "b",
       description: "Branch to operate on",
     }),
     "max-issues": option(z.coerce.number().int().positive().optional(), {
       description: "Maximum number of issues to process (default: unlimited)",
     }),
-    "issue-label": option(z.array(z.string().trim().min(1)).default([]), {
+    "issue-label": option(z.array(z.string().trim().min(1)).optional(), {
       description: "Only include issues with this label (repeatable)",
       repeatable: true,
     }),
-    "issue-sort": option(z.enum(IssueSort).default(IssueSort.Created), {
+    "issue-sort": option(z.enum(IssueSort).optional(), {
       description: "Sort issues by created, updated, or comments",
     }),
-    "issue-order": option(z.enum(IssueOrder).default(IssueOrder.Ascending), {
+    "issue-order": option(z.enum(IssueOrder).optional(), {
       description: "Sort issues in ascending or descending order",
     }),
     model: option(openCodeModelSchema.optional(), {
@@ -45,33 +49,33 @@ export const runCommand = defineCommand({
     "model-variant": option(openCodeModelVariantSchema.optional(), {
       description: "OpenCode model variant",
     }),
-    agent: option(openCodeAgentSchema, {
+    agent: option(z.string().trim().min(1).optional(), {
       description: "OpenCode agent to use (default: build)",
     }),
-    verbose: option(z.coerce.boolean().default(false), {
+    verbose: option(z.coerce.boolean().optional(), {
       description: "Include detailed progress information",
       argumentKind: "flag",
     }),
-    json: option(z.coerce.boolean().default(false), {
+    json: option(z.coerce.boolean().optional(), {
       description: "Emit progress as JSON Lines",
       argumentKind: "flag",
     }),
-    quiet: option(z.coerce.boolean().default(false), {
+    quiet: option(z.coerce.boolean().optional(), {
       description: "Only emit failures",
       argumentKind: "flag",
     }),
-    "dry-run": option(z.coerce.boolean().default(false), {
+    "dry-run": option(z.coerce.boolean().optional(), {
       description: "Assess and route issues without implementation or mutations",
       argumentKind: "flag",
     }),
-    workspace: option(z.string().trim().min(1).default("~/.ralphie"), {
+    workspace: option(z.string().trim().min(1).optional(), {
       description: "Directory used to clone and work on repositories",
     }),
-    cleanup: option(z.coerce.boolean().default(false), {
+    cleanup: option(z.coerce.boolean().optional(), {
       description: "Remove the workspace after a successful run",
       argumentKind: "flag",
     }),
-    "start-clean": option(z.coerce.boolean().default(false), {
+    "start-clean": option(z.coerce.boolean().optional(), {
       description: "Remove an existing workspace before starting",
       argumentKind: "flag",
     }),
@@ -80,28 +84,57 @@ export const runCommand = defineCommand({
     }),
   },
   handler: async ({ flags, positional, terminal, signal }) => {
-    const [repo, ...extra] = positional;
+    const [positionalRepo, ...extra] = positional;
 
-    if (!repo) {
-      throw new Error("Missing required repository argument.");
-    }
     if (extra.length > 0) {
       throw new Error(`Unexpected argument: ${extra[0]}`);
     }
-    if (flags.json && flags.quiet) {
-      throw new Error("--json and --quiet cannot be used together.");
-    }
+    const configPath = flags.config;
+    const fileConfig =
+      configPath === undefined
+        ? {}
+        : await Effect.gen(function* () {
+            const files = yield* RalphieConfigFile;
+            return yield* files.load(configPath);
+          }).pipe(Effect.provide(RalphieConfigFileLive), Effect.runPromise);
+    const config = resolveRalphieConfig(fileConfig, {
+      ...(positionalRepo === undefined ? {} : { repo: positionalRepo }),
+      ...(flags.branch === undefined ? {} : { branch: flags.branch }),
+      ...(flags["max-issues"] === undefined ? {} : { maxIssues: flags["max-issues"] }),
+      ...(flags["issue-label"] === undefined
+        ? {}
+        : { issueLabels: flags["issue-label"] }),
+      ...(flags["issue-sort"] === undefined ? {} : { issueSort: flags["issue-sort"] }),
+      ...(flags["issue-order"] === undefined
+        ? {}
+        : { issueOrder: flags["issue-order"] }),
+      ...(flags.model === undefined ? {} : { model: flags.model }),
+      ...(flags["model-variant"] === undefined
+        ? {}
+        : { modelVariant: flags["model-variant"] }),
+      ...(flags.agent === undefined ? {} : { agent: flags.agent }),
+      ...(flags.workspace === undefined ? {} : { workspace: flags.workspace }),
+      ...(flags.cleanup === undefined ? {} : { cleanup: flags.cleanup }),
+      ...(flags["start-clean"] === undefined
+        ? {}
+        : { startClean: flags["start-clean"] }),
+      ...(flags["dry-run"] === undefined ? {} : { dryRun: flags["dry-run"] }),
+      ...(flags.resume === undefined ? {} : { resume: flags.resume }),
+      ...(flags.verbose === undefined ? {} : { verbose: flags.verbose }),
+      ...(flags.json === undefined ? {} : { json: flags.json }),
+      ...(flags.quiet === undefined ? {} : { quiet: flags.quiet }),
+    });
 
     let resumeState: RunState | undefined;
-    if (flags.resume !== undefined) {
-      const resumePath = flags.resume;
+    if (config.resume !== undefined) {
+      const resumePath = config.resume;
       resumeState = await Effect.gen(function* () {
         const store = yield* RunStateStore;
         return yield* store.load(resumePath);
       }).pipe(Effect.provide(RunStateStoreLive), Effect.runPromise);
       const reconciliation = reconcileRunState(resumeState, {
-        repository: repo,
-        branch: flags.branch,
+        repository: config.repo,
+        branch: config.branch,
       });
       if (!reconciliation.compatible) {
         throw new Error(
@@ -110,29 +143,29 @@ export const runCommand = defineCommand({
       }
     }
 
-    const progressMode = flags.json
+    const progressMode = config.json
       ? ProgressRenderMode.Json
-      : flags.quiet
+      : config.quiet
         ? ProgressRenderMode.Quiet
         : terminal.isInteractive && !terminal.isCI && process.stderr.isTTY === true
           ? ProgressRenderMode.Interactive
           : ProgressRenderMode.Plain;
     const runId = resumeState?.runId ?? crypto.randomUUID();
     const eventLogPath =
-      flags.resume === undefined
+      config.resume === undefined
         ? join(
-            resolveWorkspacePath(flags.workspace),
+            resolveWorkspacePath(config.workspace),
             ".ralphie",
             "runs",
             runId,
             "events.jsonl",
           )
-        : join(dirname(flags.resume), "events.jsonl");
+        : join(dirname(config.resume), "events.jsonl");
     const progressLayer = makeProgressReporterLayer({
       mode: progressMode,
-      verbose: flags.verbose,
+      verbose: config.verbose,
       width: () => process.stderr.columns ?? terminal.width,
-      write: flags.json
+      write: config.json
         ? (text) => process.stdout.write(text)
         : (text) => process.stderr.write(text),
       runId,
@@ -141,25 +174,25 @@ export const runCommand = defineCommand({
 
     try {
       await workflow({
-        repo,
-        branch: flags.branch,
-        maxIssues: flags["max-issues"],
+        repo: config.repo,
+        branch: config.branch,
+        maxIssues: config.maxIssues,
         issueFilters: {
-          labels: flags["issue-label"],
-          sort: flags["issue-sort"],
-          order: flags["issue-order"],
+          labels: config.issueLabels,
+          sort: config.issueSort,
+          order: config.issueOrder,
         },
-        model: flags.model,
-        modelVariant: flags["model-variant"],
-        agent: flags.agent,
-        workspace: flags.workspace,
-        cleanup: flags.cleanup,
-        startClean: flags["start-clean"],
+        model: config.model,
+        modelVariant: config.modelVariant,
+        agent: config.agent,
+        workspace: config.workspace,
+        cleanup: config.cleanup,
+        startClean: config.startClean,
         signal,
         runId,
         resumeState,
-        resumePath: flags.resume,
-        dryRun: flags["dry-run"],
+        resumePath: config.resume,
+        dryRun: config.dryRun,
       }).pipe(
         Effect.provide(LiveRuntime.pipe(Layer.provideMerge(progressLayer))),
         Effect.catchAll((error) =>
