@@ -182,11 +182,11 @@ enough to implement, review, and commit independently.
 
 ## 11. Run state and resume
 
-- [ ] Define a versioned run-state JSON schema.
-- [ ] Persist run ID, repository, branch, model selection, issue budget, queue,
+- [x] Define a versioned run-state JSON schema.
+- [x] Persist run ID, repository, branch, model selection, issue budget, queue,
       completed outcomes, and active issue state.
-- [ ] Write state atomically using a temporary file and rename.
-- [ ] Validate persisted state before loading it.
+- [x] Write state atomically using a temporary file and rename.
+- [x] Validate persisted state before loading it.
 - [ ] Add a `--resume` flag or a separate resume command.
 - [ ] Refuse resume when repository or branch arguments do not match the run.
 - [ ] Reconcile saved state with current Git and GitHub state.
