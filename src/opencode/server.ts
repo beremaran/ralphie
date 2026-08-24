@@ -1,4 +1,4 @@
-import { createOpencode, type OpencodeClient } from "@opencode-ai/sdk";
+import { createOpencode, type OpencodeClient } from "@opencode-ai/sdk/v2";
 import { Context, Effect, Layer } from "effect";
 
 import { RalphieError } from "../shared/error.ts";

@@ -53,7 +53,14 @@ tracked and untracked local changes.
 bun test
 bun run typecheck
 bun run build
+bun run probe:structured-output
 ```
+
+The structured-output probe starts a temporary OpenCode server, asks a small
+decision question with a Zod-generated JSON Schema, validates the returned value
+against that same schema, prints it, and closes the server. The reusable adapter
+in `src/opencode/structured-output.ts` will underpin typed agent decisions in the
+issue pipeline.
 
 Bunli owns command routing, options, validation, help, and executable builds.
 The workflow and its external integrations are modeled as Effect programs and
@@ -66,7 +73,7 @@ Functionality is grouped by domain under `src/`:
 - `github/` owns GitHub CLI authentication and Octokit initialization.
 - `git/` owns repository cloning, validation, cleanup, and branch preparation.
 - `issues/` owns issue selection and the per-issue execution pipeline.
-- `opencode/` owns the OpenCode server lifecycle.
+- `opencode/` owns the OpenCode server lifecycle and schema-validated decisions.
 - `workspace/` owns workspace path resolution and safe removal.
 - `process/` owns external command execution.
 - `shared/` contains errors shared across domains.

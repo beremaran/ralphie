@@ -28,6 +28,7 @@
     "start": "bun run index.ts",
     "dev": "bunli dev --entry ./src/cli.ts",
     "build": "bunli build --targets native",
+    "probe:structured-output": "bun run scripts/probe-structured-output.ts",
     "test": "bun test",
     "typecheck": "bunx tsc --noEmit"
   }

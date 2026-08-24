@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Exit, Layer } from "effect";
-import type { OpencodeClient } from "@opencode-ai/sdk";
+import type { OpencodeClient } from "@opencode-ai/sdk/v2";
 import type { Octokit } from "octokit";
 
 import { GitRepository } from "./git/repository.ts";
