@@ -53,6 +53,7 @@ export const runStateSchema = z.object({
   runId: z.string().min(1),
   repository: z.string().min(1),
   branch: z.string().min(1),
+  dryRun: z.boolean().optional(),
   selection: z.object({
     agent: z.string().min(1),
     model: z

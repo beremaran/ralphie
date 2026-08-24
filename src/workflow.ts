@@ -15,6 +15,7 @@ import {
   type IssueExecutionOutcome,
 } from "./issues/execution.ts";
 import { IssueExecutor } from "./issues/executor.ts";
+import { DryRunIssueExecutor } from "./issues/dry-run-executor.ts";
 import {
   createIssueQueue,
   IssueQueueState,
@@ -153,6 +154,7 @@ export type WorkflowOptions = {
   readonly resumeState?: RunState;
   readonly resumePath?: string;
   readonly issueFailurePolicy?: IssueFailurePolicy;
+  readonly dryRun?: boolean;
 };
 
 export const workflow = ({
@@ -171,11 +173,13 @@ export const workflow = ({
   resumeState,
   resumePath,
   issueFailurePolicy = IssueFailurePolicy.Halt,
+  dryRun = false,
 }: WorkflowOptions) =>
   Effect.gen(function* () {
     const progress = yield* ProgressReporter;
     const stateStore = yield* RunStateStore;
     const actualRunId = resumeState?.runId ?? runId;
+    const effectiveDryRun = resumeState?.dryRun ?? dryRun;
     const statePath =
       resumePath ??
       join(
@@ -200,6 +204,7 @@ export const workflow = ({
         agent,
         issueLimit: maxIssues ?? "unlimited",
         runId: actualRunId,
+        dryRun: effectiveDryRun,
         ...(resumeState === undefined ? {} : { resumed: true, statePath }),
       },
     });
@@ -334,6 +339,7 @@ export const workflow = ({
           runId: actualRunId,
           repository: repo,
           branch,
+          dryRun: effectiveDryRun,
           selection,
           ...((resumeState?.maxIssues ?? maxIssues) === undefined
             ? {}
@@ -360,7 +366,9 @@ export const workflow = ({
 
       yield* persistState(RunStateStatus.Active);
       const openCode = yield* OpenCode;
-      const issueExecutor = yield* IssueExecutor;
+      const issueExecutor = effectiveDryRun
+        ? yield* DryRunIssueExecutor
+        : yield* IssueExecutor;
       const diagnostics = makeOpenCodeSessionDiagnostics();
       yield* Effect.acquireUseRelease(
         track(

@@ -67,6 +67,10 @@ export const runCommand = defineCommand({
       description: "Only emit failures",
       argumentKind: "flag",
     }),
+    "dry-run": option(z.coerce.boolean().default(false), {
+      description: "Assess and route issues without implementation or mutations",
+      argumentKind: "flag",
+    }),
     workspace: option(z.string().trim().min(1).default("~/.ralphie"), {
       description: "Directory used to clone and work on repositories",
     }),
@@ -161,6 +165,7 @@ export const runCommand = defineCommand({
         runId,
         resumeState,
         resumePath: flags.resume,
+        dryRun: flags["dry-run"],
       }).pipe(
         Effect.provide(LiveRuntime.pipe(Layer.provideMerge(progressLayer))),
         Effect.catchAll((error) =>

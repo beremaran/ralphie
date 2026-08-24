@@ -13,6 +13,7 @@ import { OpenCodeLive } from "./opencode/server.ts";
 import { IssueArtifactStoreLive } from "./issues/artifacts.ts";
 import { ComplexityAssessmentLive } from "./issues/complexity.ts";
 import { DecompositionExecutorLive } from "./issues/decomposition-executor.ts";
+import { DryRunIssueExecutorLive } from "./issues/dry-run-executor.ts";
 import { IssueExecutorLive } from "./issues/executor.ts";
 import { ImplementationExecutorLive } from "./issues/implementation-executor.ts";
 import { IssueRecoveryLive } from "./issues/recovery.ts";
@@ -73,6 +74,11 @@ const IssueExecutorRuntime = IssueExecutorLive.pipe(
       ComplexityAssessmentLive,
       ImplementationExecutorRuntime,
       DecompositionExecutorRuntime,
+      DryRunIssueExecutorLive.pipe(
+        Layer.provideMerge(
+          Layer.merge(ComplexityAssessmentLive, IssueArtifactStoreLive),
+        ),
+      ),
     ),
   ),
 );

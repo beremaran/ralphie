@@ -10,6 +10,7 @@ import { GitHubClient } from "./github/client.ts";
 import { GitHubIssues, type GitHubIssue, IssueOrder, IssueSort } from "./github/issues.ts";
 import { type IssueExecutionOutcome, IssueExecutionOutcomeKind } from "./issues/execution.ts";
 import { IssueExecutor } from "./issues/executor.ts";
+import { DryRunIssueExecutor } from "./issues/dry-run-executor.ts";
 import { DEFAULT_OPENCODE_AGENT } from "./opencode/model.ts";
 import { OpenCode } from "./opencode/server.ts";
 import {
@@ -119,6 +120,15 @@ function testRuntime(
           return result;
         }),
     }),
+    Layer.succeed(DryRunIssueExecutor, {
+      execute: ({ issue }) => {
+        calls.push(`dryRunIssue:${issue.number}`);
+        return Effect.succeed({
+          kind: IssueExecutionOutcomeKind.Skipped,
+          reason: "dry run",
+        });
+      },
+    }),
     Layer.succeed(OpenCode, {
       start: options.startFailure
         ? Effect.fail(options.startFailure)
@@ -197,6 +207,29 @@ describe("workflow", () => {
     ]);
     expect(events.some(({ stage }) => stage === ProgressStage.IssueExecution)).toBeTrue();
     expect(events.at(-1)?.status).toBe(ProgressStatus.Succeeded);
+  });
+
+  test("dry-run assesses through the queue without invoking mutation execution", async () => {
+    const calls: string[] = [];
+    const states: RunState[] = [];
+    const summary = await workflow({
+      ...baseOptions,
+      dryRun: true,
+    }).pipe(
+      Effect.provide(testRuntime(calls, states)),
+      Effect.runPromise,
+    );
+
+    expect(summary.outcomes).toEqual([
+      {
+        issueNumber: 42,
+        outcome: { kind: IssueExecutionOutcomeKind.Skipped, reason: "dry run" },
+      },
+    ]);
+    expect(calls).toContain("dryRunIssue:42");
+    expect(calls).not.toContain("executeIssue:42:/tmp/ralphie/repo:develop:build");
+    expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
+    expect(states.at(-1)?.dryRun).toBe(true);
   });
 
   test.each([
