@@ -6,6 +6,7 @@ import { z } from "zod";
 import { requestStructuredOutput } from "./structured-output.ts";
 import {
   OpenCodeAssistantErrorKind,
+  makeOpenCodeSessionDiagnostics,
   toOpenCodeAssistantError,
 } from "./task-session.ts";
 
@@ -149,6 +150,52 @@ describe("OpenCode structured output", () => {
     });
   });
 
+  test("records the session and verifies repository invariants", async () => {
+    const diagnostics = makeOpenCodeSessionDiagnostics(() => "2026-08-24T00:00:00.000Z");
+    let verified: unknown;
+    const client = {
+      session: {
+        create: async () => ({ data: { id: "session-1" } }),
+        prompt: async () => ({
+          data: {
+            info: assistantInfo({
+              decision: ProbeDecision.Proceed,
+              confidence: 1,
+              reason: "The condition is true.",
+            }),
+            parts: [],
+          },
+        }),
+      },
+    } as unknown as OpencodeClient;
+
+    await requestStructuredOutput(client, {
+      directory: "/workspace",
+      title: "Test decision",
+      prompt: "Make a decision.",
+      schema: decisionSchema,
+      agent: "build",
+      runId: "run-1",
+      diagnostics,
+      repositoryInvariant: { branch: "main", head: "abc123" },
+      verifyRepositoryInvariant: (directory, expected) =>
+        Effect.sync(() => {
+          verified = { directory, expected };
+        }),
+    }).pipe(Effect.runPromise);
+
+    expect(diagnostics.list("run-1")).toHaveLength(1);
+    expect(diagnostics.list("run-1")[0]).toMatchObject({
+      sessionID: "session-1",
+      directory: "/workspace",
+      agent: "build",
+    });
+    expect(verified).toEqual({
+      directory: "/workspace",
+      expected: { branch: "main", head: "abc123" },
+    });
+  });
+
   test("rejects structured output that does not match the schema", async () => {
     const client = {
       session: {
@@ -211,7 +258,7 @@ describe("OpenCode structured output", () => {
     expect(Exit.isFailure(exit)).toBe(true);
     if (Exit.isFailure(exit)) {
       const failure = exit.cause;
-      expect(String(failure)).toContain("Failed to get structured output");
+      expect(String(failure)).toContain("OpenCode assistant failed");
       const cause = failure as unknown as { error?: { cause?: unknown } };
       expect(cause).toBeDefined();
     }

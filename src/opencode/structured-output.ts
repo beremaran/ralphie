@@ -4,7 +4,18 @@ import { z } from "zod";
 
 import { RalphieError } from "../shared/error.ts";
 import type { OpenCodeModel } from "./model.ts";
-import { toOpenCodeAssistantError } from "./task-session.ts";
+import {
+  OPEN_CODE_TASK_PERMISSION_POLICY,
+  type OpenCodeRepositoryInvariant,
+  type OpenCodeSessionDiagnostics,
+  reportOpenCodeFailure,
+  toOpenCodeAssistantError,
+} from "./task-session.ts";
+import {
+  ProgressStage,
+  type ProgressIssue,
+  type ProgressReporterService,
+} from "../progress/progress.ts";
 
 export type StructuredOutputRequest<Output> = {
   readonly directory: string;
@@ -15,6 +26,16 @@ export type StructuredOutputRequest<Output> = {
   readonly agent?: string;
   readonly model?: OpenCodeModel;
   readonly variant?: string;
+  readonly runId?: string;
+  readonly diagnostics?: OpenCodeSessionDiagnostics;
+  readonly repositoryInvariant?: OpenCodeRepositoryInvariant;
+  readonly verifyRepositoryInvariant?: (
+    repositoryPath: string,
+    expected: OpenCodeRepositoryInvariant,
+  ) => Effect.Effect<void, RalphieError>;
+  readonly progress?: ProgressReporterService;
+  readonly progressStage?: ProgressStage;
+  readonly progressIssue?: ProgressIssue;
 };
 
 export type StructuredOutputResult<Output> = {
@@ -42,18 +63,30 @@ export const requestStructuredOutput = <Output>(
   client: OpencodeClient,
   request: StructuredOutputRequest<Output>,
 ): Effect.Effect<StructuredOutputResult<Output>, RalphieError> =>
-  Effect.tryPromise({
+  Effect.gen(function* () {
+    const result = yield* Effect.tryPromise({
     try: async () => {
       const session = await client.session.create({
         directory: request.directory,
         title: request.title,
         ...(request.agent === undefined ? {} : { agent: request.agent }),
+        permission: OPEN_CODE_TASK_PERMISSION_POLICY,
       });
 
       if (session.error !== undefined || session.data === undefined) {
         throw new Error(
           `Could not create OpenCode session: ${describeApiError(session.error)}`,
         );
+      }
+
+      if (request.runId !== undefined && request.diagnostics !== undefined) {
+        request.diagnostics.record(request.runId, {
+          sessionID: session.data.id,
+          directory: request.directory,
+          ...(request.agent === undefined ? {} : { agent: request.agent }),
+          ...(request.model === undefined ? {} : { model: request.model }),
+          ...(request.variant === undefined ? {} : { variant: request.variant }),
+        });
       }
 
       const response = await client.session.prompt({
@@ -97,8 +130,25 @@ export const requestStructuredOutput = <Output>(
       };
     },
     catch: (cause) =>
-      new RalphieError({
-        message: "Failed to get structured output from OpenCode.",
-        cause,
-      }),
+      cause instanceof RalphieError
+        ? cause
+        : new RalphieError({
+            message: "Failed to get structured output from OpenCode.",
+            cause,
+          }),
+    }).pipe(
+      Effect.tapError((error) => reportOpenCodeFailure(request, error)),
+    );
+
+    if (
+      request.repositoryInvariant !== undefined &&
+      request.verifyRepositoryInvariant !== undefined
+    ) {
+      yield* request.verifyRepositoryInvariant(
+        request.directory,
+        request.repositoryInvariant,
+      );
+    }
+
+    return result;
   });

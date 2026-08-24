@@ -37,12 +37,12 @@ enough to implement, review, and commit independently.
 - [ ] Reuse `requestStructuredOutput` for every decision task.
 - [x] Add typed handling for OpenCode assistant errors, aborts, output-length
       failures, and structured-output retry exhaustion.
-- [x] Record every OpenCode session ID in the run diagnostics.
-- [x] Ensure session failures produce progress failure events with useful context.
+- [ ] Record every OpenCode session ID in the run diagnostics.
+- [ ] Ensure session failures produce progress failure events with useful context.
 - [x] Define a permission/tool policy that prevents agents from committing,
       pushing, changing branches, or mutating GitHub directly.
-- [x] Verify repository branch and `HEAD` invariants after every agent session.
-- [ ] Decide whether successful sessions are retained for inspection or deleted.
+- [ ] Verify repository branch and `HEAD` invariants after every agent session.
+- [x] Decide whether successful sessions are retained for inspection or deleted.
 - [x] Add mocked SDK tests for fresh-session behavior and selection propagation.
 
 ## 3. Prompt construction

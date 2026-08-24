@@ -4,7 +4,14 @@ import type {
   Part,
 } from "@opencode-ai/sdk/v2";
 import { Context, Data, Effect, Layer } from "effect";
+import type { PermissionRuleset } from "@opencode-ai/sdk/v2";
 
+import {
+  ProgressStage,
+  ProgressStatus,
+  type ProgressIssue,
+  type ProgressReporterService,
+} from "../progress/progress.ts";
 import { RalphieError } from "../shared/error.ts";
 import type { OpenCodeModel, OpenCodeSelection } from "./model.ts";
 
@@ -12,6 +19,8 @@ export type OpenCodeTaskSessionRequest = {
   readonly directory: string;
   readonly title: string;
   readonly selection: OpenCodeSelection;
+  readonly runId?: string;
+  readonly diagnostics?: OpenCodeSessionDiagnostics;
 };
 
 export type OpenCodeTaskSession = {
@@ -22,6 +31,11 @@ export type OpenCodeTaskSession = {
 
 export type OpenCodeTaskRequest = OpenCodeTaskSessionRequest & {
   readonly prompt: string;
+  readonly repositoryInvariant?: OpenCodeRepositoryInvariant;
+  readonly verifyRepositoryInvariant?: OpenCodeRepositoryInvariantVerifier;
+  readonly progress?: ProgressReporterService;
+  readonly progressStage?: ProgressStage;
+  readonly progressIssue?: ProgressIssue;
 };
 
 export type OpenCodeTaskResult = {
@@ -46,6 +60,79 @@ export class OpenCodeAssistantError extends Data.TaggedError(
   readonly retries?: number;
   readonly sdkError: NonNullable<AssistantMessage["error"]>;
 }> {}
+
+export type OpenCodeRepositoryInvariant = {
+  readonly branch: string;
+  readonly head: string;
+};
+
+export type OpenCodeRepositoryInvariantVerifier = (
+  repositoryPath: string,
+  expected: OpenCodeRepositoryInvariant,
+) => Effect.Effect<void, RalphieError>;
+
+export type OpenCodeSessionDiagnostic = {
+  readonly runId: string;
+  readonly sessionID: string;
+  readonly directory: string;
+  readonly agent?: string;
+  readonly model?: OpenCodeModel;
+  readonly variant?: string;
+  readonly recordedAt: string;
+};
+
+export type OpenCodeSessionDiagnosticInput = Omit<
+  OpenCodeSessionDiagnostic,
+  "runId" | "recordedAt"
+>;
+
+/** Successful sessions remain available for post-run inspection. */
+export enum OpenCodeSessionRetentionPolicy {
+  Retain = "retain",
+}
+
+export const OPEN_CODE_SESSION_RETENTION_POLICY =
+  OpenCodeSessionRetentionPolicy.Retain;
+
+export type OpenCodeSessionDiagnostics = {
+  readonly record: (
+    runId: string,
+    session: OpenCodeSessionDiagnosticInput,
+  ) => void;
+  readonly list: (runId: string) => ReadonlyArray<OpenCodeSessionDiagnostic>;
+};
+
+export const makeOpenCodeSessionDiagnostics = (
+  now: () => string = () => new Date().toISOString(),
+): OpenCodeSessionDiagnostics => {
+  const sessions = new Map<string, OpenCodeSessionDiagnostic[]>();
+
+  return {
+    record: (runId, session) => {
+      const runSessions = sessions.get(runId) ?? [];
+      runSessions.push({ ...session, runId, recordedAt: now() });
+      sessions.set(runId, runSessions);
+    },
+    list: (runId) => [...(sessions.get(runId) ?? [])],
+  };
+};
+
+/**
+ * OpenCode permission rules for task agents. The agent may inspect and edit
+ * files, but deterministic Ralphie steps retain ownership of commits, pushes,
+ * branch changes, worktrees, resets/cleanups, and GitHub mutations.
+ */
+export const OPEN_CODE_TASK_PERMISSION_POLICY: PermissionRuleset = [
+  { permission: "bash", pattern: "git commit*", action: "deny" },
+  { permission: "bash", pattern: "git push*", action: "deny" },
+  { permission: "bash", pattern: "git branch*", action: "deny" },
+  { permission: "bash", pattern: "git checkout*", action: "deny" },
+  { permission: "bash", pattern: "git switch*", action: "deny" },
+  { permission: "bash", pattern: "git worktree*", action: "deny" },
+  { permission: "bash", pattern: "git reset*", action: "deny" },
+  { permission: "bash", pattern: "git clean*", action: "deny" },
+  { permission: "bash", pattern: "gh *", action: "deny" },
+];
 
 type OpenCodePromptParameters = Parameters<
   OpencodeClient["session"]["prompt"]
@@ -106,6 +193,43 @@ const assistantFailure = (
   });
 };
 
+export const reportOpenCodeFailure = (
+  request: {
+    readonly directory: string;
+    readonly title: string;
+    readonly progress?: ProgressReporterService;
+    readonly progressStage?: ProgressStage;
+    readonly progressIssue?: ProgressIssue;
+  },
+  error: RalphieError,
+): Effect.Effect<void> => {
+  if (request.progress === undefined) return Effect.void;
+
+  const assistantError =
+    error.cause instanceof OpenCodeAssistantError ? error.cause : undefined;
+  return request.progress
+    .emit({
+      stage: request.progressStage ?? ProgressStage.Implementation,
+      status: ProgressStatus.Failed,
+      issue: request.progressIssue,
+      message: `OpenCode task failed: ${error.message}`,
+      details: {
+        directory: request.directory,
+        title: request.title,
+        ...(assistantError === undefined
+          ? {}
+          : {
+              assistantError: assistantError.kind,
+              sessionError: assistantError.errorName,
+              ...(assistantError.retries === undefined
+                ? {}
+                : { retries: assistantError.retries }),
+            }),
+      },
+    })
+    .pipe(Effect.catchAll(() => Effect.void));
+};
+
 const createSessionModel = (model: OpenCodeModel) => ({
   providerID: model.providerID,
   id: model.modelID,
@@ -151,6 +275,7 @@ export const createOpenCodeTaskSession = (
         directory: request.directory,
         title: request.title,
         agent: request.selection.agent,
+        permission: OPEN_CODE_TASK_PERMISSION_POLICY,
         ...(request.selection.model === undefined
           ? {}
           : { model: createSessionModel(request.selection.model) }),
@@ -162,11 +287,23 @@ export const createOpenCodeTaskSession = (
         );
       }
 
-      return {
+      const session = {
         sessionID: response.data.id,
         directory: request.directory,
         selection: request.selection,
       };
+
+      if (request.runId !== undefined && request.diagnostics !== undefined) {
+        request.diagnostics.record(request.runId, {
+          sessionID: session.sessionID,
+          directory: session.directory,
+          agent: session.selection.agent,
+          model: session.selection.model,
+          variant: session.selection.variant,
+        });
+      }
+
+      return session;
     },
     catch: (cause) =>
       new RalphieError({
@@ -190,7 +327,7 @@ export const runOpenCodeTask = (
   Effect.gen(function* () {
     const session = yield* createOpenCodeTaskSession(client, request);
 
-    const result = yield* Effect.tryPromise({
+    const response = yield* Effect.tryPromise({
       try: async () => {
         const response = await client.session.prompt(
           taskSessionPromptParameters(session, {
@@ -204,28 +341,39 @@ export const runOpenCodeTask = (
           );
         }
 
-        if (response.data.info.error !== undefined) {
-          throw assistantFailure(
-            "OpenCode assistant failed",
-            response.data.info.error,
-          );
-        }
-
-        return {
-          session,
-          response: response.data.info,
-          parts: response.data.parts,
-        };
+        return response.data;
       },
       catch: (cause) =>
         new RalphieError({
           message: "Failed to run an OpenCode task.",
           cause,
-        }),
+      }),
     });
 
-    return result;
-  });
+    if (response.info.error !== undefined) {
+      return yield* Effect.fail(
+        assistantFailure("OpenCode assistant failed", response.info.error),
+      );
+    }
+
+    if (
+      request.repositoryInvariant !== undefined &&
+      request.verifyRepositoryInvariant !== undefined
+    ) {
+      yield* request.verifyRepositoryInvariant(
+        request.directory,
+        request.repositoryInvariant,
+      );
+    }
+
+    return {
+      session,
+      response: response.info,
+      parts: response.parts,
+    };
+  }).pipe(
+    Effect.tapError((error) => reportOpenCodeFailure(request, error)),
+  );
 
 export type OpenCodeTaskSessionService = {
   readonly create: (
@@ -234,6 +382,7 @@ export type OpenCodeTaskSessionService = {
   readonly run: (
     request: OpenCodeTaskRequest,
   ) => Effect.Effect<OpenCodeTaskResult, RalphieError>;
+  readonly diagnostics: OpenCodeSessionDiagnostics;
 };
 
 export const OpenCodeTaskSession = Context.GenericTag<OpenCodeTaskSessionService>(
@@ -241,8 +390,20 @@ export const OpenCodeTaskSession = Context.GenericTag<OpenCodeTaskSessionService
 );
 
 export const makeOpenCodeTaskSessionLayer = (client: OpencodeClient) =>
-  Layer.succeed(OpenCodeTaskSession, {
-    create: (request: OpenCodeTaskSessionRequest) =>
-      createOpenCodeTaskSession(client, request),
-    run: (request: OpenCodeTaskRequest) => runOpenCodeTask(client, request),
+  Layer.sync(OpenCodeTaskSession, () => {
+    const diagnostics = makeOpenCodeSessionDiagnostics();
+    const withDiagnostics = <Request extends OpenCodeTaskSessionRequest>(
+      request: Request,
+    ): Request =>
+      request.diagnostics === undefined
+        ? { ...request, diagnostics }
+        : request;
+
+    return {
+      diagnostics,
+      create: (request: OpenCodeTaskSessionRequest) =>
+        createOpenCodeTaskSession(client, withDiagnostics(request)),
+      run: (request: OpenCodeTaskRequest) =>
+        runOpenCodeTask(client, withDiagnostics(request)),
+    };
   });
