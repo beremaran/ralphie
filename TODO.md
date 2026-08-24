@@ -55,22 +55,22 @@ enough to implement, review, and commit independently.
 - [x] Add a review prompt that receives only the issue and staged diff.
 - [x] Add a fresh-context review-fix prompt containing the structured review.
 - [x] Add a commit-message prompt based on the issue and final staged diff.
-- [ ] Add a decomposition prompt that requires independently actionable 0–3
+- [x] Add a decomposition prompt that requires independently actionable 0–3
       child issues and an acyclic dependency graph.
-- [ ] Include failed review summaries when escalation invokes decomposition.
-- [ ] Unit-test prompt builders with issues that have empty bodies and labels.
-- [ ] Add prompt-size safeguards for very large issue bodies and diffs.
+- [x] Include failed review summaries when escalation invokes decomposition.
+- [x] Unit-test prompt builders with issues that have empty bodies and labels.
+- [x] Add prompt-size safeguards for very large issue bodies and diffs.
 
 ## 4. Complexity assessment and routing
 
 - [x] Execute the complexity assessment with `complexityDecisionSchema`.
 - [x] Emit started, succeeded, and failed complexity progress events.
-- [ ] Store the decision and rationale in the issue artifact store.
-- [ ] Route complexity 0–3 to `ImplementationExecutor`.
-- [ ] Route complexity 4–5 to `DecompositionExecutor`.
-- [ ] Treat invalid or missing decisions as issue failures without mutating Git or
+- [x] Store the decision and rationale in the issue artifact store.
+- [x] Route complexity 0–3 to `ImplementationExecutor`.
+- [x] Route complexity 4–5 to `DecompositionExecutor`.
+- [x] Treat invalid or missing decisions as issue failures without mutating Git or
       GitHub.
-- [ ] Add executor tests covering every complexity value from 0 through 5.
+- [x] Add executor tests covering every complexity value from 0 through 5.
 - [ ] Add a real OpenCode smoke test for complexity assessment.
 
 ## 5. Deterministic Git issue operations
