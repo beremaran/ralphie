@@ -98,4 +98,20 @@ describe("refreshable issue queue", () => {
     ]);
     expect(toQueuedIssues([child])).toEqual([{ issue: child, dependsOn: [] }]);
   });
+
+  test("restores processing budget and completed dependencies from a snapshot", () => {
+    const queue = createIssueQueue(
+      [{ issue: issue(2), dependsOn: [1] }, { issue: issue(3) }],
+      3,
+      { completedIssueNumbers: [1], processedCount: 1 },
+    );
+
+    expect(queue.next()?.number).toBe(2);
+    queue.complete(2);
+    expect(queue.snapshot()).toEqual({
+      pending: [{ issue: issue(3), dependsOn: [] }],
+      completedIssueNumbers: [1, 2],
+      processedCount: 2,
+    });
+  });
 });

@@ -20,16 +20,30 @@ export type IssueQueue = {
   readonly pendingCount: () => number;
   readonly processedCount: () => number;
   readonly state: () => IssueQueueState;
+  readonly snapshot: () => {
+    readonly pending: ReadonlyArray<QueuedIssue>;
+    readonly completedIssueNumbers: ReadonlyArray<number>;
+    readonly processedCount: number;
+  };
 };
 
 export const createIssueQueue = (
   initialIssues: ReadonlyArray<QueuedIssue>,
   maxIssues?: number,
+  resume?: {
+    readonly completedIssueNumbers: ReadonlyArray<number>;
+    readonly processedCount: number;
+  },
 ): IssueQueue => {
   const pending: QueuedIssue[] = [];
   const known = new Set<number>();
   const completed = new Set<number>();
-  let processed = 0;
+  let processed = resume?.processedCount ?? 0;
+
+  for (const issueNumber of resume?.completedIssueNumbers ?? []) {
+    known.add(issueNumber);
+    completed.add(issueNumber);
+  }
 
   const refresh = (issues: ReadonlyArray<QueuedIssue>): number => {
     let added = 0;
@@ -81,6 +95,14 @@ export const createIssueQueue = (
         ? IssueQueueState.Ready
         : IssueQueueState.DependencyBlocked;
     },
+    snapshot: () => ({
+      pending: pending.map((entry) => ({
+        issue: { ...entry.issue, labels: [...entry.issue.labels] },
+        dependsOn: [...(entry.dependsOn ?? [])],
+      })),
+      completedIssueNumbers: [...completed],
+      processedCount: processed,
+    }),
   };
 };
 
