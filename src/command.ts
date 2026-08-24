@@ -14,6 +14,7 @@ import {
   ProgressRenderMode,
 } from "./progress/progress.ts";
 import { LiveRuntime } from "./runtime.ts";
+import { exitCodeForFailure } from "./process/exit-code.ts";
 import { workflow } from "./workflow.ts";
 import { redactSensitiveText } from "./shared/redaction.ts";
 import {
@@ -140,32 +141,37 @@ export const runCommand = defineCommand({
       eventLogPath,
     });
 
-    await workflow({
-      repo,
-      branch: flags.branch,
-      maxIssues: flags["max-issues"],
-      issueFilters: {
-        labels: flags["issue-label"],
-        sort: flags["issue-sort"],
-        order: flags["issue-order"],
-      },
-      model: flags.model,
-      modelVariant: flags["model-variant"],
-      agent: flags.agent,
-      workspace: flags.workspace,
-      cleanup: flags.cleanup,
-      startClean: flags["start-clean"],
-      signal,
-      runId,
-      resumeState,
-      resumePath: flags.resume,
-    }).pipe(
-      Effect.provide(LiveRuntime.pipe(Layer.provideMerge(progressLayer))),
-      Effect.catchAll((error) =>
-        Effect.fail(new Error(redactSensitiveText(error.message))),
-      ),
-      Effect.runPromise,
-    );
+    try {
+      await workflow({
+        repo,
+        branch: flags.branch,
+        maxIssues: flags["max-issues"],
+        issueFilters: {
+          labels: flags["issue-label"],
+          sort: flags["issue-sort"],
+          order: flags["issue-order"],
+        },
+        model: flags.model,
+        modelVariant: flags["model-variant"],
+        agent: flags.agent,
+        workspace: flags.workspace,
+        cleanup: flags.cleanup,
+        startClean: flags["start-clean"],
+        signal,
+        runId,
+        resumeState,
+        resumePath: flags.resume,
+      }).pipe(
+        Effect.provide(LiveRuntime.pipe(Layer.provideMerge(progressLayer))),
+        Effect.catchAll((error) =>
+          Effect.fail(new Error(redactSensitiveText(error.message))),
+        ),
+        Effect.runPromise,
+      );
+    } catch (error) {
+      process.exitCode = exitCodeForFailure(signal);
+      throw error;
+    }
   },
 });
 
