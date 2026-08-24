@@ -75,6 +75,7 @@ export type WorkflowOptions = {
   readonly workspace: string;
   readonly cleanup: boolean;
   readonly startClean: boolean;
+  readonly signal?: AbortSignal;
 };
 
 export const workflow = ({
@@ -88,6 +89,7 @@ export const workflow = ({
   workspace,
   cleanup,
   startClean,
+  signal,
 }: WorkflowOptions) =>
   Effect.gen(function* () {
     const progress = yield* ProgressReporter;
@@ -109,6 +111,7 @@ export const workflow = ({
     });
 
     const run = Effect.gen(function* () {
+      signal?.throwIfAborted();
       if (startClean) {
         const workspaceService = yield* Workspace;
         yield* track(
@@ -174,6 +177,7 @@ export const workflow = ({
         ),
         () =>
           Effect.forEach(selectedIssues, (issue, index) => {
+            signal?.throwIfAborted();
             const issueContext = {
               issue: { number: issue.number, title: issue.title },
               current: index + 1,

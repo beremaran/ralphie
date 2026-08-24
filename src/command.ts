@@ -69,7 +69,7 @@ export const runCommand = defineCommand({
       argumentKind: "flag",
     }),
   },
-  handler: async ({ flags, positional, spinner, terminal }) => {
+  handler: async ({ flags, positional, spinner, terminal, signal }) => {
     const [repo, ...extra] = positional;
 
     if (!repo) {
@@ -113,6 +113,7 @@ export const runCommand = defineCommand({
       workspace: flags.workspace,
       cleanup: flags.cleanup,
       startClean: flags["start-clean"],
+      signal,
     }).pipe(
       Effect.provide(Layer.merge(LiveRuntime, progressLayer)),
       Effect.catchAll((error) => Effect.fail(new Error(error.message))),
