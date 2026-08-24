@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { parseRepositorySlug } from "./repository.ts";
 
-describe("repository parsing", () => {
+describe("GitHub repository parsing", () => {
   test.each([
     "owner/repository",
     "https://github.com/owner/repository.git",

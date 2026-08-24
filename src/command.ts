@@ -2,6 +2,7 @@ import { defineCommand, option } from "@bunli/core";
 import { Effect } from "effect";
 import { z } from "zod";
 
+import { issueOrderValues, issueSortValues } from "./github/issues.ts";
 import { LiveRuntime } from "./runtime.ts";
 import { workflow } from "./workflow.ts";
 
@@ -15,6 +16,16 @@ export const runCommand = defineCommand({
     }),
     "max-issues": option(z.coerce.number().int().positive().optional(), {
       description: "Maximum number of issues to process (default: unlimited)",
+    }),
+    "issue-label": option(z.array(z.string().trim().min(1)).default([]), {
+      description: "Only include issues with this label (repeatable)",
+      repeatable: true,
+    }),
+    "issue-sort": option(z.enum(issueSortValues).default("created"), {
+      description: "Sort issues by created, updated, or comments",
+    }),
+    "issue-order": option(z.enum(issueOrderValues).default("asc"), {
+      description: "Sort issues in ascending or descending order",
     }),
     workspace: option(z.string().trim().min(1).default("~/.ralphie"), {
       description: "Directory used to clone and work on repositories",
@@ -42,6 +53,11 @@ export const runCommand = defineCommand({
       repo,
       branch: flags.branch,
       maxIssues: flags["max-issues"],
+      issueFilters: {
+        labels: flags["issue-label"],
+        sort: flags["issue-sort"],
+        order: flags["issue-order"],
+      },
       workspace: flags.workspace,
       cleanup: flags.cleanup,
       startClean: flags["start-clean"],

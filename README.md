@@ -18,14 +18,17 @@ The CLI also requires these local tools:
 ## Usage
 
 ```bash
-bun run index.ts <repo> [--branch <branch>] [--max-issues <count>] [--workspace <path>] [--start-clean] [--cleanup]
+bun run index.ts <repo> [--branch <branch>] [--max-issues <count>] [--issue-label <label>] [--issue-sort <sort>] [--issue-order <order>] [--workspace <path>] [--start-clean] [--cleanup]
 # Example:
-bun run index.ts owner/project --branch develop --max-issues 10 --workspace /tmp/ralphie --start-clean --cleanup
+bun run index.ts owner/project --branch develop --max-issues 10 --issue-label bug --issue-sort created --issue-order asc --workspace /tmp/ralphie --start-clean --cleanup
 ```
 
 The branch defaults to `main`. The short form `-b develop` is also supported.
 By default, Ralphie processes an unlimited number of issues. Pass a positive
 integer to `--max-issues` to set a limit.
+Use repeatable `--issue-label` flags to require labels when selecting issues.
+Issues can be sorted with `--issue-sort created|updated|comments` and
+`--issue-order asc|desc`; the defaults select the oldest-created issue first.
 The workspace defaults to `~/.ralphie`. Pass `--workspace <path>` to choose a
 different location for cloned repositories and working files.
 Pass `--cleanup` to remove the workspace after a successful run. Cleanup is
@@ -38,7 +41,9 @@ The current scaffold validates GitHub CLI authentication, retrieves its token to
 initialize Octokit, and verifies the Git installation. It then clones the target
 repository into `<workspace>/<repository>` (or safely reuses a matching existing
 checkout), fetches it, switches to the requested branch when necessary, and starts
-an OpenCode server before exiting. Existing dirty checkouts are reset to the
+an OpenCode server before exiting. Before OpenCode starts, Ralphie fetches every
+matching open GitHub issue, reports the count, and identifies the first issue it
+would process. Existing dirty checkouts are reset to the
 requested remote branch with `git reset --hard` and `git clean -fd`, discarding
 tracked and untracked local changes.
 

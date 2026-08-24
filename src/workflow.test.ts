@@ -4,6 +4,7 @@ import type { Octokit } from "octokit";
 
 import { GitRepository } from "./git/repository.ts";
 import { GitHubClient } from "./github/client.ts";
+import { GitHubIssues } from "./github/issues.ts";
 import { OpenCode } from "./opencode/server.ts";
 import { RalphieError } from "./shared/error.ts";
 import { Workspace } from "./workspace/workspace.ts";
@@ -43,6 +44,20 @@ function testRuntime(calls: string[], options: TestRuntimeOptions = {}) {
         });
       },
     }),
+    Layer.succeed(GitHubIssues, {
+      listOpen: (_client, repo, filters) => {
+        calls.push(
+          `listIssues:${repo}:${filters.labels.join(",")}:${filters.sort}:${filters.order}`,
+        );
+        return Effect.succeed([
+          {
+            number: 42,
+            title: "Test issue",
+            url: "https://github.com/owner/repo/issues/42",
+          },
+        ]);
+      },
+    }),
     Layer.succeed(OpenCode, {
       start: options.startFailure
         ? Effect.fail(options.startFailure)
@@ -73,6 +88,7 @@ describe("workflow", () => {
       repo: "owner/repo",
       branch: "develop",
       maxIssues: 5,
+      issueFilters: { labels: ["bug"], sort: "created", order: "asc" },
       workspace: "/tmp/ralphie",
       cleanup: true,
       startClean: true,
@@ -86,6 +102,7 @@ describe("workflow", () => {
       "initializeGitHub",
       "verifyGitInstalled",
       "prepareRepository:owner/repo:develop:/tmp/ralphie",
+      "listIssues:owner/repo:bug:created:asc",
       "startServer",
       "closeServer",
       "removeWorkspace:/tmp/ralphie",
@@ -98,6 +115,7 @@ describe("workflow", () => {
       repo: "owner/repo",
       branch: "main",
       workspace: "~/.ralphie",
+      issueFilters: { labels: [], sort: "created", order: "asc" },
       cleanup: true,
       startClean: false,
     }).pipe(
@@ -119,6 +137,7 @@ describe("workflow", () => {
       repo: "owner/repo",
       branch: "main",
       workspace: "~/.ralphie",
+      issueFilters: { labels: [], sort: "created", order: "asc" },
       cleanup: false,
       startClean: false,
     }).pipe(
@@ -143,6 +162,7 @@ describe("workflow", () => {
       repo: "owner/repo",
       branch: "main",
       workspace: "/tmp/ralphie",
+      issueFilters: { labels: [], sort: "created", order: "asc" },
       cleanup: false,
       startClean: true,
     }).pipe(
