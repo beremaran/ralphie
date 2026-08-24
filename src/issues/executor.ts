@@ -1,17 +1,11 @@
 import { Context, Effect, Layer } from "effect";
 
 import type { RalphieError } from "../shared/error.ts";
-import {
-  IssueArtifactKind,
-  IssueArtifactStore,
-} from "./artifacts.ts";
+import { IssueArtifactKind, IssueArtifactStore } from "./artifacts.ts";
 import { ComplexityAssessment } from "./complexity.ts";
 import { ComplexityLevel } from "./decisions.ts";
 import { DecompositionExecutor } from "./decomposition-executor.ts";
-import type {
-  IssueExecutionContext,
-  IssueExecutionOutcome,
-} from "./execution.ts";
+import type { IssueExecutionContext, IssueExecutionOutcome } from "./execution.ts";
 import { IssueExecutionOutcomeKind } from "./execution.ts";
 import { ImplementationExecutor } from "./implementation-executor.ts";
 
@@ -39,16 +33,21 @@ export const IssueExecutorLive = Layer.effect(
         Effect.gen(function* () {
           const artifacts = yield* artifactStores.forIssue(
             context.issue.number,
+            context.workspace && context.runId
+              ? { workspace: context.workspace, runId: context.runId }
+              : undefined,
           );
-          const assessment = yield* complexityAssessment.assess(context);
-
-          yield* artifacts.write(
-            IssueArtifactKind.ComplexityDecision,
-            assessment.decision,
-          );
+          const decision = artifacts.has(IssueArtifactKind.ComplexityDecision)
+            ? yield* artifacts.read(IssueArtifactKind.ComplexityDecision)
+            : yield* complexityAssessment.assess(context).pipe(
+                Effect.map(({ decision }) => decision),
+                Effect.tap((value) =>
+                  artifacts.write(IssueArtifactKind.ComplexityDecision, value),
+                ),
+              );
 
           const input = { context, artifacts };
-          if (assessment.decision.complexity >= ComplexityLevel.Level4) {
+          if (decision.complexity >= ComplexityLevel.Level4) {
             return yield* decompositionExecutor.execute(input);
           }
 

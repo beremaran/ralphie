@@ -136,6 +136,12 @@ export const ImplementationExecutorLive = Layer.effect(
           const { context, artifacts } = input;
           yield* checkSignal(context.signal);
           const checkpoint = yield* readCheckpoint(preparation, input);
+          if (
+            artifacts.has(IssueArtifactKind.ReviewAttempts) ||
+            artifacts.has(IssueArtifactKind.CommitMessageDecision)
+          ) {
+            yield* artifacts.resetImplementationAttempt();
+          }
           const invariant = {
             branch: checkpoint.branch,
             head: checkpoint.sha,

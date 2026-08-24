@@ -116,6 +116,52 @@ describe("IssueExecutor", () => {
     });
   }
 
+  test("reuses a persisted complexity decision when retrying an issue", async () => {
+    let assessmentCalls = 0;
+    let implementationCalls = 0;
+    const context = { issue: { number: 42 } } as IssueExecutionContext;
+    const dependencies = Layer.mergeAll(
+      IssueArtifactStoreLive,
+      Layer.succeed(ComplexityAssessment, {
+        assess: () => {
+          assessmentCalls += 1;
+          return Effect.succeed({
+            decision: {
+              complexity: ComplexityLevel.Level2,
+              rationale: "Persisted routing decision.",
+            },
+            sessionID: "complexity-session",
+          });
+        },
+      }),
+      Layer.succeed(ImplementationExecutor, {
+        execute: () => {
+          implementationCalls += 1;
+          return Effect.succeed({
+            kind: IssueExecutionOutcomeKind.Skipped,
+            reason: "test retry",
+          });
+        },
+      }),
+      Layer.succeed(DecompositionExecutor, {
+        execute: () => Effect.die("must not decompose"),
+      }),
+    );
+
+    await Effect.gen(function* () {
+      const executor = yield* IssueExecutor;
+      yield* executor.execute(context);
+      yield* executor.execute(context);
+    }).pipe(
+      Effect.provide(IssueExecutorLive),
+      Effect.provide(dependencies),
+      Effect.runPromise,
+    );
+
+    expect(assessmentCalls).toBe(1);
+    expect(implementationCalls).toBe(2);
+  });
+
   test("turns an invalid or missing complexity decision into a failed outcome", async () => {
     let workflowCalls = 0;
     const context = { issue: { number: 42 } } as IssueExecutionContext;
