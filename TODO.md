@@ -250,9 +250,9 @@ enough to implement, review, and commit independently.
 - [x] Add an opt-in real OpenCode implementation/review smoke test in a disposable
       repository.
 - [x] Add an opt-in GitHub integration test against a dedicated test repository.
-- [ ] Run a one-issue dry run against `beremaran/opencode-goal` (the live
-      mutation-free run succeeded on 2026-08-24, but the repository had zero
-      open issues to assess).
+- [x] Run a one-issue dry run against a live repository (`beremaran/issue-ralphing`
+      issue #28 was assessed at complexity 1 and routed to implementation without
+      mutation on 2026-08-24; `beremaran/opencode-goal` had no open issues).
 - [x] Run a disposable end-to-end issue through implementation, review, commit,
       and push.
 - [x] Run a disposable end-to-end decomposition and verify all links and closure.
