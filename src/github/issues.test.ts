@@ -29,6 +29,8 @@ describe("GitHub issues", () => {
             number: 12,
             title: "First issue",
             html_url: "https://github.com/owner/repository/issues/12",
+            body: "Issue body",
+            labels: ["bug", { name: "priority" }, { name: null }],
           },
           {
             number: 13,
@@ -58,6 +60,8 @@ describe("GitHub issues", () => {
         number: 12,
         title: "First issue",
         url: "https://github.com/owner/repository/issues/12",
+        body: "Issue body",
+        labels: ["bug", "priority"],
       },
     ]);
   });

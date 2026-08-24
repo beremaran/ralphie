@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Exit, Layer } from "effect";
+import type { OpencodeClient } from "@opencode-ai/sdk";
 import type { Octokit } from "octokit";
 
 import { GitRepository } from "./git/repository.ts";
 import { GitHubClient } from "./github/client.ts";
 import { GitHubIssues } from "./github/issues.ts";
+import { IssuePipeline } from "./issues/pipeline.ts";
 import { OpenCode } from "./opencode/server.ts";
 import { RalphieError } from "./shared/error.ts";
 import { Workspace } from "./workspace/workspace.ts";
@@ -54,8 +56,33 @@ function testRuntime(calls: string[], options: TestRuntimeOptions = {}) {
             number: 42,
             title: "Test issue",
             url: "https://github.com/owner/repo/issues/42",
+            body: "Test body",
+            labels: ["bug"],
+          },
+          {
+            number: 43,
+            title: "Second issue",
+            url: "https://github.com/owner/repo/issues/43",
+            body: null,
+            labels: [],
           },
         ]);
+      },
+    }),
+    Layer.succeed(IssuePipeline, {
+      plan: ({ issue, repositoryPath, baseBranch }) => {
+        calls.push(`planIssue:${issue.number}:${repositoryPath}:${baseBranch}`);
+        return Effect.succeed({
+          issue,
+          repositoryPath,
+          baseBranch,
+          issueBranch: `ralphie/issue-${issue.number}`,
+          stages: [
+            { kind: "opencode-session", purpose: "plan" },
+            { kind: "opencode-session", purpose: "implement" },
+            { kind: "git-task", action: "commit" },
+          ],
+        });
       },
     }),
     Layer.succeed(OpenCode, {
@@ -65,6 +92,7 @@ function testRuntime(calls: string[], options: TestRuntimeOptions = {}) {
             calls.push("startServer");
             return {
               url: "http://127.0.0.1:4096",
+              client: {} as OpencodeClient,
               close: () => calls.push("closeServer"),
             };
         }),
@@ -87,7 +115,7 @@ describe("workflow", () => {
     await workflow({
       repo: "owner/repo",
       branch: "develop",
-      maxIssues: 5,
+      maxIssues: 1,
       issueFilters: { labels: ["bug"], sort: "created", order: "asc" },
       workspace: "/tmp/ralphie",
       cleanup: true,
@@ -104,6 +132,7 @@ describe("workflow", () => {
       "prepareRepository:owner/repo:develop:/tmp/ralphie",
       "listIssues:owner/repo:bug:created:asc",
       "startServer",
+      "planIssue:42:/tmp/ralphie/repo:develop",
       "closeServer",
       "removeWorkspace:/tmp/ralphie",
     ]);

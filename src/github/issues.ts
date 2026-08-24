@@ -20,6 +20,8 @@ export type GitHubIssue = {
   readonly number: number;
   readonly title: string;
   readonly url: string;
+  readonly body: string | null;
+  readonly labels: ReadonlyArray<string>;
 };
 
 export type GitHubIssuesService = {
@@ -57,6 +59,10 @@ export const GitHubIssuesLive = Layer.succeed(GitHubIssues, {
             number: issue.number,
             title: issue.title,
             url: issue.html_url,
+            body: issue.body ?? null,
+            labels: issue.labels.flatMap((label) =>
+              typeof label === "string" ? [label] : label.name ? [label.name] : [],
+            ),
           }));
       },
       catch: (cause) =>

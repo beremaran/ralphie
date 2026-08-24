@@ -6,6 +6,7 @@ import {
   GitHubIssues,
   type IssueFilters,
 } from "./github/issues.ts";
+import { IssuePipeline, selectIssues } from "./issues/pipeline.ts";
 import { OpenCode, type OpenCodeServer } from "./opencode/server.ts";
 import { Workspace } from "./workspace/workspace.ts";
 
@@ -71,14 +72,36 @@ export const workflow = ({
     } else {
       yield* Console.log("No open issues match the current filters.");
     }
+    const selectedIssues = selectIssues(issues, maxIssues);
+    yield* Console.log(`Issues selected for processing: ${selectedIssues.length}.`);
 
     const openCode = yield* OpenCode;
+    const issuePipeline = yield* IssuePipeline;
     yield* Effect.acquireUseRelease(
       openCode.start,
       (server) =>
-        Console.log(
-          `OpenCode server started at ${server.url}.\nReady for ${repo} on branch ${branch}.\nWorkspace: ${workspace}.\nIssue limit: ${maxIssues ?? "unlimited"}.`,
-        ),
+        Effect.gen(function* () {
+          yield* Console.log(
+            `OpenCode server started at ${server.url}.\nReady for ${repo} on branch ${branch}.\nWorkspace: ${workspace}.\nIssue limit: ${maxIssues ?? "unlimited"}.`,
+          );
+
+          yield* Effect.forEach(selectedIssues, (issue) =>
+            Effect.gen(function* () {
+              const plan = yield* issuePipeline.plan({
+                issue,
+                repositoryPath: prepared.path,
+                baseBranch: branch,
+              });
+              const sessionCount = plan.stages.filter(
+                (stage) => stage.kind === "opencode-session",
+              ).length;
+              const deterministicCount = plan.stages.length - sessionCount;
+              yield* Console.log(
+                `Prepared issue #${issue.number}: ${sessionCount} OpenCode sessions and ${deterministicCount} deterministic tasks.`,
+              );
+            }),
+          );
+        }),
       closeServer,
     );
 

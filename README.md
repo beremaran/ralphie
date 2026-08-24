@@ -65,6 +65,7 @@ Functionality is grouped by domain under `src/`:
 
 - `github/` owns GitHub CLI authentication and Octokit initialization.
 - `git/` owns repository cloning, validation, cleanup, and branch preparation.
+- `issues/` owns issue selection and the per-issue execution pipeline.
 - `opencode/` owns the OpenCode server lifecycle.
 - `workspace/` owns workspace path resolution and safe removal.
 - `process/` owns external command execution.
@@ -72,3 +73,8 @@ Functionality is grouped by domain under `src/`:
 
 `workflow.ts` orchestrates these domain services, while `runtime.ts` assembles
 their live Effect layers.
+
+The issue pipeline currently prepares a typed sequence for each selected issue:
+deterministic Git branch preparation, a GitHub status action, separate planning
+and implementation OpenCode sessions, Git validation and commit tasks, and a
+final GitHub publication action. Stage execution will be implemented next.
