@@ -25,6 +25,7 @@ const outcomeSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal(IssueExecutionOutcomeKind.Completed),
     commitSha: z.string().min(1),
+    reviewCount: z.number().int().positive().optional(),
   }),
   z.object({
     kind: z.literal(IssueExecutionOutcomeKind.Decomposed),

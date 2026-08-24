@@ -25,6 +25,8 @@ export type IssueExecutionOutcome =
       readonly kind: IssueExecutionOutcomeKind.Completed;
       /** The commit created for the issue's implementation. */
       readonly commitSha: string;
+      /** Number of structured review decisions required to converge. */
+      readonly reviewCount?: number;
     }
   | {
       readonly kind: IssueExecutionOutcomeKind.Decomposed;

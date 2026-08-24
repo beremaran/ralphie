@@ -96,37 +96,37 @@ enough to implement, review, and commit independently.
 
 ## 6. Implementation workflow
 
-- [ ] Run the implementation agent in a fresh session on the prepared checkout.
-- [ ] Check agent session success before inspecting changes.
-- [ ] Verify the agent did not create commits or switch branches.
-- [ ] Stage all changes deterministically after implementation.
-- [ ] Start review attempt 1 using the staged diff.
-- [ ] Validate review output with `reviewDecisionSchema`.
-- [ ] Treat `approved` as convergence, including reviews with only non-blocking
+- [x] Run the implementation agent in a fresh session on the prepared checkout.
+- [x] Check agent session success before inspecting changes.
+- [x] Verify the agent did not create commits or switch branches.
+- [x] Stage all changes deterministically after implementation.
+- [x] Start review attempt 1 using the staged diff.
+- [x] Validate review output with `reviewDecisionSchema`.
+- [x] Treat `approved` as convergence, including reviews with only non-blocking
       findings.
-- [ ] For `changes_requested`, start a fresh review-fix session with the review.
-- [ ] Restage all changes after each review-fix session.
-- [ ] Repeat review/fix for at most `REVIEW_ITERATION_LIMIT` reviews.
-- [ ] Do not run another fix session after the fifth rejected review.
-- [ ] Emit attempt/max-attempt progress on every review and fix.
-- [ ] Preserve every review decision and session ID in order.
-- [ ] Generate and validate a commit message after approval.
-- [ ] Commit and push using deterministic Git operations.
-- [ ] Return a completed outcome containing commit SHA and review count.
-- [ ] Add tests for first-pass approval, approval after fixes, no-change output,
+- [x] For `changes_requested`, start a fresh review-fix session with the review.
+- [x] Restage all changes after each review-fix session.
+- [x] Repeat review/fix for at most `REVIEW_ITERATION_LIMIT` reviews.
+- [x] Do not run another fix session after the fifth rejected review.
+- [x] Emit attempt/max-attempt progress on every review and fix.
+- [x] Preserve every review decision and session ID in order.
+- [x] Generate and validate a commit message after approval.
+- [x] Commit and push using deterministic Git operations.
+- [x] Return a completed outcome containing commit SHA and review count.
+- [x] Add tests for first-pass approval, approval after fixes, no-change output,
       agent failure, review failure, commit failure, and push failure.
 
 ## 7. Review-exhaustion escalation
 
-- [ ] Invoke `IssueRecovery.handleReviewExhaustion` after the fifth rejected
+- [x] Invoke `IssueRecovery.handleReviewExhaustion` after the fifth rejected
       review.
-- [ ] Confirm the recovery bundle contains the complete staged binary patch.
-- [ ] Confirm metadata contains all five decisions and session IDs.
-- [ ] Halt without reset if diagnostic preservation fails.
-- [ ] Halt if checkout restoration cannot be verified.
+- [x] Confirm the recovery bundle contains the complete staged binary patch.
+- [x] Confirm metadata contains all five decisions and session IDs.
+- [x] Halt without reset if diagnostic preservation fails.
+- [x] Halt if checkout restoration cannot be verified.
 - [ ] Select the decomposition workflow explicitly after successful restoration.
-- [ ] Pass failed-review context to the decomposition agent.
-- [ ] Report escalation as a successful issue transition, not a successful code
+- [x] Pass failed-review context to the decomposition agent.
+- [x] Report escalation as a successful issue transition, not a successful code
       implementation.
 - [ ] Add an integration test covering implementation, five rejected reviews,
       restore, and decomposition handoff.

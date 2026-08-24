@@ -42,6 +42,19 @@ export const GitIssuePreparationLive = Layer.effect(
             input.branch,
           );
           const artifacts = yield* artifactStores.forIssue(input.issueNumber);
+          if (artifacts.has(IssueArtifactKind.IssueCheckpoint)) {
+            const existing = yield* artifacts.read(IssueArtifactKind.IssueCheckpoint);
+            if (
+              existing.branch !== checkpoint.branch ||
+              existing.sha.toLowerCase() !== checkpoint.sha.toLowerCase()
+            ) {
+              return yield* new RalphieError({
+                message:
+                  `Issue ${input.issueNumber} already has a different clean issue-base checkpoint.`,
+              });
+            }
+            return checkpoint;
+          }
           yield* artifacts.write(IssueArtifactKind.IssueCheckpoint, checkpoint);
           return checkpoint;
         }),

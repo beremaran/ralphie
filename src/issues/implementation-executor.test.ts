@@ -1,0 +1,401 @@
+import { describe, expect, test } from "bun:test";
+import type { OpencodeClient } from "@opencode-ai/sdk/v2";
+import { Effect, Exit, Layer } from "effect";
+import type { Octokit } from "octokit";
+
+import {
+  IssueArtifactKind,
+  type IssueArtifactStore,
+  makeIssueArtifactStore,
+} from "./artifacts.ts";
+import {
+  GitIssueOperations,
+  type GitIssueOperationsService,
+  GitPushError,
+  GitPushFailureKind,
+  GitRemoteMovementPolicy,
+} from "../git/issue-operations.ts";
+import {
+  GitIssuePreparation,
+  type GitIssuePreparationService,
+} from "../git/issue-preparation.ts";
+import {
+  IssueExecutionOutcomeKind,
+  type IssueExecutionContext,
+} from "./execution.ts";
+import type { WorkflowExecutorResult } from "./workflow-executor-input.ts";
+import {
+  ImplementationExecutor,
+  ImplementationExecutorLive,
+} from "./implementation-executor.ts";
+import {
+  IssueRecovery,
+  ReviewExhaustionOutcome,
+  type IssueRecoveryService,
+} from "./recovery.ts";
+import {
+  IssueQueueResumeStrategy,
+  IssueWorkflowKind,
+} from "./stage.ts";
+import { RalphieError } from "../shared/error.ts";
+import { makeOpenCodeSessionDiagnostics } from "../opencode/task-session.ts";
+import {
+  makeProgressRecorderLayer,
+  type ProgressUpdate,
+} from "../progress/progress.ts";
+import type { IssueCheckpoint } from "../git/issue-checkpoint.ts";
+
+const checkpoint: IssueCheckpoint = {
+  branch: "main",
+  sha: "0123456789abcdef0123456789abcdef01234567",
+};
+
+const review = (verdict: "approved" | "changes_requested") => ({
+  verdict,
+  summary: verdict === "approved" ? "The change is safe." : "Fix the blocker.",
+  findings:
+    verdict === "approved"
+      ? []
+      : [
+          {
+            severity: "blocking" as const,
+            description: "The implementation misses an edge case.",
+          },
+        ],
+});
+
+const issueContext = (
+  openCode: OpencodeClient,
+  verify: IssueExecutionContext["repositoryInvariant"]["verify"] = () =>
+    Effect.void,
+): IssueExecutionContext => ({
+  issue: {
+    number: 42,
+    title: "Fix token refresh",
+    url: "https://github.com/owner/repository/issues/42",
+    body: "Refresh expired tokens.",
+    labels: ["bug"],
+  },
+  repository: "owner/repository",
+  repositoryPath: "/workspace/repository",
+  targetBranch: "main",
+  workspace: "/workspace",
+  runId: "run-1",
+  octokit: {} as Octokit,
+  openCode,
+  openCodeSelection: { agent: "build" },
+  openCodeDiagnostics: makeOpenCodeSessionDiagnostics(() => "now"),
+  repositoryInvariant: {
+    capture: () => Effect.succeed({ branch: checkpoint.branch, head: checkpoint.sha }),
+    verify,
+  },
+});
+
+const openCodeClient = (
+  outputs: ReadonlyArray<unknown>,
+  sessions?: string[],
+) => {
+  let index = 0;
+  let sessionIndex = 0;
+  const client = {
+    session: {
+      create: async () => {
+        const sessionID = `session-${++sessionIndex}`;
+        sessions?.push(sessionID);
+        return { data: { id: sessionID } };
+      },
+      prompt: async (parameters: { format?: unknown }) => {
+        const output = outputs[index++];
+        return {
+          data: {
+            info:
+              parameters.format === undefined
+                ? {}
+                : { structured: output },
+            parts: [],
+          },
+        };
+      },
+    },
+  };
+  return client as unknown as OpencodeClient;
+};
+
+const services = (options: {
+  readonly preparation?: Partial<GitIssuePreparationService>;
+  readonly operations?: Partial<GitIssueOperationsService>;
+  readonly recovery?: Partial<IssueRecoveryService>;
+  readonly progress?: ProgressUpdate[];
+}) => {
+  const preparation: GitIssuePreparationService = {
+    prepare: () => Effect.succeed(checkpoint),
+    ...options.preparation,
+  };
+  const operations: GitIssueOperationsService = {
+    stageAll: () => Effect.void,
+    readStagedBinaryDiff: () => Effect.succeed("diff --git a/file b/file\n"),
+    hasStagedChanges: () => Effect.succeed(true),
+    commit: () => Effect.succeed({ sha: "commit-1", treeSha: "tree-1" }),
+    push: () => Effect.void,
+    ...options.operations,
+  };
+  const recovery: IssueRecoveryService = {
+    handleReviewExhaustion: () =>
+      Effect.succeed({
+        outcome: ReviewExhaustionOutcome.EscalatedToDecomposition,
+        diagnosticsPath: "/workspace/review-exhaustion",
+        nextWorkflow: IssueWorkflowKind.Decomposition,
+        resume: IssueQueueResumeStrategy.RefreshOpenIssues,
+      }),
+    ...options.recovery,
+  };
+  return {
+    layer: Layer.merge(
+      Layer.succeed(GitIssuePreparation, preparation),
+      Layer.merge(
+        Layer.succeed(GitIssueOperations, operations),
+        Layer.merge(
+          Layer.succeed(IssueRecovery, recovery),
+          makeProgressRecorderLayer(options.progress ?? []),
+        ),
+      ),
+    ),
+    preparation,
+    operations,
+    recovery,
+  };
+};
+
+const run = (
+  client: OpencodeClient,
+  artifacts: IssueArtifactStore,
+  layer: Layer.Layer.Any,
+  verify?: IssueExecutionContext["repositoryInvariant"]["verify"],
+) =>
+  Effect.gen(function* () {
+    const executor = yield* ImplementationExecutor;
+    return yield* executor.execute({
+      context: issueContext(client, verify),
+      artifacts,
+    });
+  }).pipe(
+    Effect.provide(ImplementationExecutorLive),
+    Effect.provide(layer as any),
+  ) as Effect.Effect<WorkflowExecutorResult, RalphieError, never>;
+
+describe("implementation executor", () => {
+  test("implements, reviews, commits, and pushes after first-pass approval", async () => {
+    const events: ProgressUpdate[] = [];
+    const setup = services({ progress: events });
+    const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
+    const result = await Effect.runPromise(
+      run(
+        openCodeClient([undefined, review("approved"), { subject: "fix token refresh" }]),
+        artifacts,
+        setup.layer,
+      ),
+    );
+
+    expect(result).toEqual({
+      kind: IssueExecutionOutcomeKind.Completed,
+      commitSha: "commit-1",
+      reviewCount: 1,
+    });
+    expect(await Effect.runPromise(artifacts.read(IssueArtifactKind.ReviewAttempts))).toHaveLength(1);
+    expect(await Effect.runPromise(artifacts.read(IssueArtifactKind.CommitMessageDecision))).toEqual({
+      subject: "fix token refresh",
+    });
+    expect(events.some((event) => event.stage === "review" && event.status === "succeeded")).toBe(true);
+  });
+
+  test("starts a fresh review-fix session and converges after a requested change", async () => {
+    const sessions: string[] = [];
+    const setup = services({
+      operations: {
+        hasStagedChanges: () => Effect.succeed(true),
+      },
+    });
+    const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
+    const result = await Effect.runPromise(
+      run(
+        openCodeClient(
+          [undefined, review("changes_requested"), undefined, review("approved"), { subject: "fix token refresh" }],
+          sessions,
+        ),
+        artifacts,
+        setup.layer,
+      ),
+    );
+
+    expect(result).toMatchObject({
+      kind: IssueExecutionOutcomeKind.Completed,
+      reviewCount: 2,
+    });
+    expect(sessions).toHaveLength(5);
+    expect(await Effect.runPromise(artifacts.read(IssueArtifactKind.ReviewAttempts))).toHaveLength(2);
+  });
+
+  test("returns skipped without review or commit when implementation makes no changes", async () => {
+    let commitCalled = false;
+    let reviewPrompted = false;
+    const setup = services({
+      operations: {
+        hasStagedChanges: () => Effect.succeed(false),
+        commit: () => {
+          commitCalled = true;
+          return Effect.succeed({ sha: "commit-1", treeSha: "tree-1" });
+        },
+      },
+    });
+    const client = openCodeClient([]);
+    const originalPrompt = client.session.prompt;
+    client.session.prompt = (async (parameters: { format?: unknown }) => {
+      if (parameters.format !== undefined) reviewPrompted = true;
+      return originalPrompt(parameters as never);
+    }) as unknown as typeof client.session.prompt;
+    const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
+    const result = await Effect.runPromise(run(client, artifacts, setup.layer));
+
+    expect(result).toEqual({
+      kind: IssueExecutionOutcomeKind.Skipped,
+      reason: "Implementation agent produced no changes.",
+    });
+    expect(commitCalled).toBe(false);
+    expect(reviewPrompted).toBe(false);
+  });
+
+  test("fails when the implementation agent fails", async () => {
+    const client = {
+      session: {
+        create: async () => ({ data: { id: "implementation" } }),
+        prompt: async () => ({
+          data: {
+            info: {
+              error: { name: "MessageOutputLengthError", data: { message: "too long" } },
+            },
+            parts: [],
+          },
+        }),
+      },
+    } as unknown as OpencodeClient;
+    const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
+    const exit = await Effect.runPromiseExit(
+      run(client, artifacts, services({}).layer),
+    );
+
+    expect(Exit.isFailure(exit)).toBe(true);
+  });
+
+  test("fails when a review response is invalid", async () => {
+    const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
+    const exit = await Effect.runPromiseExit(
+      run(openCodeClient([{ verdict: "invalid" }]), artifacts, services({}).layer),
+    );
+
+    expect(Exit.isFailure(exit)).toBe(true);
+    expect(artifacts.has(IssueArtifactKind.ReviewAttempts)).toBe(false);
+  });
+
+  test("fails without pushing when deterministic commit fails", async () => {
+    let pushed = false;
+    const setup = services({
+      operations: {
+        commit: () => Effect.fail(new RalphieError({ message: "commit failed" })),
+        push: () => {
+          pushed = true;
+          return Effect.void;
+        },
+      },
+    });
+    const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
+    const exit = await Effect.runPromiseExit(
+      run(openCodeClient([undefined, review("approved"), { subject: "fix" }]), artifacts, setup.layer),
+    );
+
+    expect(Exit.isFailure(exit)).toBe(true);
+    expect(pushed).toBe(false);
+  });
+
+  test("fails when push is rejected", async () => {
+    const setup = services({
+      operations: {
+        push: () =>
+          Effect.fail(
+            new GitPushError({
+              kind: GitPushFailureKind.NonFastForward,
+              policy: GitRemoteMovementPolicy.Halt,
+              branch: "main",
+              message: "rejected",
+            }),
+          ),
+      },
+    });
+    const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
+    const exit = await Effect.runPromiseExit(
+      run(openCodeClient([undefined, review("approved"), { subject: "fix" }]), artifacts, setup.layer),
+    );
+
+    expect(Exit.isFailure(exit)).toBe(true);
+  });
+
+  test("escalates after five rejected reviews without fixing or committing after the fifth", async () => {
+    let fixCount = 0;
+    let commitCalled = false;
+    let recoveryInput: number | undefined;
+    const setup = services({
+      recovery: {
+        handleReviewExhaustion: (input) => {
+          recoveryInput = input.reviews.length;
+          return Effect.succeed({
+            outcome: ReviewExhaustionOutcome.EscalatedToDecomposition,
+            diagnosticsPath: "/workspace/recovery",
+            nextWorkflow: IssueWorkflowKind.Decomposition,
+            resume: IssueQueueResumeStrategy.RefreshOpenIssues,
+          });
+        },
+      },
+      operations: {
+        commit: () => {
+          commitCalled = true;
+          return Effect.succeed({ sha: "commit-1", treeSha: "tree-1" });
+        },
+      },
+    });
+    const client = openCodeClient([
+      undefined,
+      review("changes_requested"),
+      undefined,
+      review("changes_requested"),
+      undefined,
+      review("changes_requested"),
+      undefined,
+      review("changes_requested"),
+      undefined,
+      review("changes_requested"),
+    ]);
+    const originalPrompt = client.session.prompt;
+    client.session.prompt = (async (parameters: {
+      format?: unknown;
+      parts?: ReadonlyArray<{ text: string }>;
+    }) => {
+      if (
+        parameters.format === undefined &&
+        parameters.parts?.[0]?.text.includes("Address the blocking findings")
+      ) {
+        fixCount += 1;
+      }
+      return originalPrompt(parameters as never);
+    }) as unknown as typeof client.session.prompt;
+    const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
+    const result = await Effect.runPromise(run(client, artifacts, setup.layer));
+
+    expect(result).toEqual({
+      kind: IssueExecutionOutcomeKind.Escalated,
+      diagnosticsPath: "/workspace/recovery",
+      reason: "Review did not converge within the review iteration budget.",
+    });
+    expect(recoveryInput).toBe(5);
+    expect(fixCount).toBe(4);
+    expect(commitCalled).toBe(false);
+  });
+});
