@@ -48,9 +48,26 @@ export const IssueExecutorLive = Layer.effect(
           );
 
           const input = { context, artifacts };
-          return assessment.decision.complexity <= ComplexityLevel.Level3
-            ? yield* implementationExecutor.execute(input)
-            : yield* decompositionExecutor.execute(input);
+          if (assessment.decision.complexity >= ComplexityLevel.Level4) {
+            return yield* decompositionExecutor.execute(input);
+          }
+
+          const implementation = yield* implementationExecutor.execute(input);
+          if (implementation.kind !== IssueExecutionOutcomeKind.Escalated) {
+            return implementation;
+          }
+
+          const decomposition = yield* decompositionExecutor.execute(input);
+          if (decomposition.kind !== IssueExecutionOutcomeKind.Decomposed) {
+            return {
+              kind: IssueExecutionOutcomeKind.Failed,
+              message: "Review escalation did not complete decomposition.",
+            } as const;
+          }
+          return {
+            ...implementation,
+            childIssueNumbers: decomposition.childIssueNumbers,
+          };
         }).pipe(
           Effect.catchTag("RalphieError", (error) =>
             Effect.succeed({

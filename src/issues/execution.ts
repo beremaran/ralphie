@@ -38,6 +38,8 @@ export type IssueExecutionOutcome =
       /** Where recovery diagnostics for the escalation were written. */
       readonly diagnosticsPath: string;
       readonly reason: string;
+      /** Child issues created after the restored checkout entered decomposition. */
+      readonly childIssueNumbers?: ReadonlyArray<number>;
     }
   | {
       readonly kind: IssueExecutionOutcomeKind.Skipped;

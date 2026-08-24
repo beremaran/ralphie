@@ -156,4 +156,52 @@ describe("IssueExecutor", () => {
     });
     expect(workflowCalls).toBe(0);
   });
+
+  test("hands a restored review escalation to decomposition", async () => {
+    const context = { issue: { number: 42 } } as IssueExecutionContext;
+    const dependencies = Layer.mergeAll(
+      IssueArtifactStoreLive,
+      Layer.succeed(ComplexityAssessment, {
+        assess: () =>
+          Effect.succeed({
+            decision: {
+              complexity: ComplexityLevel.Level3,
+              rationale: "Implementation is appropriate.",
+            },
+            sessionID: "complexity-session",
+          }),
+      }),
+      Layer.succeed(ImplementationExecutor, {
+        execute: () =>
+          Effect.succeed({
+            kind: IssueExecutionOutcomeKind.Escalated,
+            diagnosticsPath: "/workspace/diagnostics",
+            reason: "Review budget exhausted.",
+          }),
+      }),
+      Layer.succeed(DecompositionExecutor, {
+        execute: () =>
+          Effect.succeed({
+            kind: IssueExecutionOutcomeKind.Decomposed,
+            childIssueNumbers: [101, 102],
+          }),
+      }),
+    );
+
+    const outcome = await Effect.gen(function* () {
+      const executor = yield* IssueExecutor;
+      return yield* executor.execute(context);
+    }).pipe(
+      Effect.provide(IssueExecutorLive),
+      Effect.provide(dependencies),
+      Effect.runPromise,
+    );
+
+    expect(outcome).toEqual({
+      kind: IssueExecutionOutcomeKind.Escalated,
+      diagnosticsPath: "/workspace/diagnostics",
+      reason: "Review budget exhausted.",
+      childIssueNumbers: [101, 102],
+    });
+  });
 });

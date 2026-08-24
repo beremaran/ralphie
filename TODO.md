@@ -124,7 +124,7 @@ enough to implement, review, and commit independently.
 - [x] Confirm metadata contains all five decisions and session IDs.
 - [x] Halt without reset if diagnostic preservation fails.
 - [x] Halt if checkout restoration cannot be verified.
-- [ ] Select the decomposition workflow explicitly after successful restoration.
+- [x] Select the decomposition workflow explicitly after successful restoration.
 - [x] Pass failed-review context to the decomposition agent.
 - [x] Report escalation as a successful issue transition, not a successful code
       implementation.

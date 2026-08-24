@@ -35,6 +35,7 @@ const outcomeSchema = z.discriminatedUnion("kind", [
     kind: z.literal(IssueExecutionOutcomeKind.Escalated),
     diagnosticsPath: z.string().min(1),
     reason: z.string().min(1),
+    childIssueNumbers: z.array(z.number().int().positive()).optional(),
   }),
   z.object({
     kind: z.literal(IssueExecutionOutcomeKind.Skipped),
