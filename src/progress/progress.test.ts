@@ -39,6 +39,7 @@ describe("progress reporting", () => {
     }).pipe(
       (effect) =>
         withProgressContext(effect, {
+          project: "project-a",
           repository: "owner/repo",
           repositoryRunId: "repository-run-1",
         }),
@@ -52,6 +53,7 @@ describe("progress reporting", () => {
       stage: ProgressStage.Review,
       status: ProgressStatus.Started,
       message: "Reviewing changes...",
+      project: "project-a",
       repository: "owner/repo",
       repositoryRunId: "repository-run-1",
       issue: { number: 42, title: "Fix issue" },

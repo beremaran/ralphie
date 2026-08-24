@@ -1,217 +1,193 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { IssueOrder, IssueSort } from "../github/issues.ts";
 import {
   DEFAULT_BRANCH,
   DEFAULT_WORKSPACE,
+  IMPLICIT_PROJECT_NAME,
   RalphieConfigFile,
   RalphieConfigFileLive,
+  RepositoryTargetKind,
   resolveRalphieConfig,
-  resolveRalphieConfigs,
 } from "./config.ts";
 
-describe("Ralphie JSON config", () => {
-  test("applies defaults when only the repository is configured", () => {
-    expect(resolveRalphieConfig({ repo: "owner/repo" }, {})).toEqual({
-      repo: "owner/repo",
-      branch: DEFAULT_BRANCH,
-      issueLabels: [],
-      issueSort: IssueSort.Created,
-      issueOrder: IssueOrder.Ascending,
-      agent: "build",
+describe("hierarchical Ralphie JSON config", () => {
+  test("synthesizes an implicit project for a positional repository", () => {
+    expect(resolveRalphieConfig({}, { repo: "owner/repo" })).toEqual({
+      projects: [
+        {
+          name: IMPLICIT_PROJECT_NAME,
+          targets: [
+            {
+              kind: RepositoryTargetKind.Explicit,
+              repo: "owner/repo",
+              branch: DEFAULT_BRANCH,
+              issueLabels: [],
+              issueSort: IssueSort.Created,
+              issueOrder: IssueOrder.Ascending,
+              agent: "build",
+              dryRun: false,
+            },
+          ],
+        },
+      ],
       workspace: DEFAULT_WORKSPACE,
       cleanup: false,
       startClean: false,
-      dryRun: false,
       verbose: false,
       json: false,
       quiet: false,
     });
   });
 
-  test("lets explicit CLI values override file values, including false", () => {
+  test("applies built-in, top-level, project, repository, then CLI precedence", () => {
     const resolved = resolveRalphieConfig(
       {
-        repo: "file/repo",
-        branch: "develop",
-        maxIssues: 10,
-        issueLabels: ["bug"],
-        cleanup: true,
-        model: { providerID: "openai", modelID: "gpt-5" },
+        git: { branch: "top" },
+        issues: {
+          limit: 20,
+          sort: { by: IssueSort.Updated, order: IssueOrder.Descending },
+          filter: { labels: ["top"] },
+        },
+        agent: {
+          model: { id: { providerID: "openai", modelID: "gpt-5" }, variant: "low" },
+          mode: "top-agent",
+        },
+        projects: [
+          {
+            name: "project-a",
+            git: { branch: "project" },
+            issues: {
+              limit: 10,
+              sort: { order: IssueOrder.Ascending },
+              filter: { labels: ["project"] },
+            },
+            agent: { model: { variant: "high" } },
+            repositories: [
+              {
+                repo: "owner/repo",
+                git: { branch: "repository" },
+                issues: { limit: 5 },
+                agent: { mode: "repository-agent" },
+              },
+            ],
+          },
+        ],
       },
-      {
-        repo: "cli/repo",
-        branch: "main",
-        maxIssues: 2,
-        issueLabels: ["urgent"],
-        cleanup: false,
-      },
+      { branch: "cli", maxIssues: 2, issueLabels: ["cli"], agent: "cli-agent" },
     );
 
-    expect(resolved).toMatchObject({
-      repo: "cli/repo",
-      branch: "main",
+    expect(resolved.projects[0]?.targets[0]).toMatchObject({
+      repo: "owner/repo",
+      branch: "cli",
       maxIssues: 2,
-      issueLabels: ["urgent"],
-      cleanup: false,
+      issueLabels: ["cli"],
+      issueSort: IssueSort.Updated,
+      issueOrder: IssueOrder.Ascending,
+      agent: "cli-agent",
       model: { providerID: "openai", modelID: "gpt-5" },
+      modelVariant: "high",
     });
   });
 
-  test("requires a repository after merging both sources", () => {
-    expect(() => resolveRalphieConfig({}, {})).toThrow("Missing repository");
-  });
-
-  test("rejects incompatible output modes after merging", () => {
-    expect(() =>
-      resolveRalphieConfig({ repo: "owner/repo", json: true }, { quiet: true }),
-    ).toThrow("cannot be enabled together");
-  });
-
-  test("resolves repository entries in order with shared defaults and local overrides", () => {
-    expect(
-      resolveRalphieConfigs(
-        {
-          branch: "develop",
-          maxIssues: 10,
-          repositories: [
-            { repo: "owner/frontend", issueLabels: ["frontend"] },
-            { repo: "owner/backend", branch: "release", maxIssues: 2 },
-          ],
-        },
-        { agent: "reviewer" },
-      ),
-    ).toMatchObject([
+  test("preserves an unresolved repository pattern with inherited settings", () => {
+    const resolved = resolveRalphieConfig(
       {
-        repo: "owner/frontend",
-        branch: "develop",
-        maxIssues: 10,
-        issueLabels: ["frontend"],
-        agent: "reviewer",
-      },
-      {
-        repo: "owner/backend",
-        branch: "release",
-        maxIssues: 2,
-        agent: "reviewer",
-      },
-    ]);
-  });
-
-  test("applies explicit CLI overrides to every configured repository", () => {
-    const resolved = resolveRalphieConfigs(
-      {
-        repositories: [
-          { repo: "owner/one", branch: "one" },
-          { repo: "owner/two", branch: "two" },
+        git: { branch: "main" },
+        projects: [
+          {
+            name: "finance",
+            repoPattern: "beremaran/finance-*",
+            issues: { limit: 3 },
+          },
         ],
       },
-      { branch: "cli", cleanup: true },
+      {},
     );
-
-    expect(resolved.map(({ branch }) => branch)).toEqual(["cli", "cli"]);
-    expect(resolved.every(({ cleanup }) => cleanup)).toBeTrue();
+    expect(resolved.projects[0]).toMatchObject({
+      name: "finance",
+      targets: [
+        {
+          kind: RepositoryTargetKind.Pattern,
+          repoPattern: "beremaran/finance-*",
+          branch: "main",
+          maxIssues: 3,
+        },
+      ],
+    });
   });
 
-  test("rejects ambiguous and duplicate repository configurations", () => {
+  test("rejects ambiguous projects, duplicate identities, and incompatible CLI use", () => {
     expect(() =>
-      resolveRalphieConfigs(
-        { repositories: [{ repo: "owner/one" }] },
-        { repo: "owner/positional" },
-      ),
-    ).toThrow("positional repository");
-    expect(() =>
-      resolveRalphieConfigs(
+      resolveRalphieConfig(
         {
-          repositories: [{ repo: "owner/one" }, { repo: "OWNER/ONE" }],
+          projects: [
+            { name: "same", repositories: [{ repo: "owner/one" }] },
+            { name: "SAME", repositories: [{ repo: "owner/two" }] },
+          ],
         },
         {},
       ),
-    ).toThrow("must be unique");
+    ).toThrow("project name must be unique");
     expect(() =>
-      resolveRalphieConfigs(
-        { repositories: [{ repo: "owner/one" }, { repo: "owner/two" }] },
-        { resume: "/tmp/state.json" },
+      resolveRalphieConfig(
+        {
+          projects: [
+            { name: "one", repositories: [{ repo: "owner/repo" }] },
+            { name: "two", repositories: [{ repo: "OWNER/REPO" }] },
+          ],
+        },
+        {},
       ),
-    ).toThrow("resume separately");
+    ).toThrow("repository must be unique");
+    expect(() =>
+      resolveRalphieConfig(
+        { projects: [{ name: "one", repoPattern: "owner/*" }] },
+        { repo: "owner/repo" },
+      ),
+    ).toThrow("positional repository");
   });
 
-  test("loads and transforms a strict JSON file", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "ralphie-config-"));
-    const path = join(directory, "ralphie.json");
-    try {
-      await writeFile(
-        path,
-        JSON.stringify({
-          repo: "owner/repo",
-          maxIssues: 3,
-          model: "openai/gpt-5",
-        }),
-      );
-      const config = await Effect.gen(function* () {
-        const files = yield* RalphieConfigFile;
-        return yield* files.load(path);
-      }).pipe(Effect.provide(RalphieConfigFileLive), Effect.runPromise);
-
-      expect(config).toEqual({
-        repo: "owner/repo",
-        maxIssues: 3,
-        model: { providerID: "openai", modelID: "gpt-5" },
-      });
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
+  test("loads the published hierarchical example", async () => {
+    const config = await Effect.gen(function* () {
+      const files = yield* RalphieConfigFile;
+      return yield* files.load(join(import.meta.dir, "../../ralphie.example.json"));
+    }).pipe(Effect.provide(RalphieConfigFileLive), Effect.runPromise);
+    expect(config.projects?.map(({ name }) => name)).toEqual([
+      "proj-a",
+      "proj-b",
+      "lonely-repo",
+    ]);
   });
 
-  test("treats null optional values as unset", async () => {
+  test("accepts null optional settings as unset", async () => {
     const directory = await mkdtemp(join(tmpdir(), "ralphie-config-null-"));
     const path = join(directory, "ralphie.json");
     try {
       await writeFile(
         path,
         JSON.stringify({
-          repo: "owner/repo",
-          maxIssues: null,
-          issueLabels: null,
-          model: null,
-          cleanup: null,
+          issues: { limit: null, filter: { labels: null } },
+          projects: [{ name: "one", repositories: [{ repo: "owner/repo" }] }],
         }),
       );
-      const config = await Effect.gen(function* () {
+      const file = await Effect.gen(function* () {
         const files = yield* RalphieConfigFile;
         return yield* files.load(path);
       }).pipe(Effect.provide(RalphieConfigFileLive), Effect.runPromise);
-
-      expect(resolveRalphieConfig(config, {})).toMatchObject({
-        repo: "owner/repo",
-        issueLabels: [],
-        cleanup: false,
-      });
-      expect(resolveRalphieConfig(config, {}).maxIssues).toBeUndefined();
-      expect(resolveRalphieConfig(config, {}).model).toBeUndefined();
+      const target = resolveRalphieConfig(file, {}).projects[0]?.targets[0];
+      expect(target?.maxIssues).toBeUndefined();
+      expect(target?.issueLabels).toEqual([]);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
   });
 
-  test("keeps the published example valid", async () => {
-    const config = await Effect.gen(function* () {
-      const files = yield* RalphieConfigFile;
-      return yield* files.load(join(import.meta.dir, "../../ralphie.example.json"));
-    }).pipe(Effect.provide(RalphieConfigFileLive), Effect.runPromise);
-
-    expect(config.repositories?.map(({ repo }) => repo)).toEqual([
-      "owner/frontend",
-      "owner/backend",
-    ]);
-    expect(config.model).toEqual({ providerID: "openai", modelID: "gpt-5" });
-  });
-
-  test("explains malformed JSON and every schema violation", async () => {
+  test("reports malformed JSON, nested schema paths, and missing files", async () => {
     const directory = await mkdtemp(join(tmpdir(), "ralphie-config-invalid-"));
     try {
       const malformedPath = join(directory, "malformed.json");
@@ -225,31 +201,22 @@ describe("Ralphie JSON config", () => {
       const invalidPath = join(directory, "invalid.json");
       await writeFile(
         invalidPath,
-        JSON.stringify({
-          repositories: [{ repo: "owner/one" }, { repo: 42 }],
-          maxIssues: 0,
-          typo: true,
-        }),
+        JSON.stringify({ projects: [{ name: "one", repositories: [{ repo: 42 }] }] }),
       );
       const invalid = Effect.gen(function* () {
         const files = yield* RalphieConfigFile;
         return yield* files.load(invalidPath);
       }).pipe(Effect.provide(RalphieConfigFileLive), Effect.runPromise);
-      await expect(invalid).rejects.toThrow("maxIssues: Too small");
-      await expect(invalid).rejects.toThrow("repositories[1].repo");
-      await expect(invalid).rejects.toThrow('config: Unrecognized key: "typo"');
+      await expect(invalid).rejects.toThrow("projects[0].repositories[0].repo");
+
+      const missingPath = join(directory, "missing.json");
+      const missing = Effect.gen(function* () {
+        const files = yield* RalphieConfigFile;
+        return yield* files.load(missingPath);
+      }).pipe(Effect.provide(RalphieConfigFileLive), Effect.runPromise);
+      await expect(missing).rejects.toThrow("Config file not found");
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
-  });
-
-  test("distinguishes a missing config file", async () => {
-    const missingPath = join(tmpdir(), `missing-ralphie-${crypto.randomUUID()}.json`);
-    const missing = Effect.gen(function* () {
-      const files = yield* RalphieConfigFile;
-      return yield* files.load(missingPath);
-    }).pipe(Effect.provide(RalphieConfigFileLive), Effect.runPromise);
-
-    await expect(missing).rejects.toThrow(`Config file not found: ${missingPath}.`);
   });
 });

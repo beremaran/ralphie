@@ -11,6 +11,7 @@ import {
   GitHubIssueMutations,
 } from "./github/issue-mutations.ts";
 import { type GitHubIssue, GitHubIssues, type IssueFilters } from "./github/issues.ts";
+import { GitHubRepositoryPatterns } from "./github/repository-patterns.ts";
 import {
   IssueCompletionKind,
   IssueExecutionOutcomeKind,
@@ -144,6 +145,7 @@ const summarize = (
 };
 
 export type WorkflowOptions = {
+  readonly project?: string;
   readonly repo: string;
   readonly branch: string;
   readonly maxIssues?: number;
@@ -170,12 +172,22 @@ export type WorkflowSharedResources = {
 
 export type BatchWorkflowOptions = {
   readonly repositories: ReadonlyArray<WorkflowOptions>;
+  readonly repositoryPatterns?: ReadonlyArray<RepositoryPatternWorkflowOptions>;
   readonly workspace: string;
   readonly cleanup: boolean;
   readonly startClean: boolean;
 };
 
+export type RepositoryPatternWorkflowOptions = Omit<
+  WorkflowOptions,
+  "repo" | "resumeState" | "resumePath" | "runId" | "sharedResources"
+> & {
+  readonly project: string;
+  readonly repoPattern: string;
+};
+
 export const workflow = ({
+  project,
   repo,
   branch,
   maxIssues,
@@ -213,6 +225,7 @@ export const workflow = ({
       status: ProgressStatus.Info,
       message: `Ralphie started for ${repo} on ${branch}.`,
       details: {
+        ...(project === undefined ? {} : { project }),
         repository: repo,
         branch,
         workspace,
@@ -314,6 +327,7 @@ export const workflow = ({
       let checkout = yield* invariantService.capture(prepared.path);
       if (resumeState !== undefined) {
         const reconciliation = reconcileRunState(resumeState, {
+          ...(project === undefined ? {} : { project }),
           repository: repo,
           branch,
           git: checkout,
@@ -371,6 +385,7 @@ export const workflow = ({
           version: RUN_STATE_VERSION,
           status,
           runId: actualRunId,
+          ...(project === undefined ? {} : { project }),
           repository: repo,
           branch,
           dryRun: effectiveDryRun,
@@ -442,6 +457,7 @@ export const workflow = ({
                 `Executing #${issue.number} ${issue.title}...`,
                 issueExecutor.execute({
                   issue,
+                  ...(project === undefined ? {} : { project }),
                   repository: repo,
                   repositoryPath: prepared.path,
                   targetBranch: branch,
@@ -653,6 +669,7 @@ export const workflow = ({
 
 export const batchWorkflow = ({
   repositories,
+  repositoryPatterns = [],
   workspace,
   cleanup,
   startClean,
@@ -678,7 +695,8 @@ export const batchWorkflow = ({
       workspaceService.prepare(workspace),
       `Workspace ready: ${workspace}.`,
     );
-    yield* checkCancellation(repositories[0]?.signal);
+    const signal = repositories[0]?.signal ?? repositoryPatterns[0]?.signal;
+    yield* checkCancellation(signal);
 
     const github = yield* GitHubClient;
     const octokit = yield* track(
@@ -688,7 +706,42 @@ export const batchWorkflow = ({
       github.initialize,
       "GitHub authentication verified and Octokit initialized.",
     );
-    yield* checkCancellation(repositories[0]?.signal);
+    yield* checkCancellation(signal);
+
+    const patterns = yield* GitHubRepositoryPatterns;
+    const expandedPatterns = yield* Effect.forEach(repositoryPatterns, (pattern) =>
+      track(
+        progress,
+        ProgressStage.RepositoryDiscovery,
+        `Resolving repository pattern ${pattern.repoPattern}...`,
+        patterns.resolve(octokit, pattern.repoPattern),
+        (matches) =>
+          `Repository pattern ${pattern.repoPattern} matched ${matches.length} repositories.`,
+        { project: pattern.project, details: { pattern: pattern.repoPattern } },
+      ).pipe(
+        Effect.map((matches) =>
+          matches.map(
+            ({ slug }): WorkflowOptions => ({
+              ...pattern,
+              repo: slug,
+              runId: crypto.randomUUID(),
+              cleanup: false,
+              startClean: false,
+            }),
+          ),
+        ),
+      ),
+    );
+    const allRepositories = [...repositories, ...expandedPatterns.flat()];
+    const normalizedRepositories = allRepositories.map(({ repo }) =>
+      repo.toLowerCase(),
+    );
+    if (new Set(normalizedRepositories).size !== normalizedRepositories.length) {
+      return yield* new RalphieError({
+        message:
+          "Repository patterns and explicit entries resolved to duplicate repositories.",
+      });
+    }
 
     const git = yield* GitRepository;
     yield* track(
@@ -698,7 +751,7 @@ export const batchWorkflow = ({
       git.verifyInstalled,
       "Git installation verified.",
     );
-    yield* checkCancellation(repositories[0]?.signal);
+    yield* checkCancellation(signal);
 
     const openCode = yield* OpenCode;
     const results = yield* Effect.acquireUseRelease(
@@ -711,7 +764,7 @@ export const batchWorkflow = ({
       ),
       (server) =>
         Effect.forEach(
-          repositories,
+          allRepositories,
           (options) => {
             const repositoryRunId =
               options.resumeState?.runId ?? options.runId ?? crypto.randomUUID();
@@ -724,6 +777,9 @@ export const batchWorkflow = ({
             }).pipe(
               (effect) =>
                 withProgressContext(effect, {
+                  ...(options.project === undefined
+                    ? {}
+                    : { project: options.project }),
                   repository: options.repo,
                   repositoryRunId,
                 }),
@@ -739,7 +795,7 @@ export const batchWorkflow = ({
     const failures = results.filter(({ result }) => Either.isLeft(result));
     if (failures.length > 0) {
       return yield* new RalphieError({
-        message: `${failures.length} of ${repositories.length} repository runs failed: ${failures
+        message: `${failures.length} of ${allRepositories.length} repository runs failed: ${failures
           .map(({ repository, result }) =>
             Either.isLeft(result)
               ? `${repository}: ${errorMessage(result.left)}`

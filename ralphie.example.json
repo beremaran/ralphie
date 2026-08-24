@@ -1,29 +1,74 @@
 {
-  "branch": "main",
-  "maxIssues": 10,
-  "issueLabels": ["bug"],
-  "issueSort": "created",
-  "issueOrder": "asc",
-  "model": "openai/gpt-5",
-  "modelVariant": "medium",
-  "agent": "build",
-  "workspace": "~/.ralphie",
-  "startClean": false,
-  "cleanup": false,
   "dryRun": false,
-  "verbose": false,
-  "json": false,
-  "quiet": false,
-  "repositories": [
+  "git": {
+    "branch": "main"
+  },
+  "issues": {
+    "sort": {
+      "by": "created",
+      "order": "asc"
+    },
+    "limit": 10,
+    "filter": {
+      "labels": ["bug"]
+    }
+  },
+  "workspace": {
+    "path": "~/.ralphie",
+    "cleanup": {
+      "before": true,
+      "after": true
+    }
+  },
+  "output": {
+    "verbose": false,
+    "quiet": false,
+    "json": false
+  },
+  "agent": {
+    "model": {
+      "id": "openai/gpt-5",
+      "variant": "medium"
+    },
+    "mode": "build"
+  },
+  "projects": [
     {
-      "repo": "owner/frontend",
-      "issueLabels": ["frontend"]
+      "name": "proj-a",
+      "repoPattern": "some-owner/project-xyz-*"
     },
     {
-      "repo": "owner/backend",
-      "branch": "develop",
-      "maxIssues": 5,
-      "issueLabels": ["backend"]
+      "name": "proj-b",
+      "repositories": [
+        {
+          "repo": "owner/frontend",
+          "issues": {
+            "filter": {
+              "labels": ["frontend"]
+            }
+          }
+        },
+        {
+          "repo": "owner/backend",
+          "git": {
+            "branch": "develop"
+          },
+          "issues": {
+            "limit": 5,
+            "filter": {
+              "labels": ["backend"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "lonely-repo",
+      "repositories": [
+        {
+          "repo": "some-owner/some-repo"
+        }
+      ]
     }
   ]
 }

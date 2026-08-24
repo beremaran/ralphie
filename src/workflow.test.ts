@@ -14,6 +14,7 @@ import {
   IssueOrder,
   IssueSort,
 } from "./github/issues.ts";
+import { GitHubRepositoryPatterns } from "./github/repository-patterns.ts";
 import {
   IssueCompletionKind,
   type IssueExecutionOutcome,
@@ -56,6 +57,11 @@ type TestRuntimeOptions = {
   readonly captureStart?: number;
   readonly prepareGate?: () => Promise<void>;
   readonly failedRepository?: string;
+  readonly patternRepositories?: ReadonlyArray<{
+    readonly slug: string;
+    readonly owner: string;
+    readonly name: string;
+  }>;
 };
 
 function testRuntime(
@@ -134,6 +140,12 @@ function testRuntime(
         const result = issueLists[Math.min(listIndex, issueLists.length - 1)] ?? [];
         listIndex += 1;
         return Effect.succeed(result);
+      },
+    }),
+    Layer.succeed(GitHubRepositoryPatterns, {
+      resolve: (_client, pattern) => {
+        calls.push(`resolvePattern:${pattern}`);
+        return Effect.succeed(options.patternRepositories ?? []);
       },
     }),
     Layer.succeed(GitHubIssueMutations, {
@@ -252,6 +264,7 @@ describe("workflow", () => {
     const events: ProgressUpdate[] = [];
     const summary = await workflow({
       ...baseOptions,
+      project: "project-a",
       model: { providerID: "openai", modelID: "gpt-5" },
       modelVariant: "high",
       agent: "reviewer",
@@ -261,6 +274,7 @@ describe("workflow", () => {
 
     expect(summary.counts.completed).toBe(1);
     expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
+    expect(states.at(-1)?.project).toBe("project-a");
     expect(states.at(-1)?.queue.completedIssueNumbers).toEqual([42]);
     expect(calls).toEqual([
       "removeWorkspace:/tmp/ralphie",
@@ -693,5 +707,40 @@ describe("batch workflow", () => {
     expect(calls.filter((call) => call === "closeIssue:42")).toHaveLength(1);
     expect(calls.filter((call) => call === "closeServer")).toHaveLength(1);
     expect(calls).not.toContain("removeWorkspace:/tmp/ralphie");
+  });
+
+  test("expands patterns after shared authentication and runs every match", async () => {
+    const calls: string[] = [];
+    const summaries = await batchWorkflow({
+      repositories: [],
+      repositoryPatterns: [
+        {
+          project: "finance",
+          repoPattern: "owner/finance-*",
+          ...baseOptions,
+        },
+      ],
+      workspace: baseOptions.workspace,
+      startClean: false,
+      cleanup: false,
+    }).pipe(
+      Effect.provide(
+        testRuntime(calls, [], {
+          patternRepositories: [
+            { slug: "owner/finance-a", owner: "owner", name: "finance-a" },
+            { slug: "owner/finance-b", owner: "owner", name: "finance-b" },
+          ],
+        }),
+      ),
+      Effect.runPromise,
+    );
+
+    expect(summaries.map(({ repository }) => repository)).toEqual([
+      "owner/finance-a",
+      "owner/finance-b",
+    ]);
+    expect(calls.filter((call) => call === "initializeGitHub")).toHaveLength(1);
+    expect(calls.filter((call) => call === "startServer")).toHaveLength(1);
+    expect(calls).toContain("resolvePattern:owner/finance-*");
   });
 });

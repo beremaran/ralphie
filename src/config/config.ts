@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { z } from "zod";
 
 import { IssueOrder, IssueSort } from "../github/issues.ts";
+import { parseRepositoryPattern } from "../github/repository-patterns.ts";
 import { parseRepositorySlug } from "../github/repository.ts";
 import {
   DEFAULT_OPENCODE_AGENT,
@@ -15,62 +16,139 @@ import { redactSensitiveText } from "../shared/redaction.ts";
 
 export const DEFAULT_BRANCH = "main";
 export const DEFAULT_WORKSPACE = "~/.ralphie";
+export const IMPLICIT_PROJECT_NAME = "default";
 
 const nonEmptyString = z.string().trim().min(1);
-const optionalConfigValue = <Schema extends z.ZodType>(schema: Schema) =>
-  schema
+function optionalConfigValue<Schema extends z.ZodType>(schema: Schema) {
+  return schema
     .nullable()
     .transform((value) => value ?? undefined)
     .optional();
+}
 
-const repositoryOptionShape = {
-  branch: optionalConfigValue(nonEmptyString),
-  maxIssues: optionalConfigValue(z.number().int().positive()),
-  issueLabels: optionalConfigValue(z.array(nonEmptyString)),
-  issueSort: optionalConfigValue(z.enum(IssueSort)),
-  issueOrder: optionalConfigValue(z.enum(IssueOrder)),
-  model: optionalConfigValue(openCodeModelSchema),
-  modelVariant: optionalConfigValue(openCodeModelVariantSchema),
-  agent: optionalConfigValue(nonEmptyString),
+const gitConfigSchema = z
+  .object({ branch: optionalConfigValue(nonEmptyString) })
+  .strict();
+const issueConfigSchema = z
+  .object({
+    limit: optionalConfigValue(z.number().int().positive()),
+    sort: optionalConfigValue(
+      z
+        .object({
+          by: optionalConfigValue(z.enum(IssueSort)),
+          order: optionalConfigValue(z.enum(IssueOrder)),
+        })
+        .strict(),
+    ),
+    filter: optionalConfigValue(
+      z.object({ labels: optionalConfigValue(z.array(nonEmptyString)) }).strict(),
+    ),
+  })
+  .strict();
+const agentConfigSchema = z
+  .object({
+    model: optionalConfigValue(
+      z
+        .object({
+          id: optionalConfigValue(openCodeModelSchema),
+          variant: optionalConfigValue(openCodeModelVariantSchema),
+        })
+        .strict(),
+    ),
+    mode: optionalConfigValue(nonEmptyString),
+  })
+  .strict();
+const executionConfigShape = {
+  git: optionalConfigValue(gitConfigSchema),
+  issues: optionalConfigValue(issueConfigSchema),
+  agent: optionalConfigValue(agentConfigSchema),
   dryRun: optionalConfigValue(z.boolean()),
-  resume: optionalConfigValue(nonEmptyString),
 };
 
 export const ralphieRepositoryConfigSchema = z
   .object({
     repo: nonEmptyString,
-    ...repositoryOptionShape,
+    ...executionConfigShape,
+    resume: optionalConfigValue(nonEmptyString),
   })
   .strict();
 
-export const ralphieFileConfigSchema = z
+export const ralphieProjectConfigSchema = z
   .object({
-    repo: optionalConfigValue(nonEmptyString),
+    name: nonEmptyString,
+    repoPattern: optionalConfigValue(nonEmptyString),
     repositories: z.array(ralphieRepositoryConfigSchema).min(1).optional(),
-    ...repositoryOptionShape,
-    workspace: optionalConfigValue(nonEmptyString),
-    cleanup: optionalConfigValue(z.boolean()),
-    startClean: optionalConfigValue(z.boolean()),
-    verbose: optionalConfigValue(z.boolean()),
-    json: optionalConfigValue(z.boolean()),
-    quiet: optionalConfigValue(z.boolean()),
+    ...executionConfigShape,
   })
   .strict()
-  .superRefine((config, context) => {
-    if (config.repo !== undefined && config.repositories !== undefined) {
+  .superRefine((project, context) => {
+    if ((project.repoPattern === undefined) === (project.repositories === undefined)) {
       context.addIssue({
         code: "custom",
-        message: "repo and repositories cannot both be configured.",
+        message: "Exactly one of repoPattern or repositories is required.",
       });
     }
   });
 
+export const ralphieFileConfigSchema = z
+  .object({
+    ...executionConfigShape,
+    workspace: optionalConfigValue(
+      z
+        .object({
+          path: optionalConfigValue(nonEmptyString),
+          cleanup: optionalConfigValue(
+            z
+              .object({
+                before: optionalConfigValue(z.boolean()),
+                after: optionalConfigValue(z.boolean()),
+              })
+              .strict(),
+          ),
+        })
+        .strict(),
+    ),
+    output: optionalConfigValue(
+      z
+        .object({
+          verbose: optionalConfigValue(z.boolean()),
+          json: optionalConfigValue(z.boolean()),
+          quiet: optionalConfigValue(z.boolean()),
+        })
+        .strict(),
+    ),
+    projects: z.array(ralphieProjectConfigSchema).min(1).optional(),
+  })
+  .strict();
+
 export type RalphieFileConfig = z.infer<typeof ralphieFileConfigSchema>;
 
-export type RalphieConfigOverrides = Omit<RalphieFileConfig, "repositories">;
+export type RalphieConfigOverrides = {
+  readonly repo?: string;
+  readonly branch?: string;
+  readonly maxIssues?: number;
+  readonly issueLabels?: ReadonlyArray<string>;
+  readonly issueSort?: IssueSort;
+  readonly issueOrder?: IssueOrder;
+  readonly model?: OpenCodeModel;
+  readonly modelVariant?: string;
+  readonly agent?: string;
+  readonly workspace?: string;
+  readonly cleanup?: boolean;
+  readonly startClean?: boolean;
+  readonly dryRun?: boolean;
+  readonly resume?: string;
+  readonly verbose?: boolean;
+  readonly json?: boolean;
+  readonly quiet?: boolean;
+};
 
-export type ResolvedRalphieConfig = {
-  readonly repo: string;
+export enum RepositoryTargetKind {
+  Explicit = "explicit",
+  Pattern = "pattern",
+}
+
+export type ResolvedExecutionConfig = {
   readonly branch: string;
   readonly maxIssues?: number;
   readonly issueLabels: ReadonlyArray<string>;
@@ -79,105 +157,178 @@ export type ResolvedRalphieConfig = {
   readonly model?: OpenCodeModel;
   readonly modelVariant?: string;
   readonly agent: string;
+  readonly dryRun: boolean;
+};
+
+export type ResolvedRepositoryTarget = ResolvedExecutionConfig &
+  (
+    | {
+        readonly kind: RepositoryTargetKind.Explicit;
+        readonly repo: string;
+        readonly resume?: string;
+      }
+    | {
+        readonly kind: RepositoryTargetKind.Pattern;
+        readonly repoPattern: string;
+      }
+  );
+
+export type ResolvedProjectConfig = {
+  readonly name: string;
+  readonly targets: ReadonlyArray<ResolvedRepositoryTarget>;
+};
+
+export type ResolvedRalphieConfig = {
+  readonly projects: ReadonlyArray<ResolvedProjectConfig>;
   readonly workspace: string;
   readonly cleanup: boolean;
   readonly startClean: boolean;
-  readonly dryRun: boolean;
-  readonly resume?: string;
   readonly verbose: boolean;
   readonly json: boolean;
   readonly quiet: boolean;
 };
 
-const defined = <T extends Record<string, unknown>>(value: T): Partial<T> =>
-  Object.fromEntries(
-    Object.entries(value).filter(([, entry]) => entry !== undefined),
-  ) as Partial<T>;
+type ExecutionConfig = {
+  readonly git?: { readonly branch?: string };
+  readonly issues?: {
+    readonly limit?: number;
+    readonly sort?: { readonly by?: IssueSort; readonly order?: IssueOrder };
+    readonly filter?: { readonly labels?: ReadonlyArray<string> };
+  };
+  readonly agent?: {
+    readonly model?: { readonly id?: OpenCodeModel; readonly variant?: string };
+    readonly mode?: string;
+  };
+  readonly dryRun?: boolean;
+};
+
+function lastDefined<Value>(
+  values: ReadonlyArray<Value | undefined>,
+): Value | undefined {
+  return values.filter((value): value is Value => value !== undefined).at(-1);
+}
+
+const resolveExecution = (
+  levels: ReadonlyArray<ExecutionConfig | undefined>,
+  overrides: RalphieConfigOverrides,
+): ResolvedExecutionConfig => {
+  const branch = lastDefined(levels.map((level) => level?.git?.branch));
+  const limit = lastDefined(levels.map((level) => level?.issues?.limit));
+  const sortBy = lastDefined(levels.map((level) => level?.issues?.sort?.by));
+  const sortOrder = lastDefined(levels.map((level) => level?.issues?.sort?.order));
+  const labels = lastDefined(levels.map((level) => level?.issues?.filter?.labels));
+  const model = lastDefined(levels.map((level) => level?.agent?.model?.id));
+  const modelVariant = lastDefined(levels.map((level) => level?.agent?.model?.variant));
+  const mode = lastDefined(levels.map((level) => level?.agent?.mode));
+  const dryRun = lastDefined(levels.map((level) => level?.dryRun));
+  const maxIssues = overrides.maxIssues ?? limit;
+  const selectedModel = overrides.model ?? model;
+  const selectedVariant = overrides.modelVariant ?? modelVariant;
+
+  return {
+    branch: overrides.branch ?? branch ?? DEFAULT_BRANCH,
+    ...(maxIssues === undefined ? {} : { maxIssues }),
+    issueLabels: [...(overrides.issueLabels ?? labels ?? [])],
+    issueSort: overrides.issueSort ?? sortBy ?? IssueSort.Created,
+    issueOrder: overrides.issueOrder ?? sortOrder ?? IssueOrder.Ascending,
+    ...(selectedModel === undefined ? {} : { model: selectedModel }),
+    ...(selectedVariant === undefined ? {} : { modelVariant: selectedVariant }),
+    agent: overrides.agent ?? mode ?? DEFAULT_OPENCODE_AGENT,
+    dryRun: overrides.dryRun ?? dryRun ?? false,
+  };
+};
 
 export const resolveRalphieConfig = (
   file: RalphieFileConfig,
   overrides: RalphieConfigOverrides,
 ): ResolvedRalphieConfig => {
-  const resolved = resolveRalphieConfigs(file, overrides);
-  if (resolved.length !== 1) {
+  if (file.projects !== undefined && overrides.repo !== undefined) {
     throw new RalphieError({
-      message: "Expected exactly one configured repository.",
+      message: "A positional repository cannot be combined with config.projects.",
     });
   }
-  return resolved[0]!;
-};
+  const projects =
+    file.projects ??
+    (overrides.repo === undefined
+      ? undefined
+      : [{ name: IMPLICIT_PROJECT_NAME, repositories: [{ repo: overrides.repo }] }]);
+  if (projects === undefined) {
+    throw new RalphieError({
+      message:
+        "Missing repository: provide a positional repository or config.projects.",
+    });
+  }
 
-const resolveSingleRepository = (
-  file: RalphieConfigOverrides,
-  overrides: RalphieConfigOverrides,
-): ResolvedRalphieConfig => {
-  const merged = { ...file, ...defined(overrides) };
-  if (merged.repo === undefined) {
+  const projectNames = projects.map(({ name }) => name.toLowerCase());
+  if (new Set(projectNames).size !== projectNames.length) {
+    throw new RalphieError({ message: "Each project name must be unique." });
+  }
+
+  const resolvedProjects = projects.map((project): ResolvedProjectConfig => {
+    const projectExecution = resolveExecution([file, project], overrides);
+    if (project.repoPattern !== undefined) {
+      parseRepositoryPattern(project.repoPattern);
+      if (overrides.resume !== undefined) {
+        throw new RalphieError({
+          message: "--resume cannot be applied to a repository pattern.",
+        });
+      }
+      return {
+        name: project.name,
+        targets: [
+          {
+            kind: RepositoryTargetKind.Pattern,
+            repoPattern: project.repoPattern,
+            ...projectExecution,
+          },
+        ],
+      };
+    }
+
+    return {
+      name: project.name,
+      targets: (project.repositories ?? []).map((repository) => ({
+        kind: RepositoryTargetKind.Explicit,
+        repo: parseRepositorySlug(repository.repo).slug,
+        ...resolveExecution([file, project, repository], overrides),
+        ...((overrides.resume ?? repository.resume) === undefined
+          ? {}
+          : { resume: overrides.resume ?? repository.resume }),
+      })),
+    };
+  });
+
+  const targets = resolvedProjects.flatMap(({ targets }) => targets);
+  if (overrides.resume !== undefined && targets.length !== 1) {
     throw new RalphieError({
-      message: "Missing repository: provide a positional repository or config.repo.",
+      message: "--resume can only be used when exactly one repository is configured.",
     });
   }
-  if (merged.json === true && merged.quiet === true) {
+  const explicit = targets
+    .filter((target) => target.kind === RepositoryTargetKind.Explicit)
+    .map((target) => target.repo.toLowerCase());
+  if (new Set(explicit).size !== explicit.length) {
+    throw new RalphieError({
+      message: "Each explicitly configured repository must be unique across projects.",
+    });
+  }
+
+  const json = overrides.json ?? file.output?.json ?? false;
+  const quiet = overrides.quiet ?? file.output?.quiet ?? false;
+  if (json && quiet) {
     throw new RalphieError({
       message: "JSON and quiet output modes cannot be enabled together.",
     });
   }
-
   return {
-    repo: merged.repo,
-    branch: merged.branch ?? DEFAULT_BRANCH,
-    ...(merged.maxIssues === undefined ? {} : { maxIssues: merged.maxIssues }),
-    issueLabels: [...(merged.issueLabels ?? [])],
-    issueSort: merged.issueSort ?? IssueSort.Created,
-    issueOrder: merged.issueOrder ?? IssueOrder.Ascending,
-    ...(merged.model === undefined ? {} : { model: merged.model }),
-    ...(merged.modelVariant === undefined ? {} : { modelVariant: merged.modelVariant }),
-    agent: merged.agent ?? DEFAULT_OPENCODE_AGENT,
-    workspace: merged.workspace ?? DEFAULT_WORKSPACE,
-    cleanup: merged.cleanup ?? false,
-    startClean: merged.startClean ?? false,
-    dryRun: merged.dryRun ?? false,
-    ...(merged.resume === undefined ? {} : { resume: merged.resume }),
-    verbose: merged.verbose ?? false,
-    json: merged.json ?? false,
-    quiet: merged.quiet ?? false,
+    projects: resolvedProjects,
+    workspace: overrides.workspace ?? file.workspace?.path ?? DEFAULT_WORKSPACE,
+    cleanup: overrides.cleanup ?? file.workspace?.cleanup?.after ?? false,
+    startClean: overrides.startClean ?? file.workspace?.cleanup?.before ?? false,
+    verbose: overrides.verbose ?? file.output?.verbose ?? false,
+    json,
+    quiet,
   };
-};
-
-export const resolveRalphieConfigs = (
-  file: RalphieFileConfig,
-  overrides: RalphieConfigOverrides,
-): ReadonlyArray<ResolvedRalphieConfig> => {
-  const { repositories, ...defaults } = file;
-  if (repositories === undefined) {
-    return [resolveSingleRepository(defaults, overrides)];
-  }
-  if (overrides.repo !== undefined) {
-    throw new RalphieError({
-      message: "A positional repository cannot be combined with config.repositories.",
-    });
-  }
-  if (defaults.resume !== undefined || overrides.resume !== undefined) {
-    throw new RalphieError({
-      message:
-        "A multi-repository run must configure resume separately on each repository entry.",
-    });
-  }
-
-  const repositoryOverrides = { ...overrides };
-  delete repositoryOverrides.repo;
-  const resolved = repositories.map((repository) =>
-    resolveSingleRepository({ ...defaults, ...repository }, repositoryOverrides),
-  );
-  const normalized = resolved.map(({ repo }) =>
-    parseRepositorySlug(repo).slug.toLowerCase(),
-  );
-  if (new Set(normalized).size !== normalized.length) {
-    throw new RalphieError({
-      message: "Each configured repository must be unique.",
-    });
-  }
-  return resolved;
 };
 
 export type RalphieConfigFileService = {

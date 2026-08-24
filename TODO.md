@@ -29,6 +29,16 @@ enough to implement, review, and commit independently.
       repository-attributed progress, and batch-safe workspace cleanup.
 - [x] Share process-wide preflight services and one OpenCode server across all
       concurrent repository pipelines.
+- [x] Replace the flat multi-repository config with hierarchical domains for
+      `git`, `issues`, `workspace`, `output`, and `agent`.
+- [x] Add named `projects`, requiring exactly one of `repoPattern` or
+      `repositories` per project.
+- [x] Expand `owner/repository-glob` patterns deterministically and reject empty
+      matches, duplicate project names, and duplicate repositories.
+- [x] Apply configuration precedence as built-ins, top-level, project,
+      repository, then CLI overrides, including explicit boolean `false`.
+- [x] Carry project attribution through progress events, persisted state,
+      diagnostics, and repository artifacts.
 - [x] Replace the workflow's plan-only logging with calls to `IssueExecutor`.
 - [x] Add mocked executor tests proving the workflow handles every outcome.
 

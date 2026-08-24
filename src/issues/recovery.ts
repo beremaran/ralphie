@@ -26,6 +26,8 @@ export type ReviewAttempt = {
 
 export type ReviewExhaustionInput = {
   readonly runId: string;
+  readonly project?: string;
+  readonly repository?: string;
   readonly workspace: string;
   readonly repositoryPath: string;
   readonly issue: GitHubIssue;
@@ -103,6 +105,10 @@ export const IssueRecoveryLive = Layer.effect(
           }
           const metadata = `${JSON.stringify(
             {
+              ...(input.project === undefined ? {} : { project: input.project }),
+              ...(input.repository === undefined
+                ? {}
+                : { repository: input.repository }),
               issue: input.issue,
               checkpoint: input.checkpoint,
               reviews: input.reviews,

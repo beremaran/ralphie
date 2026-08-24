@@ -34,7 +34,14 @@ export const IssueExecutorLive = Layer.effect(
           const artifacts = yield* artifactStores.forIssue(
             context.issue.number,
             context.workspace && context.runId
-              ? { workspace: context.workspace, runId: context.runId }
+              ? {
+                  workspace: context.workspace,
+                  runId: context.runId,
+                  ...(context.project === undefined
+                    ? {}
+                    : { project: context.project }),
+                  repository: context.repository,
+                }
               : undefined,
           );
           const decision = artifacts.has(IssueArtifactKind.ComplexityDecision)

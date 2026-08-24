@@ -7,6 +7,7 @@ import { ProgressStage } from "../progress/progress.ts";
 
 export enum RunReconciliationStatus {
   Compatible = "compatible",
+  ProjectMismatch = "project-mismatch",
   RepositoryMismatch = "repository-mismatch",
   BranchMismatch = "branch-mismatch",
   GitMismatch = "git-mismatch",
@@ -24,6 +25,7 @@ export type RunGitHubInputs = {
 };
 
 export type RunReconciliationInputs = {
+  readonly project?: string;
   readonly repository: string;
   readonly branch: string;
   readonly git?: RunGitInputs;
@@ -45,7 +47,16 @@ export const reconcileRunState = (
   const reasons: string[] = [];
   let status = RunReconciliationStatus.Compatible;
 
-  if (state.repository !== inputs.repository) {
+  if (
+    state.project !== undefined &&
+    inputs.project !== undefined &&
+    state.project !== inputs.project
+  ) {
+    status = RunReconciliationStatus.ProjectMismatch;
+    reasons.push(
+      `saved project is ${state.project}, requested project is ${inputs.project}`,
+    );
+  } else if (state.repository !== inputs.repository) {
     status = RunReconciliationStatus.RepositoryMismatch;
     reasons.push(
       `saved repository is ${state.repository}, requested repository is ${inputs.repository}`,

@@ -10,6 +10,7 @@ export enum ProgressStage {
   GitHubAuthentication = "github-authentication",
   GitVerification = "git-verification",
   RemoteSafety = "remote-safety",
+  RepositoryDiscovery = "repository-discovery",
   RepositoryPreparation = "repository-preparation",
   IssueDiscovery = "issue-discovery",
   OpenCodeServer = "opencode-server",
@@ -56,6 +57,7 @@ export type ProgressUpdate = {
   readonly stage: ProgressStage;
   readonly status: ProgressStatus;
   readonly message: string;
+  readonly project?: string;
   readonly repository?: string;
   readonly repositoryRunId?: string;
   readonly issue?: ProgressIssue;
@@ -66,7 +68,10 @@ export type ProgressUpdate = {
   readonly details?: Readonly<Record<string, unknown>>;
 };
 
-export type ProgressContext = Pick<ProgressUpdate, "repository" | "repositoryRunId">;
+export type ProgressContext = Pick<
+  ProgressUpdate,
+  "project" | "repository" | "repositoryRunId"
+>;
 
 const currentProgressContext = FiberRef.unsafeMake<ProgressContext>({});
 
@@ -164,7 +169,11 @@ export const makeProgressReporterLayer = ({
     let persistEvents = true;
 
     const renderLine = (event: ProgressEvent): string => {
-      const repository = event.repository ? ` [${event.repository}]` : "";
+      const scope = event.repository
+        ? ` [${event.project ? `${event.project}: ` : ""}${event.repository}]`
+        : event.project
+          ? ` [${event.project}]`
+          : "";
       const issue = event.issue ? ` #${event.issue.number}` : "";
       const position =
         event.current !== undefined && event.total !== undefined
@@ -175,7 +184,7 @@ export const makeProgressReporterLayer = ({
           ? ` (${event.attempt}/${event.maxAttempts})`
           : "";
       const details = verbose ? formatDetails(event.details) : "";
-      return `${statusSymbol(event.status)}${repository}${position}${attempt}${issue} ${event.message}${details}`;
+      return `${statusSymbol(event.status)}${scope}${position}${attempt}${issue} ${event.message}${details}`;
     };
 
     const clearLiveLine = () => {

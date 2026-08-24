@@ -275,72 +275,91 @@ ralphie --config ./ralphie.json
 
 ```json
 {
-  "branch": "main",
-  "maxIssues": 10,
-  "issueSort": "created",
-  "issueOrder": "asc",
-  "model": "openai/gpt-5",
-  "modelVariant": "medium",
-  "agent": "build",
-  "workspace": "~/.ralphie",
-  "startClean": true,
-  "cleanup": true,
-  "repositories": [
+  "git": { "branch": "main" },
+  "issues": {
+    "limit": 10,
+    "sort": { "by": "created", "order": "asc" },
+    "filter": { "labels": ["bug"] }
+  },
+  "workspace": {
+    "path": "~/.ralphie",
+    "cleanup": { "before": true, "after": true }
+  },
+  "output": { "verbose": false, "quiet": false, "json": false },
+  "agent": {
+    "model": { "id": "openai/gpt-5", "variant": "medium" },
+    "mode": "build"
+  },
+  "projects": [
     {
-      "repo": "owner/frontend",
-      "issueLabels": ["frontend"]
+      "name": "frontend",
+      "repositories": [
+        {
+          "repo": "owner/frontend",
+          "issues": { "filter": { "labels": ["frontend"] } }
+        }
+      ]
     },
     {
-      "repo": "owner/backend",
-      "branch": "develop",
-      "maxIssues": 5,
-      "issueLabels": ["backend"]
+      "name": "backend",
+      "repoPattern": "owner/backend-*",
+      "git": { "branch": "develop" },
+      "issues": { "limit": 5, "filter": { "labels": ["backend"] } }
     }
   ]
 }
 ```
 
-Every entry in `repositories` gets an independent issue queue, checkout, run
-state, and issue-processing loop. Ralphie authenticates GitHub, initializes
-Octokit, verifies Git, prepares the workspace, and starts one shared OpenCode
-server exactly once; it then runs the repository-specific loops in parallel
-against those shared resources. Repository entries inherit top-level settings
-and may override repository-level settings; explicit CLI options override every
-entry:
+Projects are named groups of repositories. Each project must specify exactly one
+of `repoPattern` or `repositories`: use a pattern to discover repositories, or
+use an explicit list when the set is known. Patterns use
+`owner/repository-glob` syntax with `*` and `?` in the repository name. Matches
+include accessible public and private repositories, exclude archived
+repositories, and are expanded in deterministic order. A pattern that matches no
+repositories, duplicate project names, or duplicate repositories across projects
+is rejected before repository work begins. Explicit repository entries use the
+same nested domains as the rest of the file, so
+branch, issue, agent, and dry-run settings can be overridden without switching
+back to a second flat schema. Workspace lifecycle and output mode remain
+batch-wide settings.
+
+Every resolved repository gets an independent issue queue, checkout, run state,
+and issue-processing loop. Ralphie authenticates GitHub, initializes Octokit,
+verifies Git, prepares the workspace, and starts one shared OpenCode server
+exactly once; it then runs repository loops in parallel against those shared
+resources. The configuration precedence is:
 
 ```text
-built-in defaults < top-level config < repository entry < CLI options
+built-in defaults < top-level config < project config < repository config < CLI options
 ```
 
-`workspace`, `startClean`, `cleanup`, and output settings are batch-wide. Ralphie
-performs start cleanup once, stores clones under `<workspace>/<owner>/<repo>`,
-and removes the workspace only after every repository run succeeds. Parallel
-human-readable output uses append-only lines prefixed with the repository name;
-JSON events include `repository` and `repositoryRunId` fields.
+Workspace preparation and cleanup are batch-wide: start cleanup runs once,
+clones are stored under `<workspace>/<owner>/<repo>`, and the workspace is
+removed only after every repository run succeeds. Human-readable progress is
+attributed to both project and repository; JSON events and persisted run state
+carry the project name alongside `repository` and `repositoryRunId`.
 
 Resume paths belong to individual runs, so a multi-repository file places
-`resume` on the corresponding repository entry. The global `--resume` flag and
-a top-level `resume` setting are rejected when multiple repositories are
-configured.
+`resume` on the corresponding repository entry. The global `--resume` flag is
+accepted only when exactly one explicit repository is configured.
 
 The file is optional and has no implicit discovery location. Unknown keys,
 invalid enum values, malformed model identifiers, and incompatible output modes
 are rejected before preflight begins with property-level diagnostics. Optional
 settings may be omitted or set to `null` to use their normal default—for
-example, `"maxIssues": null` means unlimited and `"issueLabels": null` means no
-label filter. Explicit command-line values override the file, and omitted values
-fall back to Ralphie's normal defaults:
+example, `"issues": { "limit": null }` means unlimited and a `null`
+`issues.filter.labels` means no label filter. Explicit command-line values
+override the file, and omitted values fall back to Ralphie's normal defaults:
 
 ```bash
 ralphie --config ./ralphie.json --branch main --max-issues 2
 ```
 
-For a single repository, `repo` remains supported instead of `repositories` and
-the positional repository overrides it. A positional repository cannot be
-combined with `repositories`, and duplicate entries are rejected. Boolean
-values can be explicitly disabled when overriding a file, for example
+For a single repository, the positional `owner/name` form remains supported and
+is treated as one implicit project. It cannot be combined with `projects`.
+Boolean values can be explicitly disabled when overriding a file, for example
 `--cleanup=false`. See [ralphie.example.json](./ralphie.example.json) for a
-complete multi-repository template.
+complete multi-project template.
 
 Process bugs from oldest to newest on a non-default branch:
 
@@ -408,7 +427,7 @@ ralphie [repository] [options]
 ```
 
 `[repository]` accepts an `owner/name` slug or a GitHub HTTPS/SSH clone URL. It
-may be omitted when `repo` or `repositories` is present in `--config`.
+may be omitted when `projects` is present in `--config`.
 
 | Option | Default | Description |
 | --- | --- | --- |

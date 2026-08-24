@@ -72,6 +72,7 @@ export type IssueExecutionOutcome =
  */
 export type IssueExecutionContext = {
   readonly issue: GitHubIssue;
+  readonly project?: string;
   /** GitHub owner/repository slug supplied to the run. */
   readonly repository: string;
   readonly repositoryPath: string;

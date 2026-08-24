@@ -457,6 +457,8 @@ export const ImplementationExecutorLive = Layer.effect(
             if (attempt === REVIEW_ITERATION_LIMIT) {
               const exhausted = yield* recovery.handleReviewExhaustion({
                 runId: context.runId,
+                ...(context.project === undefined ? {} : { project: context.project }),
+                repository: context.repository,
                 workspace: context.workspace,
                 repositoryPath: context.repositoryPath,
                 issue: context.issue,

@@ -72,6 +72,7 @@ export const runStateSchema = z.object({
   version: z.literal(RUN_STATE_VERSION),
   status: z.enum(RunStateStatus),
   runId: z.string().min(1),
+  project: z.string().min(1).optional(),
   repository: z.string().min(1),
   branch: z.string().min(1),
   dryRun: z.boolean().optional(),

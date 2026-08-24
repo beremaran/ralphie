@@ -70,6 +70,8 @@ export type IssueArtifactStore = {
 export type IssueArtifactScope = {
   readonly workspace: string;
   readonly runId: string;
+  readonly project?: string;
+  readonly repository?: string;
 };
 
 export type IssueArtifactStoreService = {
@@ -134,6 +136,8 @@ const persistedArtifactStateSchema = z
   .object({
     version: z.literal(1),
     issueNumber: z.number().int().positive(),
+    project: z.string().min(1).optional(),
+    repository: z.string().min(1).optional(),
     artifacts: persistedArtifactsSchema,
   })
   .strict();
@@ -160,6 +164,7 @@ const artifactPath = (scope: IssueArtifactScope, issueNumber: number): string =>
 const toPersistedState = (
   issueNumber: number,
   values: ReadonlyMap<IssueArtifactKind, unknown>,
+  scope?: IssueArtifactScope,
 ): PersistedArtifactState => {
   const artifacts: Record<string, unknown> = {};
   for (const kind of Object.values(IssueArtifactKind)) {
@@ -169,6 +174,8 @@ const toPersistedState = (
   return persistedArtifactStateSchema.parse({
     version: 1,
     issueNumber,
+    ...(scope?.project === undefined ? {} : { project: scope.project }),
+    ...(scope?.repository === undefined ? {} : { repository: scope.repository }),
     artifacts,
   });
 };
@@ -202,6 +209,7 @@ const persistAtomically = (
 const loadPersistedState = (
   filePath: string,
   issueNumber: number,
+  scope?: IssueArtifactScope,
 ): Effect.Effect<PersistedArtifactState | undefined, RalphieError> =>
   Effect.tryPromise({
     try: async () => {
@@ -216,6 +224,24 @@ const loadPersistedState = (
       if (parsed.issueNumber !== issueNumber) {
         throw new RalphieError({
           message: `Persisted artifacts at ${filePath} belong to issue ${parsed.issueNumber}, not issue ${issueNumber}.`,
+        });
+      }
+      if (
+        parsed.project !== undefined &&
+        scope?.project !== undefined &&
+        parsed.project !== scope.project
+      ) {
+        throw new RalphieError({
+          message: `Persisted artifacts at ${filePath} belong to project ${parsed.project}, not ${scope.project}.`,
+        });
+      }
+      if (
+        parsed.repository !== undefined &&
+        scope?.repository !== undefined &&
+        parsed.repository !== scope.repository
+      ) {
+        throw new RalphieError({
+          message: `Persisted artifacts at ${filePath} belong to repository ${parsed.repository}, not ${scope.repository}.`,
         });
       }
       return parsed;
@@ -233,6 +259,7 @@ const makeStore = (
   issueNumber: number,
   initialValues = new Map<IssueArtifactKind, unknown>(),
   persistence?: ArtifactPersistence,
+  scope?: IssueArtifactScope,
 ): Effect.Effect<IssueArtifactStore, RalphieError> => {
   const values = initialValues;
   const save = (nextValues: ReadonlyMap<IssueArtifactKind, unknown>) => {
@@ -242,7 +269,7 @@ const makeStore = (
       return Effect.void;
     }
     return Effect.gen(function* () {
-      const state = toPersistedState(issueNumber, nextValues);
+      const state = toPersistedState(issueNumber, nextValues, scope);
       yield* persistence(state);
       values.clear();
       for (const [kind, value] of nextValues) values.set(kind, value);
@@ -352,7 +379,7 @@ export const makeDurableIssueArtifactStore = (
     return failure(`Cannot create an artifact store for issue ${issueNumber}.`);
   }
   const filePath = artifactPath(scope, issueNumber);
-  return loadPersistedState(filePath, issueNumber).pipe(
+  return loadPersistedState(filePath, issueNumber, scope).pipe(
     Effect.flatMap((state) => {
       const values = new Map<IssueArtifactKind, unknown>();
       if (state) {
@@ -361,8 +388,11 @@ export const makeDurableIssueArtifactStore = (
           if (value !== undefined) values.set(kind, value);
         }
       }
-      return makeStore(issueNumber, values, (nextState) =>
-        persistAtomically(filePath, nextState),
+      return makeStore(
+        issueNumber,
+        values,
+        (nextState) => persistAtomically(filePath, nextState),
+        scope,
       );
     }),
   );

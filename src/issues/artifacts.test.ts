@@ -192,7 +192,12 @@ describe("per-issue artifact store", () => {
   test("persists artifacts and reloads them in a fresh runtime", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "ralphie-artifacts-"));
     try {
-      const scope = { workspace, runId: "run/restart" };
+      const scope = {
+        workspace,
+        runId: "run/restart",
+        project: "project-a",
+        repository: "owner/repo",
+      };
       const first = await Effect.runPromise(makeDurableIssueArtifactStore(42, scope));
       const complexity = {
         complexity: ComplexityLevel.Level2,
@@ -202,6 +207,21 @@ describe("per-issue artifact store", () => {
         first.write(IssueArtifactKind.ComplexityDecision, complexity),
       );
       await Effect.runPromise(first.appendReview(review(1)));
+      const persisted = await Bun.file(
+        join(
+          workspace,
+          ".ralphie",
+          "runs",
+          "run_restart",
+          "issues",
+          "42",
+          "artifacts.json",
+        ),
+      ).json();
+      expect(persisted).toMatchObject({
+        project: "project-a",
+        repository: "owner/repo",
+      });
 
       const reloaded = await Effect.runPromise(
         makeDurableIssueArtifactStore(42, scope),

@@ -16,6 +16,7 @@ const state: RunState = {
   version: RUN_STATE_VERSION,
   status: RunStateStatus.Active,
   runId: "run-1",
+  project: "project-a",
   repository: "owner/repo",
   branch: "main",
   selection: { agent: "build" },
@@ -40,6 +41,11 @@ const state: RunState = {
 
 describe("run-state reconciliation", () => {
   test.each([
+    [
+      "project",
+      { project: "project-b", repository: "owner/repo", branch: "main" },
+      RunReconciliationStatus.ProjectMismatch,
+    ],
     [
       "repository",
       { repository: "other/repo", branch: "main" },

@@ -9,6 +9,7 @@ import { GitRemoteSafetyLive } from "./git/remote-safety.ts";
 import { GitHubClientLive } from "./github/client.ts";
 import { GitHubIssueMutationsLive } from "./github/issue-mutations.ts";
 import { GitHubIssuesLive } from "./github/issues.ts";
+import { GitHubRepositoryPatternsLive } from "./github/repository-patterns.ts";
 import { OpenCodeLive } from "./opencode/server.ts";
 import { IssueArtifactStoreLive } from "./issues/artifacts.ts";
 import { ComplexityAssessmentLive } from "./issues/complexity.ts";
@@ -83,6 +84,7 @@ export const LiveRuntime = Layer.mergeAll(
   GitHubClientLiveWithCommandRunner,
   GitHubIssuesLive,
   GitHubIssueMutationsLive,
+  GitHubRepositoryPatternsLive,
   GitRepositoryLiveWithCommandRunner,
   GitRepositoryInvariantLiveWithCommandRunner,
   IssueExecutorRuntime,

@@ -6,14 +6,19 @@ import { z } from "zod";
 import {
   RalphieConfigFile,
   RalphieConfigFileLive,
-  resolveRalphieConfigs,
+  RepositoryTargetKind,
+  resolveRalphieConfig,
 } from "./config/config.ts";
 import { IssueOrder, IssueSort } from "./github/issues.ts";
 import { openCodeModelSchema, openCodeModelVariantSchema } from "./opencode/model.ts";
 import { makeProgressReporterLayer, ProgressRenderMode } from "./progress/progress.ts";
 import { LiveRuntime } from "./runtime.ts";
 import { exitCodeForFailure } from "./process/exit-code.ts";
-import { batchWorkflow, type WorkflowOptions } from "./workflow.ts";
+import {
+  batchWorkflow,
+  type RepositoryPatternWorkflowOptions,
+  type WorkflowOptions,
+} from "./workflow.ts";
 import { redactSensitiveText } from "./shared/redaction.ts";
 import { type RunState, RunStateStore, RunStateStoreLive } from "./run/state.ts";
 import { reconcileRunState } from "./run/reconciliation.ts";
@@ -97,7 +102,7 @@ export const runCommand = defineCommand({
             const files = yield* RalphieConfigFile;
             return yield* files.load(configPath);
           }).pipe(Effect.provide(RalphieConfigFileLive), Effect.runPromise);
-    const configs = resolveRalphieConfigs(fileConfig, {
+    const config = resolveRalphieConfig(fileConfig, {
       ...(positionalRepo === undefined ? {} : { repo: positionalRepo }),
       ...(flags.branch === undefined ? {} : { branch: flags.branch }),
       ...(flags["max-issues"] === undefined ? {} : { maxIssues: flags["max-issues"] }),
@@ -125,18 +130,28 @@ export const runCommand = defineCommand({
       ...(flags.quiet === undefined ? {} : { quiet: flags.quiet }),
     });
 
+    const configuredTargets = config.projects.flatMap((project) =>
+      project.targets.map((target) => ({ project: project.name, target })),
+    );
+    const explicitTargets = configuredTargets.filter(
+      (entry) => entry.target.kind === RepositoryTargetKind.Explicit,
+    );
     const repositoryRuns = await Promise.all(
-      configs.map(async (config) => {
+      explicitTargets.map(async ({ project, target }) => {
         let resumeState: RunState | undefined;
-        if (config.resume !== undefined) {
-          const resumePath = config.resume;
+        if (target.kind !== RepositoryTargetKind.Explicit) {
+          throw new Error("Expected an explicit repository target.");
+        }
+        if (target.resume !== undefined) {
+          const resumePath = target.resume;
           resumeState = await Effect.gen(function* () {
             const store = yield* RunStateStore;
             return yield* store.load(resumePath);
           }).pipe(Effect.provide(RunStateStoreLive), Effect.runPromise);
           const reconciliation = reconcileRunState(resumeState, {
-            repository: config.repo,
-            branch: config.branch,
+            project,
+            repository: target.repo,
+            branch: target.branch,
           });
           if (!reconciliation.compatible) {
             throw new Error(
@@ -144,28 +159,27 @@ export const runCommand = defineCommand({
             );
           }
         }
-        return { config, resumeState };
+        return { project, target, resumeState };
       }),
     );
-
-    const config = configs[0]!;
 
     const progressMode = config.json
       ? ProgressRenderMode.Json
       : config.quiet
         ? ProgressRenderMode.Quiet
-        : configs.length === 1 &&
+        : configuredTargets.length === 1 &&
+            configuredTargets[0]?.target.kind === RepositoryTargetKind.Explicit &&
             terminal.isInteractive &&
             !terminal.isCI &&
             process.stderr.isTTY === true
           ? ProgressRenderMode.Interactive
           : ProgressRenderMode.Plain;
     const batchRunId =
-      repositoryRuns.length === 1
+      configuredTargets.length === 1 && repositoryRuns.length === 1
         ? (repositoryRuns[0]!.resumeState?.runId ?? crypto.randomUUID())
         : crypto.randomUUID();
     const eventLogPath =
-      repositoryRuns.length !== 1 || config.resume === undefined
+      repositoryRuns.length !== 1 || repositoryRuns[0]?.target.resume === undefined
         ? join(
             resolveWorkspacePath(config.workspace),
             ".ralphie",
@@ -173,7 +187,7 @@ export const runCommand = defineCommand({
             batchRunId,
             "events.jsonl",
           )
-        : join(dirname(config.resume), "events.jsonl");
+        : join(dirname(repositoryRuns[0]!.target.resume!), "events.jsonl");
     const progressLayer = makeProgressReporterLayer({
       mode: progressMode,
       verbose: config.verbose,
@@ -187,7 +201,8 @@ export const runCommand = defineCommand({
 
     try {
       const repositories: WorkflowOptions[] = repositoryRuns.map(
-        ({ config: repository, resumeState }) => ({
+        ({ project, target: repository, resumeState }) => ({
+          project,
           repo: repository.repo,
           branch: repository.branch,
           maxIssues: repository.maxIssues,
@@ -199,7 +214,7 @@ export const runCommand = defineCommand({
           model: repository.model,
           modelVariant: repository.modelVariant,
           agent: repository.agent,
-          workspace: repository.workspace,
+          workspace: config.workspace,
           cleanup: false,
           startClean: false,
           signal,
@@ -209,8 +224,35 @@ export const runCommand = defineCommand({
           dryRun: repository.dryRun,
         }),
       );
+      const repositoryPatterns: RepositoryPatternWorkflowOptions[] = configuredTargets
+        .filter((entry) => entry.target.kind === RepositoryTargetKind.Pattern)
+        .map(({ project, target }) => {
+          if (target.kind !== RepositoryTargetKind.Pattern) {
+            throw new Error("Expected a repository pattern target.");
+          }
+          return {
+            project,
+            repoPattern: target.repoPattern,
+            branch: target.branch,
+            maxIssues: target.maxIssues,
+            issueFilters: {
+              labels: target.issueLabels,
+              sort: target.issueSort,
+              order: target.issueOrder,
+            },
+            model: target.model,
+            modelVariant: target.modelVariant,
+            agent: target.agent,
+            workspace: config.workspace,
+            cleanup: false,
+            startClean: false,
+            signal,
+            dryRun: target.dryRun,
+          };
+        });
       await batchWorkflow({
         repositories,
+        repositoryPatterns,
         workspace: config.workspace,
         cleanup: config.cleanup,
         startClean: config.startClean,

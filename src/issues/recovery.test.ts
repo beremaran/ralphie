@@ -112,6 +112,8 @@ describe("review exhaustion recovery", () => {
         const recovery = yield* IssueRecovery;
         return yield* recovery.handleReviewExhaustion({
           runId: "run/unsafe",
+          project: "project-a",
+          repository: "owner/repo",
           workspace,
           repositoryPath: `${workspace}/repo`,
           issue,
@@ -137,6 +139,8 @@ describe("review exhaustion recovery", () => {
         await readFile(join(result.diagnosticsPath, "metadata.json"), "utf8"),
       );
       expect(metadata.issue.number).toBe(42);
+      expect(metadata.project).toBe("project-a");
+      expect(metadata.repository).toBe("owner/repo");
       expect(metadata.reviews).toEqual(reviews);
       expect(progressEvents.map(({ stage, status }) => ({ stage, status }))).toEqual([
         {

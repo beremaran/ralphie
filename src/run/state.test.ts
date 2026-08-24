@@ -18,6 +18,7 @@ const state: RunState = {
   version: RUN_STATE_VERSION,
   status: RunStateStatus.Active,
   runId: "run-1",
+  project: "project-a",
   repository: "owner/repo",
   branch: "main",
   selection: { agent: "build" },
