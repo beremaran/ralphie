@@ -24,7 +24,7 @@ The CLI also requires these local tools:
 > accept those mutations.
 
 ```bash
-bun run index.ts <repo> [--branch <branch>] [--agent <agent>] [--model <provider/model>] [--model-variant <variant>] [--max-issues <count>] [--issue-label <label>] [--issue-sort <sort>] [--issue-order <order>] [--workspace <path>] [--verbose] [--json|--quiet] [--start-clean] [--cleanup]
+bun run index.ts <repo> [--branch <branch>] [--agent <agent>] [--model <provider/model>] [--model-variant <variant>] [--max-issues <count>] [--issue-label <label>] [--issue-sort <sort>] [--issue-order <order>] [--workspace <path>] [--verbose] [--json|--quiet] [--resume <state.json>] [--start-clean] [--cleanup]
 # Example:
 bun run index.ts owner/project --branch develop --model openai/gpt-5 --model-variant high --max-issues 10 --issue-label bug --issue-sort created --issue-order asc --workspace /tmp/ralphie --start-clean --cleanup
 ```
@@ -51,16 +51,58 @@ skipped when the workflow fails and refuses protected paths such as `/`, your
 home directory, or the current project directory.
 Pass `--start-clean` to remove an existing workspace before any other workflow
 work begins. It uses the same protected-path checks as `--cleanup`.
+Pass `--resume <state.json>` to continue an interrupted run. The saved
+repository and branch must match the command, and Ralphie reconciles the saved
+queue with the current checkout and open GitHub issues before doing more work.
 
-The current scaffold validates GitHub CLI authentication, retrieves its token to
-initialize Octokit, and verifies the Git installation. It then clones the target
-repository into `<workspace>/<repository>` (or safely reuses a matching existing
-checkout), fetches it, switches to the requested branch when necessary, and starts
-an OpenCode server before exiting. Before OpenCode starts, Ralphie fetches every
-matching open GitHub issue, reports the count, and identifies the first issue it
-would process. Existing dirty checkouts are reset to the
-requested remote branch with `git reset --hard` and `git clean -fd`, discarding
-tracked and untracked local changes.
+Ralphie validates GitHub CLI authentication, initializes Octokit from the local
+`gh` token, verifies Git, and prepares `<workspace>/<repository>`. A matching
+existing checkout is fetched, switched to the requested branch, and cleaned with
+`git reset --hard` and `git clean -fd`; tracked and untracked local changes are
+discarded. Ralphie then starts one OpenCode server and processes matching issues
+through the workflows below. One issue failure currently halts the run and leaves
+resumable state and diagnostics in place.
+
+## Workflows and recovery
+
+Every issue first receives a schema-validated complexity score from 0 through 5.
+
+- Complexity 0–3 runs implementation in a fresh session, stages changes with
+  Git, and asks a separate session to review the exact staged diff. Requested
+  changes are addressed in another fresh session. After at most five reviews,
+  an approved diff receives a structured commit message and is committed and
+  pushed directly to the selected branch. A successful agent that makes no
+  changes is recorded as skipped.
+- Complexity 4–5 is decomposed into independently actionable child issues.
+  Ralphie creates them in deterministic order, adds parent, sibling, dependency,
+  and lineage links, rewrites the original issue, and closes it as a duplicate.
+  The open-issue queue is then refreshed so eligible children can run in the
+  same invocation.
+
+If five reviews cannot converge, Ralphie first writes the staged binary patch,
+review decisions, and session metadata to the run diagnostics. It restores the
+exact clean issue checkpoint and routes the original issue into decomposition.
+If diagnostics cannot be preserved or the restore cannot be verified, the run
+halts without continuing on an uncertain checkout. GitHub decomposition uses
+stable markers and persists child mappings so retries discover existing children
+and resume linking instead of creating duplicates.
+
+## Progress, state, and diagnostics
+
+Human progress is written to stderr; `--json` writes one JSON object per line to
+stdout. JSON events contain `runId`, `timestamp`, `stage`, `status`, and `message`,
+with optional `issue`, `current`, `total`, `attempt`, `maxAttempts`, and `details`.
+Stage and status strings are a versioned operational vocabulary; fields may only
+be added compatibly within a minor release. Sensitive tokens and environment
+values are redacted at the renderer boundary. Session IDs, commit SHAs, created
+issue numbers, and diagnostic paths are confined to JSON or verbose details.
+
+Run state is written atomically to
+`<workspace>/.ralphie/runs/<run-id>/state.json`. Per-issue diagnostics live under
+the same run directory. Failed and interrupted runs retain that directory for
+inspection and `--resume`. A successful run is marked complete before optional
+`--cleanup`; cleanup removes the whole workspace, including completed state and
+diagnostics. Use a workspace you are willing to delete when enabling cleanup.
 
 ## Development
 
@@ -68,6 +110,7 @@ tracked and untracked local changes.
 bun test
 bun run typecheck
 bun run build
+bun run check
 bun run probe:structured-output
 ```
 
@@ -97,21 +140,19 @@ Functionality is grouped by domain under `src/`:
 `workflow.ts` orchestrates these domain services, while `runtime.ts` assembles
 their live Effect layers.
 
-The issue pipeline works directly on `--branch`; it does not create issue
-branches, worktrees, or pull requests. An OpenCode session first assigns a
-schema-validated complexity from 0 to 5. Complexity 0-3 enters the implementation
-workflow: implement, stage, review with structured output, and address review in
-a fresh session until approval or five passes, then generate a structured commit
-message, commit, and push. Complexity 4-5 enters the decomposition workflow:
-generate a dependency-aware issue breakdown, create and cross-link the resulting
-issues, then rewrite and close the original as a duplicate. Newly created issues
-are intended to re-enter the main open-issue loop when stage execution is added.
+The issue loop works directly on `--branch`; it does not create issue branches,
+worktrees, pull requests, or force pushes. Its refreshable queue deduplicates
+newly created issues, respects dependency completion and configured sorting, and
+retains the `--max-issues` budget across refreshes and resume.
 
-Before implementation, Ralphie records the clean checkout branch and exact HEAD.
-If the fifth review still requests changes, it saves the staged binary patch and
-structured review history under `<workspace>/.ralphie/runs/<run-id>/`, restores
-and verifies that exact issue base, and escalates the original issue to the
-decomposition workflow. The refreshable issue queue deduplicates newly created
-issues, respects dependency completion, and retains the `--max-issues` budget.
-If diagnostics cannot be preserved, restoration does not begin; if restoration
-fails, the run stops rather than continuing with a contaminated checkout.
+## Packaging and releases
+
+`bun run build` creates a standalone executable for the current platform in
+`dist/`. For source installs, clone the repository, run `bun install
+--frozen-lockfile`, and invoke `bun run index.ts`; contributors can also use
+`bun link` to expose the package's `ralphie` binary locally.
+
+Ralphie uses Semantic Versioning. Until 1.0, minor releases may contain breaking
+CLI or state-schema changes and patch releases remain backward compatible. Each
+release updates `CHANGELOG.md`, passes `bun run check`, and publishes checksummed
+platform binaries from a signed Git tag.
