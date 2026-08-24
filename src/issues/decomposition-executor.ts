@@ -57,7 +57,7 @@ export const DecompositionExecutorLive = Layer.effect(
     const issues = yield* GitHubIssues;
     const progress = yield* ProgressReporter;
 
-    const recoverableMutation = <Output>(
+    const recoverableMutation = <Output,>(
       operation: string,
       effect: Effect.Effect<Output, RalphieError>,
       input: WorkflowExecutorInput,

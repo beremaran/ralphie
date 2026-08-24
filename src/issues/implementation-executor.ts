@@ -68,7 +68,7 @@ const checkSignal = (signal: AbortSignal | undefined): Effect.Effect<void, Ralph
       new RalphieError({ message: "Issue execution was aborted.", cause }),
   }).pipe(Effect.asVoid);
 
-const stage = <A>(
+const stage = <A,>(
   progress: ProgressReporterService,
   input: WorkflowExecutorInput,
   progressStage: ProgressStage,

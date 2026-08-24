@@ -60,7 +60,7 @@ const describeApiError = (error: unknown): string => {
   return `${name}: ${message}`;
 };
 
-export const requestStructuredOutput = <Output>(
+export const requestStructuredOutput = <Output,>(
   client: OpencodeClient,
   request: StructuredOutputRequest<Output>,
 ): Effect.Effect<StructuredOutputResult<Output>, RalphieError> =>
