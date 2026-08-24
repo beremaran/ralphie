@@ -10,6 +10,7 @@ describe("GitHub repository parsing", () => {
   ])("normalizes %s", (repository) => {
     expect(parseRepositorySlug(repository)).toEqual({
       slug: "owner/repository",
+      owner: "owner",
       name: "repository",
     });
   });

@@ -1,5 +1,4 @@
 {
-  "repo": "owner/repository",
   "branch": "main",
   "maxIssues": 10,
   "issueLabels": ["bug"],
@@ -14,5 +13,17 @@
   "dryRun": false,
   "verbose": false,
   "json": false,
-  "quiet": false
+  "quiet": false,
+  "repositories": [
+    {
+      "repo": "owner/frontend",
+      "issueLabels": ["frontend"]
+    },
+    {
+      "repo": "owner/backend",
+      "branch": "develop",
+      "maxIssues": 5,
+      "issueLabels": ["backend"]
+    }
+  ]
 }

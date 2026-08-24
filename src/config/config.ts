@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { z } from "zod";
 
 import { IssueOrder, IssueSort } from "../github/issues.ts";
+import { parseRepositorySlug } from "../github/repository.ts";
 import {
   DEFAULT_OPENCODE_AGENT,
   openCodeModelSchema,
@@ -16,31 +17,51 @@ export const DEFAULT_WORKSPACE = "~/.ralphie";
 
 const nonEmptyString = z.string().trim().min(1);
 
+const repositoryOptionShape = {
+  branch: nonEmptyString.optional(),
+  maxIssues: z.number().int().positive().optional(),
+  issueLabels: z.array(nonEmptyString).optional(),
+  issueSort: z.enum(IssueSort).optional(),
+  issueOrder: z.enum(IssueOrder).optional(),
+  model: openCodeModelSchema.optional(),
+  modelVariant: openCodeModelVariantSchema.optional(),
+  agent: nonEmptyString.optional(),
+  dryRun: z.boolean().optional(),
+  resume: nonEmptyString.optional(),
+};
+
+export const ralphieRepositoryConfigSchema = z
+  .object({
+    repo: nonEmptyString,
+    ...repositoryOptionShape,
+  })
+  .strict();
+
 export const ralphieFileConfigSchema = z
   .object({
     repo: nonEmptyString.optional(),
-    branch: nonEmptyString.optional(),
-    maxIssues: z.number().int().positive().optional(),
-    issueLabels: z.array(nonEmptyString).optional(),
-    issueSort: z.enum(IssueSort).optional(),
-    issueOrder: z.enum(IssueOrder).optional(),
-    model: openCodeModelSchema.optional(),
-    modelVariant: openCodeModelVariantSchema.optional(),
-    agent: nonEmptyString.optional(),
+    repositories: z.array(ralphieRepositoryConfigSchema).min(1).optional(),
+    ...repositoryOptionShape,
     workspace: nonEmptyString.optional(),
     cleanup: z.boolean().optional(),
     startClean: z.boolean().optional(),
-    dryRun: z.boolean().optional(),
-    resume: nonEmptyString.optional(),
     verbose: z.boolean().optional(),
     json: z.boolean().optional(),
     quiet: z.boolean().optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((config, context) => {
+    if (config.repo !== undefined && config.repositories !== undefined) {
+      context.addIssue({
+        code: "custom",
+        message: "repo and repositories cannot both be configured.",
+      });
+    }
+  });
 
 export type RalphieFileConfig = z.infer<typeof ralphieFileConfigSchema>;
 
-export type RalphieConfigOverrides = RalphieFileConfig;
+export type RalphieConfigOverrides = Omit<RalphieFileConfig, "repositories">;
 
 export type ResolvedRalphieConfig = {
   readonly repo: string;
@@ -69,6 +90,19 @@ const defined = <T extends Record<string, unknown>>(value: T): Partial<T> =>
 
 export const resolveRalphieConfig = (
   file: RalphieFileConfig,
+  overrides: RalphieConfigOverrides,
+): ResolvedRalphieConfig => {
+  const resolved = resolveRalphieConfigs(file, overrides);
+  if (resolved.length !== 1) {
+    throw new RalphieError({
+      message: "Expected exactly one configured repository.",
+    });
+  }
+  return resolved[0]!;
+};
+
+const resolveSingleRepository = (
+  file: RalphieConfigOverrides,
   overrides: RalphieConfigOverrides,
 ): ResolvedRalphieConfig => {
   const merged = { ...file, ...defined(overrides) };
@@ -102,6 +136,42 @@ export const resolveRalphieConfig = (
     json: merged.json ?? false,
     quiet: merged.quiet ?? false,
   };
+};
+
+export const resolveRalphieConfigs = (
+  file: RalphieFileConfig,
+  overrides: RalphieConfigOverrides,
+): ReadonlyArray<ResolvedRalphieConfig> => {
+  const { repositories, ...defaults } = file;
+  if (repositories === undefined) {
+    return [resolveSingleRepository(defaults, overrides)];
+  }
+  if (overrides.repo !== undefined) {
+    throw new RalphieError({
+      message: "A positional repository cannot be combined with config.repositories.",
+    });
+  }
+  if (defaults.resume !== undefined || overrides.resume !== undefined) {
+    throw new RalphieError({
+      message:
+        "A multi-repository run must configure resume separately on each repository entry.",
+    });
+  }
+
+  const repositoryOverrides = { ...overrides };
+  delete repositoryOverrides.repo;
+  const resolved = repositories.map((repository) =>
+    resolveSingleRepository({ ...defaults, ...repository }, repositoryOverrides),
+  );
+  const normalized = resolved.map(({ repo }) =>
+    parseRepositorySlug(repo).slug.toLowerCase(),
+  );
+  if (new Set(normalized).size !== normalized.length) {
+    throw new RalphieError({
+      message: "Each configured repository must be unique.",
+    });
+  }
+  return resolved;
 };
 
 export type RalphieConfigFileService = {

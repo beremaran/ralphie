@@ -66,7 +66,7 @@ export const GitRepositoryLive = Layer.effect(
                   }),
           });
           const workspacePath = resolveWorkspacePath(workspace);
-          const repositoryPath = join(workspacePath, parsed.name);
+          const repositoryPath = join(workspacePath, parsed.owner, parsed.name);
 
           const exists = yield* Effect.tryPromise({
             try: async () => {

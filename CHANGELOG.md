@@ -15,6 +15,8 @@ All notable changes to Ralphie are documented here. The project follows
   redaction.
 - Structured no-change resolution verification with persisted evidence.
 - Optional, strictly validated JSON configuration with CLI override precedence.
+- Parallel multi-repository execution with per-repository overrides, isolated
+  checkouts, progress attribution, and shared workspace lifecycle management.
 
 ### Changed
 

@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, Either } from "effect";
 import { join } from "node:path";
 
 import { GitRepository } from "./git/repository.ts";
@@ -158,6 +158,13 @@ export type WorkflowOptions = {
   readonly resumePath?: string;
   readonly issueFailurePolicy?: IssueFailurePolicy;
   readonly dryRun?: boolean;
+};
+
+export type BatchWorkflowOptions = {
+  readonly repositories: ReadonlyArray<WorkflowOptions>;
+  readonly workspace: string;
+  readonly cleanup: boolean;
+  readonly startClean: boolean;
 };
 
 export const workflow = ({
@@ -611,4 +618,95 @@ export const workflow = ({
         }),
       ),
     );
+  });
+
+export const batchWorkflow = ({
+  repositories,
+  workspace,
+  cleanup,
+  startClean,
+}: BatchWorkflowOptions) =>
+  Effect.gen(function* () {
+    const progress = yield* ProgressReporter;
+    const workspaceService = yield* Workspace;
+
+    if (startClean) {
+      yield* track(
+        progress,
+        ProgressStage.WorkspaceCleanup,
+        `Removing existing workspace ${workspace}...`,
+        workspaceService.remove(workspace),
+        `Existing workspace removed: ${workspace}.`,
+      );
+    }
+
+    const results = yield* Effect.forEach(
+      repositories,
+      (options) => {
+        const repositoryRunId =
+          options.resumeState?.runId ?? options.runId ?? crypto.randomUUID();
+        const repositoryProgress: ProgressReporterService = {
+          emit: (update) =>
+            progress.emit({
+              ...update,
+              repository: update.repository ?? options.repo,
+              repositoryRunId: update.repositoryRunId ?? repositoryRunId,
+            }),
+          stopPersisting: progress.stopPersisting,
+        };
+        return workflow({
+          ...options,
+          startClean: false,
+          cleanup: false,
+          runId: repositoryRunId,
+        }).pipe(
+          Effect.provideService(ProgressReporter, repositoryProgress),
+          Effect.either,
+          Effect.map((result) => ({ repository: options.repo, result })),
+        );
+      },
+      { concurrency: "unbounded" },
+    );
+
+    const failures = results.filter(({ result }) => Either.isLeft(result));
+    if (failures.length > 0) {
+      return yield* new RalphieError({
+        message: `${failures.length} of ${repositories.length} repository runs failed: ${failures
+          .map(({ repository, result }) =>
+            Either.isLeft(result)
+              ? `${repository}: ${errorMessage(result.left)}`
+              : repository,
+          )
+          .join("; ")}`,
+      });
+    }
+
+    if (cleanup) {
+      const startedMessage = `Removing workspace ${workspace}...`;
+      yield* progress.emit({
+        stage: ProgressStage.WorkspaceCleanup,
+        status: ProgressStatus.Started,
+        message: startedMessage,
+      });
+      yield* workspaceService.remove(workspace).pipe(
+        Effect.tapError((error) =>
+          progress.emit({
+            stage: ProgressStage.WorkspaceCleanup,
+            status: ProgressStatus.Failed,
+            message: `${startedMessage.replace(/\.{3}$/, "")} failed: ${errorMessage(error)}`,
+          }),
+        ),
+      );
+      yield* progress.stopPersisting;
+      yield* progress.emit({
+        stage: ProgressStage.WorkspaceCleanup,
+        status: ProgressStatus.Succeeded,
+        message: `Workspace removed: ${workspace}.`,
+      });
+    }
+
+    return results.map(({ repository, result }) => ({
+      repository,
+      summary: Either.getOrThrow(result),
+    }));
   });

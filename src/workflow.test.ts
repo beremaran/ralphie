@@ -32,7 +32,7 @@ import {
 import { type RunState, RunStateStatus, RunStateStore } from "./run/state.ts";
 import { RalphieError } from "./shared/error.ts";
 import { Workspace } from "./workspace/workspace.ts";
-import { workflow } from "./workflow.ts";
+import { batchWorkflow, workflow } from "./workflow.ts";
 
 const firstIssue: GitHubIssue = {
   number: 42,
@@ -54,6 +54,8 @@ type TestRuntimeOptions = {
   readonly abortAt?: "github" | "repository" | "issues" | "opencode" | "between";
   readonly abortController?: AbortController;
   readonly captureStart?: number;
+  readonly initializeGate?: () => Promise<void>;
+  readonly failedRepository?: string;
 };
 
 function testRuntime(
@@ -80,9 +82,17 @@ function testRuntime(
       initialize: Effect.suspend(() => {
         calls.push("initializeGitHub");
         if (options.abortAt === "github") options.abortController?.abort();
-        return options.githubFailure
-          ? Effect.fail(options.githubFailure)
-          : Effect.succeed({} as Octokit);
+        if (options.githubFailure) return Effect.fail(options.githubFailure);
+        if (options.initializeGate !== undefined) {
+          return Effect.tryPromise({
+            try: async () => {
+              await options.initializeGate?.();
+              return {} as Octokit;
+            },
+            catch: (cause) => new RalphieError({ message: "gate failed", cause }),
+          });
+        }
+        return Effect.succeed({} as Octokit);
       }),
     }),
     Layer.succeed(GitRepository, {
@@ -140,7 +150,13 @@ function testRuntime(
       },
     }),
     Layer.succeed(IssueExecutor, {
-      execute: ({ issue, repositoryPath, targetBranch, openCodeSelection }) =>
+      execute: ({
+        issue,
+        repository,
+        repositoryPath,
+        targetBranch,
+        openCodeSelection,
+      }) =>
         Effect.gen(function* () {
           calls.push(
             `executeIssue:${issue.number}:${repositoryPath}:${targetBranch}:${openCodeSelection.agent}`,
@@ -148,6 +164,12 @@ function testRuntime(
           if (options.abortOnExecute !== undefined) {
             options.abortOnExecute.abort();
             return yield* new RalphieError({ message: "agent interrupted" });
+          }
+          if (options.failedRepository === repository) {
+            return {
+              kind: IssueExecutionOutcomeKind.Failed,
+              message: "repository-specific failure",
+            } as const;
           }
           const result = outcomes[Math.min(outcomeIndex, outcomes.length - 1)];
           outcomeIndex += 1;
@@ -597,5 +619,72 @@ describe("workflow", () => {
 
     expect(Exit.isFailure(exit)).toBeTrue();
     expect(calls).toEqual([]);
+  });
+});
+
+describe("batch workflow", () => {
+  test("runs repositories concurrently and manages the shared workspace once", async () => {
+    const calls: string[] = [];
+    const states: RunState[] = [];
+    const events: ProgressUpdate[] = [];
+    let activeInitializations = 0;
+    let maximumInitializations = 0;
+    const initializeGate = async () => {
+      activeInitializations += 1;
+      maximumInitializations = Math.max(maximumInitializations, activeInitializations);
+      await Bun.sleep(10);
+      activeInitializations -= 1;
+    };
+
+    const summaries = await batchWorkflow({
+      repositories: [
+        { ...baseOptions, repo: "owner/one", runId: "run-one" },
+        { ...baseOptions, repo: "owner/two", runId: "run-two" },
+      ],
+      workspace: baseOptions.workspace,
+      startClean: true,
+      cleanup: true,
+    }).pipe(
+      Effect.provide(testRuntime(calls, states, { initializeGate }, events)),
+      Effect.runPromise,
+    );
+
+    expect(maximumInitializations).toBe(2);
+    expect(summaries.map(({ repository }) => repository)).toEqual([
+      "owner/one",
+      "owner/two",
+    ]);
+    expect(
+      calls.filter((call) => call === "removeWorkspace:/tmp/ralphie"),
+    ).toHaveLength(2);
+    expect(events.some(({ repository }) => repository === "owner/one")).toBeTrue();
+    expect(events.some(({ repository }) => repository === "owner/two")).toBeTrue();
+    expect(
+      events.some(({ repositoryRunId }) => repositoryRunId === "run-one"),
+    ).toBeTrue();
+    expect(
+      events.some(({ repositoryRunId }) => repositoryRunId === "run-two"),
+    ).toBeTrue();
+  });
+
+  test("lets sibling repositories finish and retains the workspace when one fails", async () => {
+    const calls: string[] = [];
+    const exit = await batchWorkflow({
+      repositories: [
+        { ...baseOptions, repo: "owner/failing", runId: "run-failing" },
+        { ...baseOptions, repo: "owner/succeeding", runId: "run-succeeding" },
+      ],
+      workspace: baseOptions.workspace,
+      startClean: false,
+      cleanup: true,
+    }).pipe(
+      Effect.provide(testRuntime(calls, [], { failedRepository: "owner/failing" })),
+      Effect.runPromiseExit,
+    );
+
+    expect(Exit.isFailure(exit)).toBeTrue();
+    expect(calls).toContain("executeIssue:42:/tmp/ralphie/repo:develop:build");
+    expect(calls.filter((call) => call === "closeIssue:42")).toHaveLength(1);
+    expect(calls).not.toContain("removeWorkspace:/tmp/ralphie");
   });
 });

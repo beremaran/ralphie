@@ -25,6 +25,8 @@ enough to implement, review, and commit independently.
 - [x] Assemble executor services in the live runtime.
 - [x] Load repeatable CLI settings from an optional validated JSON config file,
       with explicit CLI values taking precedence.
+- [x] Run configured repositories concurrently with isolated checkouts,
+      repository-attributed progress, and batch-safe workspace cleanup.
 - [x] Replace the workflow's plan-only logging with calls to `IssueExecutor`.
 - [x] Add mocked executor tests proving the workflow handles every outcome.
 

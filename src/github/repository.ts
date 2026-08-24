@@ -2,6 +2,7 @@ import { RalphieError } from "../shared/error.ts";
 
 export type RepositorySlug = {
   readonly slug: string;
+  readonly owner: string;
   readonly name: string;
 };
 
@@ -33,5 +34,5 @@ export const parseRepositorySlug = (repository: string): RepositorySlug => {
     });
   }
 
-  return { slug: `${owner}/${name}`, name };
+  return { slug: `${owner}/${name}`, owner, name };
 };

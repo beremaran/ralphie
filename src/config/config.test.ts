@@ -11,6 +11,7 @@ import {
   RalphieConfigFile,
   RalphieConfigFileLive,
   resolveRalphieConfig,
+  resolveRalphieConfigs,
 } from "./config.ts";
 
 describe("Ralphie JSON config", () => {
@@ -71,6 +72,74 @@ describe("Ralphie JSON config", () => {
     ).toThrow("cannot be enabled together");
   });
 
+  test("resolves repository entries in order with shared defaults and local overrides", () => {
+    expect(
+      resolveRalphieConfigs(
+        {
+          branch: "develop",
+          maxIssues: 10,
+          repositories: [
+            { repo: "owner/frontend", issueLabels: ["frontend"] },
+            { repo: "owner/backend", branch: "release", maxIssues: 2 },
+          ],
+        },
+        { agent: "reviewer" },
+      ),
+    ).toMatchObject([
+      {
+        repo: "owner/frontend",
+        branch: "develop",
+        maxIssues: 10,
+        issueLabels: ["frontend"],
+        agent: "reviewer",
+      },
+      {
+        repo: "owner/backend",
+        branch: "release",
+        maxIssues: 2,
+        agent: "reviewer",
+      },
+    ]);
+  });
+
+  test("applies explicit CLI overrides to every configured repository", () => {
+    const resolved = resolveRalphieConfigs(
+      {
+        repositories: [
+          { repo: "owner/one", branch: "one" },
+          { repo: "owner/two", branch: "two" },
+        ],
+      },
+      { branch: "cli", cleanup: true },
+    );
+
+    expect(resolved.map(({ branch }) => branch)).toEqual(["cli", "cli"]);
+    expect(resolved.every(({ cleanup }) => cleanup)).toBeTrue();
+  });
+
+  test("rejects ambiguous and duplicate repository configurations", () => {
+    expect(() =>
+      resolveRalphieConfigs(
+        { repositories: [{ repo: "owner/one" }] },
+        { repo: "owner/positional" },
+      ),
+    ).toThrow("positional repository");
+    expect(() =>
+      resolveRalphieConfigs(
+        {
+          repositories: [{ repo: "owner/one" }, { repo: "OWNER/ONE" }],
+        },
+        {},
+      ),
+    ).toThrow("must be unique");
+    expect(() =>
+      resolveRalphieConfigs(
+        { repositories: [{ repo: "owner/one" }, { repo: "owner/two" }] },
+        { resume: "/tmp/state.json" },
+      ),
+    ).toThrow("resume separately");
+  });
+
   test("loads and transforms a strict JSON file", async () => {
     const directory = await mkdtemp(join(tmpdir(), "ralphie-config-"));
     const path = join(directory, "ralphie.json");
@@ -104,7 +173,10 @@ describe("Ralphie JSON config", () => {
       return yield* files.load(join(import.meta.dir, "../../ralphie.example.json"));
     }).pipe(Effect.provide(RalphieConfigFileLive), Effect.runPromise);
 
-    expect(config.repo).toBe("owner/repository");
+    expect(config.repositories?.map(({ repo }) => repo)).toEqual([
+      "owner/frontend",
+      "owner/backend",
+    ]);
     expect(config.model).toEqual({ providerID: "openai", modelID: "gpt-5" });
   });
 

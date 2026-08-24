@@ -275,10 +275,8 @@ ralphie --config ./ralphie.json
 
 ```json
 {
-  "repo": "owner/repository",
-  "branch": "develop",
+  "branch": "main",
   "maxIssues": 10,
-  "issueLabels": ["bug", "backend"],
   "issueSort": "created",
   "issueOrder": "asc",
   "model": "openai/gpt-5",
@@ -286,9 +284,41 @@ ralphie --config ./ralphie.json
   "agent": "build",
   "workspace": "~/.ralphie",
   "startClean": true,
-  "cleanup": true
+  "cleanup": true,
+  "repositories": [
+    {
+      "repo": "owner/frontend",
+      "issueLabels": ["frontend"]
+    },
+    {
+      "repo": "owner/backend",
+      "branch": "develop",
+      "maxIssues": 5,
+      "issueLabels": ["backend"]
+    }
+  ]
 }
 ```
+
+Every entry in `repositories` gets an independent issue queue, checkout,
+OpenCode server, run state, and issue-processing loop. Ralphie runs those loops
+in parallel. Repository entries inherit top-level settings and may override
+repository-level settings; explicit CLI options override every entry:
+
+```text
+built-in defaults < top-level config < repository entry < CLI options
+```
+
+`workspace`, `startClean`, `cleanup`, and output settings are batch-wide. Ralphie
+performs start cleanup once, stores clones under `<workspace>/<owner>/<repo>`,
+and removes the workspace only after every repository run succeeds. Parallel
+human-readable output uses append-only lines prefixed with the repository name;
+JSON events include `repository` and `repositoryRunId` fields.
+
+Resume paths belong to individual runs, so a multi-repository file places
+`resume` on the corresponding repository entry. The global `--resume` flag and
+a top-level `resume` setting are rejected when multiple repositories are
+configured.
 
 The file is optional and has no implicit discovery location. Unknown keys,
 invalid enum values, malformed model identifiers, and incompatible output modes
@@ -299,10 +329,12 @@ file, and omitted values fall back to Ralphie's normal defaults:
 ralphie --config ./ralphie.json --branch main --max-issues 2
 ```
 
-The positional repository also overrides `repo` from the file. Boolean values
-can be explicitly disabled when overriding a file, for example
-`--cleanup=false`. See [ralphie.example.json](./ralphie.example.json) for every
-supported key.
+For a single repository, `repo` remains supported instead of `repositories` and
+the positional repository overrides it. A positional repository cannot be
+combined with `repositories`, and duplicate entries are rejected. Boolean
+values can be explicitly disabled when overriding a file, for example
+`--cleanup=false`. See [ralphie.example.json](./ralphie.example.json) for a
+complete multi-repository template.
 
 Process bugs from oldest to newest on a non-default branch:
 
@@ -370,7 +402,7 @@ ralphie [repository] [options]
 ```
 
 `[repository]` accepts an `owner/name` slug or a GitHub HTTPS/SSH clone URL. It
-may be omitted when `repo` is present in `--config`.
+may be omitted when `repo` or `repositories` is present in `--config`.
 
 | Option | Default | Description |
 | --- | --- | --- |
@@ -400,13 +432,16 @@ Ralphie adapts its progress renderer to its environment:
 
 - interactive terminals receive one in-place status line for the active leaf
   stage, while completed milestones remain in the scrollback;
+- multi-repository runs use repository-prefixed append-only lines so concurrent
+  progress cannot corrupt one shared interactive status line;
 - CI and redirected output receive durable, append-only lines;
 - `--verbose` adds operational details;
 - `--json` writes one JSON object per line to stdout; and
 - `--quiet` suppresses everything except failures.
 
 JSON events use a stable operational vocabulary and include `runId`,
-`timestamp`, `stage`, `status`, and `message`. Depending on the event, they may
+`timestamp`, `stage`, `status`, and `message`. Multi-repository events also
+include `repository` and `repositoryRunId`. Depending on the event, they may
 also include issue position, review attempt, session ID, commit SHA, created
 issue numbers, or diagnostic paths. Credentials and sensitive environment values
 are redacted at the reporting boundary.

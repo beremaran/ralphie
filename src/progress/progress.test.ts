@@ -31,6 +31,7 @@ describe("progress reporting", () => {
         stage: ProgressStage.Review,
         status: ProgressStatus.Started,
         message: "Reviewing changes...",
+        repository: "owner/repo",
         issue: { number: 42, title: "Fix issue" },
         attempt: 1,
         maxAttempts: 5,
@@ -43,6 +44,7 @@ describe("progress reporting", () => {
       stage: ProgressStage.Review,
       status: ProgressStatus.Started,
       message: "Reviewing changes...",
+      repository: "owner/repo",
       issue: { number: 42, title: "Fix issue" },
       attempt: 1,
       maxAttempts: 5,
@@ -66,6 +68,7 @@ describe("progress reporting", () => {
         stage: ProgressStage.IssuePlanning,
         status: ProgressStatus.Succeeded,
         message: "Issue prepared.",
+        repository: "owner/repo",
         issue: { number: 42, title: "Fix issue" },
         current: 1,
         total: 3,
@@ -73,7 +76,7 @@ describe("progress reporting", () => {
       });
     }).pipe(Effect.provide(layer), Effect.runPromise);
 
-    expect(output).toBe('✓ [1/3] #42 Issue prepared. {"branch":"main"}\n');
+    expect(output).toBe('✓ [owner/repo] [1/3] #42 Issue prepared. {"branch":"main"}\n');
   });
 
   test("renders nested interactive stages on one live line", async () => {

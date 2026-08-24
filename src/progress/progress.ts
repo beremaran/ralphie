@@ -55,6 +55,8 @@ export type ProgressUpdate = {
   readonly stage: ProgressStage;
   readonly status: ProgressStatus;
   readonly message: string;
+  readonly repository?: string;
+  readonly repositoryRunId?: string;
   readonly issue?: ProgressIssue;
   readonly current?: number;
   readonly total?: number;
@@ -151,6 +153,7 @@ export const makeProgressReporterLayer = ({
     let persistEvents = true;
 
     const renderLine = (event: ProgressEvent): string => {
+      const repository = event.repository ? ` [${event.repository}]` : "";
       const issue = event.issue ? ` #${event.issue.number}` : "";
       const position =
         event.current !== undefined && event.total !== undefined
@@ -161,7 +164,7 @@ export const makeProgressReporterLayer = ({
           ? ` (${event.attempt}/${event.maxAttempts})`
           : "";
       const details = verbose ? formatDetails(event.details) : "";
-      return `${statusSymbol(event.status)}${position}${attempt}${issue} ${event.message}${details}`;
+      return `${statusSymbol(event.status)}${repository}${position}${attempt}${issue} ${event.message}${details}`;
     };
 
     const clearLiveLine = () => {

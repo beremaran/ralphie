@@ -6,14 +6,14 @@ import { z } from "zod";
 import {
   RalphieConfigFile,
   RalphieConfigFileLive,
-  resolveRalphieConfig,
+  resolveRalphieConfigs,
 } from "./config/config.ts";
 import { IssueOrder, IssueSort } from "./github/issues.ts";
 import { openCodeModelSchema, openCodeModelVariantSchema } from "./opencode/model.ts";
 import { makeProgressReporterLayer, ProgressRenderMode } from "./progress/progress.ts";
 import { LiveRuntime } from "./runtime.ts";
 import { exitCodeForFailure } from "./process/exit-code.ts";
-import { workflow } from "./workflow.ts";
+import { batchWorkflow, type WorkflowOptions } from "./workflow.ts";
 import { redactSensitiveText } from "./shared/redaction.ts";
 import { type RunState, RunStateStore, RunStateStoreLive } from "./run/state.ts";
 import { reconcileRunState } from "./run/reconciliation.ts";
@@ -97,7 +97,7 @@ export const runCommand = defineCommand({
             const files = yield* RalphieConfigFile;
             return yield* files.load(configPath);
           }).pipe(Effect.provide(RalphieConfigFileLive), Effect.runPromise);
-    const config = resolveRalphieConfig(fileConfig, {
+    const configs = resolveRalphieConfigs(fileConfig, {
       ...(positionalRepo === undefined ? {} : { repo: positionalRepo }),
       ...(flags.branch === undefined ? {} : { branch: flags.branch }),
       ...(flags["max-issues"] === undefined ? {} : { maxIssues: flags["max-issues"] }),
@@ -125,39 +125,52 @@ export const runCommand = defineCommand({
       ...(flags.quiet === undefined ? {} : { quiet: flags.quiet }),
     });
 
-    let resumeState: RunState | undefined;
-    if (config.resume !== undefined) {
-      const resumePath = config.resume;
-      resumeState = await Effect.gen(function* () {
-        const store = yield* RunStateStore;
-        return yield* store.load(resumePath);
-      }).pipe(Effect.provide(RunStateStoreLive), Effect.runPromise);
-      const reconciliation = reconcileRunState(resumeState, {
-        repository: config.repo,
-        branch: config.branch,
-      });
-      if (!reconciliation.compatible) {
-        throw new Error(
-          `Cannot resume run ${resumeState.runId}: ${reconciliation.reasons.join("; ")}.`,
-        );
-      }
-    }
+    const repositoryRuns = await Promise.all(
+      configs.map(async (config) => {
+        let resumeState: RunState | undefined;
+        if (config.resume !== undefined) {
+          const resumePath = config.resume;
+          resumeState = await Effect.gen(function* () {
+            const store = yield* RunStateStore;
+            return yield* store.load(resumePath);
+          }).pipe(Effect.provide(RunStateStoreLive), Effect.runPromise);
+          const reconciliation = reconcileRunState(resumeState, {
+            repository: config.repo,
+            branch: config.branch,
+          });
+          if (!reconciliation.compatible) {
+            throw new Error(
+              `Cannot resume run ${resumeState.runId}: ${reconciliation.reasons.join("; ")}.`,
+            );
+          }
+        }
+        return { config, resumeState };
+      }),
+    );
+
+    const config = configs[0]!;
 
     const progressMode = config.json
       ? ProgressRenderMode.Json
       : config.quiet
         ? ProgressRenderMode.Quiet
-        : terminal.isInteractive && !terminal.isCI && process.stderr.isTTY === true
+        : configs.length === 1 &&
+            terminal.isInteractive &&
+            !terminal.isCI &&
+            process.stderr.isTTY === true
           ? ProgressRenderMode.Interactive
           : ProgressRenderMode.Plain;
-    const runId = resumeState?.runId ?? crypto.randomUUID();
+    const batchRunId =
+      repositoryRuns.length === 1
+        ? (repositoryRuns[0]!.resumeState?.runId ?? crypto.randomUUID())
+        : crypto.randomUUID();
     const eventLogPath =
-      config.resume === undefined
+      repositoryRuns.length !== 1 || config.resume === undefined
         ? join(
             resolveWorkspacePath(config.workspace),
             ".ralphie",
             "runs",
-            runId,
+            batchRunId,
             "events.jsonl",
           )
         : join(dirname(config.resume), "events.jsonl");
@@ -168,31 +181,39 @@ export const runCommand = defineCommand({
       write: config.json
         ? (text) => process.stdout.write(text)
         : (text) => process.stderr.write(text),
-      runId,
+      runId: batchRunId,
       eventLogPath,
     });
 
     try {
-      await workflow({
-        repo: config.repo,
-        branch: config.branch,
-        maxIssues: config.maxIssues,
-        issueFilters: {
-          labels: config.issueLabels,
-          sort: config.issueSort,
-          order: config.issueOrder,
-        },
-        model: config.model,
-        modelVariant: config.modelVariant,
-        agent: config.agent,
+      const repositories: WorkflowOptions[] = repositoryRuns.map(
+        ({ config: repository, resumeState }) => ({
+          repo: repository.repo,
+          branch: repository.branch,
+          maxIssues: repository.maxIssues,
+          issueFilters: {
+            labels: repository.issueLabels,
+            sort: repository.issueSort,
+            order: repository.issueOrder,
+          },
+          model: repository.model,
+          modelVariant: repository.modelVariant,
+          agent: repository.agent,
+          workspace: repository.workspace,
+          cleanup: false,
+          startClean: false,
+          signal,
+          runId: resumeState?.runId ?? crypto.randomUUID(),
+          resumeState,
+          resumePath: repository.resume,
+          dryRun: repository.dryRun,
+        }),
+      );
+      await batchWorkflow({
+        repositories,
         workspace: config.workspace,
         cleanup: config.cleanup,
         startClean: config.startClean,
-        signal,
-        runId,
-        resumeState,
-        resumePath: config.resume,
-        dryRun: config.dryRun,
       }).pipe(
         Effect.provide(LiveRuntime.pipe(Layer.provideMerge(progressLayer))),
         Effect.catchAll((error) =>
