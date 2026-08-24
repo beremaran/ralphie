@@ -24,7 +24,7 @@ The CLI also requires these local tools:
 > accept those mutations.
 
 ```bash
-bun run index.ts <repo> [--branch <branch>] [--agent <agent>] [--model <provider/model>] [--model-variant <variant>] [--max-issues <count>] [--issue-label <label>] [--issue-sort <sort>] [--issue-order <order>] [--workspace <path>] [--verbose] [--json|--quiet] [--resume <state.json>] [--start-clean] [--cleanup]
+bun run index.ts <repo> [--branch <branch>] [--agent <agent>] [--model <provider/model>] [--model-variant <variant>] [--max-issues <count>] [--issue-label <label>] [--issue-sort <sort>] [--issue-order <order>] [--workspace <path>] [--verbose] [--json|--quiet] [--dry-run] [--resume <state.json>] [--start-clean] [--cleanup]
 # Example:
 bun run index.ts owner/project --branch develop --model openai/gpt-5 --model-variant high --max-issues 10 --issue-label bug --issue-sort created --issue-order asc --workspace /tmp/ralphie --start-clean --cleanup
 ```
@@ -54,6 +54,10 @@ work begins. It uses the same protected-path checks as `--cleanup`.
 Pass `--resume <state.json>` to continue an interrupted run. The saved
 repository and branch must match the command, and Ralphie reconciles the saved
 queue with the current checkout and open GitHub issues before doing more work.
+Pass `--dry-run` to perform preflight, discover and queue issues, and ask
+OpenCode for structured complexity routing without invoking implementation,
+decomposition, commits, pushes, or GitHub mutations. Dry-run mode is retained in
+resumable state so a resumed validation cannot silently become a mutating run.
 
 Ralphie validates GitHub CLI authentication, initializes Octokit from the local
 `gh` token, verifies Git, and prepares `<workspace>/<repository>`. A matching
@@ -113,6 +117,17 @@ bun run build
 bun run check
 bun run probe:structured-output
 ```
+
+Real integrations are opt-in and skipped by the normal suite:
+
+```bash
+RALPHIE_RUN_OPENCODE_COMPLEXITY_SMOKE=1 bun test src/integration/network-smoke.test.ts
+RALPHIE_RUN_OPENCODE_IMPLEMENTATION_SMOKE=1 bun test src/integration/network-smoke.test.ts
+RALPHIE_RUN_GITHUB_INTEGRATION=1 RALPHIE_GITHUB_TEST_REPOSITORY=owner/ralphie-smoke-test bun test src/integration/network-smoke.test.ts
+```
+
+The GitHub smoke test is read-only and refuses repository names that do not look
+like dedicated test, sandbox, fixture, integration, or smoke repositories.
 
 The structured-output probe starts a temporary OpenCode server, asks a small
 decision question with a Zod-generated JSON Schema, validates the returned value
