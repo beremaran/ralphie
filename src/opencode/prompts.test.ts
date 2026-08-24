@@ -7,6 +7,7 @@ import {
 import {
   buildCommitMessagePrompt,
   buildComplexityPrompt,
+  buildDecompositionPrompt,
   buildImplementationPrompt,
   buildReviewFixPrompt,
   buildReviewPrompt,
@@ -54,6 +55,23 @@ describe("OpenCode prompts", () => {
     expect(prompt).toContain("must\nnot create commits, push, switch branches");
     expect(prompt).toContain("Leave all resulting changes in the working tree");
     expect(prompt).toContain('Issue title: "Add validation"');
+  });
+
+  test("preserves empty issue bodies and labels in prompts", () => {
+    const prompt = buildComplexityPrompt({
+      issue: {
+        number: 8,
+        title: "Handle empty metadata",
+        url: "issue/8",
+        body: null,
+        labels: [],
+      },
+      repositoryPath: "/workspace/repo",
+      targetBranch: "main",
+    });
+
+    expect(prompt).toContain('Issue labels: []');
+    expect(prompt).toContain('Issue body: ""');
   });
 
   test("builds a review prompt from only issue, metadata, and staged diff", () => {
@@ -134,5 +152,61 @@ describe("OpenCode prompts", () => {
     expect(prompt).toContain("diff --git a/src/cache.ts b/src/cache.ts");
     expect(prompt).toContain("Do not edit files, stage or");
     expect(prompt).toContain("create commits, push, switch branches");
+  });
+
+  test("builds a decomposition prompt with actionable bounded children and failed reviews", () => {
+    const prompt = buildDecompositionPrompt({
+      issue: {
+        number: 22,
+        title: "Modernize the API",
+        url: "issue/22",
+        body: "Split the migration into safe steps.",
+        labels: ["architecture"],
+      },
+      repositoryPath: "/workspace/repo",
+      targetBranch: "main",
+      failedReviewSummaries: [
+        {
+          verdict: ReviewVerdict.ChangesRequested,
+          summary: "The migration is too broad.",
+          findings: [
+            {
+              severity: ReviewFindingSeverity.Blocking,
+              description: "Separate storage and API changes.",
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(prompt).toContain("at least two child issues");
+    expect(prompt).toContain("estimated complexity from 0 through 3");
+    expect(prompt).toContain("dependency graph must be acyclic");
+    expect(prompt).toContain("The migration is too broad.");
+    expect(prompt).toContain("Do not create, edit, or\nclose GitHub issues");
+  });
+
+  test("bounds large issue bodies and diffs while preserving truncation markers", () => {
+    const body = "b".repeat(20_000);
+    const diff = "d".repeat(120_000);
+    const prompt = buildReviewPrompt({
+      issue: {
+        number: 23,
+        title: "Large change",
+        url: "issue/23",
+        body,
+        labels: [],
+      },
+      repositoryPath: "/workspace/repo",
+      targetBranch: "main",
+      stagedDiff: diff,
+    });
+
+    expect(prompt).toContain("[issue body truncated]");
+    expect(prompt).toContain("[staged diff truncated]");
+    expect(prompt).not.toContain(body);
+    expect(prompt).not.toContain(diff);
+    expect(prompt.match(/b/g)?.length ?? 0).toBeLessThan(body.length);
+    expect(prompt.match(/d/g)?.length ?? 0).toBeLessThan(diff.length);
   });
 });
