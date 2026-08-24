@@ -54,7 +54,7 @@ type TestRuntimeOptions = {
   readonly abortAt?: "github" | "repository" | "issues" | "opencode" | "between";
   readonly abortController?: AbortController;
   readonly captureStart?: number;
-  readonly initializeGate?: () => Promise<void>;
+  readonly prepareGate?: () => Promise<void>;
   readonly failedRepository?: string;
 };
 
@@ -83,15 +83,6 @@ function testRuntime(
         calls.push("initializeGitHub");
         if (options.abortAt === "github") options.abortController?.abort();
         if (options.githubFailure) return Effect.fail(options.githubFailure);
-        if (options.initializeGate !== undefined) {
-          return Effect.tryPromise({
-            try: async () => {
-              await options.initializeGate?.();
-              return {} as Octokit;
-            },
-            catch: (cause) => new RalphieError({ message: "gate failed", cause }),
-          });
-        }
         return Effect.succeed({} as Octokit);
       }),
     }),
@@ -103,12 +94,21 @@ function testRuntime(
       prepare: (repo, branch, workspace) => {
         calls.push(`prepareRepository:${repo}:${branch}:${workspace}`);
         if (options.abortAt === "repository") options.abortController?.abort();
-        return Effect.succeed({
+        const prepared = {
           path: `${workspace}/repo`,
           cloned: true,
           branchChanged: branch !== "main",
           cleaned: false,
-        });
+        };
+        return options.prepareGate === undefined
+          ? Effect.succeed(prepared)
+          : Effect.tryPromise({
+              try: async () => {
+                await options.prepareGate?.();
+                return prepared;
+              },
+              catch: (cause) => new RalphieError({ message: "gate failed", cause }),
+            });
       },
     }),
     Layer.succeed(GitRepositoryInvariant, {
@@ -208,6 +208,10 @@ function testRuntime(
         }),
     }),
     Layer.succeed(Workspace, {
+      prepare: (workspace) => {
+        calls.push(`prepareWorkspace:${workspace}`);
+        return Effect.void;
+      },
       remove: (workspace) => {
         calls.push(`removeWorkspace:${workspace}`);
         return options.removeFailure ? Effect.fail(options.removeFailure) : Effect.void;
@@ -260,6 +264,7 @@ describe("workflow", () => {
     expect(states.at(-1)?.queue.completedIssueNumbers).toEqual([42]);
     expect(calls).toEqual([
       "removeWorkspace:/tmp/ralphie",
+      "prepareWorkspace:/tmp/ralphie",
       "initializeGitHub",
       "verifyGitInstalled",
       "prepareRepository:owner/repo:develop:/tmp/ralphie",
@@ -478,14 +483,15 @@ describe("workflow", () => {
     );
 
     expect(Exit.isFailure(exit)).toBeTrue();
-    expect(calls).toEqual(["initializeGitHub"]);
+    expect(calls).toEqual(["prepareWorkspace:/tmp/ralphie", "initializeGitHub"]);
   });
 
   test.each([
-    ["github", ["initializeGitHub"]],
+    ["github", ["prepareWorkspace:/tmp/ralphie", "initializeGitHub"]],
     [
       "repository",
       [
+        "prepareWorkspace:/tmp/ralphie",
         "initializeGitHub",
         "verifyGitInstalled",
         "prepareRepository:owner/repo:develop:/tmp/ralphie",
@@ -494,6 +500,7 @@ describe("workflow", () => {
     [
       "issues",
       [
+        "prepareWorkspace:/tmp/ralphie",
         "initializeGitHub",
         "verifyGitInstalled",
         "prepareRepository:owner/repo:develop:/tmp/ralphie",
@@ -627,13 +634,13 @@ describe("batch workflow", () => {
     const calls: string[] = [];
     const states: RunState[] = [];
     const events: ProgressUpdate[] = [];
-    let activeInitializations = 0;
-    let maximumInitializations = 0;
-    const initializeGate = async () => {
-      activeInitializations += 1;
-      maximumInitializations = Math.max(maximumInitializations, activeInitializations);
+    let activePreparations = 0;
+    let maximumPreparations = 0;
+    const prepareGate = async () => {
+      activePreparations += 1;
+      maximumPreparations = Math.max(maximumPreparations, activePreparations);
       await Bun.sleep(10);
-      activeInitializations -= 1;
+      activePreparations -= 1;
     };
 
     const summaries = await batchWorkflow({
@@ -645,11 +652,11 @@ describe("batch workflow", () => {
       startClean: true,
       cleanup: true,
     }).pipe(
-      Effect.provide(testRuntime(calls, states, { initializeGate }, events)),
+      Effect.provide(testRuntime(calls, states, { prepareGate }, events)),
       Effect.runPromise,
     );
 
-    expect(maximumInitializations).toBe(2);
+    expect(maximumPreparations).toBe(2);
     expect(summaries.map(({ repository }) => repository)).toEqual([
       "owner/one",
       "owner/two",
@@ -657,14 +664,13 @@ describe("batch workflow", () => {
     expect(
       calls.filter((call) => call === "removeWorkspace:/tmp/ralphie"),
     ).toHaveLength(2);
-    expect(events.some(({ repository }) => repository === "owner/one")).toBeTrue();
-    expect(events.some(({ repository }) => repository === "owner/two")).toBeTrue();
     expect(
-      events.some(({ repositoryRunId }) => repositoryRunId === "run-one"),
-    ).toBeTrue();
-    expect(
-      events.some(({ repositoryRunId }) => repositoryRunId === "run-two"),
-    ).toBeTrue();
+      calls.filter((call) => call === "prepareWorkspace:/tmp/ralphie"),
+    ).toHaveLength(1);
+    expect(calls.filter((call) => call === "initializeGitHub")).toHaveLength(1);
+    expect(calls.filter((call) => call === "verifyGitInstalled")).toHaveLength(1);
+    expect(calls.filter((call) => call === "startServer")).toHaveLength(1);
+    expect(calls.filter((call) => call === "closeServer")).toHaveLength(1);
   });
 
   test("lets sibling repositories finish and retains the workspace when one fails", async () => {
@@ -685,6 +691,7 @@ describe("batch workflow", () => {
     expect(Exit.isFailure(exit)).toBeTrue();
     expect(calls).toContain("executeIssue:42:/tmp/ralphie/repo:develop:build");
     expect(calls.filter((call) => call === "closeIssue:42")).toHaveLength(1);
+    expect(calls.filter((call) => call === "closeServer")).toHaveLength(1);
     expect(calls).not.toContain("removeWorkspace:/tmp/ralphie");
   });
 });

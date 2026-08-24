@@ -300,10 +300,13 @@ ralphie --config ./ralphie.json
 }
 ```
 
-Every entry in `repositories` gets an independent issue queue, checkout,
-OpenCode server, run state, and issue-processing loop. Ralphie runs those loops
-in parallel. Repository entries inherit top-level settings and may override
-repository-level settings; explicit CLI options override every entry:
+Every entry in `repositories` gets an independent issue queue, checkout, run
+state, and issue-processing loop. Ralphie authenticates GitHub, initializes
+Octokit, verifies Git, prepares the workspace, and starts one shared OpenCode
+server exactly once; it then runs the repository-specific loops in parallel
+against those shared resources. Repository entries inherit top-level settings
+and may override repository-level settings; explicit CLI options override every
+entry:
 
 ```text
 built-in defaults < top-level config < repository entry < CLI options

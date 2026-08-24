@@ -1,5 +1,6 @@
 import { Effect, Either } from "effect";
 import { join } from "node:path";
+import type { Octokit } from "octokit";
 
 import { GitRepository } from "./git/repository.ts";
 import { GitRepositoryInvariant } from "./git/repository-invariant.ts";
@@ -27,6 +28,7 @@ import {
   ProgressStage,
   ProgressStatus,
   type ProgressUpdate,
+  withProgressContext,
 } from "./progress/progress.ts";
 import { reconcileRunState } from "./run/reconciliation.ts";
 import {
@@ -158,6 +160,12 @@ export type WorkflowOptions = {
   readonly resumePath?: string;
   readonly issueFailurePolicy?: IssueFailurePolicy;
   readonly dryRun?: boolean;
+  readonly sharedResources?: WorkflowSharedResources;
+};
+
+export type WorkflowSharedResources = {
+  readonly octokit: Octokit;
+  readonly openCode: OpenCodeServer;
 };
 
 export type BatchWorkflowOptions = {
@@ -184,6 +192,7 @@ export const workflow = ({
   resumePath,
   issueFailurePolicy = IssueFailurePolicy.Halt,
   dryRun = false,
+  sharedResources,
 }: WorkflowOptions) =>
   Effect.gen(function* () {
     const progress = yield* ProgressReporter;
@@ -237,25 +246,42 @@ export const workflow = ({
         );
       }
 
-      const github = yield* GitHubClient;
-      const octokit = yield* track(
-        progress,
-        ProgressStage.GitHubAuthentication,
-        "Checking GitHub authentication...",
-        github.initialize,
-        "GitHub authentication verified and Octokit initialized.",
-      );
+      if (sharedResources === undefined) {
+        const workspaceService = yield* Workspace;
+        yield* track(
+          progress,
+          ProgressStage.WorkspacePreparation,
+          `Preparing workspace ${workspace}...`,
+          workspaceService.prepare(workspace),
+          `Workspace ready: ${workspace}.`,
+        );
+      }
+
+      const octokit =
+        sharedResources?.octokit ??
+        (yield* Effect.gen(function* () {
+          const github = yield* GitHubClient;
+          return yield* track(
+            progress,
+            ProgressStage.GitHubAuthentication,
+            "Checking GitHub authentication...",
+            github.initialize,
+            "GitHub authentication verified and Octokit initialized.",
+          );
+        }));
       const issueMutations = yield* GitHubIssueMutations;
       yield* checkCancellation(signal);
 
       const repository = yield* GitRepository;
-      yield* track(
-        progress,
-        ProgressStage.GitVerification,
-        "Checking Git installation...",
-        repository.verifyInstalled,
-        "Git installation verified.",
-      );
+      if (sharedResources === undefined) {
+        yield* track(
+          progress,
+          ProgressStage.GitVerification,
+          "Checking Git installation...",
+          repository.verifyInstalled,
+          "Git installation verified.",
+        );
+      }
       yield* checkCancellation(signal);
 
       const prepared = yield* track(
@@ -372,161 +398,166 @@ export const workflow = ({
       persistCancellationState = () => persistState(RunStateStatus.Active, activeIssue);
 
       yield* persistState(RunStateStatus.Active);
-      const openCode = yield* OpenCode;
       const issueExecutor = effectiveDryRun
         ? yield* DryRunIssueExecutor
         : yield* IssueExecutor;
       const diagnostics = makeOpenCodeSessionDiagnostics();
-      yield* Effect.acquireUseRelease(
-        track(
-          progress,
-          ProgressStage.OpenCodeServer,
-          "Starting OpenCode server...",
-          openCode.start,
-          (server) => `OpenCode server started at ${server.url}.`,
-        ),
-        (server) =>
-          Effect.gen(function* () {
-            while (queue.state() === IssueQueueState.Ready) {
-              yield* checkCancellation(signal);
-              const issue = queue.next();
-              if (issue === undefined) break;
-              activeQueueIssue = issue;
-              const current = queue.processedCount();
-              const total =
-                resumeState?.maxIssues ?? maxIssues ?? current + queue.pendingCount();
-              const resumedClosureOutcome =
-                resumeState?.activeIssue?.issueNumber === issue.number &&
-                resumeState.activeIssue.stage === ProgressStage.IssueClosure
-                  ? outcomes.find(
-                      (entry) =>
-                        entry.issueNumber === issue.number &&
-                        entry.outcome.kind === IssueExecutionOutcomeKind.Completed,
-                    )?.outcome
-                  : undefined;
+      const processQueue = (server: OpenCodeServer) =>
+        Effect.gen(function* () {
+          while (queue.state() === IssueQueueState.Ready) {
+            yield* checkCancellation(signal);
+            const issue = queue.next();
+            if (issue === undefined) break;
+            activeQueueIssue = issue;
+            const current = queue.processedCount();
+            const total =
+              resumeState?.maxIssues ?? maxIssues ?? current + queue.pendingCount();
+            const resumedClosureOutcome =
+              resumeState?.activeIssue?.issueNumber === issue.number &&
+              resumeState.activeIssue.stage === ProgressStage.IssueClosure
+                ? outcomes.find(
+                    (entry) =>
+                      entry.issueNumber === issue.number &&
+                      entry.outcome.kind === IssueExecutionOutcomeKind.Completed,
+                  )?.outcome
+                : undefined;
+            activeIssue = {
+              issueNumber: issue.number,
+              stage:
+                resumedClosureOutcome === undefined
+                  ? ProgressStage.ComplexityAssessment
+                  : ProgressStage.IssueClosure,
+            };
+            restoreCancellationCheckout = () =>
+              checkpoints.restore(prepared.path, {
+                branch: checkout.branch,
+                sha: checkout.head,
+              });
+            yield* persistState(RunStateStatus.Active, activeIssue);
+            const outcome =
+              resumedClosureOutcome ??
+              (yield* track(
+                progress,
+                ProgressStage.IssueExecution,
+                `Executing #${issue.number} ${issue.title}...`,
+                issueExecutor.execute({
+                  issue,
+                  repository: repo,
+                  repositoryPath: prepared.path,
+                  targetBranch: branch,
+                  workspace,
+                  runId: actualRunId,
+                  octokit,
+                  openCode: server.client,
+                  openCodeSelection: selection,
+                  openCodeDiagnostics: diagnostics,
+                  repositoryInvariant: invariantService,
+                  signal,
+                }),
+                (result) =>
+                  `Issue #${issue.number} finished with outcome ${result.kind}.`,
+                {
+                  issue: { number: issue.number, title: issue.title },
+                  current,
+                  total,
+                },
+              ));
+            if (resumedClosureOutcome === undefined) {
+              outcomes.push({ issueNumber: issue.number, outcome });
+            }
+
+            if (outcome.kind === IssueExecutionOutcomeKind.Completed) {
+              // The implementation path may have advanced HEAD. Persist the
+              // post-delivery checkout so a closure-only resume reconciles
+              // against the commit that was actually pushed.
+              checkout = yield* invariantService.capture(prepared.path);
               activeIssue = {
                 issueNumber: issue.number,
-                stage:
-                  resumedClosureOutcome === undefined
-                    ? ProgressStage.ComplexityAssessment
-                    : ProgressStage.IssueClosure,
+                stage: ProgressStage.IssueClosure,
               };
-              restoreCancellationCheckout = () =>
-                checkpoints.restore(prepared.path, {
-                  branch: checkout.branch,
-                  sha: checkout.head,
-                });
               yield* persistState(RunStateStatus.Active, activeIssue);
-              const outcome =
-                resumedClosureOutcome ??
-                (yield* track(
-                  progress,
-                  ProgressStage.IssueExecution,
-                  `Executing #${issue.number} ${issue.title}...`,
-                  issueExecutor.execute({
-                    issue,
-                    repository: repo,
-                    repositoryPath: prepared.path,
-                    targetBranch: branch,
-                    workspace,
-                    runId: actualRunId,
-                    octokit,
-                    openCode: server.client,
-                    openCodeSelection: selection,
-                    openCodeDiagnostics: diagnostics,
-                    repositoryInvariant: invariantService,
-                    signal,
-                  }),
-                  (result) =>
-                    `Issue #${issue.number} finished with outcome ${result.kind}.`,
-                  {
-                    issue: { number: issue.number, title: issue.title },
-                    current,
-                    total,
-                  },
-                ));
-              if (resumedClosureOutcome === undefined) {
-                outcomes.push({ issueNumber: issue.number, outcome });
-              }
-
-              if (outcome.kind === IssueExecutionOutcomeKind.Completed) {
-                // The implementation path may have advanced HEAD. Persist the
-                // post-delivery checkout so a closure-only resume reconciles
-                // against the commit that was actually pushed.
-                checkout = yield* invariantService.capture(prepared.path);
-                activeIssue = {
-                  issueNumber: issue.number,
-                  stage: ProgressStage.IssueClosure,
-                };
-                yield* persistState(RunStateStatus.Active, activeIssue);
-                yield* track(
-                  progress,
-                  ProgressStage.IssueClosure,
-                  `Closing issue #${issue.number} as completed...`,
-                  issueMutations.close(
-                    octokit,
-                    repo,
-                    issue.number,
-                    GitHubIssueCloseReason.Completed,
-                  ),
-                  `Issue #${issue.number} closed as completed.`,
-                  {
-                    issue: { number: issue.number, title: issue.title },
-                    details: { completion: outcome.completion },
-                  },
-                );
-              }
-
-              if (
-                outcome.kind === IssueExecutionOutcomeKind.Completed ||
-                outcome.kind === IssueExecutionOutcomeKind.Decomposed ||
-                outcome.kind === IssueExecutionOutcomeKind.Escalated
-              ) {
-                queue.complete(issue.number);
-              }
-
-              if (outcome.kind === IssueExecutionOutcomeKind.Failed) {
-                yield* persistState(RunStateStatus.Active, {
-                  issueNumber: issue.number,
-                  stage: ProgressStage.IssueExecution,
-                });
-                if (issueFailurePolicy === IssueFailurePolicy.Halt) {
-                  return yield* new RalphieError({
-                    message: `Issue #${issue.number} failed: ${outcome.message}`,
-                  });
-                }
-              } else {
-                activeIssue = undefined;
-                activeQueueIssue = undefined;
-                restoreCancellationCheckout = undefined;
-                checkout = yield* invariantService.capture(prepared.path);
-                yield* persistState(RunStateStatus.Active);
-              }
-
-              if (
-                outcome.kind === IssueExecutionOutcomeKind.Decomposed ||
-                outcome.kind === IssueExecutionOutcomeKind.Escalated
-              ) {
-                const refreshed = yield* track(
-                  progress,
-                  ProgressStage.IssueDiscovery,
-                  "Refreshing open issues after decomposition...",
-                  githubIssues.listOpen(octokit, repo, issueFilters),
-                  (result) => `Refreshed ${result.length} matching open issues.`,
-                );
-                const added = queue.refresh(toQueuedIssues(refreshed));
-                yield* progress.emit({
-                  stage: ProgressStage.IssueQueue,
-                  status: ProgressStatus.Info,
-                  message: `Issue queue refreshed; added ${added} new issues.`,
-                  details: { added, pending: queue.pendingCount() },
-                });
-                yield* persistState(RunStateStatus.Active);
-              }
+              yield* track(
+                progress,
+                ProgressStage.IssueClosure,
+                `Closing issue #${issue.number} as completed...`,
+                issueMutations.close(
+                  octokit,
+                  repo,
+                  issue.number,
+                  GitHubIssueCloseReason.Completed,
+                ),
+                `Issue #${issue.number} closed as completed.`,
+                {
+                  issue: { number: issue.number, title: issue.title },
+                  details: { completion: outcome.completion },
+                },
+              );
             }
-          }),
-        closeServer,
-      );
+
+            if (
+              outcome.kind === IssueExecutionOutcomeKind.Completed ||
+              outcome.kind === IssueExecutionOutcomeKind.Decomposed ||
+              outcome.kind === IssueExecutionOutcomeKind.Escalated
+            ) {
+              queue.complete(issue.number);
+            }
+
+            if (outcome.kind === IssueExecutionOutcomeKind.Failed) {
+              yield* persistState(RunStateStatus.Active, {
+                issueNumber: issue.number,
+                stage: ProgressStage.IssueExecution,
+              });
+              if (issueFailurePolicy === IssueFailurePolicy.Halt) {
+                return yield* new RalphieError({
+                  message: `Issue #${issue.number} failed: ${outcome.message}`,
+                });
+              }
+            } else {
+              activeIssue = undefined;
+              activeQueueIssue = undefined;
+              restoreCancellationCheckout = undefined;
+              checkout = yield* invariantService.capture(prepared.path);
+              yield* persistState(RunStateStatus.Active);
+            }
+
+            if (
+              outcome.kind === IssueExecutionOutcomeKind.Decomposed ||
+              outcome.kind === IssueExecutionOutcomeKind.Escalated
+            ) {
+              const refreshed = yield* track(
+                progress,
+                ProgressStage.IssueDiscovery,
+                "Refreshing open issues after decomposition...",
+                githubIssues.listOpen(octokit, repo, issueFilters),
+                (result) => `Refreshed ${result.length} matching open issues.`,
+              );
+              const added = queue.refresh(toQueuedIssues(refreshed));
+              yield* progress.emit({
+                stage: ProgressStage.IssueQueue,
+                status: ProgressStatus.Info,
+                message: `Issue queue refreshed; added ${added} new issues.`,
+                details: { added, pending: queue.pendingCount() },
+              });
+              yield* persistState(RunStateStatus.Active);
+            }
+          }
+        });
+      if (sharedResources === undefined) {
+        const openCode = yield* OpenCode;
+        yield* Effect.acquireUseRelease(
+          track(
+            progress,
+            ProgressStage.OpenCodeServer,
+            "Starting OpenCode server...",
+            openCode.start,
+            (server) => `OpenCode server started at ${server.url}.`,
+          ),
+          processQueue,
+          closeServer,
+        );
+      } else {
+        yield* processQueue(sharedResources.openCode);
+      }
 
       if (queue.state() === IssueQueueState.DependencyBlocked) {
         yield* persistState(RunStateStatus.Active);
@@ -640,32 +671,69 @@ export const batchWorkflow = ({
       );
     }
 
-    const results = yield* Effect.forEach(
-      repositories,
-      (options) => {
-        const repositoryRunId =
-          options.resumeState?.runId ?? options.runId ?? crypto.randomUUID();
-        const repositoryProgress: ProgressReporterService = {
-          emit: (update) =>
-            progress.emit({
-              ...update,
-              repository: update.repository ?? options.repo,
-              repositoryRunId: update.repositoryRunId ?? repositoryRunId,
-            }),
-          stopPersisting: progress.stopPersisting,
-        };
-        return workflow({
-          ...options,
-          startClean: false,
-          cleanup: false,
-          runId: repositoryRunId,
-        }).pipe(
-          Effect.provideService(ProgressReporter, repositoryProgress),
-          Effect.either,
-          Effect.map((result) => ({ repository: options.repo, result })),
-        );
-      },
-      { concurrency: "unbounded" },
+    yield* track(
+      progress,
+      ProgressStage.WorkspacePreparation,
+      `Preparing workspace ${workspace}...`,
+      workspaceService.prepare(workspace),
+      `Workspace ready: ${workspace}.`,
+    );
+    yield* checkCancellation(repositories[0]?.signal);
+
+    const github = yield* GitHubClient;
+    const octokit = yield* track(
+      progress,
+      ProgressStage.GitHubAuthentication,
+      "Checking GitHub authentication...",
+      github.initialize,
+      "GitHub authentication verified and Octokit initialized.",
+    );
+    yield* checkCancellation(repositories[0]?.signal);
+
+    const git = yield* GitRepository;
+    yield* track(
+      progress,
+      ProgressStage.GitVerification,
+      "Checking Git installation...",
+      git.verifyInstalled,
+      "Git installation verified.",
+    );
+    yield* checkCancellation(repositories[0]?.signal);
+
+    const openCode = yield* OpenCode;
+    const results = yield* Effect.acquireUseRelease(
+      track(
+        progress,
+        ProgressStage.OpenCodeServer,
+        "Starting OpenCode server...",
+        openCode.start,
+        (server) => `OpenCode server started at ${server.url}.`,
+      ),
+      (server) =>
+        Effect.forEach(
+          repositories,
+          (options) => {
+            const repositoryRunId =
+              options.resumeState?.runId ?? options.runId ?? crypto.randomUUID();
+            return workflow({
+              ...options,
+              startClean: false,
+              cleanup: false,
+              runId: repositoryRunId,
+              sharedResources: { octokit, openCode: server },
+            }).pipe(
+              (effect) =>
+                withProgressContext(effect, {
+                  repository: options.repo,
+                  repositoryRunId,
+                }),
+              Effect.either,
+              Effect.map((result) => ({ repository: options.repo, result })),
+            );
+          },
+          { concurrency: "unbounded" },
+        ),
+      closeServer,
     );
 
     const failures = results.filter(({ result }) => Either.isLeft(result));

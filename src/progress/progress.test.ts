@@ -10,6 +10,7 @@ import {
   ProgressReporter,
   ProgressStage,
   ProgressStatus,
+  withProgressContext,
 } from "./progress.ts";
 
 describe("progress reporting", () => {
@@ -31,12 +32,19 @@ describe("progress reporting", () => {
         stage: ProgressStage.Review,
         status: ProgressStatus.Started,
         message: "Reviewing changes...",
-        repository: "owner/repo",
         issue: { number: 42, title: "Fix issue" },
         attempt: 1,
         maxAttempts: 5,
       });
-    }).pipe(Effect.provide(layer), Effect.runPromise);
+    }).pipe(
+      (effect) =>
+        withProgressContext(effect, {
+          repository: "owner/repo",
+          repositoryRunId: "repository-run-1",
+        }),
+      Effect.provide(layer),
+      Effect.runPromise,
+    );
 
     expect(JSON.parse(output)).toEqual({
       runId: "run-1",
@@ -45,6 +53,7 @@ describe("progress reporting", () => {
       status: ProgressStatus.Started,
       message: "Reviewing changes...",
       repository: "owner/repo",
+      repositoryRunId: "repository-run-1",
       issue: { number: 42, title: "Fix issue" },
       attempt: 1,
       maxAttempts: 5,

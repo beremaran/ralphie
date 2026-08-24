@@ -1,6 +1,6 @@
 import { Context, Effect, Layer } from "effect";
 import { mkdir, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import simpleGit from "simple-git";
 
 import { parseRepositorySlug } from "../github/repository.ts";
@@ -70,7 +70,7 @@ export const GitRepositoryLive = Layer.effect(
 
           const exists = yield* Effect.tryPromise({
             try: async () => {
-              await mkdir(workspacePath, { recursive: true });
+              await mkdir(dirname(repositoryPath), { recursive: true });
               return pathExists(repositoryPath);
             },
             catch: (cause) =>

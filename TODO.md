@@ -27,6 +27,8 @@ enough to implement, review, and commit independently.
       with explicit CLI values taking precedence.
 - [x] Run configured repositories concurrently with isolated checkouts,
       repository-attributed progress, and batch-safe workspace cleanup.
+- [x] Share process-wide preflight services and one OpenCode server across all
+      concurrent repository pipelines.
 - [x] Replace the workflow's plan-only logging with calls to `IssueExecutor`.
 - [x] Add mocked executor tests proving the workflow handles every outcome.
 

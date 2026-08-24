@@ -30,6 +30,11 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Fixed
 
+- Run batch-wide GitHub authentication, Octokit initialization, Git
+  verification, workspace preparation, and OpenCode startup exactly once rather
+  than once per configured repository.
+- Preserve repository attribution on nested progress emitted by issue and
+  OpenCode services during concurrent runs.
 - Report missing files, malformed JSON, and each schema violation separately
   instead of collapsing every config failure into one generic message.
 - Treat `null` optional JSON settings as unset, including unlimited

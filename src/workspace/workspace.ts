@@ -1,5 +1,5 @@
 import { Context, Effect, Layer } from "effect";
-import { rm } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { parse, resolve, sep } from "node:path";
 
@@ -40,12 +40,23 @@ const assertSafeCleanupTarget = (workspace: string): string => {
 };
 
 export type WorkspaceService = {
+  readonly prepare: (workspace: string) => Effect.Effect<void, RalphieError>;
   readonly remove: (workspace: string) => Effect.Effect<void, RalphieError>;
 };
 
 export const Workspace = Context.GenericTag<WorkspaceService>("ralphie/Workspace");
 
 export const WorkspaceLive = Layer.succeed(Workspace, {
+  prepare: (workspace) =>
+    Effect.tryPromise({
+      try: () =>
+        mkdir(resolveWorkspacePath(workspace), { recursive: true }).then(() => {}),
+      catch: (cause) =>
+        new RalphieError({
+          message: `Failed to initialize workspace: ${workspace}`,
+          cause,
+        }),
+    }),
   remove: (workspace) =>
     Effect.tryPromise({
       try: () =>
