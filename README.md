@@ -18,12 +18,14 @@ The CLI also requires these local tools:
 ## Usage
 
 ```bash
-bun run index.ts <repo> [--branch <branch>]
+bun run index.ts <repo> [--branch <branch>] [--max-issues <count>]
 # Example:
-bun run index.ts owner/project --branch develop
+bun run index.ts owner/project --branch develop --max-issues 10
 ```
 
 The branch defaults to `main`. The short form `-b develop` is also supported.
+By default, Ralphie processes an unlimited number of issues. Pass a positive
+integer to `--max-issues` to set a limit.
 
 The current scaffold validates GitHub CLI authentication, retrieves its token to
 initialize Octokit, verifies the Git installation, starts an OpenCode server,

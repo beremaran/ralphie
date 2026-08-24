@@ -56,7 +56,11 @@ describe("workflow", () => {
   test("checks dependencies, starts OpenCode, and releases it", async () => {
     const calls: string[] = [];
 
-    await workflow("owner/repo", "develop").pipe(
+    await workflow({
+      repo: "owner/repo",
+      branch: "develop",
+      maxIssues: 5,
+    }).pipe(
       Effect.provide(testRuntime(calls)),
       Effect.runPromise,
     );
@@ -73,7 +77,7 @@ describe("workflow", () => {
 
   test("stops when GitHub authentication fails", async () => {
     const calls: string[] = [];
-    const exit = await workflow("owner/repo", "main").pipe(
+    const exit = await workflow({ repo: "owner/repo", branch: "main" }).pipe(
       Effect.provide(
         testRuntime(calls, {
           commandResults: [
@@ -90,7 +94,7 @@ describe("workflow", () => {
 
   test("stops when git is unavailable", async () => {
     const calls: string[] = [];
-    const exit = await workflow("owner/repo", "main").pipe(
+    const exit = await workflow({ repo: "owner/repo", branch: "main" }).pipe(
       Effect.provide(
         testRuntime(calls, {
           commandResults: [
@@ -114,7 +118,7 @@ describe("workflow", () => {
 
   test("rejects an empty GitHub token", async () => {
     const calls: string[] = [];
-    const exit = await workflow("owner/repo", "main").pipe(
+    const exit = await workflow({ repo: "owner/repo", branch: "main" }).pipe(
       Effect.provide(
         testRuntime(calls, {
           commandResults: [

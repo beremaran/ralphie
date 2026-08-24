@@ -30,7 +30,13 @@ const requireSuccessfulCommand = (
 const closeServer = (server: OpenCodeServer) =>
   Effect.sync(() => server.close());
 
-export const workflow = (repo: string, branch: string) =>
+export type WorkflowOptions = {
+  readonly repo: string;
+  readonly branch: string;
+  readonly maxIssues?: number;
+};
+
+export const workflow = ({ repo, branch, maxIssues }: WorkflowOptions) =>
   Effect.gen(function* () {
     yield* requireSuccessfulCommand(
       "gh",
@@ -67,7 +73,7 @@ export const workflow = (repo: string, branch: string) =>
       openCode.start,
       (server) =>
         Console.log(
-          `OpenCode server started at ${server.url}.\nReady for ${repo} on branch ${branch}.`,
+          `OpenCode server started at ${server.url}.\nReady for ${repo} on branch ${branch}.\nIssue limit: ${maxIssues ?? "unlimited"}.`,
         ),
       closeServer,
     );

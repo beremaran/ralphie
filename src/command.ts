@@ -13,6 +13,9 @@ export const runCommand = defineCommand({
       short: "b",
       description: "Branch to operate on",
     }),
+    "max-issues": option(z.coerce.number().int().positive().optional(), {
+      description: "Maximum number of issues to process (default: unlimited)",
+    }),
   },
   handler: async ({ flags, positional }) => {
     const [repo, ...extra] = positional;
@@ -24,7 +27,11 @@ export const runCommand = defineCommand({
       throw new Error(`Unexpected argument: ${extra[0]}`);
     }
 
-    await workflow(repo, flags.branch).pipe(
+    await workflow({
+      repo,
+      branch: flags.branch,
+      maxIssues: flags["max-issues"],
+    }).pipe(
       Effect.provide(LiveRuntime),
       Effect.catchAll((error) => Effect.fail(new Error(error.message))),
       Effect.runPromise,
