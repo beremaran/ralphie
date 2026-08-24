@@ -108,6 +108,8 @@ unlimited.
 Every matching open issue receives a schema-validated complexity score from 0
 through 5.
 
+### Issue routing
+
 ```mermaid
 flowchart TD
     A[Open GitHub issue] --> B[Structured complexity assessment]
@@ -142,6 +144,43 @@ An implementation that produces no changes is recorded as skipped. If the
 review budget is exhausted, Ralphie preserves the patch and review diagnostics,
 restores the clean checkpoint, and sends the issue through decomposition.
 
+The boundary between agent work and deterministic operations stays explicit
+throughout the loop:
+
+```mermaid
+sequenceDiagram
+    participant R as Ralphie
+    participant GH as GitHub
+    participant G as Git
+    participant O as OpenCode
+
+    R->>G: Capture clean branch checkpoint
+    R->>GH: Verify direct-push safety
+    R->>O: Start fresh implementation session
+    O-->>R: Edit the checkout
+    R->>G: Stage all changes and read exact diff
+
+    loop Until approved or five reviews
+        R->>O: Start fresh structured-review session
+        O-->>R: Return approved or changes requested
+        opt Changes requested and budget remains
+            R->>O: Start fresh review-fix session
+            O-->>R: Update the checkout
+            R->>G: Restage changes and read exact diff
+        end
+    end
+
+    alt Review approved
+        R->>O: Generate structured commit message
+        R->>G: Commit exact staged tree
+        R->>GH: Revalidate remote safety
+        R->>G: Push selected branch without force
+    else Review budget exhausted
+        R->>G: Preserve patch and restore checkpoint
+        R->>GH: Continue through decomposition
+    end
+```
+
 ### Decomposition workflow: complexity 4–5
 
 1. Ask OpenCode to split the issue into the next set of independently actionable
@@ -154,6 +193,19 @@ restores the clean checkpoint, and sends the issue through decomposition.
 Stable markers and persisted child mappings make the workflow retry-safe: a
 resumed run discovers previously created children instead of duplicating them.
 Eligible children can enter the main implementation loop during the same run.
+
+```mermaid
+flowchart LR
+    A[Original issue] --> B[Structured task breakdown]
+    B --> C{Existing child marker?}
+    C -->|Yes| D[Reuse child issue]
+    C -->|No| E[Create child issue]
+    D --> F[Link parent, siblings, dependencies, and lineage]
+    E --> F
+    F --> G[Rewrite original with complete stack]
+    G --> H[Close original as duplicate]
+    H --> I[Refresh open-issue queue]
+```
 
 ## Safety model
 
@@ -313,6 +365,30 @@ One issue failure currently halts the run. This preserves the checkout and
 diagnostics at the first uncertain boundary instead of allowing later issues to
 continue on questionable state.
 
+```mermaid
+stateDiagram-v2
+    state "Issue in progress" as IssueInProgress
+    state "Recoverable stop" as RecoverableStop
+    state "Artifacts retained" as Retained
+    state "Workspace cleaned" as Cleaned
+
+    [*] --> Active: Start or resume
+    Active --> IssueInProgress: Dequeue issue
+    IssueInProgress --> Active: Persist outcome and queue
+    IssueInProgress --> RecoverableStop: Failure or interruption
+    RecoverableStop --> Active: Resume and reconcile
+    Active --> Complete: Queue empty or budget reached
+    Complete --> Retained: Keep workspace
+    Complete --> Cleaned: --cleanup
+    Retained --> [*]
+    Cleaned --> [*]
+```
+
+On resume, Ralphie compares persisted intent with both local Git and live GitHub
+state before returning to `Active`. It can reconcile partially created child
+issues and a commit created immediately before interruption without repeating
+the corresponding agent work.
+
 `--cleanup` removes the entire workspace after success, including completed
 state, events, diagnostics, and the repository checkout. Cleanup is skipped on
 failure so recovery remains possible.
@@ -322,6 +398,31 @@ failure so recovery remains possible.
 Ralphie uses [Bunli](https://bunli.dev/) for its command surface and
 [Effect](https://effect.website/) for typed services, failures, resource scopes,
 and dependency assembly.
+
+```mermaid
+flowchart LR
+    U[Operator] --> CLI[Bunli CLI]
+
+    subgraph RP["Ralphie process"]
+        CLI --> W[Workflow orchestrator]
+        W --> Q[Issue queue and executors]
+        W --> S[Run state and artifacts]
+        W --> P[Progress and audit events]
+        Q --> OC[OpenCode adapter]
+        Q --> GD[Git domain]
+        Q --> GHD[GitHub domain]
+    end
+
+    AUTH[Local gh CLI] --> GHD
+    GHD <--> GH[GitHub API]
+    GD <--> REPO[Workspace checkout]
+    OC <--> SERVER[Local OpenCode server]
+    S --> DISK[Versioned JSON and issue artifacts]
+    P --> TERM[Terminal or JSON Lines]
+```
+
+The workflow orchestrator owns sequencing, while domain services own side
+effects and validate their invariants at the boundary.
 
 | Area | Responsibility |
 | --- | --- |
