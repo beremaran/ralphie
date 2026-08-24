@@ -78,9 +78,9 @@ enough to implement, review, and commit independently.
 - [ ] Capture and store the clean issue-base checkpoint before an implementation
       session begins.
 - [ ] Fail before agent work if the branch or checkout is not clean.
-- [ ] Add a deterministic `git add --all` operation.
-- [ ] Add an operation to read the exact staged binary diff.
-- [ ] Add an operation to detect an empty staged change set.
+- [x] Add a deterministic `git add --all` operation.
+- [x] Add an operation to read the exact staged binary diff.
+- [x] Add an operation to detect an empty staged change set.
 - [ ] Define behavior for an agent that reports success but produces no changes.
 - [ ] Add a deterministic commit operation that accepts the validated generated
       subject and optional body.
