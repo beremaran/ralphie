@@ -9,8 +9,11 @@ import { Effect, Exit } from "effect";
 import {
   createOpenCodeTaskSession,
   makeOpenCodeTaskSessionLayer,
+  OpenCodeAssistantErrorKind,
   OpenCodeTaskSession,
+  OpenCodeAssistantError,
   runOpenCodeTask,
+  toOpenCodeAssistantError,
   taskSessionPromptParameters,
 } from "./task-session.ts";
 
@@ -265,5 +268,31 @@ describe("OpenCode task sessions", () => {
     }).pipe(Effect.runPromiseExit);
 
     expect(Exit.isFailure(exit)).toBe(true);
+  });
+
+  test.each([
+    [
+      "MessageAbortedError",
+      OpenCodeAssistantErrorKind.Aborted,
+      { name: "MessageAbortedError", data: { message: "Aborted." } },
+    ],
+    [
+      "MessageOutputLengthError",
+      OpenCodeAssistantErrorKind.OutputLengthExceeded,
+      { name: "MessageOutputLengthError", data: {} },
+    ],
+    [
+      "StructuredOutputError",
+      OpenCodeAssistantErrorKind.StructuredOutputRetryExhausted,
+      {
+        name: "StructuredOutputError",
+        data: { message: "Could not satisfy schema.", retries: 3 },
+      },
+    ],
+  ])("classifies %s as %s", (_name, kind, sdkError) => {
+    const typedError = toOpenCodeAssistantError(sdkError as never);
+
+    expect(typedError).toBeInstanceOf(OpenCodeAssistantError);
+    expect(typedError.kind).toBe(kind);
   });
 });

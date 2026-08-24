@@ -4,6 +4,10 @@ import { Effect, Exit } from "effect";
 import { z } from "zod";
 
 import { requestStructuredOutput } from "./structured-output.ts";
+import {
+  OpenCodeAssistantErrorKind,
+  toOpenCodeAssistantError,
+} from "./task-session.ts";
 
 enum ProbeDecision {
   Proceed = "proceed",
@@ -16,7 +20,10 @@ const decisionSchema = z.object({
   reason: z.string().min(1),
 });
 
-const assistantInfo = (structured: unknown) => ({
+const assistantInfo = (
+  structured: unknown,
+  error?: Record<string, unknown>,
+) => ({
   id: "message-1",
   sessionID: "session-1",
   role: "assistant" as const,
@@ -35,6 +42,7 @@ const assistantInfo = (structured: unknown) => ({
     cache: { read: 0, write: 0 },
   },
   structured,
+  ...(error === undefined ? {} : { error }),
 });
 
 describe("OpenCode structured output", () => {
@@ -162,5 +170,56 @@ describe("OpenCode structured output", () => {
     }).pipe(Effect.runPromiseExit);
 
     expect(Exit.isFailure(exit)).toBe(true);
+  });
+
+  test.each([
+    [
+      OpenCodeAssistantErrorKind.Aborted,
+      { name: "MessageAbortedError", data: { message: "Aborted." } },
+    ],
+    [
+      OpenCodeAssistantErrorKind.OutputLengthExceeded,
+      { name: "MessageOutputLengthError", data: {} },
+    ],
+    [
+      OpenCodeAssistantErrorKind.StructuredOutputRetryExhausted,
+      {
+        name: "StructuredOutputError",
+        data: { message: "Schema retries exhausted.", retries: 2 },
+      },
+    ],
+  ])("returns typed assistant failure for %s", async (kind, error) => {
+    const client = {
+      session: {
+        create: async () => ({ data: { id: "session-1" } }),
+        prompt: async () => ({
+          data: {
+            info: assistantInfo(undefined, error),
+            parts: [],
+          },
+        }),
+      },
+    } as unknown as OpencodeClient;
+
+    const exit = await requestStructuredOutput(client, {
+      directory: "/workspace",
+      title: "Test decision",
+      prompt: "Make a decision.",
+      schema: decisionSchema,
+    }).pipe(Effect.runPromiseExit);
+
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const failure = exit.cause;
+      expect(String(failure)).toContain("Failed to get structured output");
+      const cause = failure as unknown as { error?: { cause?: unknown } };
+      expect(cause).toBeDefined();
+    }
+
+    const typed = toOpenCodeAssistantError(error as never);
+    expect(typed.kind).toBe(kind);
+    if (kind === OpenCodeAssistantErrorKind.StructuredOutputRetryExhausted) {
+      expect(typed.retries).toBe(2);
+    }
   });
 });

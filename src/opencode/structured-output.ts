@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { RalphieError } from "../shared/error.ts";
 import type { OpenCodeModel } from "./model.ts";
+import { toOpenCodeAssistantError } from "./task-session.ts";
 
 export type StructuredOutputRequest<Output> = {
   readonly directory: string;
@@ -76,9 +77,11 @@ export const requestStructuredOutput = <Output>(
       }
 
       if (response.data.info.error !== undefined) {
-        throw new Error(
-          `OpenCode assistant failed: ${describeApiError(response.data.info.error)}`,
-        );
+        const assistantError = toOpenCodeAssistantError(response.data.info.error);
+        throw new RalphieError({
+          message: `OpenCode assistant failed (${assistantError.kind}): ${assistantError.message}`,
+          cause: assistantError,
+        });
       }
 
       const parsed = request.schema.safeParse(response.data.info.structured);

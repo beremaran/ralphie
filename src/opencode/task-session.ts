@@ -3,7 +3,7 @@ import type {
   OpencodeClient,
   Part,
 } from "@opencode-ai/sdk/v2";
-import { Context, Effect, Layer } from "effect";
+import { Context, Data, Effect, Layer } from "effect";
 
 import { RalphieError } from "../shared/error.ts";
 import type { OpenCodeModel, OpenCodeSelection } from "./model.ts";
@@ -30,6 +30,23 @@ export type OpenCodeTaskResult = {
   readonly parts: ReadonlyArray<Part>;
 };
 
+export enum OpenCodeAssistantErrorKind {
+  Aborted = "aborted",
+  OutputLengthExceeded = "output-length-exceeded",
+  StructuredOutputRetryExhausted = "structured-output-retry-exhausted",
+  Other = "other",
+}
+
+export class OpenCodeAssistantError extends Data.TaggedError(
+  "OpenCodeAssistantError",
+)<{
+  readonly kind: OpenCodeAssistantErrorKind;
+  readonly message: string;
+  readonly errorName: string;
+  readonly retries?: number;
+  readonly sdkError: NonNullable<AssistantMessage["error"]>;
+}> {}
+
 type OpenCodePromptParameters = Parameters<
   OpencodeClient["session"]["prompt"]
 >[0];
@@ -53,6 +70,40 @@ const describeApiError = (error: unknown): string => {
       : JSON.stringify(error);
 
   return `${name}: ${message}`;
+};
+
+export const toOpenCodeAssistantError = (
+  error: NonNullable<AssistantMessage["error"]>,
+): OpenCodeAssistantError => {
+  const kind =
+    error.name === "MessageAbortedError"
+      ? OpenCodeAssistantErrorKind.Aborted
+      : error.name === "MessageOutputLengthError"
+        ? OpenCodeAssistantErrorKind.OutputLengthExceeded
+        : error.name === "StructuredOutputError"
+          ? OpenCodeAssistantErrorKind.StructuredOutputRetryExhausted
+          : OpenCodeAssistantErrorKind.Other;
+
+  return new OpenCodeAssistantError({
+    kind,
+    message: describeApiError(error),
+    errorName: error.name,
+    ...(error.name === "StructuredOutputError"
+      ? { retries: error.data.retries }
+      : {}),
+    sdkError: error,
+  });
+};
+
+const assistantFailure = (
+  prefix: string,
+  error: NonNullable<AssistantMessage["error"]>,
+): RalphieError => {
+  const typedError = toOpenCodeAssistantError(error);
+  return new RalphieError({
+    message: `${prefix} (${typedError.kind}): ${typedError.message}`,
+    cause: typedError,
+  });
 };
 
 const createSessionModel = (model: OpenCodeModel) => ({
@@ -154,8 +205,9 @@ export const runOpenCodeTask = (
         }
 
         if (response.data.info.error !== undefined) {
-          throw new Error(
-            `OpenCode assistant failed: ${describeApiError(response.data.info.error)}`,
+          throw assistantFailure(
+            "OpenCode assistant failed",
+            response.data.info.error,
           );
         }
 
