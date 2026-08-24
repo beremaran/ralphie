@@ -18,7 +18,7 @@ The CLI also requires these local tools:
 ## Usage
 
 ```bash
-bun run index.ts <repo> [--branch <branch>] [--model <provider/model>] [--model-variant <variant>] [--max-issues <count>] [--issue-label <label>] [--issue-sort <sort>] [--issue-order <order>] [--workspace <path>] [--start-clean] [--cleanup]
+bun run index.ts <repo> [--branch <branch>] [--model <provider/model>] [--model-variant <variant>] [--max-issues <count>] [--issue-label <label>] [--issue-sort <sort>] [--issue-order <order>] [--workspace <path>] [--verbose] [--json|--quiet] [--start-clean] [--cleanup]
 # Example:
 bun run index.ts owner/project --branch develop --model openai/gpt-5 --model-variant high --max-issues 10 --issue-label bug --issue-sort created --issue-order asc --workspace /tmp/ralphie --start-clean --cleanup
 ```
@@ -26,6 +26,10 @@ bun run index.ts owner/project --branch develop --model openai/gpt-5 --model-var
 The branch defaults to `main`. The short form `-b develop` is also supported.
 Use `--model provider/model` and `--model-variant variant` to override OpenCode's
 model selection. Neither has a default; when omitted, OpenCode chooses them.
+Progress uses interactive spinners in a terminal and durable plain lines in CI
+or redirected output. Pass `--verbose` to include event details, `--json` to
+write JSON Lines events to stdout, or `--quiet` to show failures only. `--json`
+and `--quiet` are mutually exclusive.
 By default, Ralphie processes an unlimited number of issues. Pass a positive
 integer to `--max-issues` to set a limit.
 Use repeatable `--issue-label` flags to require labels when selecting issues.
@@ -76,6 +80,7 @@ Functionality is grouped by domain under `src/`:
 - `git/` owns repository cloning, validation, cleanup, and branch preparation.
 - `issues/` owns issue selection and the per-issue execution pipeline.
 - `opencode/` owns the OpenCode server lifecycle and schema-validated decisions.
+- `progress/` owns typed progress events and human, JSON, quiet, and test renderers.
 - `workspace/` owns workspace path resolution and safe removal.
 - `process/` owns external command execution.
 - `shared/` contains errors shared across domains.

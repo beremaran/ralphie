@@ -14,6 +14,12 @@ import {
   OpenCodeSessionPurpose,
   StructuredOutputName,
 } from "./opencode/session.ts";
+import {
+  makeProgressRecorderLayer,
+  type ProgressUpdate,
+  ProgressStage,
+  ProgressStatus,
+} from "./progress/progress.ts";
 import { RalphieError } from "./shared/error.ts";
 import { Workspace } from "./workspace/workspace.ts";
 import { workflow } from "./workflow.ts";
@@ -25,7 +31,11 @@ type TestRuntimeOptions = {
   removeFailure?: RalphieError;
 };
 
-function testRuntime(calls: string[], options: TestRuntimeOptions = {}) {
+function testRuntime(
+  calls: string[],
+  options: TestRuntimeOptions = {},
+  progressEvents: ProgressUpdate[] = [],
+) {
   return Layer.mergeAll(
     Layer.succeed(GitHubClient, {
       initialize: Effect.suspend(() => {
@@ -131,12 +141,14 @@ function testRuntime(calls: string[], options: TestRuntimeOptions = {}) {
           : Effect.void;
       },
     }),
+    makeProgressRecorderLayer(progressEvents),
   );
 }
 
 describe("workflow", () => {
   test("checks dependencies, starts OpenCode, and releases it", async () => {
     const calls: string[] = [];
+    const progressEvents: ProgressUpdate[] = [];
 
     await workflow({
       repo: "owner/repo",
@@ -153,7 +165,7 @@ describe("workflow", () => {
       cleanup: true,
       startClean: true,
     }).pipe(
-      Effect.provide(testRuntime(calls)),
+      Effect.provide(testRuntime(calls, {}, progressEvents)),
       Effect.runPromise,
     );
 
@@ -168,10 +180,69 @@ describe("workflow", () => {
       "closeServer",
       "removeWorkspace:/tmp/ralphie",
     ]);
+    expect(
+      progressEvents.map(({ stage, status }) => ({ stage, status })),
+    ).toEqual([
+      { stage: ProgressStage.Run, status: ProgressStatus.Info },
+      {
+        stage: ProgressStage.WorkspaceCleanup,
+        status: ProgressStatus.Started,
+      },
+      {
+        stage: ProgressStage.WorkspaceCleanup,
+        status: ProgressStatus.Succeeded,
+      },
+      {
+        stage: ProgressStage.GitHubAuthentication,
+        status: ProgressStatus.Started,
+      },
+      {
+        stage: ProgressStage.GitHubAuthentication,
+        status: ProgressStatus.Succeeded,
+      },
+      { stage: ProgressStage.GitVerification, status: ProgressStatus.Started },
+      {
+        stage: ProgressStage.GitVerification,
+        status: ProgressStatus.Succeeded,
+      },
+      {
+        stage: ProgressStage.RepositoryPreparation,
+        status: ProgressStatus.Started,
+      },
+      {
+        stage: ProgressStage.RepositoryPreparation,
+        status: ProgressStatus.Succeeded,
+      },
+      { stage: ProgressStage.IssueDiscovery, status: ProgressStatus.Started },
+      {
+        stage: ProgressStage.IssueDiscovery,
+        status: ProgressStatus.Succeeded,
+      },
+      { stage: ProgressStage.OpenCodeServer, status: ProgressStatus.Started },
+      {
+        stage: ProgressStage.OpenCodeServer,
+        status: ProgressStatus.Succeeded,
+      },
+      { stage: ProgressStage.IssuePlanning, status: ProgressStatus.Started },
+      {
+        stage: ProgressStage.IssuePlanning,
+        status: ProgressStatus.Succeeded,
+      },
+      {
+        stage: ProgressStage.WorkspaceCleanup,
+        status: ProgressStatus.Started,
+      },
+      {
+        stage: ProgressStage.WorkspaceCleanup,
+        status: ProgressStatus.Succeeded,
+      },
+      { stage: ProgressStage.Run, status: ProgressStatus.Succeeded },
+    ]);
   });
 
   test("stops when GitHub authentication fails", async () => {
     const calls: string[] = [];
+    const progressEvents: ProgressUpdate[] = [];
     const exit = await workflow({
       repo: "owner/repo",
       branch: "main",
@@ -185,15 +256,23 @@ describe("workflow", () => {
       startClean: false,
     }).pipe(
       Effect.provide(
-        testRuntime(calls, {
-          githubFailure: new RalphieError({ message: "not logged in" }),
-        }),
+        testRuntime(
+          calls,
+          { githubFailure: new RalphieError({ message: "not logged in" }) },
+          progressEvents,
+        ),
       ),
       Effect.runPromiseExit,
     );
 
     expect(Exit.isFailure(exit)).toBeTrue();
     expect(calls).toEqual(["initializeGitHub"]);
+    expect(progressEvents.at(-2)?.status).toBe(ProgressStatus.Failed);
+    expect(progressEvents.at(-2)?.stage).toBe(
+      ProgressStage.GitHubAuthentication,
+    );
+    expect(progressEvents.at(-1)?.status).toBe(ProgressStatus.Failed);
+    expect(progressEvents.at(-1)?.stage).toBe(ProgressStage.Run);
   });
 
   test("stops when git is unavailable", async () => {

@@ -1,5 +1,5 @@
 import { defineCommand, option } from "@bunli/core";
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
 import { z } from "zod";
 
 import { IssueOrder, IssueSort } from "./github/issues.ts";
@@ -7,6 +7,10 @@ import {
   openCodeModelSchema,
   openCodeModelVariantSchema,
 } from "./opencode/model.ts";
+import {
+  makeProgressReporterLayer,
+  ProgressRenderMode,
+} from "./progress/progress.ts";
 import { LiveRuntime } from "./runtime.ts";
 import { workflow } from "./workflow.ts";
 
@@ -37,6 +41,18 @@ export const runCommand = defineCommand({
     "model-variant": option(openCodeModelVariantSchema.optional(), {
       description: "OpenCode model variant",
     }),
+    verbose: option(z.coerce.boolean().default(false), {
+      description: "Include detailed progress information",
+      argumentKind: "flag",
+    }),
+    json: option(z.coerce.boolean().default(false), {
+      description: "Emit progress as JSON Lines",
+      argumentKind: "flag",
+    }),
+    quiet: option(z.coerce.boolean().default(false), {
+      description: "Only emit failures",
+      argumentKind: "flag",
+    }),
     workspace: option(z.string().trim().min(1).default("~/.ralphie"), {
       description: "Directory used to clone and work on repositories",
     }),
@@ -49,7 +65,7 @@ export const runCommand = defineCommand({
       argumentKind: "flag",
     }),
   },
-  handler: async ({ flags, positional }) => {
+  handler: async ({ flags, positional, spinner, terminal }) => {
     const [repo, ...extra] = positional;
 
     if (!repo) {
@@ -58,6 +74,25 @@ export const runCommand = defineCommand({
     if (extra.length > 0) {
       throw new Error(`Unexpected argument: ${extra[0]}`);
     }
+    if (flags.json && flags.quiet) {
+      throw new Error("--json and --quiet cannot be used together.");
+    }
+
+    const progressMode = flags.json
+      ? ProgressRenderMode.Json
+      : flags.quiet
+        ? ProgressRenderMode.Quiet
+        : terminal.isInteractive
+          ? ProgressRenderMode.Interactive
+          : ProgressRenderMode.Plain;
+    const progressLayer = makeProgressReporterLayer({
+      mode: progressMode,
+      verbose: flags.verbose,
+      spinner,
+      write: flags.json
+        ? (text) => process.stdout.write(text)
+        : (text) => process.stderr.write(text),
+    });
 
     await workflow({
       repo,
@@ -74,7 +109,7 @@ export const runCommand = defineCommand({
       cleanup: flags.cleanup,
       startClean: flags["start-clean"],
     }).pipe(
-      Effect.provide(LiveRuntime),
+      Effect.provide(Layer.merge(LiveRuntime, progressLayer)),
       Effect.catchAll((error) => Effect.fail(new Error(error.message))),
       Effect.runPromise,
     );
