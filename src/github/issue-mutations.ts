@@ -12,6 +12,25 @@ export enum GitHubIssueCloseReason {
   Duplicate = "duplicate",
 }
 
+export enum GitHubMutationRecoveryOutcome {
+  RecoveryRequired = "recovery-required",
+}
+
+/** A mutation may have reached GitHub even though its response was lost. */
+export class GitHubMutationRecoveryError extends RalphieError {
+  readonly outcome = GitHubMutationRecoveryOutcome.RecoveryRequired;
+  readonly operation: string;
+
+  constructor(input: {
+    readonly message: string;
+    readonly operation: string;
+    readonly cause?: unknown;
+  }) {
+    super(input);
+    this.operation = input.operation;
+  }
+}
+
 export type CreateGitHubIssueInput = {
   readonly title: string;
   readonly body: string;

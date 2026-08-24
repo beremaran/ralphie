@@ -7,12 +7,19 @@ import {
   renderDecomposedOriginalBody,
 } from "../github/decomposition-markdown.ts";
 import {
+  GitHubMutationRecoveryError,
+  GitHubMutationRecoveryOutcome,
   GitHubIssueCloseReason,
   GitHubIssueMutations,
 } from "../github/issue-mutations.ts";
+import { GitHubIssues } from "../github/issues.ts";
 import { buildDecompositionPrompt } from "../opencode/prompts.ts";
 import { requestStructuredOutput } from "../opencode/structured-output.ts";
-import { ProgressReporter, ProgressStage } from "../progress/progress.ts";
+import {
+  ProgressReporter,
+  ProgressStage,
+  ProgressStatus,
+} from "../progress/progress.ts";
 import { RalphieError } from "../shared/error.ts";
 import {
   IssueArtifactKind,
@@ -47,7 +54,67 @@ export const DecompositionExecutorLive = Layer.effect(
   DecompositionExecutor,
   Effect.gen(function* () {
     const mutations = yield* GitHubIssueMutations;
+    const issues = yield* GitHubIssues;
     const progress = yield* ProgressReporter;
+
+    const recoverableMutation = <Output>(
+      operation: string,
+      effect: Effect.Effect<Output, RalphieError>,
+      input: WorkflowExecutorInput,
+    ): Effect.Effect<Output, RalphieError> =>
+      effect.pipe(
+        Effect.catchTag("RalphieError", (error) =>
+          Effect.gen(function* () {
+            yield* progress.emit({
+              issue: {
+                number: input.context.issue.number,
+                title: input.context.issue.title,
+              },
+              stage:
+                operation === "close-original"
+                  ? ProgressStage.IssueClosure
+                  : ProgressStage.IssueCreation,
+              status: ProgressStatus.Failed,
+              message: `GitHub mutation ${operation} requires recovery: ${error.message}`,
+              details: {
+                outcome: GitHubMutationRecoveryOutcome.RecoveryRequired,
+                operation,
+              },
+            });
+            return yield* new GitHubMutationRecoveryError({
+              message: `GitHub mutation ${operation} may have partially succeeded; recovery is required.`,
+              operation,
+              cause: error,
+            });
+          }),
+        ),
+      );
+
+    const ambiguous = (
+      input: WorkflowExecutorInput,
+      message: string,
+      details: Readonly<Record<string, unknown>>,
+    ): Effect.Effect<never, RalphieError> =>
+      Effect.gen(function* () {
+        yield* progress.emit({
+          issue: {
+            number: input.context.issue.number,
+            title: input.context.issue.title,
+          },
+          stage: ProgressStage.IssueCreation,
+          status: ProgressStatus.Failed,
+          message: `GitHub mutation state is ambiguous: ${message}`,
+          details: {
+            ...details,
+            outcome: GitHubMutationRecoveryOutcome.RecoveryRequired,
+          },
+        });
+        return yield* new GitHubMutationRecoveryError({
+          message: `GitHub mutation state is ambiguous: ${message}`,
+          operation: "reconcile-created-children",
+          cause: details,
+        });
+      });
 
     return {
       execute: (input) =>
@@ -110,17 +177,66 @@ export const DecompositionExecutorLive = Layer.effect(
               );
 
           let mapping = yield* existingMapping(input);
+          const discovered = yield* issues.listDecompositionChildren(
+            context.octokit,
+            context.repository,
+            lineage,
+          );
+          const discoveredByKey = new Map<string, number>();
+          for (const child of discovered) {
+            if (!breakdown.issues.some((issue) => issue.key === child.decompositionKey)) {
+              return yield* ambiguous(
+                input,
+                `Found generated child ${child.number} with unexpected key ${child.decompositionKey}.`,
+                { issueNumber: child.number, key: child.decompositionKey },
+              );
+            }
+            const previous = discoveredByKey.get(child.decompositionKey);
+            if (previous !== undefined && previous !== child.number) {
+              return yield* ambiguous(
+                input,
+                `Found multiple generated children for key ${child.decompositionKey}.`,
+                {
+                  key: child.decompositionKey,
+                  issueNumbers: [previous, child.number],
+                },
+              );
+            }
+            discoveredByKey.set(child.decompositionKey, child.number);
+          }
+          for (const [key, issueNumber] of discoveredByKey) {
+            const recorded = mapping[key];
+            if (recorded !== undefined && recorded !== issueNumber) {
+              return yield* ambiguous(
+                input,
+                `Artifact mapping for ${key} points to #${recorded}, but GitHub marker discovery found #${issueNumber}.`,
+                { key, recorded, discovered: issueNumber },
+              );
+            }
+            if (recorded === undefined) {
+              yield* recoverableMutation(
+                `record-created-${key}`,
+                artifacts.recordCreatedIssue(key, issueNumber),
+                input,
+              );
+              mapping = { ...mapping, [key]: issueNumber };
+            }
+          }
           for (const child of breakdown.issues) {
             if (mapping[child.key] !== undefined) continue;
-            const created = yield* mutations.create(
-              context.octokit,
-              context.repository,
-              {
+            const created = yield* recoverableMutation(
+              `create-child-${child.key}`,
+              mutations.create(context.octokit, context.repository, {
                 title: child.title,
                 body: `${decompositionMarker(lineage, child.key)}\n\n${child.body}`,
-              },
+              }),
+              input,
             );
-            yield* artifacts.recordCreatedIssue(child.key, created.number);
+            yield* recoverableMutation(
+              `record-created-${child.key}`,
+              artifacts.recordCreatedIssue(child.key, created.number),
+              input,
+            );
             mapping = { ...mapping, [child.key]: created.number };
           }
 
@@ -131,38 +247,40 @@ export const DecompositionExecutorLive = Layer.effect(
                 message: `Missing created issue for ${child.key}.`,
               });
             }
-            yield* mutations.update(
-              context.octokit,
-              context.repository,
-              childNumber,
-              {
+            yield* recoverableMutation(
+              `link-child-${child.key}`,
+              mutations.update(context.octokit, context.repository, childNumber, {
                 body: renderChildIssueBody({
                   child,
                   lineage,
                   issueNumbers: mapping,
                 }),
-              },
+              }),
+              input,
             );
           }
 
-          yield* mutations.update(
-            context.octokit,
-            context.repository,
-            context.issue.number,
-            {
+          yield* recoverableMutation(
+            "rewrite-original",
+            mutations.update(context.octokit, context.repository, context.issue.number, {
               body: renderDecomposedOriginalBody({
                 original: context.issue,
                 breakdown,
                 issueNumbers: mapping,
                 lineage,
               }),
-            },
+            }),
+            input,
           );
-          yield* mutations.close(
-            context.octokit,
-            context.repository,
-            context.issue.number,
-            GitHubIssueCloseReason.Duplicate,
+          yield* recoverableMutation(
+            "close-original",
+            mutations.close(
+              context.octokit,
+              context.repository,
+              context.issue.number,
+              GitHubIssueCloseReason.Duplicate,
+            ),
+            input,
           );
 
           return {

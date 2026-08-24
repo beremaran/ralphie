@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { OpencodeClient } from "@opencode-ai/sdk/v2";
-import { Effect, Exit, Layer } from "effect";
+import { Cause, Effect, Exit, Layer } from "effect";
 import type { Octokit } from "octokit";
 
 import {
@@ -18,9 +18,12 @@ import {
   type IssueExecutionContext,
 } from "./execution.ts";
 import {
+  GitHubMutationRecoveryError,
   GitHubIssueMutations,
   GitHubIssueMutationsLive,
 } from "../github/issue-mutations.ts";
+import { GitHubIssues } from "../github/issues.ts";
+import type { GitHubDecompositionChild } from "../github/issues.ts";
 import { makeOpenCodeSessionDiagnostics } from "../opencode/task-session.ts";
 import { makeProgressRecorderLayer } from "../progress/progress.ts";
 
@@ -100,6 +103,7 @@ const run = (
   openCode: OpencodeClient,
   octokit: Octokit,
   artifacts: IssueArtifactStore,
+  discoveredChildren: ReadonlyArray<GitHubDecompositionChild> = [],
 ) =>
   Effect.gen(function* () {
     const executor = yield* DecompositionExecutor;
@@ -109,7 +113,13 @@ const run = (
     Effect.provide(
       Layer.merge(
         GitHubIssueMutationsLive,
-        makeProgressRecorderLayer([]),
+        Layer.merge(
+          Layer.succeed(GitHubIssues, {
+            listOpen: () => Effect.succeed([]),
+            listDecompositionChildren: () => Effect.succeed(discoveredChildren),
+          }),
+          makeProgressRecorderLayer([]),
+        ),
       ),
     ),
   );
@@ -201,6 +211,58 @@ describe("decomposition executor", () => {
     expect(breakdownPersisted).toBeTrue();
   });
 
+  test("reconciles marker-discovered children before creating new issues", async () => {
+    let createCount = 0;
+    const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
+    await Effect.runPromise(
+      artifacts.write(IssueArtifactKind.IssueBreakdownDecision, breakdown),
+    );
+    const discoveredChildren: ReadonlyArray<GitHubDecompositionChild> = [
+      {
+        number: 101,
+        title: "Migrate storage",
+        url: "https://github.com/owner/repository/issues/101",
+        body: '<!-- ralphie:decomposition root=42 parent=42 key="storage" depth=1 -->',
+        labels: [],
+        decompositionKey: "storage",
+      },
+      {
+        number: 102,
+        title: "Update API",
+        url: "https://github.com/owner/repository/issues/102",
+        body: '<!-- ralphie:decomposition root=42 parent=42 key="api" depth=1 -->',
+        labels: [],
+        decompositionKey: "api",
+      },
+    ];
+    const octokit = {
+      rest: {
+        issues: {
+          create: async () => {
+            createCount += 1;
+            return issueResponse(999, "Unexpected", "Unexpected");
+          },
+          update: async (parameters: Record<string, unknown>) =>
+            issueResponse(Number(parameters.issue_number), "Updated", "Updated"),
+        },
+      },
+    } as unknown as Octokit;
+
+    const outcome = await Effect.runPromise(
+      run(openCodeClient(), octokit, artifacts, discoveredChildren),
+    );
+    expect(outcome).toEqual({
+      kind: IssueExecutionOutcomeKind.Decomposed,
+      childIssueNumbers: [101, 102],
+    });
+    expect(createCount).toBe(0);
+    expect(
+      await Effect.runPromise(
+        artifacts.read(IssueArtifactKind.CreatedIssueNumbers),
+      ),
+    ).toEqual({ storage: 101, api: 102 });
+  });
+
   test("leaves the original open when child linking fails", async () => {
     let originalUpdated = false;
     let closeCount = 0;
@@ -243,4 +305,46 @@ describe("decomposition executor", () => {
     expect(createCount).toBe(2);
     expect(closeCount).toBe(2);
   });
+
+  test.each([1, 2, 3, 4, 5, 6])(
+    "emits recovery failure when mutation boundary %d fails",
+    async (failureAt) => {
+      let mutationCount = 0;
+      let closeCount = 0;
+      const octokit = {
+        rest: {
+          issues: {
+            create: async (parameters: Record<string, unknown>) => {
+              mutationCount += 1;
+              if (mutationCount === failureAt) throw new Error("mutation failed");
+              return issueResponse(
+                parameters.title === "Migrate storage" ? 101 : 102,
+                "Child",
+                "Child",
+              );
+            },
+            update: async (parameters: Record<string, unknown>) => {
+              mutationCount += 1;
+              if (mutationCount === failureAt) throw new Error("mutation failed");
+              if (parameters.state === "closed") closeCount += 1;
+              return issueResponse(Number(parameters.issue_number), "Child", "Child");
+            },
+          },
+        },
+      } as unknown as Octokit;
+      const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
+
+      const exit = await Effect.runPromiseExit(
+        run(openCodeClient(), octokit, artifacts),
+      );
+      expect(Exit.isFailure(exit)).toBeTrue();
+      expect(closeCount).toBe(0);
+      if (failureAt === 6 && Exit.isFailure(exit)) {
+        const error = Cause.failureOption(exit.cause);
+        expect(
+          error._tag === "Some" && error.value instanceof GitHubMutationRecoveryError,
+        ).toBeTrue();
+      }
+    },
+  );
 });

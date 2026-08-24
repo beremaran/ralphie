@@ -156,13 +156,13 @@ enough to implement, review, and commit independently.
 - [x] Persist decomposition progress before the first GitHub mutation.
 - [x] Persist each created issue number as soon as GitHub returns it.
 - [x] Add a stable marker to generated issue bodies so reruns can identify them.
-- [ ] On retry, discover already-created children instead of duplicating them.
+- [x] On retry, discover already-created children instead of duplicating them.
 - [x] Resume linking when creation succeeded but updates failed.
 - [x] Leave the original issue open when child creation or linking is incomplete.
 - [x] Make original-issue rewriting idempotent.
 - [x] Make original-issue closure idempotent.
-- [ ] Emit a recovery path when GitHub mutation state is ambiguous.
-- [ ] Add failure-injection tests after every individual GitHub mutation.
+- [x] Emit a recovery path when GitHub mutation state is ambiguous.
+- [x] Add failure-injection tests after every individual GitHub mutation.
 
 ## 10. Refreshable main issue loop
 

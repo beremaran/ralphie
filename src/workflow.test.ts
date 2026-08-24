@@ -64,6 +64,7 @@ function testRuntime(
       },
     }),
     Layer.succeed(GitHubIssues, {
+      listDecompositionChildren: () => Effect.succeed([]),
       listOpen: (_client, repo, filters) => {
         calls.push(
           `listIssues:${repo}:${filters.labels.join(",")}:${filters.sort}:${filters.order}`,
