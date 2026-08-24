@@ -16,7 +16,7 @@ enough to implement, review, and commit independently.
 - [x] Define an `IssueExecutionContext` containing the issue, repository path,
       target branch, workspace, run ID, Octokit client, OpenCode client, and
       model/agent selection.
-- [ ] Add an `IssueExecutor` Effect service that accepts an execution context and
+- [x] Add an `IssueExecutor` Effect service that accepts an execution context and
       returns an `IssueExecutionOutcome`.
 - [ ] Add explicit `ImplementationExecutor` and `DecompositionExecutor` services.
 - [ ] Keep stage enums as the audit/progress vocabulary rather than building an
