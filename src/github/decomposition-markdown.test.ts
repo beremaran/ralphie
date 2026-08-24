@@ -72,6 +72,14 @@ describe("decomposition Markdown", () => {
     expect(body).toContain("- #12 — Migrate API (depends on #11)");
     expect(body).toContain("Keep this original context.");
     expect(body).toContain("Split storage from API work.");
+    expect(
+      renderDecomposedOriginalBody({
+        original: { ...original, body },
+        breakdown,
+        issueNumbers,
+        lineage,
+      }),
+    ).toBe(body);
   });
 
   test("rejects decomposition beyond the maximum depth", () => {

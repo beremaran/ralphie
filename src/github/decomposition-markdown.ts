@@ -90,6 +90,13 @@ export const renderDecomposedOriginalBody = (input: {
   readonly lineage: DecompositionLineage;
 }): string => {
   validateDepth(input.lineage.depth);
+  const originalSection = "## Original issue content\n\n";
+  const originalBody = input.original.body ?? "";
+  const preservedOriginal = originalBody.includes(
+    `<!-- ${RALPHIE_DECOMPOSITION_MARKER} original=`,
+  )
+    ? (originalBody.split(originalSection)[1] ?? "")
+    : originalBody;
   const stack = input.breakdown.issues.map((child) => {
     const number = input.issueNumbers[child.key];
     if (number === undefined) {
@@ -118,5 +125,5 @@ ${input.breakdown.rationale}
 
 ## Original issue content
 
-${input.original.body ?? ""}`;
+${preservedOriginal}`;
 };

@@ -138,29 +138,29 @@ enough to implement, review, and commit independently.
 - [x] Add a GitHub service for closing the original issue with the chosen reason.
 - [x] Define the rendered Markdown format for parent, sibling, and dependency
       links.
-- [ ] Create child issues in a deterministic order.
-- [ ] Record the mapping from breakdown keys to GitHub issue numbers immediately
+- [x] Create child issues in a deterministic order.
+- [x] Record the mapping from breakdown keys to GitHub issue numbers immediately
       after each creation.
-- [ ] Perform a second update pass after all issue numbers are known so every
+- [x] Perform a second update pass after all issue numbers are known so every
       child links the parent, siblings, and dependencies.
-- [ ] Rewrite the original issue with the complete child-issue stack.
-- [ ] Close the original only after every child has been created and linked.
+- [x] Rewrite the original issue with the complete child-issue stack.
+- [x] Close the original only after every child has been created and linked.
 - [x] Preserve the original issue content in the rewritten body.
 - [x] Include decomposition lineage/depth metadata in generated issue bodies.
 - [x] Add a maximum decomposition depth to prevent recursive splitting forever.
 - [x] Define what happens if a child is reassessed as complexity 4 or 5.
-- [ ] Add Octokit tests for successful creation, linking, rewriting, and closure.
+- [x] Add Octokit tests for successful creation, linking, rewriting, and closure.
 
 ## 9. Partial GitHub failure and idempotency
 
-- [ ] Persist decomposition progress before the first GitHub mutation.
-- [ ] Persist each created issue number as soon as GitHub returns it.
+- [x] Persist decomposition progress before the first GitHub mutation.
+- [x] Persist each created issue number as soon as GitHub returns it.
 - [x] Add a stable marker to generated issue bodies so reruns can identify them.
 - [ ] On retry, discover already-created children instead of duplicating them.
-- [ ] Resume linking when creation succeeded but updates failed.
-- [ ] Leave the original issue open when child creation or linking is incomplete.
-- [ ] Make original-issue rewriting idempotent.
-- [ ] Make original-issue closure idempotent.
+- [x] Resume linking when creation succeeded but updates failed.
+- [x] Leave the original issue open when child creation or linking is incomplete.
+- [x] Make original-issue rewriting idempotent.
+- [x] Make original-issue closure idempotent.
 - [ ] Emit a recovery path when GitHub mutation state is ambiguous.
 - [ ] Add failure-injection tests after every individual GitHub mutation.
 
