@@ -45,6 +45,7 @@ const context = (client: OpencodeClient): IssueExecutionContext => ({
     body: "Refresh expired tokens.",
     labels: ["bug"],
   },
+  repository: "owner/repository",
   repositoryPath: "/workspace/repo",
   targetBranch: "main",
   workspace: "/workspace",

@@ -8,6 +8,7 @@ import type { GitHubIssue } from "./issues.ts";
 import {
   MAX_DECOMPOSITION_DEPTH,
   RALPHIE_DECOMPOSITION_MARKER,
+  nextDecompositionLineage,
   renderChildIssueBody,
   renderDecomposedOriginalBody,
 } from "./decomposition-markdown.ts";
@@ -81,5 +82,23 @@ describe("decomposition Markdown", () => {
         issueNumbers,
       }),
     ).toThrow();
+  });
+
+  test("increments lineage when a generated child requires decomposition", () => {
+    const generated = {
+      ...original,
+      number: 12,
+      body: renderChildIssueBody({
+        child: breakdown.issues[1]!,
+        lineage,
+        issueNumbers,
+      }),
+    };
+
+    expect(nextDecompositionLineage(generated)).toEqual({
+      rootIssueNumber: 10,
+      parentIssueNumber: 12,
+      depth: 2,
+    });
   });
 });

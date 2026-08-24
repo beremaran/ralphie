@@ -29,6 +29,24 @@ export const decompositionMarker = (
   return `<!-- ${RALPHIE_DECOMPOSITION_MARKER} root=${lineage.rootIssueNumber} parent=${lineage.parentIssueNumber} key=${JSON.stringify(key)} depth=${lineage.depth} -->`;
 };
 
+/** Derive lineage for the children of an issue, including recursively generated children. */
+export const nextDecompositionLineage = (
+  issue: GitHubIssue,
+): DecompositionLineage => {
+  const marker = issue.body?.match(
+    /<!-- ralphie:decomposition root=(\d+) parent=(\d+) key="[^"]+" depth=(\d+) -->/,
+  );
+  const previousRoot = marker?.[1] === undefined ? undefined : Number(marker[1]);
+  const previousDepth = marker?.[3] === undefined ? undefined : Number(marker[3]);
+  const depth = previousDepth === undefined ? 1 : previousDepth + 1;
+  validateDepth(depth);
+  return {
+    rootIssueNumber: previousRoot ?? issue.number,
+    parentIssueNumber: issue.number,
+    depth,
+  };
+};
+
 export const renderChildIssueBody = (input: {
   readonly child: IssueBreakdownDecision["issues"][number];
   readonly lineage: DecompositionLineage;

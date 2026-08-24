@@ -148,7 +148,7 @@ enough to implement, review, and commit independently.
 - [x] Preserve the original issue content in the rewritten body.
 - [x] Include decomposition lineage/depth metadata in generated issue bodies.
 - [x] Add a maximum decomposition depth to prevent recursive splitting forever.
-- [ ] Define what happens if a child is reassessed as complexity 4 or 5.
+- [x] Define what happens if a child is reassessed as complexity 4 or 5.
 - [ ] Add Octokit tests for successful creation, linking, rewriting, and closure.
 
 ## 9. Partial GitHub failure and idempotency

@@ -64,6 +64,7 @@ describe("issue execution domain types", () => {
         body: null,
         labels: [],
       },
+      repository: "example/repo",
       repositoryPath: "/tmp/repository",
       targetBranch: "main",
       workspace: "/tmp/workspace",
@@ -74,6 +75,7 @@ describe("issue execution domain types", () => {
     };
 
     expect(context.issue.number).toBe(42);
+    expect(context.repository).toBe("example/repo");
     expect(context.repositoryPath).toBe("/tmp/repository");
     expect(context.targetBranch).toBe("main");
     expect(context.workspace).toBe("/tmp/workspace");
