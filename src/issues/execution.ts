@@ -1,0 +1,64 @@
+import type { Octokit } from "octokit";
+import type { OpencodeClient } from "@opencode-ai/sdk/v2";
+
+import type { GitHubIssue } from "../github/issues.ts";
+import type { OpenCodeSelection } from "../opencode/model.ts";
+
+/**
+ * The terminal state reported by an issue executor.
+ *
+ * Keeping this as an enum-backed discriminator makes outcomes safe to route
+ * and easy to serialize in progress and run diagnostics.
+ */
+export enum IssueExecutionOutcomeKind {
+  Completed = "completed",
+  Decomposed = "decomposed",
+  Escalated = "escalated",
+  Skipped = "skipped",
+  Failed = "failed",
+}
+
+export type IssueExecutionOutcome =
+  | {
+      readonly kind: IssueExecutionOutcomeKind.Completed;
+      /** The commit created for the issue's implementation. */
+      readonly commitSha: string;
+    }
+  | {
+      readonly kind: IssueExecutionOutcomeKind.Decomposed;
+      /** Issues created from the original issue's decomposition. */
+      readonly childIssueNumbers: ReadonlyArray<number>;
+    }
+  | {
+      readonly kind: IssueExecutionOutcomeKind.Escalated;
+      /** Where recovery diagnostics for the escalation were written. */
+      readonly diagnosticsPath: string;
+      readonly reason: string;
+    }
+  | {
+      readonly kind: IssueExecutionOutcomeKind.Skipped;
+      readonly reason: string;
+    }
+  | {
+      readonly kind: IssueExecutionOutcomeKind.Failed;
+      readonly message: string;
+    };
+
+/**
+ * Shared inputs available to all per-issue workflow executors.
+ *
+ * The repository path is the concrete checkout being mutated; workspace is
+ * retained separately because it owns run artifacts and cleanup. The clients
+ * are passed in from the workflow runtime so an issue executor does not need
+ * to perform authentication or start another OpenCode server.
+ */
+export type IssueExecutionContext = {
+  readonly issue: GitHubIssue;
+  readonly repositoryPath: string;
+  readonly targetBranch: string;
+  readonly workspace: string;
+  readonly runId: string;
+  readonly octokit: Octokit;
+  readonly openCode: OpencodeClient;
+  readonly openCodeSelection: OpenCodeSelection;
+};

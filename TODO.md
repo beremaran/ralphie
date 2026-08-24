@@ -11,9 +11,9 @@ enough to implement, review, and commit independently.
 
 ## 1. Execution foundations
 
-- [ ] Define `IssueExecutionOutcome` variants for completed, decomposed,
+- [x] Define `IssueExecutionOutcome` variants for completed, decomposed,
       escalated, skipped, and failed issues.
-- [ ] Define an `IssueExecutionContext` containing the issue, repository path,
+- [x] Define an `IssueExecutionContext` containing the issue, repository path,
       target branch, workspace, run ID, Octokit client, OpenCode client, and
       model/agent selection.
 - [ ] Add an `IssueExecutor` Effect service that accepts an execution context and
