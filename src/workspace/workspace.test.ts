@@ -4,33 +4,10 @@ import { homedir } from "node:os";
 import { resolve } from "node:path";
 
 import {
-  parseRepositorySlug,
   resolveWorkspacePath,
   Workspace,
   WorkspaceLive,
-} from "./services.ts";
-
-describe("repository parsing", () => {
-  test.each([
-    "owner/repository",
-    "https://github.com/owner/repository.git",
-    "git@github.com:owner/repository.git",
-  ])("normalizes %s", (repository) => {
-    expect(parseRepositorySlug(repository)).toEqual({
-      slug: "owner/repository",
-      name: "repository",
-    });
-  });
-
-  test.each(["repository", "../repository", "owner/..", "owner/repo/extra"])(
-    "rejects invalid repository %s",
-    (repository) => {
-      expect(() => parseRepositorySlug(repository)).toThrow(
-        "Expected owner/repository",
-      );
-    },
-  );
-});
+} from "./workspace.ts";
 
 describe("workspace cleanup", () => {
   test("expands the default workspace path", () => {

@@ -2,7 +2,7 @@ import { defineCommand, option } from "@bunli/core";
 import { Effect } from "effect";
 import { z } from "zod";
 
-import { LiveRuntime } from "./services.ts";
+import { LiveRuntime } from "./runtime.ts";
 import { workflow } from "./workflow.ts";
 
 export const runCommand = defineCommand({

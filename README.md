@@ -53,3 +53,17 @@ bun run build
 Bunli owns command routing, options, validation, help, and executable builds.
 The workflow and its external integrations are modeled as Effect programs and
 layers, including guaranteed cleanup of the temporary OpenCode server.
+
+## Architecture
+
+Functionality is grouped by domain under `src/`:
+
+- `github/` owns GitHub CLI authentication and Octokit initialization.
+- `git/` owns repository cloning, validation, cleanup, and branch preparation.
+- `opencode/` owns the OpenCode server lifecycle.
+- `workspace/` owns workspace path resolution and safe removal.
+- `process/` owns external command execution.
+- `shared/` contains errors shared across domains.
+
+`workflow.ts` orchestrates these domain services, while `runtime.ts` assembles
+their live Effect layers.

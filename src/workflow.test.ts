@@ -2,43 +2,45 @@ import { describe, expect, test } from "bun:test";
 import { Effect, Exit, Layer } from "effect";
 import type { Octokit } from "octokit";
 
-import {
-  CommandRunner,
-  OctokitClient,
-  OpenCode,
-  RalphieError,
-  Repository,
-  Workspace,
-  type CommandResult,
-} from "./services.ts";
+import { GitRepository } from "./git/repository.ts";
+import { GitHubClient } from "./github/client.ts";
+import { OpenCode } from "./opencode/server.ts";
+import { RalphieError } from "./shared/error.ts";
+import { Workspace } from "./workspace/workspace.ts";
 import { workflow } from "./workflow.ts";
 
 type TestRuntimeOptions = {
-  commandResults?: CommandResult[];
+  githubFailure?: RalphieError;
+  gitFailure?: RalphieError;
   startFailure?: RalphieError;
   removeFailure?: RalphieError;
 };
 
 function testRuntime(calls: string[], options: TestRuntimeOptions = {}) {
-  const commandResults = [...(options.commandResults ?? [])];
-
   return Layer.mergeAll(
-    Layer.succeed(CommandRunner, {
-      run: (command, args) => {
-        calls.push(`${command} ${args.join(" ")}`);
-        return Effect.succeed(
-          commandResults.shift() ?? {
-            exitCode: 0,
-            stdout: args[1] === "token" ? "test-token" : "",
-            stderr: "",
-          },
-        );
-      },
+    Layer.succeed(GitHubClient, {
+      initialize: Effect.suspend(() => {
+        calls.push("initializeGitHub");
+        return options.githubFailure
+          ? Effect.fail(options.githubFailure)
+          : Effect.succeed({} as Octokit);
+      }),
     }),
-    Layer.succeed(OctokitClient, {
-      create: (authToken) => {
-        calls.push(`initializeOctokit:${authToken}`);
-        return Effect.succeed({} as Octokit);
+    Layer.succeed(GitRepository, {
+      verifyInstalled: Effect.suspend(() => {
+        calls.push("verifyGitInstalled");
+        return options.gitFailure
+          ? Effect.fail(options.gitFailure)
+          : Effect.void;
+      }),
+      prepare: (repo, branch, workspace) => {
+        calls.push(`prepareRepository:${repo}:${branch}:${workspace}`);
+        return Effect.succeed({
+          path: `${workspace}/repo`,
+          cloned: true,
+          branchChanged: branch !== "main",
+          cleaned: false,
+        });
       },
     }),
     Layer.succeed(OpenCode, {
@@ -51,17 +53,6 @@ function testRuntime(calls: string[], options: TestRuntimeOptions = {}) {
               close: () => calls.push("closeServer"),
             };
         }),
-    }),
-    Layer.succeed(Repository, {
-      prepare: (repo, branch, workspace) => {
-        calls.push(`prepareRepository:${repo}:${branch}:${workspace}`);
-        return Effect.succeed({
-          path: `${workspace}/repo`,
-          cloned: true,
-          branchChanged: branch !== "main",
-          cleaned: false,
-        });
-      },
     }),
     Layer.succeed(Workspace, {
       remove: (workspace) => {
@@ -92,10 +83,8 @@ describe("workflow", () => {
 
     expect(calls).toEqual([
       "removeWorkspace:/tmp/ralphie",
-      "gh auth status",
-      "gh auth token",
-      "initializeOctokit:test-token",
-      "git --version",
+      "initializeGitHub",
+      "verifyGitInstalled",
       "prepareRepository:owner/repo:develop:/tmp/ralphie",
       "startServer",
       "closeServer",
@@ -114,16 +103,14 @@ describe("workflow", () => {
     }).pipe(
       Effect.provide(
         testRuntime(calls, {
-          commandResults: [
-            { exitCode: 1, stdout: "", stderr: "not logged in" },
-          ],
+          githubFailure: new RalphieError({ message: "not logged in" }),
         }),
       ),
       Effect.runPromiseExit,
     );
 
     expect(Exit.isFailure(exit)).toBeTrue();
-    expect(calls).toEqual(["gh auth status"]);
+    expect(calls).toEqual(["initializeGitHub"]);
   });
 
   test("stops when git is unavailable", async () => {
@@ -137,11 +124,7 @@ describe("workflow", () => {
     }).pipe(
       Effect.provide(
         testRuntime(calls, {
-          commandResults: [
-            { exitCode: 0, stdout: "", stderr: "" },
-            { exitCode: 0, stdout: "test-token", stderr: "" },
-            { exitCode: 1, stdout: "", stderr: "" },
-          ],
+          gitFailure: new RalphieError({ message: "git unavailable" }),
         }),
       ),
       Effect.runPromiseExit,
@@ -149,35 +132,9 @@ describe("workflow", () => {
 
     expect(Exit.isFailure(exit)).toBeTrue();
     expect(calls).toEqual([
-      "gh auth status",
-      "gh auth token",
-      "initializeOctokit:test-token",
-      "git --version",
+      "initializeGitHub",
+      "verifyGitInstalled",
     ]);
-  });
-
-  test("rejects an empty GitHub token", async () => {
-    const calls: string[] = [];
-    const exit = await workflow({
-      repo: "owner/repo",
-      branch: "main",
-      workspace: "~/.ralphie",
-      cleanup: false,
-      startClean: false,
-    }).pipe(
-      Effect.provide(
-        testRuntime(calls, {
-          commandResults: [
-            { exitCode: 0, stdout: "", stderr: "" },
-            { exitCode: 0, stdout: "", stderr: "" },
-          ],
-        }),
-      ),
-      Effect.runPromiseExit,
-    );
-
-    expect(Exit.isFailure(exit)).toBeTrue();
-    expect(calls).toEqual(["gh auth status", "gh auth token"]);
   });
 
   test("stops before other work when start-clean fails", async () => {
