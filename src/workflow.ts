@@ -312,19 +312,20 @@ export const workflow = ({
         activeIssue?: RunState["activeIssue"],
       ) => {
         const snapshot = queue.snapshot();
+        const currentActiveQueueIssue = activeQueueIssue;
         const hasActiveQueueIssue =
-          activeIssue !== undefined && activeQueueIssue !== undefined;
+          activeIssue !== undefined && currentActiveQueueIssue !== undefined;
         const pending = snapshot.pending.map(({ issue }) => ({
           ...issue,
           labels: [...issue.labels],
         }));
         if (
           hasActiveQueueIssue &&
-          !pending.some(({ number }) => number === activeQueueIssue.number)
+          !pending.some(({ number }) => number === currentActiveQueueIssue.number)
         ) {
           pending.unshift({
-            ...activeQueueIssue,
-            labels: [...activeQueueIssue.labels],
+            ...currentActiveQueueIssue,
+            labels: [...currentActiveQueueIssue.labels],
           });
         }
         return stateStore.save(statePath, {
