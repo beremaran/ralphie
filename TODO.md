@@ -21,9 +21,9 @@ enough to implement, review, and commit independently.
 - [ ] Add explicit `ImplementationExecutor` and `DecompositionExecutor` services.
 - [ ] Keep stage enums as the audit/progress vocabulary rather than building an
       untyped generic stage interpreter.
-- [ ] Add a typed per-issue artifact store for complexity, checkpoints, reviews,
+- [x] Add a typed per-issue artifact store for complexity, checkpoints, reviews,
       commit messages, breakdowns, and created issue numbers.
-- [ ] Reject reads of artifacts that have not been produced yet.
+- [x] Reject reads of artifacts that have not been produced yet.
 - [ ] Assemble executor services in the live runtime.
 - [ ] Replace the workflow's plan-only logging with calls to `IssueExecutor`.
 - [ ] Add mocked executor tests proving the workflow handles every outcome.
