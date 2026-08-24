@@ -11,23 +11,29 @@ import {
   type OpenCodeModel,
 } from "../opencode/model.ts";
 import { RalphieError } from "../shared/error.ts";
+import { redactSensitiveText } from "../shared/redaction.ts";
 
 export const DEFAULT_BRANCH = "main";
 export const DEFAULT_WORKSPACE = "~/.ralphie";
 
 const nonEmptyString = z.string().trim().min(1);
+const optionalConfigValue = <Schema extends z.ZodType>(schema: Schema) =>
+  schema
+    .nullable()
+    .transform((value) => value ?? undefined)
+    .optional();
 
 const repositoryOptionShape = {
-  branch: nonEmptyString.optional(),
-  maxIssues: z.number().int().positive().optional(),
-  issueLabels: z.array(nonEmptyString).optional(),
-  issueSort: z.enum(IssueSort).optional(),
-  issueOrder: z.enum(IssueOrder).optional(),
-  model: openCodeModelSchema.optional(),
-  modelVariant: openCodeModelVariantSchema.optional(),
-  agent: nonEmptyString.optional(),
-  dryRun: z.boolean().optional(),
-  resume: nonEmptyString.optional(),
+  branch: optionalConfigValue(nonEmptyString),
+  maxIssues: optionalConfigValue(z.number().int().positive()),
+  issueLabels: optionalConfigValue(z.array(nonEmptyString)),
+  issueSort: optionalConfigValue(z.enum(IssueSort)),
+  issueOrder: optionalConfigValue(z.enum(IssueOrder)),
+  model: optionalConfigValue(openCodeModelSchema),
+  modelVariant: optionalConfigValue(openCodeModelVariantSchema),
+  agent: optionalConfigValue(nonEmptyString),
+  dryRun: optionalConfigValue(z.boolean()),
+  resume: optionalConfigValue(nonEmptyString),
 };
 
 export const ralphieRepositoryConfigSchema = z
@@ -39,15 +45,15 @@ export const ralphieRepositoryConfigSchema = z
 
 export const ralphieFileConfigSchema = z
   .object({
-    repo: nonEmptyString.optional(),
+    repo: optionalConfigValue(nonEmptyString),
     repositories: z.array(ralphieRepositoryConfigSchema).min(1).optional(),
     ...repositoryOptionShape,
-    workspace: nonEmptyString.optional(),
-    cleanup: z.boolean().optional(),
-    startClean: z.boolean().optional(),
-    verbose: z.boolean().optional(),
-    json: z.boolean().optional(),
-    quiet: z.boolean().optional(),
+    workspace: optionalConfigValue(nonEmptyString),
+    cleanup: optionalConfigValue(z.boolean()),
+    startClean: optionalConfigValue(z.boolean()),
+    verbose: optionalConfigValue(z.boolean()),
+    json: optionalConfigValue(z.boolean()),
+    quiet: optionalConfigValue(z.boolean()),
   })
   .strict()
   .superRefine((config, context) => {
@@ -182,15 +188,62 @@ export const RalphieConfigFile = Context.GenericTag<RalphieConfigFileService>(
   "ralphie/RalphieConfigFile",
 );
 
+const configPath = (path: PropertyKey[]): string => {
+  if (path.length === 0) return "config";
+  return path.reduce<string>(
+    (result, segment) =>
+      typeof segment === "number"
+        ? `${result}[${segment}]`
+        : result.length === 0
+          ? String(segment)
+          : `${result}.${String(segment)}`,
+    "",
+  );
+};
+
+const validationMessage = (path: string, error: z.ZodError): string =>
+  `Config file ${path} has invalid settings:\n${error.issues
+    .map((issue) => `- ${configPath(issue.path)}: ${issue.message}`)
+    .join("\n")}`;
+
+const readErrorMessage = (path: string, cause: unknown): string => {
+  const code = (cause as NodeJS.ErrnoException | undefined)?.code;
+  if (code === "ENOENT") return `Config file not found: ${path}.`;
+  if (code === "EACCES") return `Cannot read config file ${path}: permission denied.`;
+  const detail = cause instanceof Error ? ` ${cause.message}` : "";
+  return redactSensitiveText(`Failed to read config file ${path}.${detail}`);
+};
+
 export const RalphieConfigFileLive = Layer.succeed(RalphieConfigFile, {
   load: (path) =>
-    Effect.tryPromise({
-      try: async () =>
-        ralphieFileConfigSchema.parse(JSON.parse(await readFile(path, "utf8"))),
-      catch: (cause) =>
-        new RalphieError({
-          message: `Config file ${path} is invalid or unreadable.`,
-          cause,
-        }),
+    Effect.gen(function* () {
+      const content = yield* Effect.tryPromise({
+        try: () => readFile(path, "utf8"),
+        catch: (cause) =>
+          new RalphieError({ message: readErrorMessage(path, cause), cause }),
+      });
+      const parsed = yield* Effect.try({
+        try: () => JSON.parse(content),
+        catch: (cause) =>
+          new RalphieError({
+            message: redactSensitiveText(
+              `Config file ${path} contains malformed JSON${
+                cause instanceof Error ? `: ${cause.message}` : "."
+              }`,
+            ),
+            cause,
+          }),
+      });
+      return yield* Effect.try({
+        try: () => ralphieFileConfigSchema.parse(parsed),
+        catch: (cause) =>
+          new RalphieError({
+            message:
+              cause instanceof z.ZodError
+                ? validationMessage(path, cause)
+                : `Config file ${path} could not be validated.`,
+            cause,
+          }),
+      });
     }),
 });

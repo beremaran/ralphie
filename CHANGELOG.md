@@ -30,6 +30,10 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Fixed
 
+- Report missing files, malformed JSON, and each schema violation separately
+  instead of collapsing every config failure into one generic message.
+- Treat `null` optional JSON settings as unset, including unlimited
+  `maxIssues` and an empty `issueLabels` filter.
 - Prevent final progress events from recreating a workspace removed by
   `--cleanup`.
 - Prevent viewport repainting, split-stream output, and accumulating

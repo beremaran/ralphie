@@ -322,8 +322,11 @@ configured.
 
 The file is optional and has no implicit discovery location. Unknown keys,
 invalid enum values, malformed model identifiers, and incompatible output modes
-are rejected before preflight begins. Explicit command-line values override the
-file, and omitted values fall back to Ralphie's normal defaults:
+are rejected before preflight begins with property-level diagnostics. Optional
+settings may be omitted or set to `null` to use their normal default—for
+example, `"maxIssues": null` means unlimited and `"issueLabels": null` means no
+label filter. Explicit command-line values override the file, and omitted values
+fall back to Ralphie's normal defaults:
 
 ```bash
 ralphie --config ./ralphie.json --branch main --max-issues 2

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Exit } from "effect";
+import { Effect } from "effect";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -167,6 +167,37 @@ describe("Ralphie JSON config", () => {
     }
   });
 
+  test("treats null optional values as unset", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "ralphie-config-null-"));
+    const path = join(directory, "ralphie.json");
+    try {
+      await writeFile(
+        path,
+        JSON.stringify({
+          repo: "owner/repo",
+          maxIssues: null,
+          issueLabels: null,
+          model: null,
+          cleanup: null,
+        }),
+      );
+      const config = await Effect.gen(function* () {
+        const files = yield* RalphieConfigFile;
+        return yield* files.load(path);
+      }).pipe(Effect.provide(RalphieConfigFileLive), Effect.runPromise);
+
+      expect(resolveRalphieConfig(config, {})).toMatchObject({
+        repo: "owner/repo",
+        issueLabels: [],
+        cleanup: false,
+      });
+      expect(resolveRalphieConfig(config, {}).maxIssues).toBeUndefined();
+      expect(resolveRalphieConfig(config, {}).model).toBeUndefined();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   test("keeps the published example valid", async () => {
     const config = await Effect.gen(function* () {
       const files = yield* RalphieConfigFile;
@@ -180,23 +211,45 @@ describe("Ralphie JSON config", () => {
     expect(config.model).toEqual({ providerID: "openai", modelID: "gpt-5" });
   });
 
-  test("rejects malformed JSON and unknown keys", async () => {
+  test("explains malformed JSON and every schema violation", async () => {
     const directory = await mkdtemp(join(tmpdir(), "ralphie-config-invalid-"));
     try {
-      for (const [name, content] of [
-        ["malformed.json", "{"],
-        ["unknown.json", JSON.stringify({ repo: "owner/repo", typo: true })],
-      ] as const) {
-        const path = join(directory, name);
-        await writeFile(path, content);
-        const exit = await Effect.gen(function* () {
-          const files = yield* RalphieConfigFile;
-          return yield* files.load(path);
-        }).pipe(Effect.provide(RalphieConfigFileLive), Effect.runPromiseExit);
-        expect(Exit.isFailure(exit)).toBeTrue();
-      }
+      const malformedPath = join(directory, "malformed.json");
+      await writeFile(malformedPath, "{");
+      const malformed = Effect.gen(function* () {
+        const files = yield* RalphieConfigFile;
+        return yield* files.load(malformedPath);
+      }).pipe(Effect.provide(RalphieConfigFileLive), Effect.runPromise);
+      await expect(malformed).rejects.toThrow("contains malformed JSON");
+
+      const invalidPath = join(directory, "invalid.json");
+      await writeFile(
+        invalidPath,
+        JSON.stringify({
+          repositories: [{ repo: "owner/one" }, { repo: 42 }],
+          maxIssues: 0,
+          typo: true,
+        }),
+      );
+      const invalid = Effect.gen(function* () {
+        const files = yield* RalphieConfigFile;
+        return yield* files.load(invalidPath);
+      }).pipe(Effect.provide(RalphieConfigFileLive), Effect.runPromise);
+      await expect(invalid).rejects.toThrow("maxIssues: Too small");
+      await expect(invalid).rejects.toThrow("repositories[1].repo");
+      await expect(invalid).rejects.toThrow('config: Unrecognized key: "typo"');
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  });
+
+  test("distinguishes a missing config file", async () => {
+    const missingPath = join(tmpdir(), `missing-ralphie-${crypto.randomUUID()}.json`);
+    const missing = Effect.gen(function* () {
+      const files = yield* RalphieConfigFile;
+      return yield* files.load(missingPath);
+    }).pipe(Effect.provide(RalphieConfigFileLive), Effect.runPromise);
+
+    await expect(missing).rejects.toThrow(`Config file not found: ${missingPath}.`);
   });
 });
