@@ -21,17 +21,22 @@ const client = ({
   push = true,
   protectedBranch = false,
   rules = [],
+  rulesError,
 }: {
   readonly push?: boolean;
   readonly protectedBranch?: boolean;
   readonly rules?: ReadonlyArray<unknown>;
+  readonly rulesError?: unknown;
 } = {}) =>
   ({
     rest: {
       repos: {
         get: async () => repositoryResponse(push),
         getBranch: async () => branchResponse(protectedBranch),
-        getBranchRules: async () => rulesResponse(rules),
+        getBranchRules: async () => {
+          if (rulesError !== undefined) throw rulesError;
+          return rulesResponse(rules);
+        },
       },
     },
   }) as unknown as Octokit;
@@ -64,6 +69,7 @@ const verify = (
     readonly push?: boolean;
     readonly protectedBranch?: boolean;
     readonly rules?: ReadonlyArray<unknown>;
+    readonly rulesError?: unknown;
     readonly expectedCommitSha?: string;
     readonly pushMode?: GitPushMode;
   } = {},
@@ -78,6 +84,7 @@ const verify = (
           push: input.push,
           protectedBranch: input.protectedBranch,
           rules: input.rules,
+          rulesError: input.rulesError,
         }),
       repository: "owner/repository",
       repositoryPath: "/workspace/repository",
@@ -105,6 +112,40 @@ describe("Git remote safety", () => {
       commitsAheadBase: 0,
       pushMode: GitPushMode.NonForce,
     });
+  });
+
+  test("accepts a private repository when GitHub says rulesets are unavailable", async () => {
+    const report = await Effect.runPromise(
+      verify({
+        rulesError: {
+          status: 403,
+          response: {
+            status: 403,
+            data: {
+              message:
+                "Upgrade to GitHub Pro or make this repository public to enable this feature.",
+            },
+          },
+        },
+      }),
+    );
+
+    expect(report.activeBranchRules).toBe(0);
+  });
+
+  test("fails closed for other branch-rules errors and exposes GitHub's reason", async () => {
+    const error = await verify({
+      rulesError: {
+        status: 403,
+        response: {
+          status: 403,
+          data: { message: "Resource not accessible by personal access token" },
+        },
+      },
+    }).pipe(Effect.flip, Effect.runPromise);
+
+    expect(error.message).toContain("Failed to inspect GitHub branch rules for main.");
+    expect(error.message).toContain("Resource not accessible by personal access token");
   });
 
   test.each([

@@ -117,9 +117,57 @@ function githubRequest<Output>(
 ): Effect.Effect<Output, RalphieError> {
   return Effect.tryPromise({
     try: request,
-    catch: (cause) => new RalphieError({ message, cause }),
+    catch: (cause) =>
+      new RalphieError({ message: githubFailureMessage(message, cause), cause }),
   });
 }
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+
+const githubFailureDetails = (cause: unknown): string | undefined => {
+  if (isRecord(cause)) {
+    const response = cause.response;
+    if (isRecord(response) && isRecord(response.data)) {
+      const apiMessage = response.data.message;
+      if (typeof apiMessage === "string" && apiMessage.trim().length > 0) {
+        return apiMessage.trim();
+      }
+    }
+  }
+  return cause instanceof Error && cause.message.trim().length > 0
+    ? cause.message.trim()
+    : undefined;
+};
+
+const githubFailureStatus = (cause: unknown): number | undefined => {
+  if (!isRecord(cause)) return undefined;
+  if (typeof cause.status === "number") return cause.status;
+  return isRecord(cause.response) && typeof cause.response.status === "number"
+    ? cause.response.status
+    : undefined;
+};
+
+const githubFailureMessage = (message: string, cause: unknown): string => {
+  const details = githubFailureDetails(cause);
+  return details === undefined ? message : `${message} GitHub responded: ${details}`;
+};
+
+/**
+ * GitHub returns this explicit 403 when repository rulesets cannot exist for a
+ * private repository on the current plan. Classic branch protection remains a
+ * separate check, so treating only this capability response as no rulesets does
+ * not weaken protection or permission failures.
+ */
+const isBranchRulesFeatureUnavailable = (cause: unknown): boolean => {
+  if (githubFailureStatus(cause) !== 403) return false;
+  const details = githubFailureDetails(cause)?.toLowerCase() ?? "";
+  return (
+    details.includes("upgrade to github pro") &&
+    details.includes("make this repository public") &&
+    details.includes("enable this feature")
+  );
+};
 
 export const GitRemoteSafetyLive = Layer.effect(
   GitRemoteSafety,
@@ -285,18 +333,30 @@ export const GitRemoteSafetyLive = Layer.effect(
             );
           }
 
-          const rulesResponse = yield* githubRequest(
-            () =>
-              input.client.rest.repos.getBranchRules({
-                owner,
-                repo,
-                branch: input.branch,
+          const branchRules = yield* Effect.tryPromise({
+            try: async (): Promise<ReadonlyArray<unknown>> => {
+              try {
+                const response = await input.client.rest.repos.getBranchRules({
+                  owner,
+                  repo,
+                  branch: input.branch,
+                });
+                return Array.isArray(response.data) ? response.data : [];
+              } catch (cause) {
+                if (isBranchRulesFeatureUnavailable(cause)) return [];
+                throw cause;
+              }
+            },
+            catch: (cause) =>
+              new RalphieError({
+                message: githubFailureMessage(
+                  `Failed to inspect GitHub branch rules for ${input.branch}.`,
+                  cause,
+                ),
+                cause,
               }),
-            `Failed to inspect GitHub branch rules for ${input.branch}.`,
-          );
-          const activeBranchRules = Array.isArray(rulesResponse.data)
-            ? rulesResponse.data.length
-            : 0;
+          });
+          const activeBranchRules = branchRules.length;
           if (activeBranchRules > 0) {
             return yield* fail(
               GitRemoteSafetyFailureKind.BranchRules,

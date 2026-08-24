@@ -18,5 +18,7 @@ All notable changes to Ralphie are documented here. The project follows
 
 - Prevent final progress events from recreating a workspace removed by
   `--cleanup`.
+- Treat GitHub's explicit rulesets-unavailable response for private repositories
+  as zero active rules while continuing to fail closed for other API errors.
 
 [Unreleased]: https://github.com/beremaran/ralphie/commits/main
