@@ -36,7 +36,7 @@ const defineOptInTest = (
   testBody: () => Promise<void>,
 ): void => {
   if (enabled) {
-    test(name, testBody);
+    test(name, testBody, 120_000);
   } else {
     test.skip(name, testBody);
   }
