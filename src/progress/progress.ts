@@ -1,5 +1,6 @@
 import type { PromptSpinnerFactory } from "@bunli/core";
 import { Context, Effect, Layer } from "effect";
+import { redactSensitiveText, redactSensitiveValue } from "../shared/redaction.ts";
 
 export enum ProgressStage {
   Run = "run",
@@ -128,6 +129,14 @@ export const makeProgressReporterLayer = ({
         Effect.sync(() => {
           const event: ProgressEvent = {
             ...update,
+            message: redactSensitiveText(update.message),
+            ...(update.details === undefined
+              ? {}
+              : {
+                  details: redactSensitiveValue(update.details) as Readonly<
+                    Record<string, unknown>
+                  >,
+                }),
             runId,
             timestamp: now().toISOString(),
           };

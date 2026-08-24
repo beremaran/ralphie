@@ -14,6 +14,9 @@ import {
 } from "./progress/progress.ts";
 import { LiveRuntime } from "./runtime.ts";
 import { workflow } from "./workflow.ts";
+import { redactSensitiveText } from "./shared/redaction.ts";
+import { RunStateStore, RunStateStoreLive } from "./run/state.ts";
+import { reconcileRunState } from "./run/reconciliation.ts";
 
 export const runCommand = defineCommand({
   name: "run",
@@ -68,6 +71,9 @@ export const runCommand = defineCommand({
       description: "Remove an existing workspace before starting",
       argumentKind: "flag",
     }),
+    resume: option(z.string().trim().min(1).optional(), {
+      description: "Resume from a saved run-state JSON file",
+    }),
   },
   handler: async ({ flags, positional, spinner, terminal, signal }) => {
     const [repo, ...extra] = positional;
@@ -80,6 +86,22 @@ export const runCommand = defineCommand({
     }
     if (flags.json && flags.quiet) {
       throw new Error("--json and --quiet cannot be used together.");
+    }
+
+    if (flags.resume !== undefined) {
+      const savedState = await Effect.gen(function* () {
+        const store = yield* RunStateStore;
+        return yield* store.load(flags.resume!);
+      }).pipe(Effect.provide(RunStateStoreLive), Effect.runPromise);
+      const reconciliation = reconcileRunState(savedState, {
+        repository: repo,
+        branch: flags.branch,
+      });
+      if (!reconciliation.compatible) {
+        throw new Error(
+          `Cannot resume run ${savedState.runId}: ${reconciliation.reasons.join("; ")}.`,
+        );
+      }
     }
 
     const progressMode = flags.json
@@ -116,7 +138,9 @@ export const runCommand = defineCommand({
       signal,
     }).pipe(
       Effect.provide(Layer.merge(LiveRuntime, progressLayer)),
-      Effect.catchAll((error) => Effect.fail(new Error(error.message))),
+      Effect.catchAll((error) =>
+        Effect.fail(new Error(redactSensitiveText(error.message))),
+      ),
       Effect.runPromise,
     );
   },

@@ -203,7 +203,7 @@ enough to implement, review, and commit independently.
 - [ ] Include issue position and review attempt counters where applicable.
 - [ ] Include session IDs, commit SHAs, created issue numbers, and diagnostic
       paths only in verbose details or JSON events.
-- [ ] Ensure secrets and the GitHub token can never appear in progress details.
+- [x] Ensure secrets and the GitHub token can never appear in progress details.
 - [ ] Keep interactive spinner transitions balanced on success and failure.
 - [ ] Ensure non-TTY output remains append-only and readable.
 - [ ] Add a final summary of completed, decomposed, escalated, skipped, and failed
@@ -236,7 +236,7 @@ enough to implement, review, and commit independently.
       of or behind the intended base.
 - [ ] Revalidate origin ownership before every remote mutation.
 - [ ] Bound issue body, diff, review, and diagnostic artifact sizes.
-- [ ] Redact credentials and sensitive environment values from errors and logs.
+- [x] Redact credentials and sensitive environment values from errors and logs.
 - [x] Document that implementation agents can edit files in the target checkout.
 - [x] Add adversarial tests for issue text that attempts to override Git/GitHub
       restrictions.

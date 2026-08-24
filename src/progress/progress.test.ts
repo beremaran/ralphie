@@ -146,4 +146,31 @@ describe("progress reporting", () => {
 
     expect(output).toBe("✗ Failed.\n");
   });
+
+  test("redacts credentials from messages and nested JSON details", async () => {
+    let output = "";
+    const layer = makeProgressReporterLayer({
+      mode: ProgressRenderMode.Json,
+      verbose: true,
+      spinner: unusedSpinner,
+      write: (text) => {
+        output += text;
+      },
+      runId: "run-1",
+    });
+
+    await Effect.gen(function* () {
+      const progress = yield* ProgressReporter;
+      yield* progress.emit({
+        stage: ProgressStage.Run,
+        status: ProgressStatus.Failed,
+        message: "Request failed with Bearer private-value",
+        details: { githubToken: "private-value", nested: { password: "secret" } },
+      });
+    }).pipe(Effect.provide(layer), Effect.runPromise);
+
+    expect(output).not.toContain("private-value");
+    expect(output).not.toContain('"secret"');
+    expect(output).toContain("[REDACTED]");
+  });
 });
