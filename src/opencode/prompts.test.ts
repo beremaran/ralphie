@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 
-import { buildComplexityPrompt } from "./prompts.ts";
+import {
+  buildComplexityPrompt,
+  buildImplementationPrompt,
+} from "./prompts.ts";
 
 describe("OpenCode prompts", () => {
   test("builds a complexity prompt with the complete rubric and issue context", () => {
@@ -25,5 +28,24 @@ describe("OpenCode prompts", () => {
     expect(prompt).toContain('Repository path: "/workspace/repo"');
     expect(prompt).toContain('Target branch: "main"');
     expect(prompt).toContain("Do not modify files, Git, or GitHub.");
+  });
+
+  test("builds an implementation prompt with deterministic-operation restrictions", () => {
+    const prompt = buildImplementationPrompt({
+      issue: {
+        number: 7,
+        title: "Add validation",
+        url: "issue/7",
+        body: "Validate the input.",
+        labels: [],
+      },
+      repositoryPath: "/workspace/repo",
+      targetBranch: "develop",
+    });
+
+    expect(prompt).toContain("implement the smallest\ncomplete solution");
+    expect(prompt).toContain("must\nnot create commits, push, switch branches");
+    expect(prompt).toContain("Leave all resulting changes in the working tree");
+    expect(prompt).toContain('Issue title: "Add validation"');
   });
 });

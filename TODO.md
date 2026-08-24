@@ -50,7 +50,7 @@ enough to implement, review, and commit independently.
 - [x] Add a prompt builder for complexity assessment using issue title, body,
       labels, and relevant repository context.
 - [x] Document the 0–5 complexity rubric in the complexity prompt.
-- [ ] Add a prompt builder for issue implementation with explicit scope and Git
+- [x] Add a prompt builder for issue implementation with explicit scope and Git
       restrictions.
 - [ ] Add a review prompt that receives only the issue and staged diff.
 - [ ] Add a fresh-context review-fix prompt containing the structured review.
