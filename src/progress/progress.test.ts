@@ -114,9 +114,24 @@ describe("progress reporting", () => {
         status: ProgressStatus.Succeeded,
         message: "Git verified.",
       });
+      yield* progress.emit({
+        stage: ProgressStage.Push,
+        status: ProgressStatus.Started,
+        message: "Pushing...",
+      });
+      yield* progress.emit({
+        stage: ProgressStage.Push,
+        status: ProgressStatus.Failed,
+        message: "Push failed.",
+      });
     }).pipe(Effect.provide(layer), Effect.runPromise);
 
-    expect(calls).toEqual(["start", "succeed:✓ Git verified."]);
+    expect(calls).toEqual([
+      "start",
+      "succeed:✓ Git verified.",
+      "start",
+      "fail:✗ Push failed.",
+    ]);
   });
 
   test("quiet mode only emits failures", async () => {
@@ -216,5 +231,59 @@ describe("progress reporting", () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  });
+
+  test("renders a representative non-interactive run as append-only lines", async () => {
+    let output = "";
+    const layer = makeProgressReporterLayer({
+      mode: ProgressRenderMode.Plain,
+      verbose: false,
+      spinner: unusedSpinner,
+      write: (text) => {
+        output += text;
+      },
+      runId: "run-snapshot",
+    });
+
+    await Effect.gen(function* () {
+      const progress = yield* ProgressReporter;
+      yield* progress.emit({
+        stage: ProgressStage.Run,
+        status: ProgressStatus.Info,
+        message: "Run started.",
+      });
+      yield* progress.emit({
+        stage: ProgressStage.Review,
+        status: ProgressStatus.Started,
+        message: "Reviewing changes...",
+        issue: { number: 42, title: "Fix issue" },
+        current: 1,
+        total: 2,
+        attempt: 2,
+        maxAttempts: 5,
+      });
+      yield* progress.emit({
+        stage: ProgressStage.Review,
+        status: ProgressStatus.Succeeded,
+        message: "Review approved.",
+        issue: { number: 42, title: "Fix issue" },
+        current: 1,
+        total: 2,
+        attempt: 2,
+        maxAttempts: 5,
+      });
+      yield* progress.emit({
+        stage: ProgressStage.Run,
+        status: ProgressStatus.Succeeded,
+        message: "Run completed.",
+      });
+    }).pipe(Effect.provide(layer), Effect.runPromise);
+
+    expect(output).toBe(
+      "• Run started.\n" +
+        "◐ [1/2] (2/5) #42 Reviewing changes...\n" +
+        "✓ [1/2] (2/5) #42 Review approved.\n" +
+        "✓ Run completed.\n",
+    );
   });
 });
