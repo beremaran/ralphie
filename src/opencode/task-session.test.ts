@@ -1,11 +1,16 @@
 import { describe, expect, test } from "bun:test";
-import type { OpencodeClient } from "@opencode-ai/sdk/v2";
+import type {
+  AssistantMessage,
+  OpencodeClient,
+  Part,
+} from "@opencode-ai/sdk/v2";
 import { Effect, Exit } from "effect";
 
 import {
   createOpenCodeTaskSession,
   makeOpenCodeTaskSessionLayer,
   OpenCodeTaskSession,
+  runOpenCodeTask,
   taskSessionPromptParameters,
 } from "./task-session.ts";
 
@@ -17,6 +22,37 @@ const selection = {
   },
   variant: "high",
 };
+
+const assistantResponse = (error?: AssistantMessage["error"]): AssistantMessage => ({
+  id: "message-1",
+  sessionID: "session-1",
+  role: "assistant",
+  time: { created: 1, completed: 2 },
+  ...(error === undefined ? {} : { error }),
+  parentID: "message-0",
+  modelID: "claude-sonnet",
+  providerID: "openrouter",
+  mode: "primary",
+  agent: "build",
+  path: { cwd: "/workspace/repository", root: "/workspace/repository" },
+  cost: 0,
+  tokens: {
+    input: 1,
+    output: 2,
+    reasoning: 0,
+    cache: { read: 0, write: 0 },
+  },
+});
+
+const responseParts: ReadonlyArray<Part> = [
+  {
+    id: "part-1",
+    sessionID: "session-1",
+    messageID: "message-1",
+    type: "text",
+    text: "Implemented the requested change.",
+  },
+];
 
 describe("OpenCode task sessions", () => {
   test("creates a fresh session in the checkout with agent and model", async () => {
@@ -135,5 +171,99 @@ describe("OpenCode task sessions", () => {
     );
 
     expect(session.sessionID).toBe("session-from-service");
+  });
+
+  test("runs a fresh text task and returns response metadata and parts", async () => {
+    let promptParameters: unknown;
+    const client = {
+      session: {
+        create: async () => ({ data: { id: "session-1" } }),
+        prompt: async (parameters: unknown) => {
+          promptParameters = parameters;
+          return {
+            data: {
+              info: assistantResponse(),
+              parts: responseParts,
+            },
+          };
+        },
+      },
+    } as unknown as OpencodeClient;
+
+    const result = await runOpenCodeTask(client, {
+      directory: "/workspace/repository",
+      title: "Implement issue #42",
+      prompt: "Implement the issue and explain the result.",
+      selection,
+    }).pipe(Effect.runPromise);
+
+    expect(result).toEqual({
+      session: {
+        sessionID: "session-1",
+        directory: "/workspace/repository",
+        selection,
+      },
+      response: assistantResponse(),
+      parts: responseParts,
+    });
+    expect(promptParameters).toEqual({
+      sessionID: "session-1",
+      directory: "/workspace/repository",
+      agent: "build",
+      model: {
+        providerID: "openrouter",
+        modelID: "anthropic/claude-sonnet",
+      },
+      variant: "high",
+      parts: [
+        { type: "text", text: "Implement the issue and explain the result." },
+      ],
+    });
+  });
+
+  test("fails when the task prompt transport fails", async () => {
+    const client = {
+      session: {
+        create: async () => ({ data: { id: "session-1" } }),
+        prompt: async () => {
+          throw new Error("connection reset");
+        },
+      },
+    } as unknown as OpencodeClient;
+
+    const exit = await runOpenCodeTask(client, {
+      directory: "/workspace/repository",
+      title: "Implement issue #42",
+      prompt: "Implement the issue.",
+      selection: { agent: "build" },
+    }).pipe(Effect.runPromiseExit);
+
+    expect(Exit.isFailure(exit)).toBe(true);
+  });
+
+  test("fails when the assistant returns an error", async () => {
+    const client = {
+      session: {
+        create: async () => ({ data: { id: "session-1" } }),
+        prompt: async () => ({
+          data: {
+            info: assistantResponse({
+              name: "MessageAbortedError",
+              data: { message: "The task was aborted." },
+            }),
+            parts: [],
+          },
+        }),
+      },
+    } as unknown as OpencodeClient;
+
+    const exit = await runOpenCodeTask(client, {
+      directory: "/workspace/repository",
+      title: "Implement issue #42",
+      prompt: "Implement the issue.",
+      selection: { agent: "build" },
+    }).pipe(Effect.runPromiseExit);
+
+    expect(Exit.isFailure(exit)).toBe(true);
   });
 });

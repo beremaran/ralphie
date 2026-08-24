@@ -32,7 +32,7 @@ enough to implement, review, and commit independently.
 
 - [x] Add a shared helper for creating a fresh OpenCode session in the repository
       directory with the selected agent, model, and variant.
-- [ ] Add a helper for non-structured agent tasks that returns session metadata
+- [x] Add a helper for non-structured agent tasks that returns session metadata
       and the final response.
 - [ ] Reuse `requestStructuredOutput` for every decision task.
 - [ ] Add typed handling for OpenCode assistant errors, aborts, output-length
