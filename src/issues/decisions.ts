@@ -1,11 +1,34 @@
 import { z } from "zod";
 
+export enum ComplexityLevel {
+  Level0 = 0,
+  Level1 = 1,
+  Level2 = 2,
+  Level3 = 3,
+  Level4 = 4,
+  Level5 = 5,
+}
+
+export enum ImplementationComplexityLevel {
+  Level0 = ComplexityLevel.Level0,
+  Level1 = ComplexityLevel.Level1,
+  Level2 = ComplexityLevel.Level2,
+  Level3 = ComplexityLevel.Level3,
+}
+
+export enum ReviewVerdict {
+  Approved = "approved",
+  ChangesRequested = "changes_requested",
+}
+
+export enum ReviewFindingSeverity {
+  Blocking = "blocking",
+  NonBlocking = "non_blocking",
+}
+
 export const complexityDecisionSchema = z.object({
   complexity: z
-    .number()
-    .int()
-    .min(0)
-    .max(5)
+    .enum(ComplexityLevel)
     .describe("Issue complexity from 0 (trivial) to 5 (very complex)."),
   rationale: z
     .string()
@@ -17,11 +40,11 @@ export type ComplexityDecision = z.infer<typeof complexityDecisionSchema>;
 
 export const reviewDecisionSchema = z
   .object({
-    verdict: z.enum(["approved", "changes_requested"]),
+    verdict: z.enum(ReviewVerdict),
     summary: z.string().min(1),
     findings: z.array(
       z.object({
-        severity: z.enum(["blocking", "non_blocking"]),
+        severity: z.enum(ReviewFindingSeverity),
         description: z.string().min(1),
         file: z.string().min(1).optional(),
         line: z.number().int().positive().optional(),
@@ -30,16 +53,19 @@ export const reviewDecisionSchema = z
   })
   .superRefine((decision, context) => {
     const hasBlockingFinding = decision.findings.some(
-      (finding) => finding.severity === "blocking",
+      (finding) => finding.severity === ReviewFindingSeverity.Blocking,
     );
-    if (decision.verdict === "approved" && hasBlockingFinding) {
+    if (decision.verdict === ReviewVerdict.Approved && hasBlockingFinding) {
       context.addIssue({
         code: "custom",
         message: "An approved review cannot contain blocking findings.",
         path: ["findings"],
       });
     }
-    if (decision.verdict === "changes_requested" && !hasBlockingFinding) {
+    if (
+      decision.verdict === ReviewVerdict.ChangesRequested &&
+      !hasBlockingFinding
+    ) {
       context.addIssue({
         code: "custom",
         message: "A changes-requested review needs a blocking finding.",
@@ -71,7 +97,7 @@ export const issueBreakdownDecisionSchema = z
             .describe("A stable identifier used by dependency references."),
           title: z.string().min(1),
           body: z.string().min(1),
-          estimatedComplexity: z.number().int().min(0).max(3),
+          estimatedComplexity: z.enum(ImplementationComplexityLevel),
           dependsOn: z.array(z.string().min(1)),
         }),
       )

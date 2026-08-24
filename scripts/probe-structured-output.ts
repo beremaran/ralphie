@@ -4,9 +4,14 @@ import { z } from "zod";
 
 import { requestStructuredOutput } from "../src/opencode/structured-output.ts";
 
+enum ProbeDecision {
+  Proceed = "proceed",
+  Stop = "stop",
+}
+
 const decisionSchema = z.object({
   decision: z
-    .enum(["proceed", "stop"])
+    .enum(ProbeDecision)
     .describe("Whether the stated condition is true."),
   confidence: z
     .number()

@@ -4,11 +4,16 @@ import type { Octokit } from "octokit";
 import { RalphieError } from "../shared/error.ts";
 import { parseRepositorySlug } from "./repository.ts";
 
-export const issueSortValues = ["created", "updated", "comments"] as const;
-export const issueOrderValues = ["asc", "desc"] as const;
+export enum IssueSort {
+  Created = "created",
+  Updated = "updated",
+  Comments = "comments",
+}
 
-export type IssueSort = (typeof issueSortValues)[number];
-export type IssueOrder = (typeof issueOrderValues)[number];
+export enum IssueOrder {
+  Ascending = "asc",
+  Descending = "desc",
+}
 
 export type IssueFilters = {
   readonly labels: ReadonlyArray<string>;

@@ -1,26 +1,42 @@
-export type StructuredOutputName =
-  | "complexity-decision"
-  | "review-decision"
-  | "commit-message-decision"
-  | "issue-breakdown-decision";
+import { IssueStageKind } from "../issues/stage.ts";
+
+export enum StructuredOutputName {
+  ComplexityDecision = "complexity-decision",
+  ReviewDecision = "review-decision",
+  CommitMessageDecision = "commit-message-decision",
+  IssueBreakdownDecision = "issue-breakdown-decision",
+}
+
+export enum OpenCodeSessionPurpose {
+  Implement = "implement",
+  AddressReview = "address-review",
+  AssessComplexity = "assess-complexity",
+  ReviewDiff = "review-diff",
+  GenerateCommitMessage = "generate-commit-message",
+  DecomposeIssue = "decompose-issue",
+}
+
+export enum OpenCodeSessionContext {
+  Fresh = "fresh",
+}
 
 export type OpenCodeSessionStage =
   | {
-      readonly kind: "opencode-session";
-      readonly purpose: "implement";
+      readonly kind: IssueStageKind.OpenCodeSession;
+      readonly purpose: OpenCodeSessionPurpose.Implement;
     }
   | {
-      readonly kind: "opencode-session";
-      readonly purpose: "address-review";
-      readonly context: "fresh";
-      readonly input: "review-decision";
+      readonly kind: IssueStageKind.OpenCodeSession;
+      readonly purpose: OpenCodeSessionPurpose.AddressReview;
+      readonly context: OpenCodeSessionContext.Fresh;
+      readonly input: StructuredOutputName.ReviewDecision;
     }
   | {
-      readonly kind: "opencode-session";
+      readonly kind: IssueStageKind.OpenCodeSession;
       readonly purpose:
-        | "assess-complexity"
-        | "review-diff"
-        | "generate-commit-message"
-        | "decompose-issue";
+        | OpenCodeSessionPurpose.AssessComplexity
+        | OpenCodeSessionPurpose.ReviewDiff
+        | OpenCodeSessionPurpose.GenerateCommitMessage
+        | OpenCodeSessionPurpose.DecomposeIssue;
       readonly output: StructuredOutputName;
     };

@@ -1,17 +1,30 @@
+import { IssueStageKind } from "../issues/stage.ts";
+import { StructuredOutputName } from "../opencode/session.ts";
+
+export enum GitHubIssueAction {
+  CreateBreakdownIssues = "create-breakdown-issues",
+  RewriteOriginalAsDuplicate = "rewrite-original-as-duplicate",
+  CloseOriginalAsDuplicate = "close-original-as-duplicate",
+}
+
+export enum IssueLinkStrategy {
+  OriginalAndSiblings = "original-and-siblings",
+}
+
 export type GitHubIssueStage =
   | {
-      readonly kind: "github-task";
-      readonly action: "create-breakdown-issues";
-      readonly input: "issue-breakdown-decision";
-      readonly links: "original-and-siblings";
+      readonly kind: IssueStageKind.GitHubTask;
+      readonly action: GitHubIssueAction.CreateBreakdownIssues;
+      readonly input: StructuredOutputName.IssueBreakdownDecision;
+      readonly links: IssueLinkStrategy.OriginalAndSiblings;
       readonly includeDependencies: true;
     }
   | {
-      readonly kind: "github-task";
-      readonly action: "rewrite-original-as-duplicate";
-      readonly input: "issue-breakdown-decision";
+      readonly kind: IssueStageKind.GitHubTask;
+      readonly action: GitHubIssueAction.RewriteOriginalAsDuplicate;
+      readonly input: StructuredOutputName.IssueBreakdownDecision;
     }
   | {
-      readonly kind: "github-task";
-      readonly action: "close-original-as-duplicate";
+      readonly kind: IssueStageKind.GitHubTask;
+      readonly action: GitHubIssueAction.CloseOriginalAsDuplicate;
     };

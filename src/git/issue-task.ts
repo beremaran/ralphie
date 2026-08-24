@@ -1,7 +1,14 @@
-export type GitIssueAction = "stage-all" | "commit" | "push";
+import { IssueStageKind } from "../issues/stage.ts";
+import { StructuredOutputName } from "../opencode/session.ts";
+
+export enum GitIssueAction {
+  StageAll = "stage-all",
+  Commit = "commit",
+  Push = "push",
+}
 
 export type GitIssueStage = {
-  readonly kind: "git-task";
+  readonly kind: IssueStageKind.GitTask;
   readonly action: GitIssueAction;
-  readonly messageFrom?: "commit-message-decision";
+  readonly messageFrom?: StructuredOutputName.CommitMessageDecision;
 };

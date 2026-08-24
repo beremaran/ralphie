@@ -2,7 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { Effect, Exit } from "effect";
 import type { Octokit } from "octokit";
 
-import { GitHubIssues, GitHubIssuesLive } from "./issues.ts";
+import {
+  GitHubIssues,
+  GitHubIssuesLive,
+  IssueOrder,
+  IssueSort,
+} from "./issues.ts";
 
 const listOpen = (
   client: Octokit,
@@ -12,8 +17,8 @@ const listOpen = (
     const issues = yield* GitHubIssues;
     return yield* issues.listOpen(client, "owner/repository", {
       labels,
-      sort: "created",
-      order: "asc",
+      sort: IssueSort.Created,
+      order: IssueOrder.Ascending,
     });
   }).pipe(Effect.provide(GitHubIssuesLive));
 
@@ -50,8 +55,8 @@ describe("GitHub issues", () => {
       owner: "owner",
       repo: "repository",
       state: "open",
-      sort: "created",
-      direction: "asc",
+      sort: IssueSort.Created,
+      direction: IssueOrder.Ascending,
       per_page: 100,
       labels: "bug,priority",
     });

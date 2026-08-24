@@ -1,9 +1,24 @@
 import { Context, Effect, Layer } from "effect";
 
-import type { GitIssueStage } from "../git/issue-task.ts";
+import { GitIssueAction, type GitIssueStage } from "../git/issue-task.ts";
 import type { GitHubIssue } from "../github/issues.ts";
-import type { GitHubIssueStage } from "../github/issue-task.ts";
-import type { OpenCodeSessionStage } from "../opencode/session.ts";
+import {
+  GitHubIssueAction,
+  type GitHubIssueStage,
+  IssueLinkStrategy,
+} from "../github/issue-task.ts";
+import {
+  OpenCodeSessionContext,
+  OpenCodeSessionPurpose,
+  type OpenCodeSessionStage,
+  StructuredOutputName,
+} from "../opencode/session.ts";
+import { ComplexityLevel, ReviewVerdict } from "./decisions.ts";
+import {
+  IssueStageKind,
+  IssueWorkflowKind,
+  ReviewLoopExhaustion,
+} from "./stage.ts";
 
 export type IssueAtomicStage =
   | GitIssueStage
@@ -11,12 +26,12 @@ export type IssueAtomicStage =
   | OpenCodeSessionStage;
 
 export type ReviewLoopStage = {
-  readonly kind: "review-loop";
+  readonly kind: IssueStageKind.ReviewLoop;
   readonly maxIterations: 5;
-  readonly onExhausted: "fail";
+  readonly onExhausted: ReviewLoopExhaustion.Fail;
   readonly convergeWhen: {
-    readonly output: "review-decision";
-    readonly verdict: "approved";
+    readonly output: StructuredOutputName.ReviewDecision;
+    readonly verdict: ReviewVerdict.Approved;
   };
   readonly stageChanges: GitIssueStage;
   readonly review: OpenCodeSessionStage;
@@ -26,10 +41,10 @@ export type ReviewLoopStage = {
 export type IssueStage = IssueAtomicStage | ReviewLoopStage;
 
 export type IssueWorkflow = {
-  readonly kind: "implementation" | "decomposition";
+  readonly kind: IssueWorkflowKind;
   readonly complexity: {
-    readonly min: number;
-    readonly max: number;
+    readonly min: ComplexityLevel;
+    readonly max: ComplexityLevel;
   };
   readonly stages: ReadonlyArray<IssueStage>;
 };
@@ -54,73 +69,82 @@ export const IssuePipeline =
   Context.GenericTag<IssuePipelineService>("ralphie/IssuePipeline");
 
 const assessment: OpenCodeSessionStage = {
-  kind: "opencode-session",
-  purpose: "assess-complexity",
-  output: "complexity-decision",
+  kind: IssueStageKind.OpenCodeSession,
+  purpose: OpenCodeSessionPurpose.AssessComplexity,
+  output: StructuredOutputName.ComplexityDecision,
 };
 
 const implementationWorkflow: IssueWorkflow = {
-  kind: "implementation",
-  complexity: { min: 0, max: 3 },
+  kind: IssueWorkflowKind.Implementation,
+  complexity: { min: ComplexityLevel.Level0, max: ComplexityLevel.Level3 },
   stages: [
-    { kind: "opencode-session", purpose: "implement" },
     {
-      kind: "review-loop",
+      kind: IssueStageKind.OpenCodeSession,
+      purpose: OpenCodeSessionPurpose.Implement,
+    },
+    {
+      kind: IssueStageKind.ReviewLoop,
       maxIterations: 5,
-      onExhausted: "fail",
+      onExhausted: ReviewLoopExhaustion.Fail,
       convergeWhen: {
-        output: "review-decision",
-        verdict: "approved",
+        output: StructuredOutputName.ReviewDecision,
+        verdict: ReviewVerdict.Approved,
       },
-      stageChanges: { kind: "git-task", action: "stage-all" },
+      stageChanges: {
+        kind: IssueStageKind.GitTask,
+        action: GitIssueAction.StageAll,
+      },
       review: {
-        kind: "opencode-session",
-        purpose: "review-diff",
-        output: "review-decision",
+        kind: IssueStageKind.OpenCodeSession,
+        purpose: OpenCodeSessionPurpose.ReviewDiff,
+        output: StructuredOutputName.ReviewDecision,
       },
       onChangesRequested: {
-        kind: "opencode-session",
-        purpose: "address-review",
-        context: "fresh",
-        input: "review-decision",
+        kind: IssueStageKind.OpenCodeSession,
+        purpose: OpenCodeSessionPurpose.AddressReview,
+        context: OpenCodeSessionContext.Fresh,
+        input: StructuredOutputName.ReviewDecision,
       },
     },
     {
-      kind: "opencode-session",
-      purpose: "generate-commit-message",
-      output: "commit-message-decision",
+      kind: IssueStageKind.OpenCodeSession,
+      purpose: OpenCodeSessionPurpose.GenerateCommitMessage,
+      output: StructuredOutputName.CommitMessageDecision,
     },
     {
-      kind: "git-task",
-      action: "commit",
-      messageFrom: "commit-message-decision",
+      kind: IssueStageKind.GitTask,
+      action: GitIssueAction.Commit,
+      messageFrom: StructuredOutputName.CommitMessageDecision,
     },
-    { kind: "git-task", action: "push" },
+    { kind: IssueStageKind.GitTask, action: GitIssueAction.Push },
   ],
 };
 
 const decompositionWorkflow: IssueWorkflow = {
-  kind: "decomposition",
-  complexity: { min: 4, max: 5 },
+  kind: IssueWorkflowKind.Decomposition,
+  complexity: { min: ComplexityLevel.Level4, max: ComplexityLevel.Level5 },
   stages: [
     {
-      kind: "opencode-session",
-      purpose: "decompose-issue",
-      output: "issue-breakdown-decision",
+      kind: IssueStageKind.OpenCodeSession,
+      purpose: OpenCodeSessionPurpose.DecomposeIssue,
+      output: StructuredOutputName.IssueBreakdownDecision,
     },
     {
-      kind: "github-task",
-      action: "create-breakdown-issues",
-      input: "issue-breakdown-decision",
-      links: "original-and-siblings",
+      kind: IssueStageKind.GitHubTask,
+      action: GitHubIssueAction.CreateBreakdownIssues,
+      input: StructuredOutputName.IssueBreakdownDecision,
+      links: IssueLinkStrategy.OriginalAndSiblings,
       includeDependencies: true,
     },
     {
-      kind: "github-task",
-      action: "rewrite-original-as-duplicate",
-      input: "issue-breakdown-decision",
+      kind: IssueStageKind.GitHubTask,
+      action: GitHubIssueAction.RewriteOriginalAsDuplicate,
+      input: StructuredOutputName.IssueBreakdownDecision,
     },
-    { kind: "github-task", action: "close-original-as-duplicate" },
+    {
+      kind: IssueStageKind.GitHubTask,
+      action: GitHubIssueAction.CloseOriginalAsDuplicate,
+    },
   ],
 };
 

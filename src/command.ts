@@ -2,7 +2,7 @@ import { defineCommand, option } from "@bunli/core";
 import { Effect } from "effect";
 import { z } from "zod";
 
-import { issueOrderValues, issueSortValues } from "./github/issues.ts";
+import { IssueOrder, IssueSort } from "./github/issues.ts";
 import { LiveRuntime } from "./runtime.ts";
 import { workflow } from "./workflow.ts";
 
@@ -21,10 +21,10 @@ export const runCommand = defineCommand({
       description: "Only include issues with this label (repeatable)",
       repeatable: true,
     }),
-    "issue-sort": option(z.enum(issueSortValues).default("created"), {
+    "issue-sort": option(z.enum(IssueSort).default(IssueSort.Created), {
       description: "Sort issues by created, updated, or comments",
     }),
-    "issue-order": option(z.enum(issueOrderValues).default("asc"), {
+    "issue-order": option(z.enum(IssueOrder).default(IssueOrder.Ascending), {
       description: "Sort issues in ascending or descending order",
     }),
     workspace: option(z.string().trim().min(1).default("~/.ralphie"), {

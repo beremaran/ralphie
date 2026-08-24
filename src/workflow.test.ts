@@ -5,9 +5,15 @@ import type { Octokit } from "octokit";
 
 import { GitRepository } from "./git/repository.ts";
 import { GitHubClient } from "./github/client.ts";
-import { GitHubIssues } from "./github/issues.ts";
+import { GitHubIssues, IssueOrder, IssueSort } from "./github/issues.ts";
+import { ComplexityLevel } from "./issues/decisions.ts";
 import { IssuePipeline } from "./issues/pipeline.ts";
+import { IssueStageKind, IssueWorkflowKind } from "./issues/stage.ts";
 import { OpenCode } from "./opencode/server.ts";
+import {
+  OpenCodeSessionPurpose,
+  StructuredOutputName,
+} from "./opencode/session.ts";
 import { RalphieError } from "./shared/error.ts";
 import { Workspace } from "./workspace/workspace.ts";
 import { workflow } from "./workflow.ts";
@@ -77,13 +83,27 @@ function testRuntime(calls: string[], options: TestRuntimeOptions = {}) {
           repositoryPath,
           targetBranch,
           assessment: {
-            kind: "opencode-session",
-            purpose: "assess-complexity",
-            output: "complexity-decision",
+            kind: IssueStageKind.OpenCodeSession,
+            purpose: OpenCodeSessionPurpose.AssessComplexity,
+            output: StructuredOutputName.ComplexityDecision,
           },
           workflows: [
-            { kind: "implementation", complexity: { min: 0, max: 3 }, stages: [] },
-            { kind: "decomposition", complexity: { min: 4, max: 5 }, stages: [] },
+            {
+              kind: IssueWorkflowKind.Implementation,
+              complexity: {
+                min: ComplexityLevel.Level0,
+                max: ComplexityLevel.Level3,
+              },
+              stages: [],
+            },
+            {
+              kind: IssueWorkflowKind.Decomposition,
+              complexity: {
+                min: ComplexityLevel.Level4,
+                max: ComplexityLevel.Level5,
+              },
+              stages: [],
+            },
           ],
         });
       },
@@ -119,7 +139,11 @@ describe("workflow", () => {
       repo: "owner/repo",
       branch: "develop",
       maxIssues: 1,
-      issueFilters: { labels: ["bug"], sort: "created", order: "asc" },
+      issueFilters: {
+        labels: ["bug"],
+        sort: IssueSort.Created,
+        order: IssueOrder.Ascending,
+      },
       workspace: "/tmp/ralphie",
       cleanup: true,
       startClean: true,
@@ -147,7 +171,11 @@ describe("workflow", () => {
       repo: "owner/repo",
       branch: "main",
       workspace: "~/.ralphie",
-      issueFilters: { labels: [], sort: "created", order: "asc" },
+      issueFilters: {
+        labels: [],
+        sort: IssueSort.Created,
+        order: IssueOrder.Ascending,
+      },
       cleanup: true,
       startClean: false,
     }).pipe(
@@ -169,7 +197,11 @@ describe("workflow", () => {
       repo: "owner/repo",
       branch: "main",
       workspace: "~/.ralphie",
-      issueFilters: { labels: [], sort: "created", order: "asc" },
+      issueFilters: {
+        labels: [],
+        sort: IssueSort.Created,
+        order: IssueOrder.Ascending,
+      },
       cleanup: false,
       startClean: false,
     }).pipe(
@@ -194,7 +226,11 @@ describe("workflow", () => {
       repo: "owner/repo",
       branch: "main",
       workspace: "/tmp/ralphie",
-      issueFilters: { labels: [], sort: "created", order: "asc" },
+      issueFilters: {
+        labels: [],
+        sort: IssueSort.Created,
+        order: IssueOrder.Ascending,
+      },
       cleanup: false,
       startClean: true,
     }).pipe(

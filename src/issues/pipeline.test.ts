@@ -1,13 +1,29 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 
+import { GitIssueAction } from "../git/issue-task.ts";
 import type { GitHubIssue } from "../github/issues.ts";
+import {
+  GitHubIssueAction,
+  IssueLinkStrategy,
+} from "../github/issue-task.ts";
+import {
+  OpenCodeSessionContext,
+  OpenCodeSessionPurpose,
+  StructuredOutputName,
+} from "../opencode/session.ts";
+import { ComplexityLevel, ReviewVerdict } from "./decisions.ts";
 import {
   IssuePipeline,
   IssuePipelineLive,
   selectIssues,
   selectWorkflow,
 } from "./pipeline.ts";
+import {
+  IssueStageKind,
+  IssueWorkflowKind,
+  ReviewLoopExhaustion,
+} from "./stage.ts";
 
 const issues: GitHubIssue[] = [
   { number: 1, title: "One", url: "issue/1", body: null, labels: [] },
@@ -32,9 +48,9 @@ describe("issue pipeline", () => {
     expect(plan.targetBranch).toBe("main");
     expect(plan).not.toHaveProperty("issueBranch");
     expect(plan.assessment).toEqual({
-      kind: "opencode-session",
-      purpose: "assess-complexity",
-      output: "complexity-decision",
+      kind: IssueStageKind.OpenCodeSession,
+      purpose: OpenCodeSessionPurpose.AssessComplexity,
+      output: StructuredOutputName.ComplexityDecision,
     });
   });
 
@@ -42,43 +58,51 @@ describe("issue pipeline", () => {
     const plan = await makePlan();
 
     for (const complexity of [0, 1, 2, 3]) {
-      expect(selectWorkflow(plan, complexity)?.kind).toBe("implementation");
+      expect(selectWorkflow(plan, complexity)?.kind).toBe(
+        IssueWorkflowKind.Implementation,
+      );
     }
 
     expect(selectWorkflow(plan, 3)?.stages).toEqual([
-      { kind: "opencode-session", purpose: "implement" },
       {
-        kind: "review-loop",
+        kind: IssueStageKind.OpenCodeSession,
+        purpose: OpenCodeSessionPurpose.Implement,
+      },
+      {
+        kind: IssueStageKind.ReviewLoop,
         maxIterations: 5,
-        onExhausted: "fail",
+        onExhausted: ReviewLoopExhaustion.Fail,
         convergeWhen: {
-          output: "review-decision",
-          verdict: "approved",
+          output: StructuredOutputName.ReviewDecision,
+          verdict: ReviewVerdict.Approved,
         },
-        stageChanges: { kind: "git-task", action: "stage-all" },
+        stageChanges: {
+          kind: IssueStageKind.GitTask,
+          action: GitIssueAction.StageAll,
+        },
         review: {
-          kind: "opencode-session",
-          purpose: "review-diff",
-          output: "review-decision",
+          kind: IssueStageKind.OpenCodeSession,
+          purpose: OpenCodeSessionPurpose.ReviewDiff,
+          output: StructuredOutputName.ReviewDecision,
         },
         onChangesRequested: {
-          kind: "opencode-session",
-          purpose: "address-review",
-          context: "fresh",
-          input: "review-decision",
+          kind: IssueStageKind.OpenCodeSession,
+          purpose: OpenCodeSessionPurpose.AddressReview,
+          context: OpenCodeSessionContext.Fresh,
+          input: StructuredOutputName.ReviewDecision,
         },
       },
       {
-        kind: "opencode-session",
-        purpose: "generate-commit-message",
-        output: "commit-message-decision",
+        kind: IssueStageKind.OpenCodeSession,
+        purpose: OpenCodeSessionPurpose.GenerateCommitMessage,
+        output: StructuredOutputName.CommitMessageDecision,
       },
       {
-        kind: "git-task",
-        action: "commit",
-        messageFrom: "commit-message-decision",
+        kind: IssueStageKind.GitTask,
+        action: GitIssueAction.Commit,
+        messageFrom: StructuredOutputName.CommitMessageDecision,
       },
-      { kind: "git-task", action: "push" },
+      { kind: IssueStageKind.GitTask, action: GitIssueAction.Push },
     ]);
   });
 
@@ -86,27 +110,32 @@ describe("issue pipeline", () => {
     const plan = await makePlan();
 
     for (const complexity of [4, 5]) {
-      expect(selectWorkflow(plan, complexity)?.kind).toBe("decomposition");
+      expect(selectWorkflow(plan, complexity)?.kind).toBe(
+        IssueWorkflowKind.Decomposition,
+      );
     }
     expect(selectWorkflow(plan, 4)?.stages).toEqual([
       {
-        kind: "opencode-session",
-        purpose: "decompose-issue",
-        output: "issue-breakdown-decision",
+        kind: IssueStageKind.OpenCodeSession,
+        purpose: OpenCodeSessionPurpose.DecomposeIssue,
+        output: StructuredOutputName.IssueBreakdownDecision,
       },
       {
-        kind: "github-task",
-        action: "create-breakdown-issues",
-        input: "issue-breakdown-decision",
-        links: "original-and-siblings",
+        kind: IssueStageKind.GitHubTask,
+        action: GitHubIssueAction.CreateBreakdownIssues,
+        input: StructuredOutputName.IssueBreakdownDecision,
+        links: IssueLinkStrategy.OriginalAndSiblings,
         includeDependencies: true,
       },
       {
-        kind: "github-task",
-        action: "rewrite-original-as-duplicate",
-        input: "issue-breakdown-decision",
+        kind: IssueStageKind.GitHubTask,
+        action: GitHubIssueAction.RewriteOriginalAsDuplicate,
+        input: StructuredOutputName.IssueBreakdownDecision,
       },
-      { kind: "github-task", action: "close-original-as-duplicate" },
+      {
+        kind: IssueStageKind.GitHubTask,
+        action: GitHubIssueAction.CloseOriginalAsDuplicate,
+      },
     ]);
   });
 

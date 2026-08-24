@@ -5,8 +5,13 @@ import { z } from "zod";
 
 import { requestStructuredOutput } from "./structured-output.ts";
 
+enum ProbeDecision {
+  Proceed = "proceed",
+  Stop = "stop",
+}
+
 const decisionSchema = z.object({
-  decision: z.enum(["proceed", "stop"]),
+  decision: z.enum(ProbeDecision),
   confidence: z.number().min(0).max(1),
   reason: z.string().min(1),
 });
@@ -43,7 +48,7 @@ describe("OpenCode structured output", () => {
           return {
             data: {
               info: assistantInfo({
-                decision: "proceed",
+                decision: ProbeDecision.Proceed,
                 confidence: 1,
                 reason: "The condition is true.",
               }),
@@ -64,7 +69,7 @@ describe("OpenCode structured output", () => {
     expect(result).toEqual({
       sessionID: "session-1",
       output: {
-        decision: "proceed",
+        decision: ProbeDecision.Proceed,
         confidence: 1,
         reason: "The condition is true.",
       },

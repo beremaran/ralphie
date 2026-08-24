@@ -1,16 +1,22 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  ComplexityLevel,
   complexityDecisionSchema,
+  ImplementationComplexityLevel,
   issueBreakdownDecisionSchema,
+  ReviewFindingSeverity,
   reviewDecisionSchema,
+  ReviewVerdict,
 } from "./decisions.ts";
 
 describe("issue pipeline decisions", () => {
   test("only accepts complexity levels from 0 through 5", () => {
     expect(
-      complexityDecisionSchema.safeParse({ complexity: 3, rationale: "Small" })
-        .success,
+      complexityDecisionSchema.safeParse({
+        complexity: ComplexityLevel.Level3,
+        rationale: "Small",
+      }).success,
     ).toBe(true);
     expect(
       complexityDecisionSchema.safeParse({ complexity: 3.5, rationale: "No" })
@@ -25,16 +31,21 @@ describe("issue pipeline decisions", () => {
   test("keeps review verdicts consistent with blocking findings", () => {
     expect(
       reviewDecisionSchema.safeParse({
-        verdict: "approved",
+        verdict: ReviewVerdict.Approved,
         summary: "Ready",
         findings: [],
       }).success,
     ).toBe(true);
     expect(
       reviewDecisionSchema.safeParse({
-        verdict: "approved",
+        verdict: ReviewVerdict.Approved,
         summary: "Contradictory",
-        findings: [{ severity: "blocking", description: "Broken" }],
+        findings: [
+          {
+            severity: ReviewFindingSeverity.Blocking,
+            description: "Broken",
+          },
+        ],
       }).success,
     ).toBe(false);
   });
@@ -47,14 +58,14 @@ describe("issue pipeline decisions", () => {
           key: "foundation",
           title: "Build foundation",
           body: "Implement the foundation.",
-          estimatedComplexity: 2,
+          estimatedComplexity: ImplementationComplexityLevel.Level2,
           dependsOn: [],
         },
         {
           key: "integration",
           title: "Integrate foundation",
           body: "Connect the foundation.",
-          estimatedComplexity: 3,
+          estimatedComplexity: ImplementationComplexityLevel.Level3,
           dependsOn: ["foundation"],
         },
       ],
