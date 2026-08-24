@@ -14,11 +14,15 @@ All notable changes to Ralphie are documented here. The project follows
 - Typed progress events, JSON Lines output, diagnostics, and credential
   redaction.
 
+### Changed
+
+- Rely on the authoritative non-force Git push for GitHub branch policy and
+  permission enforcement while retaining destination, commit, and divergence
+  safety checks.
+
 ### Fixed
 
 - Prevent final progress events from recreating a workspace removed by
   `--cleanup`.
-- Treat GitHub's explicit rulesets-unavailable response for private repositories
-  as zero active rules while continuing to fail closed for other API errors.
 
 [Unreleased]: https://github.com/beremaran/ralphie/commits/main

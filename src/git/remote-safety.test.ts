@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Exit, Layer } from "effect";
-import type { Octokit } from "octokit";
 
 import { CommandRunner, type CommandResult } from "../process/command-runner.ts";
 import {
@@ -10,36 +9,6 @@ import {
   GitRemoteSafetyFailureKind,
   GitRemoteSafetyLive,
 } from "./remote-safety.ts";
-
-const repositoryResponse = (push: boolean) => ({ data: { permissions: { push } } });
-const branchResponse = (protectedBranch: boolean) => ({
-  data: { protected: protectedBranch },
-});
-const rulesResponse = (rules: ReadonlyArray<unknown>) => ({ data: rules });
-
-const client = ({
-  push = true,
-  protectedBranch = false,
-  rules = [],
-  rulesError,
-}: {
-  readonly push?: boolean;
-  readonly protectedBranch?: boolean;
-  readonly rules?: ReadonlyArray<unknown>;
-  readonly rulesError?: unknown;
-} = {}) =>
-  ({
-    rest: {
-      repos: {
-        get: async () => repositoryResponse(push),
-        getBranch: async () => branchResponse(protectedBranch),
-        getBranchRules: async () => {
-          if (rulesError !== undefined) throw rulesError;
-          return rulesResponse(rules);
-        },
-      },
-    },
-  }) as unknown as Octokit;
 
 const runner = (
   counts = "0 0",
@@ -62,14 +31,9 @@ const runner = (
 
 const verify = (
   input: {
-    readonly client?: Octokit;
     readonly counts?: string;
     readonly origin?: string;
     readonly remoteSha?: string;
-    readonly push?: boolean;
-    readonly protectedBranch?: boolean;
-    readonly rules?: ReadonlyArray<unknown>;
-    readonly rulesError?: unknown;
     readonly expectedCommitSha?: string;
     readonly pushMode?: GitPushMode;
   } = {},
@@ -78,14 +42,6 @@ const verify = (
   return Effect.gen(function* () {
     const safety = yield* GitRemoteSafety;
     return yield* safety.verifyDirectPush({
-      client:
-        input.client ??
-        client({
-          push: input.push,
-          protectedBranch: input.protectedBranch,
-          rules: input.rules,
-          rulesError: input.rulesError,
-        }),
       repository: "owner/repository",
       repositoryPath: "/workspace/repository",
       branch: "main",
@@ -100,70 +56,18 @@ const verify = (
 };
 
 describe("Git remote safety", () => {
-  test("accepts an owned, non-protected, non-diverged direct push", async () => {
+  test("accepts a matching, non-diverged direct push", async () => {
     const report = await Effect.runPromise(verify());
     expect(report).toMatchObject({
       repository: "owner/repository",
       branch: "main",
-      protected: false,
-      activeBranchRules: 0,
-      hasPushPermission: true,
       commitsBehindBase: 0,
       commitsAheadBase: 0,
       pushMode: GitPushMode.NonForce,
     });
   });
 
-  test("accepts a private repository when GitHub says rulesets are unavailable", async () => {
-    const report = await Effect.runPromise(
-      verify({
-        rulesError: {
-          status: 403,
-          response: {
-            status: 403,
-            data: {
-              message:
-                "Upgrade to GitHub Pro or make this repository public to enable this feature.",
-            },
-          },
-        },
-      }),
-    );
-
-    expect(report.activeBranchRules).toBe(0);
-  });
-
-  test("fails closed for other branch-rules errors and exposes GitHub's reason", async () => {
-    const error = await verify({
-      rulesError: {
-        status: 403,
-        response: {
-          status: 403,
-          data: { message: "Resource not accessible by personal access token" },
-        },
-      },
-    }).pipe(Effect.flip, Effect.runPromise);
-
-    expect(error.message).toContain("Failed to inspect GitHub branch rules for main.");
-    expect(error.message).toContain("Resource not accessible by personal access token");
-  });
-
   test.each([
-    [
-      "protected branch",
-      { protectedBranch: true },
-      GitRemoteSafetyFailureKind.ProtectedBranch,
-    ],
-    [
-      "active branch rules",
-      { rules: [{ type: "required_status_checks" }] },
-      GitRemoteSafetyFailureKind.BranchRules,
-    ],
-    [
-      "missing push permission",
-      { push: false },
-      GitRemoteSafetyFailureKind.PushPermission,
-    ],
     ["diverged base", { counts: "1 2" }, GitRemoteSafetyFailureKind.DivergedBase],
     ["moved remote", { remoteSha: "newbase" }, GitRemoteSafetyFailureKind.DivergedBase],
   ])("refuses %s", async (_name, options, kind) => {
@@ -196,7 +100,6 @@ describe("Git remote safety", () => {
     const effect = Effect.gen(function* () {
       const safety = yield* GitRemoteSafety;
       return yield* safety.verifyDirectPush({
-        client: client(),
         repository: "owner/repository",
         repositoryPath: "/workspace/repository",
         branch: "main",

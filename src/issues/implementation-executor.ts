@@ -153,7 +153,6 @@ export const ImplementationExecutorLive = Layer.effect(
             if (actual.head.toLowerCase() === createdCommit.sha.toLowerCase()) {
               yield* remoteSafety
                 .verifyDirectPush({
-                  client: context.octokit,
                   repository: context.repository,
                   repositoryPath: context.repositoryPath,
                   branch: context.targetBranch,
@@ -207,7 +206,6 @@ export const ImplementationExecutorLive = Layer.effect(
             "Verifying direct-push safety...",
             remoteSafety
               .verifyDirectPush({
-                client: context.octokit,
                 repository: context.repository,
                 repositoryPath: context.repositoryPath,
                 branch: context.targetBranch,
@@ -375,7 +373,6 @@ export const ImplementationExecutorLive = Layer.effect(
                 `Pushing ${context.targetBranch}...`,
                 remoteSafety
                   .verifyDirectPush({
-                    client: context.octokit,
                     repository: context.repository,
                     repositoryPath: context.repositoryPath,
                     branch: context.targetBranch,

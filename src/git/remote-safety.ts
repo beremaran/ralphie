@@ -1,23 +1,16 @@
 import { Context, Data, Effect, Layer } from "effect";
-import type { Octokit } from "octokit";
 
 import { CommandRunner, type CommandRunnerService } from "../process/command-runner.ts";
 import { RalphieError } from "../shared/error.ts";
 import { parseRepositorySlug } from "../github/repository.ts";
 
 export enum GitRemoteSafetyFailureKind {
-  ProtectedBranch = "protected-branch",
-  BranchRules = "branch-rules",
-  PushPermission = "push-permission",
   OriginMismatch = "origin-mismatch",
   DivergedBase = "diverged-base",
   InvalidPushMode = "invalid-push-mode",
 }
 
 export enum GitDirectPushPolicy {
-  RefuseProtectedBranches = "refuse-protected-branches",
-  RefuseActiveBranchRules = "refuse-active-branch-rules",
-  RequirePushPermission = "require-push-permission",
   RequireOwnedOrigin = "require-owned-origin",
   RequireExpectedBase = "require-expected-base",
   NonForceOnly = "non-force-only",
@@ -36,7 +29,6 @@ export class GitRemoteSafetyError extends Data.TaggedError("GitRemoteSafetyError
 }> {}
 
 export type GitRemoteSafetyInput = {
-  readonly client: Octokit;
   readonly repository: string;
   readonly repositoryPath: string;
   readonly branch: string;
@@ -51,9 +43,6 @@ export type GitRemoteSafetyReport = {
   readonly repository: string;
   readonly branch: string;
   readonly origin: string;
-  readonly protected: boolean;
-  readonly activeBranchRules: number;
-  readonly hasPushPermission: true;
   readonly commitsBehindBase: number;
   readonly commitsAheadBase: number;
   readonly pushMode: GitPushMode.NonForce;
@@ -105,69 +94,8 @@ const parseCounts = (output: string): readonly [number, number] | undefined => {
   return [values[0]!, values[1]!];
 };
 
-const repositoryParameters = (repository: string) => {
-  const { slug } = parseRepositorySlug(repository);
-  const [owner, repo] = slug.split("/") as [string, string];
-  return { owner, repo, slug };
-};
-
-function githubRequest<Output>(
-  request: () => Promise<Output>,
-  message: string,
-): Effect.Effect<Output, RalphieError> {
-  return Effect.tryPromise({
-    try: request,
-    catch: (cause) =>
-      new RalphieError({ message: githubFailureMessage(message, cause), cause }),
-  });
-}
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null;
-
-const githubFailureDetails = (cause: unknown): string | undefined => {
-  if (isRecord(cause)) {
-    const response = cause.response;
-    if (isRecord(response) && isRecord(response.data)) {
-      const apiMessage = response.data.message;
-      if (typeof apiMessage === "string" && apiMessage.trim().length > 0) {
-        return apiMessage.trim();
-      }
-    }
-  }
-  return cause instanceof Error && cause.message.trim().length > 0
-    ? cause.message.trim()
-    : undefined;
-};
-
-const githubFailureStatus = (cause: unknown): number | undefined => {
-  if (!isRecord(cause)) return undefined;
-  if (typeof cause.status === "number") return cause.status;
-  return isRecord(cause.response) && typeof cause.response.status === "number"
-    ? cause.response.status
-    : undefined;
-};
-
-const githubFailureMessage = (message: string, cause: unknown): string => {
-  const details = githubFailureDetails(cause);
-  return details === undefined ? message : `${message} GitHub responded: ${details}`;
-};
-
-/**
- * GitHub returns this explicit 403 when repository rulesets cannot exist for a
- * private repository on the current plan. Classic branch protection remains a
- * separate check, so treating only this capability response as no rulesets does
- * not weaken protection or permission failures.
- */
-const isBranchRulesFeatureUnavailable = (cause: unknown): boolean => {
-  if (githubFailureStatus(cause) !== 403) return false;
-  const details = githubFailureDetails(cause)?.toLowerCase() ?? "";
-  return (
-    details.includes("upgrade to github pro") &&
-    details.includes("make this repository public") &&
-    details.includes("enable this feature")
-  );
-};
+const repositorySlug = (repository: string): string =>
+  parseRepositorySlug(repository).slug;
 
 export const GitRemoteSafetyLive = Layer.effect(
   GitRemoteSafety,
@@ -186,8 +114,8 @@ export const GitRemoteSafetyLive = Layer.effect(
             );
           }
 
-          const { owner, repo, slug } = yield* Effect.try({
-            try: () => repositoryParameters(input.repository),
+          const slug = yield* Effect.try({
+            try: () => repositorySlug(input.repository),
             catch: (cause) =>
               cause instanceof RalphieError
                 ? cause
@@ -304,74 +232,10 @@ export const GitRemoteSafetyLive = Layer.effect(
             );
           }
 
-          const repositoryResponse = yield* githubRequest(
-            () => input.client.rest.repos.get({ owner, repo }),
-            `Failed to inspect GitHub repository ${slug}.`,
-          );
-          if (repositoryResponse.data.permissions?.push !== true) {
-            return yield* fail(
-              GitRemoteSafetyFailureKind.PushPermission,
-              GitDirectPushPolicy.RequirePushPermission,
-              `Authenticated GitHub credentials do not have push permission for ${slug}.`,
-            );
-          }
-
-          const branchResponse = yield* githubRequest(
-            () =>
-              input.client.rest.repos.getBranch({
-                owner,
-                repo,
-                branch: input.branch,
-              }),
-            `Failed to inspect GitHub branch ${input.branch}.`,
-          );
-          if (branchResponse.data.protected === true) {
-            return yield* fail(
-              GitRemoteSafetyFailureKind.ProtectedBranch,
-              GitDirectPushPolicy.RefuseProtectedBranches,
-              `Direct pushes to protected branch ${input.branch} are refused.`,
-            );
-          }
-
-          const branchRules = yield* Effect.tryPromise({
-            try: async (): Promise<ReadonlyArray<unknown>> => {
-              try {
-                const response = await input.client.rest.repos.getBranchRules({
-                  owner,
-                  repo,
-                  branch: input.branch,
-                });
-                return Array.isArray(response.data) ? response.data : [];
-              } catch (cause) {
-                if (isBranchRulesFeatureUnavailable(cause)) return [];
-                throw cause;
-              }
-            },
-            catch: (cause) =>
-              new RalphieError({
-                message: githubFailureMessage(
-                  `Failed to inspect GitHub branch rules for ${input.branch}.`,
-                  cause,
-                ),
-                cause,
-              }),
-          });
-          const activeBranchRules = branchRules.length;
-          if (activeBranchRules > 0) {
-            return yield* fail(
-              GitRemoteSafetyFailureKind.BranchRules,
-              GitDirectPushPolicy.RefuseActiveBranchRules,
-              `Direct pushes to ${input.branch} are refused because ${activeBranchRules} active branch rule(s) apply.`,
-            );
-          }
-
           return {
             repository: slug,
             branch: input.branch,
             origin,
-            protected: false,
-            activeBranchRules,
-            hasPushPermission: true,
             commitsBehindBase: behind,
             commitsAheadBase: ahead,
             pushMode: GitPushMode.NonForce,

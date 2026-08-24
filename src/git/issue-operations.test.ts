@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Cause, Effect, Exit, Option } from "effect";
+import { Cause, Effect, Exit, Layer, Option } from "effect";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -8,8 +8,8 @@ import { CommandRunner, CommandRunnerLive } from "../process/command-runner.ts";
 import { GitIssueCheckpoint, GitIssueCheckpointLive } from "./issue-checkpoint.ts";
 import {
   GitPushError,
+  GitPushFailurePolicy,
   GitPushFailureKind,
-  GitRemoteMovementPolicy,
   GitIssueOperations,
   GitIssueOperationsLive,
 } from "./issue-operations.ts";
@@ -197,7 +197,7 @@ describe("deterministic Git issue operations", () => {
         expect(failure.value).toBeInstanceOf(GitPushError);
         expect(failure.value).toMatchObject({
           kind: GitPushFailureKind.NonFastForward,
-          policy: GitRemoteMovementPolicy.Halt,
+          policy: GitPushFailurePolicy.Halt,
           branch: "main",
         });
       }
@@ -206,6 +206,38 @@ describe("deterministic Git issue operations", () => {
       await rm(remotePath, { recursive: true, force: true });
       await rm(otherRepositoryPath, { recursive: true, force: true });
     }
+  });
+
+  test("surfaces a protected-branch rejection without calling it remote movement", async () => {
+    const rejection = [
+      "remote: error: GH006: Protected branch update failed for refs/heads/main.",
+      "remote: error: Changes must be made through a pull request.",
+      "! [remote rejected] HEAD -> main (protected branch hook declined)",
+      "error: failed to push some refs to 'github.com:owner/repository.git'",
+    ].join("\n");
+    const error = await Effect.gen(function* () {
+      const operations = yield* GitIssueOperations;
+      return yield* operations.push("/workspace/repository", "main", "abc123");
+    }).pipe(
+      Effect.provide(GitIssueOperationsLive),
+      Effect.provide(
+        Layer.succeed(CommandRunner, {
+          run: () => Effect.succeed({ exitCode: 1, stdout: "", stderr: rejection }),
+        }),
+      ),
+      Effect.flip,
+      Effect.runPromise,
+    );
+
+    expect(error).toBeInstanceOf(GitPushError);
+    expect(error).toMatchObject({
+      kind: GitPushFailureKind.Other,
+      policy: GitPushFailurePolicy.Halt,
+      branch: "main",
+    });
+    expect(error.message).toContain("GH006: Protected branch update failed");
+    expect(error.message).toContain("Changes must be made through a pull request");
+    expect(error.message).not.toContain("remote branch moved");
   });
 
   test("runs checkpoint, stage, binary diff, restore, commit, and push in one temporary checkout flow", async () => {

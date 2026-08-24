@@ -12,8 +12,8 @@ import {
   GitIssueOperations,
   type GitIssueOperationsService,
   GitPushError,
+  GitPushFailurePolicy,
   GitPushFailureKind,
-  GitRemoteMovementPolicy,
 } from "../git/issue-operations.ts";
 import {
   GitIssuePreparation,
@@ -154,9 +154,6 @@ const services = (options: {
           repository: input.repository,
           branch: input.branch,
           origin: "https://github.com/owner/repository.git",
-          protected: false,
-          activeBranchRules: 0,
-          hasPushPermission: true,
           commitsBehindBase: 0,
           commitsAheadBase: input.expectedCommitSha === undefined ? 0 : 1,
           pushMode: GitPushMode.NonForce,
@@ -426,7 +423,7 @@ describe("implementation executor", () => {
           Effect.fail(
             new GitPushError({
               kind: GitPushFailureKind.NonFastForward,
-              policy: GitRemoteMovementPolicy.Halt,
+              policy: GitPushFailurePolicy.Halt,
               branch: "main",
               message: "rejected",
             }),
@@ -443,6 +440,10 @@ describe("implementation executor", () => {
     );
 
     expect(Exit.isFailure(exit)).toBe(true);
+    expect(artifacts.has(IssueArtifactKind.CreatedCommit)).toBe(true);
+    expect(
+      await Effect.runPromise(artifacts.read(IssueArtifactKind.CreatedCommit)),
+    ).toMatchObject({ sha: "commit-1" });
   });
 
   test("escalates after five rejected reviews without fixing or committing after the fifth", async () => {

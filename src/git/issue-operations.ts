@@ -10,14 +10,14 @@ export enum GitPushFailureKind {
   Other = "other",
 }
 
-/** Remote movement is deliberately halted until a future policy is chosen. */
-export enum GitRemoteMovementPolicy {
+/** Push failures halt so their created commit can be reconciled on resume. */
+export enum GitPushFailurePolicy {
   Halt = "halt",
 }
 
 export class GitPushError extends Data.TaggedError("GitPushError")<{
   readonly kind: GitPushFailureKind;
-  readonly policy: GitRemoteMovementPolicy.Halt;
+  readonly policy: GitPushFailurePolicy.Halt;
   readonly branch: string;
   readonly message: string;
   readonly cause?: unknown;
@@ -84,7 +84,9 @@ const validCommitMessage = (message: CommitMessageDecision): boolean =>
   (message.body === undefined || message.body.trim().length > 0);
 
 const isNonFastForward = (output: string): boolean =>
-  /non-fast-forward|fetch first|failed to push some refs|rejected/i.test(output);
+  /non-fast-forward|fetch first|remote contains work|tip of your current branch is behind/i.test(
+    output,
+  );
 
 export const GitIssueOperationsLive = Layer.effect(
   GitIssueOperations,
@@ -202,14 +204,17 @@ export const GitIssueOperationsLive = Layer.effect(
             const kind = isNonFastForward(output)
               ? GitPushFailureKind.NonFastForward
               : GitPushFailureKind.Other;
+            const summary =
+              kind === GitPushFailureKind.NonFastForward
+                ? `Push to origin/${branch} was rejected because the remote branch moved; push failure policy is halt.`
+                : `Push to origin/${branch} failed; push failure policy is halt.`;
             return yield* new GitPushError({
               kind,
-              policy: GitRemoteMovementPolicy.Halt,
+              policy: GitPushFailurePolicy.Halt,
               branch,
-              message: `Failed to push issue commit to origin/${branch}; remote movement policy is halt.${
-                result.stderr ? ` ${result.stderr}` : ""
-              }`,
-              cause: result.stderr,
+              message:
+                output.trim().length > 0 ? `${summary}\n${output.trim()}` : summary,
+              cause: output,
             });
           }
 

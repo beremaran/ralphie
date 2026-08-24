@@ -155,7 +155,7 @@ sequenceDiagram
     participant O as OpenCode
 
     R->>G: Capture clean branch checkpoint
-    R->>GH: Verify direct-push safety
+    R->>G: Verify destination and remote base
     R->>O: Start fresh implementation session
     O-->>R: Edit the checkout
     R->>G: Stage all changes and read exact diff
@@ -173,8 +173,10 @@ sequenceDiagram
     alt Review approved
         R->>O: Generate structured commit message
         R->>G: Commit exact staged tree
-        R->>GH: Revalidate remote safety
+        R->>G: Revalidate destination, HEAD, and remote base
         R->>G: Push selected branch without force
+        G->>GH: Send branch update
+        GH-->>G: Accept or return authoritative policy rejection
     else Review budget exhausted
         R->>G: Preserve patch and restore checkpoint
         R->>GH: Continue through decomposition
@@ -214,14 +216,19 @@ again before pushing, Ralphie verifies that:
 
 - the checkout and `origin` match the requested GitHub repository;
 - the local checkout is still on the selected branch and expected commit;
-- the branch is not protected and has no active branch rules;
-- the authenticated GitHub account has push permission;
 - the remote branch has not moved from the captured base;
 - the result is exactly the expected local commit; and
 - the push is non-force.
 
 If any invariant fails, Ralphie halts instead of guessing or retrying a dangerous
 operation.
+
+Ralphie does not try to predict whether GitHub will accept the update by querying
+branch protection, repository rulesets, or API-reported push permission. The
+actual non-force `git push` is authoritative and enforces the repository's
+current policy without plan-, permission-, or timing-dependent API guesses. If
+GitHub rejects the push, Ralphie surfaces the complete Git response, retains the
+created commit and run artifacts, and halts for inspection or resume.
 
 There is one intentionally destructive local behavior: when reusing an existing
 repository checkout, Ralphie aligns it to the requested branch with the
