@@ -26,6 +26,11 @@ export enum ReviewFindingSeverity {
   NonBlocking = "non_blocking",
 }
 
+export enum IssueResolutionStatus {
+  Resolved = "resolved",
+  Unresolved = "unresolved",
+}
+
 export const AGENT_TEXT_LIMIT = 8_000;
 export const AGENT_ISSUE_BODY_LIMIT = 12_000;
 export const AGENT_BREAKDOWN_ISSUE_LIMIT = 50;
@@ -80,6 +85,17 @@ export const reviewDecisionSchema = z
   });
 
 export type ReviewDecision = z.infer<typeof reviewDecisionSchema>;
+
+export const issueResolutionDecisionSchema = z.object({
+  status: z.enum(IssueResolutionStatus),
+  summary: z.string().min(1).max(AGENT_TEXT_LIMIT),
+  evidence: z
+    .array(z.string().min(1).max(AGENT_TEXT_LIMIT))
+    .min(1)
+    .max(AGENT_REVIEW_FINDING_LIMIT),
+});
+
+export type IssueResolutionDecision = z.infer<typeof issueResolutionDecisionSchema>;
 
 export const commitMessageDecisionSchema = z.object({
   subject: z.string().min(1).max(72),

@@ -4,6 +4,7 @@ import { Effect } from "effect";
 import { makeOpenCodeSessionDiagnostics } from "../opencode/task-session.ts";
 
 import {
+  IssueCompletionKind,
   IssueExecutionOutcomeKind,
   type IssueExecutionOutcome,
   type IssueExecutionContext,
@@ -20,7 +21,11 @@ describe("issue execution domain types", () => {
 
   test("supports narrowing each outcome variant by kind", () => {
     const outcomes: ReadonlyArray<IssueExecutionOutcome> = [
-      { kind: IssueExecutionOutcomeKind.Completed, commitSha: "abc123" },
+      {
+        kind: IssueExecutionOutcomeKind.Completed,
+        completion: IssueCompletionKind.PushedCommit,
+        commitSha: "abc123",
+      },
       {
         kind: IssueExecutionOutcomeKind.Decomposed,
         childIssueNumbers: [101, 102],
@@ -37,7 +42,9 @@ describe("issue execution domain types", () => {
     const descriptions = outcomes.map((outcome) => {
       switch (outcome.kind) {
         case IssueExecutionOutcomeKind.Completed:
-          return outcome.commitSha;
+          return outcome.completion === IssueCompletionKind.PushedCommit
+            ? outcome.commitSha
+            : outcome.resolutionSummary;
         case IssueExecutionOutcomeKind.Decomposed:
           return String(outcome.childIssueNumbers.length);
         case IssueExecutionOutcomeKind.Escalated:

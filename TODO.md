@@ -80,6 +80,8 @@ enough to implement, review, and commit independently.
 - [x] Add an operation to read the exact staged binary diff.
 - [x] Add an operation to detect an empty staged change set.
 - [x] Define behavior for an agent that reports success but produces no changes.
+- [x] Require a fresh structured resolution decision with concrete evidence
+      before treating a no-change implementation as completed.
 - [x] Add a deterministic commit operation that accepts the validated generated
       subject and optional body.
 - [x] Verify the created commit contains the expected staged tree.
@@ -111,6 +113,9 @@ enough to implement, review, and commit independently.
 - [x] Generate and validate a commit message after approval.
 - [x] Commit and push using deterministic Git operations.
 - [x] Return a completed outcome containing commit SHA and review count.
+- [x] Close successfully pushed and independently verified already-resolved
+      issues with GitHub's completed reason.
+- [x] Persist issue closure as a recoverable, idempotent stage.
 - [x] Add tests for first-pass approval, approval after fixes, no-change output,
       agent failure, review failure, commit failure, and push failure.
 

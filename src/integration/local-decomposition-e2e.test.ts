@@ -89,6 +89,13 @@ const makeOctokit = () => {
     rest: {
       issues: {
         listForRepo: Symbol("listForRepo"),
+        get: async (parameters: Record<string, unknown>) => {
+          const issue = issues.get(Number(parameters.issue_number));
+          if (issue === undefined) {
+            throw new Error(`Unknown issue ${String(parameters.issue_number)}`);
+          }
+          return { data: toResponse(issue) };
+        },
         create: async (parameters: Record<string, unknown>) => {
           const number = nextIssueNumber++;
           const issue: StoredIssue = {

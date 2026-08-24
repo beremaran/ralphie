@@ -25,7 +25,11 @@ import {
   type GitRemoteSafetyInput,
   type GitRemoteSafetyService,
 } from "../git/remote-safety.ts";
-import { IssueExecutionOutcomeKind, type IssueExecutionContext } from "./execution.ts";
+import {
+  IssueCompletionKind,
+  IssueExecutionOutcomeKind,
+  type IssueExecutionContext,
+} from "./execution.ts";
 import type { WorkflowExecutorResult } from "./workflow-executor-input.ts";
 import {
   ImplementationExecutor,
@@ -45,6 +49,7 @@ import {
 } from "../progress/progress.ts";
 import type { IssueCheckpoint } from "../git/issue-checkpoint.ts";
 import { reviewDecisionSchema } from "./decisions.ts";
+import { IssueResolutionStatus } from "./decisions.ts";
 
 const checkpoint: IssueCheckpoint = {
   branch: "main",
@@ -213,6 +218,7 @@ describe("implementation executor", () => {
 
     expect(result).toEqual({
       kind: IssueExecutionOutcomeKind.Completed,
+      completion: IssueCompletionKind.PushedCommit,
       commitSha: "commit-1",
       reviewCount: 1,
     });
@@ -287,6 +293,7 @@ describe("implementation executor", () => {
 
     expect(result).toEqual({
       kind: IssueExecutionOutcomeKind.Completed,
+      completion: IssueCompletionKind.PushedCommit,
       commitSha: "commit-1",
       reviewCount: 1,
     });
@@ -328,7 +335,7 @@ describe("implementation executor", () => {
     ).toHaveLength(2);
   });
 
-  test("returns skipped without review or commit when implementation makes no changes", async () => {
+  test("completes without a commit when fresh verification proves the issue resolved", async () => {
     let commitCalled = false;
     let reviewPrompted = false;
     const setup = services({
@@ -340,7 +347,14 @@ describe("implementation executor", () => {
         },
       },
     });
-    const client = openCodeClient([]);
+    const client = openCodeClient([
+      undefined,
+      {
+        status: IssueResolutionStatus.Resolved,
+        summary: "The checkout already closes every response body.",
+        evidence: ["bodyclose reports zero findings"],
+      },
+    ]);
     const originalPrompt = client.session.prompt;
     client.session.prompt = (async (parameters: { format?: unknown }) => {
       if (parameters.format !== undefined) reviewPrompted = true;
@@ -350,11 +364,45 @@ describe("implementation executor", () => {
     const result = await Effect.runPromise(run(client, artifacts, setup.layer));
 
     expect(result).toEqual({
-      kind: IssueExecutionOutcomeKind.Skipped,
-      reason: "Implementation agent produced no changes.",
+      kind: IssueExecutionOutcomeKind.Completed,
+      completion: IssueCompletionKind.AlreadyResolved,
+      resolutionSummary: "The checkout already closes every response body.",
+      evidence: ["bodyclose reports zero findings"],
     });
     expect(commitCalled).toBe(false);
-    expect(reviewPrompted).toBe(false);
+    expect(reviewPrompted).toBe(true);
+    expect(
+      await Effect.runPromise(
+        artifacts.read(IssueArtifactKind.IssueResolutionDecision),
+      ),
+    ).toMatchObject({ status: IssueResolutionStatus.Resolved });
+  });
+
+  test("fails safely when a no-change implementation remains unresolved", async () => {
+    const setup = services({
+      operations: { hasStagedChanges: () => Effect.succeed(false) },
+    });
+    const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
+    const result = await Effect.runPromise(
+      run(
+        openCodeClient([
+          undefined,
+          {
+            status: IssueResolutionStatus.Unresolved,
+            summary: "The reported behavior still reproduces.",
+            evidence: ["targeted test still fails"],
+          },
+        ]),
+        artifacts,
+        setup.layer,
+      ),
+    );
+
+    expect(result).toEqual({
+      kind: IssueExecutionOutcomeKind.Failed,
+      message:
+        "Issue remains unresolved after a no-change implementation: The reported behavior still reproduces.",
+    });
   });
 
   test("fails when the implementation agent fails", async () => {

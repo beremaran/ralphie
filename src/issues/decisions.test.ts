@@ -7,6 +7,8 @@ import {
   complexityDecisionSchema,
   ImplementationComplexityLevel,
   issueBreakdownDecisionSchema,
+  issueResolutionDecisionSchema,
+  IssueResolutionStatus,
   ReviewFindingSeverity,
   reviewDecisionSchema,
   ReviewVerdict,
@@ -48,6 +50,23 @@ describe("issue pipeline decisions", () => {
         ],
       }).success,
     ).toBe(false);
+  });
+
+  test("requires concrete evidence for issue resolution decisions", () => {
+    expect(
+      issueResolutionDecisionSchema.safeParse({
+        status: IssueResolutionStatus.Resolved,
+        summary: "The finding no longer reproduces.",
+        evidence: ["targeted linter reports zero findings"],
+      }).success,
+    ).toBeTrue();
+    expect(
+      issueResolutionDecisionSchema.safeParse({
+        status: IssueResolutionStatus.Resolved,
+        summary: "Probably fixed.",
+        evidence: [],
+      }).success,
+    ).toBeFalse();
   });
 
   test("requires small child issues with valid dependency keys", () => {

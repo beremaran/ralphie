@@ -6,6 +6,7 @@ import {
   buildComplexityPrompt,
   buildDecompositionPrompt,
   buildImplementationPrompt,
+  buildResolutionVerificationPrompt,
   buildReviewFixPrompt,
   buildReviewPrompt,
 } from "./prompts.ts";
@@ -69,6 +70,26 @@ describe("OpenCode prompts", () => {
 
     expect(prompt).toContain("Issue labels: []");
     expect(prompt).toContain('Issue body: ""');
+  });
+
+  test("builds a read-only fresh-context resolution verification prompt", () => {
+    const prompt = buildResolutionVerificationPrompt({
+      issue: {
+        number: 9,
+        title: "Close response bodies",
+        url: "issue/9",
+        body: "Fix the bodyclose finding.",
+        labels: ["lint"],
+      },
+      repositoryPath: "/workspace/repo",
+      targetBranch: "main",
+    });
+
+    expect(prompt).toContain("starting with fresh context");
+    expect(prompt).toContain('Return "resolved" only');
+    expect(prompt).toContain("cite concrete source or command-result evidence");
+    expect(prompt).toContain("Do not edit files");
+    expect(prompt).toContain('Issue title: "Close response bodies"');
   });
 
   test("builds a review prompt from only issue, metadata, and staged diff", () => {

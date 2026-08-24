@@ -3,7 +3,11 @@ import { Effect, Layer } from "effect";
 
 import { makeIssueArtifactStore } from "./artifacts.ts";
 import { DecompositionExecutor } from "./decomposition-executor.ts";
-import { IssueExecutionOutcomeKind, type IssueExecutionContext } from "./execution.ts";
+import {
+  IssueCompletionKind,
+  IssueExecutionOutcomeKind,
+  type IssueExecutionContext,
+} from "./execution.ts";
 import { ImplementationExecutor } from "./implementation-executor.ts";
 
 const context = {
@@ -22,6 +26,7 @@ describe("concrete issue workflow executors", () => {
           execute: (input) =>
             Effect.succeed({
               kind: IssueExecutionOutcomeKind.Completed,
+              completion: IssueCompletionKind.PushedCommit,
               commitSha: `issue-${input.artifacts.issueNumber}`,
             }),
         }),
@@ -31,6 +36,7 @@ describe("concrete issue workflow executors", () => {
 
     expect(outcome).toEqual({
       kind: IssueExecutionOutcomeKind.Completed,
+      completion: IssueCompletionKind.PushedCommit,
       commitSha: "issue-42",
     });
   });

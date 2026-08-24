@@ -13,6 +13,7 @@ All notable changes to Ralphie are documented here. The project follows
   deterministic commits and pushes, and dependency-aware decomposition.
 - Typed progress events, JSON Lines output, diagnostics, and credential
   redaction.
+- Structured no-change resolution verification with persisted evidence.
 
 ### Changed
 
@@ -21,6 +22,8 @@ All notable changes to Ralphie are documented here. The project follows
   safety checks.
 - Render interactive progress through one stderr status line with nested-stage
   tracking instead of creating OpenTUI spinner renderers.
+- Close completed implementation issues after verified delivery, with
+  idempotent recovery for interrupted or ambiguous GitHub responses.
 
 ### Fixed
 
@@ -28,5 +31,7 @@ All notable changes to Ralphie are documented here. The project follows
   `--cleanup`.
 - Prevent viewport repainting, split-stream output, and accumulating
   `CliRenderer` destroy listeners during long runs.
+- Prevent no-change agent runs from being silently skipped without proving
+  whether the issue is already resolved.
 
 [Unreleased]: https://github.com/beremaran/ralphie/commits/main

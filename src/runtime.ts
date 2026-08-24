@@ -82,6 +82,7 @@ const IssueExecutorRuntime = IssueExecutorLive.pipe(
 export const LiveRuntime = Layer.mergeAll(
   GitHubClientLiveWithCommandRunner,
   GitHubIssuesLive,
+  GitHubIssueMutationsLive,
   GitRepositoryLiveWithCommandRunner,
   GitRepositoryInvariantLiveWithCommandRunner,
   IssueExecutorRuntime,

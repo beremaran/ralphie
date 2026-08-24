@@ -2,6 +2,8 @@ import { Effect } from "effect";
 
 import { RunStateStatus, type RunState } from "./state.ts";
 import { RalphieError } from "../shared/error.ts";
+import { IssueExecutionOutcomeKind } from "../issues/execution.ts";
+import { ProgressStage } from "../progress/progress.ts";
 
 export enum RunReconciliationStatus {
   Compatible = "compatible",
@@ -75,9 +77,20 @@ export const reconcileRunState = (
 
   if (inputs.github !== undefined) {
     const openIssues = new Set(inputs.github.openIssueNumbers);
+    const recoverableClosureIssue =
+      state.activeIssue?.stage === ProgressStage.IssueClosure &&
+      state.outcomes.some(
+        ({ issueNumber, outcome }) =>
+          issueNumber === state.activeIssue?.issueNumber &&
+          outcome.kind === IssueExecutionOutcomeKind.Completed,
+      )
+        ? state.activeIssue.issueNumber
+        : undefined;
     const missing = state.queue.pending
       .map((issue) => issue.number)
-      .filter((number) => !openIssues.has(number));
+      .filter(
+        (number) => !openIssues.has(number) && number !== recoverableClosureIssue,
+      );
     if (missing.length > 0) {
       status = RunReconciliationStatus.GitHubMismatch;
       reasons.push(`saved pending issues are no longer open: ${missing.join(", ")}`);

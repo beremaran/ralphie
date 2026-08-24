@@ -5,8 +5,13 @@ import { GitRepository } from "./git/repository.ts";
 import { GitRepositoryInvariant } from "./git/repository-invariant.ts";
 import { GitIssueCheckpoint } from "./git/issue-checkpoint.ts";
 import { GitHubClient } from "./github/client.ts";
+import {
+  GitHubIssueCloseReason,
+  GitHubIssueMutations,
+} from "./github/issue-mutations.ts";
 import { type GitHubIssue, GitHubIssues, type IssueFilters } from "./github/issues.ts";
 import {
+  IssueCompletionKind,
   IssueExecutionOutcomeKind,
   type IssueExecutionOutcome,
 } from "./issues/execution.ts";
@@ -54,6 +59,10 @@ const copyOutcome = (
   outcome: IssueExecutionOutcome,
 ): RunState["outcomes"][number]["outcome"] => {
   switch (outcome.kind) {
+    case IssueExecutionOutcomeKind.Completed:
+      return outcome.completion === IssueCompletionKind.AlreadyResolved
+        ? { ...outcome, evidence: [...outcome.evidence] }
+        : { ...outcome };
     case IssueExecutionOutcomeKind.Decomposed:
       return { ...outcome, childIssueNumbers: [...outcome.childIssueNumbers] };
     case IssueExecutionOutcomeKind.Escalated:
@@ -229,6 +238,7 @@ export const workflow = ({
         github.initialize,
         "GitHub authentication verified and Octokit initialized.",
       );
+      const issueMutations = yield* GitHubIssueMutations;
       yield* checkCancellation(signal);
 
       const repository = yield* GitRepository;
@@ -378,9 +388,21 @@ export const workflow = ({
               const current = queue.processedCount();
               const total =
                 resumeState?.maxIssues ?? maxIssues ?? current + queue.pendingCount();
+              const resumedClosureOutcome =
+                resumeState?.activeIssue?.issueNumber === issue.number &&
+                resumeState.activeIssue.stage === ProgressStage.IssueClosure
+                  ? outcomes.find(
+                      (entry) =>
+                        entry.issueNumber === issue.number &&
+                        entry.outcome.kind === IssueExecutionOutcomeKind.Completed,
+                    )?.outcome
+                  : undefined;
               activeIssue = {
                 issueNumber: issue.number,
-                stage: ProgressStage.ComplexityAssessment,
+                stage:
+                  resumedClosureOutcome === undefined
+                    ? ProgressStage.ComplexityAssessment
+                    : ProgressStage.IssueClosure,
               };
               restoreCancellationCheckout = () =>
                 checkpoints.restore(prepared.path, {
@@ -388,33 +410,65 @@ export const workflow = ({
                   sha: checkout.head,
                 });
               yield* persistState(RunStateStatus.Active, activeIssue);
-              const outcome = yield* track(
-                progress,
-                ProgressStage.IssueExecution,
-                `Executing #${issue.number} ${issue.title}...`,
-                issueExecutor.execute({
-                  issue,
-                  repository: repo,
-                  repositoryPath: prepared.path,
-                  targetBranch: branch,
-                  workspace,
-                  runId: actualRunId,
-                  octokit,
-                  openCode: server.client,
-                  openCodeSelection: selection,
-                  openCodeDiagnostics: diagnostics,
-                  repositoryInvariant: invariantService,
-                  signal,
-                }),
-                (result) =>
-                  `Issue #${issue.number} finished with outcome ${result.kind}.`,
-                {
-                  issue: { number: issue.number, title: issue.title },
-                  current,
-                  total,
-                },
-              );
-              outcomes.push({ issueNumber: issue.number, outcome });
+              const outcome =
+                resumedClosureOutcome ??
+                (yield* track(
+                  progress,
+                  ProgressStage.IssueExecution,
+                  `Executing #${issue.number} ${issue.title}...`,
+                  issueExecutor.execute({
+                    issue,
+                    repository: repo,
+                    repositoryPath: prepared.path,
+                    targetBranch: branch,
+                    workspace,
+                    runId: actualRunId,
+                    octokit,
+                    openCode: server.client,
+                    openCodeSelection: selection,
+                    openCodeDiagnostics: diagnostics,
+                    repositoryInvariant: invariantService,
+                    signal,
+                  }),
+                  (result) =>
+                    `Issue #${issue.number} finished with outcome ${result.kind}.`,
+                  {
+                    issue: { number: issue.number, title: issue.title },
+                    current,
+                    total,
+                  },
+                ));
+              if (resumedClosureOutcome === undefined) {
+                outcomes.push({ issueNumber: issue.number, outcome });
+              }
+
+              if (outcome.kind === IssueExecutionOutcomeKind.Completed) {
+                // The implementation path may have advanced HEAD. Persist the
+                // post-delivery checkout so a closure-only resume reconciles
+                // against the commit that was actually pushed.
+                checkout = yield* invariantService.capture(prepared.path);
+                activeIssue = {
+                  issueNumber: issue.number,
+                  stage: ProgressStage.IssueClosure,
+                };
+                yield* persistState(RunStateStatus.Active, activeIssue);
+                yield* track(
+                  progress,
+                  ProgressStage.IssueClosure,
+                  `Closing issue #${issue.number} as completed...`,
+                  issueMutations.close(
+                    octokit,
+                    repo,
+                    issue.number,
+                    GitHubIssueCloseReason.Completed,
+                  ),
+                  `Issue #${issue.number} closed as completed.`,
+                  {
+                    issue: { number: issue.number, title: issue.title },
+                    details: { completion: outcome.completion },
+                  },
+                );
+              }
 
               if (
                 outcome.kind === IssueExecutionOutcomeKind.Completed ||

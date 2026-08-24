@@ -18,6 +18,7 @@ export enum ProgressStage {
   ComplexityAssessment = "complexity-assessment",
   Implementation = "implementation",
   ChangeStaging = "change-staging",
+  ResolutionVerification = "resolution-verification",
   Review = "review",
   ReviewFix = "review-fix",
   ReviewExhaustion = "review-exhaustion",

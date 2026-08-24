@@ -9,7 +9,11 @@ import {
 import { ComplexityAssessment } from "./complexity.ts";
 import { ComplexityLevel } from "./decisions.ts";
 import { DecompositionExecutor } from "./decomposition-executor.ts";
-import { IssueExecutionOutcomeKind, type IssueExecutionContext } from "./execution.ts";
+import {
+  IssueCompletionKind,
+  IssueExecutionOutcomeKind,
+  type IssueExecutionContext,
+} from "./execution.ts";
 import { IssueExecutor, IssueExecutorLive } from "./executor.ts";
 import { ImplementationExecutor } from "./implementation-executor.ts";
 import { RalphieError } from "../shared/error.ts";
@@ -67,6 +71,7 @@ describe("IssueExecutor", () => {
             implementationCalls += 1;
             return Effect.succeed({
               kind: IssueExecutionOutcomeKind.Completed,
+              completion: IssueCompletionKind.PushedCommit,
               commitSha: "implementation-sha",
             });
           },

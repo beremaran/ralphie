@@ -28,6 +28,7 @@ import {
   type DecompositionExecutorService,
 } from "../issues/decomposition-executor.ts";
 import {
+  IssueCompletionKind,
   IssueExecutionOutcomeKind,
   type IssueExecutionContext,
 } from "../issues/execution.ts";
@@ -263,6 +264,9 @@ describe("local implementation end-to-end", () => {
       });
       if (outcome.kind !== IssueExecutionOutcomeKind.Completed) {
         throw new Error(`Expected completed outcome, got ${outcome.kind}`);
+      }
+      if (outcome.completion !== IssueCompletionKind.PushedCommit) {
+        throw new Error(`Expected pushed-commit completion, got ${outcome.completion}`);
       }
       expect(outcome.commitSha).not.toBe(initialSha);
       expect(git(repositoryPath, ["rev-parse", "HEAD"])).toBe(outcome.commitSha);

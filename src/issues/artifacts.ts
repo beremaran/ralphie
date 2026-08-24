@@ -11,10 +11,12 @@ import {
   commitMessageDecisionSchema,
   complexityDecisionSchema,
   issueBreakdownDecisionSchema,
+  issueResolutionDecisionSchema,
   reviewDecisionSchema,
   type CommitMessageDecision,
   type ComplexityDecision,
   type IssueBreakdownDecision,
+  type IssueResolutionDecision,
 } from "./decisions.ts";
 import type { ReviewAttempt } from "./recovery.ts";
 import { REVIEW_ITERATION_LIMIT } from "./stage.ts";
@@ -25,6 +27,7 @@ export enum IssueArtifactKind {
   ReviewAttempts = "review-attempts",
   CommitMessageDecision = "commit-message-decision",
   CreatedCommit = "created-commit",
+  IssueResolutionDecision = "issue-resolution-decision",
   IssueBreakdownDecision = "issue-breakdown-decision",
   CreatedIssueNumbers = "created-issue-numbers",
 }
@@ -40,6 +43,7 @@ export type IssueArtifactValues = {
     readonly sha: string;
     readonly treeSha: string;
   };
+  readonly [IssueArtifactKind.IssueResolutionDecision]: IssueResolutionDecision;
   readonly [IssueArtifactKind.IssueBreakdownDecision]: IssueBreakdownDecision;
   readonly [IssueArtifactKind.CreatedIssueNumbers]: CreatedIssueNumberMapping;
 };
@@ -117,6 +121,8 @@ const persistedArtifactsSchema = z
     [IssueArtifactKind.CreatedCommit]: z
       .object({ sha: z.string().min(1), treeSha: z.string().min(1) })
       .optional(),
+    [IssueArtifactKind.IssueResolutionDecision]:
+      issueResolutionDecisionSchema.optional(),
     [IssueArtifactKind.IssueBreakdownDecision]: issueBreakdownDecisionSchema.optional(),
     [IssueArtifactKind.CreatedIssueNumbers]: z
       .record(z.string(), z.number().int().positive())
@@ -321,6 +327,7 @@ const makeStore = (
       nextValues.delete(IssueArtifactKind.ReviewAttempts);
       nextValues.delete(IssueArtifactKind.CommitMessageDecision);
       nextValues.delete(IssueArtifactKind.CreatedCommit);
+      nextValues.delete(IssueArtifactKind.IssueResolutionDecision);
       return save(nextValues);
     },
   };

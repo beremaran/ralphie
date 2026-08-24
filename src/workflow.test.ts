@@ -7,6 +7,7 @@ import { GitRepository } from "./git/repository.ts";
 import { GitRepositoryInvariant } from "./git/repository-invariant.ts";
 import { GitIssueCheckpoint } from "./git/issue-checkpoint.ts";
 import { GitHubClient } from "./github/client.ts";
+import { GitHubIssueMutations } from "./github/issue-mutations.ts";
 import {
   GitHubIssues,
   type GitHubIssue,
@@ -14,6 +15,7 @@ import {
   IssueSort,
 } from "./github/issues.ts";
 import {
+  IssueCompletionKind,
   type IssueExecutionOutcome,
   IssueExecutionOutcomeKind,
 } from "./issues/execution.ts";
@@ -47,9 +49,11 @@ type TestRuntimeOptions = {
   readonly gitFailure?: RalphieError;
   readonly startFailure?: RalphieError;
   readonly removeFailure?: RalphieError;
+  readonly closeFailure?: RalphieError;
   readonly abortOnExecute?: AbortController;
   readonly abortAt?: "github" | "repository" | "issues" | "opencode" | "between";
   readonly abortController?: AbortController;
+  readonly captureStart?: number;
 };
 
 function testRuntime(
@@ -60,9 +64,14 @@ function testRuntime(
 ) {
   let listIndex = 0;
   let outcomeIndex = 0;
-  let captureIndex = 0;
+  let captureIndex = options.captureStart ?? 0;
   const outcomes = options.outcomes ?? [
-    { kind: IssueExecutionOutcomeKind.Completed, commitSha: "abc123", reviewCount: 1 },
+    {
+      kind: IssueExecutionOutcomeKind.Completed,
+      completion: IssueCompletionKind.PushedCommit,
+      commitSha: "abc123",
+      reviewCount: 1,
+    },
   ];
   const issueLists = options.issueLists ?? [[firstIssue]];
 
@@ -115,6 +124,19 @@ function testRuntime(
         const result = issueLists[Math.min(listIndex, issueLists.length - 1)] ?? [];
         listIndex += 1;
         return Effect.succeed(result);
+      },
+    }),
+    Layer.succeed(GitHubIssueMutations, {
+      create: () => Effect.fail(new RalphieError({ message: "unused" })),
+      update: () => Effect.fail(new RalphieError({ message: "unused" })),
+      close: (_client, _repository, issueNumber) => {
+        calls.push(`closeIssue:${issueNumber}`);
+        return options.closeFailure
+          ? Effect.fail(options.closeFailure)
+          : Effect.succeed(
+              issueLists.flat().find(({ number }) => number === issueNumber) ??
+                firstIssue,
+            );
       },
     }),
     Layer.succeed(IssueExecutor, {
@@ -222,6 +244,7 @@ describe("workflow", () => {
       "listIssues:owner/repo:bug:created:asc",
       "startServer",
       "executeIssue:42:/tmp/ralphie/repo:develop:reviewer",
+      "closeIssue:42",
       "closeServer",
       "removeWorkspace:/tmp/ralphie",
       "stopPersisting",
@@ -253,7 +276,21 @@ describe("workflow", () => {
   });
 
   test.each([
-    [{ kind: IssueExecutionOutcomeKind.Completed, commitSha: "abc" }],
+    [
+      {
+        kind: IssueExecutionOutcomeKind.Completed,
+        completion: IssueCompletionKind.PushedCommit,
+        commitSha: "abc",
+      },
+    ],
+    [
+      {
+        kind: IssueExecutionOutcomeKind.Completed,
+        completion: IssueCompletionKind.AlreadyResolved,
+        resolutionSummary: "The checkout already satisfies the issue.",
+        evidence: ["targeted validation passed"],
+      },
+    ],
     [{ kind: IssueExecutionOutcomeKind.Decomposed, childIssueNumbers: [51] }],
     [
       {
@@ -306,6 +343,67 @@ describe("workflow", () => {
     expect(calls.at(-1)).toBe("closeServer");
   });
 
+  test("persists a recoverable closure stage when GitHub closure fails", async () => {
+    const calls: string[] = [];
+    const states: RunState[] = [];
+    const exit = await workflow(baseOptions).pipe(
+      Effect.provide(
+        testRuntime(calls, states, {
+          closeFailure: new RalphieError({ message: "close response lost" }),
+        }),
+      ),
+      Effect.runPromiseExit,
+    );
+
+    expect(Exit.isFailure(exit)).toBeTrue();
+    expect(calls).toContain("closeIssue:42");
+    expect(states.at(-1)?.activeIssue).toEqual({
+      issueNumber: 42,
+      stage: ProgressStage.IssueClosure,
+    });
+    expect(states.at(-1)?.queue.pending.map(({ number }) => number)).toEqual([42]);
+    expect(states.at(-1)?.checkout).toEqual({ branch: "develop", head: "head-1" });
+    expect(states.at(-1)?.outcomes).toHaveLength(1);
+    expect(states.at(-1)?.outcomes[0]?.outcome.kind).toBe(
+      IssueExecutionOutcomeKind.Completed,
+    );
+  });
+
+  test("resumes an interrupted closure without rerunning implementation", async () => {
+    const failedStates: RunState[] = [];
+    await workflow(baseOptions).pipe(
+      Effect.provide(
+        testRuntime([], failedStates, {
+          closeFailure: new RalphieError({ message: "close response lost" }),
+        }),
+      ),
+      Effect.runPromiseExit,
+    );
+    const resumeState = failedStates.at(-1);
+    if (resumeState === undefined) throw new Error("Missing resumable state");
+
+    const calls: string[] = [];
+    const resumedStates: RunState[] = [];
+    const summary = await workflow({
+      ...baseOptions,
+      resumeState,
+    }).pipe(
+      Effect.provide(
+        testRuntime(calls, resumedStates, {
+          issueLists: [[]],
+          captureStart: 1,
+        }),
+      ),
+      Effect.runPromise,
+    );
+
+    expect(calls).toContain("closeIssue:42");
+    expect(calls.some((call) => call.startsWith("executeIssue:"))).toBeFalse();
+    expect(summary.outcomes).toHaveLength(1);
+    expect(summary.counts.completed).toBe(1);
+    expect(resumedStates.at(-1)?.status).toBe(RunStateStatus.Complete);
+  });
+
   test("refreshes the queue after decomposition and runs a new child within budget", async () => {
     const calls: string[] = [];
     const states: RunState[] = [];
@@ -316,7 +414,11 @@ describe("workflow", () => {
           issueLists: [[firstIssue], [child]],
           outcomes: [
             { kind: IssueExecutionOutcomeKind.Decomposed, childIssueNumbers: [51] },
-            { kind: IssueExecutionOutcomeKind.Completed, commitSha: "child-sha" },
+            {
+              kind: IssueExecutionOutcomeKind.Completed,
+              completion: IssueCompletionKind.PushedCommit,
+              commitSha: "child-sha",
+            },
           ],
         }),
       ),

@@ -37,7 +37,7 @@ import {
   type ProgressUpdate,
 } from "../progress/progress.ts";
 import { createIssueQueue, toQueuedIssues } from "./queue.ts";
-import { IssueExecutionOutcomeKind } from "./execution.ts";
+import { IssueCompletionKind, IssueExecutionOutcomeKind } from "./execution.ts";
 import {
   ImplementationExecutor,
   ImplementationExecutorLive,
@@ -255,6 +255,7 @@ describe("mocked end-to-end issue workflows", () => {
     ).then((result) => {
       expect(result).toEqual({
         kind: IssueExecutionOutcomeKind.Completed,
+        completion: IssueCompletionKind.PushedCommit,
         commitSha: "commit-e2e",
         reviewCount: 1,
       });

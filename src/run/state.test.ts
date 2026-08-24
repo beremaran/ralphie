@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { IssueExecutionOutcomeKind } from "../issues/execution.ts";
+import { IssueCompletionKind, IssueExecutionOutcomeKind } from "../issues/execution.ts";
 import {
   RUN_STATE_VERSION,
   RunStateStatus,
@@ -32,6 +32,7 @@ const state: RunState = {
       issueNumber: 1,
       outcome: {
         kind: IssueExecutionOutcomeKind.Completed,
+        completion: IssueCompletionKind.PushedCommit,
         commitSha: "abc123",
       },
     },
@@ -79,6 +80,33 @@ describe("run state store", () => {
         }),
       ).pipe(Effect.runPromiseExit);
       expect(Exit.isFailure(exit)).toBe(true);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("migrates legacy completed outcomes to pushed-commit completions", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "ralphie-state-legacy-"));
+    const path = join(directory, "state.json");
+    try {
+      const legacy = structuredClone(state) as unknown as {
+        outcomes: Array<{ outcome: Record<string, unknown> }>;
+      };
+      delete legacy.outcomes[0]?.outcome.completion;
+      await writeFile(path, JSON.stringify(legacy));
+
+      const loaded = await withStore(
+        Effect.gen(function* () {
+          const store = yield* RunStateStore;
+          return yield* store.load(path);
+        }),
+      ).pipe(Effect.runPromise);
+
+      expect(loaded.outcomes[0]?.outcome).toMatchObject({
+        kind: IssueExecutionOutcomeKind.Completed,
+        completion: IssueCompletionKind.PushedCommit,
+        commitSha: "abc123",
+      });
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

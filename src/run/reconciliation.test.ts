@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 
-import { IssueExecutionOutcomeKind } from "../issues/execution.ts";
+import { IssueCompletionKind, IssueExecutionOutcomeKind } from "../issues/execution.ts";
 import {
   RunReconciliationStatus,
   RunStateCleanupAction,
@@ -10,6 +10,7 @@ import {
   reconcileRunState,
 } from "./reconciliation.ts";
 import { RUN_STATE_VERSION, RunStateStatus, type RunState } from "./state.ts";
+import { ProgressStage } from "../progress/progress.ts";
 
 const state: RunState = {
   version: RUN_STATE_VERSION,
@@ -26,7 +27,11 @@ const state: RunState = {
   outcomes: [
     {
       issueNumber: 1,
-      outcome: { kind: IssueExecutionOutcomeKind.Completed, commitSha: "abc123" },
+      outcome: {
+        kind: IssueExecutionOutcomeKind.Completed,
+        completion: IssueCompletionKind.PushedCommit,
+        commitSha: "abc123",
+      },
     },
   ],
   checkout: { branch: "main", head: "abc123" },
@@ -79,6 +84,28 @@ describe("run-state reconciliation", () => {
       status: RunReconciliationStatus.Compatible,
       reasons: [],
     });
+  });
+
+  test("accepts a closed pending issue while recovering its closure stage", () => {
+    const closingState: RunState = {
+      ...state,
+      queue: {
+        pending: [
+          { number: 1, title: "Closing", url: "issue/1", body: null, labels: [] },
+        ],
+        completedIssueNumbers: [],
+        processedCount: 0,
+      },
+      activeIssue: { issueNumber: 1, stage: ProgressStage.IssueClosure },
+    };
+
+    const result = reconcileRunState(closingState, {
+      repository: "owner/repo",
+      branch: "main",
+      github: { openIssueNumbers: [] },
+    });
+
+    expect(result.compatible).toBeTrue();
   });
 
   test("detects stale active state", () => {

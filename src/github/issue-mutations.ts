@@ -134,13 +134,39 @@ export const GitHubIssueMutationsLive = Layer.succeed(GitHubIssueMutations, {
   close: (client, repository, issueNumber, reason) =>
     Effect.tryPromise({
       try: async () => {
-        const response = await client.rest.issues.update({
+        const parameters = {
           ...repositoryParameters(repository),
           issue_number: issueNumber,
-          state: "closed",
-          state_reason: reason,
-        });
-        return mapIssue(response.data);
+        };
+        const current = await client.rest.issues.get(parameters);
+        if (current.data.state === "closed") {
+          if (current.data.state_reason !== reason) {
+            throw new RalphieError({
+              message: `Issue #${issueNumber} is already closed with reason ${current.data.state_reason ?? "unknown"}, not ${reason}.`,
+            });
+          }
+          return mapIssue(current.data);
+        }
+
+        try {
+          const response = await client.rest.issues.update({
+            ...parameters,
+            state: "closed",
+            state_reason: reason,
+          });
+          return mapIssue(response.data);
+        } catch (cause) {
+          // The update may have reached GitHub even when its response was lost.
+          // Re-read the authoritative state before declaring the mutation failed.
+          const reconciled = await client.rest.issues.get(parameters);
+          if (
+            reconciled.data.state === "closed" &&
+            reconciled.data.state_reason === reason
+          ) {
+            return mapIssue(reconciled.data);
+          }
+          throw cause;
+        }
       },
       catch: (cause) =>
         mutationError(`Failed to close issue #${issueNumber} in ${repository}.`, cause),

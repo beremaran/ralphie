@@ -115,7 +115,10 @@ flowchart TD
     A[Open GitHub issue] --> B[Structured complexity assessment]
     B -->|0–3| C[Implementation session]
     C --> D[Deterministically stage changes]
-    D --> E[Fresh review session]
+    D -->|Changes present| E[Fresh review session]
+    D -->|No changes| N[Fresh structured resolution verification]
+    N -->|Resolved with evidence| O[Close issue as completed]
+    N -->|Unresolved or uncertain| P[Fail and leave issue open]
     E -->|Approved| F[Structured commit message]
     E -->|Changes requested| G[Fresh review-fix session]
     G --> D
@@ -126,6 +129,7 @@ flowchart TD
     J --> K[Rewrite and close original issue]
     K --> L[Refresh issue queue]
     F --> M[Commit and non-force push]
+    M --> O
 ```
 
 ### Implementation workflow: complexity 0–3
@@ -139,10 +143,14 @@ flowchart TD
 6. Stop after approval or five review attempts.
 7. Generate a validated commit message, commit the staged tree, recheck remote
    safety, and push without force.
+8. Close the GitHub issue as completed after the push is verified.
 
-An implementation that produces no changes is recorded as skipped. If the
-review budget is exhausted, Ralphie preserves the patch and review diagnostics,
-restores the clean checkpoint, and sends the issue through decomposition.
+When implementation produces no changes, a fresh read-only session must prove
+that the current checkout already resolves the issue and return concrete
+evidence. A proven resolution is completed and closed; an unresolved or
+uncertain result fails safely and remains open. If the review budget is
+exhausted, Ralphie preserves the patch and review diagnostics, restores the
+clean checkpoint, and sends the issue through decomposition.
 
 The boundary between agent work and deterministic operations stays explicit
 throughout the loop:
@@ -160,26 +168,34 @@ sequenceDiagram
     O-->>R: Edit the checkout
     R->>G: Stage all changes and read exact diff
 
-    loop Until approved or five reviews
-        R->>O: Start fresh structured-review session
-        O-->>R: Return approved or changes requested
-        opt Changes requested and budget remains
-            R->>O: Start fresh review-fix session
-            O-->>R: Update the checkout
-            R->>G: Restage changes and read exact diff
+    alt Changes present
+        loop Until approved or five reviews
+            R->>O: Start fresh structured-review session
+            O-->>R: Return approved or changes requested
+            opt Changes requested and budget remains
+                R->>O: Start fresh review-fix session
+                O-->>R: Update the checkout
+                R->>G: Restage changes and read exact diff
+            end
         end
-    end
-
-    alt Review approved
-        R->>O: Generate structured commit message
-        R->>G: Commit exact staged tree
-        R->>G: Revalidate destination, HEAD, and remote base
-        R->>G: Push selected branch without force
-        G->>GH: Send branch update
-        GH-->>G: Accept or return authoritative policy rejection
-    else Review budget exhausted
-        R->>G: Preserve patch and restore checkpoint
-        R->>GH: Continue through decomposition
+        alt Review approved
+            R->>O: Generate structured commit message
+            R->>G: Commit exact staged tree
+            R->>G: Revalidate destination, HEAD, and remote base
+            R->>G: Push selected branch without force
+            G->>GH: Send branch update
+            GH-->>G: Accept or return authoritative policy rejection
+            R->>GH: Close issue as completed
+        else Review budget exhausted
+            R->>G: Preserve patch and restore checkpoint
+            R->>GH: Continue through decomposition
+        end
+    else No changes
+        R->>O: Start fresh structured resolution verification
+        O-->>R: Return status and concrete evidence
+        opt Resolved
+            R->>GH: Close issue as completed
+        end
     end
 ```
 
@@ -394,8 +410,8 @@ stateDiagram-v2
 
 On resume, Ralphie compares persisted intent with both local Git and live GitHub
 state before returning to `Active`. It can reconcile partially created child
-issues and a commit created immediately before interruption without repeating
-the corresponding agent work.
+issues, a commit created immediately before interruption, and an issue closure
+whose response was lost without repeating the corresponding agent work.
 
 `--cleanup` removes the entire workspace after success, including completed
 state, events, diagnostics, and the repository checkout. Cleanup is skipped on

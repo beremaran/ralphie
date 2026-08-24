@@ -3,7 +3,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { z } from "zod";
 
-import { IssueExecutionOutcomeKind } from "../issues/execution.ts";
+import { IssueCompletionKind, IssueExecutionOutcomeKind } from "../issues/execution.ts";
 import { RalphieError } from "../shared/error.ts";
 
 export const RUN_STATE_VERSION = 1 as const;
@@ -21,11 +21,18 @@ const issueSchema = z.object({
   labels: z.array(z.string()),
 });
 
-const outcomeSchema = z.discriminatedUnion("kind", [
+const currentOutcomeSchema = z.union([
   z.object({
     kind: z.literal(IssueExecutionOutcomeKind.Completed),
+    completion: z.literal(IssueCompletionKind.PushedCommit),
     commitSha: z.string().min(1),
     reviewCount: z.number().int().positive().optional(),
+  }),
+  z.object({
+    kind: z.literal(IssueExecutionOutcomeKind.Completed),
+    completion: z.literal(IssueCompletionKind.AlreadyResolved),
+    resolutionSummary: z.string().min(1),
+    evidence: z.array(z.string().min(1)).min(1),
   }),
   z.object({
     kind: z.literal(IssueExecutionOutcomeKind.Decomposed),
@@ -46,6 +53,20 @@ const outcomeSchema = z.discriminatedUnion("kind", [
     message: z.string().min(1),
   }),
 ]);
+
+const outcomeSchema = z.preprocess((value) => {
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "kind" in value &&
+    value.kind === IssueExecutionOutcomeKind.Completed &&
+    !("completion" in value) &&
+    "commitSha" in value
+  ) {
+    return { ...value, completion: IssueCompletionKind.PushedCommit };
+  }
+  return value;
+}, currentOutcomeSchema);
 
 export const runStateSchema = z.object({
   version: z.literal(RUN_STATE_VERSION),

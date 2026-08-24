@@ -48,13 +48,21 @@ const breakdown = {
   ],
 };
 
-const issueResponse = (number: number, title: string, body: string) => ({
+const issueResponse = (
+  number: number,
+  title: string,
+  body: string,
+  state = "open",
+  stateReason: string | null = null,
+) => ({
   data: {
     number,
     title,
     html_url: `https://github.com/owner/repository/issues/${number}`,
     body,
     labels: [],
+    state,
+    state_reason: stateReason,
   },
 });
 
@@ -132,6 +140,8 @@ describe("decomposition executor", () => {
     const octokit = {
       rest: {
         issues: {
+          get: async (parameters: Record<string, unknown>) =>
+            issueResponse(Number(parameters.issue_number), "Original", "Original"),
           create: async (parameters: Record<string, unknown>) => {
             requests.push({ method: "create", parameters });
             const number = parameters.title === "Migrate storage" ? 101 : 102;
@@ -208,6 +218,8 @@ describe("decomposition executor", () => {
     const octokit = {
       rest: {
         issues: {
+          get: async (parameters: Record<string, unknown>) =>
+            issueResponse(Number(parameters.issue_number), "Original", "Original"),
           create: async () => {
             breakdownPersisted = artifacts.has(
               IssueArtifactKind.IssueBreakdownDecision,
@@ -251,6 +263,8 @@ describe("decomposition executor", () => {
     const octokit = {
       rest: {
         issues: {
+          get: async (parameters: Record<string, unknown>) =>
+            issueResponse(Number(parameters.issue_number), "Original", "Original"),
           create: async () => {
             createCount += 1;
             return issueResponse(999, "Unexpected", "Unexpected");
@@ -282,6 +296,8 @@ describe("decomposition executor", () => {
     const octokit = {
       rest: {
         issues: {
+          get: async (parameters: Record<string, unknown>) =>
+            issueResponse(Number(parameters.issue_number), "Original", "Original"),
           create: async (parameters: Record<string, unknown>) => {
             createCount += 1;
             return issueResponse(
@@ -327,6 +343,8 @@ describe("decomposition executor", () => {
       const octokit = {
         rest: {
           issues: {
+            get: async (parameters: Record<string, unknown>) =>
+              issueResponse(Number(parameters.issue_number), "Original", "Original"),
             create: async (parameters: Record<string, unknown>) => {
               mutationCount += 1;
               if (mutationCount === failureAt) throw new Error("mutation failed");

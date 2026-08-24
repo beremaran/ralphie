@@ -12,6 +12,7 @@ import { GitPushMode, GitRemoteSafety } from "../git/remote-safety.ts";
 import {
   buildCommitMessagePrompt,
   buildImplementationPrompt,
+  buildResolutionVerificationPrompt,
   buildReviewFixPrompt,
   buildReviewPrompt,
 } from "../opencode/prompts.ts";
@@ -31,10 +32,12 @@ import type {
 import { IssueArtifactKind } from "./artifacts.ts";
 import {
   commitMessageDecisionSchema,
+  issueResolutionDecisionSchema,
+  IssueResolutionStatus,
   reviewDecisionSchema,
   ReviewVerdict,
 } from "./decisions.ts";
-import { IssueExecutionOutcomeKind } from "./execution.ts";
+import { IssueCompletionKind, IssueExecutionOutcomeKind } from "./execution.ts";
 import { IssueRecovery, type ReviewAttempt } from "./recovery.ts";
 import { REVIEW_ITERATION_LIMIT } from "./stage.ts";
 
@@ -137,6 +140,22 @@ export const ImplementationExecutorLive = Layer.effect(
         Effect.gen(function* () {
           const { context, artifacts } = input;
           yield* checkSignal(context.signal);
+          if (artifacts.has(IssueArtifactKind.IssueResolutionDecision)) {
+            const resolution = yield* artifacts.read(
+              IssueArtifactKind.IssueResolutionDecision,
+            );
+            return resolution.status === IssueResolutionStatus.Resolved
+              ? ({
+                  kind: IssueExecutionOutcomeKind.Completed,
+                  completion: IssueCompletionKind.AlreadyResolved,
+                  resolutionSummary: resolution.summary,
+                  evidence: resolution.evidence,
+                } as const)
+              : ({
+                  kind: IssueExecutionOutcomeKind.Failed,
+                  message: resolution.summary,
+                } as const);
+          }
           if (
             artifacts.has(IssueArtifactKind.IssueCheckpoint) &&
             artifacts.has(IssueArtifactKind.CreatedCommit)
@@ -177,6 +196,7 @@ export const ImplementationExecutorLive = Layer.effect(
                 : [];
               return {
                 kind: IssueExecutionOutcomeKind.Completed,
+                completion: IssueCompletionKind.PushedCommit,
                 commitSha: createdCommit.sha,
                 reviewCount: savedReviews.length,
               } as const;
@@ -253,17 +273,52 @@ export const ImplementationExecutorLive = Layer.effect(
           );
           const hasChanges = yield* operations.hasStagedChanges(context.repositoryPath);
           if (!hasChanges) {
-            yield* progress.emit({
-              ...issueProgress(input),
-              stage: ProgressStage.ChangeStaging,
-              status: ProgressStatus.Skipped,
-              message:
-                "Implementation produced no changes; skipping review and commit.",
-            });
-            return {
-              kind: IssueExecutionOutcomeKind.Skipped,
-              reason: "Implementation agent produced no changes.",
-            } as const;
+            const resolution = yield* stage(
+              progress,
+              input,
+              ProgressStage.ResolutionVerification,
+              "Verifying whether the issue is already resolved...",
+              requestStructuredOutput(context.openCode, {
+                directory: context.repositoryPath,
+                title: `Verify resolution of issue #${context.issue.number}`,
+                prompt: buildResolutionVerificationPrompt({
+                  issue: context.issue,
+                  repositoryPath: context.repositoryPath,
+                  targetBranch: context.targetBranch,
+                }),
+                schema: issueResolutionDecisionSchema,
+                agent: context.openCodeSelection.agent,
+                model: context.openCodeSelection.model,
+                variant: context.openCodeSelection.variant,
+                runId: context.runId,
+                diagnostics: context.openCodeDiagnostics,
+                repositoryInvariant: invariant,
+                verifyRepositoryInvariant: context.repositoryInvariant.verify,
+                progress,
+                progressStage: ProgressStage.ResolutionVerification,
+                progressIssue: issueProgress(input).issue,
+                signal: context.signal,
+              }),
+              ({ output }) =>
+                output.status === IssueResolutionStatus.Resolved
+                  ? "Issue is already resolved in the current checkout."
+                  : "Issue remains unresolved in the current checkout.",
+            );
+            yield* artifacts.write(
+              IssueArtifactKind.IssueResolutionDecision,
+              resolution.output,
+            );
+            return resolution.output.status === IssueResolutionStatus.Resolved
+              ? ({
+                  kind: IssueExecutionOutcomeKind.Completed,
+                  completion: IssueCompletionKind.AlreadyResolved,
+                  resolutionSummary: resolution.output.summary,
+                  evidence: resolution.output.evidence,
+                } as const)
+              : ({
+                  kind: IssueExecutionOutcomeKind.Failed,
+                  message: `Issue remains unresolved after a no-change implementation: ${resolution.output.summary}`,
+                } as const);
           }
 
           const reviews: ReviewAttempt[] = [];
@@ -393,6 +448,7 @@ export const ImplementationExecutorLive = Layer.effect(
               );
               return {
                 kind: IssueExecutionOutcomeKind.Completed,
+                completion: IssueCompletionKind.PushedCommit,
                 commitSha: commit.sha,
                 reviewCount: reviews.length,
               } as const;
