@@ -37,11 +37,11 @@ enough to implement, review, and commit independently.
 - [ ] Reuse `requestStructuredOutput` for every decision task.
 - [x] Add typed handling for OpenCode assistant errors, aborts, output-length
       failures, and structured-output retry exhaustion.
-- [ ] Record every OpenCode session ID in the run diagnostics.
-- [ ] Ensure session failures produce progress failure events with useful context.
+- [x] Record every OpenCode session ID in the run diagnostics.
+- [x] Ensure session failures produce progress failure events with useful context.
 - [x] Define a permission/tool policy that prevents agents from committing,
       pushing, changing branches, or mutating GitHub directly.
-- [ ] Verify repository branch and `HEAD` invariants after every agent session.
+- [x] Verify repository branch and `HEAD` invariants after every agent session.
 - [x] Decide whether successful sessions are retained for inspection or deleted.
 - [x] Add mocked SDK tests for fresh-session behavior and selection propagation.
 
@@ -237,8 +237,8 @@ enough to implement, review, and commit independently.
 - [ ] Revalidate origin ownership before every remote mutation.
 - [ ] Bound issue body, diff, review, and diagnostic artifact sizes.
 - [ ] Redact credentials and sensitive environment values from errors and logs.
-- [ ] Document that implementation agents can edit files in the target checkout.
-- [ ] Add adversarial tests for issue text that attempts to override Git/GitHub
+- [x] Document that implementation agents can edit files in the target checkout.
+- [x] Add adversarial tests for issue text that attempts to override Git/GitHub
       restrictions.
 
 ## 15. End-to-end validation
@@ -261,11 +261,11 @@ enough to implement, review, and commit independently.
 
 - [ ] Update the README when the CLI moves from plan-only to executing mutations.
 - [ ] Document each workflow and its failure/recovery behavior.
-- [ ] Document `--max-issues` behavior for refreshed child issues.
-- [ ] Document model, variant, and agent selection examples.
+- [x] Document `--max-issues` behavior for refreshed child issues.
+- [x] Document model, variant, and agent selection examples.
 - [ ] Document JSON event fields and stability expectations.
 - [ ] Document workspace, diagnostic, run-state, resume, and cleanup behavior.
-- [ ] Add a prominent warning that Ralphie pushes directly to the selected branch.
+- [x] Add a prominent warning that Ralphie pushes directly to the selected branch.
 - [ ] Add `--dry-run` if users need to validate routing without mutations.
 - [ ] Add release packaging and installation instructions.
 - [ ] Add CI for tests, type-checking, builds, and formatting.

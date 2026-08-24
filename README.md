@@ -17,6 +17,12 @@ The CLI also requires these local tools:
 
 ## Usage
 
+> [!WARNING]
+> Ralphie lets implementation agents edit files in the target checkout, then
+> commits and pushes approved changes directly to `--branch`. It does not create
+> a protective worktree, feature branch, or pull request. Use it only where you
+> accept those mutations.
+
 ```bash
 bun run index.ts <repo> [--branch <branch>] [--agent <agent>] [--model <provider/model>] [--model-variant <variant>] [--max-issues <count>] [--issue-label <label>] [--issue-sort <sort>] [--issue-order <order>] [--workspace <path>] [--verbose] [--json|--quiet] [--start-clean] [--cleanup]
 # Example:
@@ -32,7 +38,9 @@ or redirected output. Pass `--verbose` to include event details, `--json` to
 write JSON Lines events to stdout, or `--quiet` to show failures only. `--json`
 and `--quiet` are mutually exclusive.
 By default, Ralphie processes an unlimited number of issues. Pass a positive
-integer to `--max-issues` to set a limit.
+integer to `--max-issues` to set a limit. The budget is charged when work on an
+issue begins and is retained when decomposition refreshes the queue with child
+issues.
 Use repeatable `--issue-label` flags to require labels when selecting issues.
 Issues can be sorted with `--issue-sort created|updated|comments` and
 `--issue-order asc|desc`; the defaults select the oldest-created issue first.
