@@ -169,4 +169,15 @@ describe("Git remote safety", () => {
     const report = await Effect.runPromise(effect);
     expect(report.commitsAheadBase).toBe(1);
   });
+
+  test("accepts an expected commit that already reached the remote", async () => {
+    const report = await Effect.runPromise(
+      verify({
+        counts: "0 1",
+        expectedCommitSha: "abc123",
+        remoteSha: "abc123",
+      }),
+    );
+    expect(report.commitsAheadBase).toBe(1);
+  });
 });

@@ -44,6 +44,7 @@ import {
   type ProgressUpdate,
 } from "../progress/progress.ts";
 import type { IssueCheckpoint } from "../git/issue-checkpoint.ts";
+import { reviewDecisionSchema } from "./decisions.ts";
 
 const checkpoint: IssueCheckpoint = {
   branch: "main",
@@ -67,6 +68,7 @@ const review = (verdict: "approved" | "changes_requested") => ({
 const issueContext = (
   openCode: OpencodeClient,
   verify: IssueExecutionContext["repositoryInvariant"]["verify"] = () => Effect.void,
+  head = checkpoint.sha,
 ): IssueExecutionContext => ({
   issue: {
     number: 42,
@@ -85,7 +87,7 @@ const issueContext = (
   openCodeSelection: { agent: "build" },
   openCodeDiagnostics: makeOpenCodeSessionDiagnostics(() => "now"),
   repositoryInvariant: {
-    capture: () => Effect.succeed({ branch: checkpoint.branch, head: checkpoint.sha }),
+    capture: () => Effect.succeed({ branch: checkpoint.branch, head }),
     verify,
   },
 });
@@ -181,11 +183,12 @@ const run = (
   artifacts: IssueArtifactStore,
   layer: Layer.Layer.Any,
   verify?: IssueExecutionContext["repositoryInvariant"]["verify"],
+  head?: string,
 ) =>
   Effect.gen(function* () {
     const executor = yield* ImplementationExecutor;
     return yield* executor.execute({
-      context: issueContext(client, verify),
+      context: issueContext(client, verify, head),
       artifacts,
     });
   }).pipe(
@@ -251,6 +254,46 @@ describe("implementation executor", () => {
 
     expect(Exit.isFailure(exit)).toBe(true);
     expect(prompted).toBe(false);
+  });
+
+  test("reconciles a commit created before interruption without rerunning the agent", async () => {
+    let pushedSha: string | undefined;
+    const setup = services({
+      operations: {
+        push: (_path, _branch, sha) => {
+          pushedSha = sha;
+          return Effect.void;
+        },
+      },
+    });
+    const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
+    await Effect.runPromise(
+      artifacts.write(IssueArtifactKind.IssueCheckpoint, checkpoint),
+    );
+    await Effect.runPromise(
+      artifacts.appendReview({
+        attempt: 1,
+        sessionID: "review-before-interruption",
+        decision: reviewDecisionSchema.parse(review("approved")),
+      }),
+    );
+    await Effect.runPromise(
+      artifacts.write(IssueArtifactKind.CreatedCommit, {
+        sha: "commit-1",
+        treeSha: "tree-1",
+      }),
+    );
+
+    const result = await Effect.runPromise(
+      run(openCodeClient([]), artifacts, setup.layer, undefined, "commit-1"),
+    );
+
+    expect(result).toEqual({
+      kind: IssueExecutionOutcomeKind.Completed,
+      commitSha: "commit-1",
+      reviewCount: 1,
+    });
+    expect(pushedSha).toBe("commit-1");
   });
 
   test("starts a fresh review-fix session and converges after a requested change", async () => {

@@ -78,6 +78,12 @@ describe("per-issue artifact store", () => {
       store.write(IssueArtifactKind.CommitMessageDecision, commitMessage),
     );
     await Effect.runPromise(
+      store.write(IssueArtifactKind.CreatedCommit, {
+        sha: "commit-sha",
+        treeSha: "tree-sha",
+      }),
+    );
+    await Effect.runPromise(
       store.write(IssueArtifactKind.IssueBreakdownDecision, breakdown),
     );
     await Effect.runPromise(store.recordCreatedIssue("first", 101));
@@ -95,6 +101,9 @@ describe("per-issue artifact store", () => {
     expect(
       await Effect.runPromise(store.read(IssueArtifactKind.CommitMessageDecision)),
     ).toEqual(commitMessage);
+    expect(
+      await Effect.runPromise(store.read(IssueArtifactKind.CreatedCommit)),
+    ).toEqual({ sha: "commit-sha", treeSha: "tree-sha" });
     expect(
       await Effect.runPromise(store.read(IssueArtifactKind.IssueBreakdownDecision)),
     ).toEqual(breakdown);

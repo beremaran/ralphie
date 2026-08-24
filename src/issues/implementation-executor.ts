@@ -137,6 +137,57 @@ export const ImplementationExecutorLive = Layer.effect(
         Effect.gen(function* () {
           const { context, artifacts } = input;
           yield* checkSignal(context.signal);
+          if (
+            artifacts.has(IssueArtifactKind.IssueCheckpoint) &&
+            artifacts.has(IssueArtifactKind.CreatedCommit)
+          ) {
+            const storedCheckpoint = yield* artifacts.read(
+              IssueArtifactKind.IssueCheckpoint,
+            );
+            const createdCommit = yield* artifacts.read(
+              IssueArtifactKind.CreatedCommit,
+            );
+            const actual = yield* context.repositoryInvariant.capture(
+              context.repositoryPath,
+            );
+            if (actual.head.toLowerCase() === createdCommit.sha.toLowerCase()) {
+              yield* remoteSafety
+                .verifyDirectPush({
+                  client: context.octokit,
+                  repository: context.repository,
+                  repositoryPath: context.repositoryPath,
+                  branch: context.targetBranch,
+                  intendedBaseSha: storedCheckpoint.sha,
+                  expectedCommitSha: createdCommit.sha,
+                  pushMode: GitPushMode.NonForce,
+                })
+                .pipe(
+                  Effect.mapError(asRalphieError),
+                  Effect.zipRight(
+                    operations
+                      .push(
+                        context.repositoryPath,
+                        context.targetBranch,
+                        createdCommit.sha,
+                      )
+                      .pipe(Effect.mapError(asRalphieError)),
+                  ),
+                );
+              const savedReviews = artifacts.has(IssueArtifactKind.ReviewAttempts)
+                ? yield* artifacts.read(IssueArtifactKind.ReviewAttempts)
+                : [];
+              return {
+                kind: IssueExecutionOutcomeKind.Completed,
+                commitSha: createdCommit.sha,
+                reviewCount: savedReviews.length,
+              } as const;
+            }
+            if (actual.head.toLowerCase() !== storedCheckpoint.sha.toLowerCase()) {
+              return yield* new RalphieError({
+                message: `Cannot recover issue #${context.issue.number}: checkout HEAD ${actual.head} matches neither checkpoint ${storedCheckpoint.sha} nor created commit ${createdCommit.sha}.`,
+              });
+            }
+          }
           const checkpoint = yield* readCheckpoint(preparation, input);
           if (
             artifacts.has(IssueArtifactKind.ReviewAttempts) ||
@@ -308,6 +359,8 @@ export const ImplementationExecutorLive = Layer.effect(
                 operations.commit(context.repositoryPath, commitMessage.output),
                 "Implementation changes committed.",
               );
+              yield* artifacts.write(IssueArtifactKind.CreatedCommit, commit);
+              yield* checkSignal(context.signal);
               yield* progress.emit({
                 ...issueProgress(input),
                 stage: ProgressStage.Commit,

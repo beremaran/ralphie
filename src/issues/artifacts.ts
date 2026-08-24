@@ -24,6 +24,7 @@ export enum IssueArtifactKind {
   IssueCheckpoint = "issue-checkpoint",
   ReviewAttempts = "review-attempts",
   CommitMessageDecision = "commit-message-decision",
+  CreatedCommit = "created-commit",
   IssueBreakdownDecision = "issue-breakdown-decision",
   CreatedIssueNumbers = "created-issue-numbers",
 }
@@ -35,6 +36,10 @@ export type IssueArtifactValues = {
   readonly [IssueArtifactKind.IssueCheckpoint]: IssueCheckpoint;
   readonly [IssueArtifactKind.ReviewAttempts]: ReadonlyArray<ReviewAttempt>;
   readonly [IssueArtifactKind.CommitMessageDecision]: CommitMessageDecision;
+  readonly [IssueArtifactKind.CreatedCommit]: {
+    readonly sha: string;
+    readonly treeSha: string;
+  };
   readonly [IssueArtifactKind.IssueBreakdownDecision]: IssueBreakdownDecision;
   readonly [IssueArtifactKind.CreatedIssueNumbers]: CreatedIssueNumberMapping;
 };
@@ -109,6 +114,9 @@ const persistedArtifactsSchema = z
       .max(REVIEW_ITERATION_LIMIT)
       .optional(),
     [IssueArtifactKind.CommitMessageDecision]: commitMessageDecisionSchema.optional(),
+    [IssueArtifactKind.CreatedCommit]: z
+      .object({ sha: z.string().min(1), treeSha: z.string().min(1) })
+      .optional(),
     [IssueArtifactKind.IssueBreakdownDecision]: issueBreakdownDecisionSchema.optional(),
     [IssueArtifactKind.CreatedIssueNumbers]: z
       .record(z.string(), z.number().int().positive())
@@ -312,6 +320,7 @@ const makeStore = (
       const nextValues = new Map(values);
       nextValues.delete(IssueArtifactKind.ReviewAttempts);
       nextValues.delete(IssueArtifactKind.CommitMessageDecision);
+      nextValues.delete(IssueArtifactKind.CreatedCommit);
       return save(nextValues);
     },
   };

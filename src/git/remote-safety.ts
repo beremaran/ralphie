@@ -218,7 +218,13 @@ export const GitRemoteSafetyLive = Layer.effect(
             `Failed to read origin/${input.branch}.`,
           );
           const remoteSha = remote.split(/\s+/)[0] ?? "";
-          if (remoteSha.toLowerCase() !== input.intendedBaseSha.toLowerCase()) {
+          const normalizedRemoteSha = remoteSha.toLowerCase();
+          const remoteIsIntendedBase =
+            normalizedRemoteSha === input.intendedBaseSha.toLowerCase();
+          const remoteIsExpectedCommit =
+            input.expectedCommitSha !== undefined &&
+            normalizedRemoteSha === input.expectedCommitSha.toLowerCase();
+          if (!remoteIsIntendedBase && !remoteIsExpectedCommit) {
             return yield* fail(
               GitRemoteSafetyFailureKind.DivergedBase,
               GitDirectPushPolicy.RequireExpectedBase,
