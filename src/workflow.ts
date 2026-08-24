@@ -2,6 +2,7 @@ import { Console, Effect } from "effect";
 
 import {
   CommandRunner,
+  OctokitClient,
   OpenCode,
   RalphieError,
   type OpenCodeServer,
@@ -22,6 +23,8 @@ const requireSuccessfulCommand = (
         message: `${failureMessage}${detail}`,
       });
     }
+
+    return result;
   });
 
 const closeServer = (server: OpenCodeServer) =>
@@ -35,6 +38,22 @@ export const workflow = (repo: string, branch: string) =>
       "GitHub authentication check failed. Run `gh auth login` and try again.",
     );
     yield* Console.log("GitHub authentication verified.");
+
+    const tokenResult = yield* requireSuccessfulCommand(
+      "gh",
+      ["auth", "token"],
+      "Could not retrieve the GitHub authentication token.",
+    );
+    const authToken = tokenResult.stdout.trim();
+    if (!authToken) {
+      return yield* new RalphieError({
+        message: "GitHub CLI returned an empty authentication token.",
+      });
+    }
+
+    const octokit = yield* OctokitClient;
+    yield* octokit.create(authToken);
+    yield* Console.log("Octokit initialized.");
 
     yield* requireSuccessfulCommand(
       "git",

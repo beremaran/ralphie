@@ -25,9 +25,10 @@ bun run index.ts owner/project --branch develop
 
 The branch defaults to `main`. The short form `-b develop` is also supported.
 
-The current scaffold validates GitHub CLI authentication and the Git installation,
-starts an OpenCode server, reports that it is ready, and then shuts the server down
-before exiting. Repository workflow functionality will be added later.
+The current scaffold validates GitHub CLI authentication, retrieves its token to
+initialize Octokit, verifies the Git installation, starts an OpenCode server,
+reports that it is ready, and then shuts the server down before exiting.
+Repository workflow functionality will be added later.
 
 ## Development
 

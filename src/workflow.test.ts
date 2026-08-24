@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Exit, Layer } from "effect";
+import type { Octokit } from "octokit";
 
 import {
   CommandRunner,
+  OctokitClient,
   OpenCode,
   RalphieError,
   type CommandResult,
@@ -17,13 +19,23 @@ type TestRuntimeOptions = {
 function testRuntime(calls: string[], options: TestRuntimeOptions = {}) {
   const commandResults = [...(options.commandResults ?? [])];
 
-  return Layer.merge(
+  return Layer.mergeAll(
     Layer.succeed(CommandRunner, {
       run: (command, args) => {
         calls.push(`${command} ${args.join(" ")}`);
         return Effect.succeed(
-          commandResults.shift() ?? { exitCode: 0, stderr: "" },
+          commandResults.shift() ?? {
+            exitCode: 0,
+            stdout: args[1] === "token" ? "test-token" : "",
+            stderr: "",
+          },
         );
+      },
+    }),
+    Layer.succeed(OctokitClient, {
+      create: (authToken) => {
+        calls.push(`initializeOctokit:${authToken}`);
+        return Effect.succeed({} as Octokit);
       },
     }),
     Layer.succeed(OpenCode, {
@@ -51,6 +63,8 @@ describe("workflow", () => {
 
     expect(calls).toEqual([
       "gh auth status",
+      "gh auth token",
+      "initializeOctokit:test-token",
       "git --version",
       "startServer",
       "closeServer",
@@ -62,7 +76,9 @@ describe("workflow", () => {
     const exit = await workflow("owner/repo", "main").pipe(
       Effect.provide(
         testRuntime(calls, {
-          commandResults: [{ exitCode: 1, stderr: "not logged in" }],
+          commandResults: [
+            { exitCode: 1, stdout: "", stderr: "not logged in" },
+          ],
         }),
       ),
       Effect.runPromiseExit,
@@ -78,8 +94,9 @@ describe("workflow", () => {
       Effect.provide(
         testRuntime(calls, {
           commandResults: [
-            { exitCode: 0, stderr: "" },
-            { exitCode: 1, stderr: "" },
+            { exitCode: 0, stdout: "", stderr: "" },
+            { exitCode: 0, stdout: "test-token", stderr: "" },
+            { exitCode: 1, stdout: "", stderr: "" },
           ],
         }),
       ),
@@ -87,6 +104,29 @@ describe("workflow", () => {
     );
 
     expect(Exit.isFailure(exit)).toBeTrue();
-    expect(calls).toEqual(["gh auth status", "git --version"]);
+    expect(calls).toEqual([
+      "gh auth status",
+      "gh auth token",
+      "initializeOctokit:test-token",
+      "git --version",
+    ]);
+  });
+
+  test("rejects an empty GitHub token", async () => {
+    const calls: string[] = [];
+    const exit = await workflow("owner/repo", "main").pipe(
+      Effect.provide(
+        testRuntime(calls, {
+          commandResults: [
+            { exitCode: 0, stdout: "", stderr: "" },
+            { exitCode: 0, stdout: "", stderr: "" },
+          ],
+        }),
+      ),
+      Effect.runPromiseExit,
+    );
+
+    expect(Exit.isFailure(exit)).toBeTrue();
+    expect(calls).toEqual(["gh auth status", "gh auth token"]);
   });
 });

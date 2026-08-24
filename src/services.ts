@@ -1,5 +1,6 @@
 import { createOpencodeServer } from "@opencode-ai/sdk";
 import { Context, Data, Effect, Layer } from "effect";
+import { Octokit } from "octokit";
 
 export class RalphieError extends Data.TaggedError("RalphieError")<{
   readonly message: string;
@@ -8,6 +9,7 @@ export class RalphieError extends Data.TaggedError("RalphieError")<{
 
 export type CommandResult = {
   readonly exitCode: number;
+  readonly stdout: string;
   readonly stderr: string;
 };
 
@@ -26,12 +28,13 @@ export const CommandRunnerLive = Layer.succeed(CommandRunner, {
     Effect.try({
       try: () => {
         const result = Bun.spawnSync([command, ...args], {
-          stdout: "ignore",
+          stdout: "pipe",
           stderr: "pipe",
         });
 
         return {
           exitCode: result.exitCode,
+          stdout: result.stdout.toString().trim(),
           stderr: result.stderr.toString().trim(),
         };
       },
@@ -66,4 +69,29 @@ export const OpenCodeLive = Layer.succeed(OpenCode, {
   }),
 });
 
-export const LiveRuntime = Layer.merge(CommandRunnerLive, OpenCodeLive);
+export type OctokitService = {
+  readonly create: (
+    authToken: string,
+  ) => Effect.Effect<Octokit, RalphieError>;
+};
+
+export const OctokitClient =
+  Context.GenericTag<OctokitService>("ralphie/OctokitClient");
+
+export const OctokitLive = Layer.succeed(OctokitClient, {
+  create: (authToken) =>
+    Effect.try({
+      try: () => new Octokit({ auth: authToken }),
+      catch: (cause) =>
+        new RalphieError({
+          message: "Failed to initialize Octokit.",
+          cause,
+        }),
+    }),
+});
+
+export const LiveRuntime = Layer.mergeAll(
+  CommandRunnerLive,
+  OctokitLive,
+  OpenCodeLive,
+);
