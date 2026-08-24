@@ -341,7 +341,8 @@ Run `ralphie --help` for the help generated from the current command schema.
 
 Ralphie adapts its progress renderer to its environment:
 
-- interactive terminals receive balanced spinners and concise stage updates;
+- interactive terminals receive one in-place status line for the active leaf
+  stage, while completed milestones remain in the scrollback;
 - CI and redirected output receive durable, append-only lines;
 - `--verbose` adds operational details;
 - `--json` writes one JSON object per line to stdout; and

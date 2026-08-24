@@ -79,7 +79,7 @@ export const runCommand = defineCommand({
       description: "Resume from a saved run-state JSON file",
     }),
   },
-  handler: async ({ flags, positional, spinner, terminal, signal }) => {
+  handler: async ({ flags, positional, terminal, signal }) => {
     const [repo, ...extra] = positional;
 
     if (!repo) {
@@ -114,7 +114,7 @@ export const runCommand = defineCommand({
       ? ProgressRenderMode.Json
       : flags.quiet
         ? ProgressRenderMode.Quiet
-        : terminal.isInteractive
+        : terminal.isInteractive && !terminal.isCI && process.stderr.isTTY === true
           ? ProgressRenderMode.Interactive
           : ProgressRenderMode.Plain;
     const runId = resumeState?.runId ?? crypto.randomUUID();
@@ -131,7 +131,7 @@ export const runCommand = defineCommand({
     const progressLayer = makeProgressReporterLayer({
       mode: progressMode,
       verbose: flags.verbose,
-      spinner,
+      width: () => process.stderr.columns ?? terminal.width,
       write: flags.json
         ? (text) => process.stdout.write(text)
         : (text) => process.stderr.write(text),

@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import type { PromptSpinnerFactory } from "@bunli/core";
 import { Effect } from "effect";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -13,17 +12,12 @@ import {
   ProgressStatus,
 } from "./progress.ts";
 
-const unusedSpinner = (() => {
-  throw new Error("Spinner should not be used in this render mode.");
-}) as PromptSpinnerFactory;
-
 describe("progress reporting", () => {
   test("renders deterministic JSON Lines events", async () => {
     let output = "";
     const layer = makeProgressReporterLayer({
       mode: ProgressRenderMode.Json,
       verbose: false,
-      spinner: unusedSpinner,
       write: (text) => {
         output += text;
       },
@@ -60,7 +54,6 @@ describe("progress reporting", () => {
     const layer = makeProgressReporterLayer({
       mode: ProgressRenderMode.Plain,
       verbose: true,
-      spinner: unusedSpinner,
       write: (text) => {
         output += text;
       },
@@ -83,36 +76,51 @@ describe("progress reporting", () => {
     expect(output).toBe('✓ [1/3] #42 Issue prepared. {"branch":"main"}\n');
   });
 
-  test("uses a spinner for interactive stage transitions", async () => {
-    const calls: string[] = [];
-    const spinner = (() => ({
-      start: () => calls.push("start"),
-      stop: () => calls.push("stop"),
-      succeed: (text?: string) => calls.push(`succeed:${text}`),
-      fail: (text?: string) => calls.push(`fail:${text}`),
-      warn: (text?: string) => calls.push(`warn:${text}`),
-      info: (text?: string) => calls.push(`info:${text}`),
-      update: (text: string) => calls.push(`update:${text}`),
-    })) as PromptSpinnerFactory;
+  test("renders nested interactive stages on one live line", async () => {
+    let output = "";
+    let second = 0;
     const layer = makeProgressReporterLayer({
       mode: ProgressRenderMode.Interactive,
       verbose: false,
-      spinner,
-      write: () => undefined,
+      write: (text) => {
+        output += text;
+      },
+      width: () => 80,
+      now: () => new Date(Date.UTC(2026, 0, 1, 0, 0, second++)),
       runId: "run-1",
     });
 
     await Effect.gen(function* () {
       const progress = yield* ProgressReporter;
       yield* progress.emit({
-        stage: ProgressStage.GitVerification,
+        stage: ProgressStage.IssueExecution,
         status: ProgressStatus.Started,
-        message: "Checking Git...",
+        message: "Working on issue...",
+        issue: { number: 42, title: "Fix issue" },
       });
       yield* progress.emit({
-        stage: ProgressStage.GitVerification,
+        stage: ProgressStage.ComplexityAssessment,
+        status: ProgressStatus.Started,
+        message: "Assessing complexity...",
+        issue: { number: 42, title: "Fix issue" },
+      });
+      yield* progress.emit({
+        stage: ProgressStage.ComplexityAssessment,
         status: ProgressStatus.Succeeded,
-        message: "Git verified.",
+        message: "Complexity assessed.",
+        issue: { number: 42, title: "Fix issue" },
+      });
+      yield* progress.emit({
+        stage: ProgressStage.IssuePlanning,
+        status: ProgressStatus.Info,
+        message: "Using implementation workflow.",
+        issue: { number: 42, title: "Fix issue" },
+      });
+      yield* progress.emit({
+        stage: ProgressStage.IssueExecution,
+        status: ProgressStatus.Succeeded,
+        message: "Issue finished.",
+        issue: { number: 42, title: "Fix issue" },
       });
       yield* progress.emit({
         stage: ProgressStage.Push,
@@ -124,14 +132,53 @@ describe("progress reporting", () => {
         status: ProgressStatus.Failed,
         message: "Push failed.",
       });
+      yield* progress.emit({
+        stage: ProgressStage.Run,
+        status: ProgressStatus.Failed,
+        message: "Run failed.",
+      });
     }).pipe(Effect.provide(layer), Effect.runPromise);
 
-    expect(calls).toEqual([
-      "start",
-      "succeed:✓ Git verified.",
-      "start",
-      "fail:✗ Push failed.",
-    ]);
+    expect(output).toBe(
+      "◐ #42 Working on issue..." +
+        "\r\x1b[2K◐ #42 Assessing complexity..." +
+        "\r\x1b[2K✓ #42 Complexity assessed. (1.0s)\n" +
+        "◐ #42 Working on issue..." +
+        "\r\x1b[2K• #42 Using implementation workflow.\n" +
+        "◐ #42 Working on issue..." +
+        "\r\x1b[2K✓ #42 Issue finished. (4.0s)\n" +
+        "◐ Pushing..." +
+        "\r\x1b[2K✗ Push failed. (1.0s)\n" +
+        "✗ Run failed.\n",
+    );
+    expect(output).not.toContain("\x1b[H");
+    expect(output).not.toContain("\x1b[J");
+    expect(output).not.toContain("\x1b[?25l");
+  });
+
+  test("clips an interactive live line before it can wrap", async () => {
+    let output = "";
+    const layer = makeProgressReporterLayer({
+      mode: ProgressRenderMode.Interactive,
+      verbose: false,
+      write: (text) => {
+        output += text;
+      },
+      width: () => 24,
+      runId: "run-1",
+    });
+
+    await Effect.gen(function* () {
+      const progress = yield* ProgressReporter;
+      yield* progress.emit({
+        stage: ProgressStage.RepositoryPreparation,
+        status: ProgressStatus.Started,
+        message: "Preparing a repository with a very long name...",
+      });
+    }).pipe(Effect.provide(layer), Effect.runPromise);
+
+    expect(Bun.stringWidth(output)).toBeLessThanOrEqual(23);
+    expect(output).toEndWith("…");
   });
 
   test("quiet mode only emits failures", async () => {
@@ -139,7 +186,6 @@ describe("progress reporting", () => {
     const layer = makeProgressReporterLayer({
       mode: ProgressRenderMode.Quiet,
       verbose: false,
-      spinner: unusedSpinner,
       write: (text) => {
         output += text;
       },
@@ -168,7 +214,6 @@ describe("progress reporting", () => {
     const layer = makeProgressReporterLayer({
       mode: ProgressRenderMode.Json,
       verbose: true,
-      spinner: unusedSpinner,
       write: (text) => {
         output += text;
       },
@@ -197,7 +242,6 @@ describe("progress reporting", () => {
       const layer = makeProgressReporterLayer({
         mode: ProgressRenderMode.Quiet,
         verbose: false,
-        spinner: unusedSpinner,
         write: () => undefined,
         now: () => new Date("2026-08-24T01:02:03.000Z"),
         runId: "run-durable",
@@ -242,7 +286,6 @@ describe("progress reporting", () => {
       const layer = makeProgressReporterLayer({
         mode: ProgressRenderMode.Json,
         verbose: false,
-        spinner: unusedSpinner,
         write: (text) => {
           output += text;
         },
@@ -285,7 +328,6 @@ describe("progress reporting", () => {
     const layer = makeProgressReporterLayer({
       mode: ProgressRenderMode.Plain,
       verbose: false,
-      spinner: unusedSpinner,
       write: (text) => {
         output += text;
       },

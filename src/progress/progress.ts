@@ -1,4 +1,3 @@
-import type { PromptSpinnerFactory } from "@bunli/core";
 import { Context, Effect, Layer } from "effect";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
@@ -81,8 +80,8 @@ export const ProgressReporter = Context.GenericTag<ProgressReporterService>(
 export type ProgressRendererOptions = {
   readonly mode: ProgressRenderMode;
   readonly verbose: boolean;
-  readonly spinner: PromptSpinnerFactory;
   readonly write?: (text: string) => void;
+  readonly width?: () => number;
   readonly now?: () => Date;
   readonly runId?: string;
   /** Optional durable, redacted JSON Lines audit log. */
@@ -108,17 +107,46 @@ const formatDetails = (
   details: Readonly<Record<string, unknown>> | undefined,
 ): string => (details === undefined ? "" : ` ${JSON.stringify(details)}`);
 
+const CLEAR_LIVE_LINE = "\r\x1b[2K";
+
+const clipToWidth = (text: string, width: number): string => {
+  const available = Math.max(1, width - 1);
+  if (Bun.stringWidth(text) <= available) return text;
+  if (available === 1) return "…";
+
+  const contentWidth = available - Bun.stringWidth("…");
+  let clipped = "";
+  let used = 0;
+  for (const character of text) {
+    const characterWidth = Bun.stringWidth(character);
+    if (used + characterWidth > contentWidth) break;
+    clipped += character;
+    used += characterWidth;
+  }
+  return `${clipped}…`;
+};
+
+const progressIdentity = (event: ProgressEvent): string =>
+  `${event.stage}:${event.issue?.number ?? ""}:${event.attempt ?? ""}`;
+
+type ActiveProgress = {
+  readonly identity: string;
+  readonly line: string;
+  readonly startedAt: number;
+};
+
 export const makeProgressReporterLayer = ({
   mode,
   verbose,
-  spinner: createSpinner,
   write = (text) => process.stderr.write(text),
+  width = () => process.stderr.columns ?? 80,
   now = () => new Date(),
   runId = crypto.randomUUID(),
   eventLogPath,
 }: ProgressRendererOptions) =>
   Layer.sync(ProgressReporter, () => {
-    let activeSpinner: ReturnType<PromptSpinnerFactory> | undefined;
+    const activeProgress: ActiveProgress[] = [];
+    let liveLineVisible = false;
     let persistEvents = true;
 
     const renderLine = (event: ProgressEvent): string => {
@@ -135,9 +163,37 @@ export const makeProgressReporterLayer = ({
       return `${statusSymbol(event.status)}${position}${attempt}${issue} ${event.message}${details}`;
     };
 
+    const clearLiveLine = () => {
+      if (!liveLineVisible) return;
+      write(CLEAR_LIVE_LINE);
+      liveLineVisible = false;
+    };
+
+    const renderLiveLine = () => {
+      const active = activeProgress.at(-1);
+      if (active === undefined) return;
+      write(clipToWidth(active.line, width()));
+      liveLineVisible = true;
+    };
+
+    const appendLine = (line: string) => {
+      clearLiveLine();
+      write(`${line}\n`);
+      renderLiveLine();
+    };
+
+    const removeActive = (identity: string): ActiveProgress | undefined => {
+      for (let index = activeProgress.length - 1; index >= 0; index -= 1) {
+        if (activeProgress[index]?.identity !== identity) continue;
+        return activeProgress.splice(index, 1)[0];
+      }
+      return undefined;
+    };
+
     return {
       emit: (update) =>
         Effect.sync(() => {
+          const emittedAt = now();
           const event: ProgressEvent = {
             ...update,
             message: redactSensitiveText(update.message),
@@ -149,7 +205,7 @@ export const makeProgressReporterLayer = ({
                   >,
                 }),
             runId,
-            timestamp: now().toISOString(),
+            timestamp: emittedAt.toISOString(),
           };
 
           if (eventLogPath !== undefined && persistEvents) {
@@ -175,27 +231,36 @@ export const makeProgressReporterLayer = ({
           }
 
           if (event.status === ProgressStatus.Started) {
-            activeSpinner?.stop();
-            activeSpinner = createSpinner({ text: line, showTimer: true });
-            activeSpinner.start();
+            clearLiveLine();
+            removeActive(progressIdentity(event));
+            activeProgress.push({
+              identity: progressIdentity(event),
+              line,
+              startedAt: emittedAt.getTime(),
+            });
+            renderLiveLine();
             return;
           }
 
-          if (activeSpinner !== undefined) {
-            if (event.status === ProgressStatus.Succeeded) {
-              activeSpinner.succeed(line);
-            } else if (event.status === ProgressStatus.Failed) {
-              activeSpinner.fail(line);
-            } else if (event.status === ProgressStatus.Skipped) {
-              activeSpinner.warn(line);
-            } else {
-              activeSpinner.info(line);
-            }
-            activeSpinner = undefined;
-            return;
+          const terminalRunEvent =
+            event.stage === ProgressStage.Run &&
+            (event.status === ProgressStatus.Succeeded ||
+              event.status === ProgressStatus.Failed);
+          const settled =
+            event.status === ProgressStatus.Succeeded ||
+            event.status === ProgressStatus.Failed ||
+            event.status === ProgressStatus.Skipped;
+          const active = settled ? removeActive(progressIdentity(event)) : undefined;
+          if (terminalRunEvent) {
+            activeProgress.length = 0;
           }
-
-          write(`${line}\n`);
+          const duration =
+            active === undefined
+              ? ""
+              : ` (${(
+                  Math.max(0, emittedAt.getTime() - active.startedAt) / 1000
+                ).toFixed(1)}s)`;
+          appendLine(`${line}${duration}`);
         }),
       stopPersisting: Effect.sync(() => {
         persistEvents = false;

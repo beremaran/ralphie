@@ -19,10 +19,14 @@ All notable changes to Ralphie are documented here. The project follows
 - Rely on the authoritative non-force Git push for GitHub branch policy and
   permission enforcement while retaining destination, commit, and divergence
   safety checks.
+- Render interactive progress through one stderr status line with nested-stage
+  tracking instead of creating OpenTUI spinner renderers.
 
 ### Fixed
 
 - Prevent final progress events from recreating a workspace removed by
   `--cleanup`.
+- Prevent viewport repainting, split-stream output, and accumulating
+  `CliRenderer` destroy listeners during long runs.
 
 [Unreleased]: https://github.com/beremaran/ralphie/commits/main

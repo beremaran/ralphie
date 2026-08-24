@@ -202,7 +202,8 @@ enough to implement, review, and commit independently.
 - [x] Include session IDs, commit SHAs, created issue numbers, and diagnostic
       paths only in verbose details or JSON events.
 - [x] Ensure secrets and the GitHub token can never appear in progress details.
-- [x] Keep interactive spinner transitions balanced on success and failure.
+- [x] Keep interactive live-status transitions balanced on success and failure,
+      including nested stages.
 - [x] Ensure non-TTY output remains append-only and readable.
 - [x] Add a final summary of completed, decomposed, escalated, skipped, and failed
       issues.
