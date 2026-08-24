@@ -37,11 +37,11 @@ enough to implement, review, and commit independently.
 - [ ] Reuse `requestStructuredOutput` for every decision task.
 - [x] Add typed handling for OpenCode assistant errors, aborts, output-length
       failures, and structured-output retry exhaustion.
-- [ ] Record every OpenCode session ID in the run diagnostics.
-- [ ] Ensure session failures produce progress failure events with useful context.
-- [ ] Define a permission/tool policy that prevents agents from committing,
+- [x] Record every OpenCode session ID in the run diagnostics.
+- [x] Ensure session failures produce progress failure events with useful context.
+- [x] Define a permission/tool policy that prevents agents from committing,
       pushing, changing branches, or mutating GitHub directly.
-- [ ] Verify repository branch and `HEAD` invariants after every agent session.
+- [x] Verify repository branch and `HEAD` invariants after every agent session.
 - [ ] Decide whether successful sessions are retained for inspection or deleted.
 - [x] Add mocked SDK tests for fresh-session behavior and selection propagation.
 
@@ -82,15 +82,15 @@ enough to implement, review, and commit independently.
 - [x] Add an operation to read the exact staged binary diff.
 - [x] Add an operation to detect an empty staged change set.
 - [ ] Define behavior for an agent that reports success but produces no changes.
-- [ ] Add a deterministic commit operation that accepts the validated generated
+- [x] Add a deterministic commit operation that accepts the validated generated
       subject and optional body.
-- [ ] Verify the created commit contains the expected staged tree.
-- [ ] Add a non-force push operation targeting the configured branch.
-- [ ] Detect and clearly report non-fast-forward push rejection.
-- [ ] Decide and implement the remote-movement policy: halt, fetch/retry, or
+- [x] Verify the created commit contains the expected staged tree.
+- [x] Add a non-force push operation targeting the configured branch.
+- [x] Detect and clearly report non-fast-forward push rejection.
+- [x] Decide and implement the remote-movement policy: halt, fetch/retry, or
       restart the issue from the new remote base.
-- [ ] Verify a successful push placed the expected commit on the remote branch.
-- [ ] Verify the checkout is clean after commit and push.
+- [x] Verify a successful push placed the expected commit on the remote branch.
+- [x] Verify the checkout is clean after commit and push.
 - [ ] Add temporary-repository integration tests for checkpoint, stage, diff,
       restore, commit, and push operations.
 
