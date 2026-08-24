@@ -75,9 +75,9 @@ enough to implement, review, and commit independently.
 
 ## 5. Deterministic Git issue operations
 
-- [ ] Capture and store the clean issue-base checkpoint before an implementation
+- [x] Capture and store the clean issue-base checkpoint before an implementation
       session begins.
-- [ ] Fail before agent work if the branch or checkout is not clean.
+- [x] Fail before agent work if the branch or checkout is not clean.
 - [x] Add a deterministic `git add --all` operation.
 - [x] Add an operation to read the exact staged binary diff.
 - [x] Add an operation to detect an empty staged change set.
@@ -91,7 +91,7 @@ enough to implement, review, and commit independently.
       restart the issue from the new remote base.
 - [x] Verify a successful push placed the expected commit on the remote branch.
 - [x] Verify the checkout is clean after commit and push.
-- [ ] Add temporary-repository integration tests for checkpoint, stage, diff,
+- [x] Add temporary-repository integration tests for checkpoint, stage, diff,
       restore, commit, and push operations.
 
 ## 6. Implementation workflow

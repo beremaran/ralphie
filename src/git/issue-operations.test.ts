@@ -9,6 +9,10 @@ import {
   CommandRunnerLive,
 } from "../process/command-runner.ts";
 import {
+  GitIssueCheckpoint,
+  GitIssueCheckpointLive,
+} from "./issue-checkpoint.ts";
+import {
   GitPushError,
   GitPushFailureKind,
   GitRemoteMovementPolicy,
@@ -209,6 +213,78 @@ describe("deterministic Git issue operations", () => {
       await rm(repositoryPath, { recursive: true, force: true });
       await rm(remotePath, { recursive: true, force: true });
       await rm(otherRepositoryPath, { recursive: true, force: true });
+    }
+  });
+
+  test("runs checkpoint, stage, binary diff, restore, commit, and push in one temporary checkout flow", async () => {
+    const repositoryPath = await setupRepository();
+    const remotePath = await mkdtemp(join(tmpdir(), "ralphie-git-remote-"));
+    try {
+      await runGit(remotePath, ["init", "--bare"]);
+      await runGit(repositoryPath, ["remote", "add", "origin", remotePath]);
+      await runGit(repositoryPath, ["push", "--no-force", "origin", "main"]);
+
+      const checkpoint = await Effect.gen(function* () {
+        const checkpoints = yield* GitIssueCheckpoint;
+        return yield* checkpoints.capture(repositoryPath, "main");
+      }).pipe(
+        Effect.provide(GitIssueCheckpointLive),
+        Effect.provide(CommandRunnerLive),
+        Effect.runPromise,
+      );
+
+      await writeFile(join(repositoryPath, "temporary.bin"), Buffer.from([0, 4, 5, 6]));
+      const stagedDiff = await Effect.gen(function* () {
+        const operations = yield* GitIssueOperations;
+        yield* operations.stageAll(repositoryPath);
+        return yield* operations.readStagedBinaryDiff(repositoryPath);
+      }).pipe(
+        Effect.provide(GitIssueOperationsLive),
+        Effect.provide(CommandRunnerLive),
+        Effect.runPromise,
+      );
+      expect(stagedDiff).toContain("GIT binary patch");
+
+      await Effect.gen(function* () {
+        const checkpoints = yield* GitIssueCheckpoint;
+        yield* checkpoints.restore(repositoryPath, checkpoint);
+      }).pipe(
+        Effect.provide(GitIssueCheckpointLive),
+        Effect.provide(CommandRunnerLive),
+        Effect.runPromise,
+      );
+      expect((await runGit(repositoryPath, ["status", "--porcelain=v1"])).stdout).toBe("");
+      expect((await runGit(repositoryPath, ["rev-parse", "HEAD"])).stdout).toBe(
+        checkpoint.sha,
+      );
+
+      await writeFile(join(repositoryPath, "final.txt"), "final implementation\n");
+      const commit = await Effect.gen(function* () {
+        const operations = yield* GitIssueOperations;
+        yield* operations.stageAll(repositoryPath);
+        return yield* operations.commit(repositoryPath, {
+          subject: "finish issue integration flow",
+        });
+      }).pipe(
+        Effect.provide(GitIssueOperationsLive),
+        Effect.provide(CommandRunnerLive),
+        Effect.runPromise,
+      );
+      await Effect.gen(function* () {
+        const operations = yield* GitIssueOperations;
+        yield* operations.push(repositoryPath, "main", commit.sha);
+      }).pipe(
+        Effect.provide(GitIssueOperationsLive),
+        Effect.provide(CommandRunnerLive),
+        Effect.runPromise,
+      );
+      expect((await runGit(remotePath, ["rev-parse", "refs/heads/main"])).stdout).toBe(
+        commit.sha,
+      );
+      expect((await runGit(repositoryPath, ["status", "--porcelain=v1"])).stdout).toBe("");
+    } finally {
+      await rm(repositoryPath, { recursive: true, force: true });
+      await rm(remotePath, { recursive: true, force: true });
     }
   });
 });
