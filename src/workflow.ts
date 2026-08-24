@@ -5,6 +5,7 @@ import {
   OctokitClient,
   OpenCode,
   RalphieError,
+  Repository,
   Workspace,
   type OpenCodeServer,
 } from "./services.ts";
@@ -84,6 +85,15 @@ export const workflow = ({
       "Git is not installed or is not available on PATH.",
     );
     yield* Console.log("Git installation verified.");
+
+    const repository = yield* Repository;
+    const prepared = yield* repository.prepare(repo, branch, workspace);
+    yield* Console.log(
+      `${prepared.cloned ? "Repository cloned" : "Existing repository ready"}: ${prepared.path}.`,
+    );
+    if (prepared.branchChanged) {
+      yield* Console.log(`Switched to branch ${branch}.`);
+    }
 
     const openCode = yield* OpenCode;
     yield* Effect.acquireUseRelease(

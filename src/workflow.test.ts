@@ -7,6 +7,7 @@ import {
   OctokitClient,
   OpenCode,
   RalphieError,
+  Repository,
   Workspace,
   type CommandResult,
 } from "./services.ts";
@@ -51,6 +52,16 @@ function testRuntime(calls: string[], options: TestRuntimeOptions = {}) {
             };
         }),
     }),
+    Layer.succeed(Repository, {
+      prepare: (repo, branch, workspace) => {
+        calls.push(`prepareRepository:${repo}:${branch}:${workspace}`);
+        return Effect.succeed({
+          path: `${workspace}/repo`,
+          cloned: true,
+          branchChanged: branch !== "main",
+        });
+      },
+    }),
     Layer.succeed(Workspace, {
       remove: (workspace) => {
         calls.push(`removeWorkspace:${workspace}`);
@@ -84,6 +95,7 @@ describe("workflow", () => {
       "gh auth token",
       "initializeOctokit:test-token",
       "git --version",
+      "prepareRepository:owner/repo:develop:/tmp/ralphie",
       "startServer",
       "closeServer",
       "removeWorkspace:/tmp/ralphie",

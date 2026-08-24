@@ -35,9 +35,10 @@ Pass `--start-clean` to remove an existing workspace before any other workflow
 work begins. It uses the same protected-path checks as `--cleanup`.
 
 The current scaffold validates GitHub CLI authentication, retrieves its token to
-initialize Octokit, verifies the Git installation, starts an OpenCode server,
-reports that it is ready, and then shuts the server down before exiting.
-Repository workflow functionality will be added later.
+initialize Octokit, and verifies the Git installation. It then clones the target
+repository into `<workspace>/<repository>` (or safely reuses a matching existing
+checkout), fetches it, switches to the requested branch when necessary, and
+starts an OpenCode server before exiting.
 
 ## Development
 
