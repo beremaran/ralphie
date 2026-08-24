@@ -299,8 +299,15 @@ export const ImplementationExecutorLive = Layer.effect(
                 ProgressStage.Commit,
                 "Committing implementation changes...",
                 operations.commit(context.repositoryPath, commitMessage.output),
-                (result) => `Committed ${result.sha}.`,
+                "Implementation changes committed.",
               );
+              yield* progress.emit({
+                ...issueProgress(input),
+                stage: ProgressStage.Commit,
+                status: ProgressStatus.Info,
+                message: "Created the issue commit.",
+                details: { commitSha: commit.sha },
+              });
               yield* stage(
                 progress,
                 input,
@@ -323,6 +330,7 @@ export const ImplementationExecutorLive = Layer.effect(
                   ),
                 ),
                 `Pushed ${context.targetBranch}.`,
+                { commitSha: commit.sha },
               );
               return {
                 kind: IssueExecutionOutcomeKind.Completed,

@@ -62,7 +62,43 @@ export const DecompositionExecutorLive = Layer.effect(
       effect: Effect.Effect<Output, RalphieError>,
       input: WorkflowExecutorInput,
     ): Effect.Effect<Output, RalphieError> =>
-      effect.pipe(
+      progress.emit({
+        issue: {
+          number: input.context.issue.number,
+          title: input.context.issue.title,
+        },
+        stage:
+          operation === "close-original"
+            ? ProgressStage.IssueClosure
+            : ProgressStage.IssueCreation,
+        status: ProgressStatus.Started,
+        message: `Applying GitHub mutation ${operation}...`,
+        details: { operation },
+      }).pipe(
+        Effect.zipRight(effect),
+        Effect.tap((output) =>
+          progress.emit({
+            issue: {
+              number: input.context.issue.number,
+              title: input.context.issue.title,
+            },
+            stage:
+              operation === "close-original"
+                ? ProgressStage.IssueClosure
+                : ProgressStage.IssueCreation,
+            status: ProgressStatus.Succeeded,
+            message: `GitHub mutation ${operation} completed.`,
+            details: {
+              operation,
+              ...(typeof output === "object" &&
+              output !== null &&
+              "number" in output &&
+              typeof output.number === "number"
+                ? { createdIssueNumber: output.number }
+                : {}),
+            },
+          }),
+        ),
         Effect.catchTag("RalphieError", (error) =>
           Effect.gen(function* () {
             yield* progress.emit({

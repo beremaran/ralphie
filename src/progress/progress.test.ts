@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import type { PromptSpinnerFactory } from "@bunli/core";
 import { Effect } from "effect";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   makeProgressReporterLayer,
@@ -172,5 +175,48 @@ describe("progress reporting", () => {
     expect(output).not.toContain("private-value");
     expect(output).not.toContain('"secret"');
     expect(output).toContain("[REDACTED]");
+  });
+
+  test("persists redacted JSON Lines independently of the renderer", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "ralphie-progress-"));
+    const eventLogPath = join(directory, "run", "events.jsonl");
+    try {
+      const layer = makeProgressReporterLayer({
+        mode: ProgressRenderMode.Quiet,
+        verbose: false,
+        spinner: unusedSpinner,
+        write: () => undefined,
+        now: () => new Date("2026-08-24T01:02:03.000Z"),
+        runId: "run-durable",
+        eventLogPath,
+      });
+
+      await Effect.gen(function* () {
+        const progress = yield* ProgressReporter;
+        yield* progress.emit({
+          stage: ProgressStage.Commit,
+          status: ProgressStatus.Succeeded,
+          message: "Committed with Bearer private-value.",
+          details: { commitSha: "abc123", token: "private-value" },
+        });
+      }).pipe(Effect.provide(layer), Effect.runPromise);
+
+      const events = (await readFile(eventLogPath, "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+      expect(events).toEqual([
+        {
+          runId: "run-durable",
+          timestamp: "2026-08-24T01:02:03.000Z",
+          stage: ProgressStage.Commit,
+          status: ProgressStatus.Succeeded,
+          message: "Committed with Bearer [REDACTED]",
+          details: { commitSha: "abc123", token: "[REDACTED]" },
+        },
+      ]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });

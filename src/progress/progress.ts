@@ -1,5 +1,7 @@
 import type { PromptSpinnerFactory } from "@bunli/core";
 import { Context, Effect, Layer } from "effect";
+import { appendFileSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 import { redactSensitiveText, redactSensitiveValue } from "../shared/redaction.ts";
 
 export enum ProgressStage {
@@ -81,6 +83,8 @@ export type ProgressRendererOptions = {
   readonly write?: (text: string) => void;
   readonly now?: () => Date;
   readonly runId?: string;
+  /** Optional durable, redacted JSON Lines audit log. */
+  readonly eventLogPath?: string;
 };
 
 const statusSymbol = (status: ProgressStatus): string => {
@@ -109,6 +113,7 @@ export const makeProgressReporterLayer = ({
   write = (text) => process.stderr.write(text),
   now = () => new Date(),
   runId = crypto.randomUUID(),
+  eventLogPath,
 }: ProgressRendererOptions) =>
   Layer.sync(ProgressReporter, () => {
     let activeSpinner: ReturnType<PromptSpinnerFactory> | undefined;
@@ -143,6 +148,11 @@ export const makeProgressReporterLayer = ({
             runId,
             timestamp: now().toISOString(),
           };
+
+          if (eventLogPath !== undefined) {
+            mkdirSync(dirname(eventLogPath), { recursive: true });
+            appendFileSync(eventLogPath, `${JSON.stringify(event)}\n`, "utf8");
+          }
 
           if (mode === ProgressRenderMode.Json) {
             write(`${JSON.stringify(event)}\n`);

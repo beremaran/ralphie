@@ -1,5 +1,6 @@
 import { defineCommand, option } from "@bunli/core";
 import { Effect, Layer } from "effect";
+import { dirname, join } from "node:path";
 import { z } from "zod";
 
 import { IssueOrder, IssueSort } from "./github/issues.ts";
@@ -21,6 +22,7 @@ import {
   RunStateStoreLive,
 } from "./run/state.ts";
 import { reconcileRunState } from "./run/reconciliation.ts";
+import { resolveWorkspacePath } from "./workspace/workspace.ts";
 
 export const runCommand = defineCommand({
   name: "run",
@@ -118,6 +120,15 @@ export const runCommand = defineCommand({
           ? ProgressRenderMode.Interactive
           : ProgressRenderMode.Plain;
     const runId = resumeState?.runId ?? crypto.randomUUID();
+    const eventLogPath = flags.resume === undefined
+      ? join(
+          resolveWorkspacePath(flags.workspace),
+          ".ralphie",
+          "runs",
+          runId,
+          "events.jsonl",
+        )
+      : join(dirname(flags.resume), "events.jsonl");
     const progressLayer = makeProgressReporterLayer({
       mode: progressMode,
       verbose: flags.verbose,
@@ -126,6 +137,7 @@ export const runCommand = defineCommand({
         ? (text) => process.stdout.write(text)
         : (text) => process.stderr.write(text),
       runId,
+      eventLogPath,
     });
 
     await workflow({
