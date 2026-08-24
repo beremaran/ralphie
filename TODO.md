@@ -253,9 +253,9 @@ enough to implement, review, and commit independently.
 - [ ] Run a one-issue dry run against `beremaran/opencode-goal` (the live
       mutation-free run succeeded on 2026-08-24, but the repository had zero
       open issues to assess).
-- [ ] Run a disposable end-to-end issue through implementation, review, commit,
+- [x] Run a disposable end-to-end issue through implementation, review, commit,
       and push.
-- [ ] Run a disposable end-to-end decomposition and verify all links and closure.
+- [x] Run a disposable end-to-end decomposition and verify all links and closure.
 
 ## 16. Documentation and release readiness
 
