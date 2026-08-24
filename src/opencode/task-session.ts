@@ -30,6 +30,7 @@ export type OpenCodeTaskRequest = OpenCodeTaskSessionRequest & {
   readonly prompt: string;
   readonly repositoryInvariant?: OpenCodeRepositoryInvariant;
   readonly verifyRepositoryInvariant?: OpenCodeRepositoryInvariantVerifier;
+  readonly verifyAfter?: () => Effect.Effect<void, RalphieError>;
   readonly progress?: ProgressReporterService;
   readonly progressStage?: ProgressStage;
   readonly progressIssue?: ProgressIssue;
@@ -361,6 +362,9 @@ export const runOpenCodeTask = (
         request.directory,
         request.repositoryInvariant,
       );
+    }
+    if (request.verifyAfter !== undefined) {
+      yield* request.verifyAfter();
     }
 
     return {

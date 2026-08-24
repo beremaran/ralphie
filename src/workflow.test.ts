@@ -17,6 +17,7 @@ import {
 import { GitHubRepositoryPatterns } from "./github/repository-patterns.ts";
 import {
   IssueCompletionKind,
+  type IssueExecutionContext,
   type IssueExecutionOutcome,
   IssueExecutionOutcomeKind,
 } from "./issues/execution.ts";
@@ -62,6 +63,7 @@ type TestRuntimeOptions = {
     readonly owner: string;
     readonly name: string;
   }>;
+  readonly executionContexts?: IssueExecutionContext[];
 };
 
 function testRuntime(
@@ -97,11 +99,11 @@ function testRuntime(
         calls.push("verifyGitInstalled");
         return options.gitFailure ? Effect.fail(options.gitFailure) : Effect.void;
       }),
-      prepare: (repo, branch, workspace) => {
+      prepare: (repo, branch, workspace, destinationPath) => {
         calls.push(`prepareRepository:${repo}:${branch}:${workspace}`);
         if (options.abortAt === "repository") options.abortController?.abort();
         const prepared = {
-          path: `${workspace}/repo`,
+          path: destinationPath ?? `${workspace}/repo`,
           cloned: true,
           branchChanged: branch !== "main",
           cleaned: false,
@@ -162,14 +164,11 @@ function testRuntime(
       },
     }),
     Layer.succeed(IssueExecutor, {
-      execute: ({
-        issue,
-        repository,
-        repositoryPath,
-        targetBranch,
-        openCodeSelection,
-      }) =>
+      execute: (context) =>
         Effect.gen(function* () {
+          const { issue, repository, repositoryPath, targetBranch, openCodeSelection } =
+            context;
+          options.executionContexts?.push(context);
           calls.push(
             `executeIssue:${issue.number}:${repositoryPath}:${targetBranch}:${openCodeSelection.agent}`,
           );
@@ -703,7 +702,7 @@ describe("batch workflow", () => {
     );
 
     expect(Exit.isFailure(exit)).toBeTrue();
-    expect(calls).toContain("executeIssue:42:/tmp/ralphie/repo:develop:build");
+    expect(calls).toContain("executeIssue:42:/tmp/ralphie/succeeding:develop:build");
     expect(calls.filter((call) => call === "closeIssue:42")).toHaveLength(1);
     expect(calls.filter((call) => call === "closeServer")).toHaveLength(1);
     expect(calls).not.toContain("removeWorkspace:/tmp/ralphie");
@@ -742,5 +741,82 @@ describe("batch workflow", () => {
     expect(calls.filter((call) => call === "initializeGitHub")).toHaveLength(1);
     expect(calls.filter((call) => call === "startServer")).toHaveLength(1);
     expect(calls).toContain("resolvePattern:owner/finance-*");
+  });
+
+  test("prepares a shared project root and serializes its repository issue loops", async () => {
+    const calls: string[] = [];
+    const contexts: IssueExecutionContext[] = [];
+    const summaries = await batchWorkflow({
+      repositories: [
+        {
+          ...baseOptions,
+          project: "proj-b",
+          repo: "owner/frontend",
+          runId: "run-front",
+        },
+        {
+          ...baseOptions,
+          project: "proj-b",
+          repo: "owner/backend",
+          runId: "run-back",
+        },
+      ],
+      workspace: baseOptions.workspace,
+      startClean: false,
+      cleanup: false,
+    }).pipe(
+      Effect.provide(testRuntime(calls, [], { executionContexts: contexts })),
+      Effect.runPromise,
+    );
+
+    expect(summaries.map(({ repository }) => repository)).toEqual([
+      "owner/frontend",
+      "owner/backend",
+    ]);
+    expect(contexts.map(({ workingDirectory }) => workingDirectory)).toEqual([
+      "/tmp/ralphie/proj-b",
+      "/tmp/ralphie/proj-b",
+    ]);
+    expect(
+      contexts[0]?.projectRepositories?.map(
+        ({ repository, repositoryPath }) => `${repository}:${repositoryPath}`,
+      ),
+    ).toEqual([
+      "owner/frontend:/tmp/ralphie/proj-b/frontend",
+      "owner/backend:/tmp/ralphie/proj-b/backend",
+    ]);
+    expect(calls.findIndex((call) => call === "closeIssue:42")).toBeLessThan(
+      calls.findLastIndex((call) => call.startsWith("executeIssue:42:")),
+    );
+  });
+
+  test("halts sibling repository issue loops after a project failure", async () => {
+    const calls: string[] = [];
+    const exit = await batchWorkflow({
+      repositories: [
+        {
+          ...baseOptions,
+          project: "project",
+          repo: "owner/failing",
+          runId: "run-failing",
+        },
+        {
+          ...baseOptions,
+          project: "project",
+          repo: "owner/not-started",
+          runId: "run-not-started",
+        },
+      ],
+      workspace: baseOptions.workspace,
+      startClean: false,
+      cleanup: false,
+    }).pipe(
+      Effect.provide(testRuntime(calls, [], { failedRepository: "owner/failing" })),
+      Effect.runPromiseExit,
+    );
+
+    expect(Exit.isFailure(exit)).toBeTrue();
+    expect(calls.some((call) => call.includes("/project/failing"))).toBeTrue();
+    expect(calls.some((call) => call.includes("/project/not-started"))).toBeFalse();
   });
 });

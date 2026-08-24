@@ -155,6 +155,14 @@ export const DecompositionExecutorLive = Layer.effect(
       execute: (input) =>
         Effect.gen(function* () {
           const { context, artifacts } = input;
+          const workingDirectory = context.workingDirectory ?? context.repositoryPath;
+          const projectRepositories = context.projectRepositories ?? [
+            {
+              repository: context.repository,
+              repositoryPath: context.repositoryPath,
+              branch: context.targetBranch,
+            },
+          ];
           const lineage = nextDecompositionLineage(context.issue);
           const reviewAttempts = artifacts.has(IssueArtifactKind.ReviewAttempts)
             ? yield* artifacts.read(IssueArtifactKind.ReviewAttempts)
@@ -163,21 +171,31 @@ export const DecompositionExecutorLive = Layer.effect(
           const breakdown = artifacts.has(IssueArtifactKind.IssueBreakdownDecision)
             ? yield* artifacts.read(IssueArtifactKind.IssueBreakdownDecision)
             : yield* Effect.gen(function* () {
-                const invariant = yield* context.repositoryInvariant.capture(
-                  context.repositoryPath,
+                const invariants = yield* Effect.forEach(
+                  projectRepositories,
+                  (repository) =>
+                    context.repositoryInvariant.capture(repository.repositoryPath),
                 );
+                const invariant =
+                  invariants[
+                    projectRepositories.findIndex(
+                      ({ repository }) => repository === context.repository,
+                    )
+                  ]!;
                 if (invariant.branch !== context.targetBranch) {
                   return yield* new RalphieError({
                     message: `Decomposition requires branch ${context.targetBranch}, but checkout is on ${invariant.branch}.`,
                   });
                 }
                 return yield* requestStructuredOutput(context.openCode, {
-                  directory: context.repositoryPath,
+                  directory: workingDirectory,
                   title: `Decompose issue #${context.issue.number}`,
                   prompt: buildDecompositionPrompt({
                     issue: context.issue,
-                    repositoryPath: context.repositoryPath,
+                    repositoryPath: workingDirectory,
                     targetBranch: context.targetBranch,
+                    sourceRepository: context.repository,
+                    projectRepositories,
                     failedReviewSummaries: reviewAttempts.map(
                       ({ decision }) => decision,
                     ),
@@ -188,8 +206,16 @@ export const DecompositionExecutorLive = Layer.effect(
                   variant: context.openCodeSelection.variant,
                   runId: context.runId,
                   diagnostics: context.openCodeDiagnostics,
-                  repositoryInvariant: invariant,
-                  verifyRepositoryInvariant: context.repositoryInvariant.verify,
+                  verifyAfter: () =>
+                    Effect.forEach(
+                      projectRepositories,
+                      (repository, index) =>
+                        context.repositoryInvariant.verify(
+                          repository.repositoryPath,
+                          invariants[index]!,
+                        ),
+                      { discard: true },
+                    ),
                   progress,
                   progressStage: ProgressStage.Decomposition,
                   progressIssue: {

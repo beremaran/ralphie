@@ -21,6 +21,7 @@ export type GitRepositoryService = {
     repository: string,
     branch: string,
     workspace: string,
+    destinationPath?: string,
   ) => Effect.Effect<PreparedRepository, RalphieError>;
 };
 
@@ -53,7 +54,7 @@ export const GitRepositoryLive = Layer.effect(
         "Git is not installed or is not available on PATH.",
       ).pipe(Effect.asVoid),
 
-      prepare: (repository, branch, workspace) =>
+      prepare: (repository, branch, workspace, destinationPath) =>
         Effect.gen(function* () {
           const parsed = yield* Effect.try({
             try: () => parseRepositorySlug(repository),
@@ -66,7 +67,8 @@ export const GitRepositoryLive = Layer.effect(
                   }),
           });
           const workspacePath = resolveWorkspacePath(workspace);
-          const repositoryPath = join(workspacePath, parsed.owner, parsed.name);
+          const repositoryPath =
+            destinationPath ?? join(workspacePath, parsed.owner, parsed.name);
 
           const exists = yield* Effect.tryPromise({
             try: async () => {

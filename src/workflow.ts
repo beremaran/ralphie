@@ -2,7 +2,7 @@ import { Effect, Either } from "effect";
 import { join } from "node:path";
 import type { Octokit } from "octokit";
 
-import { GitRepository } from "./git/repository.ts";
+import { GitRepository, type PreparedRepository } from "./git/repository.ts";
 import { GitRepositoryInvariant } from "./git/repository-invariant.ts";
 import { GitIssueCheckpoint } from "./git/issue-checkpoint.ts";
 import { GitHubClient } from "./github/client.ts";
@@ -23,6 +23,13 @@ import { createIssueQueue, IssueQueueState, toQueuedIssues } from "./issues/queu
 import type { OpenCodeModel } from "./opencode/model.ts";
 import { OpenCode, type OpenCodeServer } from "./opencode/server.ts";
 import { makeOpenCodeSessionDiagnostics } from "./opencode/task-session.ts";
+import {
+  assertUniqueProjectRepositoryNames,
+  multiRepositoryProjectPath,
+  type PreparedProject,
+  projectRepositoryPath,
+  singleRepositoryProjectPath,
+} from "./project/project.ts";
 import {
   ProgressReporter,
   type ProgressReporterService,
@@ -63,9 +70,20 @@ const copyOutcome = (
 ): RunState["outcomes"][number]["outcome"] => {
   switch (outcome.kind) {
     case IssueExecutionOutcomeKind.Completed:
-      return outcome.completion === IssueCompletionKind.AlreadyResolved
-        ? { ...outcome, evidence: [...outcome.evidence] }
-        : { ...outcome };
+      if (outcome.completion === IssueCompletionKind.AlreadyResolved) {
+        return { ...outcome, evidence: [...outcome.evidence] };
+      }
+      return {
+        kind: outcome.kind,
+        completion: outcome.completion,
+        commitSha: outcome.commitSha,
+        ...(outcome.commits === undefined
+          ? {}
+          : { commits: outcome.commits.map((commit) => ({ ...commit })) }),
+        ...(outcome.reviewCount === undefined
+          ? {}
+          : { reviewCount: outcome.reviewCount }),
+      };
     case IssueExecutionOutcomeKind.Decomposed:
       return { ...outcome, childIssueNumbers: [...outcome.childIssueNumbers] };
     case IssueExecutionOutcomeKind.Escalated:
@@ -168,6 +186,8 @@ export type WorkflowOptions = {
 export type WorkflowSharedResources = {
   readonly octokit: Octokit;
   readonly openCode: OpenCodeServer;
+  readonly preparedRepository?: PreparedRepository;
+  readonly preparedProject?: PreparedProject;
 };
 
 export type BatchWorkflowOptions = {
@@ -297,15 +317,17 @@ export const workflow = ({
       }
       yield* checkCancellation(signal);
 
-      const prepared = yield* track(
-        progress,
-        ProgressStage.RepositoryPreparation,
-        `Preparing ${repo} on ${branch}...`,
-        repository.prepare(repo, branch, workspace),
-        (result) =>
-          `${result.cloned ? "Repository cloned" : "Existing repository ready"}: ${result.path}.`,
-        { details: { repository: repo, branch, workspace } },
-      );
+      const prepared =
+        sharedResources?.preparedRepository ??
+        (yield* track(
+          progress,
+          ProgressStage.RepositoryPreparation,
+          `Preparing ${repo} on ${branch}...`,
+          repository.prepare(repo, branch, workspace),
+          (result) =>
+            `${result.cloned ? "Repository cloned" : "Existing repository ready"}: ${result.path}.`,
+          { details: { repository: repo, branch, workspace } },
+        ));
       yield* checkCancellation(signal);
 
       const githubIssues = yield* GitHubIssues;
@@ -324,13 +346,33 @@ export const workflow = ({
 
       const invariantService = yield* GitRepositoryInvariant;
       const checkpoints = yield* GitIssueCheckpoint;
-      let checkout = yield* invariantService.capture(prepared.path);
+      const projectRepositories = sharedResources?.preparedProject?.repositories ?? [
+        { repository: repo, repositoryPath: prepared.path, branch },
+      ];
+      const captureProjectCheckouts = () =>
+        Effect.forEach(projectRepositories, (repository) =>
+          invariantService.capture(repository.repositoryPath).pipe(
+            Effect.map((checkout) => ({
+              repository: repository.repository,
+              ...checkout,
+            })),
+          ),
+        );
+      let projectCheckouts = yield* captureProjectCheckouts();
+      const sourceCheckout = () => {
+        const source = projectCheckouts.find(
+          (entry) => entry.repository.toLowerCase() === repo.toLowerCase(),
+        )!;
+        return { branch: source.branch, head: source.head };
+      };
+      let checkout = sourceCheckout();
       if (resumeState !== undefined) {
         const reconciliation = reconcileRunState(resumeState, {
           ...(project === undefined ? {} : { project }),
           repository: repo,
           branch,
           git: checkout,
+          projectCheckouts,
           github: {
             openIssueNumbers: discoveredIssues.map(({ number }) => number),
           },
@@ -406,6 +448,7 @@ export const workflow = ({
           })),
           ...(activeIssue === undefined ? {} : { activeIssue }),
           checkout,
+          projectCheckouts: projectCheckouts.map((entry) => ({ ...entry })),
           updatedAt: new Date().toISOString(),
         });
       };
@@ -443,11 +486,24 @@ export const workflow = ({
                   ? ProgressStage.ComplexityAssessment
                   : ProgressStage.IssueClosure,
             };
+            const issueBaseCheckouts = projectCheckouts.map((entry) => ({
+              ...entry,
+            }));
             restoreCancellationCheckout = () =>
-              checkpoints.restore(prepared.path, {
-                branch: checkout.branch,
-                sha: checkout.head,
-              });
+              Effect.forEach(
+                projectRepositories,
+                (repository) => {
+                  const base = issueBaseCheckouts.find(
+                    ({ repository: slug }) =>
+                      slug.toLowerCase() === repository.repository.toLowerCase(),
+                  )!;
+                  return checkpoints.restore(repository.repositoryPath, {
+                    branch: base.branch,
+                    sha: base.head,
+                  });
+                },
+                { discard: true },
+              );
             yield* persistState(RunStateStatus.Active, activeIssue);
             const outcome =
               resumedClosureOutcome ??
@@ -460,6 +516,13 @@ export const workflow = ({
                   ...(project === undefined ? {} : { project }),
                   repository: repo,
                   repositoryPath: prepared.path,
+                  ...(sharedResources?.preparedProject === undefined
+                    ? {}
+                    : {
+                        workingDirectory: sharedResources.preparedProject.path,
+                        projectRepositories:
+                          sharedResources.preparedProject.repositories,
+                      }),
                   targetBranch: branch,
                   workspace,
                   runId: actualRunId,
@@ -486,7 +549,8 @@ export const workflow = ({
               // The implementation path may have advanced HEAD. Persist the
               // post-delivery checkout so a closure-only resume reconciles
               // against the commit that was actually pushed.
-              checkout = yield* invariantService.capture(prepared.path);
+              projectCheckouts = yield* captureProjectCheckouts();
+              checkout = sourceCheckout();
               activeIssue = {
                 issueNumber: issue.number,
                 stage: ProgressStage.IssueClosure,
@@ -519,6 +583,11 @@ export const workflow = ({
             }
 
             if (outcome.kind === IssueExecutionOutcomeKind.Failed) {
+              // A deterministic commit may already exist when a later project
+              // push fails. Persist the actual project HEADs so resume can
+              // reconcile the created-commit artifacts and finish delivery.
+              projectCheckouts = yield* captureProjectCheckouts();
+              checkout = sourceCheckout();
               yield* persistState(RunStateStatus.Active, {
                 issueNumber: issue.number,
                 stage: ProgressStage.IssueExecution,
@@ -532,7 +601,8 @@ export const workflow = ({
               activeIssue = undefined;
               activeQueueIssue = undefined;
               restoreCancellationCheckout = undefined;
-              checkout = yield* invariantService.capture(prepared.path);
+              projectCheckouts = yield* captureProjectCheckouts();
+              checkout = sourceCheckout();
               yield* persistState(RunStateStatus.Active);
             }
 
@@ -753,6 +823,87 @@ export const batchWorkflow = ({
     );
     yield* checkCancellation(signal);
 
+    const grouped = new Map<string, WorkflowOptions[]>();
+    for (const options of allRepositories) {
+      const key = options.project ?? options.repo;
+      grouped.set(key, [...(grouped.get(key) ?? []), options]);
+    }
+    const groupedProjects = [...grouped.entries()];
+    const projectRoots = groupedProjects.map(([projectName, entries]) =>
+      entries.length > 1
+        ? multiRepositoryProjectPath(workspace, projectName)
+        : singleRepositoryProjectPath(workspace, entries[0]!.repo),
+    );
+    if (
+      new Set(projectRoots.map((path) => path.toLowerCase())).size !==
+      projectRoots.length
+    ) {
+      return yield* new RalphieError({
+        message: "Configured projects resolve to overlapping workspace directories.",
+      });
+    }
+    const preparedProjects = yield* Effect.forEach(
+      groupedProjects,
+      ([projectName, projectRepositories]) =>
+        Effect.gen(function* () {
+          const isMultiRepository = projectRepositories.length > 1;
+          if (isMultiRepository) {
+            assertUniqueProjectRepositoryNames(
+              projectName,
+              projectRepositories.map(({ repo }) => repo),
+            );
+          }
+          const preparedEntries = yield* Effect.forEach(
+            projectRepositories,
+            (options) => {
+              const destinationPath = isMultiRepository
+                ? projectRepositoryPath(workspace, projectName, options.repo)
+                : singleRepositoryProjectPath(workspace, options.repo);
+              const repositoryRunId =
+                options.resumeState?.runId ?? options.runId ?? crypto.randomUUID();
+              return track(
+                progress,
+                ProgressStage.RepositoryPreparation,
+                `Preparing ${options.repo} on ${options.branch}...`,
+                git.prepare(options.repo, options.branch, workspace, destinationPath),
+                (result) =>
+                  `${result.cloned ? "Repository cloned" : "Existing repository ready"}: ${result.path}.`,
+                {
+                  project: options.project,
+                  repository: options.repo,
+                  repositoryRunId,
+                  details: {
+                    repository: options.repo,
+                    branch: options.branch,
+                    workspace,
+                  },
+                },
+              ).pipe(
+                Effect.map((preparedRepository) => ({
+                  options: { ...options, runId: repositoryRunId },
+                  preparedRepository,
+                })),
+              );
+            },
+            { concurrency: "unbounded" },
+          );
+          const preparedProject: PreparedProject = {
+            name: projectName,
+            path: isMultiRepository
+              ? multiRepositoryProjectPath(workspace, projectName)
+              : preparedEntries[0]!.preparedRepository.path,
+            repositories: preparedEntries.map(({ options, preparedRepository }) => ({
+              repository: options.repo,
+              repositoryPath: preparedRepository.path,
+              branch: options.branch,
+            })),
+          };
+          return { name: projectName, preparedProject, entries: preparedEntries };
+        }),
+      { concurrency: "unbounded" },
+    );
+    yield* checkCancellation(signal);
+
     const openCode = yield* OpenCode;
     const results = yield* Effect.acquireUseRelease(
       track(
@@ -764,38 +915,52 @@ export const batchWorkflow = ({
       ),
       (server) =>
         Effect.forEach(
-          allRepositories,
-          (options) => {
-            const repositoryRunId =
-              options.resumeState?.runId ?? options.runId ?? crypto.randomUUID();
-            return workflow({
-              ...options,
-              startClean: false,
-              cleanup: false,
-              runId: repositoryRunId,
-              sharedResources: { octokit, openCode: server },
-            }).pipe(
-              (effect) =>
-                withProgressContext(effect, {
-                  ...(options.project === undefined
-                    ? {}
-                    : { project: options.project }),
-                  repository: options.repo,
-                  repositoryRunId,
-                }),
-              Effect.either,
-              Effect.map((result) => ({ repository: options.repo, result })),
-            );
-          },
+          preparedProjects,
+          ({ preparedProject, entries }) =>
+            Effect.gen(function* () {
+              const projectResults: Array<{
+                repository: string;
+                result: Either.Either<WorkflowSummary, RalphieError>;
+              }> = [];
+              for (const { options, preparedRepository } of entries) {
+                const repositoryRunId = options.runId!;
+                const result = yield* workflow({
+                  ...options,
+                  startClean: false,
+                  cleanup: false,
+                  runId: repositoryRunId,
+                  sharedResources: {
+                    octokit,
+                    openCode: server,
+                    preparedRepository,
+                    preparedProject,
+                  },
+                }).pipe(
+                  (effect) =>
+                    withProgressContext(effect, {
+                      ...(options.project === undefined
+                        ? {}
+                        : { project: options.project }),
+                      repository: options.repo,
+                      repositoryRunId,
+                    }),
+                  Effect.either,
+                );
+                projectResults.push({ repository: options.repo, result });
+                if (Either.isLeft(result)) break;
+              }
+              return projectResults;
+            }),
           { concurrency: "unbounded" },
-        ),
+        ).pipe(Effect.map((projectResults) => projectResults.flat())),
       closeServer,
     );
 
     const failures = results.filter(({ result }) => Either.isLeft(result));
     if (failures.length > 0) {
+      const notStarted = allRepositories.length - results.length;
       return yield* new RalphieError({
-        message: `${failures.length} of ${allRepositories.length} repository runs failed: ${failures
+        message: `${failures.length} repository runs failed${notStarted === 0 ? "" : `; ${notStarted} same-project runs were not started`}: ${failures
           .map(({ repository, result }) =>
             Either.isLeft(result)
               ? `${repository}: ${errorMessage(result.left)}`

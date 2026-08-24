@@ -33,6 +33,14 @@ export const ComplexityAssessmentLive = Layer.effect(
 
     return {
       assess: (context) => {
+        const workingDirectory = context.workingDirectory ?? context.repositoryPath;
+        const projectRepositories = context.projectRepositories ?? [
+          {
+            repository: context.repository,
+            repositoryPath: context.repositoryPath,
+            branch: context.targetBranch,
+          },
+        ];
         const issueProgress = {
           issue: {
             number: context.issue.number,
@@ -50,9 +58,17 @@ export const ComplexityAssessmentLive = Layer.effect(
           .pipe(
             Effect.zipRight(
               Effect.gen(function* () {
-                const checkpoint = yield* context.repositoryInvariant.capture(
-                  context.repositoryPath,
+                const checkpoints = yield* Effect.forEach(
+                  projectRepositories,
+                  (repository) =>
+                    context.repositoryInvariant.capture(repository.repositoryPath),
                 );
+                const checkpoint =
+                  checkpoints[
+                    projectRepositories.findIndex(
+                      ({ repository }) => repository === context.repository,
+                    )
+                  ]!;
                 if (checkpoint.branch !== context.targetBranch) {
                   return yield* new RalphieError({
                     message: `Complexity assessment requires branch ${context.targetBranch}, but checkout is on ${checkpoint.branch}.`,
@@ -60,12 +76,14 @@ export const ComplexityAssessmentLive = Layer.effect(
                 }
 
                 return yield* requestStructuredOutput(context.openCode, {
-                  directory: context.repositoryPath,
+                  directory: workingDirectory,
                   title: `Assess issue #${context.issue.number}`,
                   prompt: buildComplexityPrompt({
                     issue: context.issue,
-                    repositoryPath: context.repositoryPath,
+                    repositoryPath: workingDirectory,
                     targetBranch: context.targetBranch,
+                    sourceRepository: context.repository,
+                    projectRepositories,
                   }),
                   schema: complexityDecisionSchema,
                   agent: context.openCodeSelection.agent,
@@ -73,8 +91,16 @@ export const ComplexityAssessmentLive = Layer.effect(
                   variant: context.openCodeSelection.variant,
                   runId: context.runId,
                   diagnostics: context.openCodeDiagnostics,
-                  repositoryInvariant: checkpoint,
-                  verifyRepositoryInvariant: context.repositoryInvariant.verify,
+                  verifyAfter: () =>
+                    Effect.forEach(
+                      projectRepositories,
+                      (repository, index) =>
+                        context.repositoryInvariant.verify(
+                          repository.repositoryPath,
+                          checkpoints[index]!,
+                        ),
+                      { discard: true },
+                    ),
                   progress,
                   progressStage: ProgressStage.ComplexityAssessment,
                   progressIssue: issueProgress.issue,

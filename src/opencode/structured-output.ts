@@ -34,6 +34,7 @@ export type StructuredOutputRequest<Output> = {
     repositoryPath: string,
     expected: OpenCodeRepositoryInvariant,
   ) => Effect.Effect<void, RalphieError>;
+  readonly verifyAfter?: () => Effect.Effect<void, RalphieError>;
   readonly progress?: ProgressReporterService;
   readonly progressStage?: ProgressStage;
   readonly progressIssue?: ProgressIssue;
@@ -153,6 +154,9 @@ export function requestStructuredOutput<Output>(
         request.directory,
         request.repositoryInvariant,
       );
+    }
+    if (request.verifyAfter !== undefined) {
+      yield* request.verifyAfter();
     }
 
     return result;

@@ -13,6 +13,7 @@ import {
 } from "../opencode/model.ts";
 import { RalphieError } from "../shared/error.ts";
 import { redactSensitiveText } from "../shared/redaction.ts";
+import { assertSafeProjectName } from "../project/project.ts";
 
 export const DEFAULT_BRANCH = "main";
 export const DEFAULT_WORKSPACE = "~/.ralphie";
@@ -82,6 +83,15 @@ export const ralphieProjectConfigSchema = z
   })
   .strict()
   .superRefine((project, context) => {
+    try {
+      assertSafeProjectName(project.name);
+    } catch (error) {
+      context.addIssue({
+        code: "custom",
+        path: ["name"],
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
     if ((project.repoPattern === undefined) === (project.repositories === undefined)) {
       context.addIssue({
         code: "custom",

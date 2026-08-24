@@ -554,4 +554,187 @@ describe("implementation executor", () => {
     expect(fixCount).toBe(4);
     expect(commitCalled).toBe(false);
   });
+
+  test("stages, reviews, commits, and pushes every changed project repository", async () => {
+    const directories: string[] = [];
+    const calls: string[] = [];
+    const client = openCodeClient([
+      undefined,
+      review("approved"),
+      { subject: "fix project integration" },
+    ]);
+    const originalCreate = client.session.create;
+    client.session.create = (async (parameters: { directory: string }) => {
+      directories.push(parameters.directory);
+      return originalCreate(parameters as never);
+    }) as typeof client.session.create;
+    const repositories = [
+      {
+        repository: "owner/frontend",
+        repositoryPath: "/workspace/proj-b/frontend",
+        branch: "main",
+      },
+      {
+        repository: "owner/backend",
+        repositoryPath: "/workspace/proj-b/backend",
+        branch: "main",
+      },
+    ];
+    const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
+    const setup = services({
+      preparation: {
+        prepareProject: (_repositories, store) => {
+          const checkpoints = repositories.map((repository, index) => ({
+            ...repository,
+            sha: `${index + 1}`.repeat(40),
+          }));
+          return store
+            .write(IssueArtifactKind.ProjectCheckpoints, checkpoints)
+            .pipe(Effect.as(checkpoints));
+        },
+      },
+      operations: {
+        stageAll: (path) => Effect.sync(() => calls.push(`stage:${path}`)),
+        hasStagedChanges: () => Effect.succeed(true),
+        readStagedBinaryDiff: (path) =>
+          Effect.succeed(`diff --git ${path}/file ${path}/file\n`),
+        commit: (path) =>
+          Effect.sync(() => {
+            calls.push(`commit:${path}`);
+            const name = path.endsWith("frontend") ? "front" : "back";
+            return { sha: `${name}-sha`, treeSha: `${name}-tree` };
+          }),
+        push: (path) => Effect.sync(() => calls.push(`push:${path}`)),
+      },
+    });
+    const context: IssueExecutionContext = {
+      ...issueContext(client),
+      project: "proj-b",
+      workingDirectory: "/workspace/proj-b",
+      projectRepositories: repositories,
+    };
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const executor = yield* ImplementationExecutor;
+        return yield* executor.execute({ context, artifacts });
+      }).pipe(
+        Effect.provide(ImplementationExecutorLive),
+        Effect.provide(setup.layer as any),
+      ) as Effect.Effect<WorkflowExecutorResult, RalphieError, never>,
+    );
+
+    expect(directories).toEqual([
+      "/workspace/proj-b",
+      "/workspace/proj-b",
+      "/workspace/proj-b",
+    ]);
+    expect(calls.filter((call) => call.startsWith("commit:"))).toEqual([
+      "commit:/workspace/proj-b/frontend",
+      "commit:/workspace/proj-b/backend",
+    ]);
+    expect(calls.filter((call) => call.startsWith("push:"))).toEqual([
+      "push:/workspace/proj-b/frontend",
+      "push:/workspace/proj-b/backend",
+    ]);
+    expect(result).toMatchObject({
+      kind: IssueExecutionOutcomeKind.Completed,
+      completion: IssueCompletionKind.PushedCommit,
+      commits: [
+        { repository: "owner/frontend", sha: "front-sha" },
+        { repository: "owner/backend", sha: "back-sha" },
+      ],
+    });
+  });
+
+  test("resumes project delivery without rerunning agents after a partial push failure", async () => {
+    const repositories = [
+      {
+        repository: "owner/frontend",
+        repositoryPath: "/workspace/proj/frontend",
+        branch: "main",
+      },
+      {
+        repository: "owner/backend",
+        repositoryPath: "/workspace/proj/backend",
+        branch: "main",
+      },
+    ];
+    const heads = new Map(
+      repositories.map(({ repositoryPath }) => [repositoryPath, "a".repeat(40)]),
+    );
+    const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
+    let failBackendPush = true;
+    let sessionCount = 0;
+    const client = openCodeClient([
+      undefined,
+      review("approved"),
+      { subject: "fix project delivery" },
+    ]);
+    const originalCreate = client.session.create;
+    client.session.create = (async (
+      ...parameters: Parameters<typeof originalCreate>
+    ) => {
+      sessionCount += 1;
+      return originalCreate(...parameters);
+    }) as typeof client.session.create;
+    const setup = services({
+      preparation: {
+        prepareProject: (_repositories, store) => {
+          const checkpoints = repositories.map((repository) => ({
+            ...repository,
+            sha: "a".repeat(40),
+          }));
+          return store
+            .write(IssueArtifactKind.ProjectCheckpoints, checkpoints)
+            .pipe(Effect.as(checkpoints));
+        },
+      },
+      operations: {
+        hasStagedChanges: (path) => Effect.succeed(heads.get(path) === "a".repeat(40)),
+        commit: (path) =>
+          Effect.sync(() => {
+            const sha = path.endsWith("frontend") ? "b".repeat(40) : "c".repeat(40);
+            heads.set(path, sha);
+            return { sha, treeSha: `${sha}-tree` };
+          }),
+        push: (path) =>
+          path.endsWith("backend") && failBackendPush
+            ? Effect.fail(new RalphieError({ message: "backend push failed" }))
+            : Effect.void,
+      },
+    });
+    const context: IssueExecutionContext = {
+      ...issueContext(client),
+      project: "proj",
+      workingDirectory: "/workspace/proj",
+      projectRepositories: repositories,
+      repositoryInvariant: {
+        capture: (path) => Effect.succeed({ branch: "main", head: heads.get(path)! }),
+        verify: () => Effect.void,
+      },
+    };
+    const execute = () =>
+      Effect.gen(function* () {
+        const executor = yield* ImplementationExecutor;
+        return yield* executor.execute({ context, artifacts });
+      }).pipe(
+        Effect.provide(ImplementationExecutorLive),
+        Effect.provide(setup.layer as any),
+      ) as Effect.Effect<WorkflowExecutorResult, RalphieError, never>;
+
+    const first = await Effect.runPromiseExit(execute());
+    expect(Exit.isFailure(first)).toBeTrue();
+    expect(sessionCount).toBe(3);
+
+    failBackendPush = false;
+    const resumed = await Effect.runPromise(execute());
+    expect(sessionCount).toBe(3);
+    expect(resumed).toMatchObject({
+      kind: IssueExecutionOutcomeKind.Completed,
+      commits: [
+        { repository: "owner/frontend", sha: "b".repeat(40) },
+        { repository: "owner/backend", sha: "c".repeat(40) },
+      ],
+    });
+  });
 });

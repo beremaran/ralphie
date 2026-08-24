@@ -83,6 +83,23 @@ describe("per-issue artifact store", () => {
         treeSha: "tree-sha",
       }),
     );
+    const projectCheckpoints = [
+      {
+        repository: "owner/frontend",
+        repositoryPath: "/workspace/project/frontend",
+        branch: "main",
+        sha: checkpoint.sha,
+      },
+    ];
+    await Effect.runPromise(
+      store.write(IssueArtifactKind.ProjectCheckpoints, projectCheckpoints),
+    );
+    await Effect.runPromise(
+      store.recordCreatedCommit("owner/frontend", {
+        sha: "project-commit",
+        treeSha: "project-tree",
+      }),
+    );
     await Effect.runPromise(
       store.write(IssueArtifactKind.IssueBreakdownDecision, breakdown),
     );
@@ -104,6 +121,14 @@ describe("per-issue artifact store", () => {
     expect(
       await Effect.runPromise(store.read(IssueArtifactKind.CreatedCommit)),
     ).toEqual({ sha: "commit-sha", treeSha: "tree-sha" });
+    expect(
+      await Effect.runPromise(store.read(IssueArtifactKind.ProjectCheckpoints)),
+    ).toEqual(projectCheckpoints);
+    expect(
+      await Effect.runPromise(store.read(IssueArtifactKind.CreatedCommits)),
+    ).toEqual({
+      "owner/frontend": { sha: "project-commit", treeSha: "project-tree" },
+    });
     expect(
       await Effect.runPromise(store.read(IssueArtifactKind.IssueBreakdownDecision)),
     ).toEqual(breakdown);

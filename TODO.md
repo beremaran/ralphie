@@ -39,6 +39,12 @@ enough to implement, review, and commit independently.
       repository, then CLI overrides, including explicit boolean `false`.
 - [x] Carry project attribution through progress events, persisted state,
       diagnostics, and repository artifacts.
+- [x] Clone multi-repository projects beneath a shared project root and run
+      OpenCode from that eagle-eye working directory.
+- [x] Serialize repository issue loops within a project while running distinct
+      projects concurrently.
+- [x] Checkpoint, stage, review, commit, recover, and push project-spanning
+      changes across every affected repository.
 - [x] Replace the workflow's plan-only logging with calls to `IssueExecutor`.
 - [x] Add mocked executor tests proving the workflow handles every outcome.
 

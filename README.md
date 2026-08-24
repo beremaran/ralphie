@@ -136,14 +136,15 @@ flowchart TD
 
 1. Capture the exact clean branch and commit as an issue checkpoint.
 2. Ask a fresh OpenCode session to implement the issue.
-3. Stage every change deterministically and capture the exact staged diff.
+3. Stage every change deterministically across the project and capture the exact
+   per-repository staged diffs.
 4. Ask a separate session for a schema-validated review.
 5. If changes are requested, give the review to a fresh fix session and repeat
    staging and review.
 6. Stop after approval or five review attempts.
-7. Generate a validated commit message, commit the staged tree, recheck remote
-   safety, and push without force.
-8. Close the GitHub issue as completed after the push is verified.
+7. Generate a validated commit message, commit each changed repository, recheck
+   every remote before the first push, and push each commit without force.
+8. Close the source GitHub issue only after every required push is verified.
 
 When implementation produces no changes, a fresh read-only session must prove
 that the current checkout already resolves the issue and return concrete
@@ -323,19 +324,28 @@ branch, issue, agent, and dry-run settings can be overridden without switching
 back to a second flat schema. Workspace lifecycle and output mode remain
 batch-wide settings.
 
-Every resolved repository gets an independent issue queue, checkout, run state,
-and issue-processing loop. Ralphie authenticates GitHub, initializes Octokit,
-verifies Git, prepares the workspace, and starts one shared OpenCode server
-exactly once; it then runs repository loops in parallel against those shared
-resources. The configuration precedence is:
+Each project is one execution boundary. Multi-repository projects clone into a
+shared root such as `<workspace>/proj-b/frontend` and
+`<workspace>/proj-b/backend`; OpenCode runs from `<workspace>/proj-b`, so an
+issue from either source repository can inspect and modify both. Repository
+issue queues within that project run serially to prevent agents from racing over
+the shared checkout. Different projects run concurrently. For a project with one
+repository, OpenCode runs directly from that repository clone without an extra
+project container.
+
+Ralphie authenticates GitHub, initializes Octokit, verifies Git, prepares every
+project checkout, and starts one shared OpenCode server exactly once. For a
+project-spanning change it checkpoints and stages every repository, reviews a
+combined repository-labelled diff, commits only changed repositories, verifies
+all remote destinations before pushing, and closes the source issue only after
+every push succeeds. The configuration precedence is:
 
 ```text
 built-in defaults < top-level config < project config < repository config < CLI options
 ```
 
-Workspace preparation and cleanup are batch-wide: start cleanup runs once,
-clones are stored under `<workspace>/<owner>/<repo>`, and the workspace is
-removed only after every repository run succeeds. Human-readable progress is
+Workspace preparation and cleanup are batch-wide: start cleanup runs once, and
+the workspace is removed only after every project run succeeds. Human-readable progress is
 attributed to both project and repository; JSON events and persisted run state
 carry the project name alongside `repository` and `repositoryRunId`.
 

@@ -92,6 +92,27 @@ describe("run-state reconciliation", () => {
     });
   });
 
+  test("reconciles every persisted project checkout", () => {
+    const projectState: RunState = {
+      ...state,
+      projectCheckouts: [
+        { repository: "owner/repo", branch: "main", head: "abc123" },
+        { repository: "owner/api", branch: "develop", head: "def456" },
+      ],
+    };
+    const result = reconcileRunState(projectState, {
+      repository: "owner/repo",
+      branch: "main",
+      projectCheckouts: [
+        { repository: "owner/repo", branch: "main", head: "abc123" },
+        { repository: "owner/api", branch: "develop", head: "moved" },
+      ],
+    });
+
+    expect(result.status).toBe(RunReconciliationStatus.GitMismatch);
+    expect(result.reasons[0]).toContain("owner/api");
+  });
+
   test("accepts a closed pending issue while recovering its closure stage", () => {
     const closingState: RunState = {
       ...state,

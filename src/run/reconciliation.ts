@@ -29,6 +29,11 @@ export type RunReconciliationInputs = {
   readonly repository: string;
   readonly branch: string;
   readonly git?: RunGitInputs;
+  readonly projectCheckouts?: ReadonlyArray<{
+    readonly repository: string;
+    readonly branch: string;
+    readonly head: string;
+  }>;
   readonly github?: RunGitHubInputs;
   readonly now?: Date;
   readonly maxAgeMs?: number;
@@ -83,6 +88,28 @@ export const reconcileRunState = (
       reasons.push(
         `current HEAD is ${inputs.git.head}, expected ${state.checkout.head}`,
       );
+    }
+  }
+
+  if (inputs.projectCheckouts !== undefined && state.projectCheckouts !== undefined) {
+    const current = new Map(
+      inputs.projectCheckouts.map((checkout) => [
+        checkout.repository.toLowerCase(),
+        checkout,
+      ]),
+    );
+    for (const expected of state.projectCheckouts) {
+      const actual = current.get(expected.repository.toLowerCase());
+      if (
+        actual === undefined ||
+        actual.branch !== expected.branch ||
+        actual.head.toLowerCase() !== expected.head.toLowerCase()
+      ) {
+        status = RunReconciliationStatus.GitMismatch;
+        reasons.push(
+          `project checkout ${expected.repository} does not match saved branch ${expected.branch} at ${expected.head}`,
+        );
+      }
     }
   }
 

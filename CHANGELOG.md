@@ -15,8 +15,9 @@ All notable changes to Ralphie are documented here. The project follows
   redaction.
 - Structured no-change resolution verification with persisted evidence.
 - Optional, strictly validated JSON configuration with CLI override precedence.
-- Parallel multi-repository execution with per-repository overrides, isolated
-  checkouts, progress attribution, and shared workspace lifecycle management.
+- Parallel multi-project execution with per-repository overrides, coordinated
+  project checkouts, progress attribution, and shared workspace lifecycle
+  management.
 - Hierarchical configuration with named projects, deterministic repository
   pattern expansion, and project-level repository grouping.
 
@@ -29,6 +30,9 @@ All notable changes to Ralphie are documented here. The project follows
   tracking instead of creating OpenTUI spinner renderers.
 - Close completed implementation issues after verified delivery, with
   idempotent recovery for interrupted or ambiguous GitHub responses.
+- Run multi-repository agents from a shared project root, serialize issue work
+  within each project, and deterministically commit and push every changed
+  repository before closing the source issue.
 
 ### Fixed
 
