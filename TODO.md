@@ -69,7 +69,7 @@ enough to implement, review, and commit independently.
 - [x] Treat invalid or missing decisions as issue failures without mutating Git or
       GitHub.
 - [x] Add executor tests covering every complexity value from 0 through 5.
-- [ ] Add a real OpenCode smoke test for complexity assessment.
+- [x] Add a real OpenCode smoke test for complexity assessment.
 
 ## 5. Deterministic Git issue operations
 
@@ -126,7 +126,7 @@ enough to implement, review, and commit independently.
 - [x] Pass failed-review context to the decomposition agent.
 - [x] Report escalation as a successful issue transition, not a successful code
       implementation.
-- [ ] Add an integration test covering implementation, five rejected reviews,
+- [x] Add an integration test covering implementation, five rejected reviews,
       restore, and decomposition handoff.
 
 ## 8. GitHub decomposition operations
@@ -188,7 +188,7 @@ enough to implement, review, and commit independently.
 - [x] Add a `--resume` flag or a separate resume command.
 - [x] Refuse resume when repository or branch arguments do not match the run.
 - [x] Reconcile saved state with current Git and GitHub state.
-- [ ] Define recovery for interruption during agent work, commit, push, child
+- [x] Define recovery for interruption during agent work, commit, push, child
       creation, linking, and original closure.
 - [x] Mark successful runs complete without deleting diagnostics unexpectedly.
 - [x] Decide how `--cleanup` interacts with resumable and completed run state.
@@ -196,43 +196,43 @@ enough to implement, review, and commit independently.
 
 ## 12. Progress and diagnostics integration
 
-- [ ] Emit progress for every real OpenCode, Git, GitHub, recovery, and queue
+- [x] Emit progress for every real OpenCode, Git, GitHub, recovery, and queue
       transition.
-- [ ] Include issue position and review attempt counters where applicable.
-- [ ] Include session IDs, commit SHAs, created issue numbers, and diagnostic
+- [x] Include issue position and review attempt counters where applicable.
+- [x] Include session IDs, commit SHAs, created issue numbers, and diagnostic
       paths only in verbose details or JSON events.
 - [x] Ensure secrets and the GitHub token can never appear in progress details.
-- [ ] Keep interactive spinner transitions balanced on success and failure.
-- [ ] Ensure non-TTY output remains append-only and readable.
+- [x] Keep interactive spinner transitions balanced on success and failure.
+- [x] Ensure non-TTY output remains append-only and readable.
 - [x] Add a final summary of completed, decomposed, escalated, skipped, and failed
       issues.
 - [x] Decide whether one issue failure halts the run or can be configured to
       continue.
-- [ ] Persist JSON Lines events when resumability is enabled.
-- [ ] Add snapshot tests for representative human-readable runs.
+- [x] Persist JSON Lines events when resumability is enabled.
+- [x] Add snapshot tests for representative human-readable runs.
 
 ## 13. Cancellation and process lifecycle
 
 - [x] Pass Bunli's `AbortSignal` into the workflow and executors.
 - [x] Abort active OpenCode prompts when the user presses Ctrl-C.
 - [x] Stop the OpenCode server on success, failure, cancellation, and defects.
-- [ ] Preserve or restore the active issue checkout on cancellation.
-- [ ] Persist resumable state before exiting after cancellation.
+- [x] Preserve or restore the active issue checkout on cancellation.
+- [x] Persist resumable state before exiting after cancellation.
 - [x] Avoid starting another issue once cancellation is requested.
-- [ ] Return conventional non-zero exit codes for failure and cancellation.
-- [ ] Add cancellation tests at each long-running boundary.
+- [x] Return conventional non-zero exit codes for failure and cancellation.
+- [x] Add cancellation tests at each long-running boundary.
 
 ## 14. Safety and policy
 
-- [ ] Detect protected target branches and decide whether explicit confirmation or
+- [x] Detect protected target branches and decide whether explicit confirmation or
       an override flag is required for direct pushes.
-- [ ] Confirm the authenticated GitHub user can push before agent work begins.
-- [ ] Detect repository rules or branch protection that make direct pushes
+- [x] Confirm the authenticated GitHub user can push before agent work begins.
+- [x] Detect repository rules or branch protection that make direct pushes
       impossible.
-- [ ] Refuse force pushes.
-- [ ] Refuse execution when the local checkout contains unexpected commits ahead
+- [x] Refuse force pushes.
+- [x] Refuse execution when the local checkout contains unexpected commits ahead
       of or behind the intended base.
-- [ ] Revalidate origin ownership before every remote mutation.
+- [x] Revalidate origin ownership before every remote mutation.
 - [x] Bound issue body, diff, review, and diagnostic artifact sizes.
 - [x] Redact credentials and sensitive environment values from errors and logs.
 - [x] Document that implementation agents can edit files in the target checkout.
@@ -241,30 +241,32 @@ enough to implement, review, and commit independently.
 
 ## 15. End-to-end validation
 
-- [ ] Add a fully mocked complexity-2 happy-path test through push.
-- [ ] Add a fully mocked complexity-4 path through issue closure and queue refresh.
-- [ ] Add a fully mocked review-exhaustion escalation path.
-- [ ] Add a fully mocked partial-decomposition resume path.
-- [ ] Add a local bare-Git-remote integration test for direct branch pushes.
-- [ ] Add an opt-in real OpenCode complexity-assessment smoke test.
-- [ ] Add an opt-in real OpenCode implementation/review smoke test in a disposable
+- [x] Add a fully mocked complexity-2 happy-path test through push.
+- [x] Add a fully mocked complexity-4 path through issue closure and queue refresh.
+- [x] Add a fully mocked review-exhaustion escalation path.
+- [x] Add a fully mocked partial-decomposition resume path.
+- [x] Add a local bare-Git-remote integration test for direct branch pushes.
+- [x] Add an opt-in real OpenCode complexity-assessment smoke test.
+- [x] Add an opt-in real OpenCode implementation/review smoke test in a disposable
       repository.
-- [ ] Add an opt-in GitHub integration test against a dedicated test repository.
-- [ ] Run a one-issue dry run against `beremaran/opencode-goal`.
+- [x] Add an opt-in GitHub integration test against a dedicated test repository.
+- [ ] Run a one-issue dry run against `beremaran/opencode-goal` (the live
+      mutation-free run succeeded on 2026-08-24, but the repository had zero
+      open issues to assess).
 - [ ] Run a disposable end-to-end issue through implementation, review, commit,
       and push.
 - [ ] Run a disposable end-to-end decomposition and verify all links and closure.
 
 ## 16. Documentation and release readiness
 
-- [ ] Update the README when the CLI moves from plan-only to executing mutations.
-- [ ] Document each workflow and its failure/recovery behavior.
+- [x] Update the README when the CLI moves from plan-only to executing mutations.
+- [x] Document each workflow and its failure/recovery behavior.
 - [x] Document `--max-issues` behavior for refreshed child issues.
 - [x] Document model, variant, and agent selection examples.
-- [ ] Document JSON event fields and stability expectations.
-- [ ] Document workspace, diagnostic, run-state, resume, and cleanup behavior.
+- [x] Document JSON event fields and stability expectations.
+- [x] Document workspace, diagnostic, run-state, resume, and cleanup behavior.
 - [x] Add a prominent warning that Ralphie pushes directly to the selected branch.
-- [ ] Add `--dry-run` if users need to validate routing without mutations.
-- [ ] Add release packaging and installation instructions.
-- [ ] Add CI for tests, type-checking, builds, and formatting.
-- [ ] Add a changelog and versioning policy before the first public release.
+- [x] Add `--dry-run` if users need to validate routing without mutations.
+- [x] Add release packaging and installation instructions.
+- [x] Add CI for tests, type-checking, builds, and formatting.
+- [x] Add a changelog and versioning policy before the first public release.
