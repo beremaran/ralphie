@@ -133,9 +133,9 @@ enough to implement, review, and commit independently.
 
 ## 8. GitHub decomposition operations
 
-- [ ] Add a GitHub service for creating issues through Octokit.
-- [ ] Add a GitHub service for updating issue titles and bodies.
-- [ ] Add a GitHub service for closing the original issue with the chosen reason.
+- [x] Add a GitHub service for creating issues through Octokit.
+- [x] Add a GitHub service for updating issue titles and bodies.
+- [x] Add a GitHub service for closing the original issue with the chosen reason.
 - [ ] Define the rendered Markdown format for parent, sibling, and dependency
       links.
 - [ ] Create child issues in a deterministic order.
