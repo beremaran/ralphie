@@ -8,5 +8,13 @@
   },
   "peerDependencies": {
     "typescript": "^5"
-  }
+  },
+  "dependencies": {
+    "@opencode-ai/sdk": "^1.18.21",
+    "execa": "^10.0.1",
+    "octokit": "^5.0.5",
+    "simple-git": "^3.36.0",
+    "zx": "^8.8.5"
+  },
+  "scripts": {}
 }
