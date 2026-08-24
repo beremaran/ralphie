@@ -47,9 +47,9 @@ enough to implement, review, and commit independently.
 
 ## 3. Prompt construction
 
-- [ ] Add a prompt builder for complexity assessment using issue title, body,
+- [x] Add a prompt builder for complexity assessment using issue title, body,
       labels, and relevant repository context.
-- [ ] Document the 0–5 complexity rubric in the complexity prompt.
+- [x] Document the 0–5 complexity rubric in the complexity prompt.
 - [ ] Add a prompt builder for issue implementation with explicit scope and Git
       restrictions.
 - [ ] Add a review prompt that receives only the issue and staged diff.
