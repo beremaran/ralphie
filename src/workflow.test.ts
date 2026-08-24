@@ -10,6 +10,7 @@ import { ComplexityLevel } from "./issues/decisions.ts";
 import { IssuePipeline } from "./issues/pipeline.ts";
 import { IssueStageKind, IssueWorkflowKind } from "./issues/stage.ts";
 import { OpenCode } from "./opencode/server.ts";
+import { DEFAULT_OPENCODE_AGENT } from "./opencode/model.ts";
 import {
   OpenCodeSessionPurpose,
   StructuredOutputName,
@@ -88,7 +89,7 @@ function testRuntime(
     Layer.succeed(IssuePipeline, {
       plan: ({ issue, repositoryPath, targetBranch, openCode }) => {
         calls.push(
-          `planIssue:${issue.number}:${repositoryPath}:${targetBranch}:${openCode.model?.providerID}/${openCode.model?.modelID}:${openCode.variant}`,
+          `planIssue:${issue.number}:${repositoryPath}:${targetBranch}:${openCode.agent}:${openCode.model?.providerID}/${openCode.model?.modelID}:${openCode.variant}`,
         );
         return Effect.succeed({
           issue,
@@ -161,6 +162,7 @@ describe("workflow", () => {
       },
       model: { providerID: "openai", modelID: "gpt-5" },
       modelVariant: "high",
+      agent: "reviewer",
       workspace: "/tmp/ralphie",
       cleanup: true,
       startClean: true,
@@ -176,7 +178,7 @@ describe("workflow", () => {
       "prepareRepository:owner/repo:develop:/tmp/ralphie",
       "listIssues:owner/repo:bug:created:asc",
       "startServer",
-      "planIssue:42:/tmp/ralphie/repo:develop:openai/gpt-5:high",
+      "planIssue:42:/tmp/ralphie/repo:develop:reviewer:openai/gpt-5:high",
       "closeServer",
       "removeWorkspace:/tmp/ralphie",
     ]);
@@ -246,6 +248,7 @@ describe("workflow", () => {
     const exit = await workflow({
       repo: "owner/repo",
       branch: "main",
+      agent: DEFAULT_OPENCODE_AGENT,
       workspace: "~/.ralphie",
       issueFilters: {
         labels: [],
@@ -280,6 +283,7 @@ describe("workflow", () => {
     const exit = await workflow({
       repo: "owner/repo",
       branch: "main",
+      agent: DEFAULT_OPENCODE_AGENT,
       workspace: "~/.ralphie",
       issueFilters: {
         labels: [],
@@ -309,6 +313,7 @@ describe("workflow", () => {
     const exit = await workflow({
       repo: "owner/repo",
       branch: "main",
+      agent: DEFAULT_OPENCODE_AGENT,
       workspace: "/tmp/ralphie",
       issueFilters: {
         labels: [],

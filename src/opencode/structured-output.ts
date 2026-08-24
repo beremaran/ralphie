@@ -11,6 +11,7 @@ export type StructuredOutputRequest<Output> = {
   readonly prompt: string;
   readonly schema: z.ZodType<Output>;
   readonly retryCount?: number;
+  readonly agent?: string;
   readonly model?: OpenCodeModel;
   readonly variant?: string;
 };
@@ -45,6 +46,7 @@ export const requestStructuredOutput = <Output>(
       const session = await client.session.create({
         directory: request.directory,
         title: request.title,
+        ...(request.agent === undefined ? {} : { agent: request.agent }),
       });
 
       if (session.error !== undefined || session.data === undefined) {
@@ -56,6 +58,7 @@ export const requestStructuredOutput = <Output>(
       const response = await client.session.prompt({
         sessionID: session.data.id,
         directory: request.directory,
+        ...(request.agent === undefined ? {} : { agent: request.agent }),
         ...(request.model === undefined ? {} : { model: request.model }),
         ...(request.variant === undefined ? {} : { variant: request.variant }),
         format: {

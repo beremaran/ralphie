@@ -12,6 +12,7 @@ import {
   OpenCodeSessionPurpose,
   StructuredOutputName,
 } from "../opencode/session.ts";
+import { DEFAULT_OPENCODE_AGENT } from "../opencode/model.ts";
 import { ComplexityLevel, ReviewVerdict } from "./decisions.ts";
 import {
   IssuePipeline,
@@ -42,7 +43,7 @@ const makePlan = () =>
       issue: issues[0]!,
       repositoryPath: "/workspace/repository",
       targetBranch: "main",
-      openCode: {},
+      openCode: { agent: DEFAULT_OPENCODE_AGENT },
     });
   }).pipe(Effect.provide(IssuePipelineLive), Effect.runPromise);
 
@@ -51,7 +52,7 @@ describe("issue pipeline", () => {
     const plan = await makePlan();
 
     expect(plan.targetBranch).toBe("main");
-    expect(plan.openCode).toEqual({});
+    expect(plan.openCode).toEqual({ agent: DEFAULT_OPENCODE_AGENT });
     expect(plan).not.toHaveProperty("issueBranch");
     expect(plan.assessment).toEqual({
       kind: IssueStageKind.OpenCodeSession,

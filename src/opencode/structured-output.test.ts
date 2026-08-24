@@ -92,10 +92,14 @@ describe("OpenCode structured output", () => {
   });
 
   test("forwards explicit model and variant overrides", async () => {
+    let createParameters: unknown;
     let promptParameters: unknown;
     const client = {
       session: {
-        create: async () => ({ data: { id: "session-1" } }),
+        create: async (parameters: unknown) => {
+          createParameters = parameters;
+          return { data: { id: "session-1" } };
+        },
         prompt: async (parameters: unknown) => {
           promptParameters = parameters;
           return {
@@ -117,11 +121,18 @@ describe("OpenCode structured output", () => {
       title: "Test decision",
       prompt: "Make a decision.",
       schema: decisionSchema,
+      agent: "reviewer",
       model: { providerID: "openrouter", modelID: "anthropic/claude-sonnet" },
       variant: "high",
     }).pipe(Effect.runPromise);
 
+    expect(createParameters).toMatchObject({
+      directory: "/workspace",
+      title: "Test decision",
+      agent: "reviewer",
+    });
     expect(promptParameters).toMatchObject({
+      agent: "reviewer",
       model: {
         providerID: "openrouter",
         modelID: "anthropic/claude-sonnet",

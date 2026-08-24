@@ -69,6 +69,7 @@ export type WorkflowOptions = {
   readonly branch: string;
   readonly maxIssues?: number;
   readonly issueFilters: IssueFilters;
+  readonly agent: string;
   readonly model?: OpenCodeModel;
   readonly modelVariant?: string;
   readonly workspace: string;
@@ -81,6 +82,7 @@ export const workflow = ({
   branch,
   maxIssues,
   issueFilters,
+  agent,
   model,
   modelVariant,
   workspace,
@@ -101,6 +103,7 @@ export const workflow = ({
           ? `${model.providerID}/${model.modelID}`
           : "OpenCode default",
         variant: modelVariant ?? "OpenCode default",
+        agent,
         issueLimit: maxIssues ?? "unlimited",
       },
     });
@@ -185,7 +188,7 @@ export const workflow = ({
                 issue,
                 repositoryPath: prepared.path,
                 targetBranch: branch,
-                openCode: { model, variant: modelVariant },
+                openCode: { agent, model, variant: modelVariant },
               }),
               (plan) =>
                 `Prepared #${issue.number} for complexity assessment on ${plan.targetBranch}.`,

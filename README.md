@@ -18,12 +18,13 @@ The CLI also requires these local tools:
 ## Usage
 
 ```bash
-bun run index.ts <repo> [--branch <branch>] [--model <provider/model>] [--model-variant <variant>] [--max-issues <count>] [--issue-label <label>] [--issue-sort <sort>] [--issue-order <order>] [--workspace <path>] [--verbose] [--json|--quiet] [--start-clean] [--cleanup]
+bun run index.ts <repo> [--branch <branch>] [--agent <agent>] [--model <provider/model>] [--model-variant <variant>] [--max-issues <count>] [--issue-label <label>] [--issue-sort <sort>] [--issue-order <order>] [--workspace <path>] [--verbose] [--json|--quiet] [--start-clean] [--cleanup]
 # Example:
 bun run index.ts owner/project --branch develop --model openai/gpt-5 --model-variant high --max-issues 10 --issue-label bug --issue-sort created --issue-order asc --workspace /tmp/ralphie --start-clean --cleanup
 ```
 
 The branch defaults to `main`. The short form `-b develop` is also supported.
+The OpenCode agent defaults to `build`; use `--agent <agent>` to override it.
 Use `--model provider/model` and `--model-variant variant` to override OpenCode's
 model selection. Neither has a default; when omitted, OpenCode chooses them.
 Progress uses interactive spinners in a terminal and durable plain lines in CI

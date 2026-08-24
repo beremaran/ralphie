@@ -6,9 +6,12 @@ export type OpenCodeModel = {
 };
 
 export type OpenCodeSelection = {
+  readonly agent: string;
   readonly model?: OpenCodeModel;
   readonly variant?: string;
 };
+
+export const DEFAULT_OPENCODE_AGENT = "build";
 
 export const openCodeModelSchema = z
   .string()
@@ -26,3 +29,8 @@ export const openCodeModelSchema = z
   });
 
 export const openCodeModelVariantSchema = z.string().trim().min(1);
+export const openCodeAgentSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .default(DEFAULT_OPENCODE_AGENT);

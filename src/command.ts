@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { IssueOrder, IssueSort } from "./github/issues.ts";
 import {
+  openCodeAgentSchema,
   openCodeModelSchema,
   openCodeModelVariantSchema,
 } from "./opencode/model.ts";
@@ -40,6 +41,9 @@ export const runCommand = defineCommand({
     }),
     "model-variant": option(openCodeModelVariantSchema.optional(), {
       description: "OpenCode model variant",
+    }),
+    agent: option(openCodeAgentSchema, {
+      description: "OpenCode agent to use (default: build)",
     }),
     verbose: option(z.coerce.boolean().default(false), {
       description: "Include detailed progress information",
@@ -105,6 +109,7 @@ export const runCommand = defineCommand({
       },
       model: flags.model,
       modelVariant: flags["model-variant"],
+      agent: flags.agent,
       workspace: flags.workspace,
       cleanup: flags.cleanup,
       startClean: flags["start-clean"],
