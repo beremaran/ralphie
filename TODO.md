@@ -34,7 +34,7 @@ enough to implement, review, and commit independently.
       directory with the selected agent, model, and variant.
 - [x] Add a helper for non-structured agent tasks that returns session metadata
       and the final response.
-- [ ] Reuse `requestStructuredOutput` for every decision task.
+- [x] Reuse `requestStructuredOutput` for every decision task.
 - [x] Add typed handling for OpenCode assistant errors, aborts, output-length
       failures, and structured-output retry exhaustion.
 - [x] Record every OpenCode session ID in the run diagnostics.

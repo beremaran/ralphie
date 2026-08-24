@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { requestStructuredOutput } from "./structured-output.ts";
 import {
+  OPEN_CODE_DECISION_PERMISSION_POLICY,
   OpenCodeAssistantErrorKind,
   makeOpenCodeSessionDiagnostics,
   toOpenCodeAssistantError,
@@ -48,10 +49,14 @@ const assistantInfo = (
 
 describe("OpenCode structured output", () => {
   test("sends a JSON schema and validates the assistant decision", async () => {
+    let createParameters: unknown;
     let promptParameters: unknown;
     const client = {
       session: {
-        create: async () => ({ data: { id: "session-1" } }),
+        create: async (parameters: unknown) => {
+          createParameters = parameters;
+          return { data: { id: "session-1" } };
+        },
         prompt: async (parameters: unknown) => {
           promptParameters = parameters;
           return {
@@ -98,6 +103,9 @@ describe("OpenCode structured output", () => {
     });
     expect(promptParameters).not.toHaveProperty("model");
     expect(promptParameters).not.toHaveProperty("variant");
+    expect(createParameters).toMatchObject({
+      permission: OPEN_CODE_DECISION_PERMISSION_POLICY,
+    });
   });
 
   test("forwards explicit model and variant overrides", async () => {

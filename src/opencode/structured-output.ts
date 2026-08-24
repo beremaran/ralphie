@@ -5,7 +5,7 @@ import { z } from "zod";
 import { RalphieError } from "../shared/error.ts";
 import type { OpenCodeModel } from "./model.ts";
 import {
-  OPEN_CODE_TASK_PERMISSION_POLICY,
+  OPEN_CODE_DECISION_PERMISSION_POLICY,
   type OpenCodeRepositoryInvariant,
   type OpenCodeSessionDiagnostics,
   reportOpenCodeFailure,
@@ -71,7 +71,7 @@ export const requestStructuredOutput = <Output>(
         directory: request.directory,
         title: request.title,
         ...(request.agent === undefined ? {} : { agent: request.agent }),
-        permission: OPEN_CODE_TASK_PERMISSION_POLICY,
+        permission: OPEN_CODE_DECISION_PERMISSION_POLICY,
       }, request.signal === undefined ? undefined : { signal: request.signal });
 
       if (session.error !== undefined || session.data === undefined) {

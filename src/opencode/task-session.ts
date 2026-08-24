@@ -135,6 +135,14 @@ export const OPEN_CODE_TASK_PERMISSION_POLICY: PermissionRuleset = [
   { permission: "bash", pattern: "gh *", action: "deny" },
 ];
 
+/** Structured decision sessions may inspect repository files but cannot mutate them. */
+export const OPEN_CODE_DECISION_PERMISSION_POLICY: PermissionRuleset = [
+  { permission: "edit", pattern: "*", action: "deny" },
+  { permission: "write", pattern: "*", action: "deny" },
+  { permission: "bash", pattern: "*", action: "deny" },
+  ...OPEN_CODE_TASK_PERMISSION_POLICY,
+];
+
 type OpenCodePromptParameters = Parameters<
   OpencodeClient["session"]["prompt"]
 >[0];
