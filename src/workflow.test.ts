@@ -76,12 +76,15 @@ function testRuntime(calls: string[], options: TestRuntimeOptions = {}) {
       },
     }),
     Layer.succeed(IssuePipeline, {
-      plan: ({ issue, repositoryPath, targetBranch }) => {
-        calls.push(`planIssue:${issue.number}:${repositoryPath}:${targetBranch}`);
+      plan: ({ issue, repositoryPath, targetBranch, openCode }) => {
+        calls.push(
+          `planIssue:${issue.number}:${repositoryPath}:${targetBranch}:${openCode.model?.providerID}/${openCode.model?.modelID}:${openCode.variant}`,
+        );
         return Effect.succeed({
           issue,
           repositoryPath,
           targetBranch,
+          openCode,
           assessment: {
             kind: IssueStageKind.OpenCodeSession,
             purpose: OpenCodeSessionPurpose.AssessComplexity,
@@ -144,6 +147,8 @@ describe("workflow", () => {
         sort: IssueSort.Created,
         order: IssueOrder.Ascending,
       },
+      model: { providerID: "openai", modelID: "gpt-5" },
+      modelVariant: "high",
       workspace: "/tmp/ralphie",
       cleanup: true,
       startClean: true,
@@ -159,7 +164,7 @@ describe("workflow", () => {
       "prepareRepository:owner/repo:develop:/tmp/ralphie",
       "listIssues:owner/repo:bug:created:asc",
       "startServer",
-      "planIssue:42:/tmp/ralphie/repo:develop",
+      "planIssue:42:/tmp/ralphie/repo:develop:openai/gpt-5:high",
       "closeServer",
       "removeWorkspace:/tmp/ralphie",
     ]);

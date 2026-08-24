@@ -7,6 +7,7 @@ import {
   type IssueFilters,
 } from "./github/issues.ts";
 import { IssuePipeline, selectIssues } from "./issues/pipeline.ts";
+import type { OpenCodeModel } from "./opencode/model.ts";
 import { OpenCode, type OpenCodeServer } from "./opencode/server.ts";
 import { Workspace } from "./workspace/workspace.ts";
 
@@ -18,6 +19,8 @@ export type WorkflowOptions = {
   readonly branch: string;
   readonly maxIssues?: number;
   readonly issueFilters: IssueFilters;
+  readonly model?: OpenCodeModel;
+  readonly modelVariant?: string;
   readonly workspace: string;
   readonly cleanup: boolean;
   readonly startClean: boolean;
@@ -28,6 +31,8 @@ export const workflow = ({
   branch,
   maxIssues,
   issueFilters,
+  model,
+  modelVariant,
   workspace,
   cleanup,
   startClean,
@@ -91,6 +96,7 @@ export const workflow = ({
                 issue,
                 repositoryPath: prepared.path,
                 targetBranch: branch,
+                openCode: { model, variant: modelVariant },
               });
               yield* Console.log(
                 `Prepared issue #${issue.number} for complexity assessment on ${plan.targetBranch}; complexity 0-3 uses implementation and 4-5 uses decomposition.`,

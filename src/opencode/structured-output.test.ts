@@ -87,6 +87,47 @@ describe("OpenCode structured output", () => {
       },
       parts: [{ type: "text", text: "Make a decision." }],
     });
+    expect(promptParameters).not.toHaveProperty("model");
+    expect(promptParameters).not.toHaveProperty("variant");
+  });
+
+  test("forwards explicit model and variant overrides", async () => {
+    let promptParameters: unknown;
+    const client = {
+      session: {
+        create: async () => ({ data: { id: "session-1" } }),
+        prompt: async (parameters: unknown) => {
+          promptParameters = parameters;
+          return {
+            data: {
+              info: assistantInfo({
+                decision: ProbeDecision.Proceed,
+                confidence: 1,
+                reason: "The condition is true.",
+              }),
+              parts: [],
+            },
+          };
+        },
+      },
+    } as unknown as OpencodeClient;
+
+    await requestStructuredOutput(client, {
+      directory: "/workspace",
+      title: "Test decision",
+      prompt: "Make a decision.",
+      schema: decisionSchema,
+      model: { providerID: "openrouter", modelID: "anthropic/claude-sonnet" },
+      variant: "high",
+    }).pipe(Effect.runPromise);
+
+    expect(promptParameters).toMatchObject({
+      model: {
+        providerID: "openrouter",
+        modelID: "anthropic/claude-sonnet",
+      },
+      variant: "high",
+    });
   });
 
   test("rejects structured output that does not match the schema", async () => {

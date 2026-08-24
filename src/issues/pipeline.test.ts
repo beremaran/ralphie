@@ -38,6 +38,7 @@ const makePlan = () =>
       issue: issues[0]!,
       repositoryPath: "/workspace/repository",
       targetBranch: "main",
+      openCode: {},
     });
   }).pipe(Effect.provide(IssuePipelineLive), Effect.runPromise);
 
@@ -46,6 +47,7 @@ describe("issue pipeline", () => {
     const plan = await makePlan();
 
     expect(plan.targetBranch).toBe("main");
+    expect(plan.openCode).toEqual({});
     expect(plan).not.toHaveProperty("issueBranch");
     expect(plan.assessment).toEqual({
       kind: IssueStageKind.OpenCodeSession,

@@ -3,11 +3,7 @@ import { Effect } from "effect";
 import { z } from "zod";
 
 import { RalphieError } from "../shared/error.ts";
-
-export type OpenCodeModel = {
-  readonly providerID: string;
-  readonly modelID: string;
-};
+import type { OpenCodeModel } from "./model.ts";
 
 export type StructuredOutputRequest<Output> = {
   readonly directory: string;
@@ -16,6 +12,7 @@ export type StructuredOutputRequest<Output> = {
   readonly schema: z.ZodType<Output>;
   readonly retryCount?: number;
   readonly model?: OpenCodeModel;
+  readonly variant?: string;
 };
 
 export type StructuredOutputResult<Output> = {
@@ -60,6 +57,7 @@ export const requestStructuredOutput = <Output>(
         sessionID: session.data.id,
         directory: request.directory,
         ...(request.model === undefined ? {} : { model: request.model }),
+        ...(request.variant === undefined ? {} : { variant: request.variant }),
         format: {
           type: "json_schema",
           schema: z.toJSONSchema(request.schema),

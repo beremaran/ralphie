@@ -3,6 +3,10 @@ import { Effect } from "effect";
 import { z } from "zod";
 
 import { IssueOrder, IssueSort } from "./github/issues.ts";
+import {
+  openCodeModelSchema,
+  openCodeModelVariantSchema,
+} from "./opencode/model.ts";
 import { LiveRuntime } from "./runtime.ts";
 import { workflow } from "./workflow.ts";
 
@@ -26,6 +30,12 @@ export const runCommand = defineCommand({
     }),
     "issue-order": option(z.enum(IssueOrder).default(IssueOrder.Ascending), {
       description: "Sort issues in ascending or descending order",
+    }),
+    model: option(openCodeModelSchema.optional(), {
+      description: "OpenCode model in provider/model format",
+    }),
+    "model-variant": option(openCodeModelVariantSchema.optional(), {
+      description: "OpenCode model variant",
     }),
     workspace: option(z.string().trim().min(1).default("~/.ralphie"), {
       description: "Directory used to clone and work on repositories",
@@ -58,6 +68,8 @@ export const runCommand = defineCommand({
         sort: flags["issue-sort"],
         order: flags["issue-order"],
       },
+      model: flags.model,
+      modelVariant: flags["model-variant"],
       workspace: flags.workspace,
       cleanup: flags.cleanup,
       startClean: flags["start-clean"],

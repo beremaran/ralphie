@@ -13,6 +13,7 @@ import {
   type OpenCodeSessionStage,
   StructuredOutputName,
 } from "../opencode/session.ts";
+import type { OpenCodeSelection } from "../opencode/model.ts";
 import { ComplexityLevel, ReviewVerdict } from "./decisions.ts";
 import {
   IssueStageKind,
@@ -53,6 +54,7 @@ export type IssueExecutionPlan = {
   readonly issue: GitHubIssue;
   readonly repositoryPath: string;
   readonly targetBranch: string;
+  readonly openCode: OpenCodeSelection;
   readonly assessment: OpenCodeSessionStage;
   readonly workflows: readonly [IssueWorkflow, IssueWorkflow];
 };
@@ -62,6 +64,7 @@ export type IssuePipelineService = {
     readonly issue: GitHubIssue;
     readonly repositoryPath: string;
     readonly targetBranch: string;
+    readonly openCode: OpenCodeSelection;
   }) => Effect.Effect<IssueExecutionPlan>;
 };
 
@@ -149,11 +152,12 @@ const decompositionWorkflow: IssueWorkflow = {
 };
 
 export const IssuePipelineLive = Layer.succeed(IssuePipeline, {
-  plan: ({ issue, repositoryPath, targetBranch }) =>
+  plan: ({ issue, repositoryPath, targetBranch, openCode }) =>
     Effect.succeed({
       issue,
       repositoryPath,
       targetBranch,
+      openCode,
       assessment,
       workflows: [implementationWorkflow, decompositionWorkflow],
     }),
