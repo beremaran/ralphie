@@ -89,6 +89,7 @@ describe("OpenCode prompts", () => {
     expect(prompt).toContain('Return "resolved" only');
     expect(prompt).toContain("cite concrete source or command-result evidence");
     expect(prompt).toContain("Do not edit files");
+    expect(prompt).toContain("git ls-files");
     expect(prompt).toContain('Issue title: "Close response bodies"');
   });
 

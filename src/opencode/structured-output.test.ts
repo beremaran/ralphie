@@ -103,6 +103,16 @@ describe("OpenCode structured output", () => {
     expect(createParameters).toMatchObject({
       permission: OPEN_CODE_DECISION_PERMISSION_POLICY,
     });
+    expect(OPEN_CODE_DECISION_PERMISSION_POLICY).toContainEqual({
+      permission: "bash",
+      pattern: "git ls-files*",
+      action: "allow",
+    });
+    expect(OPEN_CODE_DECISION_PERMISSION_POLICY.at(-1)).toEqual({
+      permission: "bash",
+      pattern: "git ls-files*",
+      action: "allow",
+    });
   });
 
   test("forwards explicit model and variant overrides", async () => {

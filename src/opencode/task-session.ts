@@ -126,12 +126,20 @@ export const OPEN_CODE_TASK_PERMISSION_POLICY: PermissionRuleset = [
   { permission: "bash", pattern: "gh *", action: "deny" },
 ];
 
-/** Structured decision sessions may inspect repository files but cannot mutate them. */
+/**
+ * Structured decision sessions may inspect repository files and read Git state,
+ * but cannot mutate the checkout. OpenCode permission rules use the last
+ * matching rule, so the narrow read-only allowances must follow the catch-all
+ * Bash denial.
+ */
 export const OPEN_CODE_DECISION_PERMISSION_POLICY: PermissionRuleset = [
   { permission: "edit", pattern: "*", action: "deny" },
   { permission: "write", pattern: "*", action: "deny" },
   { permission: "bash", pattern: "*", action: "deny" },
   ...OPEN_CODE_TASK_PERMISSION_POLICY,
+  { permission: "bash", pattern: "git status*", action: "allow" },
+  { permission: "bash", pattern: "git diff*", action: "allow" },
+  { permission: "bash", pattern: "git ls-files*", action: "allow" },
 ];
 
 type OpenCodePromptParameters = Parameters<OpencodeClient["session"]["prompt"]>[0];
