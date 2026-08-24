@@ -34,9 +34,15 @@ export type WorkflowOptions = {
   readonly repo: string;
   readonly branch: string;
   readonly maxIssues?: number;
+  readonly workspace: string;
 };
 
-export const workflow = ({ repo, branch, maxIssues }: WorkflowOptions) =>
+export const workflow = ({
+  repo,
+  branch,
+  maxIssues,
+  workspace,
+}: WorkflowOptions) =>
   Effect.gen(function* () {
     yield* requireSuccessfulCommand(
       "gh",
@@ -73,7 +79,7 @@ export const workflow = ({ repo, branch, maxIssues }: WorkflowOptions) =>
       openCode.start,
       (server) =>
         Console.log(
-          `OpenCode server started at ${server.url}.\nReady for ${repo} on branch ${branch}.\nIssue limit: ${maxIssues ?? "unlimited"}.`,
+          `OpenCode server started at ${server.url}.\nReady for ${repo} on branch ${branch}.\nWorkspace: ${workspace}.\nIssue limit: ${maxIssues ?? "unlimited"}.`,
         ),
       closeServer,
     );

@@ -16,6 +16,9 @@ export const runCommand = defineCommand({
     "max-issues": option(z.coerce.number().int().positive().optional(), {
       description: "Maximum number of issues to process (default: unlimited)",
     }),
+    workspace: option(z.string().trim().min(1).default("~/.ralphie"), {
+      description: "Directory used to clone and work on repositories",
+    }),
   },
   handler: async ({ flags, positional }) => {
     const [repo, ...extra] = positional;
@@ -31,6 +34,7 @@ export const runCommand = defineCommand({
       repo,
       branch: flags.branch,
       maxIssues: flags["max-issues"],
+      workspace: flags.workspace,
     }).pipe(
       Effect.provide(LiveRuntime),
       Effect.catchAll((error) => Effect.fail(new Error(error.message))),

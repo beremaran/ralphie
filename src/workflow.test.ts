@@ -60,6 +60,7 @@ describe("workflow", () => {
       repo: "owner/repo",
       branch: "develop",
       maxIssues: 5,
+      workspace: "/tmp/ralphie",
     }).pipe(
       Effect.provide(testRuntime(calls)),
       Effect.runPromise,
@@ -77,7 +78,11 @@ describe("workflow", () => {
 
   test("stops when GitHub authentication fails", async () => {
     const calls: string[] = [];
-    const exit = await workflow({ repo: "owner/repo", branch: "main" }).pipe(
+    const exit = await workflow({
+      repo: "owner/repo",
+      branch: "main",
+      workspace: "~/.ralphie",
+    }).pipe(
       Effect.provide(
         testRuntime(calls, {
           commandResults: [
@@ -94,7 +99,11 @@ describe("workflow", () => {
 
   test("stops when git is unavailable", async () => {
     const calls: string[] = [];
-    const exit = await workflow({ repo: "owner/repo", branch: "main" }).pipe(
+    const exit = await workflow({
+      repo: "owner/repo",
+      branch: "main",
+      workspace: "~/.ralphie",
+    }).pipe(
       Effect.provide(
         testRuntime(calls, {
           commandResults: [
@@ -118,7 +127,11 @@ describe("workflow", () => {
 
   test("rejects an empty GitHub token", async () => {
     const calls: string[] = [];
-    const exit = await workflow({ repo: "owner/repo", branch: "main" }).pipe(
+    const exit = await workflow({
+      repo: "owner/repo",
+      branch: "main",
+      workspace: "~/.ralphie",
+    }).pipe(
       Effect.provide(
         testRuntime(calls, {
           commandResults: [
