@@ -26,6 +26,11 @@ export enum ReviewFindingSeverity {
   NonBlocking = "non_blocking",
 }
 
+export const AGENT_TEXT_LIMIT = 8_000;
+export const AGENT_ISSUE_BODY_LIMIT = 12_000;
+export const AGENT_BREAKDOWN_ISSUE_LIMIT = 50;
+export const AGENT_REVIEW_FINDING_LIMIT = 100;
+
 export const complexityDecisionSchema = z.object({
   complexity: z
     .enum(ComplexityLevel)
@@ -33,6 +38,7 @@ export const complexityDecisionSchema = z.object({
   rationale: z
     .string()
     .min(1)
+    .max(AGENT_TEXT_LIMIT)
     .describe("A concise explanation of the assigned complexity."),
 });
 
@@ -41,15 +47,15 @@ export type ComplexityDecision = z.infer<typeof complexityDecisionSchema>;
 export const reviewDecisionSchema = z
   .object({
     verdict: z.enum(ReviewVerdict),
-    summary: z.string().min(1),
+    summary: z.string().min(1).max(AGENT_TEXT_LIMIT),
     findings: z.array(
       z.object({
         severity: z.enum(ReviewFindingSeverity),
-        description: z.string().min(1),
+          description: z.string().min(1).max(AGENT_TEXT_LIMIT),
         file: z.string().min(1).optional(),
         line: z.number().int().positive().optional(),
       }),
-    ),
+    ).max(AGENT_REVIEW_FINDING_LIMIT),
   })
   .superRefine((decision, context) => {
     const hasBlockingFinding = decision.findings.some(
@@ -78,7 +84,7 @@ export type ReviewDecision = z.infer<typeof reviewDecisionSchema>;
 
 export const commitMessageDecisionSchema = z.object({
   subject: z.string().min(1).max(72),
-  body: z.string().min(1).optional(),
+  body: z.string().min(1).max(AGENT_TEXT_LIMIT).optional(),
 });
 
 export type CommitMessageDecision = z.infer<
@@ -87,7 +93,7 @@ export type CommitMessageDecision = z.infer<
 
 export const issueBreakdownDecisionSchema = z
   .object({
-    rationale: z.string().min(1),
+    rationale: z.string().min(1).max(AGENT_TEXT_LIMIT),
     issues: z
       .array(
         z.object({
@@ -95,13 +101,14 @@ export const issueBreakdownDecisionSchema = z
             .string()
             .min(1)
             .describe("A stable identifier used by dependency references."),
-          title: z.string().min(1),
-          body: z.string().min(1),
+          title: z.string().min(1).max(256),
+          body: z.string().min(1).max(AGENT_ISSUE_BODY_LIMIT),
           estimatedComplexity: z.enum(ImplementationComplexityLevel),
-          dependsOn: z.array(z.string().min(1)),
+          dependsOn: z.array(z.string().min(1)).max(AGENT_BREAKDOWN_ISSUE_LIMIT),
         }),
       )
-      .min(2),
+      .min(2)
+      .max(AGENT_BREAKDOWN_ISSUE_LIMIT),
   })
   .superRefine((breakdown, context) => {
     const keys = new Set(breakdown.issues.map((issue) => issue.key));

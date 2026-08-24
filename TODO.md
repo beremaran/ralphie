@@ -235,7 +235,7 @@ enough to implement, review, and commit independently.
 - [ ] Refuse execution when the local checkout contains unexpected commits ahead
       of or behind the intended base.
 - [ ] Revalidate origin ownership before every remote mutation.
-- [ ] Bound issue body, diff, review, and diagnostic artifact sizes.
+- [x] Bound issue body, diff, review, and diagnostic artifact sizes.
 - [x] Redact credentials and sensitive environment values from errors and logs.
 - [x] Document that implementation agents can edit files in the target checkout.
 - [x] Add adversarial tests for issue text that attempts to override Git/GitHub

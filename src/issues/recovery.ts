@@ -47,6 +47,9 @@ export type ReviewExhaustionResult = {
   readonly resume: IssueQueueResumeStrategy.RefreshOpenIssues;
 };
 
+export const REVIEW_DIAGNOSTIC_PATCH_LIMIT_BYTES = 10 * 1024 * 1024;
+export const REVIEW_DIAGNOSTIC_METADATA_LIMIT_BYTES = 2 * 1024 * 1024;
+
 export type IssueRecoveryService = {
   readonly handleReviewExhaustion: (
     input: ReviewExhaustionInput,
@@ -96,6 +99,30 @@ export const IssueRecoveryLive = Layer.effect(
           });
 
           const patch = yield* git.createPatch(input.repositoryPath);
+          if (
+            Buffer.byteLength(patch) > REVIEW_DIAGNOSTIC_PATCH_LIMIT_BYTES
+          ) {
+            return yield* new RalphieError({
+              message: `Review diagnostic patch exceeds ${REVIEW_DIAGNOSTIC_PATCH_LIMIT_BYTES} bytes. Checkout was not restored.`,
+            });
+          }
+          const metadata = `${JSON.stringify(
+            {
+              issue: input.issue,
+              checkpoint: input.checkpoint,
+              reviews: input.reviews,
+              createdAt: new Date().toISOString(),
+            },
+            null,
+            2,
+          )}\n`;
+          if (
+            Buffer.byteLength(metadata) > REVIEW_DIAGNOSTIC_METADATA_LIMIT_BYTES
+          ) {
+            return yield* new RalphieError({
+              message: `Review diagnostic metadata exceeds ${REVIEW_DIAGNOSTIC_METADATA_LIMIT_BYTES} bytes. Checkout was not restored.`,
+            });
+          }
           const diagnosticsPath = join(
             resolveWorkspacePath(input.workspace),
             ".ralphie",
@@ -110,19 +137,7 @@ export const IssueRecoveryLive = Layer.effect(
               await mkdir(diagnosticsPath, { recursive: true });
               await Promise.all([
                 writeFile(join(diagnosticsPath, "changes.patch"), patch),
-                writeFile(
-                  join(diagnosticsPath, "metadata.json"),
-                  `${JSON.stringify(
-                    {
-                      issue: input.issue,
-                      checkpoint: input.checkpoint,
-                      reviews: input.reviews,
-                      createdAt: new Date().toISOString(),
-                    },
-                    null,
-                    2,
-                  )}\n`,
-                ),
+                writeFile(join(diagnosticsPath, "metadata.json"), metadata),
               ]);
             },
             catch: (cause) =>

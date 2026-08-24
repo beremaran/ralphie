@@ -22,6 +22,7 @@ import {
 import {
   IssueRecovery,
   IssueRecoveryLive,
+  REVIEW_DIAGNOSTIC_PATCH_LIMIT_BYTES,
   ReviewExhaustionOutcome,
 } from "./recovery.ts";
 import {
@@ -64,6 +65,7 @@ const reviews = Array.from(
 const recoveryLayer = (
   calls: string[],
   progressEvents: ProgressUpdate[],
+  patch = "diff --git a/file b/file\n",
 ) =>
   IssueRecoveryLive.pipe(
     Layer.provide(
@@ -73,7 +75,7 @@ const recoveryLayer = (
           createPatch: () =>
             Effect.sync(() => {
               calls.push("createPatch");
-              return "diff --git a/file b/file\n";
+            return patch;
             }),
           restore: (_repositoryPath, restoredCheckpoint) =>
             Effect.sync(() => {
@@ -196,5 +198,33 @@ describe("review exhaustion recovery", () => {
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
+  });
+
+  test("does not write or restore an oversized diagnostic patch", async () => {
+    const calls: string[] = [];
+    const progressEvents: ProgressUpdate[] = [];
+    const exit = await Effect.gen(function* () {
+      const recovery = yield* IssueRecovery;
+      yield* recovery.handleReviewExhaustion({
+        runId: "run-1",
+        workspace: "/workspace",
+        repositoryPath: "/workspace/repo",
+        issue,
+        checkpoint,
+        reviews,
+      });
+    }).pipe(
+      Effect.provide(
+        recoveryLayer(
+          calls,
+          progressEvents,
+          "x".repeat(REVIEW_DIAGNOSTIC_PATCH_LIMIT_BYTES + 1),
+        ),
+      ),
+      Effect.runPromiseExit,
+    );
+
+    expect(Exit.isFailure(exit)).toBe(true);
+    expect(calls).toEqual(["createPatch"]);
   });
 });
