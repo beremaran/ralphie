@@ -229,6 +229,7 @@ export const workflow = ({
         github.initialize,
         "GitHub authentication verified and Octokit initialized.",
       );
+      yield* checkCancellation(signal);
 
       const repository = yield* GitRepository;
       yield* track(
@@ -238,6 +239,7 @@ export const workflow = ({
         repository.verifyInstalled,
         "Git installation verified.",
       );
+      yield* checkCancellation(signal);
 
       const prepared = yield* track(
         progress,
@@ -248,6 +250,7 @@ export const workflow = ({
           `${result.cloned ? "Repository cloned" : "Existing repository ready"}: ${result.path}.`,
         { details: { repository: repo, branch, workspace } },
       );
+      yield* checkCancellation(signal);
 
       const githubIssues = yield* GitHubIssues;
       const discoveredIssues = yield* track(
@@ -261,6 +264,7 @@ export const workflow = ({
             : `Found ${result.length} matching open issues; first is #${result[0]!.number} ${result[0]!.title}.`,
         { details: { filters: issueFilters } },
       );
+      yield* checkCancellation(signal);
 
       const invariantService = yield* GitRepositoryInvariant;
       const checkpoints = yield* GitIssueCheckpoint;

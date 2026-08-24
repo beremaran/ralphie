@@ -48,6 +48,8 @@ type TestRuntimeOptions = {
   readonly startFailure?: RalphieError;
   readonly removeFailure?: RalphieError;
   readonly abortOnExecute?: AbortController;
+  readonly abortAt?: "github" | "repository" | "issues" | "opencode" | "between";
+  readonly abortController?: AbortController;
 };
 
 function testRuntime(
@@ -68,6 +70,7 @@ function testRuntime(
     Layer.succeed(GitHubClient, {
       initialize: Effect.suspend(() => {
         calls.push("initializeGitHub");
+        if (options.abortAt === "github") options.abortController?.abort();
         return options.githubFailure
           ? Effect.fail(options.githubFailure)
           : Effect.succeed({} as Octokit);
@@ -80,6 +83,7 @@ function testRuntime(
       }),
       prepare: (repo, branch, workspace) => {
         calls.push(`prepareRepository:${repo}:${branch}:${workspace}`);
+        if (options.abortAt === "repository") options.abortController?.abort();
         return Effect.succeed({
           path: `${workspace}/repo`,
           cloned: true,
@@ -107,6 +111,7 @@ function testRuntime(
         calls.push(
           `listIssues:${repo}:${filters.labels.join(",")}:${filters.sort}:${filters.order}`,
         );
+        if (options.abortAt === "issues") options.abortController?.abort();
         const result = issueLists[Math.min(listIndex, issueLists.length - 1)] ?? [];
         listIndex += 1;
         return Effect.succeed(result);
@@ -125,6 +130,7 @@ function testRuntime(
           const result = outcomes[Math.min(outcomeIndex, outcomes.length - 1)];
           outcomeIndex += 1;
           if (result === undefined) throw new Error("Missing test outcome");
+          if (options.abortAt === "between") options.abortController?.abort();
           return result;
         }),
     }),
@@ -142,6 +148,7 @@ function testRuntime(
         ? Effect.fail(options.startFailure)
         : Effect.sync(() => {
             calls.push("startServer");
+            if (options.abortAt === "opencode") options.abortController?.abort();
             return {
               url: "http://127.0.0.1:4096",
               client: {} as OpencodeClient,
@@ -339,6 +346,112 @@ describe("workflow", () => {
 
     expect(Exit.isFailure(exit)).toBeTrue();
     expect(calls).toEqual(["initializeGitHub"]);
+  });
+
+  test.each([
+    ["github", ["initializeGitHub"]],
+    [
+      "repository",
+      [
+        "initializeGitHub",
+        "verifyGitInstalled",
+        "prepareRepository:owner/repo:develop:/tmp/ralphie",
+      ],
+    ],
+    [
+      "issues",
+      [
+        "initializeGitHub",
+        "verifyGitInstalled",
+        "prepareRepository:owner/repo:develop:/tmp/ralphie",
+        "listIssues:owner/repo:bug:created:asc",
+      ],
+    ],
+  ] as const)(
+    "cancels after %s without starting later work",
+    async (stage, expectedCalls) => {
+      const calls: string[] = [];
+      const states: RunState[] = [];
+      const controller = new AbortController();
+      const exit = await workflow({
+        ...baseOptions,
+        cleanup: true,
+        signal: controller.signal,
+      }).pipe(
+        Effect.provide(
+          testRuntime(calls, states, {
+            abortAt: stage,
+            abortController: controller,
+          }),
+        ),
+        Effect.runPromiseExit,
+      );
+
+      expect(Exit.isFailure(exit)).toBeTrue();
+      expect(calls).toEqual([...expectedCalls]);
+      expect(calls).not.toContain("startServer");
+      expect(calls).not.toContain("removeWorkspace:/tmp/ralphie");
+      expect(states).toHaveLength(0);
+    },
+  );
+
+  test("cancels after OpenCode starts, closes the server, and saves active state", async () => {
+    const calls: string[] = [];
+    const states: RunState[] = [];
+    const controller = new AbortController();
+    const exit = await workflow({
+      ...baseOptions,
+      cleanup: true,
+      signal: controller.signal,
+    }).pipe(
+      Effect.provide(
+        testRuntime(calls, states, {
+          abortAt: "opencode",
+          abortController: controller,
+        }),
+      ),
+      Effect.runPromiseExit,
+    );
+
+    expect(Exit.isFailure(exit)).toBeTrue();
+    expect(calls).toContain("startServer");
+    expect(calls).toContain("closeServer");
+    expect(calls).not.toContain("executeIssue:42:/tmp/ralphie/repo:develop:build");
+    expect(calls).not.toContain("removeWorkspace:/tmp/ralphie");
+    expect(states.at(-1)?.status).toBe(RunStateStatus.Active);
+    expect(states.at(-1)?.activeIssue).toBeUndefined();
+  });
+
+  test("cancels between issues, closes the server, saves state, and does not start the next issue", async () => {
+    const calls: string[] = [];
+    const states: RunState[] = [];
+    const controller = new AbortController();
+    const child = { ...firstIssue, number: 51, title: "Child" };
+    const exit = await workflow({
+      ...baseOptions,
+      maxIssues: 2,
+      cleanup: true,
+      signal: controller.signal,
+    }).pipe(
+      Effect.provide(
+        testRuntime(calls, states, {
+          issueLists: [[firstIssue, child]],
+          abortAt: "between",
+          abortController: controller,
+        }),
+      ),
+      Effect.runPromiseExit,
+    );
+
+    expect(Exit.isFailure(exit)).toBeTrue();
+    expect(calls.filter((call) => call.startsWith("executeIssue:"))).toEqual([
+      "executeIssue:42:/tmp/ralphie/repo:develop:build",
+    ]);
+    expect(calls).toContain("closeServer");
+    expect(calls).not.toContain("executeIssue:51:/tmp/ralphie/repo:develop:build");
+    expect(calls).not.toContain("removeWorkspace:/tmp/ralphie");
+    expect(states.at(-1)?.status).toBe(RunStateStatus.Active);
+    expect(states.at(-1)?.queue.pending.map(({ number }) => number)).toEqual([51]);
   });
 
   test("restores the active checkout and saves resumable state on cancellation", async () => {
