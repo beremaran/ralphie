@@ -5,12 +5,20 @@ export type QueuedIssue = {
   readonly dependsOn?: ReadonlyArray<number>;
 };
 
+export enum IssueQueueState {
+  Ready = "ready",
+  DependencyBlocked = "dependency-blocked",
+  BudgetExhausted = "budget-exhausted",
+  Exhausted = "exhausted",
+}
+
 export type IssueQueue = {
   readonly next: () => GitHubIssue | undefined;
   readonly complete: (issueNumber: number) => void;
   readonly refresh: (issues: ReadonlyArray<QueuedIssue>) => number;
   readonly pendingCount: () => number;
   readonly processedCount: () => number;
+  readonly state: () => IssueQueueState;
 };
 
 export const createIssueQueue = (
@@ -59,5 +67,18 @@ export const createIssueQueue = (
     refresh,
     pendingCount: () => pending.length,
     processedCount: () => processed,
+    state: () => {
+      if (maxIssues !== undefined && processed >= maxIssues) {
+        return IssueQueueState.BudgetExhausted;
+      }
+      if (pending.length === 0) return IssueQueueState.Exhausted;
+      return pending.some((candidate) =>
+        (candidate.dependsOn ?? []).every((dependency) =>
+          completed.has(dependency),
+        ),
+      )
+        ? IssueQueueState.Ready
+        : IssueQueueState.DependencyBlocked;
+    },
   };
 };

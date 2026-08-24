@@ -167,16 +167,16 @@ enough to implement, review, and commit independently.
 ## 10. Refreshable main issue loop
 
 - [ ] Replace `selectIssues` snapshot iteration with `createIssueQueue`.
-- [ ] Count an issue against `--max-issues` when execution begins.
+- [x] Count an issue against `--max-issues` when execution begins.
 - [ ] Mark successfully completed, decomposed, and escalated parent issues as
       completed in the queue.
 - [ ] Refetch open issues after decomposition succeeds.
-- [ ] Add newly discovered child issues without duplicating known issues.
+- [x] Add newly discovered child issues without duplicating known issues.
 - [ ] Translate created dependency keys into GitHub issue-number dependencies.
-- [ ] Skip queued issues whose dependencies are still open.
-- [ ] Re-evaluate blocked issues after each dependency completes.
-- [ ] Define the result when all remaining issues are dependency-blocked.
-- [ ] Preserve the configured sorting policy when refreshing the queue.
+- [x] Skip queued issues whose dependencies are still open.
+- [x] Re-evaluate blocked issues after each dependency completes.
+- [x] Define the result when all remaining issues are dependency-blocked.
+- [x] Preserve the configured sorting policy when refreshing the queue.
 - [ ] Add tests for refresh, dependency ordering, recursive decomposition, and
       issue-budget exhaustion.
 
