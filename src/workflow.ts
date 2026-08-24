@@ -5,6 +5,7 @@ import {
   OctokitClient,
   OpenCode,
   RalphieError,
+  Workspace,
   type OpenCodeServer,
 } from "./services.ts";
 
@@ -35,6 +36,7 @@ export type WorkflowOptions = {
   readonly branch: string;
   readonly maxIssues?: number;
   readonly workspace: string;
+  readonly cleanup: boolean;
 };
 
 export const workflow = ({
@@ -42,6 +44,7 @@ export const workflow = ({
   branch,
   maxIssues,
   workspace,
+  cleanup,
 }: WorkflowOptions) =>
   Effect.gen(function* () {
     yield* requireSuccessfulCommand(
@@ -83,4 +86,10 @@ export const workflow = ({
         ),
       closeServer,
     );
+
+    if (cleanup) {
+      const workspaceService = yield* Workspace;
+      yield* workspaceService.remove(workspace);
+      yield* Console.log(`Workspace removed: ${workspace}.`);
+    }
   });

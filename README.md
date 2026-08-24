@@ -18,9 +18,9 @@ The CLI also requires these local tools:
 ## Usage
 
 ```bash
-bun run index.ts <repo> [--branch <branch>] [--max-issues <count>] [--workspace <path>]
+bun run index.ts <repo> [--branch <branch>] [--max-issues <count>] [--workspace <path>] [--cleanup]
 # Example:
-bun run index.ts owner/project --branch develop --max-issues 10 --workspace /tmp/ralphie
+bun run index.ts owner/project --branch develop --max-issues 10 --workspace /tmp/ralphie --cleanup
 ```
 
 The branch defaults to `main`. The short form `-b develop` is also supported.
@@ -28,6 +28,9 @@ By default, Ralphie processes an unlimited number of issues. Pass a positive
 integer to `--max-issues` to set a limit.
 The workspace defaults to `~/.ralphie`. Pass `--workspace <path>` to choose a
 different location for cloned repositories and working files.
+Pass `--cleanup` to remove the workspace after a successful run. Cleanup is
+skipped when the workflow fails and refuses protected paths such as `/`, your
+home directory, or the current project directory.
 
 The current scaffold validates GitHub CLI authentication, retrieves its token to
 initialize Octokit, verifies the Git installation, starts an OpenCode server,

@@ -19,6 +19,10 @@ export const runCommand = defineCommand({
     workspace: option(z.string().trim().min(1).default("~/.ralphie"), {
       description: "Directory used to clone and work on repositories",
     }),
+    cleanup: option(z.coerce.boolean().default(false), {
+      description: "Remove the workspace after a successful run",
+      argumentKind: "flag",
+    }),
   },
   handler: async ({ flags, positional }) => {
     const [repo, ...extra] = positional;
@@ -35,6 +39,7 @@ export const runCommand = defineCommand({
       branch: flags.branch,
       maxIssues: flags["max-issues"],
       workspace: flags.workspace,
+      cleanup: flags.cleanup,
     }).pipe(
       Effect.provide(LiveRuntime),
       Effect.catchAll((error) => Effect.fail(new Error(error.message))),

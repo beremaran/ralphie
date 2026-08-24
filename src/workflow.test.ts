@@ -7,6 +7,7 @@ import {
   OctokitClient,
   OpenCode,
   RalphieError,
+  Workspace,
   type CommandResult,
 } from "./services.ts";
 import { workflow } from "./workflow.ts";
@@ -47,7 +48,13 @@ function testRuntime(calls: string[], options: TestRuntimeOptions = {}) {
               url: "http://127.0.0.1:4096",
               close: () => calls.push("closeServer"),
             };
-          }),
+        }),
+    }),
+    Layer.succeed(Workspace, {
+      remove: (workspace) =>
+        Effect.sync(() => {
+          calls.push(`removeWorkspace:${workspace}`);
+        }),
     }),
   );
 }
@@ -61,6 +68,7 @@ describe("workflow", () => {
       branch: "develop",
       maxIssues: 5,
       workspace: "/tmp/ralphie",
+      cleanup: true,
     }).pipe(
       Effect.provide(testRuntime(calls)),
       Effect.runPromise,
@@ -73,6 +81,7 @@ describe("workflow", () => {
       "git --version",
       "startServer",
       "closeServer",
+      "removeWorkspace:/tmp/ralphie",
     ]);
   });
 
@@ -82,6 +91,7 @@ describe("workflow", () => {
       repo: "owner/repo",
       branch: "main",
       workspace: "~/.ralphie",
+      cleanup: true,
     }).pipe(
       Effect.provide(
         testRuntime(calls, {
@@ -103,6 +113,7 @@ describe("workflow", () => {
       repo: "owner/repo",
       branch: "main",
       workspace: "~/.ralphie",
+      cleanup: false,
     }).pipe(
       Effect.provide(
         testRuntime(calls, {
@@ -131,6 +142,7 @@ describe("workflow", () => {
       repo: "owner/repo",
       branch: "main",
       workspace: "~/.ralphie",
+      cleanup: false,
     }).pipe(
       Effect.provide(
         testRuntime(calls, {
