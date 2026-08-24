@@ -33,7 +33,7 @@ export const runCommand = defineCommand({
     }),
     branch: option(z.string().min(1).optional(), {
       short: "b",
-      description: "Branch to operate on",
+      description: "Branch to operate on (default: main, otherwise master)",
     }),
     "max-issues": option(z.coerce.number().int().positive().optional(), {
       description: "Maximum number of issues to process (default: unlimited)",
@@ -148,15 +148,17 @@ export const runCommand = defineCommand({
             const store = yield* RunStateStore;
             return yield* store.load(resumePath);
           }).pipe(Effect.provide(RunStateStoreLive), Effect.runPromise);
-          const reconciliation = reconcileRunState(resumeState, {
-            project,
-            repository: target.repo,
-            branch: target.branch,
-          });
-          if (!reconciliation.compatible) {
-            throw new Error(
-              `Cannot resume run ${resumeState.runId}: ${reconciliation.reasons.join("; ")}.`,
-            );
+          if (target.branch !== undefined) {
+            const reconciliation = reconcileRunState(resumeState, {
+              project,
+              repository: target.repo,
+              branch: target.branch,
+            });
+            if (!reconciliation.compatible) {
+              throw new Error(
+                `Cannot resume run ${resumeState.runId}: ${reconciliation.reasons.join("; ")}.`,
+              );
+            }
           }
         }
         return { project, target, resumeState };

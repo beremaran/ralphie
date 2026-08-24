@@ -10,6 +10,7 @@ import { resolveWorkspacePath } from "../workspace/workspace.ts";
 
 export type PreparedRepository = {
   readonly path: string;
+  readonly branch: string;
   readonly cloned: boolean;
   readonly branchChanged: boolean;
   readonly cleaned: boolean;
@@ -19,7 +20,7 @@ export type GitRepositoryService = {
   readonly verifyInstalled: Effect.Effect<void, RalphieError>;
   readonly prepare: (
     repository: string,
-    branch: string,
+    branch: string | undefined,
     workspace: string,
     destinationPath?: string,
   ) => Effect.Effect<PreparedRepository, RalphieError>;
@@ -129,20 +130,35 @@ export const GitRepositoryLive = Layer.effect(
                 await git.raw(["clean", "-fd"]);
               }
 
+              const selectedBranch =
+                branch ??
+                (await git.revparse(["--verify", "refs/remotes/origin/main"]).then(
+                  () => "main",
+                  () =>
+                    git
+                      .revparse(["--verify", "refs/remotes/origin/master"])
+                      .then(() => "master"),
+                ));
+              if (selectedBranch === undefined) {
+                throw new Error(
+                  "Neither origin/main nor origin/master exists; specify a branch explicitly.",
+                );
+              }
+
               const currentBranch = (
                 await git.revparse(["--abbrev-ref", "HEAD"])
               ).trim();
-              const branchChanged = currentBranch !== branch;
+              const branchChanged = currentBranch !== selectedBranch;
               if (branchChanged) {
-                await git.checkout(branch);
+                await git.checkout(selectedBranch);
               }
 
               if (cleaned) {
-                await git.raw(["reset", "--hard", `origin/${branch}`]);
+                await git.raw(["reset", "--hard", `origin/${selectedBranch}`]);
                 await git.raw(["clean", "-fd"]);
               }
 
-              return { branchChanged, cleaned };
+              return { branch: selectedBranch, branchChanged, cleaned };
             },
             catch: (cause) =>
               new RalphieError({

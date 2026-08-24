@@ -15,7 +15,6 @@ import { RalphieError } from "../shared/error.ts";
 import { redactSensitiveText } from "../shared/redaction.ts";
 import { assertSafeProjectName } from "../project/project.ts";
 
-export const DEFAULT_BRANCH = "main";
 export const DEFAULT_WORKSPACE = "~/.ralphie";
 export const IMPLICIT_PROJECT_NAME = "default";
 
@@ -159,7 +158,8 @@ export enum RepositoryTargetKind {
 }
 
 export type ResolvedExecutionConfig = {
-  readonly branch: string;
+  /** Undefined means select main, then master, from the repository remote. */
+  readonly branch?: string;
   readonly maxIssues?: number;
   readonly issueLabels: ReadonlyArray<string>;
   readonly issueSort: IssueSort;
@@ -236,7 +236,9 @@ const resolveExecution = (
   const selectedVariant = overrides.modelVariant ?? modelVariant;
 
   return {
-    branch: overrides.branch ?? branch ?? DEFAULT_BRANCH,
+    ...((overrides.branch ?? branch) === undefined
+      ? {}
+      : { branch: overrides.branch ?? branch }),
     ...(maxIssues === undefined ? {} : { maxIssues }),
     issueLabels: [...(overrides.issueLabels ?? labels ?? [])],
     issueSort: overrides.issueSort ?? sortBy ?? IssueSort.Created,

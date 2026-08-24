@@ -104,6 +104,7 @@ function testRuntime(
         if (options.abortAt === "repository") options.abortController?.abort();
         const prepared = {
           path: destinationPath ?? `${workspace}/repo`,
+          branch: branch ?? "main",
           cloned: true,
           branchChanged: branch !== "main",
           cleaned: false,

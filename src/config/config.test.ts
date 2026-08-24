@@ -6,7 +6,6 @@ import { join } from "node:path";
 
 import { IssueOrder, IssueSort } from "../github/issues.ts";
 import {
-  DEFAULT_BRANCH,
   DEFAULT_WORKSPACE,
   IMPLICIT_PROJECT_NAME,
   RalphieConfigFile,
@@ -25,7 +24,6 @@ describe("hierarchical Ralphie JSON config", () => {
             {
               kind: RepositoryTargetKind.Explicit,
               repo: "owner/repo",
-              branch: DEFAULT_BRANCH,
               issueLabels: [],
               issueSort: IssueSort.Created,
               issueOrder: IssueOrder.Ascending,
@@ -119,6 +117,22 @@ describe("hierarchical Ralphie JSON config", () => {
         },
       ],
     });
+  });
+
+  test("leaves omitted branch settings unset at every config level", () => {
+    const resolved = resolveRalphieConfig(
+      {
+        projects: [
+          {
+            name: "project",
+            repositories: [{ repo: "owner/repo" }],
+          },
+        ],
+      },
+      {},
+    );
+
+    expect(resolved.projects[0]?.targets[0]).not.toHaveProperty("branch");
   });
 
   test("rejects ambiguous projects, duplicate identities, and incompatible CLI use", () => {

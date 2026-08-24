@@ -99,7 +99,8 @@ bun run index.ts owner/repository --dry-run --max-issues 1
 ralphie owner/repository --max-issues 5
 ```
 
-The default branch is `main`, the default OpenCode agent is `build`, and issues
+When no branch is configured, Ralphie uses `main` when it exists and otherwise
+`master`. The default OpenCode agent is `build`, and issues
 are processed oldest-first. Without `--max-issues`, the issue budget is
 unlimited.
 
@@ -442,7 +443,7 @@ may be omitted when `projects` is present in `--config`.
 | Option | Default | Description |
 | --- | --- | --- |
 | `--config <path>` | none | Load reusable options from a validated JSON file. |
-| `-b, --branch <name>` | `main` | Branch to clean, edit, commit, and push directly. |
+| `-b, --branch <name>` | `main`, otherwise `master` | Branch to clean, edit, commit, and push directly. |
 | `--max-issues <count>` | unlimited | Positive maximum number of issues charged to this run. |
 | `--issue-label <label>` | none | Require a label; repeat the flag to require multiple labels. |
 | `--issue-sort <field>` | `created` | Sort by `created`, `updated`, or `comments`. |

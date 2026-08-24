@@ -165,7 +165,7 @@ const summarize = (
 export type WorkflowOptions = {
   readonly project?: string;
   readonly repo: string;
-  readonly branch: string;
+  readonly branch?: string;
   readonly maxIssues?: number;
   readonly issueFilters: IssueFilters;
   readonly agent: string;
@@ -209,7 +209,7 @@ export type RepositoryPatternWorkflowOptions = Omit<
 export const workflow = ({
   project,
   repo,
-  branch,
+  branch: requestedBranch,
   maxIssues,
   issueFilters,
   agent,
@@ -243,11 +243,11 @@ export const workflow = ({
     yield* progress.emit({
       stage: ProgressStage.Run,
       status: ProgressStatus.Info,
-      message: `Ralphie started for ${repo} on ${branch}.`,
+      message: `Ralphie started for ${repo} on ${requestedBranch ?? "main/master (auto)"}.`,
       details: {
         ...(project === undefined ? {} : { project }),
         repository: repo,
-        branch,
+        ...(requestedBranch === undefined ? {} : { branch: requestedBranch }),
         workspace,
         model: model ? `${model.providerID}/${model.modelID}` : "OpenCode default",
         variant: modelVariant ?? "OpenCode default",
@@ -322,12 +322,19 @@ export const workflow = ({
         (yield* track(
           progress,
           ProgressStage.RepositoryPreparation,
-          `Preparing ${repo} on ${branch}...`,
-          repository.prepare(repo, branch, workspace),
+          `Preparing ${repo} on ${requestedBranch ?? "main/master"}...`,
+          repository.prepare(repo, requestedBranch, workspace),
           (result) =>
             `${result.cloned ? "Repository cloned" : "Existing repository ready"}: ${result.path}.`,
-          { details: { repository: repo, branch, workspace } },
+          {
+            details: {
+              repository: repo,
+              ...(requestedBranch === undefined ? {} : { branch: requestedBranch }),
+              workspace,
+            },
+          },
         ));
+      const branch = prepared.branch;
       yield* checkCancellation(signal);
 
       const githubIssues = yield* GitHubIssues;
@@ -347,7 +354,7 @@ export const workflow = ({
       const invariantService = yield* GitRepositoryInvariant;
       const checkpoints = yield* GitIssueCheckpoint;
       const projectRepositories = sharedResources?.preparedProject?.repositories ?? [
-        { repository: repo, repositoryPath: prepared.path, branch },
+        { repository: repo, repositoryPath: prepared.path, branch: prepared.branch },
       ];
       const captureProjectCheckouts = () =>
         Effect.forEach(projectRepositories, (repository) =>
@@ -864,7 +871,7 @@ export const batchWorkflow = ({
               return track(
                 progress,
                 ProgressStage.RepositoryPreparation,
-                `Preparing ${options.repo} on ${options.branch}...`,
+                `Preparing ${options.repo} on ${options.branch ?? "main/master"}...`,
                 git.prepare(options.repo, options.branch, workspace, destinationPath),
                 (result) =>
                   `${result.cloned ? "Repository cloned" : "Existing repository ready"}: ${result.path}.`,
@@ -895,7 +902,7 @@ export const batchWorkflow = ({
             repositories: preparedEntries.map(({ options, preparedRepository }) => ({
               repository: options.repo,
               repositoryPath: preparedRepository.path,
-              branch: options.branch,
+              branch: preparedRepository.branch,
             })),
           };
           return { name: projectName, preparedProject, entries: preparedEntries };
