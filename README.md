@@ -37,8 +37,10 @@ work begins. It uses the same protected-path checks as `--cleanup`.
 The current scaffold validates GitHub CLI authentication, retrieves its token to
 initialize Octokit, and verifies the Git installation. It then clones the target
 repository into `<workspace>/<repository>` (or safely reuses a matching existing
-checkout), fetches it, switches to the requested branch when necessary, and
-starts an OpenCode server before exiting.
+checkout), fetches it, switches to the requested branch when necessary, and starts
+an OpenCode server before exiting. Existing dirty checkouts are reset to the
+requested remote branch with `git reset --hard` and `git clean -fd`, discarding
+tracked and untracked local changes.
 
 ## Development
 

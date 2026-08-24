@@ -59,6 +59,7 @@ function testRuntime(calls: string[], options: TestRuntimeOptions = {}) {
           path: `${workspace}/repo`,
           cloned: true,
           branchChanged: branch !== "main",
+          cleaned: false,
         });
       },
     }),

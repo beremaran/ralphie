@@ -186,6 +186,7 @@ export type PreparedRepository = {
   readonly path: string;
   readonly cloned: boolean;
   readonly branchChanged: boolean;
+  readonly cleaned: boolean;
 };
 
 export type RepositoryService = {
@@ -259,7 +260,7 @@ export const RepositoryLive = Layer.effect(
             }
           }
 
-          const branchChanged = yield* Effect.tryPromise({
+          const repositoryState = yield* Effect.tryPromise({
             try: async () => {
               const git = simpleGit(repositoryPath);
               if (!(await git.checkIsRepo())) {
@@ -284,15 +285,27 @@ export const RepositoryLive = Layer.effect(
                 await git.raw(["fetch", "--prune", "origin"]);
               }
 
+              const status = await git.status();
+              const cleaned = exists && !status.isClean();
+              if (cleaned) {
+                await git.raw(["reset", "--hard"]);
+                await git.raw(["clean", "-fd"]);
+              }
+
               const currentBranch = (
                 await git.revparse(["--abbrev-ref", "HEAD"])
               ).trim();
-              if (currentBranch === branch) {
-                return false;
+              const branchChanged = currentBranch !== branch;
+              if (branchChanged) {
+                await git.checkout(branch);
               }
 
-              await git.checkout(branch);
-              return true;
+              if (cleaned) {
+                await git.raw(["reset", "--hard", `origin/${branch}`]);
+                await git.raw(["clean", "-fd"]);
+              }
+
+              return { branchChanged, cleaned };
             },
             catch: (cause) =>
               new RalphieError({
@@ -304,7 +317,7 @@ export const RepositoryLive = Layer.effect(
           return {
             path: repositoryPath,
             cloned: !exists,
-            branchChanged,
+            ...repositoryState,
           };
         }),
     };

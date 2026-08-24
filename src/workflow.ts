@@ -91,6 +91,9 @@ export const workflow = ({
     yield* Console.log(
       `${prepared.cloned ? "Repository cloned" : "Existing repository ready"}: ${prepared.path}.`,
     );
+    if (prepared.cleaned) {
+      yield* Console.log("Discarded uncommitted repository changes.");
+    }
     if (prepared.branchChanged) {
       yield* Console.log(`Switched to branch ${branch}.`);
     }
