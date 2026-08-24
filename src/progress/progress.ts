@@ -7,6 +7,7 @@ export enum ProgressStage {
   WorkspaceCleanup = "workspace-cleanup",
   GitHubAuthentication = "github-authentication",
   GitVerification = "git-verification",
+  RemoteSafety = "remote-safety",
   RepositoryPreparation = "repository-preparation",
   IssueDiscovery = "issue-discovery",
   OpenCodeServer = "opencode-server",

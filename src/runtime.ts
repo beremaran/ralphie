@@ -5,6 +5,7 @@ import { GitRepositoryInvariantLive } from "./git/repository-invariant.ts";
 import { GitIssueCheckpointLive } from "./git/issue-checkpoint.ts";
 import { GitIssueOperationsLive } from "./git/issue-operations.ts";
 import { GitIssuePreparationLive } from "./git/issue-preparation.ts";
+import { GitRemoteSafetyLive } from "./git/remote-safety.ts";
 import { GitHubClientLive } from "./github/client.ts";
 import { GitHubIssueMutationsLive } from "./github/issue-mutations.ts";
 import { GitHubIssuesLive } from "./github/issues.ts";
@@ -36,6 +37,9 @@ const GitIssueCheckpointLiveWithCommandRunner = GitIssueCheckpointLive.pipe(
 const GitIssueOperationsLiveWithCommandRunner = GitIssueOperationsLive.pipe(
   Layer.provide(CommandRunnerLive),
 );
+const GitRemoteSafetyLiveWithCommandRunner = GitRemoteSafetyLive.pipe(
+  Layer.provide(CommandRunnerLive),
+);
 const GitIssuePreparationRuntime = GitIssuePreparationLive.pipe(
   Layer.provideMerge(
     Layer.merge(
@@ -52,6 +56,7 @@ const ImplementationExecutorRuntime = ImplementationExecutorLive.pipe(
     Layer.mergeAll(
       GitIssuePreparationRuntime,
       GitIssueOperationsLiveWithCommandRunner,
+      GitRemoteSafetyLiveWithCommandRunner,
       IssueRecoveryRuntime,
     ),
   ),

@@ -8,6 +8,7 @@ import {
   GitIssuePreparation,
   type GitIssuePreparationService,
 } from "../git/issue-preparation.ts";
+import { GitPushMode, GitRemoteSafety } from "../git/remote-safety.ts";
 import { buildCommitMessagePrompt, buildImplementationPrompt, buildReviewFixPrompt, buildReviewPrompt } from "../opencode/prompts.ts";
 import { requestStructuredOutput } from "../opencode/structured-output.ts";
 import { runOpenCodeTask } from "../opencode/task-session.ts";
@@ -125,6 +126,7 @@ export const ImplementationExecutorLive = Layer.effect(
   Effect.gen(function* () {
     const preparation = yield* GitIssuePreparation;
     const operations = yield* GitIssueOperations;
+    const remoteSafety = yield* GitRemoteSafety;
     const recovery = yield* IssueRecovery;
     const progress = yield* ProgressReporter;
 
@@ -141,6 +143,21 @@ export const ImplementationExecutorLive = Layer.effect(
           yield* context.repositoryInvariant.verify(
             context.repositoryPath,
             invariant,
+          );
+          yield* stage(
+            progress,
+            input,
+            ProgressStage.RemoteSafety,
+            "Verifying direct-push safety...",
+            remoteSafety.verifyDirectPush({
+              client: context.octokit,
+              repository: context.repository,
+              repositoryPath: context.repositoryPath,
+              branch: context.targetBranch,
+              intendedBaseSha: checkpoint.sha,
+              pushMode: GitPushMode.NonForce,
+            }).pipe(Effect.mapError(asRalphieError)),
+            "Direct-push safety verified.",
           );
 
           yield* stage(
@@ -289,9 +306,22 @@ export const ImplementationExecutorLive = Layer.effect(
                 input,
                 ProgressStage.Push,
                 `Pushing ${context.targetBranch}...`,
-                operations
-                  .push(context.repositoryPath, context.targetBranch, commit.sha)
-                  .pipe(Effect.mapError(asRalphieError)),
+                remoteSafety.verifyDirectPush({
+                  client: context.octokit,
+                  repository: context.repository,
+                  repositoryPath: context.repositoryPath,
+                  branch: context.targetBranch,
+                  intendedBaseSha: checkpoint.sha,
+                  expectedCommitSha: commit.sha,
+                  pushMode: GitPushMode.NonForce,
+                }).pipe(
+                  Effect.mapError(asRalphieError),
+                  Effect.zipRight(
+                    operations
+                      .push(context.repositoryPath, context.targetBranch, commit.sha)
+                      .pipe(Effect.mapError(asRalphieError)),
+                  ),
+                ),
                 `Pushed ${context.targetBranch}.`,
               );
               return {

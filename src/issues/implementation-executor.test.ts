@@ -20,6 +20,12 @@ import {
   type GitIssuePreparationService,
 } from "../git/issue-preparation.ts";
 import {
+  GitPushMode,
+  GitRemoteSafety,
+  type GitRemoteSafetyInput,
+  type GitRemoteSafetyService,
+} from "../git/remote-safety.ts";
+import {
   IssueExecutionOutcomeKind,
   type IssueExecutionContext,
 } from "./execution.ts";
@@ -125,6 +131,8 @@ const services = (options: {
   readonly preparation?: Partial<GitIssuePreparationService>;
   readonly operations?: Partial<GitIssueOperationsService>;
   readonly recovery?: Partial<IssueRecoveryService>;
+  readonly remoteSafety?: Partial<GitRemoteSafetyService>;
+  readonly safetyInputs?: GitRemoteSafetyInput[];
   readonly progress?: ProgressUpdate[];
 }) => {
   const preparation: GitIssuePreparationService = {
@@ -149,16 +157,31 @@ const services = (options: {
       }),
     ...options.recovery,
   };
+  const remoteSafety: GitRemoteSafetyService = {
+    verifyDirectPush: (input) =>
+      Effect.sync(() => {
+        options.safetyInputs?.push(input);
+        return {
+        repository: input.repository,
+        branch: input.branch,
+        origin: "https://github.com/owner/repository.git",
+        protected: false,
+        activeBranchRules: 0,
+        hasPushPermission: true,
+        commitsBehindBase: 0,
+        commitsAheadBase: input.expectedCommitSha === undefined ? 0 : 1,
+        pushMode: GitPushMode.NonForce,
+        } as const;
+      }),
+    ...options.remoteSafety,
+  };
   return {
-    layer: Layer.merge(
+    layer: Layer.mergeAll(
       Layer.succeed(GitIssuePreparation, preparation),
-      Layer.merge(
-        Layer.succeed(GitIssueOperations, operations),
-        Layer.merge(
-          Layer.succeed(IssueRecovery, recovery),
-          makeProgressRecorderLayer(options.progress ?? []),
-        ),
-      ),
+      Layer.succeed(GitIssueOperations, operations),
+      Layer.succeed(GitRemoteSafety, remoteSafety),
+      Layer.succeed(IssueRecovery, recovery),
+      makeProgressRecorderLayer(options.progress ?? []),
     ),
     preparation,
     operations,
@@ -186,7 +209,8 @@ const run = (
 describe("implementation executor", () => {
   test("implements, reviews, commits, and pushes after first-pass approval", async () => {
     const events: ProgressUpdate[] = [];
-    const setup = services({ progress: events });
+    const safetyInputs: GitRemoteSafetyInput[] = [];
+    const setup = services({ progress: events, safetyInputs });
     const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
     const result = await Effect.runPromise(
       run(
@@ -206,6 +230,30 @@ describe("implementation executor", () => {
       subject: "fix token refresh",
     });
     expect(events.some((event) => event.stage === "review" && event.status === "succeeded")).toBe(true);
+    expect(safetyInputs.map(({ expectedCommitSha }) => expectedCommitSha)).toEqual([
+      undefined,
+      "commit-1",
+    ]);
+  });
+
+  test("refuses unsafe direct pushes before starting an agent session", async () => {
+    let prompted = false;
+    const client = openCodeClient([]);
+    client.session.prompt = (async () => {
+      prompted = true;
+      return { data: { info: {}, parts: [] } };
+    }) as unknown as typeof client.session.prompt;
+    const setup = services({
+      remoteSafety: {
+        verifyDirectPush: () =>
+          Effect.fail(new RalphieError({ message: "protected branch" })),
+      },
+    });
+    const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
+    const exit = await Effect.runPromiseExit(run(client, artifacts, setup.layer));
+
+    expect(Exit.isFailure(exit)).toBe(true);
+    expect(prompted).toBe(false);
   });
 
   test("starts a fresh review-fix session and converges after a requested change", async () => {

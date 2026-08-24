@@ -31,6 +31,10 @@ import {
 } from "../git/issue-preparation.ts";
 import type { IssueCheckpoint } from "../git/issue-checkpoint.ts";
 import {
+  GitPushMode,
+  GitRemoteSafety,
+} from "../git/remote-safety.ts";
+import {
   GitHubIssueMutations,
   type GitHubIssueMutationService,
 } from "../github/issue-mutations.ts";
@@ -124,15 +128,24 @@ const implementationServices = (
         resume: IssueQueueResumeStrategy.RefreshOpenIssues,
       }),
   };
-  return Layer.merge(
+  return Layer.mergeAll(
     Layer.succeed(GitIssuePreparation, preparation),
-    Layer.merge(
-      Layer.succeed(GitIssueOperations, git),
-      Layer.merge(
-        Layer.succeed(IssueRecovery, recovery),
-        makeProgressRecorderLayer(progress),
-      ),
-    ),
+    Layer.succeed(GitIssueOperations, git),
+    Layer.succeed(GitRemoteSafety, {
+      verifyDirectPush: (input) => Effect.succeed({
+        repository: input.repository,
+        branch: input.branch,
+        origin: "https://github.com/owner/repository.git",
+        protected: false,
+        activeBranchRules: 0,
+        hasPushPermission: true,
+        commitsBehindBase: 0,
+        commitsAheadBase: input.expectedCommitSha === undefined ? 0 : 1,
+        pushMode: GitPushMode.NonForce,
+      }),
+    }),
+    Layer.succeed(IssueRecovery, recovery),
+    makeProgressRecorderLayer(progress),
   );
 };
 
