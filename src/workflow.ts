@@ -37,6 +37,7 @@ export type WorkflowOptions = {
   readonly maxIssues?: number;
   readonly workspace: string;
   readonly cleanup: boolean;
+  readonly startClean: boolean;
 };
 
 export const workflow = ({
@@ -45,8 +46,15 @@ export const workflow = ({
   maxIssues,
   workspace,
   cleanup,
+  startClean,
 }: WorkflowOptions) =>
   Effect.gen(function* () {
+    if (startClean) {
+      const workspaceService = yield* Workspace;
+      yield* workspaceService.remove(workspace);
+      yield* Console.log(`Existing workspace removed: ${workspace}.`);
+    }
+
     yield* requireSuccessfulCommand(
       "gh",
       ["auth", "status"],

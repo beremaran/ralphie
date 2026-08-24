@@ -23,6 +23,10 @@ export const runCommand = defineCommand({
       description: "Remove the workspace after a successful run",
       argumentKind: "flag",
     }),
+    "start-clean": option(z.coerce.boolean().default(false), {
+      description: "Remove an existing workspace before starting",
+      argumentKind: "flag",
+    }),
   },
   handler: async ({ flags, positional }) => {
     const [repo, ...extra] = positional;
@@ -40,6 +44,7 @@ export const runCommand = defineCommand({
       maxIssues: flags["max-issues"],
       workspace: flags.workspace,
       cleanup: flags.cleanup,
+      startClean: flags["start-clean"],
     }).pipe(
       Effect.provide(LiveRuntime),
       Effect.catchAll((error) => Effect.fail(new Error(error.message))),

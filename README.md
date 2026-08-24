@@ -18,9 +18,9 @@ The CLI also requires these local tools:
 ## Usage
 
 ```bash
-bun run index.ts <repo> [--branch <branch>] [--max-issues <count>] [--workspace <path>] [--cleanup]
+bun run index.ts <repo> [--branch <branch>] [--max-issues <count>] [--workspace <path>] [--start-clean] [--cleanup]
 # Example:
-bun run index.ts owner/project --branch develop --max-issues 10 --workspace /tmp/ralphie --cleanup
+bun run index.ts owner/project --branch develop --max-issues 10 --workspace /tmp/ralphie --start-clean --cleanup
 ```
 
 The branch defaults to `main`. The short form `-b develop` is also supported.
@@ -31,6 +31,8 @@ different location for cloned repositories and working files.
 Pass `--cleanup` to remove the workspace after a successful run. Cleanup is
 skipped when the workflow fails and refuses protected paths such as `/`, your
 home directory, or the current project directory.
+Pass `--start-clean` to remove an existing workspace before any other workflow
+work begins. It uses the same protected-path checks as `--cleanup`.
 
 The current scaffold validates GitHub CLI authentication, retrieves its token to
 initialize Octokit, verifies the Git installation, starts an OpenCode server,

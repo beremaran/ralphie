@@ -15,6 +15,7 @@ import { workflow } from "./workflow.ts";
 type TestRuntimeOptions = {
   commandResults?: CommandResult[];
   startFailure?: RalphieError;
+  removeFailure?: RalphieError;
 };
 
 function testRuntime(calls: string[], options: TestRuntimeOptions = {}) {
@@ -51,10 +52,12 @@ function testRuntime(calls: string[], options: TestRuntimeOptions = {}) {
         }),
     }),
     Layer.succeed(Workspace, {
-      remove: (workspace) =>
-        Effect.sync(() => {
-          calls.push(`removeWorkspace:${workspace}`);
-        }),
+      remove: (workspace) => {
+        calls.push(`removeWorkspace:${workspace}`);
+        return options.removeFailure
+          ? Effect.fail(options.removeFailure)
+          : Effect.void;
+      },
     }),
   );
 }
@@ -69,12 +72,14 @@ describe("workflow", () => {
       maxIssues: 5,
       workspace: "/tmp/ralphie",
       cleanup: true,
+      startClean: true,
     }).pipe(
       Effect.provide(testRuntime(calls)),
       Effect.runPromise,
     );
 
     expect(calls).toEqual([
+      "removeWorkspace:/tmp/ralphie",
       "gh auth status",
       "gh auth token",
       "initializeOctokit:test-token",
@@ -92,6 +97,7 @@ describe("workflow", () => {
       branch: "main",
       workspace: "~/.ralphie",
       cleanup: true,
+      startClean: false,
     }).pipe(
       Effect.provide(
         testRuntime(calls, {
@@ -114,6 +120,7 @@ describe("workflow", () => {
       branch: "main",
       workspace: "~/.ralphie",
       cleanup: false,
+      startClean: false,
     }).pipe(
       Effect.provide(
         testRuntime(calls, {
@@ -143,6 +150,7 @@ describe("workflow", () => {
       branch: "main",
       workspace: "~/.ralphie",
       cleanup: false,
+      startClean: false,
     }).pipe(
       Effect.provide(
         testRuntime(calls, {
@@ -157,5 +165,26 @@ describe("workflow", () => {
 
     expect(Exit.isFailure(exit)).toBeTrue();
     expect(calls).toEqual(["gh auth status", "gh auth token"]);
+  });
+
+  test("stops before other work when start-clean fails", async () => {
+    const calls: string[] = [];
+    const exit = await workflow({
+      repo: "owner/repo",
+      branch: "main",
+      workspace: "/tmp/ralphie",
+      cleanup: false,
+      startClean: true,
+    }).pipe(
+      Effect.provide(
+        testRuntime(calls, {
+          removeFailure: new RalphieError({ message: "cleanup failed" }),
+        }),
+      ),
+      Effect.runPromiseExit,
+    );
+
+    expect(Exit.isFailure(exit)).toBeTrue();
+    expect(calls).toEqual(["removeWorkspace:/tmp/ralphie"]);
   });
 });
