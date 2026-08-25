@@ -2,6 +2,7 @@ import { Context, Effect, Layer } from "effect";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { redactSensitiveText, redactSensitiveValue } from "../shared/redaction.ts";
+import { cyan, dim, green, red, yellow } from "./colors.ts";
 
 export enum ProgressStage {
   Run = "run",
@@ -86,24 +87,39 @@ export type ProgressRendererOptions = {
   readonly verbose: boolean;
   readonly write?: (text: string) => void;
   readonly width?: () => number;
+  readonly colors?: boolean;
   readonly now?: () => Date;
   readonly runId?: string;
   /** Optional durable, redacted JSON Lines audit log. */
   readonly eventLogPath?: string;
 };
 
-const statusSymbol = (status: ProgressStatus): string => {
+const statusSymbol = (status: ProgressStatus, colors: boolean): string => {
+  if (!colors) {
+    switch (status) {
+      case ProgressStatus.Succeeded:
+        return "✓";
+      case ProgressStatus.Failed:
+        return "✗";
+      case ProgressStatus.Skipped:
+        return "−";
+      case ProgressStatus.Started:
+        return "◐";
+      case ProgressStatus.Info:
+        return "•";
+    }
+  }
   switch (status) {
     case ProgressStatus.Succeeded:
-      return "✓";
+      return green("✓");
     case ProgressStatus.Failed:
-      return "✗";
+      return red("✗");
     case ProgressStatus.Skipped:
-      return "−";
+      return dim("−");
     case ProgressStatus.Started:
-      return "◐";
+      return yellow("◐");
     case ProgressStatus.Info:
-      return "•";
+      return cyan("•");
   }
 };
 
@@ -142,6 +158,7 @@ type ActiveProgress = {
 export const makeProgressReporterLayer = ({
   mode,
   verbose,
+  colors = verbose,
   write = (text) => process.stderr.write(text),
   width = () => process.stderr.columns ?? 80,
   now = () => new Date(),
@@ -154,18 +171,19 @@ export const makeProgressReporterLayer = ({
     let persistEvents = true;
 
     const renderLine = (event: ProgressEvent): string => {
-      const scope = event.repository ? ` [${event.repository}]` : "";
-      const issue = event.issue ? ` #${event.issue.number}` : "";
+      const scope = event.repository ? ` ${dim(`[${event.repository}]`)}` : "";
+      const issue = event.issue ? ` ${cyan(`#${event.issue.number}`)}` : "";
       const position =
         event.current !== undefined && event.total !== undefined
-          ? ` [${event.current}/${event.total}]`
+          ? ` ${dim(`[${event.current}/${event.total}]`)}`
           : "";
       const attempt =
         event.attempt !== undefined && event.maxAttempts !== undefined
-          ? ` (${event.attempt}/${event.maxAttempts})`
+          ? ` ${dim(`(${event.attempt}/${event.maxAttempts})`)}`
           : "";
       const details = verbose ? formatDetails(event.details) : "";
-      return `${statusSymbol(event.status)}${scope}${position}${attempt}${issue} ${event.message}${details}`;
+      const status = statusSymbol(event.status, colors);
+      return `${status}${scope}${position}${attempt}${issue} ${event.message}${details}`;
     };
 
     const clearLiveLine = () => {
@@ -262,9 +280,13 @@ export const makeProgressReporterLayer = ({
           const duration =
             active === undefined
               ? ""
-              : ` (${(
-                  Math.max(0, emittedAt.getTime() - active.startedAt) / 1000
-                ).toFixed(1)}s)`;
+              : (() => {
+                  const elapsedMs = Math.max(0, emittedAt.getTime() - active.startedAt);
+                  const elapsedSec = (elapsedMs / 1000).toFixed(1);
+                  return colors
+                    ? ` ${dim(`((${elapsedSec}s)`)}`
+                    : ` ((${elapsedSec}s)`;
+                })();
           appendLine(`${line}${duration}`);
         }),
       stopPersisting: Effect.sync(() => {

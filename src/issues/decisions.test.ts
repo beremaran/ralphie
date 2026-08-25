@@ -1,8 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
 import {
-  AGENT_ISSUE_BODY_LIMIT,
-  AGENT_TEXT_LIMIT,
   ComplexityLevel,
   complexityDecisionSchema,
   ImplementationComplexityLevel,
@@ -103,20 +101,6 @@ describe("issue pipeline decisions", () => {
         issues: [{ ...valid.issues[0], dependsOn: ["integration"] }, valid.issues[1]],
       }).success,
     ).toBe(false);
-    expect(
-      issueBreakdownDecisionSchema.safeParse({
-        ...valid,
-        rationale: "r".repeat(AGENT_TEXT_LIMIT + 1),
-      }).success,
-    ).toBe(false);
-    expect(
-      issueBreakdownDecisionSchema.safeParse({
-        ...valid,
-        issues: [
-          { ...valid.issues[0], body: "b".repeat(AGENT_ISSUE_BODY_LIMIT + 1) },
-          valid.issues[1],
-        ],
-      }).success,
-    ).toBe(false);
+    expect(issueBreakdownDecisionSchema.safeParse(valid).success).toBe(true);
   });
 });

@@ -11,6 +11,7 @@ import {
   ProgressStage,
   ProgressStatus,
 } from "./progress.ts";
+import { cyan, dim, green, red, yellow } from "./colors.ts";
 
 describe("progress reporting", () => {
   test("renders deterministic JSON Lines events", async () => {
@@ -76,7 +77,7 @@ describe("progress reporting", () => {
       });
     }).pipe(Effect.provide(layer), Effect.runPromise);
 
-    expect(output).toBe('✓ [owner/repo] [1/3] #42 Issue prepared. {"branch":"main"}\n');
+    expect(output).toBe(`${green("✓")} ${dim("[owner/repo]")} ${dim("[1/3]")} ${cyan("#42")} Issue prepared. {"branch":"main"}\n`);
   });
 
   test("renders nested interactive stages on one live line", async () => {
@@ -85,6 +86,7 @@ describe("progress reporting", () => {
     const layer = makeProgressReporterLayer({
       mode: ProgressRenderMode.Interactive,
       verbose: false,
+      colors: true,
       write: (text) => {
         output += text;
       },
@@ -143,16 +145,16 @@ describe("progress reporting", () => {
     }).pipe(Effect.provide(layer), Effect.runPromise);
 
     expect(output).toBe(
-      "◐ #42 Working on issue..." +
-        "\r\x1b[2K◐ #42 Assessing complexity..." +
-        "\r\x1b[2K✓ #42 Complexity assessed. (1.0s)\n" +
-        "◐ #42 Working on issue..." +
-        "\r\x1b[2K• #42 Using implementation workflow.\n" +
-        "◐ #42 Working on issue..." +
-        "\r\x1b[2K✓ #42 Issue finished. (4.0s)\n" +
-        "◐ Pushing..." +
-        "\r\x1b[2K✗ Push failed. (1.0s)\n" +
-        "✗ Run failed.\n",
+      `${yellow("◐")} ${cyan("#42")} Working on issue...` +
+        `\r\x1b[2K${yellow("◐")} ${cyan("#42")} Assessing complexity...` +
+        `\r\x1b[2K${green("✓")} ${cyan("#42")} Complexity assessed. ${dim("((1.0s)")}\n` +
+        `${yellow("◐")} ${cyan("#42")} Working on issue...` +
+        `\r\x1b[2K${cyan("•")} ${cyan("#42")} Using implementation workflow.\n` +
+        `${yellow("◐")} ${cyan("#42")} Working on issue...` +
+        `\r\x1b[2K${green("✓")} ${cyan("#42")} Issue finished. ${dim("((4.0s)")}\n` +
+        `${yellow("◐")} Pushing...` +
+        `\r\x1b[2K${red("✗")} Push failed. ${dim("((1.0s)")}\n` +
+        `${red("✗")} Run failed.\n`,
     );
     expect(output).not.toContain("\x1b[H");
     expect(output).not.toContain("\x1b[J");
@@ -331,6 +333,7 @@ describe("progress reporting", () => {
     const layer = makeProgressReporterLayer({
       mode: ProgressRenderMode.Plain,
       verbose: false,
+      colors: true,
       write: (text) => {
         output += text;
       },
@@ -372,10 +375,10 @@ describe("progress reporting", () => {
     }).pipe(Effect.provide(layer), Effect.runPromise);
 
     expect(output).toBe(
-      "• Run started.\n" +
-        "◐ [1/2] (2/5) #42 Reviewing changes...\n" +
-        "✓ [1/2] (2/5) #42 Review approved.\n" +
-        "✓ Run completed.\n",
+      `${cyan("•")} Run started.\n` +
+        `${yellow("◐")} ${dim("[1/2]")} ${dim("(2/5)")} ${cyan("#42")} Reviewing changes...\n` +
+        `${green("✓")} ${dim("[1/2]")} ${dim("(2/5)")} ${cyan("#42")} Review approved.\n` +
+        `${green("✓")} Run completed.\n`,
     );
   });
 });

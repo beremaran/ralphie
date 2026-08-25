@@ -64,6 +64,27 @@ const checkCancellation = (signal: AbortSignal | undefined) =>
 const issueFeatureBranch = (issueNumber: number): string =>
   `ralphie/issue-${issueNumber}`;
 
+const outcomeMessage = (
+  issueNumber: number,
+  outcome: IssueExecutionOutcome,
+): string => {
+  switch (outcome.kind) {
+    case IssueExecutionOutcomeKind.Completed:
+      if (outcome.completion === IssueCompletionKind.AlreadyResolved) {
+        return `Issue #${issueNumber} was already resolved.`;
+      }
+      return `Issue #${issueNumber} implemented and pushed.`;
+    case IssueExecutionOutcomeKind.Decomposed:
+      return `Issue #${issueNumber} decomposed into ${outcome.childIssueNumbers.length} child issues.`;
+    case IssueExecutionOutcomeKind.Escalated:
+      return `Issue #${issueNumber} escalated: ${outcome.reason}`;
+    case IssueExecutionOutcomeKind.Failed:
+      return `Issue #${issueNumber} failed: ${outcome.message}`;
+    case IssueExecutionOutcomeKind.Skipped:
+      return `Issue #${issueNumber} skipped: ${outcome.reason}`;
+  }
+};
+
 const copyOutcome = (
   outcome: IssueExecutionOutcome,
 ): RunState["outcomes"][number]["outcome"] => {
@@ -222,7 +243,7 @@ export const workflow = ({
     yield* progress.emit({
       stage: ProgressStage.Run,
       status: ProgressStatus.Info,
-      message: `Ralphie started for ${repo} on ${requestedBranch ?? "main/master (auto)"}.`,
+      message: `Ralphie started for ${repo} on ${requestedBranch ?? "default branch"}.`,
       details: {
         repository: repo,
         ...(requestedBranch === undefined ? {} : { branch: requestedBranch }),
@@ -300,7 +321,7 @@ export const workflow = ({
         `Preparing ${repo} on ${requestedBranch ?? "main/master"}...`,
         repository.prepare(repo, requestedBranch, workspace),
         (result) =>
-          `${result.cloned ? "Repository cloned" : "Existing repository ready"}: ${result.path}.`,
+          `Repository ready: ${result.path}.`,
         {
           details: {
             repository: repo,
@@ -321,7 +342,7 @@ export const workflow = ({
         (result) =>
           result.length === 0
             ? "No open issues match the current filters."
-            : `Found ${result.length} matching open issues; first is #${result[0]!.number} ${result[0]!.title}.`,
+            : `Found ${result.length} matching open issues.`,
         { details: { filters: issueFilters } },
       );
       yield* checkCancellation(signal);
@@ -546,7 +567,7 @@ export const workflow = ({
                   signal,
                 }),
                 (result) =>
-                  `Issue #${issue.number} finished with outcome ${result.kind}.`,
+                  outcomeMessage(issue.number, result),
                 {
                   issue: { number: issue.number, title: issue.title },
                   current,
@@ -699,7 +720,7 @@ export const workflow = ({
               const refreshed = yield* track(
                 progress,
                 ProgressStage.IssueDiscovery,
-                "Refreshing open issues after decomposition...",
+                "Refreshing issue list...",
                 githubIssues.listOpen(octokit, repo, issueFilters),
                 (result) => `Refreshed ${result.length} matching open issues.`,
               );
@@ -738,7 +759,7 @@ export const workflow = ({
                 Effect.unsafeMakeSemaphore(agentConcurrency),
               );
             }
-            return `Pi runtime started at ${server.url}.`;
+            return "Pi runtime ready.";
           },
         ),
         processQueue,
