@@ -223,10 +223,10 @@ export const makeProgressReporterLayer = ({
             ...(update.details === undefined
               ? {}
               : {
-                  details: redactSensitiveValue(update.details) as Readonly<
-                    Record<string, unknown>
-                  >,
-                }),
+                details: redactSensitiveValue(update.details) as Readonly<
+                  Record<string, unknown>
+                >,
+              }),
             runId,
             timestamp: emittedAt.toISOString(),
           };
@@ -281,12 +281,12 @@ export const makeProgressReporterLayer = ({
             active === undefined
               ? ""
               : (() => {
-                  const elapsedMs = Math.max(0, emittedAt.getTime() - active.startedAt);
-                  const elapsedSec = (elapsedMs / 1000).toFixed(1);
-                  return colors
-                    ? ` ${dim(`((${elapsedSec}s)`)}`
-                    : ` ((${elapsedSec}s)`;
-                })();
+                const elapsedMs = Math.max(0, emittedAt.getTime() - active.startedAt);
+                const elapsedSec = (elapsedMs / 1000).toFixed(1);
+                return colors
+                  ? ` ${dim(`(${elapsedSec}s)`)}`
+                  : ` (${elapsedSec}s)`;
+              })();
           appendLine(`${line}${duration}`);
         }),
       stopPersisting: Effect.sync(() => {
