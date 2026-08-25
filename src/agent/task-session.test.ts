@@ -1,19 +1,19 @@
 import { describe, expect, test } from "bun:test";
-import type { AssistantMessage, OpencodeClient, Part } from "@opencode-ai/sdk/v2";
+import type { PiAssistantMessage, PiClient, PiPart } from "../pi/client.ts";
 import { Effect, Exit } from "effect";
 
 import {
-  createOpenCodeTaskSession,
-  makeOpenCodeTaskSessionLayer,
-  OPEN_CODE_SESSION_RETENTION_POLICY,
-  OpenCodeSessionRetentionPolicy,
-  OpenCodeAssistantErrorKind,
-  OpenCodeTaskSession,
-  OpenCodeAssistantError,
-  OPEN_CODE_TASK_PERMISSION_POLICY,
-  makeOpenCodeSessionDiagnostics,
-  runOpenCodeTask,
-  toOpenCodeAssistantError,
+  createPiTaskSession,
+  makePiTaskSessionLayer,
+  PI_SESSION_RETENTION_POLICY,
+  PiSessionRetentionPolicy,
+  PiAssistantErrorKind,
+  PiTaskSession,
+  PiAssistantError,
+  PI_TASK_PERMISSION_POLICY,
+  makePiSessionDiagnostics,
+  runPiTask,
+  toPiAssistantError,
   taskSessionPromptParameters,
 } from "./task-session.ts";
 
@@ -26,7 +26,9 @@ const selection = {
   variant: "high",
 };
 
-const assistantResponse = (error?: AssistantMessage["error"]): AssistantMessage => ({
+const assistantResponse = (
+  error?: PiAssistantMessage["error"],
+): PiAssistantMessage => ({
   id: "message-1",
   sessionID: "session-1",
   role: "assistant",
@@ -47,7 +49,7 @@ const assistantResponse = (error?: AssistantMessage["error"]): AssistantMessage 
   },
 });
 
-const responseParts: ReadonlyArray<Part> = [
+const responseParts: ReadonlyArray<PiPart> = [
   {
     id: "part-1",
     sessionID: "session-1",
@@ -57,11 +59,9 @@ const responseParts: ReadonlyArray<Part> = [
   },
 ];
 
-describe("OpenCode task sessions", () => {
+describe("Pi task sessions", () => {
   test("retains successful sessions for inspection", () => {
-    expect(OPEN_CODE_SESSION_RETENTION_POLICY).toBe(
-      OpenCodeSessionRetentionPolicy.Retain,
-    );
+    expect(PI_SESSION_RETENTION_POLICY).toBe(PiSessionRetentionPolicy.Retain);
   });
   test("creates a fresh session in the checkout with agent and model", async () => {
     let createParameters: unknown;
@@ -72,9 +72,9 @@ describe("OpenCode task sessions", () => {
           return { data: { id: "session-1" } };
         },
       },
-    } as unknown as OpencodeClient;
+    } as unknown as PiClient;
 
-    const result = await createOpenCodeTaskSession(client, {
+    const result = await createPiTaskSession(client, {
       directory: "/workspace/repository",
       title: "Implement issue #42",
       selection,
@@ -93,7 +93,7 @@ describe("OpenCode task sessions", () => {
         providerID: "openrouter",
         id: "anthropic/claude-sonnet",
       },
-      permission: OPEN_CODE_TASK_PERMISSION_POLICY,
+      permission: PI_TASK_PERMISSION_POLICY,
     });
     expect(createParameters).not.toHaveProperty("variant");
   });
@@ -149,9 +149,9 @@ describe("OpenCode task sessions", () => {
           error: { name: "UnauthorizedError", data: { message: "No auth" } },
         }),
       },
-    } as unknown as OpencodeClient;
+    } as unknown as PiClient;
 
-    const exit = await createOpenCodeTaskSession(client, {
+    const exit = await createPiTaskSession(client, {
       directory: "/workspace/repository",
       title: "Implement issue #42",
       selection: { agent: "build" },
@@ -165,31 +165,29 @@ describe("OpenCode task sessions", () => {
       session: {
         create: async () => ({ data: { id: "session-from-service" } }),
       },
-    } as unknown as OpencodeClient;
+    } as unknown as PiClient;
 
     const session = await Effect.gen(function* () {
-      const sessions = yield* OpenCodeTaskSession;
+      const sessions = yield* PiTaskSession;
       return yield* sessions.create({
         directory: "/workspace/repository",
         title: "Task",
         selection: { agent: "build" },
       });
-    }).pipe(Effect.provide(makeOpenCodeTaskSessionLayer(client)), Effect.runPromise);
+    }).pipe(Effect.provide(makePiTaskSessionLayer(client)), Effect.runPromise);
 
     expect(session.sessionID).toBe("session-from-service");
   });
 
   test("records every created session under its run ID", async () => {
-    const diagnostics = makeOpenCodeSessionDiagnostics(
-      () => "2026-08-24T00:00:00.000Z",
-    );
+    const diagnostics = makePiSessionDiagnostics(() => "2026-08-24T00:00:00.000Z");
     const client = {
       session: {
         create: async () => ({ data: { id: "session-diagnostics" } }),
       },
-    } as unknown as OpencodeClient;
+    } as unknown as PiClient;
 
-    await createOpenCodeTaskSession(client, {
+    await createPiTaskSession(client, {
       directory: "/workspace/repository",
       title: "Task",
       selection,
@@ -225,9 +223,9 @@ describe("OpenCode task sessions", () => {
           };
         },
       },
-    } as unknown as OpencodeClient;
+    } as unknown as PiClient;
 
-    const result = await runOpenCodeTask(client, {
+    const result = await runPiTask(client, {
       directory: "/workspace/repository",
       title: "Implement issue #42",
       prompt: "Implement the issue and explain the result.",
@@ -265,9 +263,9 @@ describe("OpenCode task sessions", () => {
           data: { info: assistantResponse(), parts: responseParts },
         }),
       },
-    } as unknown as OpencodeClient;
+    } as unknown as PiClient;
 
-    await runOpenCodeTask(client, {
+    await runPiTask(client, {
       directory: "/workspace/repository",
       title: "Implement issue #42",
       prompt: "Implement the issue.",
@@ -300,9 +298,9 @@ describe("OpenCode task sessions", () => {
           return { data: { info: assistantResponse(), parts: responseParts } };
         },
       },
-    } as unknown as OpencodeClient;
+    } as unknown as PiClient;
 
-    await runOpenCodeTask(client, {
+    await runPiTask(client, {
       directory: "/workspace/repository",
       title: "Implement issue #42",
       prompt: "Implement the issue.",
@@ -329,9 +327,9 @@ describe("OpenCode task sessions", () => {
           },
         }),
       },
-    } as unknown as OpencodeClient;
+    } as unknown as PiClient;
 
-    const exit = await runOpenCodeTask(client, {
+    const exit = await runPiTask(client, {
       directory: "/workspace/repository",
       title: "Implement issue #42",
       prompt: "Implement the issue.",
@@ -350,12 +348,13 @@ describe("OpenCode task sessions", () => {
       {
         stage: "implementation",
         status: "failed",
-        message: expect.stringContaining("OpenCode task failed"),
+        message: expect.stringContaining("Pi task failed"),
         details: {
           directory: "/workspace/repository",
           title: "Implement issue #42",
           assistantError: "aborted",
           sessionError: "MessageAbortedError",
+          cause: "MessageAbortedError: The task was aborted.",
         },
       },
     ]);
@@ -369,9 +368,9 @@ describe("OpenCode task sessions", () => {
           throw new Error("connection reset");
         },
       },
-    } as unknown as OpencodeClient;
+    } as unknown as PiClient;
 
-    const exit = await runOpenCodeTask(client, {
+    const exit = await runPiTask(client, {
       directory: "/workspace/repository",
       title: "Implement issue #42",
       prompt: "Implement the issue.",
@@ -395,9 +394,9 @@ describe("OpenCode task sessions", () => {
           },
         }),
       },
-    } as unknown as OpencodeClient;
+    } as unknown as PiClient;
 
-    const exit = await runOpenCodeTask(client, {
+    const exit = await runPiTask(client, {
       directory: "/workspace/repository",
       title: "Implement issue #42",
       prompt: "Implement the issue.",
@@ -410,26 +409,26 @@ describe("OpenCode task sessions", () => {
   test.each([
     [
       "MessageAbortedError",
-      OpenCodeAssistantErrorKind.Aborted,
+      PiAssistantErrorKind.Aborted,
       { name: "MessageAbortedError", data: { message: "Aborted." } },
     ],
     [
       "MessageOutputLengthError",
-      OpenCodeAssistantErrorKind.OutputLengthExceeded,
+      PiAssistantErrorKind.OutputLengthExceeded,
       { name: "MessageOutputLengthError", data: {} },
     ],
     [
       "StructuredOutputError",
-      OpenCodeAssistantErrorKind.StructuredOutputRetryExhausted,
+      PiAssistantErrorKind.StructuredOutputRetryExhausted,
       {
         name: "StructuredOutputError",
         data: { message: "Could not satisfy schema.", retries: 3 },
       },
     ],
   ])("classifies %s as %s", (_name, kind, sdkError) => {
-    const typedError = toOpenCodeAssistantError(sdkError as never);
+    const typedError = toPiAssistantError(sdkError as never);
 
-    expect(typedError).toBeInstanceOf(OpenCodeAssistantError);
+    expect(typedError).toBeInstanceOf(PiAssistantError);
     expect(typedError.kind).toBe(kind);
   });
 });

@@ -172,7 +172,11 @@ agent context, or unrelated repository work. Identify correctness, security,
 regression, testing, and maintainability problems that would prevent the issue
 from being safely completed. Use the structured review schema: approve only
 when there are no blocking findings; request changes when at least one finding
-is blocking. Non-blocking observations may accompany either verdict.
+is blocking. Every finding must have a severity and concrete description;
+include file and line only when the staged diff supports them. The summary must
+state the overall review conclusion. Non-blocking observations may accompany
+either verdict, but "changes_requested" must contain at least one blocking
+finding and "approved" must contain none.
 
 This is a read-only review. Do not edit files, stage or unstage changes, run
 Git commands that mutate state, create commits, push, switch branches, create

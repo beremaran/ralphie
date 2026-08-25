@@ -7,7 +7,7 @@ export enum StructuredOutputName {
   IssueBreakdownDecision = "issue-breakdown-decision",
 }
 
-export enum OpenCodeSessionPurpose {
+export enum PiSessionPurpose {
   Implement = "implement",
   AddressReview = "address-review",
   AssessComplexity = "assess-complexity",
@@ -16,27 +16,27 @@ export enum OpenCodeSessionPurpose {
   DecomposeIssue = "decompose-issue",
 }
 
-export enum OpenCodeSessionContext {
+export enum PiSessionContext {
   Fresh = "fresh",
 }
 
-export type OpenCodeSessionStage =
+export type PiSessionStage =
   | {
-      readonly kind: IssueStageKind.OpenCodeSession;
-      readonly purpose: OpenCodeSessionPurpose.Implement;
+      readonly kind: IssueStageKind.PiSession;
+      readonly purpose: PiSessionPurpose.Implement;
     }
   | {
-      readonly kind: IssueStageKind.OpenCodeSession;
-      readonly purpose: OpenCodeSessionPurpose.AddressReview;
-      readonly context: OpenCodeSessionContext.Fresh;
+      readonly kind: IssueStageKind.PiSession;
+      readonly purpose: PiSessionPurpose.AddressReview;
+      readonly context: PiSessionContext.Fresh;
       readonly input: StructuredOutputName.ReviewDecision;
     }
   | {
-      readonly kind: IssueStageKind.OpenCodeSession;
+      readonly kind: IssueStageKind.PiSession;
       readonly purpose:
-        | OpenCodeSessionPurpose.AssessComplexity
-        | OpenCodeSessionPurpose.ReviewDiff
-        | OpenCodeSessionPurpose.GenerateCommitMessage
-        | OpenCodeSessionPurpose.DecomposeIssue;
+        | PiSessionPurpose.AssessComplexity
+        | PiSessionPurpose.ReviewDiff
+        | PiSessionPurpose.GenerateCommitMessage
+        | PiSessionPurpose.DecomposeIssue;
       readonly output: StructuredOutputName;
     };

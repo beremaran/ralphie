@@ -11,7 +11,7 @@ import {
   buildReviewPrompt,
 } from "./prompts.ts";
 
-describe("OpenCode prompts", () => {
+describe("Pi prompts", () => {
   test("builds a complexity prompt with the complete rubric and issue context", () => {
     const prompt = buildComplexityPrompt({
       issue: {

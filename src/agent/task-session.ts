@@ -1,6 +1,10 @@
-import type { AssistantMessage, OpencodeClient, Part } from "@opencode-ai/sdk/v2";
+import type {
+  PiAssistantMessage,
+  PiClient,
+  PiPart,
+  PiPermissionRuleset,
+} from "../pi/client.ts";
 import { Context, Data, Effect, Layer } from "effect";
-import type { PermissionRuleset } from "@opencode-ai/sdk/v2";
 
 import {
   ProgressStage,
@@ -9,96 +13,96 @@ import {
   type ProgressReporterService,
 } from "../progress/progress.ts";
 import { RalphieError } from "../shared/error.ts";
-import type { OpenCodeModel, OpenCodeSelection } from "./model.ts";
-import { withOpenCodeAgentPermit } from "./concurrency.ts";
+import type { PiModel, PiSelection } from "./model.ts";
+import { withPiAgentPermit } from "./concurrency.ts";
 
-export type OpenCodeTaskSessionRequest = {
+export type PiTaskSessionRequest = {
   readonly directory: string;
   readonly title: string;
-  readonly selection: OpenCodeSelection;
+  readonly selection: PiSelection;
   readonly runId?: string;
-  readonly diagnostics?: OpenCodeSessionDiagnostics;
+  readonly diagnostics?: PiSessionDiagnostics;
   readonly signal?: AbortSignal;
 };
 
-export type OpenCodeTaskSession = {
+export type PiTaskSession = {
   readonly sessionID: string;
   readonly directory: string;
-  readonly selection: OpenCodeSelection;
+  readonly selection: PiSelection;
 };
 
-export type OpenCodeTaskRequest = OpenCodeTaskSessionRequest & {
+export type PiTaskRequest = PiTaskSessionRequest & {
   readonly prompt: string;
-  readonly repositoryInvariant?: OpenCodeRepositoryInvariant;
-  readonly verifyRepositoryInvariant?: OpenCodeRepositoryInvariantVerifier;
+  readonly repositoryInvariant?: PiRepositoryInvariant;
+  readonly verifyRepositoryInvariant?: PiRepositoryInvariantVerifier;
   readonly verifyAfter?: () => Effect.Effect<void, RalphieError>;
   readonly progress?: ProgressReporterService;
   readonly progressStage?: ProgressStage;
   readonly progressIssue?: ProgressIssue;
 };
 
-export type OpenCodeTaskResult = {
-  readonly session: OpenCodeTaskSession;
-  readonly response: AssistantMessage;
-  readonly parts: ReadonlyArray<Part>;
+export type PiTaskResult = {
+  readonly session: PiTaskSession;
+  readonly response: PiAssistantMessage;
+  readonly parts: ReadonlyArray<PiPart>;
 };
 
-export enum OpenCodeAssistantErrorKind {
+export enum PiAssistantErrorKind {
   Aborted = "aborted",
   OutputLengthExceeded = "output-length-exceeded",
   StructuredOutputRetryExhausted = "structured-output-retry-exhausted",
   Other = "other",
 }
 
-export class OpenCodeAssistantError extends Data.TaggedError("OpenCodeAssistantError")<{
-  readonly kind: OpenCodeAssistantErrorKind;
+export class PiAssistantError extends Data.TaggedError("PiAssistantError")<{
+  readonly kind: PiAssistantErrorKind;
   readonly message: string;
   readonly errorName: string;
   readonly retries?: number;
-  readonly sdkError: NonNullable<AssistantMessage["error"]>;
+  readonly sdkError: NonNullable<PiAssistantMessage["error"]>;
 }> {}
 
-export type OpenCodeRepositoryInvariant = {
+export type PiRepositoryInvariant = {
   readonly branch: string;
   readonly head: string;
 };
 
-export type OpenCodeRepositoryInvariantVerifier = (
+export type PiRepositoryInvariantVerifier = (
   repositoryPath: string,
-  expected: OpenCodeRepositoryInvariant,
+  expected: PiRepositoryInvariant,
 ) => Effect.Effect<void, RalphieError>;
 
-export type OpenCodeSessionDiagnostic = {
+export type PiSessionDiagnostic = {
   readonly runId: string;
   readonly sessionID: string;
   readonly directory: string;
   readonly agent?: string;
-  readonly model?: OpenCodeModel;
+  readonly model?: PiModel;
   readonly variant?: string;
   readonly recordedAt: string;
 };
 
-export type OpenCodeSessionDiagnosticInput = Omit<
-  OpenCodeSessionDiagnostic,
+export type PiSessionDiagnosticInput = Omit<
+  PiSessionDiagnostic,
   "runId" | "recordedAt"
 >;
 
 /** Successful sessions remain available for post-run inspection. */
-export enum OpenCodeSessionRetentionPolicy {
+export enum PiSessionRetentionPolicy {
   Retain = "retain",
 }
 
-export const OPEN_CODE_SESSION_RETENTION_POLICY = OpenCodeSessionRetentionPolicy.Retain;
+export const PI_SESSION_RETENTION_POLICY = PiSessionRetentionPolicy.Retain;
 
-export type OpenCodeSessionDiagnostics = {
-  readonly record: (runId: string, session: OpenCodeSessionDiagnosticInput) => void;
-  readonly list: (runId: string) => ReadonlyArray<OpenCodeSessionDiagnostic>;
+export type PiSessionDiagnostics = {
+  readonly record: (runId: string, session: PiSessionDiagnosticInput) => void;
+  readonly list: (runId: string) => ReadonlyArray<PiSessionDiagnostic>;
 };
 
-export const makeOpenCodeSessionDiagnostics = (
+export const makePiSessionDiagnostics = (
   now: () => string = () => new Date().toISOString(),
-): OpenCodeSessionDiagnostics => {
-  const sessions = new Map<string, OpenCodeSessionDiagnostic[]>();
+): PiSessionDiagnostics => {
+  const sessions = new Map<string, PiSessionDiagnostic[]>();
 
   return {
     record: (runId, session) => {
@@ -111,11 +115,11 @@ export const makeOpenCodeSessionDiagnostics = (
 };
 
 /**
- * OpenCode permission rules for task agents. The agent may inspect and edit
+ * Pi permission rules for task agents. The agent may inspect and edit
  * files, but deterministic Ralphie steps retain ownership of commits, pushes,
  * branch changes, worktrees, resets/cleanups, and GitHub mutations.
  */
-export const OPEN_CODE_TASK_PERMISSION_POLICY: PermissionRuleset = [
+export const PI_TASK_PERMISSION_POLICY: PiPermissionRuleset = [
   { permission: "bash", pattern: "git commit*", action: "deny" },
   { permission: "bash", pattern: "git push*", action: "deny" },
   { permission: "bash", pattern: "git branch*", action: "deny" },
@@ -129,24 +133,24 @@ export const OPEN_CODE_TASK_PERMISSION_POLICY: PermissionRuleset = [
 
 /**
  * Structured decision sessions may inspect repository files and read Git state,
- * but cannot mutate the checkout. OpenCode permission rules use the last
+ * but cannot mutate the checkout. Pi permission rules use the last
  * matching rule, so the narrow read-only allowances must follow the catch-all
  * Bash denial.
  */
-export const OPEN_CODE_DECISION_PERMISSION_POLICY: PermissionRuleset = [
+export const PI_DECISION_PERMISSION_POLICY: PiPermissionRuleset = [
   { permission: "edit", pattern: "*", action: "deny" },
   { permission: "write", pattern: "*", action: "deny" },
   { permission: "bash", pattern: "*", action: "deny" },
-  ...OPEN_CODE_TASK_PERMISSION_POLICY,
+  ...PI_TASK_PERMISSION_POLICY,
   { permission: "bash", pattern: "git status*", action: "allow" },
   { permission: "bash", pattern: "git diff*", action: "allow" },
   { permission: "bash", pattern: "git ls-files*", action: "allow" },
 ];
 
-type OpenCodePromptParameters = Parameters<OpencodeClient["session"]["prompt"]>[0];
+type PiPromptParameters = Parameters<PiClient["session"]["prompt"]>[0];
 
-export type OpenCodeTaskPromptInput = Omit<
-  OpenCodePromptParameters,
+export type PiTaskPromptInput = Omit<
+  PiPromptParameters,
   "sessionID" | "directory" | "agent" | "model" | "variant"
 >;
 
@@ -157,7 +161,7 @@ const describeApiError = (error: unknown): string => {
     readonly name?: unknown;
     readonly data?: { readonly message?: unknown };
   };
-  const name = typeof candidate.name === "string" ? candidate.name : "OpenCodeError";
+  const name = typeof candidate.name === "string" ? candidate.name : "PiError";
   const message =
     typeof candidate.data?.message === "string"
       ? candidate.data.message
@@ -166,39 +170,41 @@ const describeApiError = (error: unknown): string => {
   return `${name}: ${message}`;
 };
 
-export const toOpenCodeAssistantError = (
-  error: NonNullable<AssistantMessage["error"]>,
-): OpenCodeAssistantError => {
+export const toPiAssistantError = (
+  error: NonNullable<PiAssistantMessage["error"]>,
+): PiAssistantError => {
   const kind =
     error.name === "MessageAbortedError"
-      ? OpenCodeAssistantErrorKind.Aborted
+      ? PiAssistantErrorKind.Aborted
       : error.name === "MessageOutputLengthError"
-        ? OpenCodeAssistantErrorKind.OutputLengthExceeded
+        ? PiAssistantErrorKind.OutputLengthExceeded
         : error.name === "StructuredOutputError"
-          ? OpenCodeAssistantErrorKind.StructuredOutputRetryExhausted
-          : OpenCodeAssistantErrorKind.Other;
+          ? PiAssistantErrorKind.StructuredOutputRetryExhausted
+          : PiAssistantErrorKind.Other;
 
-  return new OpenCodeAssistantError({
+  return new PiAssistantError({
     kind,
     message: describeApiError(error),
     errorName: error.name,
-    ...(error.name === "StructuredOutputError" ? { retries: error.data.retries } : {}),
+    ...(error.name === "StructuredOutputError" && error.data?.retries !== undefined
+      ? { retries: error.data.retries }
+      : {}),
     sdkError: error,
   });
 };
 
 const assistantFailure = (
   prefix: string,
-  error: NonNullable<AssistantMessage["error"]>,
+  error: NonNullable<PiAssistantMessage["error"]>,
 ): RalphieError => {
-  const typedError = toOpenCodeAssistantError(error);
+  const typedError = toPiAssistantError(error);
   return new RalphieError({
     message: `${prefix} (${typedError.kind}): ${typedError.message}`,
     cause: typedError,
   });
 };
 
-export const reportOpenCodeFailure = (
+export const reportPiFailure = (
   request: {
     readonly directory: string;
     readonly title: string;
@@ -211,16 +217,27 @@ export const reportOpenCodeFailure = (
   if (request.progress === undefined) return Effect.void;
 
   const assistantError =
-    error.cause instanceof OpenCodeAssistantError ? error.cause : undefined;
+    error.cause instanceof PiAssistantError ? error.cause : undefined;
+  const causeMessage = (() => {
+    let cause: unknown = error.cause;
+    for (let depth = 0; depth < 4 && cause !== undefined; depth += 1) {
+      if (cause instanceof Error && cause.message !== error.message)
+        return cause.message;
+      if (typeof cause !== "object" || cause === null || !("cause" in cause)) break;
+      cause = (cause as { readonly cause?: unknown }).cause;
+    }
+    return undefined;
+  })();
   return request.progress
     .emit({
       stage: request.progressStage ?? ProgressStage.Implementation,
       status: ProgressStatus.Failed,
-      issue: request.progressIssue,
-      message: `OpenCode task failed: ${error.message}`,
+      ...(request.progressIssue === undefined ? {} : { issue: request.progressIssue }),
+      message: `Pi task failed: ${error.message}`,
       details: {
         directory: request.directory,
         title: request.title,
+        ...(causeMessage === undefined ? {} : { cause: causeMessage }),
         ...(assistantError === undefined
           ? {}
           : {
@@ -235,7 +252,7 @@ export const reportOpenCodeFailure = (
     .pipe(Effect.catchAll(() => Effect.void));
 };
 
-const createSessionModel = (model: OpenCodeModel) => ({
+const createSessionModel = (model: PiModel) => ({
   providerID: model.providerID,
   id: model.modelID,
 });
@@ -243,14 +260,14 @@ const createSessionModel = (model: OpenCodeModel) => ({
 /**
  * Build prompt parameters for a task session.
  *
- * OpenCode's SDK accepts the model and agent on prompts as well as on session
+ * Pi's SDK accepts the model and agent on prompts as well as on session
  * creation. Repeating them here makes every turn explicit, and is required for
  * variants because the SDK accepts `variant` on prompt rather than create.
  */
 export const taskSessionPromptParameters = (
-  session: OpenCodeTaskSession,
-  input: OpenCodeTaskPromptInput,
-): OpenCodePromptParameters => ({
+  session: PiTaskSession,
+  input: PiTaskPromptInput,
+): PiPromptParameters => ({
   ...input,
   sessionID: session.sessionID,
   directory: session.directory,
@@ -268,10 +285,10 @@ export const taskSessionPromptParameters = (
  * `taskSessionPromptParameters` for either structured or ordinary prompts
  * without accidentally losing the configured agent/model/variant.
  */
-export const createOpenCodeTaskSession = (
-  client: OpencodeClient,
-  request: OpenCodeTaskSessionRequest,
-): Effect.Effect<OpenCodeTaskSession, RalphieError> =>
+export const createPiTaskSession = (
+  client: PiClient,
+  request: PiTaskSessionRequest,
+): Effect.Effect<PiTaskSession, RalphieError> =>
   Effect.tryPromise({
     try: async () => {
       const response = await client.session.create(
@@ -279,7 +296,7 @@ export const createOpenCodeTaskSession = (
           directory: request.directory,
           title: request.title,
           agent: request.selection.agent,
-          permission: OPEN_CODE_TASK_PERMISSION_POLICY,
+          permission: PI_TASK_PERMISSION_POLICY,
           ...(request.selection.model === undefined
             ? {}
             : { model: createSessionModel(request.selection.model) }),
@@ -289,7 +306,7 @@ export const createOpenCodeTaskSession = (
 
       if (response.error !== undefined || response.data === undefined) {
         throw new Error(
-          `Could not create OpenCode task session: ${describeApiError(response.error)}`,
+          `Could not create Pi task session: ${describeApiError(response.error)}`,
         );
       }
 
@@ -313,7 +330,7 @@ export const createOpenCodeTaskSession = (
     },
     catch: (cause) =>
       new RalphieError({
-        message: "Failed to create an OpenCode task session.",
+        message: "Failed to create an Pi task session.",
         cause,
       }),
   });
@@ -326,14 +343,14 @@ export const createOpenCodeTaskSession = (
  * while implementation and review agents can use this helper for free-form
  * text responses and repository edits.
  */
-export const runOpenCodeTask = (
-  client: OpencodeClient,
-  request: OpenCodeTaskRequest,
-): Effect.Effect<OpenCodeTaskResult, RalphieError> =>
-  withOpenCodeAgentPermit(
+export const runPiTask = (
+  client: PiClient,
+  request: PiTaskRequest,
+): Effect.Effect<PiTaskResult, RalphieError> =>
+  withPiAgentPermit(
     client,
     Effect.gen(function* () {
-      const session = yield* createOpenCodeTaskSession(client, request);
+      const session = yield* createPiTaskSession(client, request);
 
       const response = yield* Effect.tryPromise({
         try: async () => {
@@ -346,7 +363,7 @@ export const runOpenCodeTask = (
 
           if (response.error !== undefined || response.data === undefined) {
             throw new Error(
-              `OpenCode task prompt failed: ${describeApiError(response.error)}`,
+              `Pi task prompt failed: ${describeApiError(response.error)}`,
             );
           }
 
@@ -354,14 +371,14 @@ export const runOpenCodeTask = (
         },
         catch: (cause) =>
           new RalphieError({
-            message: "Failed to run an OpenCode task.",
+            message: "Failed to run an Pi task.",
             cause,
           }),
       });
 
       if (response.info.error !== undefined) {
         return yield* Effect.fail(
-          assistantFailure("OpenCode assistant failed", response.info.error),
+          assistantFailure("Pi assistant failed", response.info.error),
         );
       }
 
@@ -383,36 +400,33 @@ export const runOpenCodeTask = (
         response: response.info,
         parts: response.parts,
       };
-    }).pipe(Effect.tapError((error) => reportOpenCodeFailure(request, error))),
+    }).pipe(Effect.tapError((error) => reportPiFailure(request, error))),
   );
 
-export type OpenCodeTaskSessionService = {
+export type PiTaskSessionService = {
   readonly create: (
-    request: OpenCodeTaskSessionRequest,
-  ) => Effect.Effect<OpenCodeTaskSession, RalphieError>;
-  readonly run: (
-    request: OpenCodeTaskRequest,
-  ) => Effect.Effect<OpenCodeTaskResult, RalphieError>;
-  readonly diagnostics: OpenCodeSessionDiagnostics;
+    request: PiTaskSessionRequest,
+  ) => Effect.Effect<PiTaskSession, RalphieError>;
+  readonly run: (request: PiTaskRequest) => Effect.Effect<PiTaskResult, RalphieError>;
+  readonly diagnostics: PiSessionDiagnostics;
 };
 
-export const OpenCodeTaskSession = Context.GenericTag<OpenCodeTaskSessionService>(
-  "ralphie/OpenCodeTaskSession",
+export const PiTaskSession = Context.GenericTag<PiTaskSessionService>(
+  "ralphie/PiTaskSession",
 );
 
-export const makeOpenCodeTaskSessionLayer = (client: OpencodeClient) =>
-  Layer.sync(OpenCodeTaskSession, () => {
-    const diagnostics = makeOpenCodeSessionDiagnostics();
-    const withDiagnostics = <Request extends OpenCodeTaskSessionRequest>(
+export const makePiTaskSessionLayer = (client: PiClient) =>
+  Layer.sync(PiTaskSession, () => {
+    const diagnostics = makePiSessionDiagnostics();
+    const withDiagnostics = <Request extends PiTaskSessionRequest>(
       request: Request,
     ): Request =>
       request.diagnostics === undefined ? { ...request, diagnostics } : request;
 
     return {
       diagnostics,
-      create: (request: OpenCodeTaskSessionRequest) =>
-        createOpenCodeTaskSession(client, withDiagnostics(request)),
-      run: (request: OpenCodeTaskRequest) =>
-        runOpenCodeTask(client, withDiagnostics(request)),
+      create: (request: PiTaskSessionRequest) =>
+        createPiTaskSession(client, withDiagnostics(request)),
+      run: (request: PiTaskRequest) => runPiTask(client, withDiagnostics(request)),
     };
   });

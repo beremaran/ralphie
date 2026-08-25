@@ -1,14 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import type { OpencodeClient } from "@opencode-ai/sdk/v2";
+import type { PiClient } from "../pi/client.ts";
 import { Effect, Exit } from "effect";
 import { z } from "zod";
 
 import { requestStructuredOutput } from "./structured-output.ts";
 import {
-  OPEN_CODE_DECISION_PERMISSION_POLICY,
-  OpenCodeAssistantErrorKind,
-  makeOpenCodeSessionDiagnostics,
-  toOpenCodeAssistantError,
+  PI_DECISION_PERMISSION_POLICY,
+  PiAssistantErrorKind,
+  makePiSessionDiagnostics,
+  toPiAssistantError,
 } from "./task-session.ts";
 
 enum ProbeDecision {
@@ -44,7 +44,7 @@ const assistantInfo = (structured: unknown, error?: Record<string, unknown>) => 
   ...(error === undefined ? {} : { error }),
 });
 
-describe("OpenCode structured output", () => {
+describe("Pi structured output", () => {
   test("sends a JSON schema and validates the assistant decision", async () => {
     let createParameters: unknown;
     let promptParameters: unknown;
@@ -68,7 +68,7 @@ describe("OpenCode structured output", () => {
           };
         },
       },
-    } as unknown as OpencodeClient;
+    } as unknown as PiClient;
 
     const result = await requestStructuredOutput(client, {
       directory: "/workspace",
@@ -101,14 +101,14 @@ describe("OpenCode structured output", () => {
     expect(promptParameters).not.toHaveProperty("model");
     expect(promptParameters).not.toHaveProperty("variant");
     expect(createParameters).toMatchObject({
-      permission: OPEN_CODE_DECISION_PERMISSION_POLICY,
+      permission: PI_DECISION_PERMISSION_POLICY,
     });
-    expect(OPEN_CODE_DECISION_PERMISSION_POLICY).toContainEqual({
+    expect(PI_DECISION_PERMISSION_POLICY).toContainEqual({
       permission: "bash",
       pattern: "git ls-files*",
       action: "allow",
     });
-    expect(OPEN_CODE_DECISION_PERMISSION_POLICY.at(-1)).toEqual({
+    expect(PI_DECISION_PERMISSION_POLICY.at(-1)).toEqual({
       permission: "bash",
       pattern: "git ls-files*",
       action: "allow",
@@ -138,7 +138,7 @@ describe("OpenCode structured output", () => {
           };
         },
       },
-    } as unknown as OpencodeClient;
+    } as unknown as PiClient;
 
     await requestStructuredOutput(client, {
       directory: "/workspace",
@@ -166,9 +166,7 @@ describe("OpenCode structured output", () => {
   });
 
   test("records the session and verifies repository invariants", async () => {
-    const diagnostics = makeOpenCodeSessionDiagnostics(
-      () => "2026-08-24T00:00:00.000Z",
-    );
+    const diagnostics = makePiSessionDiagnostics(() => "2026-08-24T00:00:00.000Z");
     let verified: unknown;
     const client = {
       session: {
@@ -184,7 +182,7 @@ describe("OpenCode structured output", () => {
           },
         }),
       },
-    } as unknown as OpencodeClient;
+    } as unknown as PiClient;
 
     await requestStructuredOutput(client, {
       directory: "/workspace",
@@ -237,7 +235,7 @@ describe("OpenCode structured output", () => {
           };
         },
       },
-    } as unknown as OpencodeClient;
+    } as unknown as PiClient;
 
     await requestStructuredOutput(client, {
       directory: "/workspace",
@@ -262,7 +260,7 @@ describe("OpenCode structured output", () => {
           },
         }),
       },
-    } as unknown as OpencodeClient;
+    } as unknown as PiClient;
 
     const exit = await requestStructuredOutput(client, {
       directory: "/workspace",
@@ -276,15 +274,15 @@ describe("OpenCode structured output", () => {
 
   test.each([
     [
-      OpenCodeAssistantErrorKind.Aborted,
+      PiAssistantErrorKind.Aborted,
       { name: "MessageAbortedError", data: { message: "Aborted." } },
     ],
     [
-      OpenCodeAssistantErrorKind.OutputLengthExceeded,
+      PiAssistantErrorKind.OutputLengthExceeded,
       { name: "MessageOutputLengthError", data: {} },
     ],
     [
-      OpenCodeAssistantErrorKind.StructuredOutputRetryExhausted,
+      PiAssistantErrorKind.StructuredOutputRetryExhausted,
       {
         name: "StructuredOutputError",
         data: { message: "Schema retries exhausted.", retries: 2 },
@@ -301,7 +299,7 @@ describe("OpenCode structured output", () => {
           },
         }),
       },
-    } as unknown as OpencodeClient;
+    } as unknown as PiClient;
 
     const exit = await requestStructuredOutput(client, {
       directory: "/workspace",
@@ -313,14 +311,14 @@ describe("OpenCode structured output", () => {
     expect(Exit.isFailure(exit)).toBe(true);
     if (Exit.isFailure(exit)) {
       const failure = exit.cause;
-      expect(String(failure)).toContain("OpenCode assistant failed");
+      expect(String(failure)).toContain("Pi assistant failed");
       const cause = failure as unknown as { error?: { cause?: unknown } };
       expect(cause).toBeDefined();
     }
 
-    const typed = toOpenCodeAssistantError(error as never);
+    const typed = toPiAssistantError(error as never);
     expect(typed.kind).toBe(kind);
-    if (kind === OpenCodeAssistantErrorKind.StructuredOutputRetryExhausted) {
+    if (kind === PiAssistantErrorKind.StructuredOutputRetryExhausted) {
       expect(typed.retries).toBe(2);
     }
   });

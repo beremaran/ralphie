@@ -1,16 +1,16 @@
-import type { OpencodeClient } from "@opencode-ai/sdk/v2";
+import type { PiClient } from "../pi/client.ts";
 import { Effect } from "effect";
 import { z } from "zod";
-import { withOpenCodeAgentPermit } from "./concurrency.ts";
+import { withPiAgentPermit } from "./concurrency.ts";
 
 import { RalphieError } from "../shared/error.ts";
-import type { OpenCodeModel } from "./model.ts";
+import type { PiModel } from "./model.ts";
 import {
-  OPEN_CODE_DECISION_PERMISSION_POLICY,
-  type OpenCodeRepositoryInvariant,
-  type OpenCodeSessionDiagnostics,
-  reportOpenCodeFailure,
-  toOpenCodeAssistantError,
+  PI_DECISION_PERMISSION_POLICY,
+  type PiRepositoryInvariant,
+  type PiSessionDiagnostics,
+  reportPiFailure,
+  toPiAssistantError,
 } from "./task-session.ts";
 import {
   ProgressStage,
@@ -25,15 +25,15 @@ export type StructuredOutputRequest<Output> = {
   readonly schema: z.ZodType<Output>;
   readonly retryCount?: number;
   readonly agent?: string;
-  readonly model?: OpenCodeModel;
+  readonly model?: PiModel;
   readonly variant?: string;
   readonly runId?: string;
-  readonly diagnostics?: OpenCodeSessionDiagnostics;
+  readonly diagnostics?: PiSessionDiagnostics;
   readonly signal?: AbortSignal;
-  readonly repositoryInvariant?: OpenCodeRepositoryInvariant;
+  readonly repositoryInvariant?: PiRepositoryInvariant;
   readonly verifyRepositoryInvariant?: (
     repositoryPath: string,
-    expected: OpenCodeRepositoryInvariant,
+    expected: PiRepositoryInvariant,
   ) => Effect.Effect<void, RalphieError>;
   readonly verifyAfter?: () => Effect.Effect<void, RalphieError>;
   readonly progress?: ProgressReporterService;
@@ -53,7 +53,7 @@ const describeApiError = (error: unknown): string => {
     readonly name?: unknown;
     readonly data?: { readonly message?: unknown };
   };
-  const name = typeof candidate.name === "string" ? candidate.name : "OpenCodeError";
+  const name = typeof candidate.name === "string" ? candidate.name : "PiError";
   const message =
     typeof candidate.data?.message === "string"
       ? candidate.data.message
@@ -63,10 +63,10 @@ const describeApiError = (error: unknown): string => {
 };
 
 export function requestStructuredOutput<Output>(
-  client: OpencodeClient,
+  client: PiClient,
   request: StructuredOutputRequest<Output>,
 ): Effect.Effect<StructuredOutputResult<Output>, RalphieError> {
-  return withOpenCodeAgentPermit(
+  return withPiAgentPermit(
     client,
     Effect.gen(function* () {
       const result = yield* Effect.tryPromise({
@@ -76,14 +76,14 @@ export function requestStructuredOutput<Output>(
               directory: request.directory,
               title: request.title,
               ...(request.agent === undefined ? {} : { agent: request.agent }),
-              permission: OPEN_CODE_DECISION_PERMISSION_POLICY,
+              permission: PI_DECISION_PERMISSION_POLICY,
             },
             request.signal === undefined ? undefined : { signal: request.signal },
           );
 
           if (session.error !== undefined || session.data === undefined) {
             throw new Error(
-              `Could not create OpenCode session: ${describeApiError(session.error)}`,
+              `Could not create Pi session: ${describeApiError(session.error)}`,
             );
           }
 
@@ -108,6 +108,12 @@ export function requestStructuredOutput<Output>(
                 type: "json_schema",
                 schema: z.toJSONSchema(request.schema),
                 retryCount: request.retryCount ?? 2,
+                validate: (value) => {
+                  const parsed = request.schema.safeParse(value);
+                  return parsed.success
+                    ? { success: true }
+                    : { success: false, error: z.prettifyError(parsed.error) };
+                },
               },
               parts: [{ type: "text", text: request.prompt }],
             },
@@ -115,15 +121,13 @@ export function requestStructuredOutput<Output>(
           );
 
           if (response.error !== undefined || response.data === undefined) {
-            throw new Error(
-              `OpenCode prompt failed: ${describeApiError(response.error)}`,
-            );
+            throw new Error(`Pi prompt failed: ${describeApiError(response.error)}`);
           }
 
           if (response.data.info.error !== undefined) {
-            const assistantError = toOpenCodeAssistantError(response.data.info.error);
+            const assistantError = toPiAssistantError(response.data.info.error);
             throw new RalphieError({
-              message: `OpenCode assistant failed (${assistantError.kind}): ${assistantError.message}`,
+              message: `Pi assistant failed (${assistantError.kind}): ${assistantError.message}`,
               cause: assistantError,
             });
           }
@@ -131,7 +135,7 @@ export function requestStructuredOutput<Output>(
           const parsed = request.schema.safeParse(response.data.info.structured);
           if (!parsed.success) {
             throw new Error(
-              `OpenCode returned invalid structured output: ${z.prettifyError(parsed.error)}`,
+              `Pi returned invalid structured output: ${z.prettifyError(parsed.error)}`,
             );
           }
 
@@ -144,10 +148,10 @@ export function requestStructuredOutput<Output>(
           cause instanceof RalphieError
             ? cause
             : new RalphieError({
-                message: "Failed to get structured output from OpenCode.",
+                message: "Failed to get structured output from Pi.",
                 cause,
               }),
-      }).pipe(Effect.tapError((error) => reportOpenCodeFailure(request, error)));
+      }).pipe(Effect.tapError((error) => reportPiFailure(request, error)));
 
       if (
         request.repositoryInvariant !== undefined &&

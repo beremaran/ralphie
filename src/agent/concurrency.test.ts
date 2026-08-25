@@ -1,23 +1,20 @@
 import { expect, test } from "bun:test";
-import type { OpencodeClient } from "@opencode-ai/sdk/v2";
+import type { PiClient } from "../pi/client.ts";
 import { Effect } from "effect";
 
-import {
-  registerOpenCodeAgentSemaphore,
-  withOpenCodeAgentPermit,
-} from "./concurrency.ts";
+import { registerPiAgentSemaphore, withPiAgentPermit } from "./concurrency.ts";
 
-test("global OpenCode semaphore bounds tasks sharing one client", async () => {
-  const client = {} as OpencodeClient;
+test("global Pi semaphore bounds tasks sharing one client", async () => {
+  const client = {} as PiClient;
   const semaphore = await Effect.runPromise(Effect.makeSemaphore(2));
-  registerOpenCodeAgentSemaphore(client, semaphore);
+  registerPiAgentSemaphore(client, semaphore);
   let active = 0;
   let maximumActive = 0;
 
   await Effect.runPromise(
     Effect.all(
       Array.from({ length: 6 }, () =>
-        withOpenCodeAgentPermit(
+        withPiAgentPermit(
           client,
           Effect.acquireUseRelease(
             Effect.sync(() => {
