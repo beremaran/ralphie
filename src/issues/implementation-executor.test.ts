@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { OpencodeClient } from "@opencode-ai/sdk/v2";
+import type { PiClient } from "../pi/client.ts";
 import { Effect, Exit, Layer } from "effect";
 import type { Octokit } from "octokit";
 
@@ -42,7 +42,7 @@ import {
 } from "./recovery.ts";
 import { IssueQueueResumeStrategy, IssueWorkflowKind } from "./stage.ts";
 import { RalphieError } from "../shared/error.ts";
-import { makeOpenCodeSessionDiagnostics } from "../opencode/task-session.ts";
+import { makePiSessionDiagnostics } from "../agent/task-session.ts";
 import {
   makeProgressRecorderLayer,
   type ProgressUpdate,
@@ -71,7 +71,7 @@ const review = (verdict: "approved" | "changes_requested") => ({
 });
 
 const issueContext = (
-  openCode: OpencodeClient,
+  pi: PiClient,
   verify: IssueExecutionContext["repositoryInvariant"]["verify"] = () => Effect.void,
   head = checkpoint.sha,
 ): IssueExecutionContext => ({
@@ -88,16 +88,16 @@ const issueContext = (
   workspace: "/workspace",
   runId: "run-1",
   octokit: {} as Octokit,
-  openCode,
-  openCodeSelection: { agent: "build" },
-  openCodeDiagnostics: makeOpenCodeSessionDiagnostics(() => "now"),
+  pi,
+  piSelection: { agent: "build" },
+  piDiagnostics: makePiSessionDiagnostics(() => "now"),
   repositoryInvariant: {
     capture: () => Effect.succeed({ branch: checkpoint.branch, head }),
     verify,
   },
 });
 
-const openCodeClient = (outputs: ReadonlyArray<unknown>, sessions?: string[]) => {
+const piClient = (outputs: ReadonlyArray<unknown>, sessions?: string[]) => {
   let index = 0;
   let sessionIndex = 0;
   const client = {
@@ -118,7 +118,7 @@ const openCodeClient = (outputs: ReadonlyArray<unknown>, sessions?: string[]) =>
       },
     },
   };
-  return client as unknown as OpencodeClient;
+  return client as unknown as PiClient;
 };
 
 const services = (options: {
@@ -190,7 +190,7 @@ const services = (options: {
 };
 
 const run = (
-  client: OpencodeClient,
+  client: PiClient,
   artifacts: IssueArtifactStore,
   layer: Layer.Layer.Any,
   verify?: IssueExecutionContext["repositoryInvariant"]["verify"],
@@ -215,11 +215,7 @@ describe("implementation executor", () => {
     const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
     const result = await Effect.runPromise(
       run(
-        openCodeClient([
-          undefined,
-          review("approved"),
-          { subject: "fix token refresh" },
-        ]),
+        piClient([undefined, review("approved"), { subject: "fix token refresh" }]),
         artifacts,
         setup.layer,
       ),
@@ -250,7 +246,7 @@ describe("implementation executor", () => {
 
   test("refuses unsafe direct pushes before starting an agent session", async () => {
     let prompted = false;
-    const client = openCodeClient([]);
+    const client = piClient([]);
     client.session.prompt = (async () => {
       prompted = true;
       return { data: { info: {}, parts: [] } };
@@ -297,7 +293,7 @@ describe("implementation executor", () => {
     );
 
     const result = await Effect.runPromise(
-      run(openCodeClient([]), artifacts, setup.layer, undefined, "commit-1"),
+      run(piClient([]), artifacts, setup.layer, undefined, "commit-1"),
     );
 
     expect(result).toEqual({
@@ -319,7 +315,7 @@ describe("implementation executor", () => {
     const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
     const result = await Effect.runPromise(
       run(
-        openCodeClient(
+        piClient(
           [
             undefined,
             review("changes_requested"),
@@ -356,7 +352,7 @@ describe("implementation executor", () => {
         },
       },
     });
-    const client = openCodeClient([
+    const client = piClient([
       undefined,
       {
         status: IssueResolutionStatus.Resolved,
@@ -394,7 +390,7 @@ describe("implementation executor", () => {
     const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
     const result = await Effect.runPromise(
       run(
-        openCodeClient([
+        piClient([
           undefined,
           {
             status: IssueResolutionStatus.Unresolved,
@@ -430,7 +426,7 @@ describe("implementation executor", () => {
           },
         }),
       },
-    } as unknown as OpencodeClient;
+    } as unknown as PiClient;
     const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
     const exit = await Effect.runPromiseExit(
       run(client, artifacts, services({}).layer),
@@ -442,7 +438,7 @@ describe("implementation executor", () => {
   test("fails when a review response is invalid", async () => {
     const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
     const exit = await Effect.runPromiseExit(
-      run(openCodeClient([{ verdict: "invalid" }]), artifacts, services({}).layer),
+      run(piClient([{ verdict: "invalid" }]), artifacts, services({}).layer),
     );
 
     expect(Exit.isFailure(exit)).toBe(true);
@@ -463,7 +459,7 @@ describe("implementation executor", () => {
     const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
     const exit = await Effect.runPromiseExit(
       run(
-        openCodeClient([undefined, review("approved"), { subject: "fix" }]),
+        piClient([undefined, review("approved"), { subject: "fix" }]),
         artifacts,
         setup.layer,
       ),
@@ -490,7 +486,7 @@ describe("implementation executor", () => {
     const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
     const exit = await Effect.runPromiseExit(
       run(
-        openCodeClient([undefined, review("approved"), { subject: "fix" }]),
+        piClient([undefined, review("approved"), { subject: "fix" }]),
         artifacts,
         setup.layer,
       ),
@@ -526,7 +522,7 @@ describe("implementation executor", () => {
         },
       },
     });
-    const client = openCodeClient([
+    const client = piClient([
       undefined,
       review("changes_requested"),
       undefined,
@@ -567,7 +563,7 @@ describe("implementation executor", () => {
   test("stages, reviews, commits, and pushes every changed project repository", async () => {
     const directories: string[] = [];
     const calls: string[] = [];
-    const client = openCodeClient([
+    const client = piClient([
       undefined,
       review("approved"),
       { subject: "fix project integration" },
@@ -674,7 +670,7 @@ describe("implementation executor", () => {
     const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
     let failBackendPush = true;
     let sessionCount = 0;
-    const client = openCodeClient([
+    const client = piClient([
       undefined,
       review("approved"),
       { subject: "fix project delivery" },

@@ -11,7 +11,7 @@ import {
   resolveRalphieConfig,
 } from "./config/config.ts";
 import { IssueOrder, IssueSort } from "./github/issues.ts";
-import { openCodeModelSchema, openCodeModelVariantSchema } from "./opencode/model.ts";
+import { piModelSchema, piModelVariantSchema } from "./agent/model.ts";
 import { makeProgressReporterLayer, ProgressRenderMode } from "./progress/progress.ts";
 import { LiveRuntime } from "./runtime.ts";
 import { exitCodeForFailure } from "./process/exit-code.ts";
@@ -43,7 +43,7 @@ export const runCommand = defineCommand({
       description: "Concurrent issues per project in parallel-pr mode",
     }),
     "agent-concurrency": option(z.coerce.number().int().positive().optional(), {
-      description: "Global maximum concurrent OpenCode agent tasks",
+      description: "Global maximum concurrent Pi agent tasks",
     }),
     "max-issues": option(z.coerce.number().int().positive().optional(), {
       description: "Maximum number of issues to process (default: unlimited)",
@@ -58,14 +58,14 @@ export const runCommand = defineCommand({
     "issue-order": option(z.enum(IssueOrder).optional(), {
       description: "Sort issues in ascending or descending order",
     }),
-    model: option(openCodeModelSchema.optional(), {
-      description: "OpenCode model in provider/model format",
+    model: option(piModelSchema.optional(), {
+      description: "Pi model in provider/model format",
     }),
-    "model-variant": option(openCodeModelVariantSchema.optional(), {
-      description: "OpenCode model variant",
+    "model-variant": option(piModelVariantSchema.optional(), {
+      description: "Pi thinking level (off through max)",
     }),
     agent: option(z.string().trim().min(1).optional(), {
-      description: "OpenCode agent to use (default: build)",
+      description: "Compatibility label for task diagnostics (default: build)",
     }),
     verbose: option(z.coerce.boolean().optional(), {
       description: "Include detailed progress information",

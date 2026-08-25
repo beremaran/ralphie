@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { OpencodeClient } from "@opencode-ai/sdk/v2";
+import type { PiClient } from "./pi/client.ts";
 import { Effect, Exit, Layer } from "effect";
 import type { Octokit } from "octokit";
 
@@ -27,8 +27,8 @@ import {
 import { IssueExecutor } from "./issues/executor.ts";
 import { IssueArtifactStore, makeIssueArtifactStore } from "./issues/artifacts.ts";
 import { DryRunIssueExecutor } from "./issues/dry-run-executor.ts";
-import { DEFAULT_OPENCODE_AGENT } from "./opencode/model.ts";
-import { OpenCode } from "./opencode/server.ts";
+import { DEFAULT_PI_AGENT } from "./agent/model.ts";
+import { Pi } from "./agent/server.ts";
 import {
   ProgressReporter,
   type ProgressUpdate,
@@ -64,7 +64,7 @@ type TestRuntimeOptions = {
   readonly removeFailure?: RalphieError;
   readonly closeFailure?: RalphieError;
   readonly abortOnExecute?: AbortController;
-  readonly abortAt?: "github" | "repository" | "issues" | "opencode" | "between";
+  readonly abortAt?: "github" | "repository" | "issues" | "pi" | "between";
   readonly abortController?: AbortController;
   readonly captureStart?: number;
   readonly prepareGate?: () => Promise<void>;
@@ -240,7 +240,7 @@ function testRuntime(
     Layer.succeed(IssueExecutor, {
       execute: (context) =>
         Effect.gen(function* () {
-          const { issue, repository, repositoryPath, targetBranch, openCodeSelection } =
+          const { issue, repository, repositoryPath, targetBranch, piSelection } =
             context;
           options.executionContexts?.push(context);
           if (options.executeGate !== undefined) {
@@ -250,7 +250,7 @@ function testRuntime(
             });
           }
           calls.push(
-            `executeIssue:${issue.number}:${repositoryPath}:${targetBranch}:${openCodeSelection.agent}`,
+            `executeIssue:${issue.number}:${repositoryPath}:${targetBranch}:${piSelection.agent}`,
           );
           if (options.abortOnExecute !== undefined) {
             options.abortOnExecute.abort();
@@ -278,16 +278,16 @@ function testRuntime(
         });
       },
     }),
-    Layer.succeed(OpenCode, {
+    Layer.succeed(Pi, {
       start: options.startFailure
         ? Effect.fail(options.startFailure)
         : Effect.sync(() => {
             calls.push("startServer");
-            if (options.abortAt === "opencode") options.abortController?.abort();
+            if (options.abortAt === "pi") options.abortController?.abort();
             return {
               url: "http://127.0.0.1:4096",
-              client: {} as OpencodeClient,
-              close: () => calls.push("closeServer"),
+              client: {} as PiClient,
+              close: () => calls.push("closeRuntime"),
             };
           }),
     }),
@@ -329,7 +329,7 @@ const baseOptions = {
     sort: IssueSort.Created,
     order: IssueOrder.Ascending,
   },
-  agent: DEFAULT_OPENCODE_AGENT,
+  agent: DEFAULT_PI_AGENT,
   workspace: "/tmp/ralphie",
   cleanup: false,
   startClean: false,
@@ -337,7 +337,7 @@ const baseOptions = {
 } as const;
 
 describe("workflow", () => {
-  test("executes an issue, persists completion, releases OpenCode, and cleans up", async () => {
+  test("executes an issue, persists completion, releases Pi, and cleans up", async () => {
     const calls: string[] = [];
     const states: RunState[] = [];
     const events: ProgressUpdate[] = [];
@@ -365,7 +365,7 @@ describe("workflow", () => {
       "startServer",
       "executeIssue:42:/tmp/ralphie/repo:develop:reviewer",
       "closeIssue:42",
-      "closeServer",
+      "closeRuntime",
       "removeWorkspace:/tmp/ralphie",
       "stopPersisting",
     ]);
@@ -520,7 +520,7 @@ describe("workflow", () => {
     },
   );
 
-  test("halts, persists the active issue, and releases OpenCode on failure", async () => {
+  test("halts, persists the active issue, and releases Pi on failure", async () => {
     const calls: string[] = [];
     const states: RunState[] = [];
     const exit = await workflow(baseOptions).pipe(
@@ -537,7 +537,7 @@ describe("workflow", () => {
     expect(states.at(-1)?.activeIssue?.issueNumber).toBe(42);
     expect(states.at(-1)?.queue.pending.map(({ number }) => number)).toEqual([42]);
     expect(states.at(-1)?.queue.processedCount).toBe(0);
-    expect(calls.at(-1)).toBe("closeServer");
+    expect(calls.at(-1)).toBe("closeRuntime");
   });
 
   test("persists a recoverable closure stage when GitHub closure fails", async () => {
@@ -705,7 +705,7 @@ describe("workflow", () => {
     },
   );
 
-  test("cancels after OpenCode starts, closes the server, and saves active state", async () => {
+  test("cancels after Pi starts, closes the server, and saves active state", async () => {
     const calls: string[] = [];
     const states: RunState[] = [];
     const controller = new AbortController();
@@ -716,7 +716,7 @@ describe("workflow", () => {
     }).pipe(
       Effect.provide(
         testRuntime(calls, states, {
-          abortAt: "opencode",
+          abortAt: "pi",
           abortController: controller,
         }),
       ),
@@ -725,7 +725,7 @@ describe("workflow", () => {
 
     expect(Exit.isFailure(exit)).toBeTrue();
     expect(calls).toContain("startServer");
-    expect(calls).toContain("closeServer");
+    expect(calls).toContain("closeRuntime");
     expect(calls).not.toContain("executeIssue:42:/tmp/ralphie/repo:develop:build");
     expect(calls).not.toContain("removeWorkspace:/tmp/ralphie");
     expect(states.at(-1)?.status).toBe(RunStateStatus.Active);
@@ -757,7 +757,7 @@ describe("workflow", () => {
     expect(calls.filter((call) => call.startsWith("executeIssue:"))).toEqual([
       "executeIssue:42:/tmp/ralphie/repo:develop:build",
     ]);
-    expect(calls).toContain("closeServer");
+    expect(calls).toContain("closeRuntime");
     expect(calls).not.toContain("executeIssue:51:/tmp/ralphie/repo:develop:build");
     expect(calls).not.toContain("removeWorkspace:/tmp/ralphie");
     expect(states.at(-1)?.status).toBe(RunStateStatus.Active);
@@ -840,7 +840,7 @@ describe("batch workflow", () => {
     expect(calls.filter((call) => call === "initializeGitHub")).toHaveLength(1);
     expect(calls.filter((call) => call === "verifyGitInstalled")).toHaveLength(1);
     expect(calls.filter((call) => call === "startServer")).toHaveLength(1);
-    expect(calls.filter((call) => call === "closeServer")).toHaveLength(1);
+    expect(calls.filter((call) => call === "closeRuntime")).toHaveLength(1);
   });
 
   test("lets sibling repositories finish and retains the workspace when one fails", async () => {
@@ -861,7 +861,7 @@ describe("batch workflow", () => {
     expect(Exit.isFailure(exit)).toBeTrue();
     expect(calls).toContain("executeIssue:42:/tmp/ralphie/succeeding:develop:build");
     expect(calls.filter((call) => call === "closeIssue:42")).toHaveLength(1);
-    expect(calls.filter((call) => call === "closeServer")).toHaveLength(1);
+    expect(calls.filter((call) => call === "closeRuntime")).toHaveLength(1);
     expect(calls).not.toContain("removeWorkspace:/tmp/ralphie");
   });
 

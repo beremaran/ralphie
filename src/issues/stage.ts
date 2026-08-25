@@ -1,7 +1,7 @@
 export enum IssueStageKind {
   GitTask = "git-task",
   GitHubTask = "github-task",
-  OpenCodeSession = "opencode-session",
+  PiSession = "pi-session",
   ReviewLoop = "review-loop",
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { OpencodeClient } from "@opencode-ai/sdk/v2";
+import type { PiClient } from "../pi/client.ts";
 import { Effect, Layer } from "effect";
 import type { Octokit } from "octokit";
 
@@ -31,7 +31,7 @@ import {
   type GitHubIssueMutationService,
 } from "../github/issue-mutations.ts";
 import { GitHubIssues, type GitHubIssuesService } from "../github/issues.ts";
-import { makeOpenCodeSessionDiagnostics } from "../opencode/task-session.ts";
+import { makePiSessionDiagnostics } from "../agent/task-session.ts";
 import {
   makeProgressRecorderLayer,
   type ProgressUpdate,
@@ -59,7 +59,7 @@ const issue = (number: number, title: string, body = "Task body") => ({
 });
 
 const context = (
-  client: OpencodeClient,
+  client: PiClient,
   current = issue(42, "Complete task"),
 ): IssueExecutionContext => ({
   issue: current,
@@ -69,9 +69,9 @@ const context = (
   workspace: "/workspace",
   runId: "run-e2e",
   octokit: {} as Octokit,
-  openCode: client,
-  openCodeSelection: { agent: "build" },
-  openCodeDiagnostics: makeOpenCodeSessionDiagnostics(() => "now"),
+  pi: client,
+  piSelection: { agent: "build" },
+  piDiagnostics: makePiSessionDiagnostics(() => "now"),
   repositoryInvariant: {
     capture: () => Effect.succeed({ branch: "main", head: checkpoint.sha }),
     verify: () => Effect.void,
@@ -94,7 +94,7 @@ const clientFor = (outputs: ReadonlyArray<unknown>) => {
         };
       },
     },
-  } as unknown as OpencodeClient;
+  } as unknown as PiClient;
 };
 
 const implementationServices = (
@@ -155,7 +155,7 @@ const reviewApproved = {
   findings: [],
 };
 
-const runComplexity = (client: OpencodeClient, progress: ProgressUpdate[]) =>
+const runComplexity = (client: PiClient, progress: ProgressUpdate[]) =>
   Effect.gen(function* () {
     const service = yield* ComplexityAssessment;
     return yield* service.assess(context(client));
@@ -224,7 +224,7 @@ const decompositionServices = (state: {
 };
 
 const runDecomposition = (
-  client: OpencodeClient,
+  client: PiClient,
   artifacts: IssueArtifactStore,
   layer: Layer.Layer.Any,
 ) =>

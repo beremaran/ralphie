@@ -12,12 +12,12 @@ import {
   IssueLinkStrategy,
 } from "../github/issue-task.ts";
 import {
-  OpenCodeSessionContext,
-  OpenCodeSessionPurpose,
-  type OpenCodeSessionStage,
+  PiSessionContext,
+  PiSessionPurpose,
+  type PiSessionStage,
   StructuredOutputName,
-} from "../opencode/session.ts";
-import type { OpenCodeSelection } from "../opencode/model.ts";
+} from "../agent/session.ts";
+import type { PiSelection } from "../agent/model.ts";
 import { ComplexityLevel, ReviewVerdict } from "./decisions.ts";
 import {
   CheckoutRestorePoint,
@@ -28,7 +28,7 @@ import {
   ReviewLoopExhaustion,
 } from "./stage.ts";
 
-export type IssueAtomicStage = GitIssueStage | GitHubIssueStage | OpenCodeSessionStage;
+export type IssueAtomicStage = GitIssueStage | GitHubIssueStage | PiSessionStage;
 
 export type ReviewLoopStage = {
   readonly kind: IssueStageKind.ReviewLoop;
@@ -44,8 +44,8 @@ export type ReviewLoopStage = {
     readonly verdict: ReviewVerdict.Approved;
   };
   readonly stageChanges: GitIssueStage;
-  readonly review: OpenCodeSessionStage;
-  readonly onChangesRequested: OpenCodeSessionStage;
+  readonly review: PiSessionStage;
+  readonly onChangesRequested: PiSessionStage;
 };
 
 export type IssueStage = IssueAtomicStage | ReviewLoopStage;
@@ -63,8 +63,8 @@ export type IssueExecutionPlan = {
   readonly issue: GitHubIssue;
   readonly repositoryPath: string;
   readonly targetBranch: string;
-  readonly openCode: OpenCodeSelection;
-  readonly assessment: OpenCodeSessionStage;
+  readonly pi: PiSelection;
+  readonly assessment: PiSessionStage;
   readonly workflows: readonly [IssueWorkflow, IssueWorkflow];
 };
 
@@ -73,7 +73,7 @@ export type IssuePipelineService = {
     readonly issue: GitHubIssue;
     readonly repositoryPath: string;
     readonly targetBranch: string;
-    readonly openCode: OpenCodeSelection;
+    readonly pi: PiSelection;
   }) => Effect.Effect<IssueExecutionPlan>;
 };
 
@@ -81,9 +81,9 @@ export const IssuePipeline = Context.GenericTag<IssuePipelineService>(
   "ralphie/IssuePipeline",
 );
 
-const assessment: OpenCodeSessionStage = {
-  kind: IssueStageKind.OpenCodeSession,
-  purpose: OpenCodeSessionPurpose.AssessComplexity,
+const assessment: PiSessionStage = {
+  kind: IssueStageKind.PiSession,
+  purpose: PiSessionPurpose.AssessComplexity,
   output: StructuredOutputName.ComplexityDecision,
 };
 
@@ -97,8 +97,8 @@ const implementationWorkflow: IssueWorkflow = {
       output: GitIssueOutput.IssueBase,
     },
     {
-      kind: IssueStageKind.OpenCodeSession,
-      purpose: OpenCodeSessionPurpose.Implement,
+      kind: IssueStageKind.PiSession,
+      purpose: PiSessionPurpose.Implement,
     },
     {
       kind: IssueStageKind.ReviewLoop,
@@ -118,20 +118,20 @@ const implementationWorkflow: IssueWorkflow = {
         action: GitIssueAction.StageAll,
       },
       review: {
-        kind: IssueStageKind.OpenCodeSession,
-        purpose: OpenCodeSessionPurpose.ReviewDiff,
+        kind: IssueStageKind.PiSession,
+        purpose: PiSessionPurpose.ReviewDiff,
         output: StructuredOutputName.ReviewDecision,
       },
       onChangesRequested: {
-        kind: IssueStageKind.OpenCodeSession,
-        purpose: OpenCodeSessionPurpose.AddressReview,
-        context: OpenCodeSessionContext.Fresh,
+        kind: IssueStageKind.PiSession,
+        purpose: PiSessionPurpose.AddressReview,
+        context: PiSessionContext.Fresh,
         input: StructuredOutputName.ReviewDecision,
       },
     },
     {
-      kind: IssueStageKind.OpenCodeSession,
-      purpose: OpenCodeSessionPurpose.GenerateCommitMessage,
+      kind: IssueStageKind.PiSession,
+      purpose: PiSessionPurpose.GenerateCommitMessage,
       output: StructuredOutputName.CommitMessageDecision,
     },
     {
@@ -148,8 +148,8 @@ const decompositionWorkflow: IssueWorkflow = {
   complexity: { min: ComplexityLevel.Level4, max: ComplexityLevel.Level5 },
   stages: [
     {
-      kind: IssueStageKind.OpenCodeSession,
-      purpose: OpenCodeSessionPurpose.DecomposeIssue,
+      kind: IssueStageKind.PiSession,
+      purpose: PiSessionPurpose.DecomposeIssue,
       output: StructuredOutputName.IssueBreakdownDecision,
     },
     {
@@ -172,12 +172,12 @@ const decompositionWorkflow: IssueWorkflow = {
 };
 
 export const IssuePipelineLive = Layer.succeed(IssuePipeline, {
-  plan: ({ issue, repositoryPath, targetBranch, openCode }) =>
+  plan: ({ issue, repositoryPath, targetBranch, pi }) =>
     Effect.succeed({
       issue,
       repositoryPath,
       targetBranch,
-      openCode,
+      pi,
       assessment,
       workflows: [implementationWorkflow, decompositionWorkflow],
     }),

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 
-import { makeOpenCodeSessionDiagnostics } from "../opencode/task-session.ts";
+import { makePiSessionDiagnostics } from "../agent/task-session.ts";
 
 import {
   IssueCompletionKind,
@@ -80,9 +80,9 @@ describe("issue execution domain types", () => {
       workspace: "/tmp/workspace",
       runId: "run-42",
       octokit: {} as IssueExecutionContext["octokit"],
-      openCode: {} as IssueExecutionContext["openCode"],
-      openCodeSelection: { agent: "build" },
-      openCodeDiagnostics: makeOpenCodeSessionDiagnostics(),
+      pi: {} as IssueExecutionContext["pi"],
+      piSelection: { agent: "build" },
+      piDiagnostics: makePiSessionDiagnostics(),
       repositoryInvariant: {
         capture: () => Effect.succeed({ branch: "main", head: "abc123" }),
         verify: () => Effect.void,
@@ -95,6 +95,6 @@ describe("issue execution domain types", () => {
     expect(context.targetBranch).toBe("main");
     expect(context.workspace).toBe("/tmp/workspace");
     expect(context.runId).toBe("run-42");
-    expect(context.openCodeSelection.agent).toBe("build");
+    expect(context.piSelection.agent).toBe("build");
   });
 });

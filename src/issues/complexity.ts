@@ -1,7 +1,7 @@
 import { Context, Effect, Layer } from "effect";
 
-import { requestStructuredOutput } from "../opencode/structured-output.ts";
-import { buildComplexityPrompt } from "../opencode/prompts.ts";
+import { requestStructuredOutput } from "../agent/structured-output.ts";
+import { buildComplexityPrompt } from "../agent/prompts.ts";
 import {
   ProgressReporter,
   ProgressStage,
@@ -75,7 +75,7 @@ export const ComplexityAssessmentLive = Layer.effect(
                   });
                 }
 
-                return yield* requestStructuredOutput(context.openCode, {
+                return yield* requestStructuredOutput(context.pi, {
                   directory: workingDirectory,
                   title: `Assess issue #${context.issue.number}`,
                   prompt: buildComplexityPrompt({
@@ -86,11 +86,11 @@ export const ComplexityAssessmentLive = Layer.effect(
                     projectRepositories,
                   }),
                   schema: complexityDecisionSchema,
-                  agent: context.openCodeSelection.agent,
-                  model: context.openCodeSelection.model,
-                  variant: context.openCodeSelection.variant,
+                  agent: context.piSelection.agent,
+                  model: context.piSelection.model,
+                  variant: context.piSelection.variant,
                   runId: context.runId,
-                  diagnostics: context.openCodeDiagnostics,
+                  diagnostics: context.piDiagnostics,
                   verifyAfter: () =>
                     Effect.forEach(
                       projectRepositories,

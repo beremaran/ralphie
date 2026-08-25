@@ -6,11 +6,11 @@ import { IssueOrder, IssueSort } from "../github/issues.ts";
 import { parseRepositoryPattern } from "../github/repository-patterns.ts";
 import { parseRepositorySlug } from "../github/repository.ts";
 import {
-  DEFAULT_OPENCODE_AGENT,
-  openCodeModelSchema,
-  openCodeModelVariantSchema,
-  type OpenCodeModel,
-} from "../opencode/model.ts";
+  DEFAULT_PI_AGENT,
+  piModelSchema,
+  piModelVariantSchema,
+  type PiModel,
+} from "../agent/model.ts";
 import { RalphieError } from "../shared/error.ts";
 import { redactSensitiveText } from "../shared/redaction.ts";
 import { assertSafeProjectName } from "../project/project.ts";
@@ -57,8 +57,8 @@ const agentConfigSchema = z
     model: optionalConfigValue(
       z
         .object({
-          id: optionalConfigValue(openCodeModelSchema),
-          variant: optionalConfigValue(openCodeModelVariantSchema),
+          id: optionalConfigValue(piModelSchema),
+          variant: optionalConfigValue(piModelVariantSchema),
         })
         .strict(),
     ),
@@ -152,7 +152,7 @@ export type RalphieConfigOverrides = {
   readonly issueLabels?: ReadonlyArray<string>;
   readonly issueSort?: IssueSort;
   readonly issueOrder?: IssueOrder;
-  readonly model?: OpenCodeModel;
+  readonly model?: PiModel;
   readonly modelVariant?: string;
   readonly agent?: string;
   readonly workspace?: string;
@@ -179,7 +179,7 @@ export type ResolvedExecutionConfig = {
   readonly issueLabels: ReadonlyArray<string>;
   readonly issueSort: IssueSort;
   readonly issueOrder: IssueOrder;
-  readonly model?: OpenCodeModel;
+  readonly model?: PiModel;
   readonly modelVariant?: string;
   readonly agent: string;
   readonly dryRun: boolean;
@@ -224,7 +224,7 @@ type ExecutionConfig = {
     readonly filter?: { readonly labels?: ReadonlyArray<string> };
   };
   readonly agent?: {
-    readonly model?: { readonly id?: OpenCodeModel; readonly variant?: string };
+    readonly model?: { readonly id?: PiModel; readonly variant?: string };
     readonly mode?: string;
   };
   readonly dryRun?: boolean;
@@ -267,7 +267,7 @@ const resolveExecution = (
     issueOrder: overrides.issueOrder ?? sortOrder ?? IssueOrder.Ascending,
     ...(selectedModel === undefined ? {} : { model: selectedModel }),
     ...(selectedVariant === undefined ? {} : { modelVariant: selectedVariant }),
-    agent: overrides.agent ?? mode ?? DEFAULT_OPENCODE_AGENT,
+    agent: overrides.agent ?? mode ?? DEFAULT_PI_AGENT,
     dryRun: overrides.dryRun ?? dryRun ?? false,
   };
 };

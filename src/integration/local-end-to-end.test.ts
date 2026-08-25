@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { OpencodeClient } from "@opencode-ai/sdk/v2";
+import type { PiClient } from "../pi/client.ts";
 import { Effect, Layer } from "effect";
 import type { Octokit } from "octokit";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
@@ -35,7 +35,7 @@ import {
 import { IssueExecutor, IssueExecutorLive } from "../issues/executor.ts";
 import { ImplementationExecutorLive } from "../issues/implementation-executor.ts";
 import { IssueRecoveryLive } from "../issues/recovery.ts";
-import { makeOpenCodeSessionDiagnostics } from "../opencode/task-session.ts";
+import { makePiSessionDiagnostics } from "../agent/task-session.ts";
 import {
   makeProgressRecorderLayer,
   type ProgressUpdate,
@@ -58,7 +58,7 @@ const run = (command: string, args: ReadonlyArray<string>, cwd?: string): string
 const git = (repositoryPath: string, args: ReadonlyArray<string>): string =>
   run("git", args, repositoryPath);
 
-const makeOpenCode = (repositoryPath: string) => {
+const makePi = (repositoryPath: string) => {
   let session = 0;
   let implementationWritten = false;
   const promptKinds: string[] = [];
@@ -72,7 +72,7 @@ const makeOpenCode = (repositoryPath: string) => {
 
         // The real agent is represented by the ordinary text response. Its
         // deterministic side effect gives the real Git services something to
-        // stage, commit, and push while all OpenCode network calls stay local.
+        // stage, commit, and push while all Pi network calls stay local.
         if (!structured && !implementationWritten) {
           implementationWritten = true;
           await writeFile(join(repositoryPath, "implemented.txt"), "implemented\n");
@@ -120,14 +120,14 @@ const makeOpenCode = (repositoryPath: string) => {
   };
 
   return {
-    client: client as unknown as OpencodeClient,
+    client: client as unknown as PiClient,
     promptKinds,
   };
 };
 
 const makeContext = (
   repositoryPath: string,
-  openCode: OpencodeClient,
+  pi: PiClient,
   workspace: string,
   runId: string,
   repositoryInvariant: GitRepositoryInvariantService,
@@ -145,9 +145,9 @@ const makeContext = (
   workspace,
   runId,
   octokit: {} as Octokit,
-  openCode,
-  openCodeSelection: { agent: "build" },
-  openCodeDiagnostics: makeOpenCodeSessionDiagnostics(() => "now"),
+  pi,
+  piSelection: { agent: "build" },
+  piDiagnostics: makePiSessionDiagnostics(() => "now"),
   repositoryInvariant,
 });
 
@@ -172,7 +172,7 @@ describe("local implementation end-to-end", () => {
       git(repositoryPath, ["push", "--set-upstream", "origin", "main"]);
       const initialSha = git(repositoryPath, ["rev-parse", "HEAD"]);
 
-      const openCodeSetup = makeOpenCode(repositoryPath);
+      const piSetup = makePi(repositoryPath);
       const progressEvents: ProgressUpdate[] = [];
       const safetyInputs: Array<{
         readonly intendedBaseSha: string;
@@ -244,7 +244,7 @@ describe("local implementation end-to-end", () => {
         return yield* executor.execute(
           makeContext(
             repositoryPath,
-            openCodeSetup.client,
+            piSetup.client,
             workspace,
             runId,
             repositoryInvariant,
@@ -278,7 +278,7 @@ describe("local implementation end-to-end", () => {
       expect(await Bun.file(join(repositoryPath, "implemented.txt")).text()).toBe(
         "implemented\n",
       );
-      expect(openCodeSetup.promptKinds).toEqual([
+      expect(piSetup.promptKinds).toEqual([
         "structured",
         "text",
         "structured",

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { OpencodeClient } from "@opencode-ai/sdk/v2";
+import type { PiClient } from "../pi/client.ts";
 import { Cause, Effect, Exit, Layer } from "effect";
 import type { Octokit } from "octokit";
 
@@ -25,7 +25,7 @@ import {
 } from "../github/issue-mutations.ts";
 import { GitHubIssues } from "../github/issues.ts";
 import type { GitHubDecompositionChild } from "../github/issues.ts";
-import { makeOpenCodeSessionDiagnostics } from "../opencode/task-session.ts";
+import { makePiSessionDiagnostics } from "../agent/task-session.ts";
 import { makeProgressRecorderLayer } from "../progress/progress.ts";
 
 const breakdown = {
@@ -66,10 +66,7 @@ const issueResponse = (
   },
 });
 
-const context = (
-  openCode: OpencodeClient,
-  octokit: Octokit,
-): IssueExecutionContext => ({
+const context = (pi: PiClient, octokit: Octokit): IssueExecutionContext => ({
   issue: {
     number: 42,
     title: "Modernize the API",
@@ -83,16 +80,16 @@ const context = (
   workspace: "/workspace",
   runId: "run-1",
   octokit,
-  openCode,
-  openCodeSelection: { agent: "build" },
-  openCodeDiagnostics: makeOpenCodeSessionDiagnostics(),
+  pi,
+  piSelection: { agent: "build" },
+  piDiagnostics: makePiSessionDiagnostics(),
   repositoryInvariant: {
     capture: () => Effect.succeed({ branch: "main", head: "abc123" }),
     verify: () => Effect.void,
   },
 });
 
-const openCodeClient = (capturePrompt?: (prompt: string) => void) =>
+const piClient = (capturePrompt?: (prompt: string) => void) =>
   ({
     session: {
       create: async () => ({ data: { id: "decomposition-session" } }),
@@ -106,17 +103,17 @@ const openCodeClient = (capturePrompt?: (prompt: string) => void) =>
         };
       },
     },
-  }) as unknown as OpencodeClient;
+  }) as unknown as PiClient;
 
 const run = (
-  openCode: OpencodeClient,
+  pi: PiClient,
   octokit: Octokit,
   artifacts: IssueArtifactStore,
   discoveredChildren: ReadonlyArray<GitHubDecompositionChild> = [],
 ) =>
   Effect.gen(function* () {
     const executor = yield* DecompositionExecutor;
-    return yield* executor.execute({ context: context(openCode, octokit), artifacts });
+    return yield* executor.execute({ context: context(pi, octokit), artifacts });
   }).pipe(
     Effect.provide(DecompositionExecutorLive),
     Effect.provide(
@@ -165,7 +162,7 @@ describe("decomposition executor", () => {
     const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
     await Effect.runPromise(
       run(
-        openCodeClient((value) => (prompt = value)),
+        piClient((value) => (prompt = value)),
         octokit,
         artifacts,
       ),
@@ -214,7 +211,7 @@ describe("decomposition executor", () => {
         },
       }),
     );
-    const client = openCodeClient((value) => (prompt = value));
+    const client = piClient((value) => (prompt = value));
     const octokit = {
       rest: {
         issues: {
@@ -276,7 +273,7 @@ describe("decomposition executor", () => {
     } as unknown as Octokit;
 
     const outcome = await Effect.runPromise(
-      run(openCodeClient(), octokit, artifacts, discoveredChildren),
+      run(piClient(), octokit, artifacts, discoveredChildren),
     );
     expect(outcome).toEqual({
       kind: IssueExecutionOutcomeKind.Decomposed,
@@ -319,18 +316,18 @@ describe("decomposition executor", () => {
     } as unknown as Octokit;
     const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
 
-    const exit = await Effect.runPromiseExit(run(openCodeClient(), octokit, artifacts));
+    const exit = await Effect.runPromiseExit(run(piClient(), octokit, artifacts));
     expect(Exit.isFailure(exit)).toBeTrue();
     expect(originalUpdated).toBeFalse();
     expect(closeCount).toBe(0);
 
     failLink = false;
-    await Effect.runPromise(run(openCodeClient(), octokit, artifacts));
+    await Effect.runPromise(run(piClient(), octokit, artifacts));
     expect(createCount).toBe(2);
     expect(originalUpdated).toBeTrue();
     expect(closeCount).toBe(1);
 
-    await Effect.runPromise(run(openCodeClient(), octokit, artifacts));
+    await Effect.runPromise(run(piClient(), octokit, artifacts));
     expect(createCount).toBe(2);
     expect(closeCount).toBe(2);
   });
@@ -365,9 +362,7 @@ describe("decomposition executor", () => {
       } as unknown as Octokit;
       const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
 
-      const exit = await Effect.runPromiseExit(
-        run(openCodeClient(), octokit, artifacts),
-      );
+      const exit = await Effect.runPromiseExit(run(piClient(), octokit, artifacts));
       expect(Exit.isFailure(exit)).toBeTrue();
       expect(closeCount).toBe(0);
       if (failureAt === 6 && Exit.isFailure(exit)) {

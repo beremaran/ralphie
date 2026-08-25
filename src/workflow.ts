@@ -24,10 +24,10 @@ import { IssueExecutor } from "./issues/executor.ts";
 import { DryRunIssueExecutor } from "./issues/dry-run-executor.ts";
 import { IssueArtifactKind, IssueArtifactStore } from "./issues/artifacts.ts";
 import { createIssueQueue, IssueQueueState, toQueuedIssues } from "./issues/queue.ts";
-import type { OpenCodeModel } from "./opencode/model.ts";
-import { OpenCode, type OpenCodeServer } from "./opencode/server.ts";
-import { makeOpenCodeSessionDiagnostics } from "./opencode/task-session.ts";
-import { registerOpenCodeAgentSemaphore } from "./opencode/concurrency.ts";
+import type { PiModel } from "./agent/model.ts";
+import { Pi, type PiRuntime } from "./agent/server.ts";
+import { makePiSessionDiagnostics } from "./agent/task-session.ts";
+import { registerPiAgentSemaphore } from "./agent/concurrency.ts";
 import {
   assertUniqueProjectRepositoryNames,
   multiRepositoryProjectPath,
@@ -54,7 +54,7 @@ import { RalphieError } from "./shared/error.ts";
 import { Workspace, resolveWorkspacePath } from "./workspace/workspace.ts";
 import { DEFAULT_WORKFLOW_MODE, WorkflowMode } from "./config/config.ts";
 
-const closeServer = (server: OpenCodeServer) => Effect.sync(() => server.close());
+const closeRuntime = (server: PiRuntime) => Effect.sync(() => server.close());
 
 type ProgressContext = Omit<ProgressUpdate, "stage" | "status" | "message">;
 
@@ -180,7 +180,7 @@ export type WorkflowOptions = {
   readonly maxIssues?: number;
   readonly issueFilters: IssueFilters;
   readonly agent: string;
-  readonly model?: OpenCodeModel;
+  readonly model?: PiModel;
   readonly modelVariant?: string;
   readonly workspace: string;
   readonly cleanup: boolean;
@@ -196,7 +196,7 @@ export type WorkflowOptions = {
 
 export type WorkflowSharedResources = {
   readonly octokit: Octokit;
-  readonly openCode: OpenCodeServer;
+  readonly pi: PiRuntime;
   readonly preparedRepository?: PreparedRepository;
   readonly preparedProject?: PreparedProject;
 };
@@ -267,8 +267,8 @@ export const workflow = ({
         repository: repo,
         ...(requestedBranch === undefined ? {} : { branch: requestedBranch }),
         workspace,
-        model: model ? `${model.providerID}/${model.modelID}` : "OpenCode default",
-        variant: modelVariant ?? "OpenCode default",
+        model: model ? `${model.providerID}/${model.modelID}` : "Pi default",
+        variant: modelVariant ?? "Pi default",
         agent,
         issueLimit: maxIssues ?? "unlimited",
         runId: actualRunId,
@@ -488,8 +488,8 @@ export const workflow = ({
       const issueExecutor = effectiveDryRun
         ? yield* DryRunIssueExecutor
         : yield* IssueExecutor;
-      const diagnostics = makeOpenCodeSessionDiagnostics();
-      const processQueue = (server: OpenCodeServer) => {
+      const diagnostics = makePiSessionDiagnostics();
+      const processQueue = (server: PiRuntime) => {
         const worker = Effect.gen(function* () {
           while (queue.state() === IssueQueueState.Ready) {
             yield* checkCancellation(signal);
@@ -637,9 +637,9 @@ export const workflow = ({
                   workspace,
                   runId: actualRunId,
                   octokit,
-                  openCode: server.client,
-                  openCodeSelection: selection,
-                  openCodeDiagnostics: diagnostics,
+                  pi: server.client,
+                  piSelection: selection,
+                  piDiagnostics: diagnostics,
                   repositoryInvariant: invariantService,
                   signal,
                 }),
@@ -861,20 +861,20 @@ export const workflow = ({
           : worker;
       };
       if (sharedResources === undefined) {
-        const openCode = yield* OpenCode;
+        const pi = yield* Pi;
         yield* Effect.acquireUseRelease(
           track(
             progress,
-            ProgressStage.OpenCodeServer,
-            "Starting OpenCode server...",
-            openCode.start,
-            (server) => `OpenCode server started at ${server.url}.`,
+            ProgressStage.PiRuntime,
+            "Starting Pi runtime...",
+            pi.start,
+            (server) => `Pi runtime started at ${server.url}.`,
           ),
           processQueue,
-          closeServer,
+          closeRuntime,
         );
       } else {
-        yield* processQueue(sharedResources.openCode);
+        yield* processQueue(sharedResources.pi);
       }
 
       if (queue.state() === IssueQueueState.DependencyBlocked) {
@@ -1138,7 +1138,7 @@ export const batchWorkflow = ({
     );
     yield* checkCancellation(signal);
 
-    const openCode = yield* OpenCode;
+    const pi = yield* Pi;
     const agentSemaphore =
       agentConcurrency === undefined
         ? undefined
@@ -1146,16 +1146,16 @@ export const batchWorkflow = ({
     const results = yield* Effect.acquireUseRelease(
       track(
         progress,
-        ProgressStage.OpenCodeServer,
-        "Starting OpenCode server...",
-        openCode.start,
-        (server) => `OpenCode server started at ${server.url}.`,
+        ProgressStage.PiRuntime,
+        "Starting Pi runtime...",
+        pi.start,
+        (server) => `Pi runtime started at ${server.url}.`,
       ),
       (server) =>
         Effect.gen(function* () {
           if (agentSemaphore !== undefined) {
             yield* Effect.sync(() =>
-              registerOpenCodeAgentSemaphore(server.client, agentSemaphore),
+              registerPiAgentSemaphore(server.client, agentSemaphore),
             );
           }
           return yield* Effect.forEach(
@@ -1175,7 +1175,7 @@ export const batchWorkflow = ({
                     runId: repositoryRunId,
                     sharedResources: {
                       octokit,
-                      openCode: server,
+                      pi: server,
                       preparedRepository,
                       preparedProject,
                     },
@@ -1198,7 +1198,7 @@ export const batchWorkflow = ({
             { concurrency: "unbounded" },
           ).pipe(Effect.map((projectResults) => projectResults.flat()));
         }),
-      closeServer,
+      closeRuntime,
     );
 
     const failures = results.filter(({ result }) => Either.isLeft(result));

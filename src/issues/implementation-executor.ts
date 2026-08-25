@@ -22,9 +22,9 @@ import {
   buildResolutionVerificationPrompt,
   buildReviewFixPrompt,
   buildReviewPrompt,
-} from "../opencode/prompts.ts";
-import { requestStructuredOutput } from "../opencode/structured-output.ts";
-import { runOpenCodeTask } from "../opencode/task-session.ts";
+} from "../agent/prompts.ts";
+import { requestStructuredOutput } from "../agent/structured-output.ts";
+import { runPiTask } from "../agent/task-session.ts";
 import {
   ProgressReporter,
   ProgressStage,
@@ -398,16 +398,16 @@ const executeProjectImplementation = (
       input,
       ProgressStage.Implementation,
       `Implementing #${context.issue.number} across the project...`,
-      runOpenCodeTask(context.openCode, {
+      runPiTask(context.pi, {
         directory: workingDirectory,
         title: `Implement issue #${context.issue.number}`,
-        selection: context.openCodeSelection,
+        selection: context.piSelection,
         prompt: buildImplementationPrompt({
           issue: context.issue,
           ...projectPromptInput(context),
         }),
         runId: context.runId,
-        diagnostics: context.openCodeDiagnostics,
+        diagnostics: context.piDiagnostics,
         verifyAfter: verifyProject,
         progress: services.progress,
         progressStage: ProgressStage.Implementation,
@@ -433,7 +433,7 @@ const executeProjectImplementation = (
         input,
         ProgressStage.ResolutionVerification,
         "Verifying whether the project issue is already resolved...",
-        requestStructuredOutput(context.openCode, {
+        requestStructuredOutput(context.pi, {
           directory: workingDirectory,
           title: `Verify resolution of issue #${context.issue.number}`,
           prompt: buildResolutionVerificationPrompt({
@@ -441,11 +441,11 @@ const executeProjectImplementation = (
             ...projectPromptInput(context),
           }),
           schema: issueResolutionDecisionSchema,
-          agent: context.openCodeSelection.agent,
-          model: context.openCodeSelection.model,
-          variant: context.openCodeSelection.variant,
+          agent: context.piSelection.agent,
+          model: context.piSelection.model,
+          variant: context.piSelection.variant,
           runId: context.runId,
-          diagnostics: context.openCodeDiagnostics,
+          diagnostics: context.piDiagnostics,
           verifyAfter: verifyProject,
           progress: services.progress,
           progressStage: ProgressStage.ResolutionVerification,
@@ -482,7 +482,7 @@ const executeProjectImplementation = (
         input,
         ProgressStage.Review,
         `Reviewing project changes (attempt ${attempt}/${REVIEW_ITERATION_LIMIT})...`,
-        requestStructuredOutput(context.openCode, {
+        requestStructuredOutput(context.pi, {
           directory: workingDirectory,
           title: `Review issue #${context.issue.number} (attempt ${attempt})`,
           prompt: buildReviewPrompt({
@@ -491,11 +491,11 @@ const executeProjectImplementation = (
             stagedDiff,
           }),
           schema: reviewDecisionSchema,
-          agent: context.openCodeSelection.agent,
-          model: context.openCodeSelection.model,
-          variant: context.openCodeSelection.variant,
+          agent: context.piSelection.agent,
+          model: context.piSelection.model,
+          variant: context.piSelection.variant,
           runId: context.runId,
-          diagnostics: context.openCodeDiagnostics,
+          diagnostics: context.piDiagnostics,
           verifyAfter: verifyProject,
           progress: services.progress,
           progressStage: ProgressStage.Review,
@@ -522,7 +522,7 @@ const executeProjectImplementation = (
           input,
           ProgressStage.CommitMessage,
           "Generating a project commit message...",
-          requestStructuredOutput(context.openCode, {
+          requestStructuredOutput(context.pi, {
             directory: workingDirectory,
             title: `Generate commit message for issue #${context.issue.number}`,
             prompt: buildCommitMessagePrompt({
@@ -531,11 +531,11 @@ const executeProjectImplementation = (
               stagedDiff: finalDiff,
             }),
             schema: commitMessageDecisionSchema,
-            agent: context.openCodeSelection.agent,
-            model: context.openCodeSelection.model,
-            variant: context.openCodeSelection.variant,
+            agent: context.piSelection.agent,
+            model: context.piSelection.model,
+            variant: context.piSelection.variant,
             runId: context.runId,
-            diagnostics: context.openCodeDiagnostics,
+            diagnostics: context.piDiagnostics,
             verifyAfter: verifyProject,
             progress: services.progress,
             progressStage: ProgressStage.CommitMessage,
@@ -599,10 +599,10 @@ const executeProjectImplementation = (
         input,
         ProgressStage.ReviewFix,
         `Addressing project review findings (attempt ${attempt})...`,
-        runOpenCodeTask(context.openCode, {
+        runPiTask(context.pi, {
           directory: workingDirectory,
           title: `Address review for issue #${context.issue.number} (attempt ${attempt})`,
-          selection: context.openCodeSelection,
+          selection: context.piSelection,
           prompt: buildReviewFixPrompt({
             issue: context.issue,
             ...projectPromptInput(context),
@@ -610,7 +610,7 @@ const executeProjectImplementation = (
             review: review.decision,
           }),
           runId: context.runId,
-          diagnostics: context.openCodeDiagnostics,
+          diagnostics: context.piDiagnostics,
           verifyAfter: verifyProject,
           progress: services.progress,
           progressStage: ProgressStage.ReviewFix,
@@ -769,17 +769,17 @@ export const ImplementationExecutorLive = Layer.effect(
             input,
             ProgressStage.Implementation,
             `Implementing #${context.issue.number}...`,
-            runOpenCodeTask(context.openCode, {
+            runPiTask(context.pi, {
               directory: context.repositoryPath,
               title: `Implement issue #${context.issue.number}`,
-              selection: context.openCodeSelection,
+              selection: context.piSelection,
               prompt: buildImplementationPrompt({
                 issue: context.issue,
                 repositoryPath: context.repositoryPath,
                 targetBranch: context.targetBranch,
               }),
               runId: context.runId,
-              diagnostics: context.openCodeDiagnostics,
+              diagnostics: context.piDiagnostics,
               repositoryInvariant: invariant,
               verifyRepositoryInvariant: context.repositoryInvariant.verify,
               progress,
@@ -806,7 +806,7 @@ export const ImplementationExecutorLive = Layer.effect(
               input,
               ProgressStage.ResolutionVerification,
               "Verifying whether the issue is already resolved...",
-              requestStructuredOutput(context.openCode, {
+              requestStructuredOutput(context.pi, {
                 directory: context.repositoryPath,
                 title: `Verify resolution of issue #${context.issue.number}`,
                 prompt: buildResolutionVerificationPrompt({
@@ -815,11 +815,11 @@ export const ImplementationExecutorLive = Layer.effect(
                   targetBranch: context.targetBranch,
                 }),
                 schema: issueResolutionDecisionSchema,
-                agent: context.openCodeSelection.agent,
-                model: context.openCodeSelection.model,
-                variant: context.openCodeSelection.variant,
+                agent: context.piSelection.agent,
+                model: context.piSelection.model,
+                variant: context.piSelection.variant,
                 runId: context.runId,
-                diagnostics: context.openCodeDiagnostics,
+                diagnostics: context.piDiagnostics,
                 repositoryInvariant: invariant,
                 verifyRepositoryInvariant: context.repositoryInvariant.verify,
                 progress,
@@ -860,7 +860,7 @@ export const ImplementationExecutorLive = Layer.effect(
               input,
               ProgressStage.Review,
               `Reviewing staged changes (attempt ${attempt}/${REVIEW_ITERATION_LIMIT})...`,
-              requestStructuredOutput(context.openCode, {
+              requestStructuredOutput(context.pi, {
                 directory: context.repositoryPath,
                 title: `Review issue #${context.issue.number} (attempt ${attempt})`,
                 prompt: buildReviewPrompt({
@@ -870,11 +870,11 @@ export const ImplementationExecutorLive = Layer.effect(
                   stagedDiff,
                 }),
                 schema: reviewDecisionSchema,
-                agent: context.openCodeSelection.agent,
-                model: context.openCodeSelection.model,
-                variant: context.openCodeSelection.variant,
+                agent: context.piSelection.agent,
+                model: context.piSelection.model,
+                variant: context.piSelection.variant,
                 runId: context.runId,
-                diagnostics: context.openCodeDiagnostics,
+                diagnostics: context.piDiagnostics,
                 repositoryInvariant: invariant,
                 verifyRepositoryInvariant: context.repositoryInvariant.verify,
                 progress,
@@ -904,7 +904,7 @@ export const ImplementationExecutorLive = Layer.effect(
                 input,
                 ProgressStage.CommitMessage,
                 "Generating a commit message...",
-                requestStructuredOutput(context.openCode, {
+                requestStructuredOutput(context.pi, {
                   directory: context.repositoryPath,
                   title: `Generate commit message for issue #${context.issue.number}`,
                   prompt: buildCommitMessagePrompt({
@@ -914,11 +914,11 @@ export const ImplementationExecutorLive = Layer.effect(
                     stagedDiff: finalDiff,
                   }),
                   schema: commitMessageDecisionSchema,
-                  agent: context.openCodeSelection.agent,
-                  model: context.openCodeSelection.model,
-                  variant: context.openCodeSelection.variant,
+                  agent: context.piSelection.agent,
+                  model: context.piSelection.model,
+                  variant: context.piSelection.variant,
                   runId: context.runId,
-                  diagnostics: context.openCodeDiagnostics,
+                  diagnostics: context.piDiagnostics,
                   repositoryInvariant: invariant,
                   verifyRepositoryInvariant: context.repositoryInvariant.verify,
                   progress,
@@ -1008,10 +1008,10 @@ export const ImplementationExecutorLive = Layer.effect(
               input,
               ProgressStage.ReviewFix,
               `Addressing review findings (attempt ${attempt})...`,
-              runOpenCodeTask(context.openCode, {
+              runPiTask(context.pi, {
                 directory: context.repositoryPath,
                 title: `Address review for issue #${context.issue.number} (attempt ${attempt})`,
-                selection: context.openCodeSelection,
+                selection: context.piSelection,
                 prompt: buildReviewFixPrompt({
                   issue: context.issue,
                   repositoryPath: context.repositoryPath,
@@ -1020,7 +1020,7 @@ export const ImplementationExecutorLive = Layer.effect(
                   review: review.decision,
                 }),
                 runId: context.runId,
-                diagnostics: context.openCodeDiagnostics,
+                diagnostics: context.piDiagnostics,
                 repositoryInvariant: invariant,
                 verifyRepositoryInvariant: context.repositoryInvariant.verify,
                 progress,

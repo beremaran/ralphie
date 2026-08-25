@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
 import type { Octokit } from "octokit";
-import type { OpencodeClient } from "@opencode-ai/sdk/v2";
+import type { PiClient } from "../pi/client.ts";
 
 import {
   IssueArtifactKind,
@@ -33,9 +33,9 @@ const context = (number: number): IssueExecutionContext => ({
   workspace: "/workspace",
   runId: "dry-run",
   octokit: {} as Octokit,
-  openCode: {} as OpencodeClient,
-  openCodeSelection: { agent: "build" },
-  openCodeDiagnostics: { record: () => undefined, list: () => [] },
+  pi: {} as PiClient,
+  piSelection: { agent: "build" },
+  piDiagnostics: { record: () => undefined, list: () => [] },
   repositoryInvariant: {
     capture: () => Effect.succeed({ branch: "main", head: "abc123" }),
     verify: () => Effect.void,

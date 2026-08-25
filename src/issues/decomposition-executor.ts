@@ -13,8 +13,8 @@ import {
   GitHubIssueMutations,
 } from "../github/issue-mutations.ts";
 import { GitHubIssues } from "../github/issues.ts";
-import { buildDecompositionPrompt } from "../opencode/prompts.ts";
-import { requestStructuredOutput } from "../opencode/structured-output.ts";
+import { buildDecompositionPrompt } from "../agent/prompts.ts";
+import { requestStructuredOutput } from "../agent/structured-output.ts";
 import {
   ProgressReporter,
   ProgressStage,
@@ -187,7 +187,7 @@ export const DecompositionExecutorLive = Layer.effect(
                     message: `Decomposition requires branch ${context.targetBranch}, but checkout is on ${invariant.branch}.`,
                   });
                 }
-                return yield* requestStructuredOutput(context.openCode, {
+                return yield* requestStructuredOutput(context.pi, {
                   directory: workingDirectory,
                   title: `Decompose issue #${context.issue.number}`,
                   prompt: buildDecompositionPrompt({
@@ -201,11 +201,11 @@ export const DecompositionExecutorLive = Layer.effect(
                     ),
                   }),
                   schema: issueBreakdownDecisionSchema,
-                  agent: context.openCodeSelection.agent,
-                  model: context.openCodeSelection.model,
-                  variant: context.openCodeSelection.variant,
+                  agent: context.piSelection.agent,
+                  model: context.piSelection.model,
+                  variant: context.piSelection.variant,
                   runId: context.runId,
-                  diagnostics: context.openCodeDiagnostics,
+                  diagnostics: context.piDiagnostics,
                   verifyAfter: () =>
                     Effect.forEach(
                       projectRepositories,

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { OpencodeClient } from "@opencode-ai/sdk/v2";
+import type { PiClient } from "../pi/client.ts";
 import { Effect, Layer } from "effect";
 import type { Octokit } from "octokit";
 
@@ -19,7 +19,7 @@ import { IssueExecutor, IssueExecutorLive } from "../issues/executor.ts";
 import { ImplementationExecutor } from "../issues/implementation-executor.ts";
 import { GitHubIssueMutationsLive } from "../github/issue-mutations.ts";
 import { GitHubIssuesLive } from "../github/issues.ts";
-import { makeOpenCodeSessionDiagnostics } from "../opencode/task-session.ts";
+import { makePiSessionDiagnostics } from "../agent/task-session.ts";
 import {
   makeProgressRecorderLayer,
   type ProgressUpdate,
@@ -131,7 +131,7 @@ const makeOctokit = () => {
   return { client, issues, requests };
 };
 
-const openCode = {
+const pi = {
   session: {
     create: async () => ({ data: { id: "decomposition-session" } }),
     prompt: async () => ({
@@ -141,7 +141,7 @@ const openCode = {
       },
     }),
   },
-} as unknown as OpencodeClient;
+} as unknown as PiClient;
 
 const context = (octokit: Octokit): IssueExecutionContext => ({
   issue: {
@@ -157,9 +157,9 @@ const context = (octokit: Octokit): IssueExecutionContext => ({
   workspace: "/tmp/ralphie-local-decomposition-workspace",
   runId: "local-decomposition-e2e",
   octokit,
-  openCode,
-  openCodeSelection: { agent: "build" },
-  openCodeDiagnostics: makeOpenCodeSessionDiagnostics(() => "now"),
+  pi,
+  piSelection: { agent: "build" },
+  piDiagnostics: makePiSessionDiagnostics(() => "now"),
   repositoryInvariant: {
     capture: () => Effect.succeed({ branch: "main", head: "abc123" }),
     verify: () => Effect.void,

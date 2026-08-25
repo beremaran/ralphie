@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { OpencodeClient } from "@opencode-ai/sdk/v2";
+import type { PiClient } from "../pi/client.ts";
 import type { Octokit } from "octokit";
 import { Effect, Exit, Layer } from "effect";
 
@@ -12,7 +12,7 @@ import {
 import { ComplexityAssessment, ComplexityAssessmentLive } from "./complexity.ts";
 import { ComplexityLevel } from "./decisions.ts";
 import type { IssueExecutionContext } from "./execution.ts";
-import { makeOpenCodeSessionDiagnostics } from "../opencode/task-session.ts";
+import { makePiSessionDiagnostics } from "../agent/task-session.ts";
 
 const assistantInfo = (structured: unknown) => ({
   id: "message-1",
@@ -36,9 +36,9 @@ const assistantInfo = (structured: unknown) => ({
 });
 
 const context = (
-  client: OpencodeClient,
+  client: PiClient,
   overrides: Partial<
-    Pick<IssueExecutionContext, "openCodeDiagnostics" | "repositoryInvariant">
+    Pick<IssueExecutionContext, "piDiagnostics" | "repositoryInvariant">
   > = {},
 ): IssueExecutionContext => ({
   issue: {
@@ -54,10 +54,9 @@ const context = (
   workspace: "/workspace",
   runId: "run-1",
   octokit: {} as Octokit,
-  openCode: client,
-  openCodeSelection: { agent: "build" },
-  openCodeDiagnostics:
-    overrides.openCodeDiagnostics ?? makeOpenCodeSessionDiagnostics(() => "now"),
+  pi: client,
+  piSelection: { agent: "build" },
+  piDiagnostics: overrides.piDiagnostics ?? makePiSessionDiagnostics(() => "now"),
   repositoryInvariant: overrides.repositoryInvariant ?? {
     capture: () => Effect.succeed({ branch: "main", head: "abc123" }),
     verify: () => Effect.void,
@@ -83,7 +82,7 @@ describe("complexity assessment", () => {
           },
         }),
       },
-    } as unknown as OpencodeClient;
+    } as unknown as PiClient;
 
     const result = await Effect.gen(function* () {
       const assessment = yield* ComplexityAssessment;
@@ -121,7 +120,7 @@ describe("complexity assessment", () => {
           },
         }),
       },
-    } as unknown as OpencodeClient;
+    } as unknown as PiClient;
 
     const exit = await Effect.gen(function* () {
       const assessment = yield* ComplexityAssessment;
@@ -133,7 +132,7 @@ describe("complexity assessment", () => {
   });
 
   test("records the assessment session and verifies its checkout invariant", async () => {
-    const diagnostics = makeOpenCodeSessionDiagnostics(() => "now");
+    const diagnostics = makePiSessionDiagnostics(() => "now");
     let verified: unknown;
     const result = await Effect.gen(function* () {
       const assessment = yield* ComplexityAssessment;
@@ -152,9 +151,9 @@ describe("complexity assessment", () => {
                 },
               }),
             },
-          } as unknown as OpencodeClient,
+          } as unknown as PiClient,
           {
-            openCodeDiagnostics: diagnostics,
+            piDiagnostics: diagnostics,
             repositoryInvariant: {
               capture: () => Effect.succeed({ branch: "main", head: "abc123" }),
               verify: (directory, invariant) =>

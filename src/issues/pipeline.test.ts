@@ -5,11 +5,11 @@ import { GitIssueAction, GitIssueOutput } from "../git/issue-task.ts";
 import type { GitHubIssue } from "../github/issues.ts";
 import { GitHubIssueAction, IssueLinkStrategy } from "../github/issue-task.ts";
 import {
-  OpenCodeSessionContext,
-  OpenCodeSessionPurpose,
+  PiSessionContext,
+  PiSessionPurpose,
   StructuredOutputName,
-} from "../opencode/session.ts";
-import { DEFAULT_OPENCODE_AGENT } from "../opencode/model.ts";
+} from "../agent/session.ts";
+import { DEFAULT_PI_AGENT } from "../agent/model.ts";
 import { ComplexityLevel, ReviewVerdict } from "./decisions.ts";
 import {
   IssuePipeline,
@@ -40,7 +40,7 @@ const makePlan = () =>
       issue: issues[0]!,
       repositoryPath: "/workspace/repository",
       targetBranch: "main",
-      openCode: { agent: DEFAULT_OPENCODE_AGENT },
+      pi: { agent: DEFAULT_PI_AGENT },
     });
   }).pipe(Effect.provide(IssuePipelineLive), Effect.runPromise);
 
@@ -49,11 +49,11 @@ describe("issue pipeline", () => {
     const plan = await makePlan();
 
     expect(plan.targetBranch).toBe("main");
-    expect(plan.openCode).toEqual({ agent: DEFAULT_OPENCODE_AGENT });
+    expect(plan.pi).toEqual({ agent: DEFAULT_PI_AGENT });
     expect(plan).not.toHaveProperty("issueBranch");
     expect(plan.assessment).toEqual({
-      kind: IssueStageKind.OpenCodeSession,
-      purpose: OpenCodeSessionPurpose.AssessComplexity,
+      kind: IssueStageKind.PiSession,
+      purpose: PiSessionPurpose.AssessComplexity,
       output: StructuredOutputName.ComplexityDecision,
     });
   });
@@ -74,8 +74,8 @@ describe("issue pipeline", () => {
         output: GitIssueOutput.IssueBase,
       },
       {
-        kind: IssueStageKind.OpenCodeSession,
-        purpose: OpenCodeSessionPurpose.Implement,
+        kind: IssueStageKind.PiSession,
+        purpose: PiSessionPurpose.Implement,
       },
       {
         kind: IssueStageKind.ReviewLoop,
@@ -95,20 +95,20 @@ describe("issue pipeline", () => {
           action: GitIssueAction.StageAll,
         },
         review: {
-          kind: IssueStageKind.OpenCodeSession,
-          purpose: OpenCodeSessionPurpose.ReviewDiff,
+          kind: IssueStageKind.PiSession,
+          purpose: PiSessionPurpose.ReviewDiff,
           output: StructuredOutputName.ReviewDecision,
         },
         onChangesRequested: {
-          kind: IssueStageKind.OpenCodeSession,
-          purpose: OpenCodeSessionPurpose.AddressReview,
-          context: OpenCodeSessionContext.Fresh,
+          kind: IssueStageKind.PiSession,
+          purpose: PiSessionPurpose.AddressReview,
+          context: PiSessionContext.Fresh,
           input: StructuredOutputName.ReviewDecision,
         },
       },
       {
-        kind: IssueStageKind.OpenCodeSession,
-        purpose: OpenCodeSessionPurpose.GenerateCommitMessage,
+        kind: IssueStageKind.PiSession,
+        purpose: PiSessionPurpose.GenerateCommitMessage,
         output: StructuredOutputName.CommitMessageDecision,
       },
       {
@@ -130,8 +130,8 @@ describe("issue pipeline", () => {
     }
     expect(selectWorkflow(plan, 4)?.stages).toEqual([
       {
-        kind: IssueStageKind.OpenCodeSession,
-        purpose: OpenCodeSessionPurpose.DecomposeIssue,
+        kind: IssueStageKind.PiSession,
+        purpose: PiSessionPurpose.DecomposeIssue,
         output: StructuredOutputName.IssueBreakdownDecision,
       },
       {

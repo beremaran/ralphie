@@ -1,9 +1,9 @@
 import type { Octokit } from "octokit";
-import type { OpencodeClient } from "@opencode-ai/sdk/v2";
+import type { PiClient } from "../pi/client.ts";
 
 import type { GitHubIssue } from "../github/issues.ts";
-import type { OpenCodeSelection } from "../opencode/model.ts";
-import type { OpenCodeSessionDiagnostics } from "../opencode/task-session.ts";
+import type { PiSelection } from "../agent/model.ts";
+import type { PiSessionDiagnostics } from "../agent/task-session.ts";
 import type { GitRepositoryInvariantService } from "../git/repository-invariant.ts";
 import type { ProjectRepositoryCheckout } from "../project/project.ts";
 
@@ -74,7 +74,7 @@ export type IssueExecutionOutcome =
  * The repository path is the concrete checkout being mutated; workspace is
  * retained separately because it owns run artifacts and cleanup. The clients
  * are passed in from the workflow runtime so an issue executor does not need
- * to perform authentication or start another OpenCode server.
+ * to perform authentication or start another Pi runtime.
  */
 export type IssueExecutionContext = {
   readonly issue: GitHubIssue;
@@ -82,7 +82,7 @@ export type IssueExecutionContext = {
   /** GitHub owner/repository slug supplied to the run. */
   readonly repository: string;
   readonly repositoryPath: string;
-  /** OpenCode working directory. This is the project root for multi-repo projects. */
+  /** Pi working directory. This is the project root for multi-repo projects. */
   readonly workingDirectory?: string;
   /** Every repository the issue agent may inspect and modify. */
   readonly projectRepositories?: ReadonlyArray<ProjectRepositoryCheckout>;
@@ -90,9 +90,9 @@ export type IssueExecutionContext = {
   readonly workspace: string;
   readonly runId: string;
   readonly octokit: Octokit;
-  readonly openCode: OpencodeClient;
-  readonly openCodeSelection: OpenCodeSelection;
-  readonly openCodeDiagnostics: OpenCodeSessionDiagnostics;
+  readonly pi: PiClient;
+  readonly piSelection: PiSelection;
+  readonly piDiagnostics: PiSessionDiagnostics;
   readonly repositoryInvariant: GitRepositoryInvariantService;
   readonly signal?: AbortSignal;
 };

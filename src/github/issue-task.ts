@@ -1,5 +1,5 @@
 import { IssueStageKind } from "../issues/stage.ts";
-import { StructuredOutputName } from "../opencode/session.ts";
+import { StructuredOutputName } from "../agent/session.ts";
 
 export enum GitHubIssueAction {
   CreateBreakdownIssues = "create-breakdown-issues",

@@ -12,7 +12,7 @@ import { GitHubIssueMutationsLive } from "./github/issue-mutations.ts";
 import { GitHubIssuesLive } from "./github/issues.ts";
 import { GitHubPullRequestsLive } from "./github/pull-requests.ts";
 import { GitHubRepositoryPatternsLive } from "./github/repository-patterns.ts";
-import { OpenCodeLive } from "./opencode/server.ts";
+import { PiLive } from "./pi/server.ts";
 import { IssueArtifactStoreLive } from "./issues/artifacts.ts";
 import { ComplexityAssessmentLive } from "./issues/complexity.ts";
 import { DecompositionExecutorLive } from "./issues/decomposition-executor.ts";
@@ -97,7 +97,7 @@ export const LiveRuntime = Layer.mergeAll(
   GitWorktreesLiveWithCommandRunner,
   IssueArtifactStoreLive,
   IssueExecutorRuntime,
-  OpenCodeLive,
+  PiLive,
   RunStateStoreLive,
   WorkspaceLive,
 );

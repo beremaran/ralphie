@@ -13,7 +13,7 @@ export enum ProgressStage {
   RepositoryDiscovery = "repository-discovery",
   RepositoryPreparation = "repository-preparation",
   IssueDiscovery = "issue-discovery",
-  OpenCodeServer = "opencode-server",
+  PiRuntime = "pi-runtime",
   IssuePlanning = "issue-planning",
   IssueExecution = "issue-execution",
   IssueQueue = "issue-queue",

@@ -13,15 +13,15 @@ import {
   IssueOrder,
   IssueSort,
 } from "../github/issues.ts";
-import { OpenCode, OpenCodeLive, type OpenCodeServer } from "../opencode/server.ts";
-import { openCodeModelSchema } from "../opencode/model.ts";
+import { Pi, PiLive, type PiRuntime } from "../agent/server.ts";
+import { piModelSchema, piModelVariantSchema } from "../agent/model.ts";
 import {
   buildComplexityPrompt,
   buildImplementationPrompt,
   buildReviewPrompt,
-} from "../opencode/prompts.ts";
-import { requestStructuredOutput } from "../opencode/structured-output.ts";
-import { runOpenCodeTask } from "../opencode/task-session.ts";
+} from "../agent/prompts.ts";
+import { requestStructuredOutput } from "../agent/structured-output.ts";
+import { runPiTask } from "../agent/task-session.ts";
 import {
   complexityDecisionSchema,
   reviewDecisionSchema,
@@ -43,28 +43,28 @@ const defineOptInTest = (
 };
 
 const modelSelection = () => {
-  const rawModel = process.env.RALPHIE_OPENCODE_SMOKE_MODEL;
+  const rawModel = process.env.RALPHIE_PI_SMOKE_MODEL;
   const parsedModel =
-    rawModel === undefined ? undefined : openCodeModelSchema.parse(rawModel);
+    rawModel === undefined ? undefined : piModelSchema.parse(rawModel);
   return {
-    agent: process.env.RALPHIE_OPENCODE_SMOKE_AGENT?.trim() || "build",
+    agent: process.env.RALPHIE_PI_SMOKE_AGENT?.trim() || "build",
     ...(parsedModel === undefined ? {} : { model: parsedModel }),
-    ...(process.env.RALPHIE_OPENCODE_SMOKE_VARIANT === undefined
+    ...(process.env.RALPHIE_PI_SMOKE_VARIANT === undefined
       ? {}
-      : { variant: process.env.RALPHIE_OPENCODE_SMOKE_VARIANT }),
+      : { variant: piModelVariantSchema.parse(process.env.RALPHIE_PI_SMOKE_VARIANT) }),
   };
 };
 
-const startOpenCode = async (): Promise<OpenCodeServer> =>
+const startPi = async (): Promise<PiRuntime> =>
   Effect.runPromise(
     Effect.gen(function* () {
-      const service = yield* OpenCode;
+      const service = yield* Pi;
       return yield* service.start;
-    }).pipe(Effect.provide(OpenCodeLive)),
+    }).pipe(Effect.provide(PiLive)),
   );
 
 const createDisposableRepository = async (): Promise<string> => {
-  const repositoryPath = await mkdtemp(join(tmpdir(), "ralphie-opencode-smoke-"));
+  const repositoryPath = await mkdtemp(join(tmpdir(), "ralphie-pi-smoke-"));
   const git = simpleGit(repositoryPath);
   await git.init(["-b", "main"]);
   await git.addConfig("user.email", "ralphie-smoke@example.test");
@@ -86,10 +86,8 @@ const smokeIssue = {
   labels: ["smoke-test"],
 } as const;
 
-const opencodeComplexityEnabled = envFlag("RALPHIE_RUN_OPENCODE_COMPLEXITY_SMOKE");
-const opencodeImplementationEnabled = envFlag(
-  "RALPHIE_RUN_OPENCODE_IMPLEMENTATION_SMOKE",
-);
+const piComplexityEnabled = envFlag("RALPHIE_RUN_PI_COMPLEXITY_SMOKE");
+const piImplementationEnabled = envFlag("RALPHIE_RUN_PI_IMPLEMENTATION_SMOKE");
 
 const githubRepository = process.env.RALPHIE_GITHUB_TEST_REPOSITORY?.trim();
 const safeGithubRepository =
@@ -99,13 +97,13 @@ const githubEnabled = envFlag("RALPHIE_RUN_GITHUB_INTEGRATION") && safeGithubRep
 
 describe("opt-in network smoke tests", () => {
   defineOptInTest(
-    opencodeComplexityEnabled,
-    "gets a real structured complexity assessment from OpenCode",
+    piComplexityEnabled,
+    "gets a real structured complexity assessment from Pi",
     async () => {
       const repositoryPath = await createDisposableRepository();
-      let server: OpenCodeServer | undefined;
+      let server: PiRuntime | undefined;
       try {
-        server = await startOpenCode();
+        server = await startPi();
         const result = await requestStructuredOutput(server.client, {
           directory: repositoryPath,
           title: "Smoke-test issue complexity assessment",
@@ -129,15 +127,15 @@ describe("opt-in network smoke tests", () => {
   );
 
   defineOptInTest(
-    opencodeImplementationEnabled,
-    "runs real OpenCode implementation and structured review in a disposable repository",
+    piImplementationEnabled,
+    "runs real Pi implementation and structured review in a disposable repository",
     async () => {
       const repositoryPath = await createDisposableRepository();
-      let server: OpenCodeServer | undefined;
+      let server: PiRuntime | undefined;
       try {
-        server = await startOpenCode();
+        server = await startPi();
         const selection = modelSelection();
-        const implementation = await runOpenCodeTask(server.client, {
+        const implementation = await runPiTask(server.client, {
           directory: repositoryPath,
           title: "Smoke-test implementation",
           selection,
