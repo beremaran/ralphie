@@ -21,6 +21,7 @@ export const IMPLICIT_PROJECT_NAME = "default";
 export enum WorkflowMode {
   Lgtm = "lgtm",
   Pr = "pr",
+  ParallelPr = "parallel-pr",
 }
 export const DEFAULT_WORKFLOW_MODE = WorkflowMode.Lgtm;
 
@@ -66,6 +67,7 @@ const agentConfigSchema = z
   .strict();
 const executionConfigShape = {
   workflow: optionalConfigValue(z.enum(WorkflowMode)),
+  issueConcurrency: optionalConfigValue(z.number().int().positive()),
   git: optionalConfigValue(gitConfigSchema),
   issues: optionalConfigValue(issueConfigSchema),
   agent: optionalConfigValue(agentConfigSchema),
@@ -109,6 +111,7 @@ export const ralphieProjectConfigSchema = z
 export const ralphieFileConfigSchema = z
   .object({
     ...executionConfigShape,
+    agentConcurrency: optionalConfigValue(z.number().int().positive()),
     workspace: optionalConfigValue(
       z
         .object({
@@ -143,6 +146,8 @@ export type RalphieConfigOverrides = {
   readonly repo?: string;
   readonly workflow?: WorkflowMode;
   readonly branch?: string;
+  readonly issueConcurrency?: number;
+  readonly agentConcurrency?: number;
   readonly maxIssues?: number;
   readonly issueLabels?: ReadonlyArray<string>;
   readonly issueSort?: IssueSort;
@@ -167,6 +172,7 @@ export enum RepositoryTargetKind {
 
 export type ResolvedExecutionConfig = {
   readonly workflow: WorkflowMode;
+  readonly issueConcurrency?: number;
   /** Undefined means select main, then master, from the repository remote. */
   readonly branch?: string;
   readonly maxIssues?: number;
@@ -200,6 +206,7 @@ export type ResolvedProjectConfig = {
 export type ResolvedRalphieConfig = {
   readonly projects: ReadonlyArray<ResolvedProjectConfig>;
   readonly workspace: string;
+  readonly agentConcurrency?: number;
   readonly cleanup: boolean;
   readonly startClean: boolean;
   readonly verbose: boolean;
@@ -209,6 +216,7 @@ export type ResolvedRalphieConfig = {
 
 type ExecutionConfig = {
   readonly workflow?: WorkflowMode;
+  readonly issueConcurrency?: number;
   readonly git?: { readonly branch?: string };
   readonly issues?: {
     readonly limit?: number;
@@ -233,6 +241,7 @@ const resolveExecution = (
   overrides: RalphieConfigOverrides,
 ): ResolvedExecutionConfig => {
   const workflow = lastDefined(levels.map((level) => level?.workflow));
+  const issueConcurrency = lastDefined(levels.map((level) => level?.issueConcurrency));
   const branch = lastDefined(levels.map((level) => level?.git?.branch));
   const limit = lastDefined(levels.map((level) => level?.issues?.limit));
   const sortBy = lastDefined(levels.map((level) => level?.issues?.sort?.by));
@@ -248,6 +257,7 @@ const resolveExecution = (
 
   return {
     workflow: overrides.workflow ?? workflow ?? DEFAULT_WORKFLOW_MODE,
+    issueConcurrency: overrides.issueConcurrency ?? issueConcurrency ?? 1,
     ...((overrides.branch ?? branch) === undefined
       ? {}
       : { branch: overrides.branch ?? branch }),
@@ -347,6 +357,9 @@ export const resolveRalphieConfig = (
   return {
     projects: resolvedProjects,
     workspace: overrides.workspace ?? file.workspace?.path ?? DEFAULT_WORKSPACE,
+    ...((overrides.agentConcurrency ?? file.agentConcurrency) === undefined
+      ? {}
+      : { agentConcurrency: overrides.agentConcurrency ?? file.agentConcurrency }),
     cleanup: overrides.cleanup ?? file.workspace?.cleanup?.after ?? false,
     startClean: overrides.startClean ?? file.workspace?.cleanup?.before ?? false,
     verbose: overrides.verbose ?? file.output?.verbose ?? false,

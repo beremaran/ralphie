@@ -37,7 +37,13 @@ export const runCommand = defineCommand({
       description: "Branch to operate on (default: main, otherwise master)",
     }),
     workflow: option(z.enum(WorkflowMode).optional(), {
-      description: "Delivery workflow: lgtm (direct push) or pr (pull request)",
+      description: "Delivery workflow: lgtm, pr, or parallel-pr",
+    }),
+    "issue-concurrency": option(z.coerce.number().int().positive().optional(), {
+      description: "Concurrent issues per project in parallel-pr mode",
+    }),
+    "agent-concurrency": option(z.coerce.number().int().positive().optional(), {
+      description: "Global maximum concurrent OpenCode agent tasks",
     }),
     "max-issues": option(z.coerce.number().int().positive().optional(), {
       description: "Maximum number of issues to process (default: unlimited)",
@@ -109,6 +115,12 @@ export const runCommand = defineCommand({
     const config = resolveRalphieConfig(fileConfig, {
       ...(positionalRepo === undefined ? {} : { repo: positionalRepo }),
       ...(flags.workflow === undefined ? {} : { workflow: flags.workflow }),
+      ...(flags["issue-concurrency"] === undefined
+        ? {}
+        : { issueConcurrency: flags["issue-concurrency"] }),
+      ...(flags["agent-concurrency"] === undefined
+        ? {}
+        : { agentConcurrency: flags["agent-concurrency"] }),
       ...(flags.branch === undefined ? {} : { branch: flags.branch }),
       ...(flags["max-issues"] === undefined ? {} : { maxIssues: flags["max-issues"] }),
       ...(flags["issue-label"] === undefined
@@ -210,6 +222,7 @@ export const runCommand = defineCommand({
       const repositories: WorkflowOptions[] = repositoryRuns.map(
         ({ project, target: repository, resumeState }) => ({
           workflow: repository.workflow,
+          issueConcurrency: repository.issueConcurrency,
           project,
           repo: repository.repo,
           branch: repository.branch,
@@ -240,6 +253,7 @@ export const runCommand = defineCommand({
           }
           return {
             workflow: target.workflow,
+            issueConcurrency: target.issueConcurrency,
             project,
             repoPattern: target.repoPattern,
             branch: target.branch,
@@ -265,6 +279,7 @@ export const runCommand = defineCommand({
         workspace: config.workspace,
         cleanup: config.cleanup,
         startClean: config.startClean,
+        agentConcurrency: config.agentConcurrency,
       }).pipe(
         Effect.provide(LiveRuntime.pipe(Layer.provideMerge(progressLayer))),
         Effect.catchAll((error) =>

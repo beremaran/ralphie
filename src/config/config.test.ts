@@ -26,6 +26,7 @@ describe("hierarchical Ralphie JSON config", () => {
               kind: RepositoryTargetKind.Explicit,
               repo: "owner/repo",
               workflow: WorkflowMode.Lgtm,
+              issueConcurrency: 1,
               issueLabels: [],
               issueSort: IssueSort.Created,
               issueOrder: IssueOrder.Ascending,
@@ -42,6 +43,21 @@ describe("hierarchical Ralphie JSON config", () => {
       json: false,
       quiet: false,
     });
+  });
+
+  test("resolves parallel issue and global agent concurrency", () => {
+    const resolved = resolveRalphieConfig(
+      {
+        workflow: WorkflowMode.ParallelPr,
+        issueConcurrency: 4,
+        agentConcurrency: 2,
+      },
+      { repo: "owner/repo" },
+    );
+
+    expect(resolved.agentConcurrency).toBe(2);
+    expect(resolved.projects[0]?.targets[0]?.workflow).toBe(WorkflowMode.ParallelPr);
+    expect(resolved.projects[0]?.targets[0]?.issueConcurrency).toBe(4);
   });
 
   test("applies built-in, top-level, project, repository, then CLI precedence", () => {

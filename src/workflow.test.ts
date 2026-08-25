@@ -7,6 +7,7 @@ import { GitRepository } from "./git/repository.ts";
 import { GitRepositoryInvariant } from "./git/repository-invariant.ts";
 import { GitIssueCheckpoint } from "./git/issue-checkpoint.ts";
 import { GitIssueOperations } from "./git/issue-operations.ts";
+import { GitWorktrees } from "./git/worktree.ts";
 import { GitHubClient } from "./github/client.ts";
 import { GitHubPullRequests } from "./github/pull-requests.ts";
 import { GitHubIssueMutations } from "./github/issue-mutations.ts";
@@ -47,6 +48,12 @@ const firstIssue: GitHubIssue = {
   body: "Test body",
   labels: ["bug"],
 };
+const secondIssue: GitHubIssue = {
+  ...firstIssue,
+  number: 43,
+  title: "Second test issue",
+  url: "https://github.com/owner/repo/issues/43",
+};
 
 type TestRuntimeOptions = {
   readonly outcomes?: ReadonlyArray<IssueExecutionOutcome>;
@@ -68,6 +75,7 @@ type TestRuntimeOptions = {
     readonly name: string;
   }>;
   readonly executionContexts?: IssueExecutionContext[];
+  readonly executeGate?: (context: IssueExecutionContext) => Promise<void>;
 };
 
 function testRuntime(
@@ -210,6 +218,22 @@ function testRuntime(
       restoreBaseCheckout: (_path, branch) =>
         Effect.sync(() => calls.push(`restoreBase:${branch}`)),
     }),
+    Layer.succeed(GitWorktrees, {
+      prepareIssue: ({ workspace, runId, issueNumber, branch, repositories }) =>
+        Effect.sync(() => {
+          calls.push(`prepareWorktrees:${issueNumber}`);
+          return {
+            path: `${workspace}/.ralphie/worktrees/${runId}/issue-${issueNumber}`,
+            repositories: repositories.map((repository) => ({
+              ...repository,
+              repositoryPath: `${workspace}/.ralphie/worktrees/${runId}/issue-${issueNumber}/${repository.repository.split("/").at(-1)}`,
+              branch,
+            })),
+          };
+        }),
+      removeIssue: (_sources, prepared) =>
+        Effect.sync(() => calls.push(`removeWorktrees:${prepared.path}`)),
+    }),
     Layer.succeed(IssueArtifactStore, {
       forIssue: (issueNumber) => makeIssueArtifactStore(issueNumber),
     }),
@@ -219,6 +243,12 @@ function testRuntime(
           const { issue, repository, repositoryPath, targetBranch, openCodeSelection } =
             context;
           options.executionContexts?.push(context);
+          if (options.executeGate !== undefined) {
+            yield* Effect.tryPromise({
+              try: () => options.executeGate!(context),
+              catch: (cause) => new RalphieError({ message: "gate failed", cause }),
+            });
+          }
           calls.push(
             `executeIssue:${issue.number}:${repositoryPath}:${targetBranch}:${openCodeSelection.agent}`,
           );
@@ -367,6 +397,59 @@ describe("workflow", () => {
     expect(calls).toContain("mergePullRequest:owner/repo:1");
     expect(calls).toContain("restoreBase:develop");
     expect(calls).not.toContain("closeIssue:42");
+  });
+
+  test("parallel-pr runs isolated issues concurrently and removes successful worktrees", async () => {
+    const calls: string[] = [];
+    const states: RunState[] = [];
+    let active = 0;
+    let maximumActive = 0;
+    let release: (() => void) | undefined;
+    const barrier = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    const summary = await workflow({
+      ...baseOptions,
+      workflow: WorkflowMode.ParallelPr,
+      issueConcurrency: 2,
+      maxIssues: 2,
+    }).pipe(
+      Effect.provide(
+        testRuntime(calls, states, {
+          issueLists: [[firstIssue, secondIssue]],
+          outcomes: [
+            {
+              kind: IssueExecutionOutcomeKind.Completed,
+              completion: IssueCompletionKind.PushedCommit,
+              commitSha: "commit-42",
+            },
+            {
+              kind: IssueExecutionOutcomeKind.Completed,
+              completion: IssueCompletionKind.PushedCommit,
+              commitSha: "commit-43",
+            },
+          ],
+          executeGate: async () => {
+            active += 1;
+            maximumActive = Math.max(maximumActive, active);
+            if (active === 2) release?.();
+            await barrier;
+            active -= 1;
+          },
+        }),
+      ),
+      Effect.runPromise,
+    );
+
+    expect(summary.counts.completed).toBe(2);
+    expect(maximumActive).toBe(2);
+    expect(states.at(-1)?.issueConcurrency).toBe(2);
+    expect(calls).toContain("prepareWorktrees:42");
+    expect(calls).toContain("prepareWorktrees:43");
+    expect(calls.filter((call) => call.startsWith("removeWorktrees:"))).toHaveLength(2);
+    expect(calls).not.toContain("closeIssue:42");
+    expect(calls).not.toContain("closeIssue:43");
   });
 
   test("dry-run assesses through the queue without invoking mutation execution", async () => {

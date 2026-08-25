@@ -116,6 +116,17 @@ the most specific setting wins, with CLI options taking precedence:
 ralphie owner/repository --workflow pr
 ```
 
+`parallel-pr` uses the same PR lifecycle but gives every active issue isolated
+Git worktrees and runs up to `--issue-concurrency` issues per project. A
+batch-wide `--agent-concurrency` limit independently bounds complete OpenCode
+agent tasks across every project and issue, which is useful for protecting a
+local inference server:
+
+```bash
+ralphie owner/repository --workflow parallel-pr \
+  --issue-concurrency 4 --agent-concurrency 2
+```
+
 ## How it works
 
 Every matching open issue receives a schema-validated complexity score from 0
@@ -301,7 +312,9 @@ ralphie --config ./ralphie.json
 
 ```json
 {
-  "workflow": "lgtm",
+  "workflow": "parallel-pr",
+  "issueConcurrency": 4,
+  "agentConcurrency": 2,
   "git": { "branch": "main" },
   "issues": {
     "limit": 10,
@@ -354,10 +367,14 @@ Each project is one execution boundary. Multi-repository projects clone into a
 shared root such as `<workspace>/proj-b/frontend` and
 `<workspace>/proj-b/backend`; OpenCode runs from `<workspace>/proj-b`, so an
 issue from either source repository can inspect and modify both. Repository
-issue queues within that project run serially to prevent agents from racing over
-the shared checkout. Different projects run concurrently. For a project with one
-repository, OpenCode runs directly from that repository clone without an extra
-project container.
+issue queues within that project run serially in `lgtm` and `pr`. In
+`parallel-pr`, each issue receives a project-wide set of worktrees beneath
+`<workspace>/.ralphie/worktrees/<run-id>/issue-<number>` and issue workers are
+bounded by `issueConcurrency`. Successful worktrees are removed after merge;
+failed or interrupted worktrees remain available for diagnosis and resume.
+Different projects run concurrently. For a project with one repository,
+OpenCode normally runs directly from that repository clone, or from its isolated
+issue worktree in `parallel-pr`.
 
 Ralphie authenticates GitHub, initializes Octokit, verifies Git, prepares every
 project checkout, and starts one shared OpenCode server exactly once. For a
@@ -370,9 +387,11 @@ every push succeeds. The configuration precedence is:
 built-in defaults < top-level config < project config < repository config < CLI options
 ```
 
-`workflow` accepts `lgtm` (the default, direct commit and push) or `pr` (branch
-and pull request delivery). It can be placed alongside `git`, `issues`,
-`agent`, and `dryRun` at the top level, project level, or repository level.
+`workflow` accepts `lgtm` (the default, direct commit and push), `pr` (serial
+branch and pull request delivery), or `parallel-pr` (isolated concurrent PR
+delivery). `issueConcurrency` is hierarchical like the workflow and defaults to
+1. `agentConcurrency` is batch-wide, defaults to unlimited, and can only be configured
+at the top level or on the command line.
 
 Workspace preparation and cleanup are batch-wide: start cleanup runs once, and
 the workspace is removed only after every project run succeeds. Human-readable progress is
@@ -472,8 +491,10 @@ may be omitted when `projects` is present in `--config`.
 | Option | Default | Description |
 | --- | --- | --- |
 | `--config <path>` | none | Load reusable options from a validated JSON file. |
-| `--workflow <mode>` | `lgtm` | Deliver directly with `lgtm`, or create a pull request with `pr`. |
-| `-b, --branch <name>` | `main`, otherwise `master` | Base branch; `lgtm` edits and pushes it directly, while `pr` opens pull requests against it. |
+| `--workflow <mode>` | `lgtm` | Select `lgtm`, `pr`, or isolated concurrent `parallel-pr` delivery. |
+| `--issue-concurrency <count>` | `1` | Concurrent issues per project in `parallel-pr`. |
+| `--agent-concurrency <count>` | unlimited | Global concurrent OpenCode agent tasks across the batch. |
+| `-b, --branch <name>` | `main`, otherwise `master` | Base branch; `lgtm` pushes it directly, while PR workflows open against it. |
 | `--max-issues <count>` | unlimited | Positive maximum number of issues charged to this run. |
 | `--issue-label <label>` | none | Require a label; repeat the flag to require multiple labels. |
 | `--issue-sort <field>` | `created` | Sort by `created`, `updated`, or `comments`. |

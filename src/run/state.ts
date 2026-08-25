@@ -81,6 +81,7 @@ export const runStateSchema = z.object({
   repository: z.string().min(1),
   branch: z.string().min(1),
   workflow: z.enum(WorkflowMode).optional(),
+  issueConcurrency: z.number().int().positive().optional(),
   dryRun: z.boolean().optional(),
   selection: z.object({
     agent: z.string().min(1),

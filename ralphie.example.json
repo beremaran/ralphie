@@ -1,5 +1,7 @@
 {
   "workflow": "lgtm",
+  "issueConcurrency": 1,
+  "agentConcurrency": 1,
   "dryRun": false,
   "git": {
     "branch": "main"

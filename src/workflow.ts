@@ -6,6 +6,7 @@ import { GitRepository, type PreparedRepository } from "./git/repository.ts";
 import { GitRepositoryInvariant } from "./git/repository-invariant.ts";
 import { GitIssueCheckpoint } from "./git/issue-checkpoint.ts";
 import { GitIssueOperations } from "./git/issue-operations.ts";
+import { GitWorktrees, type PreparedIssueWorktrees } from "./git/worktree.ts";
 import { GitHubClient } from "./github/client.ts";
 import { GitHubPullRequests } from "./github/pull-requests.ts";
 import {
@@ -26,6 +27,7 @@ import { createIssueQueue, IssueQueueState, toQueuedIssues } from "./issues/queu
 import type { OpenCodeModel } from "./opencode/model.ts";
 import { OpenCode, type OpenCodeServer } from "./opencode/server.ts";
 import { makeOpenCodeSessionDiagnostics } from "./opencode/task-session.ts";
+import { registerOpenCodeAgentSemaphore } from "./opencode/concurrency.ts";
 import {
   assertUniqueProjectRepositoryNames,
   multiRepositoryProjectPath,
@@ -171,6 +173,7 @@ const summarize = (
 
 export type WorkflowOptions = {
   readonly workflow?: WorkflowMode;
+  readonly issueConcurrency?: number;
   readonly project?: string;
   readonly repo: string;
   readonly branch?: string;
@@ -204,6 +207,7 @@ export type BatchWorkflowOptions = {
   readonly workspace: string;
   readonly cleanup: boolean;
   readonly startClean: boolean;
+  readonly agentConcurrency?: number;
 };
 
 export type RepositoryPatternWorkflowOptions = Omit<
@@ -216,6 +220,7 @@ export type RepositoryPatternWorkflowOptions = Omit<
 
 export const workflow = ({
   workflow: requestedWorkflow = DEFAULT_WORKFLOW_MODE,
+  issueConcurrency = 1,
   project,
   repo,
   branch: requestedBranch,
@@ -241,6 +246,9 @@ export const workflow = ({
     const actualRunId = resumeState?.runId ?? runId;
     const effectiveDryRun = resumeState?.dryRun ?? dryRun;
     const workflowMode = resumeState?.workflow ?? requestedWorkflow;
+    const effectiveIssueConcurrency = resumeState?.issueConcurrency ?? issueConcurrency;
+    const usesPullRequests =
+      workflowMode === WorkflowMode.Pr || workflowMode === WorkflowMode.ParallelPr;
     const statePath =
       resumePath ??
       join(
@@ -272,6 +280,7 @@ export const workflow = ({
 
     let activeIssue: RunState["activeIssue"] | undefined;
     let activeQueueIssue: GitHubIssue | undefined;
+    const activeQueueIssues = new Map<number, GitHubIssue>();
     let persistCancellationState: (() => Effect.Effect<void, RalphieError>) | undefined;
     let restoreCancellationCheckout:
       | (() => Effect.Effect<void, RalphieError>)
@@ -314,12 +323,11 @@ export const workflow = ({
           );
         }));
       const issueMutations = yield* GitHubIssueMutations;
-      const pullRequests =
-        workflowMode === WorkflowMode.Pr ? yield* GitHubPullRequests : undefined;
-      const issueOperations =
-        workflowMode === WorkflowMode.Pr ? yield* GitIssueOperations : undefined;
-      const artifactStores =
-        workflowMode === WorkflowMode.Pr ? yield* IssueArtifactStore : undefined;
+      const pullRequests = usesPullRequests ? yield* GitHubPullRequests : undefined;
+      const issueOperations = usesPullRequests ? yield* GitIssueOperations : undefined;
+      const artifactStores = usesPullRequests ? yield* IssueArtifactStore : undefined;
+      const worktrees =
+        workflowMode === WorkflowMode.ParallelPr ? yield* GitWorktrees : undefined;
       yield* checkCancellation(signal);
 
       const repository = yield* GitRepository;
@@ -432,20 +440,15 @@ export const workflow = ({
       ) => {
         const snapshot = queue.snapshot();
         const currentActiveQueueIssue = activeQueueIssue;
-        const hasActiveQueueIssue =
-          activeIssue !== undefined && currentActiveQueueIssue !== undefined;
+        const hasActiveQueueIssue = activeQueueIssues.size > 0;
         const pending = snapshot.pending.map(({ issue }) => ({
           ...issue,
           labels: [...issue.labels],
         }));
-        if (
-          hasActiveQueueIssue &&
-          !pending.some(({ number }) => number === currentActiveQueueIssue.number)
-        ) {
-          pending.unshift({
-            ...currentActiveQueueIssue,
-            labels: [...currentActiveQueueIssue.labels],
-          });
+        for (const issue of activeQueueIssues.values()) {
+          if (!pending.some(({ number }) => number === issue.number)) {
+            pending.unshift({ ...issue, labels: [...issue.labels] });
+          }
         }
         return stateStore.save(statePath, {
           version: RUN_STATE_VERSION,
@@ -455,6 +458,7 @@ export const workflow = ({
           repository: repo,
           branch,
           workflow: workflowMode,
+          issueConcurrency: effectiveIssueConcurrency,
           dryRun: effectiveDryRun,
           selection,
           ...((resumeState?.maxIssues ?? maxIssues) === undefined
@@ -464,7 +468,7 @@ export const workflow = ({
             pending,
             completedIssueNumbers: [...snapshot.completedIssueNumbers],
             processedCount: hasActiveQueueIssue
-              ? Math.max(0, snapshot.processedCount - 1)
+              ? Math.max(0, snapshot.processedCount - activeQueueIssues.size)
               : snapshot.processedCount,
           },
           outcomes: outcomes.map(({ issueNumber, outcome }) => ({
@@ -485,13 +489,14 @@ export const workflow = ({
         ? yield* DryRunIssueExecutor
         : yield* IssueExecutor;
       const diagnostics = makeOpenCodeSessionDiagnostics();
-      const processQueue = (server: OpenCodeServer) =>
-        Effect.gen(function* () {
+      const processQueue = (server: OpenCodeServer) => {
+        const worker = Effect.gen(function* () {
           while (queue.state() === IssueQueueState.Ready) {
             yield* checkCancellation(signal);
             const issue = queue.next();
             if (issue === undefined) break;
             activeQueueIssue = issue;
+            activeQueueIssues.set(issue.number, issue);
             const current = queue.processedCount();
             const total =
               resumeState?.maxIssues ?? maxIssues ?? current + queue.pendingCount();
@@ -515,69 +520,94 @@ export const workflow = ({
               ...entry,
             }));
             const featureBranch = issueFeatureBranch(issue.number);
+            let preparedIssueWorktrees: PreparedIssueWorktrees | undefined;
+            if (workflowMode === WorkflowMode.ParallelPr && !effectiveDryRun) {
+              preparedIssueWorktrees = yield* worktrees!.prepareIssue({
+                workspace,
+                runId: actualRunId,
+                issueNumber: issue.number,
+                branch: featureBranch,
+                repositories: projectRepositories,
+                baseShas: Object.fromEntries(
+                  issueBaseCheckouts.map((checkout) => [
+                    checkout.repository,
+                    checkout.head,
+                  ]),
+                ),
+              });
+            }
+            const issueRepositories =
+              preparedIssueWorktrees?.repositories ?? projectRepositories;
             if (
-              workflowMode === WorkflowMode.Pr &&
+              usesPullRequests &&
               !effectiveDryRun &&
               resumedClosureOutcome === undefined
             ) {
               yield* Effect.forEach(
-                projectRepositories,
+                issueRepositories,
                 (repository) => {
                   const base = issueBaseCheckouts.find(
                     ({ repository: slug }) =>
                       slug.toLowerCase() === repository.repository.toLowerCase(),
                   )!;
-                  return issueOperations!
-                    .createOrCheckoutFeatureBranch(
-                      repository.repositoryPath,
-                      featureBranch,
-                      repository.branch,
-                      base.head,
-                    )
-                    .pipe(
-                      Effect.flatMap((preparedBranch) =>
-                        issueOperations!
-                          .push(
-                            repository.repositoryPath,
-                            featureBranch,
-                            preparedBranch.headSha,
-                          )
-                          .pipe(
-                            Effect.mapError(
-                              (error) =>
-                                new RalphieError({
-                                  message: error.message,
-                                  cause: error,
-                                }),
-                            ),
+                  const prepareBranch: Effect.Effect<
+                    { readonly headSha: string },
+                    RalphieError
+                  > =
+                    workflowMode === WorkflowMode.ParallelPr
+                      ? Effect.succeed({ headSha: base.head })
+                      : issueOperations!.createOrCheckoutFeatureBranch(
+                          repository.repositoryPath,
+                          featureBranch,
+                          repository.branch,
+                          base.head,
+                        );
+                  return prepareBranch.pipe(
+                    Effect.flatMap((preparedBranch) =>
+                      issueOperations!
+                        .push(
+                          repository.repositoryPath,
+                          featureBranch,
+                          preparedBranch.headSha,
+                        )
+                        .pipe(
+                          Effect.mapError(
+                            (error) =>
+                              new RalphieError({
+                                message: error.message,
+                                cause: error,
+                              }),
                           ),
-                      ),
-                    );
+                        ),
+                    ),
+                  );
                 },
                 { discard: true },
               );
             }
-            const executionProjectRepositories = projectRepositories.map(
-              (repository) =>
-                workflowMode === WorkflowMode.Pr && !effectiveDryRun
-                  ? { ...repository, branch: featureBranch }
-                  : repository,
+            const executionProjectRepositories = issueRepositories.map((repository) =>
+              usesPullRequests && !effectiveDryRun
+                ? { ...repository, branch: featureBranch }
+                : repository,
             );
-            restoreCancellationCheckout = () =>
-              Effect.forEach(
-                projectRepositories,
-                (repository) => {
-                  const base = issueBaseCheckouts.find(
-                    ({ repository: slug }) =>
-                      slug.toLowerCase() === repository.repository.toLowerCase(),
-                  )!;
-                  return checkpoints.restore(repository.repositoryPath, {
-                    branch: base.branch,
-                    sha: base.head,
-                  });
-                },
-                { discard: true },
-              );
+            restoreCancellationCheckout =
+              workflowMode === WorkflowMode.ParallelPr
+                ? undefined
+                : () =>
+                    Effect.forEach(
+                      projectRepositories,
+                      (repository) => {
+                        const base = issueBaseCheckouts.find(
+                          ({ repository: slug }) =>
+                            slug.toLowerCase() === repository.repository.toLowerCase(),
+                        )!;
+                        return checkpoints.restore(repository.repositoryPath, {
+                          branch: base.branch,
+                          sha: base.head,
+                        });
+                      },
+                      { discard: true },
+                    );
             yield* persistState(RunStateStatus.Active, activeIssue);
             const outcome =
               resumedClosureOutcome ??
@@ -589,17 +619,21 @@ export const workflow = ({
                   issue,
                   ...(project === undefined ? {} : { project }),
                   repository: repo,
-                  repositoryPath: prepared.path,
+                  repositoryPath:
+                    issueRepositories.find(
+                      ({ repository }) =>
+                        repository.toLowerCase() === repo.toLowerCase(),
+                    )?.repositoryPath ?? prepared.path,
                   ...(sharedResources?.preparedProject === undefined
                     ? {}
                     : {
-                        workingDirectory: sharedResources.preparedProject.path,
+                        workingDirectory:
+                          preparedIssueWorktrees?.path ??
+                          sharedResources.preparedProject.path,
                         projectRepositories: executionProjectRepositories,
                       }),
                   targetBranch:
-                    workflowMode === WorkflowMode.Pr && !effectiveDryRun
-                      ? featureBranch
-                      : branch,
+                    usesPullRequests && !effectiveDryRun ? featureBranch : branch,
                   workspace,
                   runId: actualRunId,
                   octokit,
@@ -633,7 +667,7 @@ export const workflow = ({
               };
               yield* persistState(RunStateStatus.Active, activeIssue);
               if (
-                workflowMode === WorkflowMode.Pr &&
+                usesPullRequests &&
                 outcome.completion === IssueCompletionKind.PushedCommit
               ) {
                 const commits = outcome.commits ?? [
@@ -662,13 +696,17 @@ export const workflow = ({
                   Effect.forEach(
                     orderedCommits,
                     (commit) => {
-                      const repository = projectRepositories.find(
+                      const repository = issueRepositories.find(
+                        ({ repository }) =>
+                          repository.toLowerCase() === commit.repository.toLowerCase(),
+                      )!;
+                      const baseRepository = projectRepositories.find(
                         ({ repository }) =>
                           repository.toLowerCase() === commit.repository.toLowerCase(),
                       )!;
                       const closesIssue =
                         commit.repository.toLowerCase() === repo.toLowerCase();
-                      return pullRequests!
+                      const delivery = pullRequests!
                         .createOrFind(octokit, commit.repository, {
                           title: `Fix #${issue.number}: ${issue.title}`,
                           body: closesIssue
@@ -678,7 +716,7 @@ export const workflow = ({
                           closesIssue,
                           ...(closesIssue ? {} : { issueRepository: repo }),
                           head: featureBranch,
-                          base: repository.branch,
+                          base: baseRepository.branch,
                         })
                         .pipe(
                           Effect.flatMap((pullRequest) =>
@@ -699,13 +737,17 @@ export const workflow = ({
                                 ),
                               ),
                           ),
-                          Effect.tap(() =>
-                            issueOperations!.restoreBaseCheckout(
-                              repository.repositoryPath,
-                              repository.branch,
-                            ),
-                          ),
                         );
+                      return workflowMode === WorkflowMode.ParallelPr
+                        ? delivery
+                        : delivery.pipe(
+                            Effect.tap(() =>
+                              issueOperations!.restoreBaseCheckout(
+                                repository.repositoryPath,
+                                baseRepository.branch,
+                              ),
+                            ),
+                          );
                     },
                     { discard: true },
                   ),
@@ -715,6 +757,12 @@ export const workflow = ({
                     details: { completion: outcome.completion },
                   },
                 );
+                if (preparedIssueWorktrees !== undefined) {
+                  yield* worktrees!.removeIssue(
+                    projectRepositories,
+                    preparedIssueWorktrees,
+                  );
+                }
               } else {
                 yield* track(
                   progress,
@@ -759,8 +807,21 @@ export const workflow = ({
                 });
               }
             } else {
+              if (
+                preparedIssueWorktrees !== undefined &&
+                !(
+                  outcome.kind === IssueExecutionOutcomeKind.Completed &&
+                  outcome.completion === IssueCompletionKind.PushedCommit
+                )
+              ) {
+                yield* worktrees!.removeIssue(
+                  projectRepositories,
+                  preparedIssueWorktrees,
+                );
+              }
               activeIssue = undefined;
               activeQueueIssue = undefined;
+              activeQueueIssues.delete(issue.number);
               restoreCancellationCheckout = undefined;
               projectCheckouts = yield* captureProjectCheckouts();
               checkout = sourceCheckout();
@@ -789,6 +850,16 @@ export const workflow = ({
             }
           }
         });
+        return workflowMode === WorkflowMode.ParallelPr
+          ? Effect.all(
+              Array.from(
+                { length: Math.max(1, effectiveIssueConcurrency) },
+                () => worker,
+              ),
+              { concurrency: "unbounded", discard: true },
+            )
+          : worker;
+      };
       if (sharedResources === undefined) {
         const openCode = yield* OpenCode;
         yield* Effect.acquireUseRelease(
@@ -816,6 +887,7 @@ export const workflow = ({
       yield* persistState(RunStateStatus.Complete);
       activeIssue = undefined;
       activeQueueIssue = undefined;
+      activeQueueIssues.clear();
       restoreCancellationCheckout = undefined;
       const summary = summarize(actualRunId, outcomes);
       if (cleanup) {
@@ -904,6 +976,7 @@ export const batchWorkflow = ({
   workspace,
   cleanup,
   startClean,
+  agentConcurrency,
 }: BatchWorkflowOptions) =>
   Effect.gen(function* () {
     const progress = yield* ProgressReporter;
@@ -1066,6 +1139,10 @@ export const batchWorkflow = ({
     yield* checkCancellation(signal);
 
     const openCode = yield* OpenCode;
+    const agentSemaphore =
+      agentConcurrency === undefined
+        ? undefined
+        : yield* Effect.makeSemaphore(agentConcurrency);
     const results = yield* Effect.acquireUseRelease(
       track(
         progress,
@@ -1075,45 +1152,52 @@ export const batchWorkflow = ({
         (server) => `OpenCode server started at ${server.url}.`,
       ),
       (server) =>
-        Effect.forEach(
-          preparedProjects,
-          ({ preparedProject, entries }) =>
-            Effect.gen(function* () {
-              const projectResults: Array<{
-                repository: string;
-                result: Either.Either<WorkflowSummary, RalphieError>;
-              }> = [];
-              for (const { options, preparedRepository } of entries) {
-                const repositoryRunId = options.runId!;
-                const result = yield* workflow({
-                  ...options,
-                  startClean: false,
-                  cleanup: false,
-                  runId: repositoryRunId,
-                  sharedResources: {
-                    octokit,
-                    openCode: server,
-                    preparedRepository,
-                    preparedProject,
-                  },
-                }).pipe(
-                  (effect) =>
-                    withProgressContext(effect, {
-                      ...(options.project === undefined
-                        ? {}
-                        : { project: options.project }),
-                      repository: options.repo,
-                      repositoryRunId,
-                    }),
-                  Effect.either,
-                );
-                projectResults.push({ repository: options.repo, result });
-                if (Either.isLeft(result)) break;
-              }
-              return projectResults;
-            }),
-          { concurrency: "unbounded" },
-        ).pipe(Effect.map((projectResults) => projectResults.flat())),
+        Effect.gen(function* () {
+          if (agentSemaphore !== undefined) {
+            yield* Effect.sync(() =>
+              registerOpenCodeAgentSemaphore(server.client, agentSemaphore),
+            );
+          }
+          return yield* Effect.forEach(
+            preparedProjects,
+            ({ preparedProject, entries }) =>
+              Effect.gen(function* () {
+                const projectResults: Array<{
+                  repository: string;
+                  result: Either.Either<WorkflowSummary, RalphieError>;
+                }> = [];
+                for (const { options, preparedRepository } of entries) {
+                  const repositoryRunId = options.runId!;
+                  const result = yield* workflow({
+                    ...options,
+                    startClean: false,
+                    cleanup: false,
+                    runId: repositoryRunId,
+                    sharedResources: {
+                      octokit,
+                      openCode: server,
+                      preparedRepository,
+                      preparedProject,
+                    },
+                  }).pipe(
+                    (effect) =>
+                      withProgressContext(effect, {
+                        ...(options.project === undefined
+                          ? {}
+                          : { project: options.project }),
+                        repository: options.repo,
+                        repositoryRunId,
+                      }),
+                    Effect.either,
+                  );
+                  projectResults.push({ repository: options.repo, result });
+                  if (Either.isLeft(result)) break;
+                }
+                return projectResults;
+              }),
+            { concurrency: "unbounded" },
+          ).pipe(Effect.map((projectResults) => projectResults.flat()));
+        }),
       closeServer,
     );
 

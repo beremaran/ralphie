@@ -10,6 +10,7 @@ import {
 } from "../progress/progress.ts";
 import { RalphieError } from "../shared/error.ts";
 import type { OpenCodeModel, OpenCodeSelection } from "./model.ts";
+import { withOpenCodeAgentPermit } from "./concurrency.ts";
 
 export type OpenCodeTaskSessionRequest = {
   readonly directory: string;
@@ -329,58 +330,61 @@ export const runOpenCodeTask = (
   client: OpencodeClient,
   request: OpenCodeTaskRequest,
 ): Effect.Effect<OpenCodeTaskResult, RalphieError> =>
-  Effect.gen(function* () {
-    const session = yield* createOpenCodeTaskSession(client, request);
+  withOpenCodeAgentPermit(
+    client,
+    Effect.gen(function* () {
+      const session = yield* createOpenCodeTaskSession(client, request);
 
-    const response = yield* Effect.tryPromise({
-      try: async () => {
-        const response = await client.session.prompt(
-          taskSessionPromptParameters(session, {
-            parts: [{ type: "text", text: request.prompt }],
-          }),
-          request.signal === undefined ? undefined : { signal: request.signal },
-        );
-
-        if (response.error !== undefined || response.data === undefined) {
-          throw new Error(
-            `OpenCode task prompt failed: ${describeApiError(response.error)}`,
+      const response = yield* Effect.tryPromise({
+        try: async () => {
+          const response = await client.session.prompt(
+            taskSessionPromptParameters(session, {
+              parts: [{ type: "text", text: request.prompt }],
+            }),
+            request.signal === undefined ? undefined : { signal: request.signal },
           );
-        }
 
-        return response.data;
-      },
-      catch: (cause) =>
-        new RalphieError({
-          message: "Failed to run an OpenCode task.",
-          cause,
-        }),
-    });
+          if (response.error !== undefined || response.data === undefined) {
+            throw new Error(
+              `OpenCode task prompt failed: ${describeApiError(response.error)}`,
+            );
+          }
 
-    if (response.info.error !== undefined) {
-      return yield* Effect.fail(
-        assistantFailure("OpenCode assistant failed", response.info.error),
-      );
-    }
+          return response.data;
+        },
+        catch: (cause) =>
+          new RalphieError({
+            message: "Failed to run an OpenCode task.",
+            cause,
+          }),
+      });
 
-    if (
-      request.repositoryInvariant !== undefined &&
-      request.verifyRepositoryInvariant !== undefined
-    ) {
-      yield* request.verifyRepositoryInvariant(
-        request.directory,
-        request.repositoryInvariant,
-      );
-    }
-    if (request.verifyAfter !== undefined) {
-      yield* request.verifyAfter();
-    }
+      if (response.info.error !== undefined) {
+        return yield* Effect.fail(
+          assistantFailure("OpenCode assistant failed", response.info.error),
+        );
+      }
 
-    return {
-      session,
-      response: response.info,
-      parts: response.parts,
-    };
-  }).pipe(Effect.tapError((error) => reportOpenCodeFailure(request, error)));
+      if (
+        request.repositoryInvariant !== undefined &&
+        request.verifyRepositoryInvariant !== undefined
+      ) {
+        yield* request.verifyRepositoryInvariant(
+          request.directory,
+          request.repositoryInvariant,
+        );
+      }
+      if (request.verifyAfter !== undefined) {
+        yield* request.verifyAfter();
+      }
+
+      return {
+        session,
+        response: response.info,
+        parts: response.parts,
+      };
+    }).pipe(Effect.tapError((error) => reportOpenCodeFailure(request, error))),
+  );
 
 export type OpenCodeTaskSessionService = {
   readonly create: (
