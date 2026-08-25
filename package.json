@@ -17,7 +17,7 @@
   },
   "dependencies": {
     "@bunli/core": "^0.9.1",
-    "@opencode-ai/sdk": "^1.18.21",
+    "@earendil-works/pi-coding-agent": "^0.84.3",
     "effect": "^3.22.1",
     "execa": "^10.0.1",
     "octokit": "^5.0.5",
