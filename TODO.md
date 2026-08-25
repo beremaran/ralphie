@@ -12,7 +12,7 @@ enough to implement, review, and commit independently.
 - [x] Define `IssueExecutionOutcome` variants for completed, decomposed,
       escalated, skipped, and failed issues.
 - [x] Define an `IssueExecutionContext` containing the issue, repository path,
-      target branch, workspace, run ID, Octokit client, OpenCode client, and
+      target branch, workspace, run ID, Octokit client, Pi client, and
       model/agent selection.
 - [x] Add an `IssueExecutor` Effect service that accepts an execution context and
       returns an `IssueExecutionOutcome`.
@@ -27,7 +27,7 @@ enough to implement, review, and commit independently.
       with explicit CLI values taking precedence.
 - [x] Run configured repositories concurrently with isolated checkouts,
       repository-attributed progress, and batch-safe workspace cleanup.
-- [x] Share process-wide preflight services and one OpenCode server across all
+- [x] Share process-wide preflight services and one embedded Pi runtime across all
       concurrent repository pipelines.
 - [x] Replace the flat multi-repository config with hierarchical domains for
       `git`, `issues`, `workspace`, `output`, and `agent`.
@@ -40,7 +40,7 @@ enough to implement, review, and commit independently.
 - [x] Carry project attribution through progress events, persisted state,
       diagnostics, and repository artifacts.
 - [x] Clone multi-repository projects beneath a shared project root and run
-      OpenCode from that eagle-eye working directory.
+      Pi from that eagle-eye working directory.
 - [x] Serialize repository issue loops within a project while running distinct
       projects concurrently.
 - [x] Checkpoint, stage, review, commit, recover, and push project-spanning
@@ -48,16 +48,16 @@ enough to implement, review, and commit independently.
 - [x] Replace the workflow's plan-only logging with calls to `IssueExecutor`.
 - [x] Add mocked executor tests proving the workflow handles every outcome.
 
-## 2. OpenCode task/session layer
+## 2. Pi task/session layer
 
-- [x] Add a shared helper for creating a fresh OpenCode session in the repository
+- [x] Add a shared helper for creating a fresh Pi session in the repository
       directory with the selected agent, model, and variant.
 - [x] Add a helper for non-structured agent tasks that returns session metadata
       and the final response.
 - [x] Reuse `requestStructuredOutput` for every decision task.
-- [x] Add typed handling for OpenCode assistant errors, aborts, output-length
+- [x] Add typed handling for Pi assistant errors, aborts, output-length
       failures, and structured-output retry exhaustion.
-- [x] Record every OpenCode session ID in the run diagnostics.
+- [x] Record every Pi session ID in the run diagnostics.
 - [x] Ensure session failures produce progress failure events with useful context.
 - [x] Define a permission/tool policy that prevents agents from committing,
       pushing, changing branches, or mutating GitHub directly.
@@ -91,7 +91,7 @@ enough to implement, review, and commit independently.
 - [x] Treat invalid or missing decisions as issue failures without mutating Git or
       GitHub.
 - [x] Add executor tests covering every complexity value from 0 through 5.
-- [x] Add a real OpenCode smoke test for complexity assessment.
+- [x] Add a real Pi smoke test for complexity assessment.
 
 ## 5. Deterministic Git issue operations
 
@@ -223,7 +223,7 @@ enough to implement, review, and commit independently.
 
 ## 12. Progress and diagnostics integration
 
-- [x] Emit progress for every real OpenCode, Git, GitHub, recovery, and queue
+- [x] Emit progress for every real Pi, Git, GitHub, recovery, and queue
       transition.
 - [x] Include issue position and review attempt counters where applicable.
 - [x] Include session IDs, commit SHAs, created issue numbers, and diagnostic
@@ -242,8 +242,8 @@ enough to implement, review, and commit independently.
 ## 13. Cancellation and process lifecycle
 
 - [x] Pass Bunli's `AbortSignal` into the workflow and executors.
-- [x] Abort active OpenCode prompts when the user presses Ctrl-C.
-- [x] Stop the OpenCode server on success, failure, cancellation, and defects.
+- [x] Abort active Pi prompts when the user presses Ctrl-C.
+- [x] Dispose active Pi sessions on success, failure, cancellation, and defects.
 - [x] Preserve or restore the active issue checkout on cancellation.
 - [x] Persist resumable state before exiting after cancellation.
 - [x] Avoid starting another issue once cancellation is requested.
@@ -274,13 +274,13 @@ enough to implement, review, and commit independently.
 - [x] Add a fully mocked review-exhaustion escalation path.
 - [x] Add a fully mocked partial-decomposition resume path.
 - [x] Add a local bare-Git-remote integration test for direct branch pushes.
-- [x] Add an opt-in real OpenCode complexity-assessment smoke test.
-- [x] Add an opt-in real OpenCode implementation/review smoke test in a disposable
+- [x] Add an opt-in real Pi complexity-assessment smoke test.
+- [x] Add an opt-in real Pi implementation/review smoke test in a disposable
       repository.
 - [x] Add an opt-in GitHub integration test against a dedicated test repository.
 - [x] Run a one-issue dry run against a live repository (`beremaran/issue-ralphing`
       issue #28 was assessed at complexity 1 and routed to implementation without
-      mutation on 2026-08-24; `beremaran/opencode-goal` had no open issues).
+      mutation on 2026-08-24; `beremaran/pi-goal` had no open issues).
 - [x] Run a disposable end-to-end issue through implementation, review, commit,
       and push.
 - [x] Run a disposable end-to-end decomposition and verify all links and closure.

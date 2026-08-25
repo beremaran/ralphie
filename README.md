@@ -1,11 +1,11 @@
 # Ralphie
 
-**Turn a GitHub issue queue into reviewed commits with OpenCode.**
+**Turn a GitHub issue queue into reviewed commits with Pi.**
 
 [![CI](https://github.com/beremaran/ralphie/actions/workflows/ci.yml/badge.svg)](https://github.com/beremaran/ralphie/actions/workflows/ci.yml)
 
 Ralphie is an opinionated, resumable CLI that reads open GitHub issues, asks
-[OpenCode](https://opencode.ai/) for schema-validated decisions, and routes each
+[Pi](https://github.com/earendil-works/pi) for schema-validated decisions, and routes each
 issue through one of two workflows:
 
 - implement, review, revise, commit, and push focused work; or
@@ -31,7 +31,7 @@ mutations, run state, recovery, and safety checks deterministic.
 - **Structured agent decisions** — complexity, reviews, decompositions, and
   commit messages are validated against explicit schemas.
 - **Fresh-context review loops** — implementation, review, and review-fix work
-  run in separate OpenCode sessions to reduce context bias.
+  run in separate Pi sessions to reduce context bias.
 - **Deterministic delivery** — Ralphie stages, inspects, commits, and pushes the
   resulting changes itself; agents do not own the delivery protocol.
 - **Crash-safe recovery** — versioned run state, issue checkpoints, artifacts,
@@ -50,7 +50,8 @@ Ralphie expects the following tools on `PATH`:
 - [Bun](https://bun.sh/)
 - [Git](https://git-scm.com/)
 - [GitHub CLI](https://cli.github.com/), authenticated with `gh auth login`
-- [OpenCode](https://opencode.ai/)
+- model credentials supported by [Pi](https://github.com/earendil-works/pi), configured through
+  environment variables or Pi's `~/.pi/agent/auth.json`
 
 Your GitHub account must be able to read the target repository and its issues.
 Non-dry runs also require permission to push to the selected branch and manage
@@ -80,7 +81,7 @@ bun run index.ts --version
 ### Preview the first issue
 
 This performs authentication and Git preflight, prepares a clean checkout,
-discovers issues, and asks OpenCode for a complexity decision. It does not edit
+discovers issues, and asks Pi for a complexity decision. It does not edit
 files, create or close issues, commit, or push.
 
 ```bash
@@ -101,8 +102,7 @@ ralphie owner/repository --max-issues 5
 ```
 
 When no branch is configured, Ralphie uses `main` when it exists and otherwise
-`master`. The default OpenCode agent is `build`, and issues
-are processed oldest-first. Without `--max-issues`, the issue budget is
+`master`. Issues are processed oldest-first. Without `--max-issues`, the issue budget is
 unlimited.
 
 The default `lgtm` workflow commits and pushes directly to the selected branch.
@@ -118,7 +118,7 @@ ralphie owner/repository --workflow pr
 
 `parallel-pr` uses the same PR lifecycle but gives every active issue isolated
 Git worktrees and runs up to `--issue-concurrency` issues per project. A
-batch-wide `--agent-concurrency` limit independently bounds complete OpenCode
+batch-wide `--agent-concurrency` limit independently bounds complete Pi
 agent tasks across every project and issue, which is useful for protecting a
 local inference server:
 
@@ -159,7 +159,7 @@ flowchart TD
 ### Implementation workflow: complexity 0–3
 
 1. Capture the exact clean branch and commit as an issue checkpoint.
-2. Ask a fresh OpenCode session to implement the issue.
+2. Ask a fresh Pi session to implement the issue.
 3. Stage every change deterministically across the project and capture the exact
    per-repository staged diffs.
 4. Ask a separate session for a schema-validated review.
@@ -188,7 +188,7 @@ sequenceDiagram
     participant R as Ralphie
     participant GH as GitHub
     participant G as Git
-    participant O as OpenCode
+    participant O as Pi
 
     R->>G: Capture clean branch checkpoint
     R->>G: Verify destination and remote base
@@ -235,7 +235,7 @@ sequenceDiagram
 
 ### Decomposition workflow: complexity 4–5
 
-1. Ask OpenCode to split the issue into the next set of independently actionable
+1. Ask Pi to split the issue into the next set of independently actionable
    tasks and declare their dependencies.
 2. Create child issues in deterministic order.
 3. Add parent, sibling, dependency, and full-lineage links.
@@ -296,7 +296,7 @@ ralphie owner/repository --dry-run --max-issues 1
 ```
 
 Dry-run mode still performs real preflight, cloning, issue discovery, and
-OpenCode complexity assessment, but it cannot invoke implementation,
+Pi complexity assessment, but it cannot invoke implementation,
 decomposition, commits, pushes, or GitHub mutations. A resumed dry run remains a
 dry run.
 
@@ -365,7 +365,7 @@ batch-wide settings.
 
 Each project is one execution boundary. Multi-repository projects clone into a
 shared root such as `<workspace>/proj-b/frontend` and
-`<workspace>/proj-b/backend`; OpenCode runs from `<workspace>/proj-b`, so an
+`<workspace>/proj-b/backend`; Pi runs from `<workspace>/proj-b`, so an
 issue from either source repository can inspect and modify both. Repository
 issue queues within that project run serially in `lgtm` and `pr`. In
 `parallel-pr`, each issue receives a project-wide set of worktrees beneath
@@ -373,11 +373,11 @@ issue queues within that project run serially in `lgtm` and `pr`. In
 bounded by `issueConcurrency`. Successful worktrees are removed after merge;
 failed or interrupted worktrees remain available for diagnosis and resume.
 Different projects run concurrently. For a project with one repository,
-OpenCode normally runs directly from that repository clone, or from its isolated
+Pi normally runs directly from that repository clone, or from its isolated
 issue worktree in `parallel-pr`.
 
 Ralphie authenticates GitHub, initializes Octokit, verifies Git, prepares every
-project checkout, and starts one shared OpenCode server exactly once. For a
+project checkout, and creates one shared embedded Pi model runtime exactly once. For a
 project-spanning change it checkpoints and stages every repository, reviews a
 combined repository-labelled diff, commits only changed repositories, verifies
 all remote destinations before pushing, and closes the source issue only after
@@ -431,7 +431,7 @@ ralphie owner/repository \
   --max-issues 10
 ```
 
-Require multiple labels and let OpenCode choose its configured model:
+Require multiple labels and let Pi choose its configured model:
 
 ```bash
 ralphie owner/repository \
@@ -439,13 +439,12 @@ ralphie owner/repository \
   --issue-label backend
 ```
 
-Select an OpenCode model, variant, and agent explicitly:
+Select a Pi model and thinking level explicitly:
 
 ```bash
 ralphie owner/repository \
   --model openai/gpt-5 \
-  --model-variant high \
-  --agent build
+  --model-variant high
 ```
 
 Write machine-readable progress to stdout:
@@ -493,15 +492,15 @@ may be omitted when `projects` is present in `--config`.
 | `--config <path>` | none | Load reusable options from a validated JSON file. |
 | `--workflow <mode>` | `lgtm` | Select `lgtm`, `pr`, or isolated concurrent `parallel-pr` delivery. |
 | `--issue-concurrency <count>` | `1` | Concurrent issues per project in `parallel-pr`. |
-| `--agent-concurrency <count>` | unlimited | Global concurrent OpenCode agent tasks across the batch. |
+| `--agent-concurrency <count>` | unlimited | Global concurrent Pi agent tasks across the batch. |
 | `-b, --branch <name>` | `main`, otherwise `master` | Base branch; `lgtm` pushes it directly, while PR workflows open against it. |
 | `--max-issues <count>` | unlimited | Positive maximum number of issues charged to this run. |
 | `--issue-label <label>` | none | Require a label; repeat the flag to require multiple labels. |
 | `--issue-sort <field>` | `created` | Sort by `created`, `updated`, or `comments`. |
 | `--issue-order <order>` | `asc` | Sort in `asc` or `desc` order. |
-| `--agent <name>` | `build` | OpenCode agent used for task sessions. |
-| `--model <provider/model>` | OpenCode default | Override OpenCode's model selection. |
-| `--model-variant <variant>` | OpenCode default | Override the selected model variant. |
+| `--agent <name>` | `build` | Compatibility label recorded with task-session diagnostics. |
+| `--model <provider/model>` | Pi default | Override Pi's model selection. |
+| `--model-variant <variant>` | Pi default | Pi thinking level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. |
 | `--workspace <path>` | `~/.ralphie` | Root directory for repository checkouts and run artifacts. |
 | `--dry-run` | off | Assess and route issues without implementation or mutations. |
 | `--resume <state.json>` | none | Continue a compatible saved run. |
@@ -545,7 +544,7 @@ Run artifacts live under:
 State is versioned, validated, and written atomically. Failed and interrupted
 runs retain their state and diagnostics for inspection and `--resume`. On
 cancellation, Ralphie restores the active issue's clean checkout when possible,
-saves resumable state, closes the OpenCode server, and exits with status 130.
+saves resumable state, closes the Pi runtime, and exits with status 130.
 Ordinary failures exit with status 1.
 
 One issue failure currently halts the run. This preserves the checkout and
@@ -595,7 +594,7 @@ flowchart LR
         W --> Q[Issue queue and executors]
         W --> S[Run state and artifacts]
         W --> P[Progress and audit events]
-        Q --> OC[OpenCode adapter]
+        Q --> OC[Pi adapter]
         Q --> GD[Git domain]
         Q --> GHD[GitHub domain]
     end
@@ -603,7 +602,7 @@ flowchart LR
     AUTH[Local gh CLI] --> GHD
     GHD <--> GH[GitHub API]
     GD <--> REPO[Workspace checkout]
-    OC <--> SERVER[Local OpenCode server]
+    OC <--> SERVER[Embedded Pi model runtime]
     S --> DISK[Versioned JSON and issue artifacts]
     P --> TERM[Terminal or JSON Lines]
 ```
@@ -616,7 +615,8 @@ effects and validate their invariants at the boundary.
 | `src/github/` | GitHub CLI authentication, Octokit, issue discovery, mutations, and decomposition links. |
 | `src/git/` | Checkout preparation, checkpoints, deterministic issue operations, invariants, and remote safety. |
 | `src/issues/` | Queueing, complexity routing, implementation, review, recovery, and decomposition. |
-| `src/opencode/` | Server lifecycle, isolated task sessions, prompts, schemas, and structured output. |
+| `src/agent/` | Ralphie's session, prompt, schema, diagnostics, and structured-output boundary. |
+| `src/pi/` | Embedded upstream Pi client, model runtime, tools, and safety policy. |
 | `src/progress/` | Typed events, audit persistence, redaction, and terminal/JSON renderers. |
 | `src/run/` | Versioned state, artifacts, reconciliation, and resume behavior. |
 | `src/workspace/` | Path expansion and protected workspace removal. |
@@ -643,15 +643,15 @@ Useful individual commands:
 | `bun run format` | Format the repository with Biome. |
 | `bun run format:check` | Verify formatting without modifying files. |
 | `bun run build` | Build the standalone executable at `dist/cli`. |
-| `bun run probe:structured-output` | Exercise a real schema-validated OpenCode decision. |
+| `bun run probe:structured-output` | Exercise a real schema-validated Pi decision. |
 
 Real network integrations are opt-in and skipped by the normal test suite:
 
 ```bash
-RALPHIE_RUN_OPENCODE_COMPLEXITY_SMOKE=1 \
+RALPHIE_RUN_PI_COMPLEXITY_SMOKE=1 \
   bun test src/integration/network-smoke.test.ts
 
-RALPHIE_RUN_OPENCODE_IMPLEMENTATION_SMOKE=1 \
+RALPHIE_RUN_PI_IMPLEMENTATION_SMOKE=1 \
   bun test src/integration/network-smoke.test.ts
 
 RALPHIE_RUN_GITHUB_INTEGRATION=1 \

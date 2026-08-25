@@ -7,7 +7,7 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Added
 
-- Bunli and Effect CLI foundation with GitHub, Git, workspace, and OpenCode
+- Bunli and Effect CLI foundation with GitHub, Git, workspace, and Pi
   domain services.
 - Resumable issue execution with complexity routing, bounded review loops,
   deterministic commits and pushes, and dependency-aware decomposition.
@@ -23,6 +23,10 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Changed
 
+- Replace the OpenCode SDK and local server with the upstream
+  `@earendil-works/pi-coding-agent` SDK, an embedded shared `ModelRuntime`,
+  isolated in-memory Pi sessions, guarded tools, and terminating structured-output
+  tools validated by Zod.
 - Rely on the authoritative non-force Git push for GitHub branch policy and
   permission enforcement while retaining destination, commit, and divergence
   safety checks.
@@ -37,11 +41,11 @@ All notable changes to Ralphie are documented here. The project follows
 ### Fixed
 
 - Run batch-wide GitHub authentication, Octokit initialization, Git
-  verification, workspace preparation, and OpenCode startup exactly once rather
+  verification, workspace preparation, and Pi startup exactly once rather
   than once per configured repository.
 - Preserve repository attribution on nested progress emitted by issue and
-  OpenCode services during concurrent runs.
-- Share batch-wide preflight and OpenCode resources across all repositories while
+  Pi services during concurrent runs.
+- Share batch-wide preflight and Pi resources across all repositories while
   retaining independent project and repository execution state.
 - Report missing files, malformed JSON, and each schema violation separately
   instead of collapsing every config failure into one generic message.
