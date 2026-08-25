@@ -31,11 +31,6 @@ export enum IssueResolutionStatus {
   Unresolved = "unresolved",
 }
 
-export const AGENT_TEXT_LIMIT = 8_000;
-export const AGENT_ISSUE_BODY_LIMIT = 12_000;
-export const AGENT_BREAKDOWN_ISSUE_LIMIT = 50;
-export const AGENT_REVIEW_FINDING_LIMIT = 100;
-
 export const complexityDecisionSchema = z.object({
   complexity: z
     .enum(ComplexityLevel)
@@ -43,7 +38,6 @@ export const complexityDecisionSchema = z.object({
   rationale: z
     .string()
     .min(1)
-    .max(AGENT_TEXT_LIMIT)
     .describe("A concise explanation of the assigned complexity."),
 });
 
@@ -52,17 +46,16 @@ export type ComplexityDecision = z.infer<typeof complexityDecisionSchema>;
 export const reviewDecisionSchema = z
   .object({
     verdict: z.enum(ReviewVerdict),
-    summary: z.string().min(1).max(AGENT_TEXT_LIMIT),
+    summary: z.string().min(1),
     findings: z
       .array(
         z.object({
           severity: z.enum(ReviewFindingSeverity),
-          description: z.string().min(1).max(AGENT_TEXT_LIMIT),
+          description: z.string().min(1),
           file: z.string().min(1).optional(),
           line: z.number().int().positive().optional(),
         }),
-      )
-      .max(AGENT_REVIEW_FINDING_LIMIT),
+      ),
   })
   .superRefine((decision, context) => {
     const hasBlockingFinding = decision.findings.some(
@@ -88,25 +81,24 @@ export type ReviewDecision = z.infer<typeof reviewDecisionSchema>;
 
 export const issueResolutionDecisionSchema = z.object({
   status: z.enum(IssueResolutionStatus),
-  summary: z.string().min(1).max(AGENT_TEXT_LIMIT),
+  summary: z.string().min(1),
   evidence: z
-    .array(z.string().min(1).max(AGENT_TEXT_LIMIT))
-    .min(1)
-    .max(AGENT_REVIEW_FINDING_LIMIT),
+    .array(z.string().min(1))
+    .min(1),
 });
 
 export type IssueResolutionDecision = z.infer<typeof issueResolutionDecisionSchema>;
 
 export const commitMessageDecisionSchema = z.object({
   subject: z.string().min(1).max(72),
-  body: z.string().min(1).max(AGENT_TEXT_LIMIT).optional(),
+  body: z.string().min(1).optional(),
 });
 
 export type CommitMessageDecision = z.infer<typeof commitMessageDecisionSchema>;
 
 export const issueBreakdownDecisionSchema = z
   .object({
-    rationale: z.string().min(1).max(AGENT_TEXT_LIMIT),
+    rationale: z.string().min(1),
     issues: z
       .array(
         z.object({
@@ -115,13 +107,12 @@ export const issueBreakdownDecisionSchema = z
             .min(1)
             .describe("A stable identifier used by dependency references."),
           title: z.string().min(1).max(256),
-          body: z.string().min(1).max(AGENT_ISSUE_BODY_LIMIT),
+          body: z.string().min(1),
           estimatedComplexity: z.enum(ImplementationComplexityLevel),
-          dependsOn: z.array(z.string().min(1)).max(AGENT_BREAKDOWN_ISSUE_LIMIT),
+          dependsOn: z.array(z.string().min(1)),
         }),
       )
-      .min(2)
-      .max(AGENT_BREAKDOWN_ISSUE_LIMIT),
+      .min(2),
   })
   .superRefine((breakdown, context) => {
     const keys = new Set(breakdown.issues.map((issue) => issue.key));
