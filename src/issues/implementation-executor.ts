@@ -232,7 +232,7 @@ export const ImplementationExecutorLive = Layer.effect(
             progress,
             input,
             ProgressStage.RemoteSafety,
-            "Verifying direct-push safety...",
+            "Checking repository push safety...",
             remoteSafety
               .verifyDirectPush({
                 repository: context.repository,
@@ -242,7 +242,7 @@ export const ImplementationExecutorLive = Layer.effect(
                 pushMode: GitPushMode.NonForce,
               })
               .pipe(Effect.mapError(asRalphieError)),
-            "Direct-push safety verified.",
+            "Repository push safety checks passed.",
           );
 
           yield* stage(
