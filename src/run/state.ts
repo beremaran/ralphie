@@ -5,9 +5,9 @@ import { z } from "zod";
 
 import { IssueCompletionKind, IssueExecutionOutcomeKind } from "../issues/execution.ts";
 import { RalphieError } from "../shared/error.ts";
-import { WorkflowMode } from "../config/config.ts";
+import { WorkflowMode } from "../options.ts";
 
-export const RUN_STATE_VERSION = 1 as const;
+export const RUN_STATE_VERSION = 2 as const;
 
 export enum RunStateStatus {
   Active = "active",
@@ -27,10 +27,6 @@ const currentOutcomeSchema = z.union([
     kind: z.literal(IssueExecutionOutcomeKind.Completed),
     completion: z.literal(IssueCompletionKind.PushedCommit),
     commitSha: z.string().min(1),
-    commits: z
-      .array(z.object({ repository: z.string().min(1), sha: z.string().min(1) }))
-      .min(1)
-      .optional(),
     reviewCount: z.number().int().positive().optional(),
   }),
   z.object({
@@ -77,7 +73,6 @@ export const runStateSchema = z.object({
   version: z.literal(RUN_STATE_VERSION),
   status: z.enum(RunStateStatus),
   runId: z.string().min(1),
-  project: z.string().min(1).optional(),
   repository: z.string().min(1),
   branch: z.string().min(1),
   workflow: z.enum(WorkflowMode).optional(),
@@ -103,16 +98,6 @@ export const runStateSchema = z.object({
     .object({ issueNumber: z.number().int().positive(), stage: z.string().min(1) })
     .optional(),
   checkout: z.object({ branch: z.string().min(1), head: z.string().min(1) }).optional(),
-  projectCheckouts: z
-    .array(
-      z.object({
-        repository: z.string().min(1),
-        branch: z.string().min(1),
-        head: z.string().min(1),
-      }),
-    )
-    .min(1)
-    .optional(),
   updatedAt: z.string().datetime(),
 });
 

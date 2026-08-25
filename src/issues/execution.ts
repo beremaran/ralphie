@@ -5,7 +5,6 @@ import type { GitHubIssue } from "../github/issues.ts";
 import type { PiSelection } from "../agent/model.ts";
 import type { PiSessionDiagnostics } from "../agent/task-session.ts";
 import type { GitRepositoryInvariantService } from "../git/repository-invariant.ts";
-import type { ProjectRepositoryCheckout } from "../project/project.ts";
 
 /**
  * The terminal state reported by an issue executor.
@@ -32,11 +31,6 @@ export type IssueExecutionOutcome =
       readonly completion: IssueCompletionKind.PushedCommit;
       /** The commit created for the issue's implementation. */
       readonly commitSha: string;
-      /** Every repository commit created for a project-spanning issue. */
-      readonly commits?: ReadonlyArray<{
-        readonly repository: string;
-        readonly sha: string;
-      }>;
       /** Number of structured review decisions required to converge. */
       readonly reviewCount?: number;
     }
@@ -78,14 +72,9 @@ export type IssueExecutionOutcome =
  */
 export type IssueExecutionContext = {
   readonly issue: GitHubIssue;
-  readonly project?: string;
   /** GitHub owner/repository slug supplied to the run. */
   readonly repository: string;
   readonly repositoryPath: string;
-  /** Pi working directory. This is the project root for multi-repo projects. */
-  readonly workingDirectory?: string;
-  /** Every repository the issue agent may inspect and modify. */
-  readonly projectRepositories?: ReadonlyArray<ProjectRepositoryCheckout>;
   readonly targetBranch: string;
   readonly workspace: string;
   readonly runId: string;

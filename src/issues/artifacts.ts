@@ -27,24 +27,12 @@ export enum IssueArtifactKind {
   ReviewAttempts = "review-attempts",
   CommitMessageDecision = "commit-message-decision",
   CreatedCommit = "created-commit",
-  ProjectCheckpoints = "project-checkpoints",
-  CreatedCommits = "created-commits",
   IssueResolutionDecision = "issue-resolution-decision",
   IssueBreakdownDecision = "issue-breakdown-decision",
   CreatedIssueNumbers = "created-issue-numbers",
 }
 
 export type CreatedIssueNumberMapping = Readonly<Record<string, number>>;
-export type ProjectCheckpoint = {
-  readonly repository: string;
-  readonly repositoryPath: string;
-  readonly branch: string;
-  readonly sha: string;
-};
-export type CreatedCommitMapping = Readonly<
-  Record<string, { readonly sha: string; readonly treeSha: string }>
->;
-
 export type IssueArtifactValues = {
   readonly [IssueArtifactKind.ComplexityDecision]: ComplexityDecision;
   readonly [IssueArtifactKind.IssueCheckpoint]: IssueCheckpoint;
@@ -54,8 +42,6 @@ export type IssueArtifactValues = {
     readonly sha: string;
     readonly treeSha: string;
   };
-  readonly [IssueArtifactKind.ProjectCheckpoints]: ReadonlyArray<ProjectCheckpoint>;
-  readonly [IssueArtifactKind.CreatedCommits]: CreatedCommitMapping;
   readonly [IssueArtifactKind.IssueResolutionDecision]: IssueResolutionDecision;
   readonly [IssueArtifactKind.IssueBreakdownDecision]: IssueBreakdownDecision;
   readonly [IssueArtifactKind.CreatedIssueNumbers]: CreatedIssueNumberMapping;
@@ -76,10 +62,6 @@ export type IssueArtifactStore = {
     key: string,
     issueNumber: number,
   ) => Effect.Effect<void, RalphieError>;
-  readonly recordCreatedCommit: (
-    repository: string,
-    commit: { readonly sha: string; readonly treeSha: string },
-  ) => Effect.Effect<void, RalphieError>;
   /** Drop artifacts from an interrupted implementation attempt after checkout restore. */
   readonly resetImplementationAttempt: () => Effect.Effect<void, RalphieError>;
 };
@@ -87,7 +69,6 @@ export type IssueArtifactStore = {
 export type IssueArtifactScope = {
   readonly workspace: string;
   readonly runId: string;
-  readonly project?: string;
   readonly repository?: string;
 };
 
@@ -127,10 +108,6 @@ const issueCheckpointSchema = z.object({
   branch: z.string().min(1),
   sha: z.string().min(1),
 });
-const projectCheckpointSchema = issueCheckpointSchema.extend({
-  repository: z.string().min(1),
-  repositoryPath: z.string().min(1),
-});
 const createdCommitSchema = z.object({
   sha: z.string().min(1),
   treeSha: z.string().min(1),
@@ -145,16 +122,7 @@ const persistedArtifactsSchema = z
       .max(REVIEW_ITERATION_LIMIT)
       .optional(),
     [IssueArtifactKind.CommitMessageDecision]: commitMessageDecisionSchema.optional(),
-    [IssueArtifactKind.CreatedCommit]: z
-      .object({ sha: z.string().min(1), treeSha: z.string().min(1) })
-      .optional(),
-    [IssueArtifactKind.ProjectCheckpoints]: z
-      .array(projectCheckpointSchema)
-      .min(1)
-      .optional(),
-    [IssueArtifactKind.CreatedCommits]: z
-      .record(z.string(), createdCommitSchema)
-      .optional(),
+    [IssueArtifactKind.CreatedCommit]: createdCommitSchema.optional(),
     [IssueArtifactKind.IssueResolutionDecision]:
       issueResolutionDecisionSchema.optional(),
     [IssueArtifactKind.IssueBreakdownDecision]: issueBreakdownDecisionSchema.optional(),
@@ -166,9 +134,8 @@ const persistedArtifactsSchema = z
 
 const persistedArtifactStateSchema = z
   .object({
-    version: z.literal(1),
+    version: z.literal(2),
     issueNumber: z.number().int().positive(),
-    project: z.string().min(1).optional(),
     repository: z.string().min(1).optional(),
     artifacts: persistedArtifactsSchema,
   })
@@ -204,9 +171,8 @@ const toPersistedState = (
     if (value !== undefined) artifacts[kind] = value;
   }
   return persistedArtifactStateSchema.parse({
-    version: 1,
+    version: 2,
     issueNumber,
-    ...(scope?.project === undefined ? {} : { project: scope.project }),
     ...(scope?.repository === undefined ? {} : { repository: scope.repository }),
     artifacts,
   });
@@ -256,15 +222,6 @@ const loadPersistedState = (
       if (parsed.issueNumber !== issueNumber) {
         throw new RalphieError({
           message: `Persisted artifacts at ${filePath} belong to issue ${parsed.issueNumber}, not issue ${issueNumber}.`,
-        });
-      }
-      if (
-        parsed.project !== undefined &&
-        scope?.project !== undefined &&
-        parsed.project !== scope.project
-      ) {
-        throw new RalphieError({
-          message: `Persisted artifacts at ${filePath} belong to project ${parsed.project}, not ${scope.project}.`,
         });
       }
       if (
@@ -381,32 +338,11 @@ const makeStore = (
       });
       return save(nextValues);
     },
-    recordCreatedCommit: (repository, commit) => {
-      if (repository.trim().length === 0) {
-        return failure(
-          `Created commit mapping for issue ${issueNumber} requires a repository.`,
-        );
-      }
-      const existing = (values.get(IssueArtifactKind.CreatedCommits) ??
-        {}) as CreatedCommitMapping;
-      if (existing[repository] !== undefined) {
-        return failure(
-          `Created commit mapping already contains ${repository} for issue ${issueNumber}.`,
-        );
-      }
-      const nextValues = new Map(values);
-      nextValues.set(IssueArtifactKind.CreatedCommits, {
-        ...existing,
-        [repository]: commit,
-      });
-      return save(nextValues);
-    },
     resetImplementationAttempt: () => {
       const nextValues = new Map(values);
       nextValues.delete(IssueArtifactKind.ReviewAttempts);
       nextValues.delete(IssueArtifactKind.CommitMessageDecision);
       nextValues.delete(IssueArtifactKind.CreatedCommit);
-      nextValues.delete(IssueArtifactKind.CreatedCommits);
       nextValues.delete(IssueArtifactKind.IssueResolutionDecision);
       return save(nextValues);
     },

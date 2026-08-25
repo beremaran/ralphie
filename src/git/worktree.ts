@@ -2,14 +2,18 @@ import { Context, Effect, Layer } from "effect";
 import { mkdir } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 
-import type { ProjectRepositoryCheckout } from "../project/project.ts";
 import { CommandRunner, type CommandRunnerService } from "../process/command-runner.ts";
 import { RalphieError } from "../shared/error.ts";
 import { resolveWorkspacePath } from "../workspace/workspace.ts";
 
-export type PreparedIssueWorktrees = {
+export type RepositoryCheckout = {
+  readonly repository: string;
+  readonly repositoryPath: string;
+  readonly branch: string;
+};
+
+export type PreparedIssueWorktree = RepositoryCheckout & {
   readonly path: string;
-  readonly repositories: ReadonlyArray<ProjectRepositoryCheckout>;
 };
 
 export type GitWorktreeService = {
@@ -18,12 +22,12 @@ export type GitWorktreeService = {
     readonly runId: string;
     readonly issueNumber: number;
     readonly branch: string;
-    readonly repositories: ReadonlyArray<ProjectRepositoryCheckout>;
-    readonly baseShas: Readonly<Record<string, string>>;
-  }) => Effect.Effect<PreparedIssueWorktrees, RalphieError>;
+    readonly repository: RepositoryCheckout;
+    readonly baseSha: string;
+  }) => Effect.Effect<PreparedIssueWorktree, RalphieError>;
   readonly removeIssue: (
-    sourceRepositories: ReadonlyArray<ProjectRepositoryCheckout>,
-    prepared: PreparedIssueWorktrees,
+    source: RepositoryCheckout,
+    prepared: PreparedIssueWorktree,
   ) => Effect.Effect<void, RalphieError>;
 };
 
@@ -60,98 +64,62 @@ export const GitWorktreesLive = Layer.effect(
             input.runId,
             `issue-${input.issueNumber}`,
           );
+          const path = join(root, basename(input.repository.repositoryPath));
           yield* Effect.tryPromise({
-            try: () => mkdir(root, { recursive: true }),
+            try: () => mkdir(dirname(path), { recursive: true }),
             catch: (cause) =>
-              new RalphieError({ message: `Failed to prepare ${root}.`, cause }),
+              new RalphieError({ message: `Failed to prepare ${path}.`, cause }),
           });
-          const repositories = yield* Effect.forEach(
-            input.repositories,
-            (repository) =>
-              Effect.gen(function* () {
-                const path = join(root, basename(repository.repositoryPath));
-                const baseSha = input.baseShas[repository.repository];
-                if (baseSha === undefined) {
-                  return yield* new RalphieError({
-                    message: `Missing worktree base for ${repository.repository}.`,
-                  });
-                }
-                const existing = yield* runner.run("git", [
-                  "-C",
-                  path,
-                  "rev-parse",
-                  "--is-inside-work-tree",
-                ]);
-                if (existing.exitCode !== 0) {
-                  yield* Effect.tryPromise({
-                    try: () => mkdir(dirname(path), { recursive: true }),
-                    catch: (cause) =>
-                      new RalphieError({
-                        message: `Failed to prepare ${path}.`,
-                        cause,
-                      }),
-                  });
-                  const branchExists = yield* runner.run("git", [
-                    "-C",
-                    repository.repositoryPath,
-                    "show-ref",
-                    "--verify",
-                    "--quiet",
-                    `refs/heads/${input.branch}`,
-                  ]);
-                  yield* runGit(
-                    runner,
-                    repository.repositoryPath,
-                    branchExists.exitCode === 0
-                      ? ["worktree", "add", path, input.branch]
-                      : ["worktree", "add", "-b", input.branch, path, baseSha],
-                    `Failed to create issue worktree for ${repository.repository}`,
-                  );
-                }
-                const branch = yield* runGit(
-                  runner,
-                  path,
-                  ["rev-parse", "--abbrev-ref", "HEAD"],
-                  `Failed to verify issue worktree for ${repository.repository}`,
-                );
-                if (branch !== input.branch) {
-                  return yield* new RalphieError({
-                    message: `Issue worktree for ${repository.repository} is on ${branch}, expected ${input.branch}.`,
-                  });
-                }
-                return {
-                  repository: repository.repository,
-                  repositoryPath: path,
-                  branch,
-                };
-              }),
-            { concurrency: "unbounded" },
-          );
-          return { path: root, repositories };
-        }),
-      removeIssue: (sources, prepared) =>
-        Effect.forEach(
-          prepared.repositories,
-          (worktree) => {
-            const source = sources.find(
-              ({ repository }) =>
-                repository.toLowerCase() === worktree.repository.toLowerCase(),
+
+          const existing = yield* runner.run("git", [
+            "-C",
+            path,
+            "rev-parse",
+            "--is-inside-work-tree",
+          ]);
+          if (existing.exitCode !== 0) {
+            const branchExists = yield* runner.run("git", [
+              "-C",
+              input.repository.repositoryPath,
+              "show-ref",
+              "--verify",
+              "--quiet",
+              `refs/heads/${input.branch}`,
+            ]);
+            yield* runGit(
+              runner,
+              input.repository.repositoryPath,
+              branchExists.exitCode === 0
+                ? ["worktree", "add", path, input.branch]
+                : ["worktree", "add", "-b", input.branch, path, input.baseSha],
+              `Failed to create issue worktree for ${input.repository.repository}`,
             );
-            return source === undefined
-              ? Effect.fail(
-                  new RalphieError({
-                    message: `Missing source checkout for ${worktree.repository}.`,
-                  }),
-                )
-              : runGit(
-                  runner,
-                  source.repositoryPath,
-                  ["worktree", "remove", worktree.repositoryPath],
-                  `Failed to remove issue worktree for ${worktree.repository}`,
-                ).pipe(Effect.asVoid);
-          },
-          { discard: true },
-        ),
+          }
+          const branch = yield* runGit(
+            runner,
+            path,
+            ["rev-parse", "--abbrev-ref", "HEAD"],
+            `Failed to verify issue worktree for ${input.repository.repository}`,
+          );
+          if (branch !== input.branch) {
+            return yield* new RalphieError({
+              message: `Issue worktree for ${input.repository.repository} is on ${branch}, expected ${input.branch}.`,
+            });
+          }
+          return {
+            path: root,
+            repository: input.repository.repository,
+            repositoryPath: path,
+            branch,
+          };
+        }),
+      removeIssue: (source, prepared) =>
+        runGit(
+          runner,
+          source.repositoryPath,
+          ["worktree", "remove", prepared.repositoryPath],
+          `Failed to remove issue worktree for ${prepared.repository}`,
+        ).pipe(Effect.asVoid),
     } satisfies GitWorktreeService;
   }),
 );

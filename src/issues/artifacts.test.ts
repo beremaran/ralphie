@@ -83,23 +83,6 @@ describe("per-issue artifact store", () => {
         treeSha: "tree-sha",
       }),
     );
-    const projectCheckpoints = [
-      {
-        repository: "owner/frontend",
-        repositoryPath: "/workspace/project/frontend",
-        branch: "main",
-        sha: checkpoint.sha,
-      },
-    ];
-    await Effect.runPromise(
-      store.write(IssueArtifactKind.ProjectCheckpoints, projectCheckpoints),
-    );
-    await Effect.runPromise(
-      store.recordCreatedCommit("owner/frontend", {
-        sha: "project-commit",
-        treeSha: "project-tree",
-      }),
-    );
     await Effect.runPromise(
       store.write(IssueArtifactKind.IssueBreakdownDecision, breakdown),
     );
@@ -121,14 +104,6 @@ describe("per-issue artifact store", () => {
     expect(
       await Effect.runPromise(store.read(IssueArtifactKind.CreatedCommit)),
     ).toEqual({ sha: "commit-sha", treeSha: "tree-sha" });
-    expect(
-      await Effect.runPromise(store.read(IssueArtifactKind.ProjectCheckpoints)),
-    ).toEqual(projectCheckpoints);
-    expect(
-      await Effect.runPromise(store.read(IssueArtifactKind.CreatedCommits)),
-    ).toEqual({
-      "owner/frontend": { sha: "project-commit", treeSha: "project-tree" },
-    });
     expect(
       await Effect.runPromise(store.read(IssueArtifactKind.IssueBreakdownDecision)),
     ).toEqual(breakdown);
@@ -220,7 +195,6 @@ describe("per-issue artifact store", () => {
       const scope = {
         workspace,
         runId: "run/restart",
-        project: "project-a",
         repository: "owner/repo",
       };
       const first = await Effect.runPromise(makeDurableIssueArtifactStore(42, scope));
@@ -243,10 +217,7 @@ describe("per-issue artifact store", () => {
           "artifacts.json",
         ),
       ).json();
-      expect(persisted).toMatchObject({
-        project: "project-a",
-        repository: "owner/repo",
-      });
+      expect(persisted).toMatchObject({ repository: "owner/repo" });
 
       const reloaded = await Effect.runPromise(
         makeDurableIssueArtifactStore(42, scope),
@@ -311,7 +282,7 @@ describe("per-issue artifact store", () => {
       await mkdir(join(path, ".."), { recursive: true });
       await Bun.write(
         path,
-        JSON.stringify({ version: 2, issueNumber: 42, artifacts: {} }),
+        JSON.stringify({ version: 1, issueNumber: 42, artifacts: {} }),
       );
       const versionExit = await Effect.runPromiseExit(
         makeDurableIssueArtifactStore(42, { workspace, runId: "run-1" }),
@@ -320,7 +291,7 @@ describe("per-issue artifact store", () => {
 
       await writeFile(
         path,
-        JSON.stringify({ version: 1, issueNumber: 99, artifacts: {} }),
+        JSON.stringify({ version: 2, issueNumber: 99, artifacts: {} }),
       );
       const identityExit = await Effect.runPromiseExit(
         makeDurableIssueArtifactStore(42, { workspace, runId: "run-1" }),

@@ -112,7 +112,6 @@ describe("review exhaustion recovery", () => {
         const recovery = yield* IssueRecovery;
         return yield* recovery.handleReviewExhaustion({
           runId: "run/unsafe",
-          project: "project-a",
           repository: "owner/repo",
           workspace,
           repositoryPath: `${workspace}/repo`,
@@ -139,7 +138,6 @@ describe("review exhaustion recovery", () => {
         await readFile(join(result.diagnosticsPath, "metadata.json"), "utf8"),
       );
       expect(metadata.issue.number).toBe(42);
-      expect(metadata.project).toBe("project-a");
       expect(metadata.repository).toBe("owner/repo");
       expect(metadata.reviews).toEqual(reviews);
       expect(progressEvents.map(({ stage, status }) => ({ stage, status }))).toEqual([
@@ -216,73 +214,5 @@ describe("review exhaustion recovery", () => {
 
     expect(Exit.isFailure(exit)).toBe(true);
     expect(calls).toEqual(["createPatch"]);
-  });
-
-  test("preserves and restores every repository after project review exhaustion", async () => {
-    const workspace = await mkdtemp(join(tmpdir(), "ralphie-project-recovery-"));
-    const calls: string[] = [];
-    const progressEvents: ProgressUpdate[] = [];
-    const checkpoints = [
-      {
-        repository: "owner/frontend",
-        repositoryPath: `${workspace}/project/frontend`,
-        ...checkpoint,
-      },
-      {
-        repository: "owner/backend",
-        repositoryPath: `${workspace}/project/backend`,
-        branch: "develop",
-        sha: "89abcdef0123456789abcdef0123456789abcdef",
-      },
-    ];
-    const layer = IssueRecoveryLive.pipe(
-      Layer.provide(
-        Layer.merge(
-          Layer.succeed(GitIssueCheckpoint, {
-            capture: () => Effect.succeed(checkpoint),
-            createPatch: (path) =>
-              Effect.sync(() => {
-                calls.push(`patch:${path}`);
-                return `diff for ${path}\n`;
-              }),
-            restore: (path, restored) =>
-              Effect.sync(() => {
-                calls.push(`restore:${path}:${restored.sha}`);
-              }),
-          }),
-          makeProgressRecorderLayer(progressEvents),
-        ),
-      ),
-    );
-
-    try {
-      const result = await Effect.gen(function* () {
-        const recovery = yield* IssueRecovery;
-        return yield* recovery.handleProjectReviewExhaustion!({
-          runId: "project-run",
-          project: "project",
-          repository: "owner/frontend",
-          workspace,
-          issue,
-          checkpoints,
-          reviews,
-        });
-      }).pipe(Effect.provide(layer), Effect.runPromise);
-
-      expect(calls).toEqual([
-        `patch:${workspace}/project/frontend`,
-        `patch:${workspace}/project/backend`,
-        `restore:${workspace}/project/frontend:${checkpoint.sha}`,
-        `restore:${workspace}/project/backend:${checkpoints[1]!.sha}`,
-      ]);
-      expect(
-        await readFile(join(result.diagnosticsPath, "owner_frontend.patch"), "utf8"),
-      ).toContain("frontend");
-      expect(
-        await readFile(join(result.diagnosticsPath, "owner_backend.patch"), "utf8"),
-      ).toContain("backend");
-    } finally {
-      await rm(workspace, { recursive: true, force: true });
-    }
   });
 });

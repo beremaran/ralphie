@@ -23,28 +23,8 @@ enough to implement, review, and commit independently.
       commit messages, breakdowns, and created issue numbers.
 - [x] Reject reads of artifacts that have not been produced yet.
 - [x] Assemble executor services in the live runtime.
-- [x] Load repeatable CLI settings from an optional validated JSON config file,
-      with explicit CLI values taking precedence.
-- [x] Run configured repositories concurrently with isolated checkouts,
-      repository-attributed progress, and batch-safe workspace cleanup.
-- [x] Share process-wide preflight services and one embedded Pi runtime across all
-      concurrent repository pipelines.
-- [x] Replace the flat multi-repository config with hierarchical domains for
-      `git`, `issues`, `workspace`, `output`, and `agent`.
-- [x] Add named `projects`, requiring exactly one of `repoPattern` or
-      `repositories` per project.
-- [x] Expand `owner/repository-glob` patterns deterministically and reject empty
-      matches, duplicate project names, and duplicate repositories.
-- [x] Apply configuration precedence as built-ins, top-level, project,
-      repository, then CLI overrides, including explicit boolean `false`.
-- [x] Carry project attribution through progress events, persisted state,
-      diagnostics, and repository artifacts.
-- [x] Clone multi-repository projects beneath a shared project root and run
-      Pi from that eagle-eye working directory.
-- [x] Serialize repository issue loops within a project while running distinct
-      projects concurrently.
-- [x] Checkpoint, stage, review, commit, recover, and push project-spanning
-      changes across every affected repository.
+- [x] Accept one required repository and all run settings through CLI arguments
+      and flags, without configuration-file discovery or precedence.
 - [x] Replace the workflow's plan-only logging with calls to `IssueExecutor`.
 - [x] Add mocked executor tests proving the workflow handles every outcome.
 

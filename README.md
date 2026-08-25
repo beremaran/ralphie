@@ -108,19 +108,17 @@ unlimited.
 The default `lgtm` workflow commits and pushes directly to the selected branch.
 The `pr` workflow creates a branch, pushes it, and opens a pull request for
 review. The pull request body links the source issue with `Closes #<issue>` so
-GitHub closes the issue automatically when the pull request is merged. Set the
-workflow at the top level, per project, per repository, or on the command line;
-the most specific setting wins, with CLI options taking precedence:
+GitHub closes the issue automatically when the pull request is merged. Select
+the workflow on the command line:
 
 ```bash
 ralphie owner/repository --workflow pr
 ```
 
-`parallel-pr` uses the same PR lifecycle but gives every active issue isolated
-Git worktrees and runs up to `--issue-concurrency` issues per project. A
-batch-wide `--agent-concurrency` limit independently bounds complete Pi
-agent tasks across every project and issue, which is useful for protecting a
-local inference server:
+`parallel-pr` uses the same PR lifecycle but gives every active issue an isolated
+Git worktree and runs up to `--issue-concurrency` issues concurrently. An
+`--agent-concurrency` limit independently bounds complete Pi agent tasks, which
+is useful for protecting a local inference server:
 
 ```bash
 ralphie owner/repository --workflow parallel-pr \
@@ -160,15 +158,14 @@ flowchart TD
 
 1. Capture the exact clean branch and commit as an issue checkpoint.
 2. Ask a fresh Pi session to implement the issue.
-3. Stage every change deterministically across the project and capture the exact
-   per-repository staged diffs.
+3. Stage every change deterministically and capture the exact staged diff.
 4. Ask a separate session for a schema-validated review.
 5. If changes are requested, give the review to a fresh fix session and repeat
    staging and review.
 6. Stop after approval or five review attempts.
-7. Generate a validated commit message and commit each changed repository.
-8. In `lgtm` mode, recheck every remote and push each commit without force, then
-   close the source issue after every push is verified. In `pr` mode, create a
+7. Generate a validated commit message and commit the changes.
+8. In `lgtm` mode, recheck the remote and push the commit without force, then
+   close the source issue after the push is verified. In `pr` mode, create a
    feature branch, push it, and open a pull request linked with `Closes #<issue>`;
    review results are published on the pull request and the issue closes when
    GitHub merges it.
@@ -302,123 +299,20 @@ dry run.
 
 ## Common recipes
 
-### Reusable JSON configuration
+### Configure a run with CLI flags
 
-Put repeatable options in a JSON file and pass it explicitly:
-
-```bash
-ralphie --config ./ralphie.json
-```
-
-```json
-{
-  "workflow": "parallel-pr",
-  "issueConcurrency": 4,
-  "agentConcurrency": 2,
-  "git": { "branch": "main" },
-  "issues": {
-    "limit": 10,
-    "sort": { "by": "created", "order": "asc" },
-    "filter": { "labels": ["bug"] }
-  },
-  "workspace": {
-    "path": "~/.ralphie",
-    "cleanup": { "before": true, "after": true }
-  },
-  "output": { "verbose": false, "quiet": false, "json": false },
-  "agent": {
-    "model": { "id": "openai/gpt-5", "variant": "medium" },
-    "mode": "build"
-  },
-  "projects": [
-    {
-      "name": "frontend",
-      "repositories": [
-        {
-          "repo": "owner/frontend",
-          "issues": { "filter": { "labels": ["frontend"] } }
-        }
-      ]
-    },
-    {
-      "name": "backend",
-      "repoPattern": "owner/backend-*",
-      "git": { "branch": "develop" },
-      "issues": { "limit": 5, "filter": { "labels": ["backend"] } }
-    }
-  ]
-}
-```
-
-Projects are named groups of repositories. Each project must specify exactly one
-of `repoPattern` or `repositories`: use a pattern to discover repositories, or
-use an explicit list when the set is known. Patterns use
-`owner/repository-glob` syntax with `*` and `?` in the repository name. Matches
-include accessible public and private repositories, exclude archived
-repositories, and are expanded in deterministic order. A pattern that matches no
-repositories, duplicate project names, or duplicate repositories across projects
-is rejected before repository work begins. Explicit repository entries use the
-same nested domains as the rest of the file, so
-branch, issue, agent, and dry-run settings can be overridden without switching
-back to a second flat schema. Workspace lifecycle and output mode remain
-batch-wide settings.
-
-Each project is one execution boundary. Multi-repository projects clone into a
-shared root such as `<workspace>/proj-b/frontend` and
-`<workspace>/proj-b/backend`; Pi runs from `<workspace>/proj-b`, so an
-issue from either source repository can inspect and modify both. Repository
-issue queues within that project run serially in `lgtm` and `pr`. In
-`parallel-pr`, each issue receives a project-wide set of worktrees beneath
-`<workspace>/.ralphie/worktrees/<run-id>/issue-<number>` and issue workers are
-bounded by `issueConcurrency`. Successful worktrees are removed after merge;
-failed or interrupted worktrees remain available for diagnosis and resume.
-Different projects run concurrently. For a project with one repository,
-Pi normally runs directly from that repository clone, or from its isolated
-issue worktree in `parallel-pr`.
-
-Ralphie authenticates GitHub, initializes Octokit, verifies Git, prepares every
-project checkout, and creates one shared embedded Pi model runtime exactly once. For a
-project-spanning change it checkpoints and stages every repository, reviews a
-combined repository-labelled diff, commits only changed repositories, verifies
-all remote destinations before pushing, and closes the source issue only after
-every push succeeds. The configuration precedence is:
-
-```text
-built-in defaults < top-level config < project config < repository config < CLI options
-```
-
-`workflow` accepts `lgtm` (the default, direct commit and push), `pr` (serial
-branch and pull request delivery), or `parallel-pr` (isolated concurrent PR
-delivery). `issueConcurrency` is hierarchical like the workflow and defaults to
-1. `agentConcurrency` is batch-wide, defaults to unlimited, and can only be configured
-at the top level or on the command line.
-
-Workspace preparation and cleanup are batch-wide: start cleanup runs once, and
-the workspace is removed only after every project run succeeds. Human-readable progress is
-attributed to both project and repository; JSON events and persisted run state
-carry the project name alongside `repository` and `repositoryRunId`.
-
-Resume paths belong to individual runs, so a multi-repository file places
-`resume` on the corresponding repository entry. The global `--resume` flag is
-accepted only when exactly one explicit repository is configured.
-
-The file is optional and has no implicit discovery location. Unknown keys,
-invalid enum values, malformed model identifiers, and incompatible output modes
-are rejected before preflight begins with property-level diagnostics. Optional
-settings may be omitted or set to `null` to use their normal default—for
-example, `"issues": { "limit": null }` means unlimited and a `null`
-`issues.filter.labels` means no label filter. Explicit command-line values
-override the file, and omitted values fall back to Ralphie's normal defaults:
+Ralphie has no configuration file. The repository is required and every setting
+is supplied explicitly as an option:
 
 ```bash
-ralphie --config ./ralphie.json --branch main --max-issues 2
+ralphie owner/repository \
+  --workflow parallel-pr \
+  --issue-concurrency 4 \
+  --agent-concurrency 2 \
+  --branch main \
+  --issue-label bug \
+  --max-issues 10
 ```
-
-For a single repository, the positional `owner/name` form remains supported and
-is treated as one implicit project. It cannot be combined with `projects`.
-Boolean values can be explicitly disabled when overriding a file, for example
-`--cleanup=false`. See [ralphie.example.json](./ralphie.example.json) for a
-complete multi-project template.
 
 Process bugs from oldest to newest on a non-default branch:
 
@@ -481,18 +375,17 @@ already have reached the remote before continuing.
 ## CLI reference
 
 ```text
-ralphie [repository] [options]
+ralphie <repository> [options]
 ```
 
-`[repository]` accepts an `owner/name` slug or a GitHub HTTPS/SSH clone URL. It
-may be omitted when `projects` is present in `--config`.
+`<repository>` is required and accepts an `owner/name` slug or a GitHub
+HTTPS/SSH clone URL.
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `--config <path>` | none | Load reusable options from a validated JSON file. |
 | `--workflow <mode>` | `lgtm` | Select `lgtm`, `pr`, or isolated concurrent `parallel-pr` delivery. |
-| `--issue-concurrency <count>` | `1` | Concurrent issues per project in `parallel-pr`. |
-| `--agent-concurrency <count>` | unlimited | Global concurrent Pi agent tasks across the batch. |
+| `--issue-concurrency <count>` | `1` | Concurrent issues in `parallel-pr`. |
+| `--agent-concurrency <count>` | unlimited | Maximum concurrent Pi agent tasks. |
 | `-b, --branch <name>` | `main`, otherwise `master` | Base branch; `lgtm` pushes it directly, while PR workflows open against it. |
 | `--max-issues <count>` | unlimited | Positive maximum number of issues charged to this run. |
 | `--issue-label <label>` | none | Require a label; repeat the flag to require multiple labels. |
@@ -518,8 +411,6 @@ Ralphie adapts its progress renderer to its environment:
 
 - interactive terminals receive one in-place status line for the active leaf
   stage, while completed milestones remain in the scrollback;
-- multi-repository runs use repository-prefixed append-only lines so concurrent
-  progress cannot corrupt one shared interactive status line;
 - CI and redirected output receive durable, append-only lines;
 - `--verbose` adds operational details;
 - `--json` writes one JSON object per line to stdout; and

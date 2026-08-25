@@ -29,10 +29,8 @@ test("prepares, resumes, and removes an isolated issue worktree", async () => {
       runId: "run-1",
       issueNumber: 42,
       branch: "ralphie/issue-42",
-      repositories: [
-        { repository: "owner/repository", repositoryPath, branch: "main" },
-      ],
-      baseShas: { "owner/repository": baseSha },
+      repository: { repository: "owner/repository", repositoryPath, branch: "main" },
+      baseSha,
     } as const;
 
     const prepared = await Effect.gen(function* () {
@@ -40,7 +38,7 @@ test("prepares, resumes, and removes an isolated issue worktree", async () => {
       const first = yield* worktrees.prepareIssue(input);
       const resumed = yield* worktrees.prepareIssue(input);
       expect(resumed).toEqual(first);
-      yield* worktrees.removeIssue(input.repositories, first);
+      yield* worktrees.removeIssue(input.repository, first);
       return first;
     }).pipe(
       Effect.provide(GitWorktreesLive),
@@ -48,10 +46,10 @@ test("prepares, resumes, and removes an isolated issue worktree", async () => {
       Effect.runPromise,
     );
 
-    expect(prepared.repositories[0]?.branch).toBe("ralphie/issue-42");
+    expect(prepared.branch).toBe("ralphie/issue-42");
     expect(
       (await runGit(repositoryPath, ["worktree", "list", "--porcelain"])).stdout,
-    ).not.toContain(prepared.repositories[0]!.repositoryPath);
+    ).not.toContain(prepared.repositoryPath);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

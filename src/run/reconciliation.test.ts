@@ -16,7 +16,6 @@ const state: RunState = {
   version: RUN_STATE_VERSION,
   status: RunStateStatus.Active,
   runId: "run-1",
-  project: "project-a",
   repository: "owner/repo",
   branch: "main",
   selection: { agent: "build" },
@@ -41,11 +40,6 @@ const state: RunState = {
 
 describe("run-state reconciliation", () => {
   test.each([
-    [
-      "project",
-      { project: "project-b", repository: "owner/repo", branch: "main" },
-      RunReconciliationStatus.ProjectMismatch,
-    ],
     [
       "repository",
       { repository: "other/repo", branch: "main" },
@@ -90,27 +84,6 @@ describe("run-state reconciliation", () => {
       status: RunReconciliationStatus.Compatible,
       reasons: [],
     });
-  });
-
-  test("reconciles every persisted project checkout", () => {
-    const projectState: RunState = {
-      ...state,
-      projectCheckouts: [
-        { repository: "owner/repo", branch: "main", head: "abc123" },
-        { repository: "owner/api", branch: "develop", head: "def456" },
-      ],
-    };
-    const result = reconcileRunState(projectState, {
-      repository: "owner/repo",
-      branch: "main",
-      projectCheckouts: [
-        { repository: "owner/repo", branch: "main", head: "abc123" },
-        { repository: "owner/api", branch: "develop", head: "moved" },
-      ],
-    });
-
-    expect(result.status).toBe(RunReconciliationStatus.GitMismatch);
-    expect(result.reasons[0]).toContain("owner/api");
   });
 
   test("accepts a closed pending issue while recovering its closure stage", () => {

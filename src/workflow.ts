@@ -1,12 +1,11 @@
-import { Effect, Either } from "effect";
+import { Effect } from "effect";
 import { join } from "node:path";
-import type { Octokit } from "octokit";
 
-import { GitRepository, type PreparedRepository } from "./git/repository.ts";
+import { GitRepository } from "./git/repository.ts";
 import { GitRepositoryInvariant } from "./git/repository-invariant.ts";
 import { GitIssueCheckpoint } from "./git/issue-checkpoint.ts";
 import { GitIssueOperations } from "./git/issue-operations.ts";
-import { GitWorktrees, type PreparedIssueWorktrees } from "./git/worktree.ts";
+import { GitWorktrees, type PreparedIssueWorktree } from "./git/worktree.ts";
 import { GitHubClient } from "./github/client.ts";
 import { GitHubPullRequests } from "./github/pull-requests.ts";
 import {
@@ -14,7 +13,6 @@ import {
   GitHubIssueMutations,
 } from "./github/issue-mutations.ts";
 import { type GitHubIssue, GitHubIssues, type IssueFilters } from "./github/issues.ts";
-import { GitHubRepositoryPatterns } from "./github/repository-patterns.ts";
 import {
   IssueCompletionKind,
   IssueExecutionOutcomeKind,
@@ -29,19 +27,11 @@ import { Pi, type PiRuntime } from "./agent/server.ts";
 import { makePiSessionDiagnostics } from "./agent/task-session.ts";
 import { registerPiAgentSemaphore } from "./agent/concurrency.ts";
 import {
-  assertUniqueProjectRepositoryNames,
-  multiRepositoryProjectPath,
-  type PreparedProject,
-  projectRepositoryPath,
-  singleRepositoryProjectPath,
-} from "./project/project.ts";
-import {
   ProgressReporter,
   type ProgressReporterService,
   ProgressStage,
   ProgressStatus,
   type ProgressUpdate,
-  withProgressContext,
 } from "./progress/progress.ts";
 import { reconcileRunState } from "./run/reconciliation.ts";
 import {
@@ -52,7 +42,7 @@ import {
 } from "./run/state.ts";
 import { RalphieError } from "./shared/error.ts";
 import { Workspace, resolveWorkspacePath } from "./workspace/workspace.ts";
-import { DEFAULT_WORKFLOW_MODE, WorkflowMode } from "./config/config.ts";
+import { DEFAULT_WORKFLOW_MODE, WorkflowMode } from "./options.ts";
 
 const closeRuntime = (server: PiRuntime) => Effect.sync(() => server.close());
 
@@ -86,9 +76,6 @@ const copyOutcome = (
         kind: outcome.kind,
         completion: outcome.completion,
         commitSha: outcome.commitSha,
-        ...(outcome.commits === undefined
-          ? {}
-          : { commits: outcome.commits.map((commit) => ({ ...commit })) }),
         ...(outcome.reviewCount === undefined
           ? {}
           : { reviewCount: outcome.reviewCount }),
@@ -174,7 +161,7 @@ const summarize = (
 export type WorkflowOptions = {
   readonly workflow?: WorkflowMode;
   readonly issueConcurrency?: number;
-  readonly project?: string;
+  readonly agentConcurrency?: number;
   readonly repo: string;
   readonly branch?: string;
   readonly maxIssues?: number;
@@ -191,37 +178,12 @@ export type WorkflowOptions = {
   readonly resumePath?: string;
   readonly issueFailurePolicy?: IssueFailurePolicy;
   readonly dryRun?: boolean;
-  readonly sharedResources?: WorkflowSharedResources;
-};
-
-export type WorkflowSharedResources = {
-  readonly octokit: Octokit;
-  readonly pi: PiRuntime;
-  readonly preparedRepository?: PreparedRepository;
-  readonly preparedProject?: PreparedProject;
-};
-
-export type BatchWorkflowOptions = {
-  readonly repositories: ReadonlyArray<WorkflowOptions>;
-  readonly repositoryPatterns?: ReadonlyArray<RepositoryPatternWorkflowOptions>;
-  readonly workspace: string;
-  readonly cleanup: boolean;
-  readonly startClean: boolean;
-  readonly agentConcurrency?: number;
-};
-
-export type RepositoryPatternWorkflowOptions = Omit<
-  WorkflowOptions,
-  "repo" | "resumeState" | "resumePath" | "runId" | "sharedResources"
-> & {
-  readonly project: string;
-  readonly repoPattern: string;
 };
 
 export const workflow = ({
   workflow: requestedWorkflow = DEFAULT_WORKFLOW_MODE,
   issueConcurrency = 1,
-  project,
+  agentConcurrency,
   repo,
   branch: requestedBranch,
   maxIssues,
@@ -238,7 +200,6 @@ export const workflow = ({
   resumePath,
   issueFailurePolicy = IssueFailurePolicy.Halt,
   dryRun = false,
-  sharedResources,
 }: WorkflowOptions) =>
   Effect.gen(function* () {
     const progress = yield* ProgressReporter;
@@ -263,7 +224,6 @@ export const workflow = ({
       status: ProgressStatus.Info,
       message: `Ralphie started for ${repo} on ${requestedBranch ?? "main/master (auto)"}.`,
       details: {
-        ...(project === undefined ? {} : { project }),
         repository: repo,
         ...(requestedBranch === undefined ? {} : { branch: requestedBranch }),
         workspace,
@@ -299,29 +259,23 @@ export const workflow = ({
         );
       }
 
-      if (sharedResources === undefined) {
-        const workspaceService = yield* Workspace;
-        yield* track(
-          progress,
-          ProgressStage.WorkspacePreparation,
-          `Preparing workspace ${workspace}...`,
-          workspaceService.prepare(workspace),
-          `Workspace ready: ${workspace}.`,
-        );
-      }
+      const workspaceService = yield* Workspace;
+      yield* track(
+        progress,
+        ProgressStage.WorkspacePreparation,
+        `Preparing workspace ${workspace}...`,
+        workspaceService.prepare(workspace),
+        `Workspace ready: ${workspace}.`,
+      );
 
-      const octokit =
-        sharedResources?.octokit ??
-        (yield* Effect.gen(function* () {
-          const github = yield* GitHubClient;
-          return yield* track(
-            progress,
-            ProgressStage.GitHubAuthentication,
-            "Checking GitHub authentication...",
-            github.initialize,
-            "GitHub authentication verified and Octokit initialized.",
-          );
-        }));
+      const github = yield* GitHubClient;
+      const octokit = yield* track(
+        progress,
+        ProgressStage.GitHubAuthentication,
+        "Checking GitHub authentication...",
+        github.initialize,
+        "GitHub authentication verified and Octokit initialized.",
+      );
       const issueMutations = yield* GitHubIssueMutations;
       const pullRequests = usesPullRequests ? yield* GitHubPullRequests : undefined;
       const issueOperations = usesPullRequests ? yield* GitIssueOperations : undefined;
@@ -331,34 +285,30 @@ export const workflow = ({
       yield* checkCancellation(signal);
 
       const repository = yield* GitRepository;
-      if (sharedResources === undefined) {
-        yield* track(
-          progress,
-          ProgressStage.GitVerification,
-          "Checking Git installation...",
-          repository.verifyInstalled,
-          "Git installation verified.",
-        );
-      }
+      yield* track(
+        progress,
+        ProgressStage.GitVerification,
+        "Checking Git installation...",
+        repository.verifyInstalled,
+        "Git installation verified.",
+      );
       yield* checkCancellation(signal);
 
-      const prepared =
-        sharedResources?.preparedRepository ??
-        (yield* track(
-          progress,
-          ProgressStage.RepositoryPreparation,
-          `Preparing ${repo} on ${requestedBranch ?? "main/master"}...`,
-          repository.prepare(repo, requestedBranch, workspace),
-          (result) =>
-            `${result.cloned ? "Repository cloned" : "Existing repository ready"}: ${result.path}.`,
-          {
-            details: {
-              repository: repo,
-              ...(requestedBranch === undefined ? {} : { branch: requestedBranch }),
-              workspace,
-            },
+      const prepared = yield* track(
+        progress,
+        ProgressStage.RepositoryPreparation,
+        `Preparing ${repo} on ${requestedBranch ?? "main/master"}...`,
+        repository.prepare(repo, requestedBranch, workspace),
+        (result) =>
+          `${result.cloned ? "Repository cloned" : "Existing repository ready"}: ${result.path}.`,
+        {
+          details: {
+            repository: repo,
+            ...(requestedBranch === undefined ? {} : { branch: requestedBranch }),
+            workspace,
           },
-        ));
+        },
+      );
       const branch = prepared.branch;
       yield* checkCancellation(signal);
 
@@ -378,33 +328,16 @@ export const workflow = ({
 
       const invariantService = yield* GitRepositoryInvariant;
       const checkpoints = yield* GitIssueCheckpoint;
-      const projectRepositories = sharedResources?.preparedProject?.repositories ?? [
+      const repositoryCheckouts = [
         { repository: repo, repositoryPath: prepared.path, branch: prepared.branch },
       ];
-      const captureProjectCheckouts = () =>
-        Effect.forEach(projectRepositories, (repository) =>
-          invariantService.capture(repository.repositoryPath).pipe(
-            Effect.map((checkout) => ({
-              repository: repository.repository,
-              ...checkout,
-            })),
-          ),
-        );
-      let projectCheckouts = yield* captureProjectCheckouts();
-      const sourceCheckout = () => {
-        const source = projectCheckouts.find(
-          (entry) => entry.repository.toLowerCase() === repo.toLowerCase(),
-        )!;
-        return { branch: source.branch, head: source.head };
-      };
-      let checkout = sourceCheckout();
+      const captureCheckout = () => invariantService.capture(prepared.path);
+      let checkout = yield* captureCheckout();
       if (resumeState !== undefined) {
         const reconciliation = reconcileRunState(resumeState, {
-          ...(project === undefined ? {} : { project }),
           repository: repo,
           branch,
           git: checkout,
-          projectCheckouts,
           github: {
             openIssueNumbers: discoveredIssues.map(({ number }) => number),
           },
@@ -439,7 +372,6 @@ export const workflow = ({
         activeIssue?: RunState["activeIssue"],
       ) => {
         const snapshot = queue.snapshot();
-        const currentActiveQueueIssue = activeQueueIssue;
         const hasActiveQueueIssue = activeQueueIssues.size > 0;
         const pending = snapshot.pending.map(({ issue }) => ({
           ...issue,
@@ -454,7 +386,6 @@ export const workflow = ({
           version: RUN_STATE_VERSION,
           status,
           runId: actualRunId,
-          ...(project === undefined ? {} : { project }),
           repository: repo,
           branch,
           workflow: workflowMode,
@@ -477,7 +408,6 @@ export const workflow = ({
           })),
           ...(activeIssue === undefined ? {} : { activeIssue }),
           checkout,
-          projectCheckouts: projectCheckouts.map((entry) => ({ ...entry })),
           updatedAt: new Date().toISOString(),
         });
       };
@@ -516,28 +446,22 @@ export const workflow = ({
                   ? ProgressStage.ComplexityAssessment
                   : ProgressStage.IssueClosure,
             };
-            const issueBaseCheckouts = projectCheckouts.map((entry) => ({
-              ...entry,
-            }));
+            const issueBaseCheckout = { ...checkout };
             const featureBranch = issueFeatureBranch(issue.number);
-            let preparedIssueWorktrees: PreparedIssueWorktrees | undefined;
+            let preparedIssueWorktree: PreparedIssueWorktree | undefined;
             if (workflowMode === WorkflowMode.ParallelPr && !effectiveDryRun) {
-              preparedIssueWorktrees = yield* worktrees!.prepareIssue({
+              preparedIssueWorktree = yield* worktrees!.prepareIssue({
                 workspace,
                 runId: actualRunId,
                 issueNumber: issue.number,
                 branch: featureBranch,
-                repositories: projectRepositories,
-                baseShas: Object.fromEntries(
-                  issueBaseCheckouts.map((checkout) => [
-                    checkout.repository,
-                    checkout.head,
-                  ]),
-                ),
+                repository: repositoryCheckouts[0]!,
+                baseSha: issueBaseCheckout.head,
               });
             }
-            const issueRepositories =
-              preparedIssueWorktrees?.repositories ?? projectRepositories;
+            const issueRepositories = preparedIssueWorktree
+              ? [preparedIssueWorktree]
+              : repositoryCheckouts;
             if (
               usesPullRequests &&
               !effectiveDryRun &&
@@ -546,10 +470,7 @@ export const workflow = ({
               yield* Effect.forEach(
                 issueRepositories,
                 (repository) => {
-                  const base = issueBaseCheckouts.find(
-                    ({ repository: slug }) =>
-                      slug.toLowerCase() === repository.repository.toLowerCase(),
-                  )!;
+                  const base = issueBaseCheckout;
                   const prepareBranch: Effect.Effect<
                     { readonly headSha: string },
                     RalphieError
@@ -585,27 +506,17 @@ export const workflow = ({
                 { discard: true },
               );
             }
-            const executionProjectRepositories = issueRepositories.map((repository) =>
-              usesPullRequests && !effectiveDryRun
-                ? { ...repository, branch: featureBranch }
-                : repository,
-            );
             restoreCancellationCheckout =
               workflowMode === WorkflowMode.ParallelPr
                 ? undefined
                 : () =>
                     Effect.forEach(
-                      projectRepositories,
-                      (repository) => {
-                        const base = issueBaseCheckouts.find(
-                          ({ repository: slug }) =>
-                            slug.toLowerCase() === repository.repository.toLowerCase(),
-                        )!;
-                        return checkpoints.restore(repository.repositoryPath, {
-                          branch: base.branch,
-                          sha: base.head,
-                        });
-                      },
+                      repositoryCheckouts,
+                      (repository) =>
+                        checkpoints.restore(repository.repositoryPath, {
+                          branch: issueBaseCheckout.branch,
+                          sha: issueBaseCheckout.head,
+                        }),
                       { discard: true },
                     );
             yield* persistState(RunStateStatus.Active, activeIssue);
@@ -617,21 +528,12 @@ export const workflow = ({
                 `Executing #${issue.number} ${issue.title}...`,
                 issueExecutor.execute({
                   issue,
-                  ...(project === undefined ? {} : { project }),
                   repository: repo,
                   repositoryPath:
                     issueRepositories.find(
                       ({ repository }) =>
                         repository.toLowerCase() === repo.toLowerCase(),
                     )?.repositoryPath ?? prepared.path,
-                  ...(sharedResources?.preparedProject === undefined
-                    ? {}
-                    : {
-                        workingDirectory:
-                          preparedIssueWorktrees?.path ??
-                          sharedResources.preparedProject.path,
-                        projectRepositories: executionProjectRepositories,
-                      }),
                   targetBranch:
                     usesPullRequests && !effectiveDryRun ? featureBranch : branch,
                   workspace,
@@ -659,8 +561,7 @@ export const workflow = ({
               // The implementation path may have advanced HEAD. Persist the
               // post-delivery checkout so a closure-only resume reconciles
               // against the commit that was actually pushed.
-              projectCheckouts = yield* captureProjectCheckouts();
-              checkout = sourceCheckout();
+              checkout = yield* captureCheckout();
               activeIssue = {
                 issueNumber: issue.number,
                 stage: ProgressStage.IssueClosure,
@@ -670,97 +571,63 @@ export const workflow = ({
                 usesPullRequests &&
                 outcome.completion === IssueCompletionKind.PushedCommit
               ) {
-                const commits = outcome.commits ?? [
-                  { repository: repo, sha: outcome.commitSha },
-                ];
-                const orderedCommits = [...commits].sort((left, right) =>
-                  left.repository.toLowerCase() === repo.toLowerCase()
-                    ? 1
-                    : right.repository.toLowerCase() === repo.toLowerCase()
-                      ? -1
-                      : left.repository.localeCompare(right.repository),
-                );
                 const artifacts = yield* artifactStores!.forIssue(issue.number, {
                   workspace,
                   runId: actualRunId,
-                  ...(project === undefined ? {} : { project }),
                   repository: repo,
                 });
                 const reviews = artifacts.has(IssueArtifactKind.ReviewAttempts)
                   ? yield* artifacts.read(IssueArtifactKind.ReviewAttempts)
                   : [];
+                const issueRepository = issueRepositories[0]!;
+                const delivery = pullRequests!
+                  .createOrFind(octokit, repo, {
+                    title: `Fix #${issue.number}: ${issue.title}`,
+                    issueNumber: issue.number,
+                    closesIssue: true,
+                    head: featureBranch,
+                    base: branch,
+                  })
+                  .pipe(
+                    Effect.flatMap((pullRequest) =>
+                      pullRequests!
+                        .publishReviewAttempts(
+                          octokit,
+                          repo,
+                          pullRequest.number,
+                          reviews,
+                        )
+                        .pipe(
+                          Effect.zipRight(
+                            pullRequests!.merge(octokit, repo, pullRequest.number),
+                          ),
+                        ),
+                    ),
+                  );
                 yield* track(
                   progress,
                   ProgressStage.IssueClosure,
-                  `Opening and merging pull request${orderedCommits.length === 1 ? "" : "s"} for issue #${issue.number}...`,
-                  Effect.forEach(
-                    orderedCommits,
-                    (commit) => {
-                      const repository = issueRepositories.find(
-                        ({ repository }) =>
-                          repository.toLowerCase() === commit.repository.toLowerCase(),
-                      )!;
-                      const baseRepository = projectRepositories.find(
-                        ({ repository }) =>
-                          repository.toLowerCase() === commit.repository.toLowerCase(),
-                      )!;
-                      const closesIssue =
-                        commit.repository.toLowerCase() === repo.toLowerCase();
-                      const delivery = pullRequests!
-                        .createOrFind(octokit, commit.repository, {
-                          title: `Fix #${issue.number}: ${issue.title}`,
-                          body: closesIssue
-                            ? undefined
-                            : `Coordinated change for ${repo}#${issue.number}.`,
-                          issueNumber: issue.number,
-                          closesIssue,
-                          ...(closesIssue ? {} : { issueRepository: repo }),
-                          head: featureBranch,
-                          base: baseRepository.branch,
-                        })
-                        .pipe(
-                          Effect.flatMap((pullRequest) =>
-                            pullRequests!
-                              .publishReviewAttempts(
-                                octokit,
-                                commit.repository,
-                                pullRequest.number,
-                                reviews,
-                              )
-                              .pipe(
-                                Effect.zipRight(
-                                  pullRequests!.merge(
-                                    octokit,
-                                    commit.repository,
-                                    pullRequest.number,
-                                  ),
-                                ),
-                              ),
+                  `Opening and merging pull request for issue #${issue.number}...`,
+                  workflowMode === WorkflowMode.ParallelPr
+                    ? delivery
+                    : delivery.pipe(
+                        Effect.tap(() =>
+                          issueOperations!.restoreBaseCheckout(
+                            issueRepository.repositoryPath,
+                            branch,
                           ),
-                        );
-                      return workflowMode === WorkflowMode.ParallelPr
-                        ? delivery
-                        : delivery.pipe(
-                            Effect.tap(() =>
-                              issueOperations!.restoreBaseCheckout(
-                                repository.repositoryPath,
-                                baseRepository.branch,
-                              ),
-                            ),
-                          );
-                    },
-                    { discard: true },
-                  ),
-                  `Pull request${orderedCommits.length === 1 ? "" : "s"} merged; GitHub will close issue #${issue.number}.`,
+                        ),
+                      ),
+                  `Pull request merged; GitHub will close issue #${issue.number}.`,
                   {
                     issue: { number: issue.number, title: issue.title },
                     details: { completion: outcome.completion },
                   },
                 );
-                if (preparedIssueWorktrees !== undefined) {
+                if (preparedIssueWorktree !== undefined) {
                   yield* worktrees!.removeIssue(
-                    projectRepositories,
-                    preparedIssueWorktrees,
+                    repositoryCheckouts[0]!,
+                    preparedIssueWorktree,
                   );
                 }
               } else {
@@ -792,11 +659,9 @@ export const workflow = ({
             }
 
             if (outcome.kind === IssueExecutionOutcomeKind.Failed) {
-              // A deterministic commit may already exist when a later project
-              // push fails. Persist the actual project HEADs so resume can
-              // reconcile the created-commit artifacts and finish delivery.
-              projectCheckouts = yield* captureProjectCheckouts();
-              checkout = sourceCheckout();
+              // A deterministic commit may already exist when a later push fails.
+              // Persist the actual HEAD so resume can finish delivery.
+              checkout = yield* captureCheckout();
               yield* persistState(RunStateStatus.Active, {
                 issueNumber: issue.number,
                 stage: ProgressStage.IssueExecution,
@@ -808,23 +673,22 @@ export const workflow = ({
               }
             } else {
               if (
-                preparedIssueWorktrees !== undefined &&
+                preparedIssueWorktree !== undefined &&
                 !(
                   outcome.kind === IssueExecutionOutcomeKind.Completed &&
                   outcome.completion === IssueCompletionKind.PushedCommit
                 )
               ) {
                 yield* worktrees!.removeIssue(
-                  projectRepositories,
-                  preparedIssueWorktrees,
+                  repositoryCheckouts[0]!,
+                  preparedIssueWorktree,
                 );
               }
               activeIssue = undefined;
               activeQueueIssue = undefined;
               activeQueueIssues.delete(issue.number);
               restoreCancellationCheckout = undefined;
-              projectCheckouts = yield* captureProjectCheckouts();
-              checkout = sourceCheckout();
+              checkout = yield* captureCheckout();
               yield* persistState(RunStateStatus.Active);
             }
 
@@ -860,22 +724,26 @@ export const workflow = ({
             )
           : worker;
       };
-      if (sharedResources === undefined) {
-        const pi = yield* Pi;
-        yield* Effect.acquireUseRelease(
-          track(
-            progress,
-            ProgressStage.PiRuntime,
-            "Starting Pi runtime...",
-            pi.start,
-            (server) => `Pi runtime started at ${server.url}.`,
-          ),
-          processQueue,
-          closeRuntime,
-        );
-      } else {
-        yield* processQueue(sharedResources.pi);
-      }
+      const pi = yield* Pi;
+      yield* Effect.acquireUseRelease(
+        track(
+          progress,
+          ProgressStage.PiRuntime,
+          "Starting Pi runtime...",
+          pi.start,
+          (server) => {
+            if (agentConcurrency !== undefined) {
+              registerPiAgentSemaphore(
+                server.client,
+                Effect.unsafeMakeSemaphore(agentConcurrency),
+              );
+            }
+            return `Pi runtime started at ${server.url}.`;
+          },
+        ),
+        processQueue,
+        closeRuntime,
+      );
 
       if (queue.state() === IssueQueueState.DependencyBlocked) {
         yield* persistState(RunStateStatus.Active);
@@ -968,279 +836,4 @@ export const workflow = ({
         }),
       ),
     );
-  });
-
-export const batchWorkflow = ({
-  repositories,
-  repositoryPatterns = [],
-  workspace,
-  cleanup,
-  startClean,
-  agentConcurrency,
-}: BatchWorkflowOptions) =>
-  Effect.gen(function* () {
-    const progress = yield* ProgressReporter;
-    const workspaceService = yield* Workspace;
-
-    if (startClean) {
-      yield* track(
-        progress,
-        ProgressStage.WorkspaceCleanup,
-        `Removing existing workspace ${workspace}...`,
-        workspaceService.remove(workspace),
-        `Existing workspace removed: ${workspace}.`,
-      );
-    }
-
-    yield* track(
-      progress,
-      ProgressStage.WorkspacePreparation,
-      `Preparing workspace ${workspace}...`,
-      workspaceService.prepare(workspace),
-      `Workspace ready: ${workspace}.`,
-    );
-    const signal = repositories[0]?.signal ?? repositoryPatterns[0]?.signal;
-    yield* checkCancellation(signal);
-
-    const github = yield* GitHubClient;
-    const octokit = yield* track(
-      progress,
-      ProgressStage.GitHubAuthentication,
-      "Checking GitHub authentication...",
-      github.initialize,
-      "GitHub authentication verified and Octokit initialized.",
-    );
-    yield* checkCancellation(signal);
-
-    const patterns = yield* GitHubRepositoryPatterns;
-    const expandedPatterns = yield* Effect.forEach(repositoryPatterns, (pattern) =>
-      track(
-        progress,
-        ProgressStage.RepositoryDiscovery,
-        `Resolving repository pattern ${pattern.repoPattern}...`,
-        patterns.resolve(octokit, pattern.repoPattern),
-        (matches) =>
-          `Repository pattern ${pattern.repoPattern} matched ${matches.length} repositories.`,
-        { project: pattern.project, details: { pattern: pattern.repoPattern } },
-      ).pipe(
-        Effect.map((matches) =>
-          matches.map(
-            ({ slug }): WorkflowOptions => ({
-              ...pattern,
-              repo: slug,
-              runId: crypto.randomUUID(),
-              cleanup: false,
-              startClean: false,
-            }),
-          ),
-        ),
-      ),
-    );
-    const allRepositories = [...repositories, ...expandedPatterns.flat()];
-    const normalizedRepositories = allRepositories.map(({ repo }) =>
-      repo.toLowerCase(),
-    );
-    if (new Set(normalizedRepositories).size !== normalizedRepositories.length) {
-      return yield* new RalphieError({
-        message:
-          "Repository patterns and explicit entries resolved to duplicate repositories.",
-      });
-    }
-
-    const git = yield* GitRepository;
-    yield* track(
-      progress,
-      ProgressStage.GitVerification,
-      "Checking Git installation...",
-      git.verifyInstalled,
-      "Git installation verified.",
-    );
-    yield* checkCancellation(signal);
-
-    const grouped = new Map<string, WorkflowOptions[]>();
-    for (const options of allRepositories) {
-      const key = options.project ?? options.repo;
-      grouped.set(key, [...(grouped.get(key) ?? []), options]);
-    }
-    const groupedProjects = [...grouped.entries()];
-    const projectRoots = groupedProjects.map(([projectName, entries]) =>
-      entries.length > 1
-        ? multiRepositoryProjectPath(workspace, projectName)
-        : singleRepositoryProjectPath(workspace, entries[0]!.repo),
-    );
-    if (
-      new Set(projectRoots.map((path) => path.toLowerCase())).size !==
-      projectRoots.length
-    ) {
-      return yield* new RalphieError({
-        message: "Configured projects resolve to overlapping workspace directories.",
-      });
-    }
-    const preparedProjects = yield* Effect.forEach(
-      groupedProjects,
-      ([projectName, projectRepositories]) =>
-        Effect.gen(function* () {
-          const isMultiRepository = projectRepositories.length > 1;
-          if (isMultiRepository) {
-            assertUniqueProjectRepositoryNames(
-              projectName,
-              projectRepositories.map(({ repo }) => repo),
-            );
-          }
-          const preparedEntries = yield* Effect.forEach(
-            projectRepositories,
-            (options) => {
-              const destinationPath = isMultiRepository
-                ? projectRepositoryPath(workspace, projectName, options.repo)
-                : singleRepositoryProjectPath(workspace, options.repo);
-              const repositoryRunId =
-                options.resumeState?.runId ?? options.runId ?? crypto.randomUUID();
-              return track(
-                progress,
-                ProgressStage.RepositoryPreparation,
-                `Preparing ${options.repo} on ${options.branch ?? "main/master"}...`,
-                git.prepare(options.repo, options.branch, workspace, destinationPath),
-                (result) =>
-                  `${result.cloned ? "Repository cloned" : "Existing repository ready"}: ${result.path}.`,
-                {
-                  project: options.project,
-                  repository: options.repo,
-                  repositoryRunId,
-                  details: {
-                    repository: options.repo,
-                    branch: options.branch,
-                    workspace,
-                  },
-                },
-              ).pipe(
-                Effect.map((preparedRepository) => ({
-                  options: { ...options, runId: repositoryRunId },
-                  preparedRepository,
-                })),
-              );
-            },
-            { concurrency: "unbounded" },
-          );
-          const preparedProject: PreparedProject = {
-            name: projectName,
-            path: isMultiRepository
-              ? multiRepositoryProjectPath(workspace, projectName)
-              : preparedEntries[0]!.preparedRepository.path,
-            repositories: preparedEntries.map(({ options, preparedRepository }) => ({
-              repository: options.repo,
-              repositoryPath: preparedRepository.path,
-              branch: preparedRepository.branch,
-            })),
-          };
-          return { name: projectName, preparedProject, entries: preparedEntries };
-        }),
-      { concurrency: "unbounded" },
-    );
-    yield* checkCancellation(signal);
-
-    const pi = yield* Pi;
-    const agentSemaphore =
-      agentConcurrency === undefined
-        ? undefined
-        : yield* Effect.makeSemaphore(agentConcurrency);
-    const results = yield* Effect.acquireUseRelease(
-      track(
-        progress,
-        ProgressStage.PiRuntime,
-        "Starting Pi runtime...",
-        pi.start,
-        (server) => `Pi runtime started at ${server.url}.`,
-      ),
-      (server) =>
-        Effect.gen(function* () {
-          if (agentSemaphore !== undefined) {
-            yield* Effect.sync(() =>
-              registerPiAgentSemaphore(server.client, agentSemaphore),
-            );
-          }
-          return yield* Effect.forEach(
-            preparedProjects,
-            ({ preparedProject, entries }) =>
-              Effect.gen(function* () {
-                const projectResults: Array<{
-                  repository: string;
-                  result: Either.Either<WorkflowSummary, RalphieError>;
-                }> = [];
-                for (const { options, preparedRepository } of entries) {
-                  const repositoryRunId = options.runId!;
-                  const result = yield* workflow({
-                    ...options,
-                    startClean: false,
-                    cleanup: false,
-                    runId: repositoryRunId,
-                    sharedResources: {
-                      octokit,
-                      pi: server,
-                      preparedRepository,
-                      preparedProject,
-                    },
-                  }).pipe(
-                    (effect) =>
-                      withProgressContext(effect, {
-                        ...(options.project === undefined
-                          ? {}
-                          : { project: options.project }),
-                        repository: options.repo,
-                        repositoryRunId,
-                      }),
-                    Effect.either,
-                  );
-                  projectResults.push({ repository: options.repo, result });
-                  if (Either.isLeft(result)) break;
-                }
-                return projectResults;
-              }),
-            { concurrency: "unbounded" },
-          ).pipe(Effect.map((projectResults) => projectResults.flat()));
-        }),
-      closeRuntime,
-    );
-
-    const failures = results.filter(({ result }) => Either.isLeft(result));
-    if (failures.length > 0) {
-      const notStarted = allRepositories.length - results.length;
-      return yield* new RalphieError({
-        message: `${failures.length} repository runs failed${notStarted === 0 ? "" : `; ${notStarted} same-project runs were not started`}: ${failures
-          .map(({ repository, result }) =>
-            Either.isLeft(result)
-              ? `${repository}: ${errorMessage(result.left)}`
-              : repository,
-          )
-          .join("; ")}`,
-      });
-    }
-
-    if (cleanup) {
-      const startedMessage = `Removing workspace ${workspace}...`;
-      yield* progress.emit({
-        stage: ProgressStage.WorkspaceCleanup,
-        status: ProgressStatus.Started,
-        message: startedMessage,
-      });
-      yield* workspaceService.remove(workspace).pipe(
-        Effect.tapError((error) =>
-          progress.emit({
-            stage: ProgressStage.WorkspaceCleanup,
-            status: ProgressStatus.Failed,
-            message: `${startedMessage.replace(/\.{3}$/, "")} failed: ${errorMessage(error)}`,
-          }),
-        ),
-      );
-      yield* progress.stopPersisting;
-      yield* progress.emit({
-        stage: ProgressStage.WorkspaceCleanup,
-        status: ProgressStatus.Succeeded,
-        message: `Workspace removed: ${workspace}.`,
-      });
-    }
-
-    return results.map(({ repository, result }) => ({
-      repository,
-      summary: Either.getOrThrow(result),
-    }));
   });

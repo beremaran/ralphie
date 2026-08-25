@@ -37,9 +37,6 @@ export const IssueExecutorLive = Layer.effect(
               ? {
                   workspace: context.workspace,
                   runId: context.runId,
-                  ...(context.project === undefined
-                    ? {}
-                    : { project: context.project }),
                   repository: context.repository,
                 }
               : undefined,

@@ -11,7 +11,6 @@ import { GitHubClientLive } from "./github/client.ts";
 import { GitHubIssueMutationsLive } from "./github/issue-mutations.ts";
 import { GitHubIssuesLive } from "./github/issues.ts";
 import { GitHubPullRequestsLive } from "./github/pull-requests.ts";
-import { GitHubRepositoryPatternsLive } from "./github/repository-patterns.ts";
 import { PiLive } from "./pi/server.ts";
 import { IssueArtifactStoreLive } from "./issues/artifacts.ts";
 import { ComplexityAssessmentLive } from "./issues/complexity.ts";
@@ -90,7 +89,6 @@ export const LiveRuntime = Layer.mergeAll(
   GitHubIssuesLive,
   GitHubIssueMutationsLive,
   GitHubPullRequestsLive,
-  GitHubRepositoryPatternsLive,
   GitRepositoryLiveWithCommandRunner,
   GitRepositoryInvariantLiveWithCommandRunner,
   GitIssueOperationsLiveWithCommandRunner,

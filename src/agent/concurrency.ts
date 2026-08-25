@@ -3,7 +3,7 @@ import { Effect } from "effect";
 
 const semaphores = new WeakMap<PiClient, Effect.Semaphore>();
 
-/** Attach the batch-wide semaphore used by all agent tasks sharing this client. */
+/** Attach the run-wide semaphore used by all agent tasks sharing this client. */
 export const registerPiAgentSemaphore = (
   client: PiClient,
   semaphore: Effect.Semaphore,
@@ -11,7 +11,7 @@ export const registerPiAgentSemaphore = (
   semaphores.set(client, semaphore);
 };
 
-/** Hold one global agent permit for the complete session-and-prompt operation. */
+/** Hold one run-wide agent permit for the complete session-and-prompt operation. */
 export const withPiAgentPermit = <A, E, R>(
   client: PiClient,
   effect: Effect.Effect<A, E, R>,

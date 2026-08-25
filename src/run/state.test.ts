@@ -18,7 +18,6 @@ const state: RunState = {
   version: RUN_STATE_VERSION,
   status: RunStateStatus.Active,
   runId: "run-1",
-  project: "project-a",
   repository: "owner/repo",
   branch: "main",
   selection: { agent: "build" },
@@ -67,7 +66,7 @@ describe("run state store", () => {
 
   test.each([
     ["corrupted JSON", "not-json"],
-    ["incompatible version", JSON.stringify({ ...state, version: 2 })],
+    ["incompatible version", JSON.stringify({ ...state, version: 1 })],
     ["missing queue state", JSON.stringify({ ...state, queue: undefined })],
   ])("rejects %s", async (_label, content) => {
     const directory = await mkdtemp(join(tmpdir(), "ralphie-state-"));
