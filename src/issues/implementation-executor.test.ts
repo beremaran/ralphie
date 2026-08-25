@@ -139,6 +139,15 @@ const services = (options: {
     hasStagedChanges: () => Effect.succeed(true),
     commit: () => Effect.succeed({ sha: "commit-1", treeSha: "tree-1" }),
     push: () => Effect.void,
+    createOrCheckoutFeatureBranch: () =>
+      Effect.succeed({
+        branch: "feature",
+        baseBranch: "main",
+        baseSha: checkpoint.sha,
+        headSha: checkpoint.sha,
+        created: true,
+      }),
+    restoreBaseCheckout: () => Effect.void,
     ...options.operations,
   };
   const recovery: IssueRecoveryService = {

@@ -5,7 +5,9 @@ import type { Octokit } from "octokit";
 import { GitRepository, type PreparedRepository } from "./git/repository.ts";
 import { GitRepositoryInvariant } from "./git/repository-invariant.ts";
 import { GitIssueCheckpoint } from "./git/issue-checkpoint.ts";
+import { GitIssueOperations } from "./git/issue-operations.ts";
 import { GitHubClient } from "./github/client.ts";
+import { GitHubPullRequests } from "./github/pull-requests.ts";
 import {
   GitHubIssueCloseReason,
   GitHubIssueMutations,
@@ -19,6 +21,7 @@ import {
 } from "./issues/execution.ts";
 import { IssueExecutor } from "./issues/executor.ts";
 import { DryRunIssueExecutor } from "./issues/dry-run-executor.ts";
+import { IssueArtifactKind, IssueArtifactStore } from "./issues/artifacts.ts";
 import { createIssueQueue, IssueQueueState, toQueuedIssues } from "./issues/queue.ts";
 import type { OpenCodeModel } from "./opencode/model.ts";
 import { OpenCode, type OpenCodeServer } from "./opencode/server.ts";
@@ -47,6 +50,7 @@ import {
 } from "./run/state.ts";
 import { RalphieError } from "./shared/error.ts";
 import { Workspace, resolveWorkspacePath } from "./workspace/workspace.ts";
+import { DEFAULT_WORKFLOW_MODE, WorkflowMode } from "./config/config.ts";
 
 const closeServer = (server: OpenCodeServer) => Effect.sync(() => server.close());
 
@@ -64,6 +68,9 @@ const checkCancellation = (signal: AbortSignal | undefined) =>
         cause,
       }),
   });
+
+const issueFeatureBranch = (issueNumber: number): string =>
+  `ralphie/issue-${issueNumber}`;
 
 const copyOutcome = (
   outcome: IssueExecutionOutcome,
@@ -163,6 +170,7 @@ const summarize = (
 };
 
 export type WorkflowOptions = {
+  readonly workflow?: WorkflowMode;
   readonly project?: string;
   readonly repo: string;
   readonly branch?: string;
@@ -207,6 +215,7 @@ export type RepositoryPatternWorkflowOptions = Omit<
 };
 
 export const workflow = ({
+  workflow: requestedWorkflow = DEFAULT_WORKFLOW_MODE,
   project,
   repo,
   branch: requestedBranch,
@@ -231,6 +240,7 @@ export const workflow = ({
     const stateStore = yield* RunStateStore;
     const actualRunId = resumeState?.runId ?? runId;
     const effectiveDryRun = resumeState?.dryRun ?? dryRun;
+    const workflowMode = resumeState?.workflow ?? requestedWorkflow;
     const statePath =
       resumePath ??
       join(
@@ -255,6 +265,7 @@ export const workflow = ({
         issueLimit: maxIssues ?? "unlimited",
         runId: actualRunId,
         dryRun: effectiveDryRun,
+        workflow: workflowMode,
         ...(resumeState === undefined ? {} : { resumed: true, statePath }),
       },
     });
@@ -303,6 +314,12 @@ export const workflow = ({
           );
         }));
       const issueMutations = yield* GitHubIssueMutations;
+      const pullRequests =
+        workflowMode === WorkflowMode.Pr ? yield* GitHubPullRequests : undefined;
+      const issueOperations =
+        workflowMode === WorkflowMode.Pr ? yield* GitIssueOperations : undefined;
+      const artifactStores =
+        workflowMode === WorkflowMode.Pr ? yield* IssueArtifactStore : undefined;
       yield* checkCancellation(signal);
 
       const repository = yield* GitRepository;
@@ -437,6 +454,7 @@ export const workflow = ({
           ...(project === undefined ? {} : { project }),
           repository: repo,
           branch,
+          workflow: workflowMode,
           dryRun: effectiveDryRun,
           selection,
           ...((resumeState?.maxIssues ?? maxIssues) === undefined
@@ -496,6 +514,55 @@ export const workflow = ({
             const issueBaseCheckouts = projectCheckouts.map((entry) => ({
               ...entry,
             }));
+            const featureBranch = issueFeatureBranch(issue.number);
+            if (
+              workflowMode === WorkflowMode.Pr &&
+              !effectiveDryRun &&
+              resumedClosureOutcome === undefined
+            ) {
+              yield* Effect.forEach(
+                projectRepositories,
+                (repository) => {
+                  const base = issueBaseCheckouts.find(
+                    ({ repository: slug }) =>
+                      slug.toLowerCase() === repository.repository.toLowerCase(),
+                  )!;
+                  return issueOperations!
+                    .createOrCheckoutFeatureBranch(
+                      repository.repositoryPath,
+                      featureBranch,
+                      repository.branch,
+                      base.head,
+                    )
+                    .pipe(
+                      Effect.flatMap((preparedBranch) =>
+                        issueOperations!
+                          .push(
+                            repository.repositoryPath,
+                            featureBranch,
+                            preparedBranch.headSha,
+                          )
+                          .pipe(
+                            Effect.mapError(
+                              (error) =>
+                                new RalphieError({
+                                  message: error.message,
+                                  cause: error,
+                                }),
+                            ),
+                          ),
+                      ),
+                    );
+                },
+                { discard: true },
+              );
+            }
+            const executionProjectRepositories = projectRepositories.map(
+              (repository) =>
+                workflowMode === WorkflowMode.Pr && !effectiveDryRun
+                  ? { ...repository, branch: featureBranch }
+                  : repository,
+            );
             restoreCancellationCheckout = () =>
               Effect.forEach(
                 projectRepositories,
@@ -527,10 +594,12 @@ export const workflow = ({
                     ? {}
                     : {
                         workingDirectory: sharedResources.preparedProject.path,
-                        projectRepositories:
-                          sharedResources.preparedProject.repositories,
+                        projectRepositories: executionProjectRepositories,
                       }),
-                  targetBranch: branch,
+                  targetBranch:
+                    workflowMode === WorkflowMode.Pr && !effectiveDryRun
+                      ? featureBranch
+                      : branch,
                   workspace,
                   runId: actualRunId,
                   octokit,
@@ -563,22 +632,107 @@ export const workflow = ({
                 stage: ProgressStage.IssueClosure,
               };
               yield* persistState(RunStateStatus.Active, activeIssue);
-              yield* track(
-                progress,
-                ProgressStage.IssueClosure,
-                `Closing issue #${issue.number} as completed...`,
-                issueMutations.close(
-                  octokit,
-                  repo,
-                  issue.number,
-                  GitHubIssueCloseReason.Completed,
-                ),
-                `Issue #${issue.number} closed as completed.`,
-                {
-                  issue: { number: issue.number, title: issue.title },
-                  details: { completion: outcome.completion },
-                },
-              );
+              if (
+                workflowMode === WorkflowMode.Pr &&
+                outcome.completion === IssueCompletionKind.PushedCommit
+              ) {
+                const commits = outcome.commits ?? [
+                  { repository: repo, sha: outcome.commitSha },
+                ];
+                const orderedCommits = [...commits].sort((left, right) =>
+                  left.repository.toLowerCase() === repo.toLowerCase()
+                    ? 1
+                    : right.repository.toLowerCase() === repo.toLowerCase()
+                      ? -1
+                      : left.repository.localeCompare(right.repository),
+                );
+                const artifacts = yield* artifactStores!.forIssue(issue.number, {
+                  workspace,
+                  runId: actualRunId,
+                  ...(project === undefined ? {} : { project }),
+                  repository: repo,
+                });
+                const reviews = artifacts.has(IssueArtifactKind.ReviewAttempts)
+                  ? yield* artifacts.read(IssueArtifactKind.ReviewAttempts)
+                  : [];
+                yield* track(
+                  progress,
+                  ProgressStage.IssueClosure,
+                  `Opening and merging pull request${orderedCommits.length === 1 ? "" : "s"} for issue #${issue.number}...`,
+                  Effect.forEach(
+                    orderedCommits,
+                    (commit) => {
+                      const repository = projectRepositories.find(
+                        ({ repository }) =>
+                          repository.toLowerCase() === commit.repository.toLowerCase(),
+                      )!;
+                      const closesIssue =
+                        commit.repository.toLowerCase() === repo.toLowerCase();
+                      return pullRequests!
+                        .createOrFind(octokit, commit.repository, {
+                          title: `Fix #${issue.number}: ${issue.title}`,
+                          body: closesIssue
+                            ? undefined
+                            : `Coordinated change for ${repo}#${issue.number}.`,
+                          issueNumber: issue.number,
+                          closesIssue,
+                          ...(closesIssue ? {} : { issueRepository: repo }),
+                          head: featureBranch,
+                          base: repository.branch,
+                        })
+                        .pipe(
+                          Effect.flatMap((pullRequest) =>
+                            pullRequests!
+                              .publishReviewAttempts(
+                                octokit,
+                                commit.repository,
+                                pullRequest.number,
+                                reviews,
+                              )
+                              .pipe(
+                                Effect.zipRight(
+                                  pullRequests!.merge(
+                                    octokit,
+                                    commit.repository,
+                                    pullRequest.number,
+                                  ),
+                                ),
+                              ),
+                          ),
+                          Effect.tap(() =>
+                            issueOperations!.restoreBaseCheckout(
+                              repository.repositoryPath,
+                              repository.branch,
+                            ),
+                          ),
+                        );
+                    },
+                    { discard: true },
+                  ),
+                  `Pull request${orderedCommits.length === 1 ? "" : "s"} merged; GitHub will close issue #${issue.number}.`,
+                  {
+                    issue: { number: issue.number, title: issue.title },
+                    details: { completion: outcome.completion },
+                  },
+                );
+              } else {
+                yield* track(
+                  progress,
+                  ProgressStage.IssueClosure,
+                  `Closing issue #${issue.number} as completed...`,
+                  issueMutations.close(
+                    octokit,
+                    repo,
+                    issue.number,
+                    GitHubIssueCloseReason.Completed,
+                  ),
+                  `Issue #${issue.number} closed as completed.`,
+                  {
+                    issue: { number: issue.number, title: issue.title },
+                    details: { completion: outcome.completion },
+                  },
+                );
+              }
             }
 
             if (

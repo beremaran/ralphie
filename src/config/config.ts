@@ -18,6 +18,12 @@ import { assertSafeProjectName } from "../project/project.ts";
 export const DEFAULT_WORKSPACE = "~/.ralphie";
 export const IMPLICIT_PROJECT_NAME = "default";
 
+export enum WorkflowMode {
+  Lgtm = "lgtm",
+  Pr = "pr",
+}
+export const DEFAULT_WORKFLOW_MODE = WorkflowMode.Lgtm;
+
 const nonEmptyString = z.string().trim().min(1);
 function optionalConfigValue<Schema extends z.ZodType>(schema: Schema) {
   return schema
@@ -59,6 +65,7 @@ const agentConfigSchema = z
   })
   .strict();
 const executionConfigShape = {
+  workflow: optionalConfigValue(z.enum(WorkflowMode)),
   git: optionalConfigValue(gitConfigSchema),
   issues: optionalConfigValue(issueConfigSchema),
   agent: optionalConfigValue(agentConfigSchema),
@@ -134,6 +141,7 @@ export type RalphieFileConfig = z.infer<typeof ralphieFileConfigSchema>;
 
 export type RalphieConfigOverrides = {
   readonly repo?: string;
+  readonly workflow?: WorkflowMode;
   readonly branch?: string;
   readonly maxIssues?: number;
   readonly issueLabels?: ReadonlyArray<string>;
@@ -158,6 +166,7 @@ export enum RepositoryTargetKind {
 }
 
 export type ResolvedExecutionConfig = {
+  readonly workflow: WorkflowMode;
   /** Undefined means select main, then master, from the repository remote. */
   readonly branch?: string;
   readonly maxIssues?: number;
@@ -199,6 +208,7 @@ export type ResolvedRalphieConfig = {
 };
 
 type ExecutionConfig = {
+  readonly workflow?: WorkflowMode;
   readonly git?: { readonly branch?: string };
   readonly issues?: {
     readonly limit?: number;
@@ -222,6 +232,7 @@ const resolveExecution = (
   levels: ReadonlyArray<ExecutionConfig | undefined>,
   overrides: RalphieConfigOverrides,
 ): ResolvedExecutionConfig => {
+  const workflow = lastDefined(levels.map((level) => level?.workflow));
   const branch = lastDefined(levels.map((level) => level?.git?.branch));
   const limit = lastDefined(levels.map((level) => level?.issues?.limit));
   const sortBy = lastDefined(levels.map((level) => level?.issues?.sort?.by));
@@ -236,6 +247,7 @@ const resolveExecution = (
   const selectedVariant = overrides.modelVariant ?? modelVariant;
 
   return {
+    workflow: overrides.workflow ?? workflow ?? DEFAULT_WORKFLOW_MODE,
     ...((overrides.branch ?? branch) === undefined
       ? {}
       : { branch: overrides.branch ?? branch }),

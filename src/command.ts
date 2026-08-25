@@ -7,6 +7,7 @@ import {
   RalphieConfigFile,
   RalphieConfigFileLive,
   RepositoryTargetKind,
+  WorkflowMode,
   resolveRalphieConfig,
 } from "./config/config.ts";
 import { IssueOrder, IssueSort } from "./github/issues.ts";
@@ -34,6 +35,9 @@ export const runCommand = defineCommand({
     branch: option(z.string().min(1).optional(), {
       short: "b",
       description: "Branch to operate on (default: main, otherwise master)",
+    }),
+    workflow: option(z.enum(WorkflowMode).optional(), {
+      description: "Delivery workflow: lgtm (direct push) or pr (pull request)",
     }),
     "max-issues": option(z.coerce.number().int().positive().optional(), {
       description: "Maximum number of issues to process (default: unlimited)",
@@ -104,6 +108,7 @@ export const runCommand = defineCommand({
           }).pipe(Effect.provide(RalphieConfigFileLive), Effect.runPromise);
     const config = resolveRalphieConfig(fileConfig, {
       ...(positionalRepo === undefined ? {} : { repo: positionalRepo }),
+      ...(flags.workflow === undefined ? {} : { workflow: flags.workflow }),
       ...(flags.branch === undefined ? {} : { branch: flags.branch }),
       ...(flags["max-issues"] === undefined ? {} : { maxIssues: flags["max-issues"] }),
       ...(flags["issue-label"] === undefined
@@ -204,6 +209,7 @@ export const runCommand = defineCommand({
     try {
       const repositories: WorkflowOptions[] = repositoryRuns.map(
         ({ project, target: repository, resumeState }) => ({
+          workflow: repository.workflow,
           project,
           repo: repository.repo,
           branch: repository.branch,
@@ -233,6 +239,7 @@ export const runCommand = defineCommand({
             throw new Error("Expected a repository pattern target.");
           }
           return {
+            workflow: target.workflow,
             project,
             repoPattern: target.repoPattern,
             branch: target.branch,

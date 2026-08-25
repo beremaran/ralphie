@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { IssueCompletionKind, IssueExecutionOutcomeKind } from "../issues/execution.ts";
 import { RalphieError } from "../shared/error.ts";
+import { WorkflowMode } from "../config/config.ts";
 
 export const RUN_STATE_VERSION = 1 as const;
 
@@ -79,6 +80,7 @@ export const runStateSchema = z.object({
   project: z.string().min(1).optional(),
   repository: z.string().min(1),
   branch: z.string().min(1),
+  workflow: z.enum(WorkflowMode).optional(),
   dryRun: z.boolean().optional(),
   selection: z.object({
     agent: z.string().min(1),

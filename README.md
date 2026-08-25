@@ -15,9 +15,10 @@ Agents handle reasoning and code changes. Ralphie keeps Git operations, GitHub
 mutations, run state, recovery, and safety checks deterministic.
 
 > [!CAUTION]
-> Ralphie works directly on the branch selected by `--branch`. It does **not**
-> create a worktree, feature branch, pull request, or merge queue. An approved
-> implementation is committed and pushed directly to that branch.
+> Ralphie defaults to the `lgtm` workflow: it works directly on the branch
+> selected by `--branch`, commits approved work, and pushes directly to that
+> branch. Use `--workflow pr` to create a feature branch and pull request
+> instead.
 
 > [!NOTE]
 > Ralphie is pre-1.0 and currently installed from source. Start with a one-issue
@@ -104,6 +105,17 @@ When no branch is configured, Ralphie uses `main` when it exists and otherwise
 are processed oldest-first. Without `--max-issues`, the issue budget is
 unlimited.
 
+The default `lgtm` workflow commits and pushes directly to the selected branch.
+The `pr` workflow creates a branch, pushes it, and opens a pull request for
+review. The pull request body links the source issue with `Closes #<issue>` so
+GitHub closes the issue automatically when the pull request is merged. Set the
+workflow at the top level, per project, per repository, or on the command line;
+the most specific setting wins, with CLI options taking precedence:
+
+```bash
+ralphie owner/repository --workflow pr
+```
+
 ## How it works
 
 Every matching open issue receives a schema-validated complexity score from 0
@@ -143,9 +155,12 @@ flowchart TD
 5. If changes are requested, give the review to a fresh fix session and repeat
    staging and review.
 6. Stop after approval or five review attempts.
-7. Generate a validated commit message, commit each changed repository, recheck
-   every remote before the first push, and push each commit without force.
-8. Close the source GitHub issue only after every required push is verified.
+7. Generate a validated commit message and commit each changed repository.
+8. In `lgtm` mode, recheck every remote and push each commit without force, then
+   close the source issue after every push is verified. In `pr` mode, create a
+   feature branch, push it, and open a pull request linked with `Closes #<issue>`;
+   review results are published on the pull request and the issue closes when
+   GitHub merges it.
 
 When implementation produces no changes, a fresh read-only session must prove
 that the current checkout already resolves the issue and return concrete
@@ -180,7 +195,7 @@ sequenceDiagram
                 R->>G: Restage changes and read exact diff
             end
         end
-        alt Review approved
+    alt Review approved: lgtm mode
             R->>O: Generate structured commit message
             R->>G: Commit exact staged tree
             R->>G: Revalidate destination, HEAD, and remote base
@@ -188,6 +203,12 @@ sequenceDiagram
             G->>GH: Send branch update
             GH-->>G: Accept or return authoritative policy rejection
             R->>GH: Close issue as completed
+        else Review approved: pr mode
+            R->>O: Generate structured commit message
+            R->>G: Commit exact staged tree on feature branch
+            R->>GH: Open pull request with Closes #issue
+            R->>GH: Publish review comments and await merge
+            GH-->>R: Merge PR and close linked issue
         else Review budget exhausted
             R->>G: Preserve patch and restore checkpoint
             R->>GH: Continue through decomposition
@@ -229,8 +250,8 @@ flowchart LR
 
 ## Safety model
 
-Direct-to-branch automation deserves explicit guardrails. Before agent work and
-again before pushing, Ralphie verifies that:
+Delivery automation deserves explicit guardrails. In `lgtm` mode, before agent
+work and again before pushing, Ralphie verifies that:
 
 - the checkout and `origin` match the requested GitHub repository;
 - the local checkout is still on the selected branch and expected commit;
@@ -240,6 +261,9 @@ again before pushing, Ralphie verifies that:
 
 If any invariant fails, Ralphie halts instead of guessing or retrying a dangerous
 operation.
+
+In `pr` mode, the feature branch, pull request, review comments, and merge are
+reconciled through GitHub before the linked issue is considered complete.
 
 Ralphie does not try to predict whether GitHub will accept the update by querying
 branch protection, repository rulesets, or API-reported push permission. The
@@ -277,6 +301,7 @@ ralphie --config ./ralphie.json
 
 ```json
 {
+  "workflow": "lgtm",
   "git": { "branch": "main" },
   "issues": {
     "limit": 10,
@@ -344,6 +369,10 @@ every push succeeds. The configuration precedence is:
 ```text
 built-in defaults < top-level config < project config < repository config < CLI options
 ```
+
+`workflow` accepts `lgtm` (the default, direct commit and push) or `pr` (branch
+and pull request delivery). It can be placed alongside `git`, `issues`,
+`agent`, and `dryRun` at the top level, project level, or repository level.
 
 Workspace preparation and cleanup are batch-wide: start cleanup runs once, and
 the workspace is removed only after every project run succeeds. Human-readable progress is
@@ -443,7 +472,8 @@ may be omitted when `projects` is present in `--config`.
 | Option | Default | Description |
 | --- | --- | --- |
 | `--config <path>` | none | Load reusable options from a validated JSON file. |
-| `-b, --branch <name>` | `main`, otherwise `master` | Branch to clean, edit, commit, and push directly. |
+| `--workflow <mode>` | `lgtm` | Deliver directly with `lgtm`, or create a pull request with `pr`. |
+| `-b, --branch <name>` | `main`, otherwise `master` | Base branch; `lgtm` edits and pushes it directly, while `pr` opens pull requests against it. |
 | `--max-issues <count>` | unlimited | Positive maximum number of issues charged to this run. |
 | `--issue-label <label>` | none | Require a label; repeat the flag to require multiple labels. |
 | `--issue-sort <field>` | `created` | Sort by `created`, `updated`, or `comments`. |

@@ -6,7 +6,9 @@ import type { Octokit } from "octokit";
 import { GitRepository } from "./git/repository.ts";
 import { GitRepositoryInvariant } from "./git/repository-invariant.ts";
 import { GitIssueCheckpoint } from "./git/issue-checkpoint.ts";
+import { GitIssueOperations } from "./git/issue-operations.ts";
 import { GitHubClient } from "./github/client.ts";
+import { GitHubPullRequests } from "./github/pull-requests.ts";
 import { GitHubIssueMutations } from "./github/issue-mutations.ts";
 import {
   GitHubIssues,
@@ -22,6 +24,7 @@ import {
   IssueExecutionOutcomeKind,
 } from "./issues/execution.ts";
 import { IssueExecutor } from "./issues/executor.ts";
+import { IssueArtifactStore, makeIssueArtifactStore } from "./issues/artifacts.ts";
 import { DryRunIssueExecutor } from "./issues/dry-run-executor.ts";
 import { DEFAULT_OPENCODE_AGENT } from "./opencode/model.ts";
 import { OpenCode } from "./opencode/server.ts";
@@ -35,6 +38,7 @@ import { type RunState, RunStateStatus, RunStateStore } from "./run/state.ts";
 import { RalphieError } from "./shared/error.ts";
 import { Workspace } from "./workspace/workspace.ts";
 import { batchWorkflow, workflow } from "./workflow.ts";
+import { WorkflowMode } from "./config/config.ts";
 
 const firstIssue: GitHubIssue = {
   number: 42,
@@ -163,6 +167,51 @@ function testRuntime(
                 firstIssue,
             );
       },
+    }),
+    Layer.succeed(GitHubPullRequests, {
+      createOrFind: (_client, repository, input) =>
+        Effect.sync(() => {
+          calls.push(`createPullRequest:${repository}:${input.head}:${input.base}`);
+          return {
+            number: 1,
+            url: "https://github.com/owner/repo/pull/1",
+            merged: false,
+          };
+        }),
+      publishReviewAttempts: (_client, repository, number) =>
+        Effect.sync(() => calls.push(`publishReviews:${repository}:${number}`)),
+      merge: (_client, repository, number) =>
+        Effect.sync(() => {
+          calls.push(`mergePullRequest:${repository}:${number}`);
+          return {
+            number: 1,
+            url: "https://github.com/owner/repo/pull/1",
+            merged: true,
+          };
+        }),
+    }),
+    Layer.succeed(GitIssueOperations, {
+      stageAll: () => Effect.void,
+      readStagedBinaryDiff: () => Effect.succeed(""),
+      hasStagedChanges: () => Effect.succeed(false),
+      commit: () => Effect.succeed({ sha: "a".repeat(40), treeSha: "b".repeat(40) }),
+      push: (_path, branch) => Effect.sync(() => calls.push(`pushBranch:${branch}`)),
+      createOrCheckoutFeatureBranch: (_path, featureBranch, baseBranch, baseSha) =>
+        Effect.sync(() => {
+          calls.push(`prepareFeatureBranch:${featureBranch}:${baseBranch}`);
+          return {
+            branch: featureBranch,
+            baseBranch,
+            baseSha,
+            headSha: baseSha,
+            created: true,
+          };
+        }),
+      restoreBaseCheckout: (_path, branch) =>
+        Effect.sync(() => calls.push(`restoreBase:${branch}`)),
+    }),
+    Layer.succeed(IssueArtifactStore, {
+      forIssue: (issueNumber) => makeIssueArtifactStore(issueNumber),
     }),
     Layer.succeed(IssueExecutor, {
       execute: (context) =>
@@ -294,6 +343,30 @@ describe("workflow", () => {
       events.some(({ stage }) => stage === ProgressStage.IssueExecution),
     ).toBeTrue();
     expect(events.at(-1)?.status).toBe(ProgressStatus.Succeeded);
+  });
+
+  test("uses an issue branch and merged pull request without closing the issue directly", async () => {
+    const calls: string[] = [];
+    const states: RunState[] = [];
+    const contexts: IssueExecutionContext[] = [];
+
+    const summary = await workflow({
+      ...baseOptions,
+      workflow: WorkflowMode.Pr,
+    }).pipe(
+      Effect.provide(testRuntime(calls, states, { executionContexts: contexts })),
+      Effect.runPromise,
+    );
+
+    expect(summary.counts.completed).toBe(1);
+    expect(contexts[0]?.targetBranch).toBe("ralphie/issue-42");
+    expect(calls).toContain("prepareFeatureBranch:ralphie/issue-42:develop");
+    expect(calls).toContain("pushBranch:ralphie/issue-42");
+    expect(calls).toContain("createPullRequest:owner/repo:ralphie/issue-42:develop");
+    expect(calls).toContain("publishReviews:owner/repo:1");
+    expect(calls).toContain("mergePullRequest:owner/repo:1");
+    expect(calls).toContain("restoreBase:develop");
+    expect(calls).not.toContain("closeIssue:42");
   });
 
   test("dry-run assesses through the queue without invoking mutation execution", async () => {

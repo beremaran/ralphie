@@ -11,6 +11,7 @@ import {
   RalphieConfigFile,
   RalphieConfigFileLive,
   RepositoryTargetKind,
+  WorkflowMode,
   resolveRalphieConfig,
 } from "./config.ts";
 
@@ -24,6 +25,7 @@ describe("hierarchical Ralphie JSON config", () => {
             {
               kind: RepositoryTargetKind.Explicit,
               repo: "owner/repo",
+              workflow: WorkflowMode.Lgtm,
               issueLabels: [],
               issueSort: IssueSort.Created,
               issueOrder: IssueOrder.Ascending,
@@ -46,6 +48,7 @@ describe("hierarchical Ralphie JSON config", () => {
     const resolved = resolveRalphieConfig(
       {
         git: { branch: "top" },
+        workflow: WorkflowMode.Lgtm,
         issues: {
           limit: 20,
           sort: { by: IssueSort.Updated, order: IssueOrder.Descending },
@@ -58,6 +61,7 @@ describe("hierarchical Ralphie JSON config", () => {
         projects: [
           {
             name: "project-a",
+            workflow: WorkflowMode.Pr,
             git: { branch: "project" },
             issues: {
               limit: 10,
@@ -68,6 +72,7 @@ describe("hierarchical Ralphie JSON config", () => {
             repositories: [
               {
                 repo: "owner/repo",
+                workflow: WorkflowMode.Lgtm,
                 git: { branch: "repository" },
                 issues: { limit: 5 },
                 agent: { mode: "repository-agent" },
@@ -76,11 +81,18 @@ describe("hierarchical Ralphie JSON config", () => {
           },
         ],
       },
-      { branch: "cli", maxIssues: 2, issueLabels: ["cli"], agent: "cli-agent" },
+      {
+        workflow: WorkflowMode.Pr,
+        branch: "cli",
+        maxIssues: 2,
+        issueLabels: ["cli"],
+        agent: "cli-agent",
+      },
     );
 
     expect(resolved.projects[0]?.targets[0]).toMatchObject({
       repo: "owner/repo",
+      workflow: WorkflowMode.Pr,
       branch: "cli",
       maxIssues: 2,
       issueLabels: ["cli"],
@@ -95,6 +107,7 @@ describe("hierarchical Ralphie JSON config", () => {
   test("preserves an unresolved repository pattern with inherited settings", () => {
     const resolved = resolveRalphieConfig(
       {
+        workflow: WorkflowMode.Pr,
         git: { branch: "main" },
         projects: [
           {
@@ -112,6 +125,7 @@ describe("hierarchical Ralphie JSON config", () => {
         {
           kind: RepositoryTargetKind.Pattern,
           repoPattern: "beremaran/finance-*",
+          workflow: WorkflowMode.Pr,
           branch: "main",
           maxIssues: 3,
         },
@@ -133,6 +147,28 @@ describe("hierarchical Ralphie JSON config", () => {
     );
 
     expect(resolved.projects[0]?.targets[0]).not.toHaveProperty("branch");
+    expect(resolved.projects[0]?.targets[0]?.workflow).toBe(WorkflowMode.Lgtm);
+  });
+
+  test("rejects unknown workflow modes", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "ralphie-config-workflow-"));
+    const path = join(directory, "ralphie.json");
+    try {
+      await writeFile(
+        path,
+        JSON.stringify({
+          workflow: "unsupported",
+          projects: [{ name: "one", repositories: [{ repo: "owner/repo" }] }],
+        }),
+      );
+      const invalid = Effect.gen(function* () {
+        const files = yield* RalphieConfigFile;
+        return yield* files.load(path);
+      }).pipe(Effect.provide(RalphieConfigFileLive), Effect.runPromise);
+      await expect(invalid).rejects.toThrow("workflow");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   test("rejects ambiguous projects, duplicate identities, and incompatible CLI use", () => {

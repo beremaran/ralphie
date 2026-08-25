@@ -315,4 +315,134 @@ describe("deterministic Git issue operations", () => {
       await rm(remotePath, { recursive: true, force: true });
     }
   });
+
+  test("creates and resumes a feature branch only when its ancestry matches the explicit base", async () => {
+    const repositoryPath = await setupRepository();
+    try {
+      const baseSha = (await runGit(repositoryPath, ["rev-parse", "HEAD"])).stdout;
+      const first = await Effect.gen(function* () {
+        const operations = yield* GitIssueOperations;
+        return yield* operations.createOrCheckoutFeatureBranch(
+          repositoryPath,
+          "ralphie/issue-1",
+          "main",
+          baseSha,
+        );
+      }).pipe(
+        Effect.provide(GitIssueOperationsLive),
+        Effect.provide(CommandRunnerLive),
+        Effect.runPromise,
+      );
+      expect(first).toEqual({
+        branch: "ralphie/issue-1",
+        baseBranch: "main",
+        baseSha,
+        headSha: baseSha,
+        created: true,
+      });
+
+      await writeFile(join(repositoryPath, "feature.txt"), "feature\n");
+      await runGit(repositoryPath, ["add", "--all"]);
+      await runGit(repositoryPath, ["commit", "-m", "feature work"]);
+      const featureSha = (await runGit(repositoryPath, ["rev-parse", "HEAD"])).stdout;
+      const resumed = await Effect.gen(function* () {
+        const operations = yield* GitIssueOperations;
+        return yield* operations.createOrCheckoutFeatureBranch(
+          repositoryPath,
+          "ralphie/issue-1",
+          "main",
+          baseSha,
+        );
+      }).pipe(
+        Effect.provide(GitIssueOperationsLive),
+        Effect.provide(CommandRunnerLive),
+        Effect.runPromise,
+      );
+      expect(resumed.created).toBe(false);
+      expect(resumed.headSha).toBe(featureSha);
+
+      await runGit(repositoryPath, ["checkout", "main"]);
+      await writeFile(join(repositoryPath, "base-next.txt"), "base\n");
+      await runGit(repositoryPath, ["add", "--all"]);
+      await runGit(repositoryPath, ["commit", "-m", "advance base"]);
+      const advancedBaseSha = (await runGit(repositoryPath, ["rev-parse", "HEAD"]))
+        .stdout;
+      const incompatible = await Effect.gen(function* () {
+        const operations = yield* GitIssueOperations;
+        return yield* operations.createOrCheckoutFeatureBranch(
+          repositoryPath,
+          "ralphie/issue-1",
+          "main",
+          advancedBaseSha,
+        );
+      }).pipe(
+        Effect.provide(GitIssueOperationsLive),
+        Effect.provide(CommandRunnerLive),
+        Effect.runPromiseExit,
+      );
+      expect(Exit.isFailure(incompatible)).toBe(true);
+      const failure = Exit.isFailure(incompatible)
+        ? Cause.failureOption(incompatible.cause)
+        : Option.none();
+      expect(Option.isSome(failure)).toBe(true);
+      if (Option.isSome(failure)) {
+        expect(failure.value.message).toContain("not based on");
+      }
+    } finally {
+      await rm(repositoryPath, { recursive: true, force: true });
+    }
+  });
+
+  test("restores a clean base checkout to the fetched origin branch after a merge", async () => {
+    const repositoryPath = await setupRepository();
+    const remotePath = await mkdtemp(join(tmpdir(), "ralphie-git-remote-"));
+    try {
+      await runGit(remotePath, ["init", "--bare"]);
+      await runGit(repositoryPath, ["remote", "add", "origin", remotePath]);
+      await runGit(repositoryPath, ["push", "--no-force", "origin", "main"]);
+      const baseSha = (await runGit(repositoryPath, ["rev-parse", "HEAD"])).stdout;
+      await Effect.gen(function* () {
+        const operations = yield* GitIssueOperations;
+        yield* operations.createOrCheckoutFeatureBranch(
+          repositoryPath,
+          "ralphie/issue-2",
+          "main",
+          baseSha,
+        );
+      }).pipe(
+        Effect.provide(GitIssueOperationsLive),
+        Effect.provide(CommandRunnerLive),
+        Effect.runPromise,
+      );
+
+      await runGit(repositoryPath, ["checkout", "main"]);
+      await writeFile(join(repositoryPath, "merged.txt"), "merged\n");
+      await runGit(repositoryPath, ["add", "--all"]);
+      await runGit(repositoryPath, ["commit", "-m", "merge feature"]);
+      const mergedSha = (await runGit(repositoryPath, ["rev-parse", "HEAD"])).stdout;
+      await runGit(repositoryPath, ["push", "--no-force", "origin", "main"]);
+      await runGit(repositoryPath, ["checkout", "ralphie/issue-2"]);
+
+      await Effect.gen(function* () {
+        const operations = yield* GitIssueOperations;
+        yield* operations.restoreBaseCheckout(repositoryPath, "main");
+      }).pipe(
+        Effect.provide(GitIssueOperationsLive),
+        Effect.provide(CommandRunnerLive),
+        Effect.runPromise,
+      );
+      expect(
+        (await runGit(repositoryPath, ["rev-parse", "--abbrev-ref", "HEAD"])).stdout,
+      ).toBe("main");
+      expect((await runGit(repositoryPath, ["rev-parse", "HEAD"])).stdout).toBe(
+        mergedSha,
+      );
+      expect((await runGit(repositoryPath, ["status", "--porcelain=v1"])).stdout).toBe(
+        "",
+      );
+    } finally {
+      await rm(repositoryPath, { recursive: true, force: true });
+      await rm(remotePath, { recursive: true, force: true });
+    }
+  });
 });

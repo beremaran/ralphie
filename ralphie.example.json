@@ -1,4 +1,5 @@
 {
+  "workflow": "lgtm",
   "dryRun": false,
   "git": {
     "branch": "main"
