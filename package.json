@@ -34,11 +34,11 @@
     "start": "bun run index.ts",
     "dev": "bunli dev --entry ./src/cli.ts",
     "build": "bunli build --targets native",
-    "check": "bun run format:check && bun run typecheck && bun test && bun run build",
+    "check": "bun run format:check && bun run typecheck && bun run test && bun run build",
     "format": "biome format --write .",
     "format:check": "biome format .",
     "probe:structured-output": "bun run scripts/probe-structured-output.ts",
-    "test": "bun test",
+    "test": "bun test tests",
     "typecheck": "bunx tsc --noEmit"
   }
 }

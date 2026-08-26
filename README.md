@@ -574,7 +574,7 @@ Useful individual commands:
 
 | Command | Purpose |
 | --- | --- |
-| `bun test` | Run the unit and disposable integration test suite. |
+| `bun run test` | Run the unit and disposable integration test suite. |
 | `bun run typecheck` | Type-check without emitting JavaScript. |
 | `bun run format` | Format the repository with Biome. |
 | `bun run format:check` | Verify formatting without modifying files. |
@@ -585,14 +585,14 @@ Real network integrations are opt-in and skipped by the normal test suite:
 
 ```bash
 RALPHIE_RUN_PI_COMPLEXITY_SMOKE=1 \
-  bun test src/integration/network-smoke.test.ts
+  bun test tests/integration/network-smoke.test.ts
 
 RALPHIE_RUN_PI_IMPLEMENTATION_SMOKE=1 \
-  bun test src/integration/network-smoke.test.ts
+  bun test tests/integration/network-smoke.test.ts
 
 RALPHIE_RUN_GITHUB_INTEGRATION=1 \
 RALPHIE_GITHUB_TEST_REPOSITORY=owner/ralphie-smoke-test \
-  bun test src/integration/network-smoke.test.ts
+  bun test tests/integration/network-smoke.test.ts
 ```
 
 The GitHub smoke test is read-only and refuses repository names that do not look

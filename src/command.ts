@@ -1,5 +1,5 @@
 import { defineCommand, option } from "@bunli/core";
-import { Effect, Layer } from "effect";
+import { Effect } from "effect";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 
@@ -351,23 +351,21 @@ export const runCommand = defineCommand({
         resumePath: config.resume,
         dryRun: config.dryRun,
       }).pipe(
+        Effect.provide(LiveRuntime),
         Effect.provide(
-          Layer.provideMerge(
-            progressLayer,
-            LiveRuntime,
-            PiLive(
-              resolvePiConfig(
-                config,
-                flags.model,
-                flags["model-base-url"],
-                flags["api-key"],
-                flags["model-provider"],
-                flags["model-id"],
-                flags["agent-dir"],
-              ),
+          PiLive(
+            resolvePiConfig(
+              config,
+              flags.model,
+              flags["model-base-url"],
+              flags["api-key"],
+              flags["model-provider"],
+              flags["model-id"],
+              flags["agent-dir"],
             ),
           ),
         ),
+        Effect.provide(progressLayer),
         Effect.catchAll((error) =>
           Effect.fail(new Error(redactSensitiveText(error.message))),
         ),
