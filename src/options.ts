@@ -1,5 +1,9 @@
 import { IssueOrder, IssueSort } from "./github/issues.ts";
 import { parseRepositorySlug } from "./github/repository.ts";
+import {
+  MODEL_API_KEY_ENV,
+  MODEL_BASE_URL_ENV,
+} from "./pi/config.ts";
 import { DEFAULT_PI_AGENT, type PiModel } from "./agent/model.ts";
 import { RalphieError } from "./shared/error.ts";
 
@@ -25,6 +29,11 @@ export type RalphieCliOptions = {
   readonly issueOrder?: IssueOrder;
   readonly model?: PiModel;
   readonly modelVariant?: string;
+  readonly modelBaseUrl?: string;
+  readonly modelApiKey?: string;
+  readonly modelProvider?: string;
+  readonly modelId?: string;
+  readonly agentDir?: string;
   readonly agent?: string;
   readonly workspace?: string;
   readonly cleanup?: boolean;
@@ -48,6 +57,11 @@ export type ResolvedRalphieConfig = {
   readonly issueOrder: IssueOrder;
   readonly model?: PiModel;
   readonly modelVariant?: string;
+  readonly modelBaseUrl?: string;
+  readonly modelApiKey?: string;
+  readonly modelProvider?: string;
+  readonly modelId?: string;
+  readonly agentDir?: string;
   readonly agent: string;
   readonly workspace: string;
   readonly cleanup: boolean;
@@ -94,6 +108,26 @@ export const resolveRalphieConfig = (
       ? {}
       : { modelVariant: options.modelVariant }),
     agent: options.agent ?? DEFAULT_PI_AGENT,
+    ...(options.modelBaseUrl === undefined
+      ? {}
+      : { modelBaseUrl: options.modelBaseUrl }),
+    ...(options.modelApiKey === undefined
+      ? {}
+      : { modelApiKey: options.modelApiKey }),
+    ...(options.modelProvider === undefined
+      ? {}
+      : { modelProvider: options.modelProvider }),
+    ...(options.modelId === undefined ? {} : { modelId: options.modelId }),
+    ...(options.agentDir === undefined ? {} : { agentDir: options.agentDir }),
+    // Flags take precedence over the documented environment variables.
+    ...(options.modelBaseUrl === undefined &&
+    process.env[MODEL_BASE_URL_ENV] !== undefined
+      ? { modelBaseUrl: process.env[MODEL_BASE_URL_ENV] }
+      : {}),
+    ...(options.modelApiKey === undefined &&
+    process.env[MODEL_API_KEY_ENV] !== undefined
+      ? { modelApiKey: process.env[MODEL_API_KEY_ENV] }
+      : {}),
     workspace: options.workspace ?? DEFAULT_WORKSPACE,
     cleanup: options.cleanup ?? false,
     startClean: options.startClean ?? false,

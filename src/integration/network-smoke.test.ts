@@ -60,7 +60,13 @@ const startPi = async (): Promise<PiRuntime> =>
     Effect.gen(function* () {
       const service = yield* Pi;
       return yield* service.start;
-    }).pipe(Effect.provide(PiLive)),
+    }).pipe(
+      Effect.provide(
+        // Default agent directory: smoke tests rely on the operator's real Pi
+        // configuration (env-provided keys), not a generated one.
+        PiLive({ workspace: tmpdir() }),
+      ),
+    ),
   );
 
 const createDisposableRepository = async (): Promise<string> => {

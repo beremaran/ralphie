@@ -7,6 +7,11 @@
   "bin": {
     "ralphie": "./index.ts"
   },
+  "exports": {
+    ".": {
+      "import": "./index.ts"
+    }
+  },
   "devDependencies": {
     "@biomejs/biome": "^2.5.10",
     "@types/bun": "latest",

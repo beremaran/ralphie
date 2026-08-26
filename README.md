@@ -41,6 +41,51 @@ mutations, run state, recovery, and safety checks deterministic.
 - **Bounded autonomy** — review loops stop after five attempts, unsafe direct
   pushes are refused, and force pushes are never used.
 
+## Installation
+
+Ralphie ships through four channels. Choose whichever fits your environment.
+
+### 1. `bunx` (no install)
+
+Requires Bun on `PATH`; `bunx` installs it automatically.
+
+```bash
+bunx ralphie owner/repository --dry-run --max-issues 1
+```
+
+### 2. Standalone binary (curl script)
+
+Installs a self-contained native executable for your platform
+(`darwin-arm64`, `darwin-x64`, `linux-arm64`, `linux-x64`).
+
+```bash
+sh scripts/install.sh            # installs to ~/.local/bin (or ~/bin)
+sh scripts/install.sh /usr/local/bin
+RALPHIE_VERSION=0.1.0 sh scripts/install.sh   # pin a version
+```
+
+### 3. Homebrew
+
+Install from a tap that downloads the matching release binary.
+
+```bash
+brew install beremaran/tap/ralphie
+# or, from the formula in ./Formula:
+brew install --formula Formula/ralphie.rb
+```
+
+### 4. Docker
+
+A multi-stage image built from `oven/bun` and published to `ghcr.io/beremaran/ralphie`
+(`linux/amd64` and `linux/arm64`).
+
+```bash
+docker run --rm \
+  -e GITHUB_TOKEN=$GITHUB_TOKEN \
+  -v "$HOME/.ralphie:/root/.ralphie" \
+  ghcr.io/beremaran/ralphie owner/repository --max-issues 5
+```
+
 ## Quick start
 
 ### Prerequisites

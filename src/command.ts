@@ -3,10 +3,16 @@ import { Effect, Layer } from "effect";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 
-import { WorkflowMode, resolveRalphieConfig } from "./options.ts";
+import {
+  WorkflowMode,
+  resolveRalphieConfig,
+  type ResolvedRalphieConfig,
+} from "./options.ts";
 import { IssueOrder, IssueSort } from "./github/issues.ts";
 import { piModelSchema, piModelVariantSchema } from "./agent/model.ts";
 import { makeProgressReporterLayer, ProgressRenderMode } from "./progress/progress.ts";
+import { type PiProviderConfig } from "./pi/config.ts";
+import { PiLive } from "./pi/server.ts";
 import { LiveRuntime } from "./runtime.ts";
 import { exitCodeForFailure } from "./process/exit-code.ts";
 import { workflow } from "./workflow.ts";
@@ -14,6 +20,32 @@ import { redactSensitiveText } from "./shared/redaction.ts";
 import { type RunState, RunStateStore, RunStateStoreLive } from "./run/state.ts";
 import { reconcileRunState } from "./run/reconciliation.ts";
 import { resolveWorkspacePath } from "./workspace/workspace.ts";
+import { type PiModel } from "./agent/model.ts";
+
+/**
+ * Build the Pi provider configuration for this run.
+ *
+ * When `--model-base-url` is supplied, the provider/model id default to the
+ * `--model` segments so the common case needs no extra flags; explicit
+ * `--model-provider`/`--model-id` override them. `--agent-dir` opts out of the
+ * generated config entirely (Option A).
+ */
+const resolvePiConfig = (
+  config: ResolvedRalphieConfig,
+  model: PiModel | undefined,
+  modelBaseUrl: string | undefined,
+  modelApiKey: string | undefined,
+  modelProvider: string | undefined,
+  modelId: string | undefined,
+  agentDir: string | undefined,
+): PiProviderConfig => ({
+  workspace: config.workspace,
+  modelBaseUrl,
+  modelApiKey,
+  modelProvider: modelProvider ?? model?.providerID,
+  modelId: modelId ?? model?.modelID,
+  agentDir,
+});
 
 export const runCommand = defineCommand({
   name: "run",
@@ -50,6 +82,25 @@ export const runCommand = defineCommand({
     }),
     "model-variant": option(piModelVariantSchema.optional(), {
       description: "Pi thinking level (off through max)",
+    }),
+    "model-base-url": option(z.string().trim().min(1).optional(), {
+      description:
+        "OpenAI-compatible base URL for the model runtime (env: RALPHIE_MODEL_BASE_URL). When set, Ralphie writes a throwaway, 0600 Pi config into the workspace so no pre-existing Pi setup is required.",
+    }),
+    "api-key": option(z.string().trim().min(1).optional(), {
+      description:
+        "API key for the OpenAI-compatible model runtime (env: RALPHIE_MODEL_API_KEY). Written to a 0600 file in the workspace and removed after the run.",
+    }),
+    "model-provider": option(z.string().trim().min(1).optional(), {
+      description:
+        "Provider id to register for the OpenAI-compatible runtime (default: openai, or the --model provider segment)",
+    }),
+    "model-id": option(z.string().trim().min(1).optional(), {
+      description: "Model id to register for the OpenAI-compatible runtime",
+    }),
+    "agent-dir": option(z.string().trim().min(1).optional(), {
+      description:
+        "Use an existing Pi agent directory (models.json/auth.json) instead of generating a temporary one",
     }),
     agent: option(z.string().trim().min(1).optional(), {
       description: "Compatibility label for task diagnostics (default: build)",
@@ -111,6 +162,21 @@ export const runCommand = defineCommand({
       ...(flags["model-variant"] === undefined
         ? {}
         : { modelVariant: flags["model-variant"] }),
+      ...(flags["model-base-url"] === undefined
+        ? {}
+        : { modelBaseUrl: flags["model-base-url"] }),
+      ...(flags["api-key"] === undefined
+        ? {}
+        : { modelApiKey: flags["api-key"] }),
+      ...(flags["model-provider"] === undefined
+        ? {}
+        : { modelProvider: flags["model-provider"] }),
+      ...(flags["model-id"] === undefined
+        ? {}
+        : { modelId: flags["model-id"] }),
+      ...(flags["agent-dir"] === undefined
+        ? {}
+        : { agentDir: flags["agent-dir"] }),
       ...(flags.agent === undefined ? {} : { agent: flags.agent }),
       ...(flags.workspace === undefined ? {} : { workspace: flags.workspace }),
       ...(flags.cleanup === undefined ? {} : { cleanup: flags.cleanup }),
@@ -197,7 +263,23 @@ export const runCommand = defineCommand({
         resumePath: config.resume,
         dryRun: config.dryRun,
       }).pipe(
-        Effect.provide(LiveRuntime.pipe(Layer.provideMerge(progressLayer))),
+        Effect.provide(
+          Layer.provideMerge(
+            progressLayer,
+            LiveRuntime,
+            PiLive(
+              resolvePiConfig(
+                config,
+                flags.model,
+                flags["model-base-url"],
+                flags["api-key"],
+                flags["model-provider"],
+                flags["model-id"],
+                flags["agent-dir"],
+              ),
+            ),
+          ),
+        ),
         Effect.catchAll((error) =>
           Effect.fail(new Error(redactSensitiveText(error.message))),
         ),
