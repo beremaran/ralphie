@@ -3,7 +3,10 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { z } from "zod";
 
-import { IssueCompletionKind, IssueExecutionOutcomeKind } from "../issues/execution.ts";
+import {
+  IssueCompletionKind,
+  IssueExecutionOutcomeKind,
+} from "../issues/execution.ts";
 import { RalphieError } from "../shared/error.ts";
 import { WorkflowMode } from "../options.ts";
 
@@ -64,7 +67,10 @@ const outcomeSchema = z.preprocess((value) => {
     !("completion" in value) &&
     "commitSha" in value
   ) {
-    return { ...value, completion: IssueCompletionKind.PushedCommit };
+    return {
+      ...value,
+      completion: IssueCompletionKind.PushedCommit,
+    };
   }
   return value;
 }, currentOutcomeSchema);
@@ -81,7 +87,10 @@ export const runStateSchema = z.object({
   selection: z.object({
     agent: z.string().min(1),
     model: z
-      .object({ providerID: z.string().min(1), modelID: z.string().min(1) })
+      .object({
+        providerID: z.string().min(1),
+        modelID: z.string().min(1),
+      })
       .optional(),
     variant: z.string().min(1).optional(),
   }),
@@ -92,19 +101,33 @@ export const runStateSchema = z.object({
     processedCount: z.number().int().nonnegative(),
   }),
   outcomes: z.array(
-    z.object({ issueNumber: z.number().int().positive(), outcome: outcomeSchema }),
+    z.object({
+      issueNumber: z.number().int().positive(),
+      outcome: outcomeSchema,
+    }),
   ),
   activeIssue: z
-    .object({ issueNumber: z.number().int().positive(), stage: z.string().min(1) })
+    .object({
+      issueNumber: z.number().int().positive(),
+      stage: z.string().min(1),
+    })
     .optional(),
-  checkout: z.object({ branch: z.string().min(1), head: z.string().min(1) }).optional(),
+  checkout: z
+    .object({
+      branch: z.string().min(1),
+      head: z.string().min(1),
+    })
+    .optional(),
   updatedAt: z.string().datetime(),
 });
 
 export type RunState = z.infer<typeof runStateSchema>;
 
 export type RunStateStoreService = {
-  readonly save: (path: string, state: RunState) => Effect.Effect<void, RalphieError>;
+  readonly save: (
+    path: string,
+    state: RunState,
+  ) => Effect.Effect<void, RalphieError>;
   readonly load: (path: string) => Effect.Effect<RunState, RalphieError>;
 };
 
@@ -117,19 +140,29 @@ export const RunStateStoreLive = Layer.succeed(RunStateStore, {
     Effect.tryPromise({
       try: async () => {
         const validated = runStateSchema.parse(state);
-        await mkdir(dirname(path), { recursive: true });
-        const temporaryPath = `${path}.tmp-${crypto.randomUUID()}`;
-        await writeFile(temporaryPath, `${JSON.stringify(validated, null, 2)}\n`, {
-          flag: "wx",
+        await mkdir(dirname(path), {
+          recursive: true,
         });
+        const temporaryPath = `${path}.tmp-${crypto.randomUUID()}`;
+        await writeFile(
+          temporaryPath,
+          `${JSON.stringify(validated, null, 2)}\n`,
+          {
+            flag: "wx",
+          },
+        );
         await rename(temporaryPath, path);
       },
       catch: (cause) =>
-        new RalphieError({ message: `Failed to persist run state at ${path}.`, cause }),
+        new RalphieError({
+          message: `Failed to persist run state at ${path}.`,
+          cause,
+        }),
     }),
   load: (path) =>
     Effect.tryPromise({
-      try: async () => runStateSchema.parse(JSON.parse(await readFile(path, "utf8"))),
+      try: async () =>
+        runStateSchema.parse(JSON.parse(await readFile(path, "utf8"))),
       catch: (cause) =>
         new RalphieError({
           message: `Run state at ${path} is invalid or unreadable.`,

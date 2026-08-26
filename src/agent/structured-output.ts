@@ -51,7 +51,9 @@ const describeApiError = (error: unknown): string => {
 
   const candidate = error as {
     readonly name?: unknown;
-    readonly data?: { readonly message?: unknown };
+    readonly data?: {
+      readonly message?: unknown;
+    };
   };
   const name = typeof candidate.name === "string" ? candidate.name : "PiError";
   const message =
@@ -75,10 +77,18 @@ export function requestStructuredOutput<Output>(
             {
               directory: request.directory,
               title: request.title,
-              ...(request.agent === undefined ? {} : { agent: request.agent }),
+              ...(request.agent === undefined
+                ? {}
+                : {
+                    agent: request.agent,
+                  }),
               permission: PI_DECISION_PERMISSION_POLICY,
             },
-            request.signal === undefined ? undefined : { signal: request.signal },
+            request.signal === undefined
+              ? undefined
+              : {
+                  signal: request.signal,
+                },
           );
 
           if (session.error !== undefined || session.data === undefined) {
@@ -87,13 +97,28 @@ export function requestStructuredOutput<Output>(
             );
           }
 
-          if (request.runId !== undefined && request.diagnostics !== undefined) {
+          if (
+            request.runId !== undefined &&
+            request.diagnostics !== undefined
+          ) {
             request.diagnostics.record(request.runId, {
               sessionID: session.data.id,
               directory: request.directory,
-              ...(request.agent === undefined ? {} : { agent: request.agent }),
-              ...(request.model === undefined ? {} : { model: request.model }),
-              ...(request.variant === undefined ? {} : { variant: request.variant }),
+              ...(request.agent === undefined
+                ? {}
+                : {
+                    agent: request.agent,
+                  }),
+              ...(request.model === undefined
+                ? {}
+                : {
+                    model: request.model,
+                  }),
+              ...(request.variant === undefined
+                ? {}
+                : {
+                    variant: request.variant,
+                  }),
             });
           }
 
@@ -101,9 +126,21 @@ export function requestStructuredOutput<Output>(
             {
               sessionID: session.data.id,
               directory: request.directory,
-              ...(request.agent === undefined ? {} : { agent: request.agent }),
-              ...(request.model === undefined ? {} : { model: request.model }),
-              ...(request.variant === undefined ? {} : { variant: request.variant }),
+              ...(request.agent === undefined
+                ? {}
+                : {
+                    agent: request.agent,
+                  }),
+              ...(request.model === undefined
+                ? {}
+                : {
+                    model: request.model,
+                  }),
+              ...(request.variant === undefined
+                ? {}
+                : {
+                    variant: request.variant,
+                  }),
               format: {
                 type: "json_schema",
                 schema: z.toJSONSchema(request.schema),
@@ -111,17 +148,33 @@ export function requestStructuredOutput<Output>(
                 validate: (value) => {
                   const parsed = request.schema.safeParse(value);
                   return parsed.success
-                    ? { success: true }
-                    : { success: false, error: z.prettifyError(parsed.error) };
+                    ? {
+                        success: true,
+                      }
+                    : {
+                        success: false,
+                        error: z.prettifyError(parsed.error),
+                      };
                 },
               },
-              parts: [{ type: "text", text: request.prompt }],
+              parts: [
+                {
+                  type: "text",
+                  text: request.prompt,
+                },
+              ],
             },
-            request.signal === undefined ? undefined : { signal: request.signal },
+            request.signal === undefined
+              ? undefined
+              : {
+                  signal: request.signal,
+                },
           );
 
           if (response.error !== undefined || response.data === undefined) {
-            throw new Error(`Pi prompt failed: ${describeApiError(response.error)}`);
+            throw new Error(
+              `Pi prompt failed: ${describeApiError(response.error)}`,
+            );
           }
 
           if (response.data.info.error !== undefined) {
@@ -132,7 +185,9 @@ export function requestStructuredOutput<Output>(
             });
           }
 
-          const parsed = request.schema.safeParse(response.data.info.structured);
+          const parsed = request.schema.safeParse(
+            response.data.info.structured,
+          );
           if (!parsed.success) {
             throw new Error(
               `Pi returned invalid structured output: ${z.prettifyError(parsed.error)}`,

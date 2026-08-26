@@ -1,8 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Exit, Layer } from "effect";
 
-import { GitIssueCheckpoint, GitIssueCheckpointLive } from "./issue-checkpoint.ts";
-import { CommandRunner, type CommandResult } from "../process/command-runner.ts";
+import {
+  GitIssueCheckpoint,
+  GitIssueCheckpointLive,
+} from "./issue-checkpoint.ts";
+import {
+  CommandRunner,
+  type CommandResult,
+} from "../process/command-runner.ts";
 
 const sha = "0123456789abcdef0123456789abcdef01234567";
 
@@ -44,7 +50,10 @@ describe("Git issue checkpoints", () => {
     await Effect.gen(function* () {
       const checkpoints = yield* GitIssueCheckpoint;
       const checkpoint = yield* checkpoints.capture("/workspace/repo", "main");
-      expect(checkpoint).toEqual({ branch: "main", sha });
+      expect(checkpoint).toEqual({
+        branch: "main",
+        sha,
+      });
       yield* checkpoints.restore("/workspace/repo", checkpoint);
     }).pipe(Effect.provide(layer), Effect.runPromise);
 
@@ -66,10 +75,15 @@ describe("Git issue checkpoints", () => {
 
     const exit = await Effect.gen(function* () {
       const checkpoints = yield* GitIssueCheckpoint;
-      yield* checkpoints.restore("/workspace/repo", { branch: "main", sha });
+      yield* checkpoints.restore("/workspace/repo", {
+        branch: "main",
+        sha,
+      });
     }).pipe(Effect.provide(layer), Effect.runPromiseExit);
 
     expect(Exit.isFailure(exit)).toBe(true);
-    expect(calls).toEqual(["git -C /workspace/repo rev-parse --abbrev-ref HEAD"]);
+    expect(calls).toEqual([
+      "git -C /workspace/repo rev-parse --abbrev-ref HEAD",
+    ]);
   });
 });

@@ -1,6 +1,9 @@
 import { Context, Effect, Layer } from "effect";
 
-import { CommandRunner, type CommandRunnerService } from "../process/command-runner.ts";
+import {
+  CommandRunner,
+  type CommandRunnerService,
+} from "../process/command-runner.ts";
 import { RalphieError } from "../shared/error.ts";
 
 export type GitRepositoryInvariant = {
@@ -18,9 +21,10 @@ export type GitRepositoryInvariantService = {
   ) => Effect.Effect<void, RalphieError>;
 };
 
-export const GitRepositoryInvariant = Context.GenericTag<GitRepositoryInvariantService>(
-  "ralphie/GitRepositoryInvariant",
-);
+export const GitRepositoryInvariant =
+  Context.GenericTag<GitRepositoryInvariantService>(
+    "ralphie/GitRepositoryInvariant",
+  );
 
 const runGit = (
   runner: CommandRunnerService,
@@ -32,7 +36,9 @@ const runGit = (
     const result = yield* runner.run("git", ["-C", repositoryPath, ...args]);
     if (result.exitCode !== 0) {
       const detail = result.stderr ? ` ${result.stderr}` : "";
-      return yield* new RalphieError({ message: `${failureMessage}.${detail}` });
+      return yield* new RalphieError({
+        message: `${failureMessage}.${detail}`,
+      });
     }
     return result.stdout;
   });
@@ -62,7 +68,10 @@ const readInvariant = (
       });
     }
 
-    return { branch, head };
+    return {
+      branch,
+      head,
+    };
   });
 
 export const makeGitRepositoryInvariantService = (

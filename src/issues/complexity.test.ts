@@ -9,7 +9,10 @@ import {
   ProgressStage,
   ProgressStatus,
 } from "../progress/progress.ts";
-import { ComplexityAssessment, ComplexityAssessmentLive } from "./complexity.ts";
+import {
+  ComplexityAssessment,
+  ComplexityAssessmentLive,
+} from "./complexity.ts";
 import { ComplexityLevel } from "./decisions.ts";
 import type { IssueExecutionContext } from "./execution.ts";
 import { makePiSessionDiagnostics } from "../agent/task-session.ts";
@@ -18,19 +21,28 @@ const assistantInfo = (structured: unknown) => ({
   id: "message-1",
   sessionID: "session-1",
   role: "assistant" as const,
-  time: { created: 0, completed: 1 },
+  time: {
+    created: 0,
+    completed: 1,
+  },
   parentID: "message-0",
   modelID: "test-model",
   providerID: "test-provider",
   mode: "test",
   agent: "build",
-  path: { cwd: "/workspace/repo", root: "/workspace/repo" },
+  path: {
+    cwd: "/workspace/repo",
+    root: "/workspace/repo",
+  },
   cost: 0,
   tokens: {
     input: 0,
     output: 0,
     reasoning: 0,
-    cache: { read: 0, write: 0 },
+    cache: {
+      read: 0,
+      write: 0,
+    },
   },
   structured,
 });
@@ -55,23 +67,36 @@ const context = (
   runId: "run-1",
   octokit: {} as Octokit,
   pi: client,
-  piSelection: { agent: "build" },
-  piDiagnostics: overrides.piDiagnostics ?? makePiSessionDiagnostics(() => "now"),
+  piSelection: {
+    agent: "build",
+  },
+  piDiagnostics:
+    overrides.piDiagnostics ?? makePiSessionDiagnostics(() => "now"),
   repositoryInvariant: overrides.repositoryInvariant ?? {
-    capture: () => Effect.succeed({ branch: "main", head: "abc123" }),
+    capture: () =>
+      Effect.succeed({
+        branch: "main",
+        head: "abc123",
+      }),
     verify: () => Effect.void,
   },
 });
 
 const assessmentLayer = (events: ProgressUpdate[]) =>
-  ComplexityAssessmentLive.pipe(Layer.provide(makeProgressRecorderLayer(events)));
+  ComplexityAssessmentLive.pipe(
+    Layer.provide(makeProgressRecorderLayer(events)),
+  );
 
 describe("complexity assessment", () => {
   test("gets a schema-validated decision and reports progress", async () => {
     const events: ProgressUpdate[] = [];
     const client = {
       session: {
-        create: async () => ({ data: { id: "session-1" } }),
+        create: async () => ({
+          data: {
+            id: "session-1",
+          },
+        }),
         prompt: async () => ({
           data: {
             info: assistantInfo({
@@ -96,7 +121,12 @@ describe("complexity assessment", () => {
         rationale: "The change is localized.",
       },
     });
-    expect(events.map(({ stage, status }) => ({ stage, status }))).toEqual([
+    expect(
+      events.map(({ stage, status }) => ({
+        stage,
+        status,
+      })),
+    ).toEqual([
       {
         stage: ProgressStage.ComplexityAssessment,
         status: ProgressStatus.Started,
@@ -112,10 +142,17 @@ describe("complexity assessment", () => {
     const events: ProgressUpdate[] = [];
     const client = {
       session: {
-        create: async () => ({ data: { id: "session-1" } }),
+        create: async () => ({
+          data: {
+            id: "session-1",
+          },
+        }),
         prompt: async () => ({
           data: {
-            info: assistantInfo({ complexity: 9, rationale: "Invalid" }),
+            info: assistantInfo({
+              complexity: 9,
+              rationale: "Invalid",
+            }),
             parts: [],
           },
         }),
@@ -140,7 +177,11 @@ describe("complexity assessment", () => {
         context(
           {
             session: {
-              create: async () => ({ data: { id: "session-1" } }),
+              create: async () => ({
+                data: {
+                  id: "session-1",
+                },
+              }),
               prompt: async () => ({
                 data: {
                   info: assistantInfo({
@@ -155,10 +196,17 @@ describe("complexity assessment", () => {
           {
             piDiagnostics: diagnostics,
             repositoryInvariant: {
-              capture: () => Effect.succeed({ branch: "main", head: "abc123" }),
+              capture: () =>
+                Effect.succeed({
+                  branch: "main",
+                  head: "abc123",
+                }),
               verify: (directory, invariant) =>
                 Effect.sync(() => {
-                  verified = { directory, invariant };
+                  verified = {
+                    directory,
+                    invariant,
+                  };
                 }),
             },
           },
@@ -170,7 +218,10 @@ describe("complexity assessment", () => {
     expect(diagnostics.list("run-1")).toHaveLength(1);
     expect(verified).toEqual({
       directory: "/workspace/repo",
-      invariant: { branch: "main", head: "abc123" },
+      invariant: {
+        branch: "main",
+        head: "abc123",
+      },
     });
   });
 });

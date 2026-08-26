@@ -5,7 +5,10 @@ import { IssueArtifactKind, IssueArtifactStore } from "./artifacts.ts";
 import { ComplexityAssessment } from "./complexity.ts";
 import { ComplexityLevel } from "./decisions.ts";
 import { DecompositionExecutor } from "./decomposition-executor.ts";
-import type { IssueExecutionContext, IssueExecutionOutcome } from "./execution.ts";
+import type {
+  IssueExecutionContext,
+  IssueExecutionOutcome,
+} from "./execution.ts";
 import { IssueExecutionOutcomeKind } from "./execution.ts";
 import { ImplementationExecutor } from "./implementation-executor.ts";
 
@@ -50,7 +53,10 @@ export const IssueExecutorLive = Layer.effect(
                 ),
               );
 
-          const input = { context, artifacts };
+          const input = {
+            context,
+            artifacts,
+          };
           if (decision.complexity >= ComplexityLevel.Level4) {
             return yield* decompositionExecutor.execute(input);
           }

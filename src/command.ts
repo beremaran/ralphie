@@ -10,14 +10,21 @@ import {
 } from "./options.ts";
 import { IssueOrder, IssueSort } from "./github/issues.ts";
 import { piModelSchema, piModelVariantSchema } from "./agent/model.ts";
-import { makeProgressReporterLayer, ProgressRenderMode } from "./progress/progress.ts";
+import {
+  makeProgressReporterLayer,
+  ProgressRenderMode,
+} from "./progress/progress.ts";
 import { type PiProviderConfig } from "./pi/config.ts";
 import { PiLive } from "./pi/server.ts";
 import { LiveRuntime } from "./runtime.ts";
 import { exitCodeForFailure } from "./process/exit-code.ts";
 import { workflow } from "./workflow.ts";
 import { redactSensitiveText } from "./shared/redaction.ts";
-import { type RunState, RunStateStore, RunStateStoreLive } from "./run/state.ts";
+import {
+  type RunState,
+  RunStateStore,
+  RunStateStoreLive,
+} from "./run/state.ts";
 import { reconcileRunState } from "./run/reconciliation.ts";
 import { resolveWorkspacePath } from "./workspace/workspace.ts";
 import { type PiModel } from "./agent/model.ts";
@@ -118,7 +125,8 @@ export const runCommand = defineCommand({
       argumentKind: "flag",
     }),
     "dry-run": option(z.coerce.boolean().optional(), {
-      description: "Assess and route issues without implementation or mutations",
+      description:
+        "Assess and route issues without implementation or mutations",
       argumentKind: "flag",
     }),
     workspace: option(z.string().trim().min(1).optional(), {
@@ -141,53 +149,131 @@ export const runCommand = defineCommand({
     if (extra.length > 0) throw new Error(`Unexpected argument: ${extra[0]}`);
 
     const config = resolveRalphieConfig({
-      ...(positionalRepo === undefined ? {} : { repo: positionalRepo }),
-      ...(flags.workflow === undefined ? {} : { workflow: flags.workflow }),
+      ...(positionalRepo === undefined
+        ? {}
+        : {
+            repo: positionalRepo,
+          }),
+      ...(flags.workflow === undefined
+        ? {}
+        : {
+            workflow: flags.workflow,
+          }),
       ...(flags["issue-concurrency"] === undefined
         ? {}
-        : { issueConcurrency: flags["issue-concurrency"] }),
+        : {
+            issueConcurrency: flags["issue-concurrency"],
+          }),
       ...(flags["agent-concurrency"] === undefined
         ? {}
-        : { agentConcurrency: flags["agent-concurrency"] }),
-      ...(flags.branch === undefined ? {} : { branch: flags.branch }),
-      ...(flags["max-issues"] === undefined ? {} : { maxIssues: flags["max-issues"] }),
+        : {
+            agentConcurrency: flags["agent-concurrency"],
+          }),
+      ...(flags.branch === undefined
+        ? {}
+        : {
+            branch: flags.branch,
+          }),
+      ...(flags["max-issues"] === undefined
+        ? {}
+        : {
+            maxIssues: flags["max-issues"],
+          }),
       ...(flags["issue-label"] === undefined
         ? {}
-        : { issueLabels: flags["issue-label"] }),
-      ...(flags["issue-sort"] === undefined ? {} : { issueSort: flags["issue-sort"] }),
+        : {
+            issueLabels: flags["issue-label"],
+          }),
+      ...(flags["issue-sort"] === undefined
+        ? {}
+        : {
+            issueSort: flags["issue-sort"],
+          }),
       ...(flags["issue-order"] === undefined
         ? {}
-        : { issueOrder: flags["issue-order"] }),
-      ...(flags.model === undefined ? {} : { model: flags.model }),
+        : {
+            issueOrder: flags["issue-order"],
+          }),
+      ...(flags.model === undefined
+        ? {}
+        : {
+            model: flags.model,
+          }),
       ...(flags["model-variant"] === undefined
         ? {}
-        : { modelVariant: flags["model-variant"] }),
+        : {
+            modelVariant: flags["model-variant"],
+          }),
       ...(flags["model-base-url"] === undefined
         ? {}
-        : { modelBaseUrl: flags["model-base-url"] }),
+        : {
+            modelBaseUrl: flags["model-base-url"],
+          }),
       ...(flags["api-key"] === undefined
         ? {}
-        : { modelApiKey: flags["api-key"] }),
+        : {
+            modelApiKey: flags["api-key"],
+          }),
       ...(flags["model-provider"] === undefined
         ? {}
-        : { modelProvider: flags["model-provider"] }),
+        : {
+            modelProvider: flags["model-provider"],
+          }),
       ...(flags["model-id"] === undefined
         ? {}
-        : { modelId: flags["model-id"] }),
+        : {
+            modelId: flags["model-id"],
+          }),
       ...(flags["agent-dir"] === undefined
         ? {}
-        : { agentDir: flags["agent-dir"] }),
-      ...(flags.agent === undefined ? {} : { agent: flags.agent }),
-      ...(flags.workspace === undefined ? {} : { workspace: flags.workspace }),
-      ...(flags.cleanup === undefined ? {} : { cleanup: flags.cleanup }),
+        : {
+            agentDir: flags["agent-dir"],
+          }),
+      ...(flags.agent === undefined
+        ? {}
+        : {
+            agent: flags.agent,
+          }),
+      ...(flags.workspace === undefined
+        ? {}
+        : {
+            workspace: flags.workspace,
+          }),
+      ...(flags.cleanup === undefined
+        ? {}
+        : {
+            cleanup: flags.cleanup,
+          }),
       ...(flags["start-clean"] === undefined
         ? {}
-        : { startClean: flags["start-clean"] }),
-      ...(flags["dry-run"] === undefined ? {} : { dryRun: flags["dry-run"] }),
-      ...(flags.resume === undefined ? {} : { resume: flags.resume }),
-      ...(flags.verbose === undefined ? {} : { verbose: flags.verbose }),
-      ...(flags.json === undefined ? {} : { json: flags.json }),
-      ...(flags.quiet === undefined ? {} : { quiet: flags.quiet }),
+        : {
+            startClean: flags["start-clean"],
+          }),
+      ...(flags["dry-run"] === undefined
+        ? {}
+        : {
+            dryRun: flags["dry-run"],
+          }),
+      ...(flags.resume === undefined
+        ? {}
+        : {
+            resume: flags.resume,
+          }),
+      ...(flags.verbose === undefined
+        ? {}
+        : {
+            verbose: flags.verbose,
+          }),
+      ...(flags.json === undefined
+        ? {}
+        : {
+            json: flags.json,
+          }),
+      ...(flags.quiet === undefined
+        ? {}
+        : {
+            quiet: flags.quiet,
+          }),
     });
 
     let resumeState: RunState | undefined;
@@ -213,7 +299,9 @@ export const runCommand = defineCommand({
       ? ProgressRenderMode.Json
       : config.quiet
         ? ProgressRenderMode.Quiet
-        : terminal.isInteractive && !terminal.isCI && process.stderr.isTTY === true
+        : terminal.isInteractive &&
+            !terminal.isCI &&
+            process.stderr.isTTY === true
           ? ProgressRenderMode.Interactive
           : ProgressRenderMode.Plain;
     const runId = resumeState?.runId ?? crypto.randomUUID();

@@ -12,7 +12,11 @@ export type DecompositionLineage = {
 };
 
 const validateDepth = (depth: number): void => {
-  if (!Number.isInteger(depth) || depth < 1 || depth > MAX_DECOMPOSITION_DEPTH) {
+  if (
+    !Number.isInteger(depth) ||
+    depth < 1 ||
+    depth > MAX_DECOMPOSITION_DEPTH
+  ) {
     throw new RalphieError({
       message: `Decomposition depth ${depth} is outside the supported range 1–${MAX_DECOMPOSITION_DEPTH}.`,
     });
@@ -30,12 +34,16 @@ export const decompositionMarker = (
 };
 
 /** Derive lineage for the children of an issue, including recursively generated children. */
-export const nextDecompositionLineage = (issue: GitHubIssue): DecompositionLineage => {
+export const nextDecompositionLineage = (
+  issue: GitHubIssue,
+): DecompositionLineage => {
   const marker = issue.body?.match(
     /<!-- ralphie:decomposition root=(\d+) parent=(\d+) key="[^"]+" depth=(\d+) -->/,
   );
-  const previousRoot = marker?.[1] === undefined ? undefined : Number(marker[1]);
-  const previousDepth = marker?.[3] === undefined ? undefined : Number(marker[3]);
+  const previousRoot =
+    marker?.[1] === undefined ? undefined : Number(marker[1]);
+  const previousDepth =
+    marker?.[3] === undefined ? undefined : Number(marker[3]);
   const depth = previousDepth === undefined ? 1 : previousDepth + 1;
   validateDepth(depth);
   return {
@@ -121,7 +129,9 @@ export const renderDecomposedOriginalBody = (input: {
       .filter((value): value is number => value !== undefined)
       .map(issueLink);
     return `- ${issueLink(number)} — ${child.title}${
-      dependencies.length === 0 ? "" : ` (depends on ${dependencies.join(", ")})`
+      dependencies.length === 0
+        ? ""
+        : ` (depends on ${dependencies.join(", ")})`
     }`;
   });
 

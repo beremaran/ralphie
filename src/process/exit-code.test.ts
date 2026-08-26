@@ -12,6 +12,8 @@ describe("process exit codes", () => {
   test("uses the conventional shell cancellation exit code", () => {
     const controller = new AbortController();
     controller.abort();
-    expect(exitCodeForFailure(controller.signal)).toBe(RalphieExitCode.Cancelled);
+    expect(exitCodeForFailure(controller.signal)).toBe(
+      RalphieExitCode.Cancelled,
+    );
   });
 });

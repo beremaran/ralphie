@@ -9,7 +9,10 @@ import {
   makeIssueArtifactStore,
 } from "../issues/artifacts.ts";
 import { ComplexityAssessment } from "../issues/complexity.ts";
-import { ComplexityLevel, ImplementationComplexityLevel } from "../issues/decisions.ts";
+import {
+  ComplexityLevel,
+  ImplementationComplexityLevel,
+} from "../issues/decisions.ts";
 import { DecompositionExecutorLive } from "../issues/decomposition-executor.ts";
 import {
   IssueExecutionOutcomeKind,
@@ -94,7 +97,9 @@ const makeOctokit = () => {
           if (issue === undefined) {
             throw new Error(`Unknown issue ${String(parameters.issue_number)}`);
           }
-          return { data: toResponse(issue) };
+          return {
+            data: toResponse(issue),
+          };
         },
         create: async (parameters: Record<string, unknown>) => {
           const number = nextIssueNumber++;
@@ -107,36 +112,58 @@ const makeOctokit = () => {
             labels: [],
           };
           issues.set(number, issue);
-          requests.push({ method: "create", parameters });
-          return { data: toResponse(issue) };
+          requests.push({
+            method: "create",
+            parameters,
+          });
+          return {
+            data: toResponse(issue),
+          };
         },
         update: async (parameters: Record<string, unknown>) => {
           const number = Number(parameters.issue_number);
           const issue = issues.get(number);
           if (issue === undefined) throw new Error(`Unknown issue ${number}`);
-          if (parameters.title !== undefined) issue.title = String(parameters.title);
-          if (parameters.body !== undefined) issue.body = String(parameters.body);
+          if (parameters.title !== undefined)
+            issue.title = String(parameters.title);
+          if (parameters.body !== undefined)
+            issue.body = String(parameters.body);
           if (parameters.state === "closed") issue.state = "closed";
           if (parameters.state_reason !== undefined) {
             issue.state_reason = String(parameters.state_reason);
           }
-          requests.push({ method: "update", parameters });
-          return { data: toResponse(issue) };
+          requests.push({
+            method: "update",
+            parameters,
+          });
+          return {
+            data: toResponse(issue),
+          };
         },
       },
     },
     paginate: async () => [...issues.values()].map(toResponse),
   } as unknown as Octokit;
 
-  return { client, issues, requests };
+  return {
+    client,
+    issues,
+    requests,
+  };
 };
 
 const pi = {
   session: {
-    create: async () => ({ data: { id: "decomposition-session" } }),
+    create: async () => ({
+      data: {
+        id: "decomposition-session",
+      },
+    }),
     prompt: async () => ({
       data: {
-        info: { structured: breakdown },
+        info: {
+          structured: breakdown,
+        },
         parts: [],
       },
     }),
@@ -158,10 +185,16 @@ const context = (octokit: Octokit): IssueExecutionContext => ({
   runId: "local-decomposition-e2e",
   octokit,
   pi,
-  piSelection: { agent: "build" },
+  piSelection: {
+    agent: "build",
+  },
   piDiagnostics: makePiSessionDiagnostics(() => "now"),
   repositoryInvariant: {
-    capture: () => Effect.succeed({ branch: "main", head: "abc123" }),
+    capture: () =>
+      Effect.succeed({
+        branch: "main",
+        head: "abc123",
+      }),
     verify: () => Effect.void,
   },
 });
@@ -197,7 +230,9 @@ test("runs the real decomposition workflow against a disposable in-memory GitHub
     Layer.succeed(ImplementationExecutor, {
       execute: () => {
         implementationCalls += 1;
-        return Effect.die("implementation workflow must not run for complexity 4");
+        return Effect.die(
+          "implementation workflow must not run for complexity 4",
+        );
       },
     }),
     DecompositionExecutorLive.pipe(Layer.provide(decompositionDependencies)),
@@ -222,9 +257,15 @@ test("runs the real decomposition workflow against a disposable in-memory GitHub
     kind: IssueExecutionOutcomeKind.Decomposed,
     childIssueNumbers: [101, 102],
   });
-  expect(outcome.mapping).toEqual({ storage: 101, api: 102 });
+  expect(outcome.mapping).toEqual({
+    storage: 101,
+    api: 102,
+  });
   expect(
-    fake.requests.map(({ method, parameters }) => [method, parameters.issue_number]),
+    fake.requests.map(({ method, parameters }) => [
+      method,
+      parameters.issue_number,
+    ]),
   ).toEqual([
     ["create", undefined],
     ["create", undefined],

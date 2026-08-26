@@ -2,7 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { Effect, Exit } from "effect";
 import type { Octokit } from "octokit";
 
-import { GitHubIssues, GitHubIssuesLive, IssueOrder, IssueSort } from "./issues.ts";
+import {
+  GitHubIssues,
+  GitHubIssuesLive,
+  IssueOrder,
+  IssueSort,
+} from "./issues.ts";
 
 const listOpen = (client: Octokit, labels: ReadonlyArray<string> = []) =>
   Effect.gen(function* () {
@@ -18,8 +23,15 @@ describe("GitHub issues", () => {
   test("paginates, applies filters, and excludes pull requests", async () => {
     let request: Record<string, unknown> | undefined;
     const client = {
-      rest: { issues: { listForRepo: Symbol("listForRepo") } },
-      paginate: async (_method: unknown, parameters: Record<string, unknown>) => {
+      rest: {
+        issues: {
+          listForRepo: Symbol("listForRepo"),
+        },
+      },
+      paginate: async (
+        _method: unknown,
+        parameters: Record<string, unknown>,
+      ) => {
         request = parameters;
         return [
           {
@@ -27,7 +39,15 @@ describe("GitHub issues", () => {
             title: "First issue",
             html_url: "https://github.com/owner/repository/issues/12",
             body: "Issue body",
-            labels: ["bug", { name: "priority" }, { name: null }],
+            labels: [
+              "bug",
+              {
+                name: "priority",
+              },
+              {
+                name: null,
+              },
+            ],
           },
           {
             number: 13,
@@ -39,7 +59,9 @@ describe("GitHub issues", () => {
       },
     } as unknown as Octokit;
 
-    const issues = await listOpen(client, ["bug", "priority"]).pipe(Effect.runPromise);
+    const issues = await listOpen(client, ["bug", "priority"]).pipe(
+      Effect.runPromise,
+    );
 
     expect(request).toEqual({
       owner: "owner",
@@ -63,7 +85,11 @@ describe("GitHub issues", () => {
 
   test("maps GitHub failures into the domain error", async () => {
     const client = {
-      rest: { issues: { listForRepo: Symbol("listForRepo") } },
+      rest: {
+        issues: {
+          listForRepo: Symbol("listForRepo"),
+        },
+      },
       paginate: async () => {
         throw new Error("network failed");
       },

@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 
-import { IssueCompletionKind, IssueExecutionOutcomeKind } from "../issues/execution.ts";
+import {
+  IssueCompletionKind,
+  IssueExecutionOutcomeKind,
+} from "../issues/execution.ts";
 import {
   RunReconciliationStatus,
   RunStateCleanupAction,
@@ -18,9 +21,19 @@ const state: RunState = {
   runId: "run-1",
   repository: "owner/repo",
   branch: "main",
-  selection: { agent: "build" },
+  selection: {
+    agent: "build",
+  },
   queue: {
-    pending: [{ number: 2, title: "Next", url: "issue/2", body: null, labels: [] }],
+    pending: [
+      {
+        number: 2,
+        title: "Next",
+        url: "issue/2",
+        body: null,
+        labels: [],
+      },
+    ],
     completedIssueNumbers: [1],
     processedCount: 1,
   },
@@ -34,7 +47,10 @@ const state: RunState = {
       },
     },
   ],
-  checkout: { branch: "main", head: "abc123" },
+  checkout: {
+    branch: "main",
+    head: "abc123",
+  },
   updatedAt: "2026-08-24T00:00:00.000Z",
 };
 
@@ -42,12 +58,18 @@ describe("run-state reconciliation", () => {
   test.each([
     [
       "repository",
-      { repository: "other/repo", branch: "main" },
+      {
+        repository: "other/repo",
+        branch: "main",
+      },
       RunReconciliationStatus.RepositoryMismatch,
     ],
     [
       "branch",
-      { repository: "owner/repo", branch: "develop" },
+      {
+        repository: "owner/repo",
+        branch: "develop",
+      },
       RunReconciliationStatus.BranchMismatch,
     ],
     [
@@ -55,13 +77,22 @@ describe("run-state reconciliation", () => {
       {
         repository: "owner/repo",
         branch: "main",
-        git: { branch: "main", head: "def456" },
+        git: {
+          branch: "main",
+          head: "def456",
+        },
       },
       RunReconciliationStatus.GitMismatch,
     ],
     [
       "GitHub queue",
-      { repository: "owner/repo", branch: "main", github: { openIssueNumbers: [] } },
+      {
+        repository: "owner/repo",
+        branch: "main",
+        github: {
+          openIssueNumbers: [],
+        },
+      },
       RunReconciliationStatus.GitHubMismatch,
     ],
   ])("rejects a %s mismatch", (_name, inputs, status) => {
@@ -76,8 +107,13 @@ describe("run-state reconciliation", () => {
       reconcileRunState(state, {
         repository: "owner/repo",
         branch: "main",
-        git: { branch: "main", head: "abc123" },
-        github: { openIssueNumbers: [2, 3] },
+        git: {
+          branch: "main",
+          head: "abc123",
+        },
+        github: {
+          openIssueNumbers: [2, 3],
+        },
       }),
     ).toEqual({
       compatible: true,
@@ -91,18 +127,29 @@ describe("run-state reconciliation", () => {
       ...state,
       queue: {
         pending: [
-          { number: 1, title: "Closing", url: "issue/1", body: null, labels: [] },
+          {
+            number: 1,
+            title: "Closing",
+            url: "issue/1",
+            body: null,
+            labels: [],
+          },
         ],
         completedIssueNumbers: [],
         processedCount: 0,
       },
-      activeIssue: { issueNumber: 1, stage: ProgressStage.IssueClosure },
+      activeIssue: {
+        issueNumber: 1,
+        stage: ProgressStage.IssueClosure,
+      },
     };
 
     const result = reconcileRunState(closingState, {
       repository: "owner/repo",
       branch: "main",
-      github: { openIssueNumbers: [] },
+      github: {
+        openIssueNumbers: [],
+      },
     });
 
     expect(result.compatible).toBeTrue();
@@ -130,12 +177,26 @@ describe("run-state reconciliation", () => {
   });
 
   test("preserves active state even when cleanup is requested", () => {
-    expect(planRunStateCleanup(state, true)).toBe(RunStateCleanupAction.Preserve);
+    expect(planRunStateCleanup(state, true)).toBe(
+      RunStateCleanupAction.Preserve,
+    );
     expect(
-      planRunStateCleanup({ ...state, status: RunStateStatus.Complete }, true),
+      planRunStateCleanup(
+        {
+          ...state,
+          status: RunStateStatus.Complete,
+        },
+        true,
+      ),
     ).toBe(RunStateCleanupAction.Remove);
     expect(
-      planRunStateCleanup({ ...state, status: RunStateStatus.Complete }, false),
+      planRunStateCleanup(
+        {
+          ...state,
+          status: RunStateStatus.Complete,
+        },
+        false,
+      ),
     ).toBe(RunStateCleanupAction.Preserve);
   });
 });

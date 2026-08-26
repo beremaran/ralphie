@@ -10,7 +10,10 @@ import { IssueArtifactKind, IssueArtifactStore } from "./artifacts.ts";
 import { ComplexityAssessment } from "./complexity.ts";
 import { ComplexityLevel } from "./decisions.ts";
 import { IssueExecutionOutcomeKind } from "./execution.ts";
-import type { IssueExecutionContext, IssueExecutionOutcome } from "./execution.ts";
+import type {
+  IssueExecutionContext,
+  IssueExecutionOutcome,
+} from "./execution.ts";
 
 export type DryRunIssueExecutorService = {
   readonly execute: (
@@ -18,9 +21,8 @@ export type DryRunIssueExecutorService = {
   ) => Effect.Effect<IssueExecutionOutcome, RalphieError>;
 };
 
-export const DryRunIssueExecutor = Context.GenericTag<DryRunIssueExecutorService>(
-  "ralphie/DryRunIssueExecutor",
-);
+export const DryRunIssueExecutor =
+  Context.GenericTag<DryRunIssueExecutorService>("ralphie/DryRunIssueExecutor");
 
 export const DryRunIssueExecutorLive = Layer.effect(
   DryRunIssueExecutor,
@@ -32,20 +34,32 @@ export const DryRunIssueExecutorLive = Layer.effect(
     return {
       execute: (context) =>
         Effect.gen(function* () {
-          const artifacts = yield* artifactStores.forIssue(context.issue.number);
+          const artifacts = yield* artifactStores.forIssue(
+            context.issue.number,
+          );
           const result = yield* assessment.assess(context);
-          yield* artifacts.write(IssueArtifactKind.ComplexityDecision, result.decision);
+          yield* artifacts.write(
+            IssueArtifactKind.ComplexityDecision,
+            result.decision,
+          );
 
           const route =
             result.decision.complexity <= ComplexityLevel.Level3
               ? "implementation"
               : "decomposition";
           yield* progress.emit({
-            issue: { number: context.issue.number, title: context.issue.title },
+            issue: {
+              number: context.issue.number,
+              title: context.issue.title,
+            },
             stage: ProgressStage.IssuePlanning,
             status: ProgressStatus.Info,
             message: `Dry run would route #${context.issue.number} (complexity ${result.decision.complexity}/5) to ${route}.`,
-            details: { dryRun: true, complexity: result.decision.complexity, route },
+            details: {
+              dryRun: true,
+              complexity: result.decision.complexity,
+              route,
+            },
           });
 
           return {

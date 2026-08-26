@@ -12,7 +12,11 @@ import {
   GitHubIssueCloseReason,
   GitHubIssueMutations,
 } from "./github/issue-mutations.ts";
-import { type GitHubIssue, GitHubIssues, type IssueFilters } from "./github/issues.ts";
+import {
+  type GitHubIssue,
+  GitHubIssues,
+  type IssueFilters,
+} from "./github/issues.ts";
 import {
   IssueCompletionKind,
   IssueExecutionOutcomeKind,
@@ -21,7 +25,11 @@ import {
 import { IssueExecutor } from "./issues/executor.ts";
 import { DryRunIssueExecutor } from "./issues/dry-run-executor.ts";
 import { IssueArtifactKind, IssueArtifactStore } from "./issues/artifacts.ts";
-import { createIssueQueue, IssueQueueState, toQueuedIssues } from "./issues/queue.ts";
+import {
+  createIssueQueue,
+  IssueQueueState,
+  toQueuedIssues,
+} from "./issues/queue.ts";
 import type { PiModel } from "./agent/model.ts";
 import { Pi, type PiRuntime } from "./agent/server.ts";
 import { makePiSessionDiagnostics } from "./agent/task-session.ts";
@@ -91,7 +99,10 @@ const copyOutcome = (
   switch (outcome.kind) {
     case IssueExecutionOutcomeKind.Completed:
       if (outcome.completion === IssueCompletionKind.AlreadyResolved) {
-        return { ...outcome, evidence: [...outcome.evidence] };
+        return {
+          ...outcome,
+          evidence: [...outcome.evidence],
+        };
       }
       return {
         kind: outcome.kind,
@@ -99,10 +110,15 @@ const copyOutcome = (
         commitSha: outcome.commitSha,
         ...(outcome.reviewCount === undefined
           ? {}
-          : { reviewCount: outcome.reviewCount }),
+          : {
+              reviewCount: outcome.reviewCount,
+            }),
       };
     case IssueExecutionOutcomeKind.Decomposed:
-      return { ...outcome, childIssueNumbers: [...outcome.childIssueNumbers] };
+      return {
+        ...outcome,
+        childIssueNumbers: [...outcome.childIssueNumbers],
+      };
     case IssueExecutionOutcomeKind.Escalated:
       return {
         kind: outcome.kind,
@@ -110,10 +126,14 @@ const copyOutcome = (
         reason: outcome.reason,
         ...(outcome.childIssueNumbers === undefined
           ? {}
-          : { childIssueNumbers: [...outcome.childIssueNumbers] }),
+          : {
+              childIssueNumbers: [...outcome.childIssueNumbers],
+            }),
       };
     default:
-      return { ...outcome };
+      return {
+        ...outcome,
+      };
   }
 };
 
@@ -176,7 +196,11 @@ const summarize = (
     Object.values(IssueExecutionOutcomeKind).map((kind) => [kind, 0]),
   ) as Record<IssueExecutionOutcomeKind, number>;
   for (const { outcome } of outcomes) counts[outcome.kind] += 1;
-  return { runId, outcomes, counts };
+  return {
+    runId,
+    outcomes,
+    counts,
+  };
 };
 
 export type WorkflowOptions = {
@@ -228,9 +252,11 @@ export const workflow = ({
     const actualRunId = resumeState?.runId ?? runId;
     const effectiveDryRun = resumeState?.dryRun ?? dryRun;
     const workflowMode = resumeState?.workflow ?? requestedWorkflow;
-    const effectiveIssueConcurrency = resumeState?.issueConcurrency ?? issueConcurrency;
+    const effectiveIssueConcurrency =
+      resumeState?.issueConcurrency ?? issueConcurrency;
     const usesPullRequests =
-      workflowMode === WorkflowMode.Pr || workflowMode === WorkflowMode.ParallelPr;
+      workflowMode === WorkflowMode.Pr ||
+      workflowMode === WorkflowMode.ParallelPr;
     const statePath =
       resumePath ??
       join(
@@ -246,7 +272,11 @@ export const workflow = ({
       message: `Ralphie started for ${repo} on ${requestedBranch ?? "default branch"}.`,
       details: {
         repository: repo,
-        ...(requestedBranch === undefined ? {} : { branch: requestedBranch }),
+        ...(requestedBranch === undefined
+          ? {}
+          : {
+              branch: requestedBranch,
+            }),
         workspace,
         model: model ? `${model.providerID}/${model.modelID}` : "Pi default",
         variant: modelVariant ?? "Pi default",
@@ -255,14 +285,21 @@ export const workflow = ({
         runId: actualRunId,
         dryRun: effectiveDryRun,
         workflow: workflowMode,
-        ...(resumeState === undefined ? {} : { resumed: true, statePath }),
+        ...(resumeState === undefined
+          ? {}
+          : {
+              resumed: true,
+              statePath,
+            }),
       },
     });
 
     let activeIssue: RunState["activeIssue"] | undefined;
     let activeQueueIssue: GitHubIssue | undefined;
     const activeQueueIssues = new Map<number, GitHubIssue>();
-    let persistCancellationState: (() => Effect.Effect<void, RalphieError>) | undefined;
+    let persistCancellationState:
+      | (() => Effect.Effect<void, RalphieError>)
+      | undefined;
     let restoreCancellationCheckout:
       | (() => Effect.Effect<void, RalphieError>)
       | undefined;
@@ -298,11 +335,19 @@ export const workflow = ({
         "GitHub authentication verified and Octokit initialized.",
       );
       const issueMutations = yield* GitHubIssueMutations;
-      const pullRequests = usesPullRequests ? yield* GitHubPullRequests : undefined;
-      const issueOperations = usesPullRequests ? yield* GitIssueOperations : undefined;
-      const artifactStores = usesPullRequests ? yield* IssueArtifactStore : undefined;
+      const pullRequests = usesPullRequests
+        ? yield* GitHubPullRequests
+        : undefined;
+      const issueOperations = usesPullRequests
+        ? yield* GitIssueOperations
+        : undefined;
+      const artifactStores = usesPullRequests
+        ? yield* IssueArtifactStore
+        : undefined;
       const worktrees =
-        workflowMode === WorkflowMode.ParallelPr ? yield* GitWorktrees : undefined;
+        workflowMode === WorkflowMode.ParallelPr
+          ? yield* GitWorktrees
+          : undefined;
       yield* checkCancellation(signal);
 
       const repository = yield* GitRepository;
@@ -320,12 +365,15 @@ export const workflow = ({
         ProgressStage.RepositoryPreparation,
         `Preparing ${repo} on ${requestedBranch ?? "main/master"}...`,
         repository.prepare(repo, requestedBranch, workspace),
-        (result) =>
-          `Repository ready: ${result.path}.`,
+        (result) => `Repository ready: ${result.path}.`,
         {
           details: {
             repository: repo,
-            ...(requestedBranch === undefined ? {} : { branch: requestedBranch }),
+            ...(requestedBranch === undefined
+              ? {}
+              : {
+                  branch: requestedBranch,
+                }),
             workspace,
           },
         },
@@ -343,14 +391,22 @@ export const workflow = ({
           result.length === 0
             ? "No open issues match the current filters."
             : `Found ${result.length} matching open issues.`,
-        { details: { filters: issueFilters } },
+        {
+          details: {
+            filters: issueFilters,
+          },
+        },
       );
       yield* checkCancellation(signal);
 
       const invariantService = yield* GitRepositoryInvariant;
       const checkpoints = yield* GitIssueCheckpoint;
       const repositoryCheckouts = [
-        { repository: repo, repositoryPath: prepared.path, branch: prepared.branch },
+        {
+          repository: repo,
+          repositoryPath: prepared.path,
+          branch: prepared.branch,
+        },
       ];
       const captureCheckout = () => invariantService.capture(prepared.path);
       let checkout = yield* captureCheckout();
@@ -371,7 +427,9 @@ export const workflow = ({
       }
 
       const initialIssues =
-        resumeState === undefined ? discoveredIssues : resumeState.queue.pending;
+        resumeState === undefined
+          ? discoveredIssues
+          : resumeState.queue.pending;
       const queue = createIssueQueue(
         toQueuedIssues(initialIssues),
         resumeState?.maxIssues ?? maxIssues,
@@ -386,7 +444,11 @@ export const workflow = ({
         readonly issueNumber: number;
         readonly outcome: IssueExecutionOutcome;
       }> = [...(resumeState?.outcomes ?? [])];
-      const selection = { agent, model, variant: modelVariant };
+      const selection = {
+        agent,
+        model,
+        variant: modelVariant,
+      };
 
       const persistState = (
         status: RunStateStatus,
@@ -400,7 +462,10 @@ export const workflow = ({
         }));
         for (const issue of activeQueueIssues.values()) {
           if (!pending.some(({ number }) => number === issue.number)) {
-            pending.unshift({ ...issue, labels: [...issue.labels] });
+            pending.unshift({
+              ...issue,
+              labels: [...issue.labels],
+            });
           }
         }
         return stateStore.save(statePath, {
@@ -415,7 +480,9 @@ export const workflow = ({
           selection,
           ...((resumeState?.maxIssues ?? maxIssues) === undefined
             ? {}
-            : { maxIssues: resumeState?.maxIssues ?? maxIssues }),
+            : {
+                maxIssues: resumeState?.maxIssues ?? maxIssues,
+              }),
           queue: {
             pending,
             completedIssueNumbers: [...snapshot.completedIssueNumbers],
@@ -427,13 +494,18 @@ export const workflow = ({
             issueNumber,
             outcome: copyOutcome(outcome),
           })),
-          ...(activeIssue === undefined ? {} : { activeIssue }),
+          ...(activeIssue === undefined
+            ? {}
+            : {
+                activeIssue,
+              }),
           checkout,
           updatedAt: new Date().toISOString(),
         });
       };
 
-      persistCancellationState = () => persistState(RunStateStatus.Active, activeIssue);
+      persistCancellationState = () =>
+        persistState(RunStateStatus.Active, activeIssue);
 
       yield* persistState(RunStateStatus.Active);
       const issueExecutor = effectiveDryRun
@@ -450,14 +522,17 @@ export const workflow = ({
             activeQueueIssues.set(issue.number, issue);
             const current = queue.processedCount();
             const total =
-              resumeState?.maxIssues ?? maxIssues ?? current + queue.pendingCount();
+              resumeState?.maxIssues ??
+              maxIssues ??
+              current + queue.pendingCount();
             const resumedClosureOutcome =
               resumeState?.activeIssue?.issueNumber === issue.number &&
               resumeState.activeIssue.stage === ProgressStage.IssueClosure
                 ? outcomes.find(
                     (entry) =>
                       entry.issueNumber === issue.number &&
-                      entry.outcome.kind === IssueExecutionOutcomeKind.Completed,
+                      entry.outcome.kind ===
+                        IssueExecutionOutcomeKind.Completed,
                   )?.outcome
                 : undefined;
             activeIssue = {
@@ -467,7 +542,9 @@ export const workflow = ({
                   ? ProgressStage.ComplexityAssessment
                   : ProgressStage.IssueClosure,
             };
-            const issueBaseCheckout = { ...checkout };
+            const issueBaseCheckout = {
+              ...checkout,
+            };
             const featureBranch = issueFeatureBranch(issue.number);
             let preparedIssueWorktree: PreparedIssueWorktree | undefined;
             if (workflowMode === WorkflowMode.ParallelPr && !effectiveDryRun) {
@@ -493,11 +570,15 @@ export const workflow = ({
                 (repository) => {
                   const base = issueBaseCheckout;
                   const prepareBranch: Effect.Effect<
-                    { readonly headSha: string },
+                    {
+                      readonly headSha: string;
+                    },
                     RalphieError
                   > =
                     workflowMode === WorkflowMode.ParallelPr
-                      ? Effect.succeed({ headSha: base.head })
+                      ? Effect.succeed({
+                          headSha: base.head,
+                        })
                       : issueOperations!.createOrCheckoutFeatureBranch(
                           repository.repositoryPath,
                           featureBranch,
@@ -524,7 +605,9 @@ export const workflow = ({
                     ),
                   );
                 },
-                { discard: true },
+                {
+                  discard: true,
+                },
               );
             }
             restoreCancellationCheckout =
@@ -538,7 +621,9 @@ export const workflow = ({
                           branch: issueBaseCheckout.branch,
                           sha: issueBaseCheckout.head,
                         }),
-                      { discard: true },
+                      {
+                        discard: true,
+                      },
                     );
             yield* persistState(RunStateStatus.Active, activeIssue);
             const outcome =
@@ -556,7 +641,9 @@ export const workflow = ({
                         repository.toLowerCase() === repo.toLowerCase(),
                     )?.repositoryPath ?? prepared.path,
                   targetBranch:
-                    usesPullRequests && !effectiveDryRun ? featureBranch : branch,
+                    usesPullRequests && !effectiveDryRun
+                      ? featureBranch
+                      : branch,
                   workspace,
                   runId: actualRunId,
                   octokit,
@@ -566,16 +653,21 @@ export const workflow = ({
                   repositoryInvariant: invariantService,
                   signal,
                 }),
-                (result) =>
-                  outcomeMessage(issue.number, result),
+                (result) => outcomeMessage(issue.number, result),
                 {
-                  issue: { number: issue.number, title: issue.title },
+                  issue: {
+                    number: issue.number,
+                    title: issue.title,
+                  },
                   current,
                   total,
                 },
               ));
             if (resumedClosureOutcome === undefined) {
-              outcomes.push({ issueNumber: issue.number, outcome });
+              outcomes.push({
+                issueNumber: issue.number,
+                outcome,
+              });
             }
 
             if (outcome.kind === IssueExecutionOutcomeKind.Completed) {
@@ -592,11 +684,14 @@ export const workflow = ({
                 usesPullRequests &&
                 outcome.completion === IssueCompletionKind.PushedCommit
               ) {
-                const artifacts = yield* artifactStores!.forIssue(issue.number, {
-                  workspace,
-                  runId: actualRunId,
-                  repository: repo,
-                });
+                const artifacts = yield* artifactStores!.forIssue(
+                  issue.number,
+                  {
+                    workspace,
+                    runId: actualRunId,
+                    repository: repo,
+                  },
+                );
                 const reviews = artifacts.has(IssueArtifactKind.ReviewAttempts)
                   ? yield* artifacts.read(IssueArtifactKind.ReviewAttempts)
                   : [];
@@ -620,7 +715,11 @@ export const workflow = ({
                         )
                         .pipe(
                           Effect.zipRight(
-                            pullRequests!.merge(octokit, repo, pullRequest.number),
+                            pullRequests!.merge(
+                              octokit,
+                              repo,
+                              pullRequest.number,
+                            ),
                           ),
                         ),
                     ),
@@ -641,8 +740,13 @@ export const workflow = ({
                       ),
                   `Pull request merged; GitHub will close issue #${issue.number}.`,
                   {
-                    issue: { number: issue.number, title: issue.title },
-                    details: { completion: outcome.completion },
+                    issue: {
+                      number: issue.number,
+                      title: issue.title,
+                    },
+                    details: {
+                      completion: outcome.completion,
+                    },
                   },
                 );
                 if (preparedIssueWorktree !== undefined) {
@@ -664,8 +768,13 @@ export const workflow = ({
                   ),
                   `Issue #${issue.number} closed as completed.`,
                   {
-                    issue: { number: issue.number, title: issue.title },
-                    details: { completion: outcome.completion },
+                    issue: {
+                      number: issue.number,
+                      title: issue.title,
+                    },
+                    details: {
+                      completion: outcome.completion,
+                    },
                   },
                 );
               }
@@ -729,7 +838,10 @@ export const workflow = ({
                 stage: ProgressStage.IssueQueue,
                 status: ProgressStatus.Info,
                 message: `Issue queue refreshed; added ${added} new issues.`,
-                details: { added, pending: queue.pendingCount() },
+                details: {
+                  added,
+                  pending: queue.pendingCount(),
+                },
               });
               yield* persistState(RunStateStatus.Active);
             }
@@ -738,10 +850,15 @@ export const workflow = ({
         return workflowMode === WorkflowMode.ParallelPr
           ? Effect.all(
               Array.from(
-                { length: Math.max(1, effectiveIssueConcurrency) },
+                {
+                  length: Math.max(1, effectiveIssueConcurrency),
+                },
                 () => worker,
               ),
-              { concurrency: "unbounded", discard: true },
+              {
+                concurrency: "unbounded",
+                discard: true,
+              },
             )
           : worker;
       };
@@ -813,7 +930,10 @@ export const workflow = ({
 
       return Effect.gen(function* () {
         let restoreError: RalphieError | undefined;
-        if (activeIssue !== undefined && restoreCancellationCheckout !== undefined) {
+        if (
+          activeIssue !== undefined &&
+          restoreCancellationCheckout !== undefined
+        ) {
           yield* restoreCancellationCheckout().pipe(
             Effect.catchAll((failure) =>
               Effect.sync(() => {
@@ -845,7 +965,11 @@ export const workflow = ({
             `Run completed: ${summary.counts.completed} completed, ` +
             `${summary.counts.decomposed} decomposed, ${summary.counts.escalated} escalated, ` +
             `${summary.counts.skipped} skipped, ${summary.counts.failed} failed.`,
-          details: { runId: summary.runId, counts: summary.counts, statePath },
+          details: {
+            runId: summary.runId,
+            counts: summary.counts,
+            statePath,
+          },
         }),
       ),
       Effect.tapError((error) =>
@@ -853,7 +977,10 @@ export const workflow = ({
           stage: ProgressStage.Run,
           status: ProgressStatus.Failed,
           message: `Run failed: ${errorMessage(error)}`,
-          details: { runId: actualRunId, statePath },
+          details: {
+            runId: actualRunId,
+            statePath,
+          },
         }),
       ),
     );

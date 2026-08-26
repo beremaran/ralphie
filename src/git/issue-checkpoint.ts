@@ -14,7 +14,9 @@ export type GitIssueCheckpointService = {
     repositoryPath: string,
     branch: string,
   ) => Effect.Effect<IssueCheckpoint, RalphieError>;
-  readonly createPatch: (repositoryPath: string) => Effect.Effect<string, RalphieError>;
+  readonly createPatch: (
+    repositoryPath: string,
+  ) => Effect.Effect<string, RalphieError>;
   readonly restore: (
     repositoryPath: string,
     checkpoint: IssueCheckpoint,
@@ -38,7 +40,9 @@ const runGit = (
     });
     if (result.exitCode !== 0) {
       const detail = result.stderr ? ` ${result.stderr}` : "";
-      return yield* new RalphieError({ message: `${failureMessage}.${detail}` });
+      return yield* new RalphieError({
+        message: `${failureMessage}.${detail}`,
+      });
     }
     return result.stdout;
   });
@@ -92,7 +96,10 @@ export const GitIssueCheckpointLive = Layer.effect(
               message: `Git returned an invalid issue base commit: ${sha}.`,
             });
           }
-          return { branch, sha };
+          return {
+            branch,
+            sha,
+          };
         }),
 
       createPatch: (repositoryPath) =>

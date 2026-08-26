@@ -57,7 +57,9 @@ export type IssueArtifactStore = {
     kind: K,
   ) => Effect.Effect<IssueArtifactValues[K], RalphieError>;
   readonly has: (kind: IssueArtifactKind) => boolean;
-  readonly appendReview: (review: ReviewAttempt) => Effect.Effect<void, RalphieError>;
+  readonly appendReview: (
+    review: ReviewAttempt,
+  ) => Effect.Effect<void, RalphieError>;
   readonly recordCreatedIssue: (
     key: string,
     issueNumber: number,
@@ -84,7 +86,11 @@ export const IssueArtifactStore = Context.GenericTag<IssueArtifactStoreService>(
 );
 
 const failure = (message: string): Effect.Effect<never, RalphieError> =>
-  Effect.fail(new RalphieError({ message }));
+  Effect.fail(
+    new RalphieError({
+      message,
+    }),
+  );
 
 const validIssueNumber = (issueNumber: number): boolean =>
   Number.isInteger(issueNumber) && issueNumber > 0;
@@ -93,9 +99,12 @@ const validReviewOrder = (reviews: ReadonlyArray<ReviewAttempt>): boolean =>
   reviews.length <= REVIEW_ITERATION_LIMIT &&
   reviews.every((review, index) => review.attempt === index + 1);
 
-const validCreatedIssueNumberMapping = (mapping: CreatedIssueNumberMapping): boolean =>
+const validCreatedIssueNumberMapping = (
+  mapping: CreatedIssueNumberMapping,
+): boolean =>
   Object.entries(mapping).every(
-    ([key, issueNumber]) => key.trim().length > 0 && validIssueNumber(issueNumber),
+    ([key, issueNumber]) =>
+      key.trim().length > 0 && validIssueNumber(issueNumber),
   );
 
 const reviewAttemptSchema = z.object({
@@ -121,11 +130,13 @@ const persistedArtifactsSchema = z
       .array(reviewAttemptSchema)
       .max(REVIEW_ITERATION_LIMIT)
       .optional(),
-    [IssueArtifactKind.CommitMessageDecision]: commitMessageDecisionSchema.optional(),
+    [IssueArtifactKind.CommitMessageDecision]:
+      commitMessageDecisionSchema.optional(),
     [IssueArtifactKind.CreatedCommit]: createdCommitSchema.optional(),
     [IssueArtifactKind.IssueResolutionDecision]:
       issueResolutionDecisionSchema.optional(),
-    [IssueArtifactKind.IssueBreakdownDecision]: issueBreakdownDecisionSchema.optional(),
+    [IssueArtifactKind.IssueBreakdownDecision]:
+      issueBreakdownDecisionSchema.optional(),
     [IssueArtifactKind.CreatedIssueNumbers]: z
       .record(z.string(), z.number().int().positive())
       .optional(),
@@ -173,7 +184,11 @@ const toPersistedState = (
   return persistedArtifactStateSchema.parse({
     version: 2,
     issueNumber,
-    ...(scope?.repository === undefined ? {} : { repository: scope.repository }),
+    ...(scope?.repository === undefined
+      ? {}
+      : {
+          repository: scope.repository,
+        }),
     artifacts,
   });
 };
@@ -184,7 +199,9 @@ const persistAtomically = (
 ): Effect.Effect<void, RalphieError> =>
   Effect.tryPromise({
     try: async () => {
-      await mkdir(dirname(filePath), { recursive: true });
+      await mkdir(dirname(filePath), {
+        recursive: true,
+      });
       const temporaryPath = `${filePath}.${randomUUID()}.tmp`;
       try {
         await writeFile(temporaryPath, `${JSON.stringify(state, null, 2)}\n`, {
@@ -193,7 +210,9 @@ const persistAtomically = (
         });
         await rename(temporaryPath, filePath);
       } catch (cause) {
-        await rm(temporaryPath, { force: true }).catch(() => undefined);
+        await rm(temporaryPath, {
+          force: true,
+        }).catch(() => undefined);
         throw cause;
       }
     },
@@ -215,7 +234,8 @@ const loadPersistedState = (
       try {
         encoded = await readFile(filePath, "utf8");
       } catch (cause) {
-        if ((cause as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+        if ((cause as NodeJS.ErrnoException).code === "ENOENT")
+          return undefined;
         throw cause;
       }
       const parsed = persistedArtifactStateSchema.parse(JSON.parse(encoded));
@@ -296,7 +316,9 @@ const makeStore = (
     read: (kind) => {
       const value = values.get(kind);
       return value === undefined
-        ? failure(`Artifact ${kind} has not been produced for issue ${issueNumber}.`)
+        ? failure(
+            `Artifact ${kind} has not been produced for issue ${issueNumber}.`,
+          )
         : Effect.succeed(value as IssueArtifactValues[typeof kind]);
     },
     has: (kind) => values.has(kind),
@@ -312,7 +334,9 @@ const makeStore = (
         );
       }
       if (existing.length >= REVIEW_ITERATION_LIMIT) {
-        return failure(`Review attempt budget exhausted for issue ${issueNumber}.`);
+        return failure(
+          `Review attempt budget exhausted for issue ${issueNumber}.`,
+        );
       }
       const nextValues = new Map(values);
       nextValues.set(IssueArtifactKind.ReviewAttempts, [...existing, review]);

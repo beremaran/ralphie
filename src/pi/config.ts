@@ -73,7 +73,9 @@ export const resolvePiAgentDir = async (
       "pi",
       randomUUID(),
     );
-    await mkdir(dir, { recursive: true });
+    await mkdir(dir, {
+      recursive: true,
+    });
     await chmod(dir, 0o600);
 
     const modelsPath = join(dir, "models.json");
@@ -85,13 +87,19 @@ export const resolvePiAgentDir = async (
         null,
         2,
       ),
-      { encoding: "utf8", mode: 0o600 },
+      {
+        encoding: "utf8",
+        mode: 0o600,
+      },
     );
     await chmod(modelsPath, 0o600);
     await writeFile(
       authPath,
       JSON.stringify(buildAuthJson(providerId, config.modelApiKey), null, 2),
-      { encoding: "utf8", mode: 0o600 },
+      {
+        encoding: "utf8",
+        mode: 0o600,
+      },
     );
     await chmod(authPath, 0o600);
 
@@ -117,7 +125,10 @@ const makeResolution = (
 
 /** Remove a throwaway agent directory created for Option B. */
 export const cleanupPiAgentDir = async (dir: string): Promise<void> => {
-  await rm(dir, { recursive: true, force: true });
+  await rm(dir, {
+    recursive: true,
+    force: true,
+  });
 };
 
 const buildModelsJson = (
@@ -130,11 +141,19 @@ const buildModelsJson = (
       name: providerId,
       baseUrl,
       api: "openai",
-      models: [{ id: modelId, api: "openai" }],
+      models: [
+        {
+          id: modelId,
+          api: "openai",
+        },
+      ],
     },
   },
 });
 
 const buildAuthJson = (providerId: string, apiKey?: string): unknown => ({
-  [providerId]: { type: "api_key" as const, key: apiKey },
+  [providerId]: {
+    type: "api_key" as const,
+    key: apiKey,
+  },
 });

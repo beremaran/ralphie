@@ -52,8 +52,9 @@ export type GitHubIssuesService = {
   ) => Effect.Effect<ReadonlyArray<GitHubDecompositionChild>, RalphieError>;
 };
 
-export const GitHubIssues =
-  Context.GenericTag<GitHubIssuesService>("ralphie/GitHubIssues");
+export const GitHubIssues = Context.GenericTag<GitHubIssuesService>(
+  "ralphie/GitHubIssues",
+);
 
 export const GitHubIssuesLive = Layer.succeed(GitHubIssues, {
   listOpen: (client, repository, filters) =>
@@ -68,7 +69,11 @@ export const GitHubIssuesLive = Layer.succeed(GitHubIssues, {
           sort: filters.sort,
           direction: filters.order,
           per_page: 100,
-          ...(filters.labels.length > 0 ? { labels: filters.labels.join(",") } : {}),
+          ...(filters.labels.length > 0
+            ? {
+                labels: filters.labels.join(","),
+              }
+            : {}),
         });
 
         return data
@@ -79,7 +84,11 @@ export const GitHubIssuesLive = Layer.succeed(GitHubIssues, {
             url: issue.html_url,
             body: issue.body ?? null,
             labels: issue.labels.flatMap((label) =>
-              typeof label === "string" ? [label] : label.name ? [label.name] : [],
+              typeof label === "string"
+                ? [label]
+                : label.name
+                  ? [label.name]
+                  : [],
             ),
           }));
       },
@@ -128,7 +137,10 @@ export const GitHubIssuesLive = Layer.succeed(GitHubIssues, {
           } catch {
             return [];
           }
-          if (typeof decompositionKey !== "string" || decompositionKey.length === 0) {
+          if (
+            typeof decompositionKey !== "string" ||
+            decompositionKey.length === 0
+          ) {
             return [];
           }
 
@@ -139,7 +151,11 @@ export const GitHubIssuesLive = Layer.succeed(GitHubIssues, {
               url: issue.html_url,
               body,
               labels: issue.labels.flatMap((label) =>
-                typeof label === "string" ? [label] : label.name ? [label.name] : [],
+                typeof label === "string"
+                  ? [label]
+                  : label.name
+                    ? [label.name]
+                    : [],
               ),
               decompositionKey,
             },

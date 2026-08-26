@@ -4,7 +4,10 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { IssueCompletionKind, IssueExecutionOutcomeKind } from "../issues/execution.ts";
+import {
+  IssueCompletionKind,
+  IssueExecutionOutcomeKind,
+} from "../issues/execution.ts";
 import {
   RUN_STATE_VERSION,
   RunStateStatus,
@@ -20,10 +23,20 @@ const state: RunState = {
   runId: "run-1",
   repository: "owner/repo",
   branch: "main",
-  selection: { agent: "build" },
+  selection: {
+    agent: "build",
+  },
   maxIssues: 3,
   queue: {
-    pending: [{ number: 2, title: "Next", url: "issue/2", body: null, labels: [] }],
+    pending: [
+      {
+        number: 2,
+        title: "Next",
+        url: "issue/2",
+        body: null,
+        labels: [],
+      },
+    ],
     completedIssueNumbers: [1],
     processedCount: 1,
   },
@@ -37,7 +50,10 @@ const state: RunState = {
       },
     },
   ],
-  activeIssue: { issueNumber: 2, stage: "implementation" },
+  activeIssue: {
+    issueNumber: 2,
+    stage: "implementation",
+  },
   updatedAt: "2026-08-24T00:00:00.000Z",
 };
 
@@ -60,14 +76,29 @@ describe("run state store", () => {
       expect(loaded).toEqual(state);
       expect(JSON.parse(await readFile(path, "utf8"))).toEqual(state);
     } finally {
-      await rm(directory, { recursive: true, force: true });
+      await rm(directory, {
+        recursive: true,
+        force: true,
+      });
     }
   });
 
   test.each([
     ["corrupted JSON", "not-json"],
-    ["incompatible version", JSON.stringify({ ...state, version: 1 })],
-    ["missing queue state", JSON.stringify({ ...state, queue: undefined })],
+    [
+      "incompatible version",
+      JSON.stringify({
+        ...state,
+        version: 1,
+      }),
+    ],
+    [
+      "missing queue state",
+      JSON.stringify({
+        ...state,
+        queue: undefined,
+      }),
+    ],
   ])("rejects %s", async (_label, content) => {
     const directory = await mkdtemp(join(tmpdir(), "ralphie-state-"));
     const path = join(directory, "state.json");
@@ -81,7 +112,10 @@ describe("run state store", () => {
       ).pipe(Effect.runPromiseExit);
       expect(Exit.isFailure(exit)).toBe(true);
     } finally {
-      await rm(directory, { recursive: true, force: true });
+      await rm(directory, {
+        recursive: true,
+        force: true,
+      });
     }
   });
 
@@ -90,7 +124,9 @@ describe("run state store", () => {
     const path = join(directory, "state.json");
     try {
       const legacy = structuredClone(state) as unknown as {
-        outcomes: Array<{ outcome: Record<string, unknown> }>;
+        outcomes: Array<{
+          outcome: Record<string, unknown>;
+        }>;
       };
       delete legacy.outcomes[0]?.outcome.completion;
       await writeFile(path, JSON.stringify(legacy));
@@ -108,7 +144,10 @@ describe("run state store", () => {
         commitSha: "abc123",
       });
     } finally {
-      await rm(directory, { recursive: true, force: true });
+      await rm(directory, {
+        recursive: true,
+        force: true,
+      });
     }
   });
 
@@ -120,13 +159,19 @@ describe("run state store", () => {
         Effect.gen(function* () {
           const store = yield* RunStateStore;
           yield* store.save(path, state);
-          yield* store.save(path, { ...state, runId: "" });
+          yield* store.save(path, {
+            ...state,
+            runId: "",
+          });
         }),
       ).pipe(Effect.runPromiseExit);
       expect(Exit.isFailure(exit)).toBe(true);
       expect(JSON.parse(await readFile(path, "utf8"))).toEqual(state);
     } finally {
-      await rm(directory, { recursive: true, force: true });
+      await rm(directory, {
+        recursive: true,
+        force: true,
+      });
     }
   });
 });

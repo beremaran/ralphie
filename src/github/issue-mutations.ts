@@ -61,16 +61,22 @@ export type GitHubIssueMutationService = {
   ) => Effect.Effect<GitHubIssue, RalphieError>;
 };
 
-export const GitHubIssueMutations = Context.GenericTag<GitHubIssueMutationService>(
-  "ralphie/GitHubIssueMutations",
-);
+export const GitHubIssueMutations =
+  Context.GenericTag<GitHubIssueMutationService>(
+    "ralphie/GitHubIssueMutations",
+  );
 
 const mapIssue = (issue: {
   readonly number: number;
   readonly title: string;
   readonly html_url: string;
   readonly body?: string | null;
-  readonly labels?: ReadonlyArray<string | { readonly name?: string | null }>;
+  readonly labels?: ReadonlyArray<
+    | string
+    | {
+        readonly name?: string | null;
+      }
+  >;
 }): GitHubIssue => ({
   number: issue.number,
   title: issue.title,
@@ -86,11 +92,19 @@ const mapIssue = (issue: {
 const repositoryParameters = (repository: string) => {
   const { slug } = parseRepositorySlug(repository);
   const [owner, repo] = slug.split("/") as [string, string];
-  return { owner, repo };
+  return {
+    owner,
+    repo,
+  };
 };
 
 const mutationError = (message: string, cause: unknown): RalphieError =>
-  cause instanceof RalphieError ? cause : new RalphieError({ message, cause });
+  cause instanceof RalphieError
+    ? cause
+    : new RalphieError({
+        message,
+        cause,
+      });
 
 export const GitHubIssueMutationsLive = Layer.succeed(GitHubIssueMutations, {
   create: (client, repository, input) =>
@@ -119,8 +133,16 @@ export const GitHubIssueMutationsLive = Layer.succeed(GitHubIssueMutations, {
         const response = await client.rest.issues.update({
           ...repositoryParameters(repository),
           issue_number: issueNumber,
-          ...(input.title === undefined ? {} : { title: input.title }),
-          ...(input.body === undefined ? {} : { body: input.body }),
+          ...(input.title === undefined
+            ? {}
+            : {
+                title: input.title,
+              }),
+          ...(input.body === undefined
+            ? {}
+            : {
+                body: input.body,
+              }),
         });
         return mapIssue(response.data);
       },
@@ -169,6 +191,9 @@ export const GitHubIssueMutationsLive = Layer.succeed(GitHubIssueMutations, {
         }
       },
       catch: (cause) =>
-        mutationError(`Failed to close issue #${issueNumber} in ${repository}.`, cause),
+        mutationError(
+          `Failed to close issue #${issueNumber} in ${repository}.`,
+          cause,
+        ),
     }),
 });

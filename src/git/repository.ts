@@ -4,7 +4,10 @@ import { dirname, join } from "node:path";
 import simpleGit from "simple-git";
 
 import { parseRepositorySlug } from "../github/repository.ts";
-import { CommandRunner, requireSuccessfulCommand } from "../process/command-runner.ts";
+import {
+  CommandRunner,
+  requireSuccessfulCommand,
+} from "../process/command-runner.ts";
 import { RalphieError } from "../shared/error.ts";
 import { resolveWorkspacePath } from "../workspace/workspace.ts";
 
@@ -73,7 +76,9 @@ export const GitRepositoryLive = Layer.effect(
 
           const exists = yield* Effect.tryPromise({
             try: async () => {
-              await mkdir(dirname(repositoryPath), { recursive: true });
+              await mkdir(dirname(repositoryPath), {
+                recursive: true,
+              });
               return pathExists(repositoryPath);
             },
             catch: (cause) =>
@@ -132,13 +137,15 @@ export const GitRepositoryLive = Layer.effect(
 
               const selectedBranch =
                 branch ??
-                (await git.revparse(["--verify", "refs/remotes/origin/main"]).then(
-                  () => "main",
-                  () =>
-                    git
-                      .revparse(["--verify", "refs/remotes/origin/master"])
-                      .then(() => "master"),
-                ));
+                (await git
+                  .revparse(["--verify", "refs/remotes/origin/main"])
+                  .then(
+                    () => "main",
+                    () =>
+                      git
+                        .revparse(["--verify", "refs/remotes/origin/master"])
+                        .then(() => "master"),
+                  ));
               if (selectedBranch === undefined) {
                 throw new Error(
                   "Neither origin/main nor origin/master exists; specify a branch explicitly.",
@@ -158,7 +165,11 @@ export const GitRepositoryLive = Layer.effect(
                 await git.raw(["clean", "-fd"]);
               }
 
-              return { branch: selectedBranch, branchChanged, cleaned };
+              return {
+                branch: selectedBranch,
+                branchChanged,
+                cleaned,
+              };
             },
             catch: (cause) =>
               new RalphieError({

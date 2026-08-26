@@ -8,7 +8,9 @@ import { resolveWorkspacePath, Workspace, WorkspaceLive } from "./workspace.ts";
 
 describe("workspace cleanup", () => {
   test("expands the default workspace path", () => {
-    expect(resolveWorkspacePath("~/.ralphie")).toBe(resolve(homedir(), ".ralphie"));
+    expect(resolveWorkspacePath("~/.ralphie")).toBe(
+      resolve(homedir(), ".ralphie"),
+    );
   });
 
   test("prepares the workspace root", async () => {
@@ -22,7 +24,10 @@ describe("workspace cleanup", () => {
 
       expect((await stat(path)).isDirectory()).toBeTrue();
     } finally {
-      await rm(parent, { recursive: true, force: true });
+      await rm(parent, {
+        recursive: true,
+        force: true,
+      });
     }
   });
 

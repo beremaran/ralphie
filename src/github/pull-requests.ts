@@ -50,11 +50,19 @@ export const GitHubPullRequests = Context.GenericTag<GitHubPullRequestService>(
 
 const repositoryParameters = (repository: string) => {
   const { owner, name } = parseRepositorySlug(repository);
-  return { owner, repo: name };
+  return {
+    owner,
+    repo: name,
+  };
 };
 
 const mutationError = (message: string, cause: unknown): RalphieError =>
-  cause instanceof RalphieError ? cause : new RalphieError({ message, cause });
+  cause instanceof RalphieError
+    ? cause
+    : new RalphieError({
+        message,
+        cause,
+      });
 
 const isMerged = (pullRequest: {
   readonly merged?: boolean | null;
@@ -108,14 +116,19 @@ const findMatchingPullRequest = (
     readonly html_url: string;
     readonly merged?: boolean | null;
     readonly merged_at?: string | null;
-    readonly head?: { readonly ref?: string | null } | null;
-    readonly base?: { readonly ref?: string | null } | null;
+    readonly head?: {
+      readonly ref?: string | null;
+    } | null;
+    readonly base?: {
+      readonly ref?: string | null;
+    } | null;
   }>,
   input: CreateGitHubPullRequestInput,
 ) =>
   pullRequests.find(
     (pullRequest) =>
-      pullRequest.head?.ref === input.head && pullRequest.base?.ref === input.base,
+      pullRequest.head?.ref === input.head &&
+      pullRequest.base?.ref === input.base,
   );
 
 export const GitHubPullRequestsLive = Layer.succeed(GitHubPullRequests, {
@@ -168,10 +181,13 @@ export const GitHubPullRequestsLive = Layer.succeed(GitHubPullRequests, {
           ...repositoryParameters(repository),
           issue_number: pullRequestNumber,
         };
-        const comments = await client.paginate(client.rest.issues.listComments, {
-          ...parameters,
-          per_page: 100,
-        });
+        const comments = await client.paginate(
+          client.rest.issues.listComments,
+          {
+            ...parameters,
+            per_page: 100,
+          },
+        );
         const published = new Set(
           comments
             .map((comment) => reviewAttemptFromComment(comment.body))
@@ -182,18 +198,25 @@ export const GitHubPullRequestsLive = Layer.succeed(GitHubPullRequests, {
           if (published.has(attempt.attempt)) continue;
           const body = reviewCommentBody(attempt);
           try {
-            await client.rest.issues.createComment({ ...parameters, body });
+            await client.rest.issues.createComment({
+              ...parameters,
+              body,
+            });
           } catch (cause) {
             // A response can be lost after GitHub accepts the comment. Re-read
             // comments before surfacing the failure so this operation remains
             // safe to retry.
-            const reconciled = await client.paginate(client.rest.issues.listComments, {
-              ...parameters,
-              per_page: 100,
-            });
+            const reconciled = await client.paginate(
+              client.rest.issues.listComments,
+              {
+                ...parameters,
+                per_page: 100,
+              },
+            );
             if (
               reconciled.some(
-                (comment) => reviewAttemptFromComment(comment.body) === attempt.attempt,
+                (comment) =>
+                  reviewAttemptFromComment(comment.body) === attempt.attempt,
               )
             ) {
               published.add(attempt.attempt);

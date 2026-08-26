@@ -22,7 +22,10 @@ export type PiPermissionRuleset = ReadonlyArray<{
 
 export type PiAssistantError = {
   readonly name: string;
-  readonly data?: { readonly message?: string; readonly retries?: number };
+  readonly data?: {
+    readonly message?: string;
+    readonly retries?: number;
+  };
 };
 
 export type PiAssistantMessage = {
@@ -43,7 +46,12 @@ type CreateSessionInput = {
   readonly directory: string;
   readonly title?: string;
   readonly agent?: string;
-  readonly model?: PiModel | { readonly providerID: string; readonly id: string };
+  readonly model?:
+    | PiModel
+    | {
+        readonly providerID: string;
+        readonly id: string;
+      };
   readonly permission?: PiPermissionRuleset;
 };
 
@@ -53,7 +61,10 @@ type PromptInput = {
   readonly agent?: string;
   readonly model?: PiModel;
   readonly variant?: string;
-  readonly parts: ReadonlyArray<{ readonly type: "text"; readonly text: string }>;
+  readonly parts: ReadonlyArray<{
+    readonly type: "text";
+    readonly text: string;
+  }>;
   readonly format?: {
     readonly type: "json_schema";
     readonly schema: unknown;
@@ -65,17 +76,28 @@ type PromptInput = {
   };
 };
 
-type ApiResult<T> = { readonly data?: T; readonly error?: unknown };
+type ApiResult<T> = {
+  readonly data?: T;
+  readonly error?: unknown;
+};
 
 export type PiClient = {
   readonly session: {
     create: (
       input: CreateSessionInput,
-      options?: { readonly signal?: AbortSignal },
-    ) => Promise<ApiResult<{ readonly id: string }>>;
+      options?: {
+        readonly signal?: AbortSignal;
+      },
+    ) => Promise<
+      ApiResult<{
+        readonly id: string;
+      }>
+    >;
     prompt: (
       input: PromptInput,
-      options?: { readonly signal?: AbortSignal },
+      options?: {
+        readonly signal?: AbortSignal;
+      },
     ) => Promise<
       ApiResult<{
         readonly info: PiAssistantMessage;
@@ -88,14 +110,22 @@ export type PiClient = {
 
 type PendingSession = CreateSessionInput;
 
-type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+type ThinkingLevel =
+  | "off"
+  | "minimal"
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh"
+  | "max";
 
 const unsafeShellComposition = /[\n\r;&|<>`]|\$\(/;
 const deniedTaskCommand =
   /(?:^|\s)(?:git\s+(?:commit|push|branch|checkout|switch|worktree|reset|clean)|gh(?:\s|$))/i;
 
 export const isPiTaskCommandAllowed = (command: string): boolean =>
-  !unsafeShellComposition.test(command) && !deniedTaskCommand.test(command.trim());
+  !unsafeShellComposition.test(command) &&
+  !deniedTaskCommand.test(command.trim());
 
 type AnyToolDefinition = ToolDefinition<any, any, any>;
 
@@ -103,13 +133,17 @@ const makeBashTool = (directory: string): AnyToolDefinition =>
   createBashToolDefinition(directory, {
     spawnHook: (context) => {
       if (!isPiTaskCommandAllowed(context.command)) {
-        throw new Error(`Ralphie policy denied shell command: ${context.command}`);
+        throw new Error(
+          `Ralphie policy denied shell command: ${context.command}`,
+        );
       }
       return context;
     },
   });
 
-const thinkingLevelFor = (variant: string | undefined): ThinkingLevel | undefined => {
+const thinkingLevelFor = (
+  variant: string | undefined,
+): ThinkingLevel | undefined => {
   if (variant === undefined) return undefined;
   const levels: ReadonlyArray<ThinkingLevel> = [
     "off",
@@ -146,10 +180,16 @@ const finalAssistant = (
     } =>
       typeof message === "object" &&
       message !== null &&
-      (message as { readonly role?: unknown }).role === "assistant",
+      (
+        message as {
+          readonly role?: unknown;
+        }
+      ).role === "assistant",
   );
 
-const assistantParts = (assistant: ReturnType<typeof finalAssistant>): PiPart[] => {
+const assistantParts = (
+  assistant: ReturnType<typeof finalAssistant>,
+): PiPart[] => {
   if (!assistant || !Array.isArray(assistant.content)) return [];
   return assistant.content.filter(
     (part): part is PiPart =>
@@ -172,8 +212,14 @@ const assistantError = (
   assistant: ReturnType<typeof finalAssistant>,
   structuredRetries: number,
 ): PiAssistantError | undefined => {
-  if (assistant?.stopReason === "aborted") return { name: "MessageAbortedError" };
-  if (assistant?.stopReason === "length") return { name: "MessageOutputLengthError" };
+  if (assistant?.stopReason === "aborted")
+    return {
+      name: "MessageAbortedError",
+    };
+  if (assistant?.stopReason === "length")
+    return {
+      name: "MessageOutputLengthError",
+    };
   if (assistant?.stopReason === "error") {
     return {
       name: "PiAgentError",
@@ -223,7 +269,9 @@ const modelFor = (
 
 export const makePiClient = (modelRuntime: ModelRuntime): PiClient => {
   const pending = new Map<string, PendingSession>();
-  const active = new Set<{ abort: () => Promise<void> }>();
+  const active = new Set<{
+    abort: () => Promise<void>;
+  }>();
 
   return {
     session: {
@@ -231,12 +279,18 @@ export const makePiClient = (modelRuntime: ModelRuntime): PiClient => {
         if (options?.signal?.aborted) throw options.signal.reason;
         const id = randomUUID();
         pending.set(id, input);
-        return { data: { id } };
+        return {
+          data: {
+            id,
+          },
+        };
       },
       prompt: async (input, options) => {
         const created = pending.get(input.sessionID);
         if (created === undefined) {
-          return { error: new Error(`Unknown Pi session: ${input.sessionID}`) };
+          return {
+            error: new Error(`Unknown Pi session: ${input.sessionID}`),
+          };
         }
 
         const readOnly =
@@ -258,7 +312,10 @@ export const makePiClient = (modelRuntime: ModelRuntime): PiClient => {
             description:
               "Mandatory final response tool. After completing the task, call this tool exactly once with the complete result matching its schema. Never return the result as prose, Markdown, or printed JSON, and never end the turn without calling this tool. If validation rejects an invocation, correct every reported field and call it again.",
             parameters: input.format.schema as never,
-            constrainedSampling: { type: "json_schema", strict: "prefer" },
+            constrainedSampling: {
+              type: "json_schema",
+              strict: "prefer",
+            },
             executionMode: "sequential",
             execute: async (_toolCallId, params) => {
               if (input.format?.validate !== undefined) {
@@ -273,7 +330,12 @@ export const makePiClient = (modelRuntime: ModelRuntime): PiClient => {
               }
               structured = params;
               return {
-                content: [{ type: "text", text: "Structured result accepted." }],
+                content: [
+                  {
+                    type: "text",
+                    text: "Structured result accepted.",
+                  },
+                ],
                 details: {},
                 terminate: true,
               };
@@ -305,7 +367,9 @@ export const makePiClient = (modelRuntime: ModelRuntime): PiClient => {
         });
         active.add(session);
         const abort = () => void session.abort();
-        options?.signal?.addEventListener("abort", abort, { once: true });
+        options?.signal?.addEventListener("abort", abort, {
+          once: true,
+        });
 
         try {
           const prompt = input.parts.map((part) => part.text).join("\n");
@@ -319,7 +383,9 @@ export const makePiClient = (modelRuntime: ModelRuntime): PiClient => {
                   ? prompt
                   : `${prompt}\n\nMANDATORY RESPONSE CONTRACT:\n- Complete the analysis before submitting.\n- Your final action must be exactly one call to the submit_result tool.\n- Supply every required field and obey all field relationships in the schema.\n- Do not return prose, Markdown, a code fence, or printed JSON as the final answer.\n- Do not end the turn without a successful submit_result call.\n- If the tool reports validation errors, correct all errors and call it again.`
                 : "RESPONSE CONTRACT VIOLATION: your previous response ended without a valid submit_result call. Call submit_result now with the complete schema-valid result. Do not provide more analysis, prose, Markdown, or printed JSON. If validation reports errors, correct them and call the tool again.",
-              { expandPromptTemplates: false },
+              {
+                expandPromptTemplates: false,
+              },
             );
             assistant = finalAssistant(session.messages);
             if (
@@ -342,8 +408,16 @@ export const makePiClient = (modelRuntime: ModelRuntime): PiClient => {
               info: {
                 id: input.sessionID,
                 role: "assistant",
-                ...(error === undefined ? {} : { error }),
-                ...(structured === undefined ? {} : { structured }),
+                ...(error === undefined
+                  ? {}
+                  : {
+                      error,
+                    }),
+                ...(structured === undefined
+                  ? {}
+                  : {
+                      structured,
+                    }),
               },
               parts,
             },

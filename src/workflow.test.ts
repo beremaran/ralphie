@@ -24,7 +24,10 @@ import {
   IssueExecutionOutcomeKind,
 } from "./issues/execution.ts";
 import { IssueExecutor } from "./issues/executor.ts";
-import { IssueArtifactStore, makeIssueArtifactStore } from "./issues/artifacts.ts";
+import {
+  IssueArtifactStore,
+  makeIssueArtifactStore,
+} from "./issues/artifacts.ts";
 import { DryRunIssueExecutor } from "./issues/dry-run-executor.ts";
 import { DEFAULT_PI_AGENT } from "./agent/model.ts";
 import { Pi } from "./agent/server.ts";
@@ -101,7 +104,9 @@ function testRuntime(
     Layer.succeed(GitRepository, {
       verifyInstalled: Effect.suspend(() => {
         calls.push("verifyGitInstalled");
-        return options.gitFailure ? Effect.fail(options.gitFailure) : Effect.void;
+        return options.gitFailure
+          ? Effect.fail(options.gitFailure)
+          : Effect.void;
       }),
       prepare: (repo, branch, workspace, destinationPath) => {
         calls.push(`prepareRepository:${repo}:${branch}:${workspace}`);
@@ -118,11 +123,18 @@ function testRuntime(
     }),
     Layer.succeed(GitRepositoryInvariant, {
       capture: () =>
-        Effect.sync(() => ({ branch: "develop", head: `head-${captureIndex++}` })),
+        Effect.sync(() => ({
+          branch: "develop",
+          head: `head-${captureIndex++}`,
+        })),
       verify: () => Effect.void,
     }),
     Layer.succeed(GitIssueCheckpoint, {
-      capture: () => Effect.succeed({ branch: "develop", sha: "a".repeat(40) }),
+      capture: () =>
+        Effect.succeed({
+          branch: "develop",
+          sha: "a".repeat(40),
+        }),
       createPatch: () => Effect.succeed(""),
       restore: (_path, _checkpoint) => {
         calls.push("restoreCheckout");
@@ -136,14 +148,25 @@ function testRuntime(
           `listIssues:${repo}:${filters.labels.join(",")}:${filters.sort}:${filters.order}`,
         );
         if (options.abortAt === "issues") options.abortController?.abort();
-        const result = issueLists[Math.min(listIndex, issueLists.length - 1)] ?? [];
+        const result =
+          issueLists[Math.min(listIndex, issueLists.length - 1)] ?? [];
         listIndex += 1;
         return Effect.succeed(result);
       },
     }),
     Layer.succeed(GitHubIssueMutations, {
-      create: () => Effect.fail(new RalphieError({ message: "unused" })),
-      update: () => Effect.fail(new RalphieError({ message: "unused" })),
+      create: () =>
+        Effect.fail(
+          new RalphieError({
+            message: "unused",
+          }),
+        ),
+      update: () =>
+        Effect.fail(
+          new RalphieError({
+            message: "unused",
+          }),
+        ),
       close: (_client, _repository, issueNumber) => {
         calls.push(`closeIssue:${issueNumber}`);
         return options.closeFailure
@@ -157,7 +180,9 @@ function testRuntime(
     Layer.succeed(GitHubPullRequests, {
       createOrFind: (_client, repository, input) =>
         Effect.sync(() => {
-          calls.push(`createPullRequest:${repository}:${input.head}:${input.base}`);
+          calls.push(
+            `createPullRequest:${repository}:${input.head}:${input.base}`,
+          );
           return {
             number: 1,
             url: "https://github.com/owner/repo/pull/1",
@@ -180,9 +205,19 @@ function testRuntime(
       stageAll: () => Effect.void,
       readStagedBinaryDiff: () => Effect.succeed(""),
       hasStagedChanges: () => Effect.succeed(false),
-      commit: () => Effect.succeed({ sha: "a".repeat(40), treeSha: "b".repeat(40) }),
-      push: (_path, branch) => Effect.sync(() => calls.push(`pushBranch:${branch}`)),
-      createOrCheckoutFeatureBranch: (_path, featureBranch, baseBranch, baseSha) =>
+      commit: () =>
+        Effect.succeed({
+          sha: "a".repeat(40),
+          treeSha: "b".repeat(40),
+        }),
+      push: (_path, branch) =>
+        Effect.sync(() => calls.push(`pushBranch:${branch}`)),
+      createOrCheckoutFeatureBranch: (
+        _path,
+        featureBranch,
+        baseBranch,
+        baseSha,
+      ) =>
         Effect.sync(() => {
           calls.push(`prepareFeatureBranch:${featureBranch}:${baseBranch}`);
           return {
@@ -216,13 +251,22 @@ function testRuntime(
     Layer.succeed(IssueExecutor, {
       execute: (context) =>
         Effect.gen(function* () {
-          const { issue, repository, repositoryPath, targetBranch, piSelection } =
-            context;
+          const {
+            issue,
+            repository,
+            repositoryPath,
+            targetBranch,
+            piSelection,
+          } = context;
           options.executionContexts?.push(context);
           if (options.executeGate !== undefined) {
             yield* Effect.tryPromise({
               try: () => options.executeGate!(context),
-              catch: (cause) => new RalphieError({ message: "gate failed", cause }),
+              catch: (cause) =>
+                new RalphieError({
+                  message: "gate failed",
+                  cause,
+                }),
             });
           }
           calls.push(
@@ -230,7 +274,9 @@ function testRuntime(
           );
           if (options.abortOnExecute !== undefined) {
             options.abortOnExecute.abort();
-            return yield* new RalphieError({ message: "agent interrupted" });
+            return yield* new RalphieError({
+              message: "agent interrupted",
+            });
           }
           const result = outcomes[Math.min(outcomeIndex, outcomes.length - 1)];
           outcomeIndex += 1;
@@ -262,7 +308,12 @@ function testRuntime(
           }),
     }),
     Layer.succeed(RunStateStore, {
-      load: () => Effect.fail(new RalphieError({ message: "unused" })),
+      load: () =>
+        Effect.fail(
+          new RalphieError({
+            message: "unused",
+          }),
+        ),
       save: (_path, state) =>
         Effect.sync(() => {
           savedStates.push(structuredClone(state));
@@ -275,7 +326,9 @@ function testRuntime(
       },
       remove: (workspace) => {
         calls.push(`removeWorkspace:${workspace}`);
-        return options.removeFailure ? Effect.fail(options.removeFailure) : Effect.void;
+        return options.removeFailure
+          ? Effect.fail(options.removeFailure)
+          : Effect.void;
       },
     }),
     Layer.succeed(ProgressReporter, {
@@ -313,12 +366,18 @@ describe("workflow", () => {
     const events: ProgressUpdate[] = [];
     const summary = await workflow({
       ...baseOptions,
-      model: { providerID: "openai", modelID: "gpt-5" },
+      model: {
+        providerID: "openai",
+        modelID: "gpt-5",
+      },
       modelVariant: "high",
       agent: "reviewer",
       cleanup: true,
       startClean: true,
-    }).pipe(Effect.provide(testRuntime(calls, states, {}, events)), Effect.runPromise);
+    }).pipe(
+      Effect.provide(testRuntime(calls, states, {}, events)),
+      Effect.runPromise,
+    );
 
     expect(summary.counts.completed).toBe(1);
     expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
@@ -352,7 +411,11 @@ describe("workflow", () => {
       ...baseOptions,
       workflow: WorkflowMode.Pr,
     }).pipe(
-      Effect.provide(testRuntime(calls, states, { executionContexts: contexts })),
+      Effect.provide(
+        testRuntime(calls, states, {
+          executionContexts: contexts,
+        }),
+      ),
       Effect.runPromise,
     );
 
@@ -360,7 +423,9 @@ describe("workflow", () => {
     expect(contexts[0]?.targetBranch).toBe("ralphie/issue-42");
     expect(calls).toContain("prepareFeatureBranch:ralphie/issue-42:develop");
     expect(calls).toContain("pushBranch:ralphie/issue-42");
-    expect(calls).toContain("createPullRequest:owner/repo:ralphie/issue-42:develop");
+    expect(calls).toContain(
+      "createPullRequest:owner/repo:ralphie/issue-42:develop",
+    );
     expect(calls).toContain("publishReviews:owner/repo:1");
     expect(calls).toContain("mergePullRequest:owner/repo:1");
     expect(calls).toContain("restoreBase:develop");
@@ -415,7 +480,9 @@ describe("workflow", () => {
     expect(states.at(-1)?.issueConcurrency).toBe(2);
     expect(calls).toContain("prepareWorktrees:42");
     expect(calls).toContain("prepareWorktrees:43");
-    expect(calls.filter((call) => call.startsWith("removeWorktrees:"))).toHaveLength(2);
+    expect(
+      calls.filter((call) => call.startsWith("removeWorktrees:")),
+    ).toHaveLength(2);
     expect(calls).not.toContain("closeIssue:42");
     expect(calls).not.toContain("closeIssue:43");
   });
@@ -431,11 +498,16 @@ describe("workflow", () => {
     expect(summary.outcomes).toEqual([
       {
         issueNumber: 42,
-        outcome: { kind: IssueExecutionOutcomeKind.Skipped, reason: "dry run" },
+        outcome: {
+          kind: IssueExecutionOutcomeKind.Skipped,
+          reason: "dry run",
+        },
       },
     ]);
     expect(calls).toContain("dryRunIssue:42");
-    expect(calls).not.toContain("executeIssue:42:/tmp/ralphie/repo:develop:build");
+    expect(calls).not.toContain(
+      "executeIssue:42:/tmp/ralphie/repo:develop:build",
+    );
     expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
     expect(states.at(-1)?.dryRun).toBe(true);
   });
@@ -456,7 +528,12 @@ describe("workflow", () => {
         evidence: ["targeted validation passed"],
       },
     ],
-    [{ kind: IssueExecutionOutcomeKind.Decomposed, childIssueNumbers: [51] }],
+    [
+      {
+        kind: IssueExecutionOutcomeKind.Decomposed,
+        childIssueNumbers: [51],
+      },
+    ],
     [
       {
         kind: IssueExecutionOutcomeKind.Escalated,
@@ -465,25 +542,41 @@ describe("workflow", () => {
         childIssueNumbers: [52],
       },
     ],
-    [{ kind: IssueExecutionOutcomeKind.Skipped, reason: "no changes" }],
+    [
+      {
+        kind: IssueExecutionOutcomeKind.Skipped,
+        reason: "no changes",
+      },
+    ],
   ] satisfies ReadonlyArray<readonly [IssueExecutionOutcome]>)(
     "records the executor outcome",
     async (outcome) => {
       const calls: string[] = [];
       const states: RunState[] = [];
       const summary = await workflow(baseOptions).pipe(
-        Effect.provide(testRuntime(calls, states, { outcomes: [outcome] })),
+        Effect.provide(
+          testRuntime(calls, states, {
+            outcomes: [outcome],
+          }),
+        ),
         Effect.runPromise,
       );
 
-      expect(summary.outcomes).toEqual([{ issueNumber: 42, outcome }]);
+      expect(summary.outcomes).toEqual([
+        {
+          issueNumber: 42,
+          outcome,
+        },
+      ]);
       expect(summary.counts[outcome.kind]).toBe(1);
       expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
       if (
         outcome.kind === IssueExecutionOutcomeKind.Decomposed ||
         outcome.kind === IssueExecutionOutcomeKind.Escalated
       ) {
-        expect(calls.filter((call) => call.startsWith("listIssues:"))).toHaveLength(2);
+        expect(
+          calls.filter((call) => call.startsWith("listIssues:")),
+        ).toHaveLength(2);
       }
     },
   );
@@ -494,7 +587,12 @@ describe("workflow", () => {
     const exit = await workflow(baseOptions).pipe(
       Effect.provide(
         testRuntime(calls, states, {
-          outcomes: [{ kind: IssueExecutionOutcomeKind.Failed, message: "boom" }],
+          outcomes: [
+            {
+              kind: IssueExecutionOutcomeKind.Failed,
+              message: "boom",
+            },
+          ],
         }),
       ),
       Effect.runPromiseExit,
@@ -503,7 +601,9 @@ describe("workflow", () => {
     expect(Exit.isFailure(exit)).toBeTrue();
     expect(states.at(-1)?.status).toBe(RunStateStatus.Active);
     expect(states.at(-1)?.activeIssue?.issueNumber).toBe(42);
-    expect(states.at(-1)?.queue.pending.map(({ number }) => number)).toEqual([42]);
+    expect(states.at(-1)?.queue.pending.map(({ number }) => number)).toEqual([
+      42,
+    ]);
     expect(states.at(-1)?.queue.processedCount).toBe(0);
     expect(calls.at(-1)).toBe("closeRuntime");
   });
@@ -514,7 +614,9 @@ describe("workflow", () => {
     const exit = await workflow(baseOptions).pipe(
       Effect.provide(
         testRuntime(calls, states, {
-          closeFailure: new RalphieError({ message: "close response lost" }),
+          closeFailure: new RalphieError({
+            message: "close response lost",
+          }),
         }),
       ),
       Effect.runPromiseExit,
@@ -526,8 +628,13 @@ describe("workflow", () => {
       issueNumber: 42,
       stage: ProgressStage.IssueClosure,
     });
-    expect(states.at(-1)?.queue.pending.map(({ number }) => number)).toEqual([42]);
-    expect(states.at(-1)?.checkout).toEqual({ branch: "develop", head: "head-1" });
+    expect(states.at(-1)?.queue.pending.map(({ number }) => number)).toEqual([
+      42,
+    ]);
+    expect(states.at(-1)?.checkout).toEqual({
+      branch: "develop",
+      head: "head-1",
+    });
     expect(states.at(-1)?.outcomes).toHaveLength(1);
     expect(states.at(-1)?.outcomes[0]?.outcome.kind).toBe(
       IssueExecutionOutcomeKind.Completed,
@@ -539,7 +646,9 @@ describe("workflow", () => {
     await workflow(baseOptions).pipe(
       Effect.provide(
         testRuntime([], failedStates, {
-          closeFailure: new RalphieError({ message: "close response lost" }),
+          closeFailure: new RalphieError({
+            message: "close response lost",
+          }),
         }),
       ),
       Effect.runPromiseExit,
@@ -572,13 +681,23 @@ describe("workflow", () => {
   test("refreshes the queue after decomposition and runs a new child within budget", async () => {
     const calls: string[] = [];
     const states: RunState[] = [];
-    const child = { ...firstIssue, number: 51, title: "Child" };
-    const summary = await workflow({ ...baseOptions, maxIssues: 2 }).pipe(
+    const child = {
+      ...firstIssue,
+      number: 51,
+      title: "Child",
+    };
+    const summary = await workflow({
+      ...baseOptions,
+      maxIssues: 2,
+    }).pipe(
       Effect.provide(
         testRuntime(calls, states, {
           issueLists: [[firstIssue], [child]],
           outcomes: [
-            { kind: IssueExecutionOutcomeKind.Decomposed, childIssueNumbers: [51] },
+            {
+              kind: IssueExecutionOutcomeKind.Decomposed,
+              childIssueNumbers: [51],
+            },
             {
               kind: IssueExecutionOutcomeKind.Completed,
               completion: IssueCompletionKind.PushedCommit,
@@ -590,16 +709,23 @@ describe("workflow", () => {
       Effect.runPromise,
     );
 
-    expect(summary.outcomes.map(({ issueNumber }) => issueNumber)).toEqual([42, 51]);
+    expect(summary.outcomes.map(({ issueNumber }) => issueNumber)).toEqual([
+      42, 51,
+    ]);
     expect(states.at(-1)?.queue.processedCount).toBe(2);
   });
 
   test("stops before other work when start-clean fails", async () => {
     const calls: string[] = [];
-    const exit = await workflow({ ...baseOptions, startClean: true }).pipe(
+    const exit = await workflow({
+      ...baseOptions,
+      startClean: true,
+    }).pipe(
       Effect.provide(
         testRuntime(calls, [], {
-          removeFailure: new RalphieError({ message: "cleanup failed" }),
+          removeFailure: new RalphieError({
+            message: "cleanup failed",
+          }),
         }),
       ),
       Effect.runPromiseExit,
@@ -614,14 +740,19 @@ describe("workflow", () => {
     const exit = await workflow(baseOptions).pipe(
       Effect.provide(
         testRuntime(calls, [], {
-          githubFailure: new RalphieError({ message: "not logged in" }),
+          githubFailure: new RalphieError({
+            message: "not logged in",
+          }),
         }),
       ),
       Effect.runPromiseExit,
     );
 
     expect(Exit.isFailure(exit)).toBeTrue();
-    expect(calls).toEqual(["prepareWorkspace:/tmp/ralphie", "initializeGitHub"]);
+    expect(calls).toEqual([
+      "prepareWorkspace:/tmp/ralphie",
+      "initializeGitHub",
+    ]);
   });
 
   test.each([
@@ -694,7 +825,9 @@ describe("workflow", () => {
     expect(Exit.isFailure(exit)).toBeTrue();
     expect(calls).toContain("startServer");
     expect(calls).toContain("closeRuntime");
-    expect(calls).not.toContain("executeIssue:42:/tmp/ralphie/repo:develop:build");
+    expect(calls).not.toContain(
+      "executeIssue:42:/tmp/ralphie/repo:develop:build",
+    );
     expect(calls).not.toContain("removeWorkspace:/tmp/ralphie");
     expect(states.at(-1)?.status).toBe(RunStateStatus.Active);
     expect(states.at(-1)?.activeIssue).toBeUndefined();
@@ -704,7 +837,11 @@ describe("workflow", () => {
     const calls: string[] = [];
     const states: RunState[] = [];
     const controller = new AbortController();
-    const child = { ...firstIssue, number: 51, title: "Child" };
+    const child = {
+      ...firstIssue,
+      number: 51,
+      title: "Child",
+    };
     const exit = await workflow({
       ...baseOptions,
       maxIssues: 2,
@@ -726,10 +863,14 @@ describe("workflow", () => {
       "executeIssue:42:/tmp/ralphie/repo:develop:build",
     ]);
     expect(calls).toContain("closeRuntime");
-    expect(calls).not.toContain("executeIssue:51:/tmp/ralphie/repo:develop:build");
+    expect(calls).not.toContain(
+      "executeIssue:51:/tmp/ralphie/repo:develop:build",
+    );
     expect(calls).not.toContain("removeWorkspace:/tmp/ralphie");
     expect(states.at(-1)?.status).toBe(RunStateStatus.Active);
-    expect(states.at(-1)?.queue.pending.map(({ number }) => number)).toEqual([51]);
+    expect(states.at(-1)?.queue.pending.map(({ number }) => number)).toEqual([
+      51,
+    ]);
   });
 
   test("restores the active checkout and saves resumable state on cancellation", async () => {
@@ -741,7 +882,11 @@ describe("workflow", () => {
       cleanup: true,
       signal: controller.signal,
     }).pipe(
-      Effect.provide(testRuntime(calls, states, { abortOnExecute: controller })),
+      Effect.provide(
+        testRuntime(calls, states, {
+          abortOnExecute: controller,
+        }),
+      ),
       Effect.runPromiseExit,
     );
 

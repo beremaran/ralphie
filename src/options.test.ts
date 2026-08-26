@@ -16,7 +16,11 @@ describe("CLI configuration", () => {
   });
 
   test("resolves defaults from CLI arguments only", () => {
-    expect(resolveRalphieConfig({ repo: "owner/repo" })).toEqual({
+    expect(
+      resolveRalphieConfig({
+        repo: "owner/repo",
+      }),
+    ).toEqual({
       repo: "owner/repo",
       workflow: DEFAULT_WORKFLOW_MODE,
       issueConcurrency: 1,
@@ -46,7 +50,10 @@ describe("CLI configuration", () => {
         issueLabels: ["bug", "ready"],
         issueSort: IssueSort.Updated,
         issueOrder: IssueOrder.Descending,
-        model: { providerID: "openai", modelID: "gpt-5" },
+        model: {
+          providerID: "openai",
+          modelID: "gpt-5",
+        },
         modelVariant: "high",
         agent: "custom",
         workspace: "/tmp/ralphie",
@@ -67,7 +74,10 @@ describe("CLI configuration", () => {
       issueLabels: ["bug", "ready"],
       issueSort: IssueSort.Updated,
       issueOrder: IssueOrder.Descending,
-      model: { providerID: "openai", modelID: "gpt-5" },
+      model: {
+        providerID: "openai",
+        modelID: "gpt-5",
+      },
       modelVariant: "high",
       agent: "custom",
       workspace: "/tmp/ralphie",
@@ -83,7 +93,11 @@ describe("CLI configuration", () => {
 
   test("rejects incompatible output modes", () => {
     expect(() =>
-      resolveRalphieConfig({ repo: "owner/repo", json: true, quiet: true }),
+      resolveRalphieConfig({
+        repo: "owner/repo",
+        json: true,
+        quiet: true,
+      }),
     ).toThrow("JSON and quiet output modes cannot be enabled together.");
   });
 });

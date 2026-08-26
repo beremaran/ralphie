@@ -11,7 +11,9 @@ import {
 import { ImplementationExecutor } from "./implementation-executor.ts";
 
 const context = {
-  issue: { number: 42 },
+  issue: {
+    number: 42,
+  },
 } as IssueExecutionContext;
 
 describe("concrete issue workflow executors", () => {
@@ -19,7 +21,10 @@ describe("concrete issue workflow executors", () => {
     const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
     const outcome = await Effect.gen(function* () {
       const executor = yield* ImplementationExecutor;
-      return yield* executor.execute({ context, artifacts });
+      return yield* executor.execute({
+        context,
+        artifacts,
+      });
     }).pipe(
       Effect.provide(
         Layer.succeed(ImplementationExecutor, {
@@ -45,7 +50,10 @@ describe("concrete issue workflow executors", () => {
     const artifacts = await Effect.runPromise(makeIssueArtifactStore(99));
     const outcome = await Effect.gen(function* () {
       const executor = yield* DecompositionExecutor;
-      return yield* executor.execute({ context, artifacts });
+      return yield* executor.execute({
+        context,
+        artifacts,
+      });
     }).pipe(
       Effect.provide(
         Layer.succeed(DecompositionExecutor, {

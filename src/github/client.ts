@@ -1,15 +1,19 @@
 import { Context, Effect, Layer } from "effect";
 import { Octokit } from "octokit";
 
-import { CommandRunner, requireSuccessfulCommand } from "../process/command-runner.ts";
+import {
+  CommandRunner,
+  requireSuccessfulCommand,
+} from "../process/command-runner.ts";
 import { RalphieError } from "../shared/error.ts";
 
 export type GitHubClientService = {
   readonly initialize: Effect.Effect<Octokit, RalphieError>;
 };
 
-export const GitHubClient =
-  Context.GenericTag<GitHubClientService>("ralphie/GitHubClient");
+export const GitHubClient = Context.GenericTag<GitHubClientService>(
+  "ralphie/GitHubClient",
+);
 
 export const GitHubClientLive = Layer.effect(
   GitHubClient,
@@ -39,7 +43,10 @@ export const GitHubClientLive = Layer.effect(
         }
 
         return yield* Effect.try({
-          try: () => new Octokit({ auth: authToken }),
+          try: () =>
+            new Octokit({
+              auth: authToken,
+            }),
           catch: (cause) =>
             new RalphieError({
               message: "Failed to initialize Octokit.",

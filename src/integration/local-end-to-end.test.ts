@@ -41,7 +41,11 @@ import {
   type ProgressUpdate,
 } from "../progress/progress.ts";
 
-const run = (command: string, args: ReadonlyArray<string>, cwd?: string): string => {
+const run = (
+  command: string,
+  args: ReadonlyArray<string>,
+  cwd?: string,
+): string => {
   const result = Bun.spawnSync([command, ...args], {
     cwd,
     stdout: "pipe",
@@ -65,7 +69,11 @@ const makePi = (repositoryPath: string) => {
 
   const client = {
     session: {
-      create: async () => ({ data: { id: `local-session-${++session}` } }),
+      create: async () => ({
+        data: {
+          id: `local-session-${++session}`,
+        },
+      }),
       prompt: async (parameters: { readonly format?: unknown }) => {
         const structured = parameters.format !== undefined;
         promptKinds.push(structured ? "structured" : "text");
@@ -75,8 +83,16 @@ const makePi = (repositoryPath: string) => {
         // stage, commit, and push while all Pi network calls stay local.
         if (!structured && !implementationWritten) {
           implementationWritten = true;
-          await writeFile(join(repositoryPath, "implemented.txt"), "implemented\n");
-          return { data: { info: {}, parts: [] } };
+          await writeFile(
+            join(repositoryPath, "implemented.txt"),
+            "implemented\n",
+          );
+          return {
+            data: {
+              info: {},
+              parts: [],
+            },
+          };
         }
 
         if (structured && promptKinds.length === 1) {
@@ -111,7 +127,11 @@ const makePi = (repositoryPath: string) => {
         }
         return {
           data: {
-            info: { structured: { subject: "implement local issue" } },
+            info: {
+              structured: {
+                subject: "implement local issue",
+              },
+            },
             parts: [],
           },
         };
@@ -146,7 +166,9 @@ const makeContext = (
   runId,
   octokit: {} as Octokit,
   pi,
-  piSelection: { agent: "build" },
+  piSelection: {
+    agent: "build",
+  },
   piDiagnostics: makePiSessionDiagnostics(() => "now"),
   repositoryInvariant,
 });
@@ -158,7 +180,9 @@ describe("local implementation end-to-end", () => {
     const remotePath = join(root, "remote.git");
     const workspace = join(root, "workspace");
     const runId = "local-implementation-e2e";
-    await mkdir(repositoryPath, { recursive: true });
+    await mkdir(repositoryPath, {
+      recursive: true,
+    });
 
     try {
       run("git", ["init", "--bare", remotePath]);
@@ -205,12 +229,18 @@ describe("local implementation end-to-end", () => {
 
       const commandRunner = CommandRunnerLive;
       const artifactStore = IssueArtifactStoreLive;
-      const checkpoint = GitIssueCheckpointLive.pipe(Layer.provide(commandRunner));
+      const checkpoint = GitIssueCheckpointLive.pipe(
+        Layer.provide(commandRunner),
+      );
       const preparation = GitIssuePreparationLive.pipe(
         Layer.provideMerge(Layer.merge(checkpoint, artifactStore)),
       );
-      const operations = GitIssueOperationsLive.pipe(Layer.provide(commandRunner));
-      const invariant = GitRepositoryInvariantLive.pipe(Layer.provide(commandRunner));
+      const operations = GitIssueOperationsLive.pipe(
+        Layer.provide(commandRunner),
+      );
+      const invariant = GitRepositoryInvariantLive.pipe(
+        Layer.provide(commandRunner),
+      );
       const progress = makeProgressRecorderLayer(progressEvents);
       const recovery = IssueRecoveryLive.pipe(
         Layer.provideMerge(Layer.merge(checkpoint, progress)),
@@ -250,7 +280,11 @@ describe("local implementation end-to-end", () => {
             repositoryInvariant,
           ),
         );
-      }).pipe(Effect.provide(router), Effect.provide(invariant), Effect.runPromise);
+      }).pipe(
+        Effect.provide(router),
+        Effect.provide(invariant),
+        Effect.runPromise,
+      );
 
       const remoteSha = run("git", [
         "--git-dir",
@@ -266,18 +300,22 @@ describe("local implementation end-to-end", () => {
         throw new Error(`Expected completed outcome, got ${outcome.kind}`);
       }
       if (outcome.completion !== IssueCompletionKind.PushedCommit) {
-        throw new Error(`Expected pushed-commit completion, got ${outcome.completion}`);
+        throw new Error(
+          `Expected pushed-commit completion, got ${outcome.completion}`,
+        );
       }
       expect(outcome.commitSha).not.toBe(initialSha);
-      expect(git(repositoryPath, ["rev-parse", "HEAD"])).toBe(outcome.commitSha);
+      expect(git(repositoryPath, ["rev-parse", "HEAD"])).toBe(
+        outcome.commitSha,
+      );
       expect(remoteSha).toBe(outcome.commitSha);
       expect(git(repositoryPath, ["log", "-1", "--format=%s"])).toBe(
         "implement local issue",
       );
       expect(git(repositoryPath, ["status", "--porcelain=v1"])).toBe("");
-      expect(await Bun.file(join(repositoryPath, "implemented.txt")).text()).toBe(
-        "implemented\n",
-      );
+      expect(
+        await Bun.file(join(repositoryPath, "implemented.txt")).text(),
+      ).toBe("implemented\n");
       expect(piSetup.promptKinds).toEqual([
         "structured",
         "text",
@@ -285,13 +323,18 @@ describe("local implementation end-to-end", () => {
         "structured",
       ]);
       expect(safetyInputs).toHaveLength(2);
-      expect(safetyInputs[0]).toEqual({ intendedBaseSha: initialSha });
+      expect(safetyInputs[0]).toEqual({
+        intendedBaseSha: initialSha,
+      });
       expect(safetyInputs[1]?.intendedBaseSha).toBe(initialSha);
       expect(safetyInputs[1]?.expectedCommitSha).toBe(outcome.commitSha);
       expect(decompositionCalls).toBe(0);
       expect(progressEvents.length).toBeGreaterThan(0);
     } finally {
-      await rm(root, { recursive: true, force: true });
+      await rm(root, {
+        recursive: true,
+        force: true,
+      });
     }
   });
 });

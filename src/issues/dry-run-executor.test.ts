@@ -10,8 +10,14 @@ import {
 } from "./artifacts.ts";
 import { ComplexityAssessment } from "./complexity.ts";
 import { ComplexityLevel } from "./decisions.ts";
-import { DryRunIssueExecutor, DryRunIssueExecutorLive } from "./dry-run-executor.ts";
-import { IssueExecutionOutcomeKind, type IssueExecutionContext } from "./execution.ts";
+import {
+  DryRunIssueExecutor,
+  DryRunIssueExecutorLive,
+} from "./dry-run-executor.ts";
+import {
+  IssueExecutionOutcomeKind,
+  type IssueExecutionContext,
+} from "./execution.ts";
 import { ImplementationExecutor } from "./implementation-executor.ts";
 import { DecompositionExecutor } from "./decomposition-executor.ts";
 import {
@@ -34,10 +40,19 @@ const context = (number: number): IssueExecutionContext => ({
   runId: "dry-run",
   octokit: {} as Octokit,
   pi: {} as PiClient,
-  piSelection: { agent: "build" },
-  piDiagnostics: { record: () => undefined, list: () => [] },
+  piSelection: {
+    agent: "build",
+  },
+  piDiagnostics: {
+    record: () => undefined,
+    list: () => [],
+  },
   repositoryInvariant: {
-    capture: () => Effect.succeed({ branch: "main", head: "abc123" }),
+    capture: () =>
+      Effect.succeed({
+        branch: "main",
+        head: "abc123",
+      }),
     verify: () => Effect.void,
   },
 });
@@ -56,7 +71,10 @@ const run = async (complexity: ComplexityLevel, events: ProgressUpdate[]) => {
           assess: () =>
             Effect.succeed({
               sessionID: "complexity-session",
-              decision: { complexity, rationale: "dry-run test" },
+              decision: {
+                complexity,
+                rationale: "dry-run test",
+              },
             }),
         }),
         Layer.succeed(ImplementationExecutor, {
@@ -79,7 +97,12 @@ const run = async (complexity: ComplexityLevel, events: ProgressUpdate[]) => {
     const executor = yield* DryRunIssueExecutor;
     return yield* executor.execute(context(42));
   }).pipe(Effect.provide(layer), Effect.runPromise);
-  return { result, artifacts, implementationCalls, decompositionCalls };
+  return {
+    result,
+    artifacts,
+    implementationCalls,
+    decompositionCalls,
+  };
 };
 
 describe("dry-run issue executor", () => {
@@ -100,7 +123,10 @@ describe("dry-run issue executor", () => {
         await Effect.runPromise(
           outcome.artifacts.read(IssueArtifactKind.ComplexityDecision),
         ),
-      ).toEqual({ complexity, rationale: "dry-run test" });
+      ).toEqual({
+        complexity,
+        rationale: "dry-run test",
+      });
     },
   );
 });

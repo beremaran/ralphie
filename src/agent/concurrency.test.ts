@@ -13,20 +13,27 @@ test("global Pi semaphore bounds tasks sharing one client", async () => {
 
   await Effect.runPromise(
     Effect.all(
-      Array.from({ length: 6 }, () =>
-        withPiAgentPermit(
-          client,
-          Effect.acquireUseRelease(
-            Effect.sync(() => {
-              active += 1;
-              maximumActive = Math.max(maximumActive, active);
-            }),
-            () => Effect.sleep("5 millis"),
-            () => Effect.sync(() => (active -= 1)),
+      Array.from(
+        {
+          length: 6,
+        },
+        () =>
+          withPiAgentPermit(
+            client,
+            Effect.acquireUseRelease(
+              Effect.sync(() => {
+                active += 1;
+                maximumActive = Math.max(maximumActive, active);
+              }),
+              () => Effect.sleep("5 millis"),
+              () => Effect.sync(() => (active -= 1)),
+            ),
           ),
-        ),
       ),
-      { concurrency: "unbounded", discard: true },
+      {
+        concurrency: "unbounded",
+        discard: true,
+      },
     ),
   );
 

@@ -4,7 +4,10 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { GitIssueCheckpoint, type IssueCheckpoint } from "../git/issue-checkpoint.ts";
+import {
+  GitIssueCheckpoint,
+  type IssueCheckpoint,
+} from "../git/issue-checkpoint.ts";
 import type { GitHubIssue } from "../github/issues.ts";
 import {
   makeProgressRecorderLayer,
@@ -38,20 +41,25 @@ const issue: GitHubIssue = {
   labels: [],
 };
 
-const reviews = Array.from({ length: REVIEW_ITERATION_LIMIT }, (_, index) => ({
-  attempt: index + 1,
-  sessionID: `session-${index + 1}`,
-  decision: {
-    verdict: ReviewVerdict.ChangesRequested,
-    summary: "One blocker remains.",
-    findings: [
-      {
-        severity: ReviewFindingSeverity.Blocking,
-        description: "The edge case still fails.",
-      },
-    ],
+const reviews = Array.from(
+  {
+    length: REVIEW_ITERATION_LIMIT,
   },
-}));
+  (_, index) => ({
+    attempt: index + 1,
+    sessionID: `session-${index + 1}`,
+    decision: {
+      verdict: ReviewVerdict.ChangesRequested,
+      summary: "One blocker remains.",
+      findings: [
+        {
+          severity: ReviewFindingSeverity.Blocking,
+          description: "The edge case still fails.",
+        },
+      ],
+    },
+  }),
+);
 
 const recoveryLayer = (
   calls: string[],
@@ -119,7 +127,10 @@ describe("review exhaustion recovery", () => {
           checkpoint,
           reviews,
         });
-      }).pipe(Effect.provide(recoveryLayer(calls, progressEvents)), Effect.runPromise);
+      }).pipe(
+        Effect.provide(recoveryLayer(calls, progressEvents)),
+        Effect.runPromise,
+      );
 
       expect(result).toEqual({
         outcome: ReviewExhaustionOutcome.EscalatedToDecomposition,
@@ -140,7 +151,12 @@ describe("review exhaustion recovery", () => {
       expect(metadata.issue.number).toBe(42);
       expect(metadata.repository).toBe("owner/repo");
       expect(metadata.reviews).toEqual(reviews);
-      expect(progressEvents.map(({ stage, status }) => ({ stage, status }))).toEqual([
+      expect(
+        progressEvents.map(({ stage, status }) => ({
+          stage,
+          status,
+        })),
+      ).toEqual([
         {
           stage: ProgressStage.ReviewExhaustion,
           status: ProgressStatus.Info,
@@ -155,7 +171,10 @@ describe("review exhaustion recovery", () => {
         },
       ]);
     } finally {
-      await rm(workspace, { recursive: true, force: true });
+      await rm(workspace, {
+        recursive: true,
+        force: true,
+      });
     }
   });
 
@@ -184,7 +203,10 @@ describe("review exhaustion recovery", () => {
       expect(Exit.isFailure(exit)).toBe(true);
       expect(calls).toEqual(["createPatch"]);
     } finally {
-      await rm(workspace, { recursive: true, force: true });
+      await rm(workspace, {
+        recursive: true,
+        force: true,
+      });
     }
   });
 

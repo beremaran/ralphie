@@ -72,7 +72,8 @@ const review = (verdict: "approved" | "changes_requested") => ({
 
 const issueContext = (
   pi: PiClient,
-  verify: IssueExecutionContext["repositoryInvariant"]["verify"] = () => Effect.void,
+  verify: IssueExecutionContext["repositoryInvariant"]["verify"] = () =>
+    Effect.void,
   head = checkpoint.sha,
 ): IssueExecutionContext => ({
   issue: {
@@ -89,10 +90,16 @@ const issueContext = (
   runId: "run-1",
   octokit: {} as Octokit,
   pi,
-  piSelection: { agent: "build" },
+  piSelection: {
+    agent: "build",
+  },
   piDiagnostics: makePiSessionDiagnostics(() => "now"),
   repositoryInvariant: {
-    capture: () => Effect.succeed({ branch: checkpoint.branch, head }),
+    capture: () =>
+      Effect.succeed({
+        branch: checkpoint.branch,
+        head,
+      }),
     verify,
   },
 });
@@ -105,13 +112,22 @@ const piClient = (outputs: ReadonlyArray<unknown>, sessions?: string[]) => {
       create: async () => {
         const sessionID = `session-${++sessionIndex}`;
         sessions?.push(sessionID);
-        return { data: { id: sessionID } };
+        return {
+          data: {
+            id: sessionID,
+          },
+        };
       },
       prompt: async (parameters: { format?: unknown }) => {
         const output = outputs[index++];
         return {
           data: {
-            info: parameters.format === undefined ? {} : { structured: output },
+            info:
+              parameters.format === undefined
+                ? {}
+                : {
+                    structured: output,
+                  },
             parts: [],
           },
         };
@@ -137,7 +153,11 @@ const services = (options: {
     stageAll: () => Effect.void,
     readStagedBinaryDiff: () => Effect.succeed("diff --git a/file b/file\n"),
     hasStagedChanges: () => Effect.succeed(true),
-    commit: () => Effect.succeed({ sha: "commit-1", treeSha: "tree-1" }),
+    commit: () =>
+      Effect.succeed({
+        sha: "commit-1",
+        treeSha: "tree-1",
+      }),
     push: () => Effect.void,
     createOrCheckoutFeatureBranch: () =>
       Effect.succeed({
@@ -211,11 +231,20 @@ describe("implementation executor", () => {
   test("implements, reviews, commits, and pushes after first-pass approval", async () => {
     const events: ProgressUpdate[] = [];
     const safetyInputs: GitRemoteSafetyInput[] = [];
-    const setup = services({ progress: events, safetyInputs });
+    const setup = services({
+      progress: events,
+      safetyInputs,
+    });
     const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
     const result = await Effect.runPromise(
       run(
-        piClient([undefined, review("approved"), { subject: "fix token refresh" }]),
+        piClient([
+          undefined,
+          review("approved"),
+          {
+            subject: "fix token refresh",
+          },
+        ]),
         artifacts,
         setup.layer,
       ),
@@ -231,17 +260,20 @@ describe("implementation executor", () => {
       await Effect.runPromise(artifacts.read(IssueArtifactKind.ReviewAttempts)),
     ).toHaveLength(1);
     expect(
-      await Effect.runPromise(artifacts.read(IssueArtifactKind.CommitMessageDecision)),
+      await Effect.runPromise(
+        artifacts.read(IssueArtifactKind.CommitMessageDecision),
+      ),
     ).toEqual({
       subject: "fix token refresh",
     });
     expect(
-      events.some((event) => event.stage === "review" && event.status === "succeeded"),
+      events.some(
+        (event) => event.stage === "review" && event.status === "succeeded",
+      ),
     ).toBe(true);
-    expect(safetyInputs.map(({ expectedCommitSha }) => expectedCommitSha)).toEqual([
-      undefined,
-      "commit-1",
-    ]);
+    expect(
+      safetyInputs.map(({ expectedCommitSha }) => expectedCommitSha),
+    ).toEqual([undefined, "commit-1"]);
   });
 
   test("refuses unsafe direct pushes before starting an agent session", async () => {
@@ -249,16 +281,27 @@ describe("implementation executor", () => {
     const client = piClient([]);
     client.session.prompt = (async () => {
       prompted = true;
-      return { data: { info: {}, parts: [] } };
+      return {
+        data: {
+          info: {},
+          parts: [],
+        },
+      };
     }) as unknown as typeof client.session.prompt;
     const setup = services({
       remoteSafety: {
         verifyDirectPush: () =>
-          Effect.fail(new RalphieError({ message: "protected branch" })),
+          Effect.fail(
+            new RalphieError({
+              message: "protected branch",
+            }),
+          ),
       },
     });
     const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
-    const exit = await Effect.runPromiseExit(run(client, artifacts, setup.layer));
+    const exit = await Effect.runPromiseExit(
+      run(client, artifacts, setup.layer),
+    );
 
     expect(Exit.isFailure(exit)).toBe(true);
     expect(prompted).toBe(false);
@@ -321,7 +364,9 @@ describe("implementation executor", () => {
             review("changes_requested"),
             undefined,
             review("approved"),
-            { subject: "fix token refresh" },
+            {
+              subject: "fix token refresh",
+            },
           ],
           sessions,
         ),
@@ -348,7 +393,10 @@ describe("implementation executor", () => {
         hasStagedChanges: () => Effect.succeed(false),
         commit: () => {
           commitCalled = true;
-          return Effect.succeed({ sha: "commit-1", treeSha: "tree-1" });
+          return Effect.succeed({
+            sha: "commit-1",
+            treeSha: "tree-1",
+          });
         },
       },
     });
@@ -380,12 +428,16 @@ describe("implementation executor", () => {
       await Effect.runPromise(
         artifacts.read(IssueArtifactKind.IssueResolutionDecision),
       ),
-    ).toMatchObject({ status: IssueResolutionStatus.Resolved });
+    ).toMatchObject({
+      status: IssueResolutionStatus.Resolved,
+    });
   });
 
   test("fails safely when a no-change implementation remains unresolved", async () => {
     const setup = services({
-      operations: { hasStagedChanges: () => Effect.succeed(false) },
+      operations: {
+        hasStagedChanges: () => Effect.succeed(false),
+      },
     });
     const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
     const result = await Effect.runPromise(
@@ -413,13 +465,19 @@ describe("implementation executor", () => {
   test("fails when the implementation agent fails", async () => {
     const client = {
       session: {
-        create: async () => ({ data: { id: "implementation" } }),
+        create: async () => ({
+          data: {
+            id: "implementation",
+          },
+        }),
         prompt: async () => ({
           data: {
             info: {
               error: {
                 name: "MessageOutputLengthError",
-                data: { message: "too long" },
+                data: {
+                  message: "too long",
+                },
               },
             },
             parts: [],
@@ -438,7 +496,15 @@ describe("implementation executor", () => {
   test("fails when a review response is invalid", async () => {
     const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
     const exit = await Effect.runPromiseExit(
-      run(piClient([{ verdict: "invalid" }]), artifacts, services({}).layer),
+      run(
+        piClient([
+          {
+            verdict: "invalid",
+          },
+        ]),
+        artifacts,
+        services({}).layer,
+      ),
     );
 
     expect(Exit.isFailure(exit)).toBe(true);
@@ -449,7 +515,12 @@ describe("implementation executor", () => {
     let pushed = false;
     const setup = services({
       operations: {
-        commit: () => Effect.fail(new RalphieError({ message: "commit failed" })),
+        commit: () =>
+          Effect.fail(
+            new RalphieError({
+              message: "commit failed",
+            }),
+          ),
         push: () => {
           pushed = true;
           return Effect.void;
@@ -459,7 +530,13 @@ describe("implementation executor", () => {
     const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
     const exit = await Effect.runPromiseExit(
       run(
-        piClient([undefined, review("approved"), { subject: "fix" }]),
+        piClient([
+          undefined,
+          review("approved"),
+          {
+            subject: "fix",
+          },
+        ]),
         artifacts,
         setup.layer,
       ),
@@ -486,7 +563,13 @@ describe("implementation executor", () => {
     const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
     const exit = await Effect.runPromiseExit(
       run(
-        piClient([undefined, review("approved"), { subject: "fix" }]),
+        piClient([
+          undefined,
+          review("approved"),
+          {
+            subject: "fix",
+          },
+        ]),
         artifacts,
         setup.layer,
       ),
@@ -496,7 +579,9 @@ describe("implementation executor", () => {
     expect(artifacts.has(IssueArtifactKind.CreatedCommit)).toBe(true);
     expect(
       await Effect.runPromise(artifacts.read(IssueArtifactKind.CreatedCommit)),
-    ).toMatchObject({ sha: "commit-1" });
+    ).toMatchObject({
+      sha: "commit-1",
+    });
   });
 
   test("escalates after five rejected reviews without fixing or committing after the fifth", async () => {
@@ -518,7 +603,10 @@ describe("implementation executor", () => {
       operations: {
         commit: () => {
           commitCalled = true;
-          return Effect.succeed({ sha: "commit-1", treeSha: "tree-1" });
+          return Effect.succeed({
+            sha: "commit-1",
+            treeSha: "tree-1",
+          });
         },
       },
     });
@@ -537,7 +625,9 @@ describe("implementation executor", () => {
     const originalPrompt = client.session.prompt;
     client.session.prompt = (async (parameters: {
       format?: unknown;
-      parts?: ReadonlyArray<{ text: string }>;
+      parts?: ReadonlyArray<{
+        text: string;
+      }>;
     }) => {
       if (
         parameters.format === undefined &&

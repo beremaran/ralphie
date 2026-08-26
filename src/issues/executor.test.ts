@@ -21,7 +21,9 @@ import { RalphieError } from "../shared/error.ts";
 describe("IssueExecutor", () => {
   test("exposes issue execution behind an Effect service", async () => {
     const context = {
-      issue: { number: 42 },
+      issue: {
+        number: 42,
+      },
     } as IssueExecutionContext;
     const outcome = await Effect.gen(function* () {
       const executor = yield* IssueExecutor;
@@ -52,7 +54,9 @@ describe("IssueExecutor", () => {
       let implementationCalls = 0;
       let decompositionCalls = 0;
       const context = {
-        issue: { number: complexity + 1 },
+        issue: {
+          number: complexity + 1,
+        },
       } as IssueExecutionContext;
       const dependencies = Layer.mergeAll(
         IssueArtifactStoreLive,
@@ -92,8 +96,13 @@ describe("IssueExecutor", () => {
         const outcome = yield* executor.execute(context);
         const stores = yield* IssueArtifactStore;
         const artifacts = yield* stores.forIssue(context.issue.number);
-        const decision = yield* artifacts.read(IssueArtifactKind.ComplexityDecision);
-        return { outcome, decision };
+        const decision = yield* artifacts.read(
+          IssueArtifactKind.ComplexityDecision,
+        );
+        return {
+          outcome,
+          decision,
+        };
       }).pipe(
         Effect.provide(IssueExecutorLive),
         Effect.provide(dependencies),
@@ -119,7 +128,11 @@ describe("IssueExecutor", () => {
   test("reuses a persisted complexity decision when retrying an issue", async () => {
     let assessmentCalls = 0;
     let implementationCalls = 0;
-    const context = { issue: { number: 42 } } as IssueExecutionContext;
+    const context = {
+      issue: {
+        number: 42,
+      },
+    } as IssueExecutionContext;
     const dependencies = Layer.mergeAll(
       IssueArtifactStoreLive,
       Layer.succeed(ComplexityAssessment, {
@@ -164,12 +177,20 @@ describe("IssueExecutor", () => {
 
   test("turns an invalid or missing complexity decision into a failed outcome", async () => {
     let workflowCalls = 0;
-    const context = { issue: { number: 42 } } as IssueExecutionContext;
+    const context = {
+      issue: {
+        number: 42,
+      },
+    } as IssueExecutionContext;
     const dependencies = Layer.mergeAll(
       IssueArtifactStoreLive,
       Layer.succeed(ComplexityAssessment, {
         assess: () =>
-          Effect.fail(new RalphieError({ message: "Structured decision is missing." })),
+          Effect.fail(
+            new RalphieError({
+              message: "Structured decision is missing.",
+            }),
+          ),
       }),
       Layer.succeed(ImplementationExecutor, {
         execute: () => {
@@ -202,7 +223,11 @@ describe("IssueExecutor", () => {
   });
 
   test("hands a restored review escalation to decomposition", async () => {
-    const context = { issue: { number: 42 } } as IssueExecutionContext;
+    const context = {
+      issue: {
+        number: 42,
+      },
+    } as IssueExecutionContext;
     const dependencies = Layer.mergeAll(
       IssueArtifactStoreLive,
       Layer.succeed(ComplexityAssessment, {

@@ -2,7 +2,10 @@ import { Context, Effect, Layer } from "effect";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { GitIssueCheckpoint, type IssueCheckpoint } from "../git/issue-checkpoint.ts";
+import {
+  GitIssueCheckpoint,
+  type IssueCheckpoint,
+} from "../git/issue-checkpoint.ts";
 import type { GitHubIssue } from "../github/issues.ts";
 import {
   ProgressReporter,
@@ -85,7 +88,10 @@ export const IssueRecoveryLive = Layer.effect(
           }
 
           const issueContext = {
-            issue: { number: input.issue.number, title: input.issue.title },
+            issue: {
+              number: input.issue.number,
+              title: input.issue.title,
+            },
             attempt: input.reviews.length,
             maxAttempts: REVIEW_ITERATION_LIMIT,
           };
@@ -106,7 +112,9 @@ export const IssueRecoveryLive = Layer.effect(
             {
               ...(input.repository === undefined
                 ? {}
-                : { repository: input.repository }),
+                : {
+                    repository: input.repository,
+                  }),
               issue: input.issue,
               checkpoint: input.checkpoint,
               reviews: input.reviews,
@@ -115,7 +123,9 @@ export const IssueRecoveryLive = Layer.effect(
             null,
             2,
           )}\n`;
-          if (Buffer.byteLength(metadata) > REVIEW_DIAGNOSTIC_METADATA_LIMIT_BYTES) {
+          if (
+            Buffer.byteLength(metadata) > REVIEW_DIAGNOSTIC_METADATA_LIMIT_BYTES
+          ) {
             return yield* new RalphieError({
               message: `Review diagnostic metadata exceeds ${REVIEW_DIAGNOSTIC_METADATA_LIMIT_BYTES} bytes. Checkout was not restored.`,
             });
@@ -131,7 +141,9 @@ export const IssueRecoveryLive = Layer.effect(
           );
           yield* Effect.tryPromise({
             try: async () => {
-              await mkdir(diagnosticsPath, { recursive: true });
+              await mkdir(diagnosticsPath, {
+                recursive: true,
+              });
               await Promise.all([
                 writeFile(join(diagnosticsPath, "changes.patch"), patch),
                 writeFile(join(diagnosticsPath, "metadata.json"), metadata),
@@ -149,7 +161,9 @@ export const IssueRecoveryLive = Layer.effect(
             stage: ProgressStage.CheckoutRestore,
             status: ProgressStatus.Started,
             message: `Restoring ${input.checkpoint.branch} to ${input.checkpoint.sha}...`,
-            details: { diagnosticsPath },
+            details: {
+              diagnosticsPath,
+            },
           });
           yield* git.restore(input.repositoryPath, input.checkpoint).pipe(
             Effect.tapError((error) =>
@@ -158,7 +172,9 @@ export const IssueRecoveryLive = Layer.effect(
                 stage: ProgressStage.CheckoutRestore,
                 status: ProgressStatus.Failed,
                 message: `Checkout restoration failed: ${error.message}`,
-                details: { diagnosticsPath },
+                details: {
+                  diagnosticsPath,
+                },
               }),
             ),
           );
@@ -167,7 +183,9 @@ export const IssueRecoveryLive = Layer.effect(
             stage: ProgressStage.CheckoutRestore,
             status: ProgressStatus.Succeeded,
             message: `Restored ${input.checkpoint.branch} to the clean issue base.`,
-            details: { diagnosticsPath },
+            details: {
+              diagnosticsPath,
+            },
           });
 
           return {

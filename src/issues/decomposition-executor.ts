@@ -21,7 +21,10 @@ import {
   ProgressStatus,
 } from "../progress/progress.ts";
 import { RalphieError } from "../shared/error.ts";
-import { IssueArtifactKind, type CreatedIssueNumberMapping } from "./artifacts.ts";
+import {
+  IssueArtifactKind,
+  type CreatedIssueNumberMapping,
+} from "./artifacts.ts";
 import { issueBreakdownDecisionSchema } from "./decisions.ts";
 import { IssueExecutionOutcomeKind } from "./execution.ts";
 import type {
@@ -35,9 +38,10 @@ export type DecompositionExecutorService = {
   ) => Effect.Effect<WorkflowExecutorResult, RalphieError>;
 };
 
-export const DecompositionExecutor = Context.GenericTag<DecompositionExecutorService>(
-  "ralphie/DecompositionExecutor",
-);
+export const DecompositionExecutor =
+  Context.GenericTag<DecompositionExecutorService>(
+    "ralphie/DecompositionExecutor",
+  );
 
 const existingMapping = (
   input: WorkflowExecutorInput,
@@ -70,7 +74,9 @@ export const DecompositionExecutorLive = Layer.effect(
               : ProgressStage.IssueCreation,
           status: ProgressStatus.Started,
           message: `Applying GitHub mutation ${operation}...`,
-          details: { operation },
+          details: {
+            operation,
+          },
         })
         .pipe(
           Effect.zipRight(effect),
@@ -92,7 +98,9 @@ export const DecompositionExecutorLive = Layer.effect(
                 output !== null &&
                 "number" in output &&
                 typeof output.number === "number"
-                  ? { createdIssueNumber: output.number }
+                  ? {
+                      createdIssueNumber: output.number,
+                    }
                   : {}),
               },
             }),
@@ -160,7 +168,9 @@ export const DecompositionExecutorLive = Layer.effect(
             ? yield* artifacts.read(IssueArtifactKind.ReviewAttempts)
             : [];
 
-          const breakdown = artifacts.has(IssueArtifactKind.IssueBreakdownDecision)
+          const breakdown = artifacts.has(
+            IssueArtifactKind.IssueBreakdownDecision,
+          )
             ? yield* artifacts.read(IssueArtifactKind.IssueBreakdownDecision)
             : yield* Effect.gen(function* () {
                 const invariant = yield* context.repositoryInvariant.capture(
@@ -204,7 +214,10 @@ export const DecompositionExecutorLive = Layer.effect(
               }).pipe(
                 Effect.map(({ output }) => output),
                 Effect.tap((decision) =>
-                  artifacts.write(IssueArtifactKind.IssueBreakdownDecision, decision),
+                  artifacts.write(
+                    IssueArtifactKind.IssueBreakdownDecision,
+                    decision,
+                  ),
                 ),
               );
 
@@ -217,12 +230,17 @@ export const DecompositionExecutorLive = Layer.effect(
           const discoveredByKey = new Map<string, number>();
           for (const child of discovered) {
             if (
-              !breakdown.issues.some((issue) => issue.key === child.decompositionKey)
+              !breakdown.issues.some(
+                (issue) => issue.key === child.decompositionKey,
+              )
             ) {
               return yield* ambiguous(
                 input,
                 `Found generated child ${child.number} with unexpected key ${child.decompositionKey}.`,
-                { issueNumber: child.number, key: child.decompositionKey },
+                {
+                  issueNumber: child.number,
+                  key: child.decompositionKey,
+                },
               );
             }
             const previous = discoveredByKey.get(child.decompositionKey);
@@ -244,7 +262,11 @@ export const DecompositionExecutorLive = Layer.effect(
               return yield* ambiguous(
                 input,
                 `Artifact mapping for ${key} points to #${recorded}, but GitHub marker discovery found #${issueNumber}.`,
-                { key, recorded, discovered: issueNumber },
+                {
+                  key,
+                  recorded,
+                  discovered: issueNumber,
+                },
               );
             }
             if (recorded === undefined) {
@@ -253,7 +275,10 @@ export const DecompositionExecutorLive = Layer.effect(
                 artifacts.recordCreatedIssue(key, issueNumber),
                 input,
               );
-              mapping = { ...mapping, [key]: issueNumber };
+              mapping = {
+                ...mapping,
+                [key]: issueNumber,
+              };
             }
           }
           for (const child of breakdown.issues) {
@@ -271,7 +296,10 @@ export const DecompositionExecutorLive = Layer.effect(
               artifacts.recordCreatedIssue(child.key, created.number),
               input,
             );
-            mapping = { ...mapping, [child.key]: created.number };
+            mapping = {
+              ...mapping,
+              [child.key]: created.number,
+            };
           }
 
           for (const child of breakdown.issues) {
@@ -283,13 +311,18 @@ export const DecompositionExecutorLive = Layer.effect(
             }
             yield* recoverableMutation(
               `link-child-${child.key}`,
-              mutations.update(context.octokit, context.repository, childNumber, {
-                body: renderChildIssueBody({
-                  child,
-                  lineage,
-                  issueNumbers: mapping,
-                }),
-              }),
+              mutations.update(
+                context.octokit,
+                context.repository,
+                childNumber,
+                {
+                  body: renderChildIssueBody({
+                    child,
+                    lineage,
+                    issueNumbers: mapping,
+                  }),
+                },
+              ),
               input,
             );
           }
@@ -324,7 +357,9 @@ export const DecompositionExecutorLive = Layer.effect(
 
           return {
             kind: IssueExecutionOutcomeKind.Decomposed,
-            childIssueNumbers: breakdown.issues.map((child) => mapping[child.key]!),
+            childIssueNumbers: breakdown.issues.map(
+              (child) => mapping[child.key]!,
+            ),
           } as const;
         }),
     } satisfies DecompositionExecutorService;

@@ -5,7 +5,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { CommandRunner, CommandRunnerLive } from "../process/command-runner.ts";
-import { GitIssueCheckpoint, GitIssueCheckpointLive } from "./issue-checkpoint.ts";
+import {
+  GitIssueCheckpoint,
+  GitIssueCheckpointLive,
+} from "./issue-checkpoint.ts";
 import {
   GitPushError,
   GitPushFailurePolicy,
@@ -27,11 +30,20 @@ const runGit = (
   }).pipe(Effect.provide(CommandRunnerLive), Effect.runPromise);
 
 const setupRepository = async () => {
-  const repositoryPath = await mkdtemp(join(tmpdir(), "ralphie-git-operations-"));
+  const repositoryPath = await mkdtemp(
+    join(tmpdir(), "ralphie-git-operations-"),
+  );
   await runGit(repositoryPath, ["init", "-b", "main"]);
-  await runGit(repositoryPath, ["config", "user.email", "ralphie@example.test"]);
+  await runGit(repositoryPath, [
+    "config",
+    "user.email",
+    "ralphie@example.test",
+  ]);
   await runGit(repositoryPath, ["config", "user.name", "Ralphie Tests"]);
-  await writeFile(join(repositoryPath, "binary.dat"), Buffer.from([0, 1, 2, 3]));
+  await writeFile(
+    join(repositoryPath, "binary.dat"),
+    Buffer.from([0, 1, 2, 3]),
+  );
   await runGit(repositoryPath, ["add", "--all"]);
   await runGit(repositoryPath, ["commit", "-m", "initial"]);
   return repositoryPath;
@@ -41,7 +53,10 @@ describe("deterministic Git issue operations", () => {
   test("stages all changes, detects the staged set, and preserves the exact binary diff", async () => {
     const repositoryPath = await setupRepository();
     try {
-      await writeFile(join(repositoryPath, "binary.dat"), Buffer.from([0, 9, 8, 7]));
+      await writeFile(
+        join(repositoryPath, "binary.dat"),
+        Buffer.from([0, 9, 8, 7]),
+      );
       await writeFile(join(repositoryPath, "untracked.txt"), "new file\n");
 
       const beforeStage = await Effect.gen(function* () {
@@ -90,7 +105,10 @@ describe("deterministic Git issue operations", () => {
       expect(actualDiff).toContain("GIT binary patch");
       expect(actualDiff).toContain("untracked.txt");
     } finally {
-      await rm(repositoryPath, { recursive: true, force: true });
+      await rm(repositoryPath, {
+        recursive: true,
+        force: true,
+      });
     }
   });
 
@@ -111,7 +129,10 @@ describe("deterministic Git issue operations", () => {
         Buffer.from([0, 1, 2, 3]),
       );
     } finally {
-      await rm(repositoryPath, { recursive: true, force: true });
+      await rm(repositoryPath, {
+        recursive: true,
+        force: true,
+      });
     }
   });
 
@@ -153,26 +174,43 @@ describe("deterministic Git issue operations", () => {
       expect(remote.stdout).toBe(result.sha);
       expect(status.stdout).toBe("");
     } finally {
-      await rm(repositoryPath, { recursive: true, force: true });
-      await rm(remotePath, { recursive: true, force: true });
+      await rm(repositoryPath, {
+        recursive: true,
+        force: true,
+      });
+      await rm(remotePath, {
+        recursive: true,
+        force: true,
+      });
     }
   });
 
   test("classifies non-fast-forward rejection and halts instead of retrying", async () => {
     const repositoryPath = await setupRepository();
     const remotePath = await mkdtemp(join(tmpdir(), "ralphie-git-remote-"));
-    const otherRepositoryPath = await mkdtemp(join(tmpdir(), "ralphie-git-other-"));
+    const otherRepositoryPath = await mkdtemp(
+      join(tmpdir(), "ralphie-git-other-"),
+    );
     try {
       await runGit(remotePath, ["init", "--bare"]);
       await runGit(repositoryPath, ["remote", "add", "origin", remotePath]);
       await runGit(repositoryPath, ["push", "--no-force", "origin", "main"]);
       await runGit(otherRepositoryPath, ["clone", remotePath, "."]);
-      await runGit(otherRepositoryPath, ["config", "user.email", "other@example.test"]);
+      await runGit(otherRepositoryPath, [
+        "config",
+        "user.email",
+        "other@example.test",
+      ]);
       await runGit(otherRepositoryPath, ["config", "user.name", "Other Tests"]);
       await writeFile(join(otherRepositoryPath, "remote.txt"), "remote\n");
       await runGit(otherRepositoryPath, ["add", "--all"]);
       await runGit(otherRepositoryPath, ["commit", "-m", "advance remote"]);
-      await runGit(otherRepositoryPath, ["push", "--no-force", "origin", "main"]);
+      await runGit(otherRepositoryPath, [
+        "push",
+        "--no-force",
+        "origin",
+        "main",
+      ]);
 
       await writeFile(join(repositoryPath, "local.txt"), "local\n");
       const outcome = await Effect.gen(function* () {
@@ -202,9 +240,18 @@ describe("deterministic Git issue operations", () => {
         });
       }
     } finally {
-      await rm(repositoryPath, { recursive: true, force: true });
-      await rm(remotePath, { recursive: true, force: true });
-      await rm(otherRepositoryPath, { recursive: true, force: true });
+      await rm(repositoryPath, {
+        recursive: true,
+        force: true,
+      });
+      await rm(remotePath, {
+        recursive: true,
+        force: true,
+      });
+      await rm(otherRepositoryPath, {
+        recursive: true,
+        force: true,
+      });
     }
   });
 
@@ -222,7 +269,12 @@ describe("deterministic Git issue operations", () => {
       Effect.provide(GitIssueOperationsLive),
       Effect.provide(
         Layer.succeed(CommandRunner, {
-          run: () => Effect.succeed({ exitCode: 1, stdout: "", stderr: rejection }),
+          run: () =>
+            Effect.succeed({
+              exitCode: 1,
+              stdout: "",
+              stderr: rejection,
+            }),
         }),
       ),
       Effect.flip,
@@ -236,7 +288,9 @@ describe("deterministic Git issue operations", () => {
       branch: "main",
     });
     expect(error.message).toContain("GH006: Protected branch update failed");
-    expect(error.message).toContain("Changes must be made through a pull request");
+    expect(error.message).toContain(
+      "Changes must be made through a pull request",
+    );
     expect(error.message).not.toContain("remote branch moved");
   });
 
@@ -257,7 +311,10 @@ describe("deterministic Git issue operations", () => {
         Effect.runPromise,
       );
 
-      await writeFile(join(repositoryPath, "temporary.bin"), Buffer.from([0, 4, 5, 6]));
+      await writeFile(
+        join(repositoryPath, "temporary.bin"),
+        Buffer.from([0, 4, 5, 6]),
+      );
       const stagedDiff = await Effect.gen(function* () {
         const operations = yield* GitIssueOperations;
         yield* operations.stageAll(repositoryPath);
@@ -277,14 +334,17 @@ describe("deterministic Git issue operations", () => {
         Effect.provide(CommandRunnerLive),
         Effect.runPromise,
       );
-      expect((await runGit(repositoryPath, ["status", "--porcelain=v1"])).stdout).toBe(
-        "",
-      );
+      expect(
+        (await runGit(repositoryPath, ["status", "--porcelain=v1"])).stdout,
+      ).toBe("");
       expect((await runGit(repositoryPath, ["rev-parse", "HEAD"])).stdout).toBe(
         checkpoint.sha,
       );
 
-      await writeFile(join(repositoryPath, "final.txt"), "final implementation\n");
+      await writeFile(
+        join(repositoryPath, "final.txt"),
+        "final implementation\n",
+      );
       const commit = await Effect.gen(function* () {
         const operations = yield* GitIssueOperations;
         yield* operations.stageAll(repositoryPath);
@@ -304,22 +364,29 @@ describe("deterministic Git issue operations", () => {
         Effect.provide(CommandRunnerLive),
         Effect.runPromise,
       );
-      expect((await runGit(remotePath, ["rev-parse", "refs/heads/main"])).stdout).toBe(
-        commit.sha,
-      );
-      expect((await runGit(repositoryPath, ["status", "--porcelain=v1"])).stdout).toBe(
-        "",
-      );
+      expect(
+        (await runGit(remotePath, ["rev-parse", "refs/heads/main"])).stdout,
+      ).toBe(commit.sha);
+      expect(
+        (await runGit(repositoryPath, ["status", "--porcelain=v1"])).stdout,
+      ).toBe("");
     } finally {
-      await rm(repositoryPath, { recursive: true, force: true });
-      await rm(remotePath, { recursive: true, force: true });
+      await rm(repositoryPath, {
+        recursive: true,
+        force: true,
+      });
+      await rm(remotePath, {
+        recursive: true,
+        force: true,
+      });
     }
   });
 
   test("creates and resumes a feature branch only when its ancestry matches the explicit base", async () => {
     const repositoryPath = await setupRepository();
     try {
-      const baseSha = (await runGit(repositoryPath, ["rev-parse", "HEAD"])).stdout;
+      const baseSha = (await runGit(repositoryPath, ["rev-parse", "HEAD"]))
+        .stdout;
       const first = await Effect.gen(function* () {
         const operations = yield* GitIssueOperations;
         return yield* operations.createOrCheckoutFeatureBranch(
@@ -344,7 +411,8 @@ describe("deterministic Git issue operations", () => {
       await writeFile(join(repositoryPath, "feature.txt"), "feature\n");
       await runGit(repositoryPath, ["add", "--all"]);
       await runGit(repositoryPath, ["commit", "-m", "feature work"]);
-      const featureSha = (await runGit(repositoryPath, ["rev-parse", "HEAD"])).stdout;
+      const featureSha = (await runGit(repositoryPath, ["rev-parse", "HEAD"]))
+        .stdout;
       const resumed = await Effect.gen(function* () {
         const operations = yield* GitIssueOperations;
         return yield* operations.createOrCheckoutFeatureBranch(
@@ -365,8 +433,9 @@ describe("deterministic Git issue operations", () => {
       await writeFile(join(repositoryPath, "base-next.txt"), "base\n");
       await runGit(repositoryPath, ["add", "--all"]);
       await runGit(repositoryPath, ["commit", "-m", "advance base"]);
-      const advancedBaseSha = (await runGit(repositoryPath, ["rev-parse", "HEAD"]))
-        .stdout;
+      const advancedBaseSha = (
+        await runGit(repositoryPath, ["rev-parse", "HEAD"])
+      ).stdout;
       const incompatible = await Effect.gen(function* () {
         const operations = yield* GitIssueOperations;
         return yield* operations.createOrCheckoutFeatureBranch(
@@ -389,7 +458,10 @@ describe("deterministic Git issue operations", () => {
         expect(failure.value.message).toContain("not based on");
       }
     } finally {
-      await rm(repositoryPath, { recursive: true, force: true });
+      await rm(repositoryPath, {
+        recursive: true,
+        force: true,
+      });
     }
   });
 
@@ -400,7 +472,8 @@ describe("deterministic Git issue operations", () => {
       await runGit(remotePath, ["init", "--bare"]);
       await runGit(repositoryPath, ["remote", "add", "origin", remotePath]);
       await runGit(repositoryPath, ["push", "--no-force", "origin", "main"]);
-      const baseSha = (await runGit(repositoryPath, ["rev-parse", "HEAD"])).stdout;
+      const baseSha = (await runGit(repositoryPath, ["rev-parse", "HEAD"]))
+        .stdout;
       await Effect.gen(function* () {
         const operations = yield* GitIssueOperations;
         yield* operations.createOrCheckoutFeatureBranch(
@@ -419,7 +492,8 @@ describe("deterministic Git issue operations", () => {
       await writeFile(join(repositoryPath, "merged.txt"), "merged\n");
       await runGit(repositoryPath, ["add", "--all"]);
       await runGit(repositoryPath, ["commit", "-m", "merge feature"]);
-      const mergedSha = (await runGit(repositoryPath, ["rev-parse", "HEAD"])).stdout;
+      const mergedSha = (await runGit(repositoryPath, ["rev-parse", "HEAD"]))
+        .stdout;
       await runGit(repositoryPath, ["push", "--no-force", "origin", "main"]);
       await runGit(repositoryPath, ["checkout", "ralphie/issue-2"]);
 
@@ -432,17 +506,24 @@ describe("deterministic Git issue operations", () => {
         Effect.runPromise,
       );
       expect(
-        (await runGit(repositoryPath, ["rev-parse", "--abbrev-ref", "HEAD"])).stdout,
+        (await runGit(repositoryPath, ["rev-parse", "--abbrev-ref", "HEAD"]))
+          .stdout,
       ).toBe("main");
       expect((await runGit(repositoryPath, ["rev-parse", "HEAD"])).stdout).toBe(
         mergedSha,
       );
-      expect((await runGit(repositoryPath, ["status", "--porcelain=v1"])).stdout).toBe(
-        "",
-      );
+      expect(
+        (await runGit(repositoryPath, ["status", "--porcelain=v1"])).stdout,
+      ).toBe("");
     } finally {
-      await rm(repositoryPath, { recursive: true, force: true });
-      await rm(remotePath, { recursive: true, force: true });
+      await rm(repositoryPath, {
+        recursive: true,
+        force: true,
+      });
+      await rm(remotePath, {
+        recursive: true,
+        force: true,
+      });
     }
   });
 });

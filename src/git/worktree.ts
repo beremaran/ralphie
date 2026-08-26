@@ -2,7 +2,10 @@ import { Context, Effect, Layer } from "effect";
 import { mkdir } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 
-import { CommandRunner, type CommandRunnerService } from "../process/command-runner.ts";
+import {
+  CommandRunner,
+  type CommandRunnerService,
+} from "../process/command-runner.ts";
 import { RalphieError } from "../shared/error.ts";
 import { resolveWorkspacePath } from "../workspace/workspace.ts";
 
@@ -31,8 +34,9 @@ export type GitWorktreeService = {
   ) => Effect.Effect<void, RalphieError>;
 };
 
-export const GitWorktrees =
-  Context.GenericTag<GitWorktreeService>("ralphie/GitWorktrees");
+export const GitWorktrees = Context.GenericTag<GitWorktreeService>(
+  "ralphie/GitWorktrees",
+);
 
 const runGit = (
   runner: CommandRunnerService,
@@ -66,9 +70,15 @@ export const GitWorktreesLive = Layer.effect(
           );
           const path = join(root, basename(input.repository.repositoryPath));
           yield* Effect.tryPromise({
-            try: () => mkdir(dirname(path), { recursive: true }),
+            try: () =>
+              mkdir(dirname(path), {
+                recursive: true,
+              }),
             catch: (cause) =>
-              new RalphieError({ message: `Failed to prepare ${path}.`, cause }),
+              new RalphieError({
+                message: `Failed to prepare ${path}.`,
+                cause,
+              }),
           });
 
           const existing = yield* runner.run("git", [

@@ -29,9 +29,7 @@ export const Pi = Context.GenericTag<PiService>("ralphie/Pi");
  * writes) the agent directory from the run's model configuration so that
  * credentials never leak into the operator's real Pi home.
  */
-export const PiLive = (
-  config: PiProviderConfig,
-) =>
+export const PiLive = (config: PiProviderConfig) =>
   Layer.effect(
     Pi,
     Effect.gen(function* () {
@@ -76,6 +74,8 @@ export const PiLive = (
         }),
       );
 
-      return { start };
+      return {
+        start,
+      };
     }),
   );

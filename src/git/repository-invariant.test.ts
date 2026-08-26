@@ -26,18 +26,26 @@ describe("Git repository invariants", () => {
       return yield* service.capture("/workspace/repo");
     }).pipe(
       Effect.provide(
-        GitRepositoryInvariantLive.pipe(Layer.provide(runnerLayer(["main", "abc123"]))),
+        GitRepositoryInvariantLive.pipe(
+          Layer.provide(runnerLayer(["main", "abc123"])),
+        ),
       ),
       Effect.runPromise,
     );
 
-    expect(invariant).toEqual({ branch: "main", head: "abc123" });
+    expect(invariant).toEqual({
+      branch: "main",
+      head: "abc123",
+    });
   });
 
   test("fails when branch or HEAD changes", async () => {
     const branchExit = await Effect.gen(function* () {
       const service = yield* GitRepositoryInvariant;
-      yield* service.verify("/workspace/repo", { branch: "main", head: "abc123" });
+      yield* service.verify("/workspace/repo", {
+        branch: "main",
+        head: "abc123",
+      });
     }).pipe(
       Effect.provide(
         GitRepositoryInvariantLive.pipe(

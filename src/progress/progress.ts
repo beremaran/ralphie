@@ -1,7 +1,10 @@
 import { Context, Effect, Layer } from "effect";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import { redactSensitiveText, redactSensitiveValue } from "../shared/redaction.ts";
+import {
+  redactSensitiveText,
+  redactSensitiveValue,
+} from "../shared/redaction.ts";
 import { cyan, dim, green, red, yellow } from "./colors.ts";
 
 export enum ProgressStage {
@@ -223,16 +226,18 @@ export const makeProgressReporterLayer = ({
             ...(update.details === undefined
               ? {}
               : {
-                details: redactSensitiveValue(update.details) as Readonly<
-                  Record<string, unknown>
-                >,
-              }),
+                  details: redactSensitiveValue(update.details) as Readonly<
+                    Record<string, unknown>
+                  >,
+                }),
             runId,
             timestamp: emittedAt.toISOString(),
           };
 
           if (eventLogPath !== undefined && persistEvents) {
-            mkdirSync(dirname(eventLogPath), { recursive: true });
+            mkdirSync(dirname(eventLogPath), {
+              recursive: true,
+            });
             appendFileSync(eventLogPath, `${JSON.stringify(event)}\n`, "utf8");
           }
 
@@ -273,7 +278,9 @@ export const makeProgressReporterLayer = ({
             event.status === ProgressStatus.Succeeded ||
             event.status === ProgressStatus.Failed ||
             event.status === ProgressStatus.Skipped;
-          const active = settled ? removeActive(progressIdentity(event)) : undefined;
+          const active = settled
+            ? removeActive(progressIdentity(event))
+            : undefined;
           if (terminalRunEvent) {
             activeProgress.length = 0;
           }
@@ -281,12 +288,15 @@ export const makeProgressReporterLayer = ({
             active === undefined
               ? ""
               : (() => {
-                const elapsedMs = Math.max(0, emittedAt.getTime() - active.startedAt);
-                const elapsedSec = (elapsedMs / 1000).toFixed(1);
-                return colors
-                  ? ` ${dim(`(${elapsedSec}s)`)}`
-                  : ` (${elapsedSec}s)`;
-              })();
+                  const elapsedMs = Math.max(
+                    0,
+                    emittedAt.getTime() - active.startedAt,
+                  );
+                  const elapsedSec = (elapsedMs / 1000).toFixed(1);
+                  return colors
+                    ? ` ${dim(`(${elapsedSec}s)`)}`
+                    : ` (${elapsedSec}s)`;
+                })();
           appendLine(`${line}${duration}`);
         }),
       stopPersisting: Effect.sync(() => {

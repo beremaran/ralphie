@@ -9,7 +9,10 @@ import {
   makeIssueArtifactStore,
   type IssueArtifactStore,
 } from "./artifacts.ts";
-import { ComplexityAssessment, ComplexityAssessmentLive } from "./complexity.ts";
+import {
+  ComplexityAssessment,
+  ComplexityAssessmentLive,
+} from "./complexity.ts";
 import { ComplexityLevel, ImplementationComplexityLevel } from "./decisions.ts";
 import {
   DecompositionExecutor,
@@ -48,7 +51,10 @@ import { ReviewExhaustionOutcome } from "./recovery.ts";
 import { IssueQueueResumeStrategy, IssueWorkflowKind } from "./stage.ts";
 import { RalphieError } from "../shared/error.ts";
 
-const checkpoint: IssueCheckpoint = { branch: "main", sha: "abc123" };
+const checkpoint: IssueCheckpoint = {
+  branch: "main",
+  sha: "abc123",
+};
 
 const issue = (number: number, title: string, body = "Task body") => ({
   number,
@@ -70,10 +76,16 @@ const context = (
   runId: "run-e2e",
   octokit: {} as Octokit,
   pi: client,
-  piSelection: { agent: "build" },
+  piSelection: {
+    agent: "build",
+  },
   piDiagnostics: makePiSessionDiagnostics(() => "now"),
   repositoryInvariant: {
-    capture: () => Effect.succeed({ branch: "main", head: checkpoint.sha }),
+    capture: () =>
+      Effect.succeed({
+        branch: "main",
+        head: checkpoint.sha,
+      }),
     verify: () => Effect.void,
   },
 });
@@ -83,12 +95,21 @@ const clientFor = (outputs: ReadonlyArray<unknown>) => {
   let session = 0;
   return {
     session: {
-      create: async () => ({ data: { id: `session-${++session}` } }),
+      create: async () => ({
+        data: {
+          id: `session-${++session}`,
+        },
+      }),
       prompt: async (parameters: { format?: unknown }) => {
         const output = outputs[index++];
         return {
           data: {
-            info: parameters.format === undefined ? {} : { structured: output },
+            info:
+              parameters.format === undefined
+                ? {}
+                : {
+                    structured: output,
+                  },
             parts: [],
           },
         };
@@ -108,7 +129,11 @@ const implementationServices = (
     stageAll: () => Effect.void,
     readStagedBinaryDiff: () => Effect.succeed("diff --git a/file b/file\n"),
     hasStagedChanges: () => Effect.succeed(true),
-    commit: () => Effect.succeed({ sha: "commit-e2e", treeSha: "tree-e2e" }),
+    commit: () =>
+      Effect.succeed({
+        sha: "commit-e2e",
+        treeSha: "tree-e2e",
+      }),
     push: () => Effect.void,
     createOrCheckoutFeatureBranch: () =>
       Effect.succeed({
@@ -186,9 +211,16 @@ const breakdown = {
 
 const decompositionServices = (state: {
   readonly created: number[];
-  readonly updates: Array<{ issueNumber: number; body?: string }>;
-  readonly closeCount: { value: number };
-  readonly failSecondLink?: { value: boolean };
+  readonly updates: Array<{
+    issueNumber: number;
+    body?: string;
+  }>;
+  readonly closeCount: {
+    value: number;
+  };
+  readonly failSecondLink?: {
+    value: boolean;
+  };
 }) => {
   const mutations: GitHubIssueMutationService = {
     create: (_client, _repository, input) =>
@@ -201,10 +233,15 @@ const decompositionServices = (state: {
       state.failSecondLink?.value && issueNumber === 102
         ? Effect.gen(function* () {
             state.failSecondLink!.value = false;
-            return yield* new RalphieError({ message: "link failed" });
+            return yield* new RalphieError({
+              message: "link failed",
+            });
           })
         : Effect.sync(() => {
-            state.updates.push({ issueNumber, body: input.body });
+            state.updates.push({
+              issueNumber,
+              body: input.body,
+            });
             return issue(issueNumber, "Updated", input.body ?? "");
           }),
     close: (_client, _repository, issueNumber) =>
@@ -219,7 +256,10 @@ const decompositionServices = (state: {
   };
   return Layer.merge(
     Layer.succeed(GitHubIssueMutations, mutations),
-    Layer.merge(Layer.succeed(GitHubIssues, issues), makeProgressRecorderLayer([])),
+    Layer.merge(
+      Layer.succeed(GitHubIssues, issues),
+      makeProgressRecorderLayer([]),
+    ),
   );
 };
 
@@ -230,7 +270,10 @@ const runDecomposition = (
 ) =>
   Effect.gen(function* () {
     const executor = yield* DecompositionExecutor;
-    return yield* executor.execute({ context: context(client), artifacts });
+    return yield* executor.execute({
+      context: context(client),
+      artifacts,
+    });
   }).pipe(
     Effect.provide(DecompositionExecutorLive),
     Effect.provide(layer as any),
@@ -240,10 +283,15 @@ describe("mocked end-to-end issue workflows", () => {
   test("executes a complexity-2 issue through push", async () => {
     const progress: ProgressUpdate[] = [];
     const client = clientFor([
-      { complexity: ComplexityLevel.Level2, rationale: "Localized change." },
+      {
+        complexity: ComplexityLevel.Level2,
+        rationale: "Localized change.",
+      },
       undefined,
       reviewApproved,
-      { subject: "complete task" },
+      {
+        subject: "complete task",
+      },
     ]);
     const assessment = await Effect.runPromise(runComplexity(client, progress));
     expect(assessment.decision.complexity).toBe(ComplexityLevel.Level2);
@@ -252,7 +300,10 @@ describe("mocked end-to-end issue workflows", () => {
     await Effect.runPromise(
       Effect.gen(function* () {
         const executor = yield* ImplementationExecutor;
-        return yield* executor.execute({ context: context(client), artifacts });
+        return yield* executor.execute({
+          context: context(client),
+          artifacts,
+        });
       }).pipe(
         Effect.provide(ImplementationExecutorLive),
         Effect.provide(
@@ -273,19 +324,30 @@ describe("mocked end-to-end issue workflows", () => {
 
   test("executes a complexity-4 issue through closure and refreshes dependent queue work", async () => {
     const client = clientFor([
-      { complexity: ComplexityLevel.Level4, rationale: "Broad change." },
+      {
+        complexity: ComplexityLevel.Level4,
+        rationale: "Broad change.",
+      },
       breakdown,
     ]);
     const assessment = await Effect.runPromise(runComplexity(client, []));
     expect(assessment.decision.complexity).toBe(ComplexityLevel.Level4);
     const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
     await Effect.runPromise(
-      artifacts.write(IssueArtifactKind.ComplexityDecision, assessment.decision),
+      artifacts.write(
+        IssueArtifactKind.ComplexityDecision,
+        assessment.decision,
+      ),
     );
     const state = {
       created: [] as number[],
-      updates: [] as Array<{ issueNumber: number; body?: string }>,
-      closeCount: { value: 0 },
+      updates: [] as Array<{
+        issueNumber: number;
+        body?: string;
+      }>,
+      closeCount: {
+        value: 0,
+      },
     };
     const result = await Effect.runPromise(
       runDecomposition(client, artifacts, decompositionServices(state)),
@@ -299,8 +361,14 @@ describe("mocked end-to-end issue workflows", () => {
 
     const childBodies = state.updates
       .filter(({ issueNumber }) => issueNumber === 101 || issueNumber === 102)
-      .map(({ issueNumber, body }) => issue(issueNumber, `Child ${issueNumber}`, body));
-    const queue = createIssueQueue([{ issue: issue(42, "Original") }]);
+      .map(({ issueNumber, body }) =>
+        issue(issueNumber, `Child ${issueNumber}`, body),
+      );
+    const queue = createIssueQueue([
+      {
+        issue: issue(42, "Original"),
+      },
+    ]);
     expect(queue.next()?.number).toBe(42);
     queue.complete(42);
     expect(queue.refresh(toQueuedIssues(childBodies))).toBe(2);
@@ -312,9 +380,16 @@ describe("mocked end-to-end issue workflows", () => {
   test("resumes a partially completed decomposition without duplicating children", async () => {
     const state = {
       created: [] as number[],
-      updates: [] as Array<{ issueNumber: number; body?: string }>,
-      closeCount: { value: 0 },
-      failSecondLink: { value: true },
+      updates: [] as Array<{
+        issueNumber: number;
+        body?: string;
+      }>,
+      closeCount: {
+        value: 0,
+      },
+      failSecondLink: {
+        value: true,
+      },
     };
     const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
     const client = clientFor([breakdown]);
@@ -331,36 +406,64 @@ describe("mocked end-to-end issue workflows", () => {
 
   test("hands five-review exhaustion from the real implementation executor to decomposition without commit or push", async () => {
     const client = clientFor([
-      { complexity: ComplexityLevel.Level2, rationale: "Small enough to implement." },
-      undefined,
       {
-        verdict: "changes_requested",
-        summary: "Blocker remains.",
-        findings: [{ severity: "blocking", description: "Fix it." }],
+        complexity: ComplexityLevel.Level2,
+        rationale: "Small enough to implement.",
       },
       undefined,
       {
         verdict: "changes_requested",
         summary: "Blocker remains.",
-        findings: [{ severity: "blocking", description: "Fix it." }],
+        findings: [
+          {
+            severity: "blocking",
+            description: "Fix it.",
+          },
+        ],
       },
       undefined,
       {
         verdict: "changes_requested",
         summary: "Blocker remains.",
-        findings: [{ severity: "blocking", description: "Fix it." }],
+        findings: [
+          {
+            severity: "blocking",
+            description: "Fix it.",
+          },
+        ],
       },
       undefined,
       {
         verdict: "changes_requested",
         summary: "Blocker remains.",
-        findings: [{ severity: "blocking", description: "Fix it." }],
+        findings: [
+          {
+            severity: "blocking",
+            description: "Fix it.",
+          },
+        ],
       },
       undefined,
       {
         verdict: "changes_requested",
         summary: "Blocker remains.",
-        findings: [{ severity: "blocking", description: "Fix it." }],
+        findings: [
+          {
+            severity: "blocking",
+            description: "Fix it.",
+          },
+        ],
+      },
+      undefined,
+      {
+        verdict: "changes_requested",
+        summary: "Blocker remains.",
+        findings: [
+          {
+            severity: "blocking",
+            description: "Fix it.",
+          },
+        ],
       },
     ]);
     const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
@@ -372,7 +475,10 @@ describe("mocked end-to-end issue workflows", () => {
       {
         commit: () => {
           commitCalls += 1;
-          return Effect.succeed({ sha: "unexpected", treeSha: "unexpected" });
+          return Effect.succeed({
+            sha: "unexpected",
+            treeSha: "unexpected",
+          });
         },
         push: () => {
           pushCalls += 1;
@@ -391,7 +497,9 @@ describe("mocked end-to-end issue workflows", () => {
             forIssue: () => Effect.succeed(artifacts),
           }),
           complexityLayer,
-          ImplementationExecutorLive.pipe(Layer.provideMerge(implementationLayer)),
+          ImplementationExecutorLive.pipe(
+            Layer.provideMerge(implementationLayer),
+          ),
           Layer.succeed(DecompositionExecutor, {
             execute: () => {
               decompositionCalls += 1;

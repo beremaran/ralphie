@@ -32,20 +32,33 @@ const assistantResponse = (
   id: "message-1",
   sessionID: "session-1",
   role: "assistant",
-  time: { created: 1, completed: 2 },
-  ...(error === undefined ? {} : { error }),
+  time: {
+    created: 1,
+    completed: 2,
+  },
+  ...(error === undefined
+    ? {}
+    : {
+        error,
+      }),
   parentID: "message-0",
   modelID: "claude-sonnet",
   providerID: "openrouter",
   mode: "primary",
   agent: "build",
-  path: { cwd: "/workspace/repository", root: "/workspace/repository" },
+  path: {
+    cwd: "/workspace/repository",
+    root: "/workspace/repository",
+  },
   cost: 0,
   tokens: {
     input: 1,
     output: 2,
     reasoning: 0,
-    cache: { read: 0, write: 0 },
+    cache: {
+      read: 0,
+      write: 0,
+    },
   },
 });
 
@@ -69,7 +82,11 @@ describe("Pi task sessions", () => {
       session: {
         create: async (parameters: unknown) => {
           createParameters = parameters;
-          return { data: { id: "session-1" } };
+          return {
+            data: {
+              id: "session-1",
+            },
+          };
         },
       },
     } as unknown as PiClient;
@@ -107,7 +124,12 @@ describe("Pi task sessions", () => {
 
     expect(
       taskSessionPromptParameters(session, {
-        parts: [{ type: "text", text: "Implement the issue." }],
+        parts: [
+          {
+            type: "text",
+            text: "Implement the issue.",
+          },
+        ],
       }),
     ).toEqual({
       sessionID: "session-1",
@@ -118,7 +140,12 @@ describe("Pi task sessions", () => {
         modelID: "anthropic/claude-sonnet",
       },
       variant: "high",
-      parts: [{ type: "text", text: "Implement the issue." }],
+      parts: [
+        {
+          type: "text",
+          text: "Implement the issue.",
+        },
+      ],
     });
   });
 
@@ -126,11 +153,18 @@ describe("Pi task sessions", () => {
     const session = {
       sessionID: "session-1",
       directory: "/workspace/repository",
-      selection: { agent: "build" },
+      selection: {
+        agent: "build",
+      },
     };
 
     const parameters = taskSessionPromptParameters(session, {
-      parts: [{ type: "text", text: "Assess the issue." }],
+      parts: [
+        {
+          type: "text",
+          text: "Assess the issue.",
+        },
+      ],
     });
 
     expect(parameters).toMatchObject({
@@ -146,7 +180,12 @@ describe("Pi task sessions", () => {
     const client = {
       session: {
         create: async () => ({
-          error: { name: "UnauthorizedError", data: { message: "No auth" } },
+          error: {
+            name: "UnauthorizedError",
+            data: {
+              message: "No auth",
+            },
+          },
         }),
       },
     } as unknown as PiClient;
@@ -154,7 +193,9 @@ describe("Pi task sessions", () => {
     const exit = await createPiTaskSession(client, {
       directory: "/workspace/repository",
       title: "Implement issue #42",
-      selection: { agent: "build" },
+      selection: {
+        agent: "build",
+      },
     }).pipe(Effect.runPromiseExit);
 
     expect(Exit.isFailure(exit)).toBe(true);
@@ -163,7 +204,11 @@ describe("Pi task sessions", () => {
   test("provides the run's existing client through the session service", async () => {
     const client = {
       session: {
-        create: async () => ({ data: { id: "session-from-service" } }),
+        create: async () => ({
+          data: {
+            id: "session-from-service",
+          },
+        }),
       },
     } as unknown as PiClient;
 
@@ -172,7 +217,9 @@ describe("Pi task sessions", () => {
       return yield* sessions.create({
         directory: "/workspace/repository",
         title: "Task",
-        selection: { agent: "build" },
+        selection: {
+          agent: "build",
+        },
       });
     }).pipe(Effect.provide(makePiTaskSessionLayer(client)), Effect.runPromise);
 
@@ -180,10 +227,16 @@ describe("Pi task sessions", () => {
   });
 
   test("records every created session under its run ID", async () => {
-    const diagnostics = makePiSessionDiagnostics(() => "2026-08-24T00:00:00.000Z");
+    const diagnostics = makePiSessionDiagnostics(
+      () => "2026-08-24T00:00:00.000Z",
+    );
     const client = {
       session: {
-        create: async () => ({ data: { id: "session-diagnostics" } }),
+        create: async () => ({
+          data: {
+            id: "session-diagnostics",
+          },
+        }),
       },
     } as unknown as PiClient;
 
@@ -212,7 +265,11 @@ describe("Pi task sessions", () => {
     let promptParameters: unknown;
     const client = {
       session: {
-        create: async () => ({ data: { id: "session-1" } }),
+        create: async () => ({
+          data: {
+            id: "session-1",
+          },
+        }),
         prompt: async (parameters: unknown) => {
           promptParameters = parameters;
           return {
@@ -250,7 +307,12 @@ describe("Pi task sessions", () => {
         modelID: "anthropic/claude-sonnet",
       },
       variant: "high",
-      parts: [{ type: "text", text: "Implement the issue and explain the result." }],
+      parts: [
+        {
+          type: "text",
+          text: "Implement the issue and explain the result.",
+        },
+      ],
     });
   });
 
@@ -258,9 +320,16 @@ describe("Pi task sessions", () => {
     let verified: unknown;
     const client = {
       session: {
-        create: async () => ({ data: { id: "session-1" } }),
+        create: async () => ({
+          data: {
+            id: "session-1",
+          },
+        }),
         prompt: async () => ({
-          data: { info: assistantResponse(), parts: responseParts },
+          data: {
+            info: assistantResponse(),
+            parts: responseParts,
+          },
         }),
       },
     } as unknown as PiClient;
@@ -269,17 +338,28 @@ describe("Pi task sessions", () => {
       directory: "/workspace/repository",
       title: "Implement issue #42",
       prompt: "Implement the issue.",
-      selection: { agent: "build" },
-      repositoryInvariant: { branch: "main", head: "abc123" },
+      selection: {
+        agent: "build",
+      },
+      repositoryInvariant: {
+        branch: "main",
+        head: "abc123",
+      },
       verifyRepositoryInvariant: (directory, expected) =>
         Effect.sync(() => {
-          verified = { directory, expected };
+          verified = {
+            directory,
+            expected,
+          };
         }),
     }).pipe(Effect.runPromise);
 
     expect(verified).toEqual({
       directory: "/workspace/repository",
-      expected: { branch: "main", head: "abc123" },
+      expected: {
+        branch: "main",
+        head: "abc123",
+      },
     });
   });
 
@@ -291,11 +371,20 @@ describe("Pi task sessions", () => {
       session: {
         create: async (_parameters: unknown, options: unknown) => {
           createOptions = options;
-          return { data: { id: "session-1" } };
+          return {
+            data: {
+              id: "session-1",
+            },
+          };
         },
         prompt: async (_parameters: unknown, options: unknown) => {
           promptOptions = options;
-          return { data: { info: assistantResponse(), parts: responseParts } };
+          return {
+            data: {
+              info: assistantResponse(),
+              parts: responseParts,
+            },
+          };
         },
       },
     } as unknown as PiClient;
@@ -304,24 +393,36 @@ describe("Pi task sessions", () => {
       directory: "/workspace/repository",
       title: "Implement issue #42",
       prompt: "Implement the issue.",
-      selection: { agent: "build" },
+      selection: {
+        agent: "build",
+      },
       signal: controller.signal,
     }).pipe(Effect.runPromise);
 
-    expect(createOptions).toEqual({ signal: controller.signal });
-    expect(promptOptions).toEqual({ signal: controller.signal });
+    expect(createOptions).toEqual({
+      signal: controller.signal,
+    });
+    expect(promptOptions).toEqual({
+      signal: controller.signal,
+    });
   });
 
   test("emits a useful progress failure when the agent session fails", async () => {
     const events: unknown[] = [];
     const client = {
       session: {
-        create: async () => ({ data: { id: "session-1" } }),
+        create: async () => ({
+          data: {
+            id: "session-1",
+          },
+        }),
         prompt: async () => ({
           data: {
             info: assistantResponse({
               name: "MessageAbortedError",
-              data: { message: "The task was aborted." },
+              data: {
+                message: "The task was aborted.",
+              },
             }),
             parts: [],
           },
@@ -333,7 +434,9 @@ describe("Pi task sessions", () => {
       directory: "/workspace/repository",
       title: "Implement issue #42",
       prompt: "Implement the issue.",
-      selection: { agent: "build" },
+      selection: {
+        agent: "build",
+      },
       progress: {
         emit: (event) =>
           Effect.sync(() => {
@@ -363,7 +466,11 @@ describe("Pi task sessions", () => {
   test("fails when the task prompt transport fails", async () => {
     const client = {
       session: {
-        create: async () => ({ data: { id: "session-1" } }),
+        create: async () => ({
+          data: {
+            id: "session-1",
+          },
+        }),
         prompt: async () => {
           throw new Error("connection reset");
         },
@@ -374,7 +481,9 @@ describe("Pi task sessions", () => {
       directory: "/workspace/repository",
       title: "Implement issue #42",
       prompt: "Implement the issue.",
-      selection: { agent: "build" },
+      selection: {
+        agent: "build",
+      },
     }).pipe(Effect.runPromiseExit);
 
     expect(Exit.isFailure(exit)).toBe(true);
@@ -383,12 +492,18 @@ describe("Pi task sessions", () => {
   test("fails when the assistant returns an error", async () => {
     const client = {
       session: {
-        create: async () => ({ data: { id: "session-1" } }),
+        create: async () => ({
+          data: {
+            id: "session-1",
+          },
+        }),
         prompt: async () => ({
           data: {
             info: assistantResponse({
               name: "MessageAbortedError",
-              data: { message: "The task was aborted." },
+              data: {
+                message: "The task was aborted.",
+              },
             }),
             parts: [],
           },
@@ -400,7 +515,9 @@ describe("Pi task sessions", () => {
       directory: "/workspace/repository",
       title: "Implement issue #42",
       prompt: "Implement the issue.",
-      selection: { agent: "build" },
+      selection: {
+        agent: "build",
+      },
     }).pipe(Effect.runPromiseExit);
 
     expect(Exit.isFailure(exit)).toBe(true);
@@ -410,19 +527,30 @@ describe("Pi task sessions", () => {
     [
       "MessageAbortedError",
       PiAssistantErrorKind.Aborted,
-      { name: "MessageAbortedError", data: { message: "Aborted." } },
+      {
+        name: "MessageAbortedError",
+        data: {
+          message: "Aborted.",
+        },
+      },
     ],
     [
       "MessageOutputLengthError",
       PiAssistantErrorKind.OutputLengthExceeded,
-      { name: "MessageOutputLengthError", data: {} },
+      {
+        name: "MessageOutputLengthError",
+        data: {},
+      },
     ],
     [
       "StructuredOutputError",
       PiAssistantErrorKind.StructuredOutputRetryExhausted,
       {
         name: "StructuredOutputError",
-        data: { message: "Could not satisfy schema.", retries: 3 },
+        data: {
+          message: "Could not satisfy schema.",
+          retries: 3,
+        },
       },
     ],
   ])("classifies %s as %s", (_name, kind, sdkError) => {

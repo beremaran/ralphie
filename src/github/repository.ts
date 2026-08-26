@@ -34,5 +34,9 @@ export const parseRepositorySlug = (repository: string): RepositorySlug => {
     });
   }
 
-  return { slug: `${owner}/${name}`, owner, name };
+  return {
+    slug: `${owner}/${name}`,
+    owner,
+    name,
+  };
 };

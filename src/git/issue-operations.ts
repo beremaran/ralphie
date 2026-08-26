@@ -40,7 +40,9 @@ export type GitFeatureBranchResult = {
 
 export type GitIssueOperationsService = {
   /** Stage tracked, untracked, and deleted files in the issue checkout. */
-  readonly stageAll: (repositoryPath: string) => Effect.Effect<void, RalphieError>;
+  readonly stageAll: (
+    repositoryPath: string,
+  ) => Effect.Effect<void, RalphieError>;
   /** Read the complete staged patch, retaining Git's binary patch bytes/text. */
   readonly readStagedBinaryDiff: (
     repositoryPath: string,
@@ -91,7 +93,9 @@ const runGit = (
     });
     if (result.exitCode !== 0) {
       const detail = result.stderr ? ` ${result.stderr}` : "";
-      return yield* new RalphieError({ message: `${failureMessage}.${detail}` });
+      return yield* new RalphieError({
+        message: `${failureMessage}.${detail}`,
+      });
     }
     return result.stdout;
   });
@@ -271,7 +275,10 @@ export const GitIssueOperationsLive = Layer.effect(
               message: "Issue checkout is dirty after commit.",
             });
           }
-          return { sha, treeSha: actualTree };
+          return {
+            sha,
+            treeSha: actualTree,
+          };
         }),
 
       push: (repositoryPath, branch, expectedCommitSha) =>
@@ -290,7 +297,9 @@ export const GitIssueOperationsLive = Layer.effect(
             `HEAD:refs/heads/${branch}`,
           ]);
           if (result.exitCode !== 0) {
-            const output = [result.stdout, result.stderr].filter(Boolean).join("\n");
+            const output = [result.stdout, result.stderr]
+              .filter(Boolean)
+              .join("\n");
             const kind = isNonFastForward(output)
               ? GitPushFailureKind.NonFastForward
               : GitPushFailureKind.Other;
@@ -303,7 +312,9 @@ export const GitIssueOperationsLive = Layer.effect(
               policy: GitPushFailurePolicy.Halt,
               branch,
               message:
-                output.trim().length > 0 ? `${summary}\n${output.trim()}` : summary,
+                output.trim().length > 0
+                  ? `${summary}\n${output.trim()}`
+                  : summary,
               cause: output,
             });
           }
@@ -333,7 +344,12 @@ export const GitIssueOperationsLive = Layer.effect(
           }
         }),
 
-      createOrCheckoutFeatureBranch: (repositoryPath, branch, baseBranch, baseSha) =>
+      createOrCheckoutFeatureBranch: (
+        repositoryPath,
+        branch,
+        baseBranch,
+        baseSha,
+      ) =>
         Effect.gen(function* () {
           yield* validateBranchName(repositoryPath, branch, "Feature branch");
           yield* validateBranchName(repositoryPath, baseBranch, "Base branch");
@@ -454,7 +470,11 @@ export const GitIssueOperationsLive = Layer.effect(
           const originSha = yield* runGit(
             runner,
             repositoryPath,
-            ["rev-parse", "--verify", `refs/remotes/origin/${baseBranch}^{commit}`],
+            [
+              "rev-parse",
+              "--verify",
+              `refs/remotes/origin/${baseBranch}^{commit}`,
+            ],
             `Failed to resolve origin/${baseBranch}`,
           );
           yield* runGit(

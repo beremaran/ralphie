@@ -28,7 +28,10 @@ import {
   ReviewLoopExhaustion,
 } from "./stage.ts";
 
-export type IssueAtomicStage = GitIssueStage | GitHubIssueStage | PiSessionStage;
+export type IssueAtomicStage =
+  | GitIssueStage
+  | GitHubIssueStage
+  | PiSessionStage;
 
 export type ReviewLoopStage = {
   readonly kind: IssueStageKind.ReviewLoop;
@@ -89,7 +92,10 @@ const assessment: PiSessionStage = {
 
 const implementationWorkflow: IssueWorkflow = {
   kind: IssueWorkflowKind.Implementation,
-  complexity: { min: ComplexityLevel.Level0, max: ComplexityLevel.Level3 },
+  complexity: {
+    min: ComplexityLevel.Level0,
+    max: ComplexityLevel.Level3,
+  },
   stages: [
     {
       kind: IssueStageKind.GitTask,
@@ -139,13 +145,19 @@ const implementationWorkflow: IssueWorkflow = {
       action: GitIssueAction.Commit,
       messageFrom: StructuredOutputName.CommitMessageDecision,
     },
-    { kind: IssueStageKind.GitTask, action: GitIssueAction.Push },
+    {
+      kind: IssueStageKind.GitTask,
+      action: GitIssueAction.Push,
+    },
   ],
 };
 
 const decompositionWorkflow: IssueWorkflow = {
   kind: IssueWorkflowKind.Decomposition,
-  complexity: { min: ComplexityLevel.Level4, max: ComplexityLevel.Level5 },
+  complexity: {
+    min: ComplexityLevel.Level4,
+    max: ComplexityLevel.Level5,
+  },
   stages: [
     {
       kind: IssueStageKind.PiSession,

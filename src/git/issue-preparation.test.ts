@@ -10,8 +10,14 @@ import {
   IssueArtifactStoreLive,
 } from "../issues/artifacts.ts";
 import { CommandRunner, CommandRunnerLive } from "../process/command-runner.ts";
-import { GitIssueCheckpoint, GitIssueCheckpointLive } from "./issue-checkpoint.ts";
-import { GitIssuePreparation, GitIssuePreparationLive } from "./issue-preparation.ts";
+import {
+  GitIssueCheckpoint,
+  GitIssueCheckpointLive,
+} from "./issue-checkpoint.ts";
+import {
+  GitIssuePreparation,
+  GitIssuePreparationLive,
+} from "./issue-preparation.ts";
 
 const runGit = (repositoryPath: string, args: ReadonlyArray<string>) =>
   Effect.gen(function* () {
@@ -22,7 +28,11 @@ const runGit = (repositoryPath: string, args: ReadonlyArray<string>) =>
 const setupRepository = async () => {
   const repositoryPath = await mkdtemp(join(tmpdir(), "ralphie-preparation-"));
   await runGit(repositoryPath, ["init", "-b", "main"]);
-  await runGit(repositoryPath, ["config", "user.email", "ralphie@example.test"]);
+  await runGit(repositoryPath, [
+    "config",
+    "user.email",
+    "ralphie@example.test",
+  ]);
   await runGit(repositoryPath, ["config", "user.name", "Ralphie Tests"]);
   await writeFile(join(repositoryPath, "README.md"), "initial\n");
   await runGit(repositoryPath, ["add", "--all"]);
@@ -59,7 +69,10 @@ describe("Git issue preparation", () => {
       expect(checkpoint.branch).toBe("main");
       expect(checkpoint.sha).toMatch(/^[0-9a-f]{40}$/);
     } finally {
-      await rm(repositoryPath, { recursive: true, force: true });
+      await rm(repositoryPath, {
+        recursive: true,
+        force: true,
+      });
     }
   });
 
@@ -89,7 +102,10 @@ describe("Git issue preparation", () => {
       }).pipe(Effect.provide(liveLayer), Effect.runPromiseExit);
       expect(Exit.isFailure(branchExit)).toBe(true);
     } finally {
-      await rm(repositoryPath, { recursive: true, force: true });
+      await rm(repositoryPath, {
+        recursive: true,
+        force: true,
+      });
     }
   });
 });

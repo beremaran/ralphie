@@ -29,7 +29,9 @@ const assertSafeCleanupTarget = (workspace: string): string => {
     currentDirectory,
   ]);
 
-  const containsCurrentDirectory = currentDirectory.startsWith(`${target}${sep}`);
+  const containsCurrentDirectory = currentDirectory.startsWith(
+    `${target}${sep}`,
+  );
   if (protectedPaths.has(target) || containsCurrentDirectory) {
     throw new RalphieError({
       message: `Refusing to clean up protected workspace path: ${target}`,
@@ -44,13 +46,16 @@ export type WorkspaceService = {
   readonly remove: (workspace: string) => Effect.Effect<void, RalphieError>;
 };
 
-export const Workspace = Context.GenericTag<WorkspaceService>("ralphie/Workspace");
+export const Workspace =
+  Context.GenericTag<WorkspaceService>("ralphie/Workspace");
 
 export const WorkspaceLive = Layer.succeed(Workspace, {
   prepare: (workspace) =>
     Effect.tryPromise({
       try: () =>
-        mkdir(resolveWorkspacePath(workspace), { recursive: true }).then(() => {}),
+        mkdir(resolveWorkspacePath(workspace), {
+          recursive: true,
+        }).then(() => {}),
       catch: (cause) =>
         new RalphieError({
           message: `Failed to initialize workspace: ${workspace}`,
@@ -60,7 +65,10 @@ export const WorkspaceLive = Layer.succeed(Workspace, {
   remove: (workspace) =>
     Effect.tryPromise({
       try: () =>
-        rm(assertSafeCleanupTarget(workspace), { recursive: true, force: true }),
+        rm(assertSafeCleanupTarget(workspace), {
+          recursive: true,
+          force: true,
+        }),
       catch: (cause) =>
         cause instanceof RalphieError
           ? cause

@@ -22,26 +22,42 @@ const decisionSchema = z.object({
   reason: z.string().min(1),
 });
 
-const assistantInfo = (structured: unknown, error?: Record<string, unknown>) => ({
+const assistantInfo = (
+  structured: unknown,
+  error?: Record<string, unknown>,
+) => ({
   id: "message-1",
   sessionID: "session-1",
   role: "assistant" as const,
-  time: { created: 0, completed: 1 },
+  time: {
+    created: 0,
+    completed: 1,
+  },
   parentID: "message-0",
   modelID: "test-model",
   providerID: "test-provider",
   mode: "test",
   agent: "test",
-  path: { cwd: "/workspace", root: "/workspace" },
+  path: {
+    cwd: "/workspace",
+    root: "/workspace",
+  },
   cost: 0,
   tokens: {
     input: 0,
     output: 0,
     reasoning: 0,
-    cache: { read: 0, write: 0 },
+    cache: {
+      read: 0,
+      write: 0,
+    },
   },
   structured,
-  ...(error === undefined ? {} : { error }),
+  ...(error === undefined
+    ? {}
+    : {
+        error,
+      }),
 });
 
 describe("Pi structured output", () => {
@@ -52,7 +68,11 @@ describe("Pi structured output", () => {
       session: {
         create: async (parameters: unknown) => {
           createParameters = parameters;
-          return { data: { id: "session-1" } };
+          return {
+            data: {
+              id: "session-1",
+            },
+          };
         },
         prompt: async (parameters: unknown) => {
           promptParameters = parameters;
@@ -96,7 +116,12 @@ describe("Pi structured output", () => {
           required: ["decision", "confidence", "reason"],
         },
       },
-      parts: [{ type: "text", text: "Make a decision." }],
+      parts: [
+        {
+          type: "text",
+          text: "Make a decision.",
+        },
+      ],
     });
     expect(promptParameters).not.toHaveProperty("model");
     expect(promptParameters).not.toHaveProperty("variant");
@@ -122,7 +147,11 @@ describe("Pi structured output", () => {
       session: {
         create: async (parameters: unknown) => {
           createParameters = parameters;
-          return { data: { id: "session-1" } };
+          return {
+            data: {
+              id: "session-1",
+            },
+          };
         },
         prompt: async (parameters: unknown) => {
           promptParameters = parameters;
@@ -146,7 +175,10 @@ describe("Pi structured output", () => {
       prompt: "Make a decision.",
       schema: decisionSchema,
       agent: "reviewer",
-      model: { providerID: "openrouter", modelID: "anthropic/claude-sonnet" },
+      model: {
+        providerID: "openrouter",
+        modelID: "anthropic/claude-sonnet",
+      },
       variant: "high",
     }).pipe(Effect.runPromise);
 
@@ -166,11 +198,17 @@ describe("Pi structured output", () => {
   });
 
   test("records the session and verifies repository invariants", async () => {
-    const diagnostics = makePiSessionDiagnostics(() => "2026-08-24T00:00:00.000Z");
+    const diagnostics = makePiSessionDiagnostics(
+      () => "2026-08-24T00:00:00.000Z",
+    );
     let verified: unknown;
     const client = {
       session: {
-        create: async () => ({ data: { id: "session-1" } }),
+        create: async () => ({
+          data: {
+            id: "session-1",
+          },
+        }),
         prompt: async () => ({
           data: {
             info: assistantInfo({
@@ -192,10 +230,16 @@ describe("Pi structured output", () => {
       agent: "build",
       runId: "run-1",
       diagnostics,
-      repositoryInvariant: { branch: "main", head: "abc123" },
+      repositoryInvariant: {
+        branch: "main",
+        head: "abc123",
+      },
       verifyRepositoryInvariant: (directory, expected) =>
         Effect.sync(() => {
-          verified = { directory, expected };
+          verified = {
+            directory,
+            expected,
+          };
         }),
     }).pipe(Effect.runPromise);
 
@@ -207,7 +251,10 @@ describe("Pi structured output", () => {
     });
     expect(verified).toEqual({
       directory: "/workspace",
-      expected: { branch: "main", head: "abc123" },
+      expected: {
+        branch: "main",
+        head: "abc123",
+      },
     });
   });
 
@@ -219,7 +266,11 @@ describe("Pi structured output", () => {
       session: {
         create: async (_parameters: unknown, options: unknown) => {
           createOptions = options;
-          return { data: { id: "session-1" } };
+          return {
+            data: {
+              id: "session-1",
+            },
+          };
         },
         prompt: async (_parameters: unknown, options: unknown) => {
           promptOptions = options;
@@ -245,17 +296,28 @@ describe("Pi structured output", () => {
       signal: controller.signal,
     }).pipe(Effect.runPromise);
 
-    expect(createOptions).toEqual({ signal: controller.signal });
-    expect(promptOptions).toEqual({ signal: controller.signal });
+    expect(createOptions).toEqual({
+      signal: controller.signal,
+    });
+    expect(promptOptions).toEqual({
+      signal: controller.signal,
+    });
   });
 
   test("rejects structured output that does not match the schema", async () => {
     const client = {
       session: {
-        create: async () => ({ data: { id: "session-1" } }),
+        create: async () => ({
+          data: {
+            id: "session-1",
+          },
+        }),
         prompt: async () => ({
           data: {
-            info: assistantInfo({ decision: "maybe", confidence: 4 }),
+            info: assistantInfo({
+              decision: "maybe",
+              confidence: 4,
+            }),
             parts: [],
           },
         }),
@@ -275,23 +337,38 @@ describe("Pi structured output", () => {
   test.each([
     [
       PiAssistantErrorKind.Aborted,
-      { name: "MessageAbortedError", data: { message: "Aborted." } },
+      {
+        name: "MessageAbortedError",
+        data: {
+          message: "Aborted.",
+        },
+      },
     ],
     [
       PiAssistantErrorKind.OutputLengthExceeded,
-      { name: "MessageOutputLengthError", data: {} },
+      {
+        name: "MessageOutputLengthError",
+        data: {},
+      },
     ],
     [
       PiAssistantErrorKind.StructuredOutputRetryExhausted,
       {
         name: "StructuredOutputError",
-        data: { message: "Schema retries exhausted.", retries: 2 },
+        data: {
+          message: "Schema retries exhausted.",
+          retries: 2,
+        },
       },
     ],
   ])("returns typed assistant failure for %s", async (kind, error) => {
     const client = {
       session: {
-        create: async () => ({ data: { id: "session-1" } }),
+        create: async () => ({
+          data: {
+            id: "session-1",
+          },
+        }),
         prompt: async () => ({
           data: {
             info: assistantInfo(undefined, error),
@@ -312,7 +389,11 @@ describe("Pi structured output", () => {
     if (Exit.isFailure(exit)) {
       const failure = exit.cause;
       expect(String(failure)).toContain("Pi assistant failed");
-      const cause = failure as unknown as { error?: { cause?: unknown } };
+      const cause = failure as unknown as {
+        error?: {
+          cause?: unknown;
+        };
+      };
       expect(cause).toBeDefined();
     }
 

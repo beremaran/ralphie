@@ -28,9 +28,27 @@ import {
 } from "./stage.ts";
 
 const issues: GitHubIssue[] = [
-  { number: 1, title: "One", url: "issue/1", body: null, labels: [] },
-  { number: 2, title: "Two", url: "issue/2", body: null, labels: [] },
-  { number: 3, title: "Three", url: "issue/3", body: null, labels: [] },
+  {
+    number: 1,
+    title: "One",
+    url: "issue/1",
+    body: null,
+    labels: [],
+  },
+  {
+    number: 2,
+    title: "Two",
+    url: "issue/2",
+    body: null,
+    labels: [],
+  },
+  {
+    number: 3,
+    title: "Three",
+    url: "issue/3",
+    body: null,
+    labels: [],
+  },
 ];
 
 const makePlan = () =>
@@ -40,7 +58,9 @@ const makePlan = () =>
       issue: issues[0]!,
       repositoryPath: "/workspace/repository",
       targetBranch: "main",
-      pi: { agent: DEFAULT_PI_AGENT },
+      pi: {
+        agent: DEFAULT_PI_AGENT,
+      },
     });
   }).pipe(Effect.provide(IssuePipelineLive), Effect.runPromise);
 
@@ -49,7 +69,9 @@ describe("issue pipeline", () => {
     const plan = await makePlan();
 
     expect(plan.targetBranch).toBe("main");
-    expect(plan.pi).toEqual({ agent: DEFAULT_PI_AGENT });
+    expect(plan.pi).toEqual({
+      agent: DEFAULT_PI_AGENT,
+    });
     expect(plan).not.toHaveProperty("issueBranch");
     expect(plan.assessment).toEqual({
       kind: IssueStageKind.PiSession,
@@ -116,7 +138,10 @@ describe("issue pipeline", () => {
         action: GitIssueAction.Commit,
         messageFrom: StructuredOutputName.CommitMessageDecision,
       },
-      { kind: IssueStageKind.GitTask, action: GitIssueAction.Push },
+      {
+        kind: IssueStageKind.GitTask,
+        action: GitIssueAction.Push,
+      },
     ]);
   });
 
@@ -151,9 +176,9 @@ describe("issue pipeline", () => {
         action: GitHubIssueAction.CloseOriginalAsDuplicate,
       },
     ]);
-    expect(selectWorkflowByKind(plan, IssueWorkflowKind.Decomposition)?.kind).toBe(
-      IssueWorkflowKind.Decomposition,
-    );
+    expect(
+      selectWorkflowByKind(plan, IssueWorkflowKind.Decomposition)?.kind,
+    ).toBe(IssueWorkflowKind.Decomposition);
   });
 
   test("does not route invalid complexity values", async () => {

@@ -35,8 +35,14 @@ describe("issue execution domain types", () => {
         diagnosticsPath: "/tmp/diagnostics",
         reason: "review did not converge",
       },
-      { kind: IssueExecutionOutcomeKind.Skipped, reason: "dependency pending" },
-      { kind: IssueExecutionOutcomeKind.Failed, message: "agent failed" },
+      {
+        kind: IssueExecutionOutcomeKind.Skipped,
+        reason: "dependency pending",
+      },
+      {
+        kind: IssueExecutionOutcomeKind.Failed,
+        message: "agent failed",
+      },
     ];
 
     const descriptions = outcomes.map((outcome) => {
@@ -81,10 +87,16 @@ describe("issue execution domain types", () => {
       runId: "run-42",
       octokit: {} as IssueExecutionContext["octokit"],
       pi: {} as IssueExecutionContext["pi"],
-      piSelection: { agent: "build" },
+      piSelection: {
+        agent: "build",
+      },
       piDiagnostics: makePiSessionDiagnostics(),
       repositoryInvariant: {
-        capture: () => Effect.succeed({ branch: "main", head: "abc123" }),
+        capture: () =>
+          Effect.succeed({
+            branch: "main",
+            head: "abc123",
+          }),
         verify: () => Effect.void,
       },
     };

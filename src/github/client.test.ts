@@ -3,7 +3,10 @@ import { Effect, Exit, Layer } from "effect";
 import { Octokit } from "octokit";
 
 import { GitHubClient, GitHubClientLive } from "./client.ts";
-import { CommandRunner, type CommandResult } from "../process/command-runner.ts";
+import {
+  CommandRunner,
+  type CommandResult,
+} from "../process/command-runner.ts";
 
 const testLayer = (calls: string[], results: CommandResult[]) =>
   GitHubClientLive.pipe(
@@ -12,7 +15,11 @@ const testLayer = (calls: string[], results: CommandResult[]) =>
         run: (command, args) => {
           calls.push(`${command} ${args.join(" ")}`);
           return Effect.succeed(
-            results.shift() ?? { exitCode: 0, stdout: "", stderr: "" },
+            results.shift() ?? {
+              exitCode: 0,
+              stdout: "",
+              stderr: "",
+            },
           );
         },
       }),
@@ -30,8 +37,16 @@ describe("GitHub client", () => {
     const client = await initialize.pipe(
       Effect.provide(
         testLayer(calls, [
-          { exitCode: 0, stdout: "", stderr: "" },
-          { exitCode: 0, stdout: "test-token", stderr: "" },
+          {
+            exitCode: 0,
+            stdout: "",
+            stderr: "",
+          },
+          {
+            exitCode: 0,
+            stdout: "test-token",
+            stderr: "",
+          },
         ]),
       ),
       Effect.runPromise,
@@ -45,7 +60,13 @@ describe("GitHub client", () => {
     const calls: string[] = [];
     const exit = await initialize.pipe(
       Effect.provide(
-        testLayer(calls, [{ exitCode: 1, stdout: "", stderr: "not logged in" }]),
+        testLayer(calls, [
+          {
+            exitCode: 1,
+            stdout: "",
+            stderr: "not logged in",
+          },
+        ]),
       ),
       Effect.runPromiseExit,
     );
@@ -59,8 +80,16 @@ describe("GitHub client", () => {
     const exit = await initialize.pipe(
       Effect.provide(
         testLayer(calls, [
-          { exitCode: 0, stdout: "", stderr: "" },
-          { exitCode: 0, stdout: "", stderr: "" },
+          {
+            exitCode: 0,
+            stdout: "",
+            stderr: "",
+          },
+          {
+            exitCode: 0,
+            stdout: "",
+            stderr: "",
+          },
         ]),
       ),
       Effect.runPromiseExit,

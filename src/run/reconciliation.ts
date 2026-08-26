@@ -89,11 +89,14 @@ export const reconcileRunState = (
     const missing = state.queue.pending
       .map((issue) => issue.number)
       .filter(
-        (number) => !openIssues.has(number) && number !== recoverableClosureIssue,
+        (number) =>
+          !openIssues.has(number) && number !== recoverableClosureIssue,
       );
     if (missing.length > 0) {
       status = RunReconciliationStatus.GitHubMismatch;
-      reasons.push(`saved pending issues are no longer open: ${missing.join(", ")}`);
+      reasons.push(
+        `saved pending issues are no longer open: ${missing.join(", ")}`,
+      );
     }
   }
 
@@ -106,7 +109,11 @@ export const reconcileRunState = (
     reasons.push(`saved state was last updated at ${state.updatedAt}`);
   }
 
-  return { compatible: reasons.length === 0, status, reasons };
+  return {
+    compatible: reasons.length === 0,
+    status,
+    reasons,
+  };
 };
 
 export type RunReconciliationService = {
@@ -133,7 +140,10 @@ export const makeRunReconciliationService = (): RunReconciliationService => ({
         return result;
       },
       catch: (cause) =>
-        new RalphieError({ message: "Could not reconcile run state.", cause }),
+        new RalphieError({
+          message: "Could not reconcile run state.",
+          cause,
+        }),
     }),
 });
 

@@ -26,6 +26,8 @@ describe("Pi model selection", () => {
 
   test("accepts only Pi thinking levels as model variants", () => {
     expect(piModelVariantSchema.parse("high")).toBe("high");
-    expect(piModelVariantSchema.safeParse("provider-specific").success).toBe(false);
+    expect(piModelVariantSchema.safeParse("provider-specific").success).toBe(
+      false,
+    );
   });
 });

@@ -72,7 +72,9 @@ describe("per-issue artifact store", () => {
     await Effect.runPromise(
       store.write(IssueArtifactKind.ComplexityDecision, complexity),
     );
-    await Effect.runPromise(store.write(IssueArtifactKind.IssueCheckpoint, checkpoint));
+    await Effect.runPromise(
+      store.write(IssueArtifactKind.IssueCheckpoint, checkpoint),
+    );
     await Effect.runPromise(store.appendReview(review(1)));
     await Effect.runPromise(
       store.write(IssueArtifactKind.CommitMessageDecision, commitMessage),
@@ -99,17 +101,29 @@ describe("per-issue artifact store", () => {
       await Effect.runPromise(store.read(IssueArtifactKind.ReviewAttempts)),
     ).toEqual([review(1)]);
     expect(
-      await Effect.runPromise(store.read(IssueArtifactKind.CommitMessageDecision)),
+      await Effect.runPromise(
+        store.read(IssueArtifactKind.CommitMessageDecision),
+      ),
     ).toEqual(commitMessage);
     expect(
       await Effect.runPromise(store.read(IssueArtifactKind.CreatedCommit)),
-    ).toEqual({ sha: "commit-sha", treeSha: "tree-sha" });
+    ).toEqual({
+      sha: "commit-sha",
+      treeSha: "tree-sha",
+    });
     expect(
-      await Effect.runPromise(store.read(IssueArtifactKind.IssueBreakdownDecision)),
+      await Effect.runPromise(
+        store.read(IssueArtifactKind.IssueBreakdownDecision),
+      ),
     ).toEqual(breakdown);
     expect(
-      await Effect.runPromise(store.read(IssueArtifactKind.CreatedIssueNumbers)),
-    ).toEqual({ first: 101, second: 102 });
+      await Effect.runPromise(
+        store.read(IssueArtifactKind.CreatedIssueNumbers),
+      ),
+    ).toEqual({
+      first: 101,
+      second: 102,
+    });
   });
 
   test("rejects reads before the artifact has been produced", async () => {
@@ -129,9 +143,9 @@ describe("per-issue artifact store", () => {
   test("preserves review order and rejects gaps or writes past the budget", async () => {
     const store = await Effect.runPromise(makeIssueArtifactStore(42));
 
-    expect(await Effect.runPromiseExit(store.appendReview(review(2)))).toSatisfy(
-      (exit) => Exit.isFailure(exit),
-    );
+    expect(
+      await Effect.runPromiseExit(store.appendReview(review(2))),
+    ).toSatisfy((exit) => Exit.isFailure(exit));
     await Effect.runPromise(store.appendReview(review(1)));
     expect(
       await Effect.runPromiseExit(
@@ -163,7 +177,9 @@ describe("per-issue artifact store", () => {
       Effect.gen(function* () {
         const artifacts = yield* IssueArtifactStore;
         const first = yield* artifacts.forIssue(1);
-        yield* first.write(IssueArtifactKind.CreatedIssueNumbers, { child: 2 });
+        yield* first.write(IssueArtifactKind.CreatedIssueNumbers, {
+          child: 2,
+        });
         const second = yield* artifacts.forIssue(1);
         const other = yield* artifacts.forIssue(2);
         return [first, second, other] as const;
@@ -176,17 +192,17 @@ describe("per-issue artifact store", () => {
   });
 
   test("rejects invalid issue and child identifiers", async () => {
-    expect(await Effect.runPromiseExit(makeIssueArtifactStore(0))).toSatisfy((exit) =>
-      Exit.isFailure(exit),
+    expect(await Effect.runPromiseExit(makeIssueArtifactStore(0))).toSatisfy(
+      (exit) => Exit.isFailure(exit),
     );
 
     const store = await Effect.runPromise(makeIssueArtifactStore(42));
-    expect(await Effect.runPromiseExit(store.recordCreatedIssue("", 100))).toSatisfy(
-      (exit) => Exit.isFailure(exit),
-    );
-    expect(await Effect.runPromiseExit(store.recordCreatedIssue("child", 0))).toSatisfy(
-      (exit) => Exit.isFailure(exit),
-    );
+    expect(
+      await Effect.runPromiseExit(store.recordCreatedIssue("", 100)),
+    ).toSatisfy((exit) => Exit.isFailure(exit));
+    expect(
+      await Effect.runPromiseExit(store.recordCreatedIssue("child", 0)),
+    ).toSatisfy((exit) => Exit.isFailure(exit));
   });
 
   test("persists artifacts and reloads them in a fresh runtime", async () => {
@@ -197,7 +213,9 @@ describe("per-issue artifact store", () => {
         runId: "run/restart",
         repository: "owner/repo",
       };
-      const first = await Effect.runPromise(makeDurableIssueArtifactStore(42, scope));
+      const first = await Effect.runPromise(
+        makeDurableIssueArtifactStore(42, scope),
+      );
       const complexity = {
         complexity: ComplexityLevel.Level2,
         rationale: "The change is localized.",
@@ -217,26 +235,39 @@ describe("per-issue artifact store", () => {
           "artifacts.json",
         ),
       ).json();
-      expect(persisted).toMatchObject({ repository: "owner/repo" });
+      expect(persisted).toMatchObject({
+        repository: "owner/repo",
+      });
 
       const reloaded = await Effect.runPromise(
         makeDurableIssueArtifactStore(42, scope),
       );
       expect(
-        await Effect.runPromise(reloaded.read(IssueArtifactKind.ComplexityDecision)),
+        await Effect.runPromise(
+          reloaded.read(IssueArtifactKind.ComplexityDecision),
+        ),
       ).toEqual(complexity);
       expect(
-        await Effect.runPromise(reloaded.read(IssueArtifactKind.ReviewAttempts)),
+        await Effect.runPromise(
+          reloaded.read(IssueArtifactKind.ReviewAttempts),
+        ),
       ).toEqual([review(1)]);
 
       await Effect.runPromise(reloaded.resetImplementationAttempt());
-      const reset = await Effect.runPromise(makeDurableIssueArtifactStore(42, scope));
+      const reset = await Effect.runPromise(
+        makeDurableIssueArtifactStore(42, scope),
+      );
       expect(reset.has(IssueArtifactKind.ReviewAttempts)).toBe(false);
       expect(
-        await Effect.runPromise(reset.read(IssueArtifactKind.ComplexityDecision)),
+        await Effect.runPromise(
+          reset.read(IssueArtifactKind.ComplexityDecision),
+        ),
       ).toEqual(complexity);
     } finally {
-      await rm(workspace, { recursive: true, force: true });
+      await rm(workspace, {
+        recursive: true,
+        force: true,
+      });
     }
   });
 
@@ -252,18 +283,28 @@ describe("per-issue artifact store", () => {
         "42",
         "artifacts.json",
       );
-      await mkdir(join(path, ".."), { recursive: true });
+      await mkdir(join(path, ".."), {
+        recursive: true,
+      });
       await Bun.write(path, "{not-json");
 
       const exit = await Effect.runPromiseExit(
-        makeDurableIssueArtifactStore(42, { workspace, runId: "run-1" }),
+        makeDurableIssueArtifactStore(42, {
+          workspace,
+          runId: "run-1",
+        }),
       );
       expect(Exit.isFailure(exit)).toBe(true);
       if (Exit.isFailure(exit)) {
-        expect(exit.cause.toString()).toContain("Failed to load issue artifacts");
+        expect(exit.cause.toString()).toContain(
+          "Failed to load issue artifacts",
+        );
       }
     } finally {
-      await rm(workspace, { recursive: true, force: true });
+      await rm(workspace, {
+        recursive: true,
+        force: true,
+      });
     }
   });
 
@@ -279,26 +320,45 @@ describe("per-issue artifact store", () => {
         "42",
         "artifacts.json",
       );
-      await mkdir(join(path, ".."), { recursive: true });
+      await mkdir(join(path, ".."), {
+        recursive: true,
+      });
       await Bun.write(
         path,
-        JSON.stringify({ version: 1, issueNumber: 42, artifacts: {} }),
+        JSON.stringify({
+          version: 1,
+          issueNumber: 42,
+          artifacts: {},
+        }),
       );
       const versionExit = await Effect.runPromiseExit(
-        makeDurableIssueArtifactStore(42, { workspace, runId: "run-1" }),
+        makeDurableIssueArtifactStore(42, {
+          workspace,
+          runId: "run-1",
+        }),
       );
       expect(Exit.isFailure(versionExit)).toBe(true);
 
       await writeFile(
         path,
-        JSON.stringify({ version: 2, issueNumber: 99, artifacts: {} }),
+        JSON.stringify({
+          version: 2,
+          issueNumber: 99,
+          artifacts: {},
+        }),
       );
       const identityExit = await Effect.runPromiseExit(
-        makeDurableIssueArtifactStore(42, { workspace, runId: "run-1" }),
+        makeDurableIssueArtifactStore(42, {
+          workspace,
+          runId: "run-1",
+        }),
       );
       expect(Exit.isFailure(identityExit)).toBe(true);
     } finally {
-      await rm(workspace, { recursive: true, force: true });
+      await rm(workspace, {
+        recursive: true,
+        force: true,
+      });
     }
   });
 });

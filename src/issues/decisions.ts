@@ -47,15 +47,14 @@ export const reviewDecisionSchema = z
   .object({
     verdict: z.enum(ReviewVerdict),
     summary: z.string().min(1),
-    findings: z
-      .array(
-        z.object({
-          severity: z.enum(ReviewFindingSeverity),
-          description: z.string().min(1),
-          file: z.string().min(1).optional(),
-          line: z.number().int().positive().optional(),
-        }),
-      ),
+    findings: z.array(
+      z.object({
+        severity: z.enum(ReviewFindingSeverity),
+        description: z.string().min(1),
+        file: z.string().min(1).optional(),
+        line: z.number().int().positive().optional(),
+      }),
+    ),
   })
   .superRefine((decision, context) => {
     const hasBlockingFinding = decision.findings.some(
@@ -68,7 +67,10 @@ export const reviewDecisionSchema = z
         path: ["findings"],
       });
     }
-    if (decision.verdict === ReviewVerdict.ChangesRequested && !hasBlockingFinding) {
+    if (
+      decision.verdict === ReviewVerdict.ChangesRequested &&
+      !hasBlockingFinding
+    ) {
       context.addIssue({
         code: "custom",
         message: "A changes-requested review needs a blocking finding.",
@@ -82,12 +84,12 @@ export type ReviewDecision = z.infer<typeof reviewDecisionSchema>;
 export const issueResolutionDecisionSchema = z.object({
   status: z.enum(IssueResolutionStatus),
   summary: z.string().min(1),
-  evidence: z
-    .array(z.string().min(1))
-    .min(1),
+  evidence: z.array(z.string().min(1)).min(1),
 });
 
-export type IssueResolutionDecision = z.infer<typeof issueResolutionDecisionSchema>;
+export type IssueResolutionDecision = z.infer<
+  typeof issueResolutionDecisionSchema
+>;
 
 export const commitMessageDecisionSchema = z.object({
   subject: z.string().min(1).max(72),
@@ -169,4 +171,6 @@ export const issueBreakdownDecisionSchema = z
     }
   });
 
-export type IssueBreakdownDecision = z.infer<typeof issueBreakdownDecisionSchema>;
+export type IssueBreakdownDecision = z.infer<
+  typeof issueBreakdownDecisionSchema
+>;

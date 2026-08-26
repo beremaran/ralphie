@@ -48,10 +48,18 @@ const modelSelection = () => {
     rawModel === undefined ? undefined : piModelSchema.parse(rawModel);
   return {
     agent: process.env.RALPHIE_PI_SMOKE_AGENT?.trim() || "build",
-    ...(parsedModel === undefined ? {} : { model: parsedModel }),
+    ...(parsedModel === undefined
+      ? {}
+      : {
+          model: parsedModel,
+        }),
     ...(process.env.RALPHIE_PI_SMOKE_VARIANT === undefined
       ? {}
-      : { variant: piModelVariantSchema.parse(process.env.RALPHIE_PI_SMOKE_VARIANT) }),
+      : {
+          variant: piModelVariantSchema.parse(
+            process.env.RALPHIE_PI_SMOKE_VARIANT,
+          ),
+        }),
   };
 };
 
@@ -64,7 +72,9 @@ const startPi = async (): Promise<PiRuntime> =>
       Effect.provide(
         // Default agent directory: smoke tests rely on the operator's real Pi
         // configuration (env-provided keys), not a generated one.
-        PiLive({ workspace: tmpdir() }),
+        PiLive({
+          workspace: tmpdir(),
+        }),
       ),
     ),
   );
@@ -99,7 +109,8 @@ const githubRepository = process.env.RALPHIE_GITHUB_TEST_REPOSITORY?.trim();
 const safeGithubRepository =
   githubRepository !== undefined &&
   /(?:test|sandbox|fixture|integration|smoke)/i.test(githubRepository);
-const githubEnabled = envFlag("RALPHIE_RUN_GITHUB_INTEGRATION") && safeGithubRepository;
+const githubEnabled =
+  envFlag("RALPHIE_RUN_GITHUB_INTEGRATION") && safeGithubRepository;
 
 describe("opt-in network smoke tests", () => {
   defineOptInTest(
@@ -122,12 +133,19 @@ describe("opt-in network smoke tests", () => {
           ...modelSelection(),
         }).pipe(Effect.runPromise);
 
-        expect(result.output.complexity).toBeGreaterThanOrEqual(ComplexityLevel.Level0);
-        expect(result.output.complexity).toBeLessThanOrEqual(ComplexityLevel.Level5);
+        expect(result.output.complexity).toBeGreaterThanOrEqual(
+          ComplexityLevel.Level0,
+        );
+        expect(result.output.complexity).toBeLessThanOrEqual(
+          ComplexityLevel.Level5,
+        );
         expect(result.sessionID).toBeString();
       } finally {
         server?.close();
-        await rm(repositoryPath, { recursive: true, force: true });
+        await rm(repositoryPath, {
+          recursive: true,
+          force: true,
+        });
       }
     },
   );
@@ -173,7 +191,10 @@ describe("opt-in network smoke tests", () => {
         expect(review.output.summary.length).toBeGreaterThan(0);
       } finally {
         server?.close();
-        await rm(repositoryPath, { recursive: true, force: true });
+        await rm(repositoryPath, {
+          recursive: true,
+          force: true,
+        });
       }
     },
   );

@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Exit, Layer } from "effect";
 
-import { CommandRunner, type CommandResult } from "../process/command-runner.ts";
+import {
+  CommandRunner,
+  type CommandResult,
+} from "../process/command-runner.ts";
 import {
   GitDirectPushPolicy,
   GitPushMode,
@@ -16,11 +19,31 @@ const runner = (
   remoteSha = "base123",
 ) => {
   const commands: ReadonlyArray<CommandResult> = [
-    { exitCode: 0, stdout: origin, stderr: "" },
-    { exitCode: 0, stdout: "main", stderr: "" },
-    { exitCode: 0, stdout: "abc123", stderr: "" },
-    { exitCode: 0, stdout: `${remoteSha}\trefs/heads/main`, stderr: "" },
-    { exitCode: 0, stdout: counts, stderr: "" },
+    {
+      exitCode: 0,
+      stdout: origin,
+      stderr: "",
+    },
+    {
+      exitCode: 0,
+      stdout: "main",
+      stderr: "",
+    },
+    {
+      exitCode: 0,
+      stdout: "abc123",
+      stderr: "",
+    },
+    {
+      exitCode: 0,
+      stdout: `${remoteSha}\trefs/heads/main`,
+      stderr: "",
+    },
+    {
+      exitCode: 0,
+      stdout: counts,
+      stderr: "",
+    },
   ];
   let index = 0;
   return {
@@ -68,8 +91,20 @@ describe("Git remote safety", () => {
   });
 
   test.each([
-    ["diverged base", { counts: "1 2" }, GitRemoteSafetyFailureKind.DivergedBase],
-    ["moved remote", { remoteSha: "newbase" }, GitRemoteSafetyFailureKind.DivergedBase],
+    [
+      "diverged base",
+      {
+        counts: "1 2",
+      },
+      GitRemoteSafetyFailureKind.DivergedBase,
+    ],
+    [
+      "moved remote",
+      {
+        remoteSha: "newbase",
+      },
+      GitRemoteSafetyFailureKind.DivergedBase,
+    ],
   ])("refuses %s", async (_name, options, kind) => {
     const exit = await Effect.runPromiseExit(verify(options));
     expect(Exit.isFailure(exit)).toBeTrue();
@@ -79,7 +114,11 @@ describe("Git remote safety", () => {
   });
 
   test("refuses a force-push mode before any remote checks", async () => {
-    const exit = await Effect.runPromiseExit(verify({ pushMode: GitPushMode.Force }));
+    const exit = await Effect.runPromiseExit(
+      verify({
+        pushMode: GitPushMode.Force,
+      }),
+    );
     expect(Exit.isFailure(exit)).toBeTrue();
     if (Exit.isFailure(exit)) {
       const text = JSON.stringify(exit.cause);
@@ -90,7 +129,9 @@ describe("Git remote safety", () => {
 
   test("revalidates that origin belongs to the requested repository", async () => {
     const exit = await Effect.runPromiseExit(
-      verify({ origin: "https://github.com/other/repository.git" }),
+      verify({
+        origin: "https://github.com/other/repository.git",
+      }),
     );
     expect(Exit.isFailure(exit)).toBeTrue();
   });

@@ -13,7 +13,9 @@ const mutations = Effect.runSync(
 );
 
 const runMutation = <T, E>(
-  operation: (mutations: typeof GitHubIssueMutations.Service) => Effect.Effect<T, E>,
+  operation: (
+    mutations: typeof GitHubIssueMutations.Service,
+  ) => Effect.Effect<T, E>,
 ) => operation(mutations);
 
 const issueResponse = (
@@ -28,7 +30,11 @@ const issueResponse = (
     title,
     html_url: `https://github.com/owner/repository/issues/${number}`,
     body,
-    labels: [{ name: "bug" }],
+    labels: [
+      {
+        name: "bug",
+      },
+    ],
     state,
     state_reason: stateReason,
   },
@@ -109,7 +115,8 @@ describe("GitHub issue mutations", () => {
       rest: {
         issues: {
           create: async () => issueResponse(33, "Issue", "Body"),
-          get: async () => issueResponse(33, "Issue", "Body", state, stateReason),
+          get: async () =>
+            issueResponse(33, "Issue", "Body", state, stateReason),
           update: async (parameters: Record<string, unknown>) => {
             request = parameters;
             state = "closed";
@@ -160,7 +167,12 @@ describe("GitHub issue mutations", () => {
     } as unknown as Octokit;
 
     const issue = await runMutation((mutations) =>
-      mutations.close(client, "owner/repository", 34, GitHubIssueCloseReason.Completed),
+      mutations.close(
+        client,
+        "owner/repository",
+        34,
+        GitHubIssueCloseReason.Completed,
+      ),
     ).pipe(Effect.runPromise);
 
     expect(issue.number).toBe(34);
@@ -192,7 +204,12 @@ describe("GitHub issue mutations", () => {
     } as unknown as Octokit;
 
     const issue = await runMutation((mutations) =>
-      mutations.close(client, "owner/repository", 35, GitHubIssueCloseReason.Completed),
+      mutations.close(
+        client,
+        "owner/repository",
+        35,
+        GitHubIssueCloseReason.Completed,
+      ),
     ).pipe(Effect.runPromise);
 
     expect(issue.number).toBe(35);

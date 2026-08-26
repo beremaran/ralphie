@@ -8,8 +8,15 @@ describe("GitHub decomposition issue discovery", () => {
   test("finds matching generated children and ignores unrelated issues", async () => {
     let request: Record<string, unknown> | undefined;
     const client = {
-      rest: { issues: { listForRepo: Symbol("listForRepo") } },
-      paginate: async (_method: unknown, parameters: Record<string, unknown>) => {
+      rest: {
+        issues: {
+          listForRepo: Symbol("listForRepo"),
+        },
+      },
+      paginate: async (
+        _method: unknown,
+        parameters: Record<string, unknown>,
+      ) => {
         request = parameters;
         return [
           {
@@ -17,7 +24,11 @@ describe("GitHub decomposition issue discovery", () => {
             title: "Storage",
             html_url: "https://github.com/owner/repository/issues/101",
             body: '<!-- ralphie:decomposition root=42 parent=42 key="storage" depth=1 -->\nBody',
-            labels: [{ name: "generated" }],
+            labels: [
+              {
+                name: "generated",
+              },
+            ],
           },
           {
             number: 102,
@@ -40,11 +51,15 @@ describe("GitHub decomposition issue discovery", () => {
 
     const children = await Effect.gen(function* () {
       const issues = yield* GitHubIssues;
-      return yield* issues.listDecompositionChildren(client, "owner/repository", {
-        rootIssueNumber: 42,
-        parentIssueNumber: 42,
-        depth: 1,
-      });
+      return yield* issues.listDecompositionChildren(
+        client,
+        "owner/repository",
+        {
+          rootIssueNumber: 42,
+          parentIssueNumber: 42,
+          depth: 1,
+        },
+      );
     }).pipe(Effect.provide(GitHubIssuesLive), Effect.runPromise);
 
     expect(request).toEqual({

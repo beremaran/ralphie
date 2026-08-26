@@ -42,8 +42,15 @@ const breakdown: IssueBreakdownDecision = {
   ],
 };
 
-const lineage = { rootIssueNumber: 10, parentIssueNumber: 10, depth: 1 };
-const issueNumbers = { storage: 11, api: 12 };
+const lineage = {
+  rootIssueNumber: 10,
+  parentIssueNumber: 10,
+  depth: 1,
+};
+const issueNumbers = {
+  storage: 11,
+  api: 12,
+};
 
 describe("decomposition Markdown", () => {
   test("links child issues to their parent, siblings, dependencies, and lineage", () => {
@@ -75,7 +82,10 @@ describe("decomposition Markdown", () => {
     expect(body).toContain("Split storage from API work.");
     expect(
       renderDecomposedOriginalBody({
-        original: { ...original, body },
+        original: {
+          ...original,
+          body,
+        },
         breakdown,
         issueNumbers,
         lineage,
@@ -87,7 +97,10 @@ describe("decomposition Markdown", () => {
     expect(() =>
       renderChildIssueBody({
         child: breakdown.issues[0]!,
-        lineage: { ...lineage, depth: MAX_DECOMPOSITION_DEPTH + 1 },
+        lineage: {
+          ...lineage,
+          depth: MAX_DECOMPOSITION_DEPTH + 1,
+        },
         issueNumbers,
       }),
     ).toThrow();
@@ -117,7 +130,12 @@ describe("decomposition Markdown", () => {
       lineage,
       issueNumbers,
     });
-    expect(parseGeneratedIssueDependencies({ ...original, body })).toEqual([11]);
+    expect(
+      parseGeneratedIssueDependencies({
+        ...original,
+        body,
+      }),
+    ).toEqual([11]);
     expect(parseGeneratedIssueDependencies(original)).toEqual([]);
   });
 });

@@ -13,11 +13,20 @@ const service = Effect.runSync(
   Effect.provide(GitHubPullRequests, GitHubPullRequestsLive),
 );
 
-const pullRequest = (number: number, head: string, base: string, merged = false) => ({
+const pullRequest = (
+  number: number,
+  head: string,
+  base: string,
+  merged = false,
+) => ({
   number,
   html_url: `https://github.com/owner/repository/pull/${number}`,
-  head: { ref: head },
-  base: { ref: base },
+  head: {
+    ref: head,
+  },
+  base: {
+    ref: base,
+  },
   state: merged ? "closed" : "open",
   merged,
   merged_at: merged ? "2026-08-25T00:00:00Z" : null,
@@ -43,11 +52,16 @@ describe("GitHub pull requests", () => {
           list: Symbol("list"),
           create: async () => {
             created = true;
-            return { data: pullRequest(99, "feature", "main") };
+            return {
+              data: pullRequest(99, "feature", "main"),
+            };
           },
         },
       },
-      paginate: async (_method: unknown, parameters: Record<string, unknown>) => {
+      paginate: async (
+        _method: unknown,
+        parameters: Record<string, unknown>,
+      ) => {
         request = parameters;
         return [pullRequest(42, "feature", "main")];
       },
@@ -87,7 +101,9 @@ describe("GitHub pull requests", () => {
           list: Symbol("list"),
           create: async (parameters: Record<string, unknown>) => {
             request = parameters;
-            return { data: pullRequest(43, "feature", "main") };
+            return {
+              data: pullRequest(43, "feature", "main"),
+            };
           },
         },
       },
@@ -115,8 +131,12 @@ describe("GitHub pull requests", () => {
   });
 
   test("publishes review attempts once using deterministic comment markers", async () => {
-    const comments: Array<{ body: string }> = [
-      { body: `${reviewAttemptMarker(1)}\nold` },
+    const comments: Array<{
+      body: string;
+    }> = [
+      {
+        body: `${reviewAttemptMarker(1)}\nold`,
+      },
     ];
     const created: Record<string, unknown>[] = [];
     const client = {
@@ -125,8 +145,12 @@ describe("GitHub pull requests", () => {
           listComments: Symbol("listComments"),
           createComment: async (parameters: Record<string, unknown>) => {
             created.push(parameters);
-            comments.push({ body: String(parameters.body) });
-            return { data: {} };
+            comments.push({
+              body: String(parameters.body),
+            });
+            return {
+              data: {},
+            };
           },
         },
       },
@@ -134,10 +158,16 @@ describe("GitHub pull requests", () => {
     } as unknown as Octokit;
 
     await service
-      .publishReviewAttempts(client, "owner/repository", 42, [review(1), review(2)])
+      .publishReviewAttempts(client, "owner/repository", 42, [
+        review(1),
+        review(2),
+      ])
       .pipe(Effect.runPromise);
     await service
-      .publishReviewAttempts(client, "owner/repository", 42, [review(1), review(2)])
+      .publishReviewAttempts(client, "owner/repository", 42, [
+        review(1),
+        review(2),
+      ])
       .pipe(Effect.runPromise);
 
     expect(created).toHaveLength(1);
@@ -167,7 +197,11 @@ describe("GitHub pull requests", () => {
           },
           merge: async () => {
             mergeCalls += 1;
-            return { data: { merged: true } };
+            return {
+              data: {
+                merged: true,
+              },
+            };
           },
         },
       },
@@ -189,8 +223,14 @@ describe("GitHub pull requests", () => {
     const client = {
       rest: {
         pulls: {
-          get: async () => ({ data: pullRequest(45, "feature", "main") }),
-          merge: async () => ({ data: { merged: false } }),
+          get: async () => ({
+            data: pullRequest(45, "feature", "main"),
+          }),
+          merge: async () => ({
+            data: {
+              merged: false,
+            },
+          }),
         },
       },
     } as unknown as Octokit;

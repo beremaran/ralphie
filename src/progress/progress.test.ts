@@ -33,7 +33,10 @@ describe("progress reporting", () => {
         status: ProgressStatus.Started,
         message: "Reviewing changes...",
         repository: "owner/repo",
-        issue: { number: 42, title: "Fix issue" },
+        issue: {
+          number: 42,
+          title: "Fix issue",
+        },
         attempt: 1,
         maxAttempts: 5,
       });
@@ -46,7 +49,10 @@ describe("progress reporting", () => {
       status: ProgressStatus.Started,
       message: "Reviewing changes...",
       repository: "owner/repo",
-      issue: { number: 42, title: "Fix issue" },
+      issue: {
+        number: 42,
+        title: "Fix issue",
+      },
       attempt: 1,
       maxAttempts: 5,
     });
@@ -70,14 +76,21 @@ describe("progress reporting", () => {
         status: ProgressStatus.Succeeded,
         message: "Issue prepared.",
         repository: "owner/repo",
-        issue: { number: 42, title: "Fix issue" },
+        issue: {
+          number: 42,
+          title: "Fix issue",
+        },
         current: 1,
         total: 3,
-        details: { branch: "main" },
+        details: {
+          branch: "main",
+        },
       });
     }).pipe(Effect.provide(layer), Effect.runPromise);
 
-    expect(output).toBe(`${green("✓")} ${dim("[owner/repo]")} ${dim("[1/3]")} ${cyan("#42")} Issue prepared. {"branch":"main"}\n`);
+    expect(output).toBe(
+      `${green("✓")} ${dim("[owner/repo]")} ${dim("[1/3]")} ${cyan("#42")} Issue prepared. {"branch":"main"}\n`,
+    );
   });
 
   test("renders nested interactive stages on one live line", async () => {
@@ -101,31 +114,46 @@ describe("progress reporting", () => {
         stage: ProgressStage.IssueExecution,
         status: ProgressStatus.Started,
         message: "Working on issue...",
-        issue: { number: 42, title: "Fix issue" },
+        issue: {
+          number: 42,
+          title: "Fix issue",
+        },
       });
       yield* progress.emit({
         stage: ProgressStage.ComplexityAssessment,
         status: ProgressStatus.Started,
         message: "Assessing complexity...",
-        issue: { number: 42, title: "Fix issue" },
+        issue: {
+          number: 42,
+          title: "Fix issue",
+        },
       });
       yield* progress.emit({
         stage: ProgressStage.ComplexityAssessment,
         status: ProgressStatus.Succeeded,
         message: "Complexity assessed.",
-        issue: { number: 42, title: "Fix issue" },
+        issue: {
+          number: 42,
+          title: "Fix issue",
+        },
       });
       yield* progress.emit({
         stage: ProgressStage.IssuePlanning,
         status: ProgressStatus.Info,
         message: "Using implementation workflow.",
-        issue: { number: 42, title: "Fix issue" },
+        issue: {
+          number: 42,
+          title: "Fix issue",
+        },
       });
       yield* progress.emit({
         stage: ProgressStage.IssueExecution,
         status: ProgressStatus.Succeeded,
         message: "Issue finished.",
-        issue: { number: 42, title: "Fix issue" },
+        issue: {
+          number: 42,
+          title: "Fix issue",
+        },
       });
       yield* progress.emit({
         stage: ProgressStage.Push,
@@ -231,7 +259,12 @@ describe("progress reporting", () => {
         stage: ProgressStage.Run,
         status: ProgressStatus.Failed,
         message: "Request failed with Bearer private-value",
-        details: { githubToken: "private-value", nested: { password: "secret" } },
+        details: {
+          githubToken: "private-value",
+          nested: {
+            password: "secret",
+          },
+        },
       });
     }).pipe(Effect.provide(layer), Effect.runPromise);
 
@@ -259,7 +292,10 @@ describe("progress reporting", () => {
           stage: ProgressStage.Commit,
           status: ProgressStatus.Succeeded,
           message: "Committed with Bearer private-value.",
-          details: { commitSha: "abc123", token: "private-value" },
+          details: {
+            commitSha: "abc123",
+            token: "private-value",
+          },
         });
       }).pipe(Effect.provide(layer), Effect.runPromise);
 
@@ -274,11 +310,17 @@ describe("progress reporting", () => {
           stage: ProgressStage.Commit,
           status: ProgressStatus.Succeeded,
           message: "Committed with Bearer [REDACTED]",
-          details: { commitSha: "abc123", token: "[REDACTED]" },
+          details: {
+            commitSha: "abc123",
+            token: "[REDACTED]",
+          },
         },
       ]);
     } finally {
-      await rm(directory, { recursive: true, force: true });
+      await rm(directory, {
+        recursive: true,
+        force: true,
+      });
     }
   });
 
@@ -306,7 +348,12 @@ describe("progress reporting", () => {
           message: "Removing workspace...",
         });
         yield* progress.stopPersisting;
-        yield* Effect.promise(() => rm(runDirectory, { recursive: true, force: true }));
+        yield* Effect.promise(() =>
+          rm(runDirectory, {
+            recursive: true,
+            force: true,
+          }),
+        );
         yield* progress.emit({
           stage: ProgressStage.WorkspaceCleanup,
           status: ProgressStatus.Succeeded,
@@ -324,7 +371,10 @@ describe("progress reporting", () => {
       expect(output).toContain("Run completed.");
       expect(await Bun.file(eventLogPath).exists()).toBeFalse();
     } finally {
-      await rm(directory, { recursive: true, force: true });
+      await rm(directory, {
+        recursive: true,
+        force: true,
+      });
     }
   });
 
@@ -351,7 +401,10 @@ describe("progress reporting", () => {
         stage: ProgressStage.Review,
         status: ProgressStatus.Started,
         message: "Reviewing changes...",
-        issue: { number: 42, title: "Fix issue" },
+        issue: {
+          number: 42,
+          title: "Fix issue",
+        },
         current: 1,
         total: 2,
         attempt: 2,
@@ -361,7 +414,10 @@ describe("progress reporting", () => {
         stage: ProgressStage.Review,
         status: ProgressStatus.Succeeded,
         message: "Review approved.",
-        issue: { number: 42, title: "Fix issue" },
+        issue: {
+          number: 42,
+          title: "Fix issue",
+        },
         current: 1,
         total: 2,
         attempt: 2,

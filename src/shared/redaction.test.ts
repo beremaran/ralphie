@@ -16,8 +16,18 @@ describe("sensitive-value redaction", () => {
 
   test("redacts nested values under sensitive keys", () => {
     expect(
-      redactSensitiveValue({ token: "anything", nested: { apiKey: "value" } }),
-    ).toEqual({ token: "[REDACTED]", nested: { apiKey: "[REDACTED]" } });
+      redactSensitiveValue({
+        token: "anything",
+        nested: {
+          apiKey: "value",
+        },
+      }),
+    ).toEqual({
+      token: "[REDACTED]",
+      nested: {
+        apiKey: "[REDACTED]",
+      },
+    });
   });
 
   test("redacts values sourced from sensitive environment keys", () => {

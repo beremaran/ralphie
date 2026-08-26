@@ -1,6 +1,9 @@
 import { Context, Data, Effect, Layer } from "effect";
 
-import { CommandRunner, type CommandRunnerService } from "../process/command-runner.ts";
+import {
+  CommandRunner,
+  type CommandRunnerService,
+} from "../process/command-runner.ts";
 import { RalphieError } from "../shared/error.ts";
 import { parseRepositorySlug } from "../github/repository.ts";
 
@@ -21,7 +24,9 @@ export enum GitPushMode {
   Force = "force",
 }
 
-export class GitRemoteSafetyError extends Data.TaggedError("GitRemoteSafetyError")<{
+export class GitRemoteSafetyError extends Data.TaggedError(
+  "GitRemoteSafetyError",
+)<{
   readonly kind: GitRemoteSafetyFailureKind;
   readonly policy: GitDirectPushPolicy;
   readonly message: string;
@@ -52,7 +57,10 @@ export type GitRemoteSafetyService = {
   /** Verify all invariants required immediately before a direct branch push. */
   readonly verifyDirectPush: (
     input: GitRemoteSafetyInput,
-  ) => Effect.Effect<GitRemoteSafetyReport, GitRemoteSafetyError | RalphieError>;
+  ) => Effect.Effect<
+    GitRemoteSafetyReport,
+    GitRemoteSafetyError | RalphieError
+  >;
 };
 
 export const GitRemoteSafety = Context.GenericTag<GitRemoteSafetyService>(
@@ -65,7 +73,14 @@ const fail = (
   message: string,
   cause?: unknown,
 ): Effect.Effect<never, GitRemoteSafetyError> =>
-  Effect.fail(new GitRemoteSafetyError({ kind, policy, message, cause }));
+  Effect.fail(
+    new GitRemoteSafetyError({
+      kind,
+      policy,
+      message,
+      cause,
+    }),
+  );
 
 const runGit = (
   runner: CommandRunnerService,
@@ -211,7 +226,12 @@ export const GitRemoteSafetyLive = Layer.effect(
           const countsOutput = yield* runGit(
             runner,
             input.repositoryPath,
-            ["rev-list", "--left-right", "--count", `${input.intendedBaseSha}...HEAD`],
+            [
+              "rev-list",
+              "--left-right",
+              "--count",
+              `${input.intendedBaseSha}...HEAD`,
+            ],
             "Failed to compare the checkout with its intended base.",
           );
           const counts = parseCounts(countsOutput);

@@ -8,7 +8,10 @@ import {
   ProgressStatus,
 } from "../progress/progress.ts";
 import { RalphieError } from "../shared/error.ts";
-import { complexityDecisionSchema, type ComplexityDecision } from "./decisions.ts";
+import {
+  complexityDecisionSchema,
+  type ComplexityDecision,
+} from "./decisions.ts";
 import type { IssueExecutionContext } from "./execution.ts";
 
 export type ComplexityAssessmentResult = {
@@ -22,9 +25,10 @@ export type ComplexityAssessmentService = {
   ) => Effect.Effect<ComplexityAssessmentResult, RalphieError>;
 };
 
-export const ComplexityAssessment = Context.GenericTag<ComplexityAssessmentService>(
-  "ralphie/ComplexityAssessment",
-);
+export const ComplexityAssessment =
+  Context.GenericTag<ComplexityAssessmentService>(
+    "ralphie/ComplexityAssessment",
+  );
 
 export const ComplexityAssessmentLive = Layer.effect(
   ComplexityAssessment,
@@ -34,7 +38,10 @@ export const ComplexityAssessmentLive = Layer.effect(
     return {
       assess: (context) => {
         const issueProgress = {
-          issue: { number: context.issue.number, title: context.issue.title },
+          issue: {
+            number: context.issue.number,
+            title: context.issue.title,
+          },
         };
 
         return progress

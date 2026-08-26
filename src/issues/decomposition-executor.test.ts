@@ -17,7 +17,10 @@ import {
   DecompositionExecutor,
   DecompositionExecutorLive,
 } from "./decomposition-executor.ts";
-import { IssueExecutionOutcomeKind, type IssueExecutionContext } from "./execution.ts";
+import {
+  IssueExecutionOutcomeKind,
+  type IssueExecutionContext,
+} from "./execution.ts";
 import {
   GitHubMutationRecoveryError,
   GitHubIssueMutations,
@@ -81,10 +84,16 @@ const context = (pi: PiClient, octokit: Octokit): IssueExecutionContext => ({
   runId: "run-1",
   octokit,
   pi,
-  piSelection: { agent: "build" },
+  piSelection: {
+    agent: "build",
+  },
   piDiagnostics: makePiSessionDiagnostics(),
   repositoryInvariant: {
-    capture: () => Effect.succeed({ branch: "main", head: "abc123" }),
+    capture: () =>
+      Effect.succeed({
+        branch: "main",
+        head: "abc123",
+      }),
     verify: () => Effect.void,
   },
 });
@@ -92,12 +101,22 @@ const context = (pi: PiClient, octokit: Octokit): IssueExecutionContext => ({
 const piClient = (capturePrompt?: (prompt: string) => void) =>
   ({
     session: {
-      create: async () => ({ data: { id: "decomposition-session" } }),
-      prompt: async (parameters: { parts: ReadonlyArray<{ text: string }> }) => {
+      create: async () => ({
+        data: {
+          id: "decomposition-session",
+        },
+      }),
+      prompt: async (parameters: {
+        parts: ReadonlyArray<{
+          text: string;
+        }>;
+      }) => {
         capturePrompt?.(parameters.parts[0]?.text ?? "");
         return {
           data: {
-            info: { structured: breakdown },
+            info: {
+              structured: breakdown,
+            },
             parts: [],
           },
         };
@@ -113,7 +132,10 @@ const run = (
 ) =>
   Effect.gen(function* () {
     const executor = yield* DecompositionExecutor;
-    return yield* executor.execute({ context: context(pi, octokit), artifacts });
+    return yield* executor.execute({
+      context: context(pi, octokit),
+      artifacts,
+    });
   }).pipe(
     Effect.provide(DecompositionExecutorLive),
     Effect.provide(
@@ -132,15 +154,25 @@ const run = (
 
 describe("decomposition executor", () => {
   test("creates, links, rewrites, and closes in deterministic order", async () => {
-    const requests: Array<{ method: string; parameters: Record<string, unknown> }> = [];
+    const requests: Array<{
+      method: string;
+      parameters: Record<string, unknown>;
+    }> = [];
     let prompt = "";
     const octokit = {
       rest: {
         issues: {
           get: async (parameters: Record<string, unknown>) =>
-            issueResponse(Number(parameters.issue_number), "Original", "Original"),
+            issueResponse(
+              Number(parameters.issue_number),
+              "Original",
+              "Original",
+            ),
           create: async (parameters: Record<string, unknown>) => {
-            requests.push({ method: "create", parameters });
+            requests.push({
+              method: "create",
+              parameters,
+            });
             const number = parameters.title === "Migrate storage" ? 101 : 102;
             return issueResponse(
               number,
@@ -149,7 +181,10 @@ describe("decomposition executor", () => {
             );
           },
           update: async (parameters: Record<string, unknown>) => {
-            requests.push({ method: "update", parameters });
+            requests.push({
+              method: "update",
+              parameters,
+            });
             return issueResponse(
               Number(parameters.issue_number),
               "Updated",
@@ -170,7 +205,10 @@ describe("decomposition executor", () => {
 
     expect(prompt).toContain("Break down the GitHub issue");
     expect(
-      requests.map(({ method, parameters }) => [method, parameters.issue_number]),
+      requests.map(({ method, parameters }) => [
+        method,
+        parameters.issue_number,
+      ]),
     ).toEqual([
       ["create", undefined],
       ["create", undefined],
@@ -182,13 +220,18 @@ describe("decomposition executor", () => {
     expect(requests[2]?.parameters.body).toContain("#102");
     expect(requests[2]?.parameters.body).toContain("#42");
     expect(requests[3]?.parameters.body).toContain("#101");
-    expect(requests[4]?.parameters.body).toContain("Preserve this original content.");
+    expect(requests[4]?.parameters.body).toContain(
+      "Preserve this original content.",
+    );
     expect(requests[5]?.parameters.state_reason).toBe("duplicate");
 
     const mapping = await Effect.runPromise(
       artifacts.read(IssueArtifactKind.CreatedIssueNumbers),
     );
-    expect(mapping).toEqual({ storage: 101, api: 102 });
+    expect(mapping).toEqual({
+      storage: 101,
+      api: 102,
+    });
   });
 
   test("passes failed review summaries to decomposition and persists breakdown before creation", async () => {
@@ -216,7 +259,11 @@ describe("decomposition executor", () => {
       rest: {
         issues: {
           get: async (parameters: Record<string, unknown>) =>
-            issueResponse(Number(parameters.issue_number), "Original", "Original"),
+            issueResponse(
+              Number(parameters.issue_number),
+              "Original",
+              "Original",
+            ),
           create: async () => {
             breakdownPersisted = artifacts.has(
               IssueArtifactKind.IssueBreakdownDecision,
@@ -261,13 +308,21 @@ describe("decomposition executor", () => {
       rest: {
         issues: {
           get: async (parameters: Record<string, unknown>) =>
-            issueResponse(Number(parameters.issue_number), "Original", "Original"),
+            issueResponse(
+              Number(parameters.issue_number),
+              "Original",
+              "Original",
+            ),
           create: async () => {
             createCount += 1;
             return issueResponse(999, "Unexpected", "Unexpected");
           },
           update: async (parameters: Record<string, unknown>) =>
-            issueResponse(Number(parameters.issue_number), "Updated", "Updated"),
+            issueResponse(
+              Number(parameters.issue_number),
+              "Updated",
+              "Updated",
+            ),
         },
       },
     } as unknown as Octokit;
@@ -281,8 +336,13 @@ describe("decomposition executor", () => {
     });
     expect(createCount).toBe(0);
     expect(
-      await Effect.runPromise(artifacts.read(IssueArtifactKind.CreatedIssueNumbers)),
-    ).toEqual({ storage: 101, api: 102 });
+      await Effect.runPromise(
+        artifacts.read(IssueArtifactKind.CreatedIssueNumbers),
+      ),
+    ).toEqual({
+      storage: 101,
+      api: 102,
+    });
   });
 
   test("leaves the original open when child linking fails", async () => {
@@ -294,7 +354,11 @@ describe("decomposition executor", () => {
       rest: {
         issues: {
           get: async (parameters: Record<string, unknown>) =>
-            issueResponse(Number(parameters.issue_number), "Original", "Original"),
+            issueResponse(
+              Number(parameters.issue_number),
+              "Original",
+              "Original",
+            ),
           create: async (parameters: Record<string, unknown>) => {
             createCount += 1;
             return issueResponse(
@@ -309,14 +373,20 @@ describe("decomposition executor", () => {
               throw new Error("link failed");
             }
             if (parameters.state === "closed") closeCount += 1;
-            return issueResponse(Number(parameters.issue_number), "Child", "Child");
+            return issueResponse(
+              Number(parameters.issue_number),
+              "Child",
+              "Child",
+            );
           },
         },
       },
     } as unknown as Octokit;
     const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
 
-    const exit = await Effect.runPromiseExit(run(piClient(), octokit, artifacts));
+    const exit = await Effect.runPromiseExit(
+      run(piClient(), octokit, artifacts),
+    );
     expect(Exit.isFailure(exit)).toBeTrue();
     expect(originalUpdated).toBeFalse();
     expect(closeCount).toBe(0);
@@ -341,10 +411,15 @@ describe("decomposition executor", () => {
         rest: {
           issues: {
             get: async (parameters: Record<string, unknown>) =>
-              issueResponse(Number(parameters.issue_number), "Original", "Original"),
+              issueResponse(
+                Number(parameters.issue_number),
+                "Original",
+                "Original",
+              ),
             create: async (parameters: Record<string, unknown>) => {
               mutationCount += 1;
-              if (mutationCount === failureAt) throw new Error("mutation failed");
+              if (mutationCount === failureAt)
+                throw new Error("mutation failed");
               return issueResponse(
                 parameters.title === "Migrate storage" ? 101 : 102,
                 "Child",
@@ -353,22 +428,30 @@ describe("decomposition executor", () => {
             },
             update: async (parameters: Record<string, unknown>) => {
               mutationCount += 1;
-              if (mutationCount === failureAt) throw new Error("mutation failed");
+              if (mutationCount === failureAt)
+                throw new Error("mutation failed");
               if (parameters.state === "closed") closeCount += 1;
-              return issueResponse(Number(parameters.issue_number), "Child", "Child");
+              return issueResponse(
+                Number(parameters.issue_number),
+                "Child",
+                "Child",
+              );
             },
           },
         },
       } as unknown as Octokit;
       const artifacts = await Effect.runPromise(makeIssueArtifactStore(42));
 
-      const exit = await Effect.runPromiseExit(run(piClient(), octokit, artifacts));
+      const exit = await Effect.runPromiseExit(
+        run(piClient(), octokit, artifacts),
+      );
       expect(Exit.isFailure(exit)).toBeTrue();
       expect(closeCount).toBe(0);
       if (failureAt === 6 && Exit.isFailure(exit)) {
         const error = Cause.failureOption(exit.cause);
         expect(
-          error._tag === "Some" && error.value instanceof GitHubMutationRecoveryError,
+          error._tag === "Some" &&
+            error.value instanceof GitHubMutationRecoveryError,
         ).toBeTrue();
       }
     },

@@ -18,9 +18,8 @@ export type GitIssuePreparationService = {
   ) => Effect.Effect<IssueCheckpoint, RalphieError>;
 };
 
-export const GitIssuePreparation = Context.GenericTag<GitIssuePreparationService>(
-  "ralphie/GitIssuePreparation",
-);
+export const GitIssuePreparation =
+  Context.GenericTag<GitIssuePreparationService>("ralphie/GitIssuePreparation");
 
 export const GitIssuePreparationLive = Layer.effect(
   GitIssuePreparation,
@@ -37,7 +36,9 @@ export const GitIssuePreparationLive = Layer.effect(
           );
           const artifacts = yield* artifactStores.forIssue(input.issueNumber);
           if (artifacts.has(IssueArtifactKind.IssueCheckpoint)) {
-            const existing = yield* artifacts.read(IssueArtifactKind.IssueCheckpoint);
+            const existing = yield* artifacts.read(
+              IssueArtifactKind.IssueCheckpoint,
+            );
             if (
               existing.branch !== checkpoint.branch ||
               existing.sha.toLowerCase() !== checkpoint.sha.toLowerCase()

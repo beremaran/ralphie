@@ -107,7 +107,11 @@ export const makePiSessionDiagnostics = (
   return {
     record: (runId, session) => {
       const runSessions = sessions.get(runId) ?? [];
-      runSessions.push({ ...session, runId, recordedAt: now() });
+      runSessions.push({
+        ...session,
+        runId,
+        recordedAt: now(),
+      });
       sessions.set(runId, runSessions);
     },
     list: (runId) => [...(sessions.get(runId) ?? [])],
@@ -120,15 +124,51 @@ export const makePiSessionDiagnostics = (
  * branch changes, worktrees, resets/cleanups, and GitHub mutations.
  */
 export const PI_TASK_PERMISSION_POLICY: PiPermissionRuleset = [
-  { permission: "bash", pattern: "git commit*", action: "deny" },
-  { permission: "bash", pattern: "git push*", action: "deny" },
-  { permission: "bash", pattern: "git branch*", action: "deny" },
-  { permission: "bash", pattern: "git checkout*", action: "deny" },
-  { permission: "bash", pattern: "git switch*", action: "deny" },
-  { permission: "bash", pattern: "git worktree*", action: "deny" },
-  { permission: "bash", pattern: "git reset*", action: "deny" },
-  { permission: "bash", pattern: "git clean*", action: "deny" },
-  { permission: "bash", pattern: "gh *", action: "deny" },
+  {
+    permission: "bash",
+    pattern: "git commit*",
+    action: "deny",
+  },
+  {
+    permission: "bash",
+    pattern: "git push*",
+    action: "deny",
+  },
+  {
+    permission: "bash",
+    pattern: "git branch*",
+    action: "deny",
+  },
+  {
+    permission: "bash",
+    pattern: "git checkout*",
+    action: "deny",
+  },
+  {
+    permission: "bash",
+    pattern: "git switch*",
+    action: "deny",
+  },
+  {
+    permission: "bash",
+    pattern: "git worktree*",
+    action: "deny",
+  },
+  {
+    permission: "bash",
+    pattern: "git reset*",
+    action: "deny",
+  },
+  {
+    permission: "bash",
+    pattern: "git clean*",
+    action: "deny",
+  },
+  {
+    permission: "bash",
+    pattern: "gh *",
+    action: "deny",
+  },
 ];
 
 /**
@@ -138,13 +178,37 @@ export const PI_TASK_PERMISSION_POLICY: PiPermissionRuleset = [
  * Bash denial.
  */
 export const PI_DECISION_PERMISSION_POLICY: PiPermissionRuleset = [
-  { permission: "edit", pattern: "*", action: "deny" },
-  { permission: "write", pattern: "*", action: "deny" },
-  { permission: "bash", pattern: "*", action: "deny" },
+  {
+    permission: "edit",
+    pattern: "*",
+    action: "deny",
+  },
+  {
+    permission: "write",
+    pattern: "*",
+    action: "deny",
+  },
+  {
+    permission: "bash",
+    pattern: "*",
+    action: "deny",
+  },
   ...PI_TASK_PERMISSION_POLICY,
-  { permission: "bash", pattern: "git status*", action: "allow" },
-  { permission: "bash", pattern: "git diff*", action: "allow" },
-  { permission: "bash", pattern: "git ls-files*", action: "allow" },
+  {
+    permission: "bash",
+    pattern: "git status*",
+    action: "allow",
+  },
+  {
+    permission: "bash",
+    pattern: "git diff*",
+    action: "allow",
+  },
+  {
+    permission: "bash",
+    pattern: "git ls-files*",
+    action: "allow",
+  },
 ];
 
 type PiPromptParameters = Parameters<PiClient["session"]["prompt"]>[0];
@@ -159,7 +223,9 @@ const describeApiError = (error: unknown): string => {
 
   const candidate = error as {
     readonly name?: unknown;
-    readonly data?: { readonly message?: unknown };
+    readonly data?: {
+      readonly message?: unknown;
+    };
   };
   const name = typeof candidate.name === "string" ? candidate.name : "PiError";
   const message =
@@ -186,8 +252,11 @@ export const toPiAssistantError = (
     kind,
     message: describeApiError(error),
     errorName: error.name,
-    ...(error.name === "StructuredOutputError" && error.data?.retries !== undefined
-      ? { retries: error.data.retries }
+    ...(error.name === "StructuredOutputError" &&
+    error.data?.retries !== undefined
+      ? {
+          retries: error.data.retries,
+        }
       : {}),
     sdkError: error,
   });
@@ -223,8 +292,13 @@ export const reportPiFailure = (
     for (let depth = 0; depth < 4 && cause !== undefined; depth += 1) {
       if (cause instanceof Error && cause.message !== error.message)
         return cause.message;
-      if (typeof cause !== "object" || cause === null || !("cause" in cause)) break;
-      cause = (cause as { readonly cause?: unknown }).cause;
+      if (typeof cause !== "object" || cause === null || !("cause" in cause))
+        break;
+      cause = (
+        cause as {
+          readonly cause?: unknown;
+        }
+      ).cause;
     }
     return undefined;
   })();
@@ -232,12 +306,20 @@ export const reportPiFailure = (
     .emit({
       stage: request.progressStage ?? ProgressStage.Implementation,
       status: ProgressStatus.Failed,
-      ...(request.progressIssue === undefined ? {} : { issue: request.progressIssue }),
+      ...(request.progressIssue === undefined
+        ? {}
+        : {
+            issue: request.progressIssue,
+          }),
       message: `Pi task failed: ${error.message}`,
       details: {
         directory: request.directory,
         title: request.title,
-        ...(causeMessage === undefined ? {} : { cause: causeMessage }),
+        ...(causeMessage === undefined
+          ? {}
+          : {
+              cause: causeMessage,
+            }),
         ...(assistantError === undefined
           ? {}
           : {
@@ -245,7 +327,9 @@ export const reportPiFailure = (
               sessionError: assistantError.errorName,
               ...(assistantError.retries === undefined
                 ? {}
-                : { retries: assistantError.retries }),
+                : {
+                    retries: assistantError.retries,
+                  }),
             }),
       },
     })
@@ -272,10 +356,16 @@ export const taskSessionPromptParameters = (
   sessionID: session.sessionID,
   directory: session.directory,
   agent: session.selection.agent,
-  ...(session.selection.model === undefined ? {} : { model: session.selection.model }),
+  ...(session.selection.model === undefined
+    ? {}
+    : {
+        model: session.selection.model,
+      }),
   ...(session.selection.variant === undefined
     ? {}
-    : { variant: session.selection.variant }),
+    : {
+        variant: session.selection.variant,
+      }),
 });
 
 /**
@@ -299,9 +389,15 @@ export const createPiTaskSession = (
           permission: PI_TASK_PERMISSION_POLICY,
           ...(request.selection.model === undefined
             ? {}
-            : { model: createSessionModel(request.selection.model) }),
+            : {
+                model: createSessionModel(request.selection.model),
+              }),
         },
-        request.signal === undefined ? undefined : { signal: request.signal },
+        request.signal === undefined
+          ? undefined
+          : {
+              signal: request.signal,
+            },
       );
 
       if (response.error !== undefined || response.data === undefined) {
@@ -356,9 +452,18 @@ export const runPiTask = (
         try: async () => {
           const response = await client.session.prompt(
             taskSessionPromptParameters(session, {
-              parts: [{ type: "text", text: request.prompt }],
+              parts: [
+                {
+                  type: "text",
+                  text: request.prompt,
+                },
+              ],
             }),
-            request.signal === undefined ? undefined : { signal: request.signal },
+            request.signal === undefined
+              ? undefined
+              : {
+                  signal: request.signal,
+                },
           );
 
           if (response.error !== undefined || response.data === undefined) {
@@ -407,7 +512,9 @@ export type PiTaskSessionService = {
   readonly create: (
     request: PiTaskSessionRequest,
   ) => Effect.Effect<PiTaskSession, RalphieError>;
-  readonly run: (request: PiTaskRequest) => Effect.Effect<PiTaskResult, RalphieError>;
+  readonly run: (
+    request: PiTaskRequest,
+  ) => Effect.Effect<PiTaskResult, RalphieError>;
   readonly diagnostics: PiSessionDiagnostics;
 };
 
@@ -421,12 +528,18 @@ export const makePiTaskSessionLayer = (client: PiClient) =>
     const withDiagnostics = <Request extends PiTaskSessionRequest>(
       request: Request,
     ): Request =>
-      request.diagnostics === undefined ? { ...request, diagnostics } : request;
+      request.diagnostics === undefined
+        ? {
+            ...request,
+            diagnostics,
+          }
+        : request;
 
     return {
       diagnostics,
       create: (request: PiTaskSessionRequest) =>
         createPiTaskSession(client, withDiagnostics(request)),
-      run: (request: PiTaskRequest) => runPiTask(client, withDiagnostics(request)),
+      run: (request: PiTaskRequest) =>
+        runPiTask(client, withDiagnostics(request)),
     };
   });

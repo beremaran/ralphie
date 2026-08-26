@@ -57,9 +57,10 @@ export type ImplementationExecutorService = {
   ) => Effect.Effect<WorkflowExecutorResult, RalphieError>;
 };
 
-export const ImplementationExecutor = Context.GenericTag<ImplementationExecutorService>(
-  "ralphie/ImplementationExecutor",
-);
+export const ImplementationExecutor =
+  Context.GenericTag<ImplementationExecutorService>(
+    "ralphie/ImplementationExecutor",
+  );
 
 const asRalphieError = (error: unknown): RalphieError => {
   if (error instanceof RalphieError) return error;
@@ -82,7 +83,10 @@ const checkSignal = (
   Effect.try({
     try: () => signal?.throwIfAborted(),
     catch: (cause) =>
-      new RalphieError({ message: "Issue execution was aborted.", cause }),
+      new RalphieError({
+        message: "Issue execution was aborted.",
+        cause,
+      }),
   }).pipe(Effect.asVoid);
 
 function stage<A>(
@@ -98,11 +102,24 @@ function stage<A>(
   const base = {
     ...issueProgress(input),
     stage: progressStage,
-    ...(attempt === undefined ? {} : { attempt, maxAttempts: REVIEW_ITERATION_LIMIT }),
-    ...(details === undefined ? {} : { details }),
+    ...(attempt === undefined
+      ? {}
+      : {
+          attempt,
+          maxAttempts: REVIEW_ITERATION_LIMIT,
+        }),
+    ...(details === undefined
+      ? {}
+      : {
+          details,
+        }),
   };
   return progress
-    .emit({ ...base, status: ProgressStatus.Started, message: startedMessage })
+    .emit({
+      ...base,
+      status: ProgressStatus.Started,
+      message: startedMessage,
+    })
     .pipe(
       Effect.zipRight(operation),
       Effect.tap((value) =>
@@ -200,7 +217,9 @@ export const ImplementationExecutorLive = Layer.effect(
                       .pipe(Effect.mapError(asRalphieError)),
                   ),
                 );
-              const savedReviews = artifacts.has(IssueArtifactKind.ReviewAttempts)
+              const savedReviews = artifacts.has(
+                IssueArtifactKind.ReviewAttempts,
+              )
                 ? yield* artifacts.read(IssueArtifactKind.ReviewAttempts)
                 : [];
               return {
@@ -210,7 +229,9 @@ export const ImplementationExecutorLive = Layer.effect(
                 reviewCount: savedReviews.length,
               } as const;
             }
-            if (actual.head.toLowerCase() !== storedCheckpoint.sha.toLowerCase()) {
+            if (
+              actual.head.toLowerCase() !== storedCheckpoint.sha.toLowerCase()
+            ) {
               return yield* new RalphieError({
                 message: `Cannot recover issue #${context.issue.number}: checkout HEAD ${actual.head} matches neither checkpoint ${storedCheckpoint.sha} nor created commit ${createdCommit.sha}.`,
               });
@@ -227,7 +248,10 @@ export const ImplementationExecutorLive = Layer.effect(
             branch: checkpoint.branch,
             head: checkpoint.sha,
           };
-          yield* context.repositoryInvariant.verify(context.repositoryPath, invariant);
+          yield* context.repositoryInvariant.verify(
+            context.repositoryPath,
+            invariant,
+          );
           yield* stage(
             progress,
             input,
@@ -280,7 +304,9 @@ export const ImplementationExecutorLive = Layer.effect(
             operations.stageAll(context.repositoryPath),
             "Implementation changes staged.",
           );
-          const hasChanges = yield* operations.hasStagedChanges(context.repositoryPath);
+          const hasChanges = yield* operations.hasStagedChanges(
+            context.repositoryPath,
+          );
           if (!hasChanges) {
             const resolution = yield* stage(
               progress,
@@ -331,7 +357,11 @@ export const ImplementationExecutorLive = Layer.effect(
           }
 
           const reviews: ReviewAttempt[] = [];
-          for (let attempt = 1; attempt <= REVIEW_ITERATION_LIMIT; attempt += 1) {
+          for (
+            let attempt = 1;
+            attempt <= REVIEW_ITERATION_LIMIT;
+            attempt += 1
+          ) {
             yield* checkSignal(context.signal);
             const stagedDiff = yield* operations.readStagedBinaryDiff(
               context.repositoryPath,
@@ -428,7 +458,9 @@ export const ImplementationExecutorLive = Layer.effect(
                 stage: ProgressStage.Commit,
                 status: ProgressStatus.Info,
                 message: "Created the issue commit.",
-                details: { commitSha: commit.sha },
+                details: {
+                  commitSha: commit.sha,
+                },
               });
               yield* stage(
                 progress,
@@ -448,12 +480,18 @@ export const ImplementationExecutorLive = Layer.effect(
                     Effect.mapError(asRalphieError),
                     Effect.zipRight(
                       operations
-                        .push(context.repositoryPath, context.targetBranch, commit.sha)
+                        .push(
+                          context.repositoryPath,
+                          context.targetBranch,
+                          commit.sha,
+                        )
                         .pipe(Effect.mapError(asRalphieError)),
                     ),
                   ),
                 `Pushed ${context.targetBranch}.`,
-                { commitSha: commit.sha },
+                {
+                  commitSha: commit.sha,
+                },
               );
               return {
                 kind: IssueExecutionOutcomeKind.Completed,
@@ -476,7 +514,8 @@ export const ImplementationExecutorLive = Layer.effect(
               return {
                 kind: IssueExecutionOutcomeKind.Escalated,
                 diagnosticsPath: exhausted.diagnosticsPath,
-                reason: "Review did not converge within the review iteration budget.",
+                reason:
+                  "Review did not converge within the review iteration budget.",
               } as const;
             }
 

@@ -18,18 +18,27 @@ test("prepares, resumes, and removes an isolated issue worktree", async () => {
   const repositoryPath = join(root, "repository");
   try {
     await runGit(root, ["init", "-b", "main", repositoryPath]);
-    await runGit(repositoryPath, ["config", "user.email", "ralphie@example.test"]);
+    await runGit(repositoryPath, [
+      "config",
+      "user.email",
+      "ralphie@example.test",
+    ]);
     await runGit(repositoryPath, ["config", "user.name", "Ralphie Tests"]);
     await writeFile(join(repositoryPath, "file.txt"), "base\n");
     await runGit(repositoryPath, ["add", "--all"]);
     await runGit(repositoryPath, ["commit", "-m", "initial"]);
-    const baseSha = (await runGit(repositoryPath, ["rev-parse", "HEAD"])).stdout;
+    const baseSha = (await runGit(repositoryPath, ["rev-parse", "HEAD"]))
+      .stdout;
     const input = {
       workspace: root,
       runId: "run-1",
       issueNumber: 42,
       branch: "ralphie/issue-42",
-      repository: { repository: "owner/repository", repositoryPath, branch: "main" },
+      repository: {
+        repository: "owner/repository",
+        repositoryPath,
+        branch: "main",
+      },
       baseSha,
     } as const;
 
@@ -48,9 +57,13 @@ test("prepares, resumes, and removes an isolated issue worktree", async () => {
 
     expect(prepared.branch).toBe("ralphie/issue-42");
     expect(
-      (await runGit(repositoryPath, ["worktree", "list", "--porcelain"])).stdout,
+      (await runGit(repositoryPath, ["worktree", "list", "--porcelain"]))
+        .stdout,
     ).not.toContain(prepared.repositoryPath);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, {
+      recursive: true,
+      force: true,
+    });
   }
 });

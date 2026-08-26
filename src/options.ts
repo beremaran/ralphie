@@ -1,9 +1,6 @@
 import { IssueOrder, IssueSort } from "./github/issues.ts";
 import { parseRepositorySlug } from "./github/repository.ts";
-import {
-  MODEL_API_KEY_ENV,
-  MODEL_BASE_URL_ENV,
-} from "./pi/config.ts";
+import { MODEL_API_KEY_ENV, MODEL_BASE_URL_ENV } from "./pi/config.ts";
 import { DEFAULT_PI_AGENT, type PiModel } from "./agent/model.ts";
 import { RalphieError } from "./shared/error.ts";
 
@@ -94,45 +91,83 @@ export const resolveRalphieConfig = (
   return {
     repo: parseRepositorySlug(options.repo).slug,
     workflow: options.workflow ?? DEFAULT_WORKFLOW_MODE,
-    ...(options.branch === undefined ? {} : { branch: options.branch }),
+    ...(options.branch === undefined
+      ? {}
+      : {
+          branch: options.branch,
+        }),
     issueConcurrency: options.issueConcurrency ?? 1,
     ...(options.agentConcurrency === undefined
       ? {}
-      : { agentConcurrency: options.agentConcurrency }),
-    ...(options.maxIssues === undefined ? {} : { maxIssues: options.maxIssues }),
+      : {
+          agentConcurrency: options.agentConcurrency,
+        }),
+    ...(options.maxIssues === undefined
+      ? {}
+      : {
+          maxIssues: options.maxIssues,
+        }),
     issueLabels: [...(options.issueLabels ?? [])],
     issueSort: options.issueSort ?? IssueSort.Created,
     issueOrder: options.issueOrder ?? IssueOrder.Ascending,
-    ...(options.model === undefined ? {} : { model: options.model }),
+    ...(options.model === undefined
+      ? {}
+      : {
+          model: options.model,
+        }),
     ...(options.modelVariant === undefined
       ? {}
-      : { modelVariant: options.modelVariant }),
+      : {
+          modelVariant: options.modelVariant,
+        }),
     agent: options.agent ?? DEFAULT_PI_AGENT,
     ...(options.modelBaseUrl === undefined
       ? {}
-      : { modelBaseUrl: options.modelBaseUrl }),
+      : {
+          modelBaseUrl: options.modelBaseUrl,
+        }),
     ...(options.modelApiKey === undefined
       ? {}
-      : { modelApiKey: options.modelApiKey }),
+      : {
+          modelApiKey: options.modelApiKey,
+        }),
     ...(options.modelProvider === undefined
       ? {}
-      : { modelProvider: options.modelProvider }),
-    ...(options.modelId === undefined ? {} : { modelId: options.modelId }),
-    ...(options.agentDir === undefined ? {} : { agentDir: options.agentDir }),
+      : {
+          modelProvider: options.modelProvider,
+        }),
+    ...(options.modelId === undefined
+      ? {}
+      : {
+          modelId: options.modelId,
+        }),
+    ...(options.agentDir === undefined
+      ? {}
+      : {
+          agentDir: options.agentDir,
+        }),
     // Flags take precedence over the documented environment variables.
     ...(options.modelBaseUrl === undefined &&
     process.env[MODEL_BASE_URL_ENV] !== undefined
-      ? { modelBaseUrl: process.env[MODEL_BASE_URL_ENV] }
+      ? {
+          modelBaseUrl: process.env[MODEL_BASE_URL_ENV],
+        }
       : {}),
     ...(options.modelApiKey === undefined &&
     process.env[MODEL_API_KEY_ENV] !== undefined
-      ? { modelApiKey: process.env[MODEL_API_KEY_ENV] }
+      ? {
+          modelApiKey: process.env[MODEL_API_KEY_ENV],
+        }
       : {}),
     workspace: options.workspace ?? DEFAULT_WORKSPACE,
     cleanup: options.cleanup ?? false,
     startClean: options.startClean ?? false,
     dryRun: options.dryRun ?? false,
-    ...(options.resume === undefined ? {} : { resume: options.resume }),
+    ...(options.resume === undefined
+      ? {}
+      : {
+          resume: options.resume,
+        }),
     verbose: options.verbose ?? false,
     json,
     quiet,

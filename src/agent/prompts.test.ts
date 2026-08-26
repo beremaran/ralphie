@@ -107,7 +107,9 @@ describe("Pi prompts", () => {
       stagedDiff: "diff --git a/src/parser.ts b/src/parser.ts\n+return null;",
     });
 
-    expect(prompt).toContain("Base your review only on the issue and the staged diff");
+    expect(prompt).toContain(
+      "Base your review only on the issue and the staged diff",
+    );
     expect(prompt).toContain('Repository path: "/workspace/repo"');
     expect(prompt).toContain('Target branch: "main"');
     expect(prompt).toContain('Issue title: "Fix parser edge case"');
