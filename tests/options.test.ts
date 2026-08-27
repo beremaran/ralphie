@@ -23,14 +23,14 @@ describe("CLI configuration", () => {
         ).toEqual({
             repo: "owner/repo",
             workflow: DEFAULT_WORKFLOW_MODE,
-            issueConcurrency: 1,
+            parallel: 1,
             issueLabels: [],
             issueSort: IssueSort.Created,
             issueOrder: IssueOrder.Ascending,
             agent: "build",
             workspace: DEFAULT_WORKSPACE,
-            cleanup: false,
-            startClean: false,
+            cleanStart: false,
+            cleanEnd: false,
             dryRun: false,
             verbose: false,
             json: false,
@@ -44,8 +44,8 @@ describe("CLI configuration", () => {
                 repo: "https://github.com/Owner/Repo.git",
                 workflow: WorkflowMode.ParallelPr,
                 branch: "develop",
-                issueConcurrency: 4,
-                agentConcurrency: 2,
+                parallel: 4,
+                piConcurrency: 2,
                 maxIssues: 3,
                 issueLabels: ["bug", "ready"],
                 issueSort: IssueSort.Updated,
@@ -54,11 +54,10 @@ describe("CLI configuration", () => {
                     providerID: "openai",
                     modelID: "gpt-5",
                 },
-                modelVariant: "high",
-                agent: "custom",
+                thinking: "high",
+                piDir: "/tmp/pi",
                 workspace: "/tmp/ralphie",
-                cleanup: true,
-                startClean: true,
+                clean: "both",
                 dryRun: true,
                 resume: "/tmp/state.json",
                 verbose: true,
@@ -68,8 +67,8 @@ describe("CLI configuration", () => {
             repo: "Owner/Repo",
             workflow: WorkflowMode.ParallelPr,
             branch: "develop",
-            issueConcurrency: 4,
-            agentConcurrency: 2,
+            parallel: 4,
+            piConcurrency: 2,
             maxIssues: 3,
             issueLabels: ["bug", "ready"],
             issueSort: IssueSort.Updated,
@@ -78,16 +77,37 @@ describe("CLI configuration", () => {
                 providerID: "openai",
                 modelID: "gpt-5",
             },
-            modelVariant: "high",
-            agent: "custom",
+            thinking: "high",
+            piDir: "/tmp/pi",
             workspace: "/tmp/ralphie",
-            cleanup: true,
-            startClean: true,
+            cleanStart: true,
+            cleanEnd: true,
             dryRun: true,
             resume: "/tmp/state.json",
             verbose: true,
             json: true,
             quiet: false,
+        });
+    });
+
+    test("maps clean to start, end, or both removal", () => {
+        expect(
+            resolveRalphieConfig({
+                repo: "owner/repo",
+                clean: "start",
+            }),
+        ).toMatchObject({
+            cleanStart: true,
+            cleanEnd: false,
+        });
+        expect(
+            resolveRalphieConfig({
+                repo: "owner/repo",
+                clean: "end",
+            }),
+        ).toMatchObject({
+            cleanStart: false,
+            cleanEnd: true,
         });
     });
 

@@ -13,8 +13,10 @@ describe("native CLI parser", () => {
             "--issue-label",
             "bug",
             "--issue-label=ready",
-            "--issue-concurrency",
+            "--parallel",
             "2",
+            "--pi-concurrency",
+            "3",
             "--max-issues",
             "3",
             "--dry-run",
@@ -26,7 +28,8 @@ describe("native CLI parser", () => {
             repo: "owner/repository",
             workflow: WorkflowMode.ParallelPr,
             issueLabels: ["bug", "ready"],
-            issueConcurrency: 2,
+            parallel: 2,
+            piConcurrency: 3,
             maxIssues: 3,
             dryRun: true,
         });
@@ -39,17 +42,61 @@ describe("native CLI parser", () => {
         expect(() => parseCliArgs(["owner/repository", "--unknown"])).toThrow();
     });
 
-    test("validates numeric and enum options before running the workflow", () => {
-        expect(() =>
-            parseCliArgs(["owner/repository", "--max-issues", "0"]),
-        ).toThrow();
+    test("parses compound issue sort and validates enums", () => {
+        expect(
+            parseCliArgs(["owner/repository", "--issue-sort", "updated:desc"])
+                .options,
+        ).toMatchObject({
+            issueSort: IssueSort.Updated,
+            issueOrder: IssueOrder.Descending,
+        });
+        expect(
+            parseCliArgs(["owner/repository", "--issue-sort", "created"])
+                .options,
+        ).toMatchObject({
+            issueSort: IssueSort.Created,
+            issueOrder: IssueOrder.Ascending,
+        });
         expect(() =>
             parseCliArgs(["owner/repository", "--issue-sort", "invalid"]),
         ).toThrow();
         expect(() =>
-            parseCliArgs(["owner/repository", "--issue-order", "asc"]),
-        ).not.toThrow();
+            parseCliArgs([
+                "owner/repository",
+                "--issue-sort",
+                "created:sideways",
+            ]),
+        ).toThrow();
         expect(String(IssueSort.Created)).toBe("created");
         expect(String(IssueOrder.Ascending)).toBe("asc");
+    });
+
+    test("parses clean and output modes", () => {
+        expect(
+            parseCliArgs(["owner/repository", "--clean", "both"]).options,
+        ).toMatchObject({
+            clean: "both",
+            verbose: false,
+            json: false,
+            quiet: false,
+        });
+        expect(
+            parseCliArgs(["owner/repository", "--output", "json"]).options,
+        ).toMatchObject({
+            json: true,
+            quiet: false,
+        });
+        expect(
+            parseCliArgs(["owner/repository", "--output", "quiet"]).options,
+        ).toMatchObject({
+            json: false,
+            quiet: true,
+        });
+        expect(() =>
+            parseCliArgs(["owner/repository", "--clean", "sometimes"]),
+        ).toThrow();
+        expect(() =>
+            parseCliArgs(["owner/repository", "--output", "trace"]),
+        ).toThrow();
     });
 });

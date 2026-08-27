@@ -161,13 +161,13 @@ ralphie owner/repository --workflow pr
 ```
 
 `parallel-pr` uses the same PR lifecycle but gives every active issue an isolated
-Git worktree and runs up to `--issue-concurrency` issues concurrently. An
-`--agent-concurrency` limit independently bounds complete Pi agent tasks, which
+Git worktree and runs up to `--parallel` issues concurrently. A
+`--pi-concurrency` limit independently bounds complete Pi agent tasks, which
 is useful for protecting a local inference server:
 
 ```bash
 ralphie owner/repository --workflow parallel-pr \
-  --issue-concurrency 4 --agent-concurrency 2
+  --parallel 4 --pi-concurrency 2
 ```
 
 ## How it works
@@ -355,8 +355,8 @@ is supplied explicitly as an option:
 ```bash
 ralphie owner/repository \
   --workflow parallel-pr \
-  --issue-concurrency 4 \
-  --agent-concurrency 2 \
+  --parallel 4 \
+  --pi-concurrency 2 \
   --branch main \
   --issue-label bug \
   --max-issues 10
@@ -368,8 +368,7 @@ Process bugs from oldest to newest on a non-default branch:
 ralphie owner/repository \
   --branch develop \
   --issue-label bug \
-  --issue-sort created \
-  --issue-order asc \
+  --issue-sort created:asc \
   --max-issues 10
 ```
 
@@ -386,13 +385,13 @@ Select a Pi model and thinking level explicitly:
 ```bash
 ralphie owner/repository \
   --model openai/gpt-5 \
-  --model-variant high
+  --thinking high
 ```
 
 Write machine-readable progress to stdout:
 
 ```bash
-ralphie owner/repository --max-issues 1 --json > ralphie.jsonl
+ralphie owner/repository --max-issues 1 --output json > ralphie.jsonl
 ```
 
 Start from an empty disposable workspace and remove it after success:
@@ -400,13 +399,12 @@ Start from an empty disposable workspace and remove it after success:
 ```bash
 ralphie owner/repository \
   --workspace /tmp/ralphie \
-  --start-clean \
-  --cleanup
+  --clean both
 ```
 
 > [!WARNING]
-> Both workspace cleanup flags delete the selected workspace recursively after
-> protected-path checks. Use a path dedicated to Ralphie.
+> `--clean start` and `--clean end` delete the selected workspace recursively
+> after protected-path checks. Use a path dedicated to Ralphie.
 
 Resume an interrupted run:
 
@@ -432,24 +430,27 @@ HTTPS/SSH clone URL.
 | Option | Default | Description |
 | --- | --- | --- |
 | `--workflow <mode>` | `lgtm` | Select `lgtm`, `pr`, or isolated concurrent `parallel-pr` delivery. |
-| `--issue-concurrency <count>` | `1` | Concurrent issues in `parallel-pr`. |
-| `--agent-concurrency <count>` | unlimited | Maximum concurrent Pi agent tasks. |
+| `--parallel <count>` | `1` | Concurrent issues in `parallel-pr`. |
+| `--pi-concurrency <count>` | unlimited | Maximum concurrent Pi agent tasks. |
 | `-b, --branch <name>` | `main`, otherwise `master` | Base branch; `lgtm` pushes it directly, while PR workflows open against it. |
 | `--max-issues <count>` | unlimited | Positive maximum number of issues charged to this run. |
 | `--issue-label <label>` | none | Require a label; repeat the flag to require multiple labels. |
-| `--issue-sort <field>` | `created` | Sort by `created`, `updated`, or `comments`. |
-| `--issue-order <order>` | `asc` | Sort in `asc` or `desc` order. |
-| `--agent <name>` | `build` | Compatibility label recorded with task-session diagnostics. |
+| `--issue-sort <sort>` | `created` | Sort by `created`, `updated`, or `comments`, optionally `:asc` or `:desc`. |
 | `--model <provider/model>` | Pi default | Override Pi's model selection. |
-| `--model-variant <variant>` | Pi default | Pi thinking level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. |
+| `--thinking <level>` | Pi default | Pi thinking level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. |
+| `--pi-dir <path>` | Pi default | Existing Pi agent directory. |
 | `--workspace <path>` | `~/.ralphie` | Root directory for repository checkouts and run artifacts. |
 | `--dry-run` | off | Assess and route issues without implementation or mutations. |
 | `--resume <state.json>` | none | Continue a compatible saved run. |
-| `--start-clean` | off | Remove the workspace before any other workflow step. |
-| `--cleanup` | off | Remove the workspace after a successful run. |
-| `--verbose` | off | Include detailed human-readable progress. |
-| `--json` | off | Emit newline-delimited JSON progress to stdout. |
-| `--quiet` | off | Emit failures only. Mutually exclusive with `--json`. |
+| `--clean <when>` | off | Remove the workspace at `start`, `end`, or `both` (before any step and/or after success). |
+| `--output <mode>` | `default` | Progress mode: `default`, `verbose`, `quiet`, or `json`. |
+
+Model credentials are read from environment variables:
+
+| Variable | Purpose |
+| --- | --- |
+| `RALPHIE_MODEL_BASE_URL` | OpenAI-compatible model base URL; enables the throwaway Pi configuration. |
+| `RALPHIE_MODEL_API_KEY` | Model API key for the throwaway Pi configuration. |
 
 Run `ralphie --help` for the help generated from the current command schema.
 
@@ -460,9 +461,9 @@ Ralphie adapts its progress renderer to its environment:
 - interactive terminals receive one in-place status line for the active leaf
   stage, while completed milestones remain in the scrollback;
 - CI and redirected output receive durable, append-only lines;
-- `--verbose` adds operational details;
-- `--json` writes one JSON object per line to stdout; and
-- `--quiet` suppresses everything except failures.
+- `--output verbose` adds operational details;
+- `--output json` writes one JSON object per line to stdout; and
+- `--output quiet` suppresses everything except failures.
 
 JSON events use a stable operational vocabulary and include `runId`,
 `timestamp`, `stage`, `status`, and `message`. Multi-repository events also
@@ -504,7 +505,7 @@ stateDiagram-v2
     RecoverableStop --> Active: Resume and reconcile
     Active --> Complete: Queue empty or budget reached
     Complete --> Retained: Keep workspace
-    Complete --> Cleaned: --cleanup
+    Complete --> Cleaned: --clean end
     Retained --> [*]
     Cleaned --> [*]
 ```
@@ -514,7 +515,7 @@ state before returning to `Active`. It can reconcile partially created child
 issues, a commit created immediately before interruption, and an issue closure
 whose response was lost without repeating the corresponding agent work.
 
-`--cleanup` removes the entire workspace after success, including completed
+`--clean end` removes the entire workspace after success, including completed
 state, events, diagnostics, and the repository checkout. Cleanup is skipped on
 failure so recovery remains possible.
 

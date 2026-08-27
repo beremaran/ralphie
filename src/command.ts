@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { z } from "zod";
 
 import {
+    type CleanWhen,
     type ResolvedRalphieConfig,
     resolveRalphieConfig,
     WorkflowMode,
@@ -26,28 +27,19 @@ import { resolveWorkspacePath } from "./workspace/workspace.ts";
 const cliOptions = {
     branch: { type: "string", short: "b" },
     workflow: { type: "string" },
-    "issue-concurrency": { type: "string" },
-    "agent-concurrency": { type: "string" },
+    parallel: { type: "string" },
+    "pi-concurrency": { type: "string" },
     "max-issues": { type: "string" },
     "issue-label": { type: "string", multiple: true },
     "issue-sort": { type: "string" },
-    "issue-order": { type: "string" },
     model: { type: "string" },
-    "model-variant": { type: "string" },
-    "model-base-url": { type: "string" },
-    "api-key": { type: "string" },
-    "model-provider": { type: "string" },
-    "model-id": { type: "string" },
-    "agent-dir": { type: "string" },
-    agent: { type: "string" },
-    verbose: { type: "boolean" },
-    json: { type: "boolean" },
-    quiet: { type: "boolean" },
-    "dry-run": { type: "boolean" },
+    thinking: { type: "string" },
+    "pi-dir": { type: "string" },
     workspace: { type: "string" },
-    cleanup: { type: "boolean" },
-    "start-clean": { type: "boolean" },
+    "dry-run": { type: "boolean" },
+    clean: { type: "string" },
     resume: { type: "string" },
+    output: { type: "string" },
     help: { type: "boolean", short: "h" },
     version: { type: "boolean", short: "v" },
 } as const;
@@ -93,6 +85,29 @@ const asNumber = (
 const asBoolean = (values: Record<string, unknown>, name: string): boolean =>
     values[name] === true;
 
+const cleanWhenSchema = z.enum(["start", "end", "both"]);
+const outputModeSchema = z.enum(["default", "verbose", "quiet", "json"]);
+
+const parseIssueSort = (
+    value: string,
+): {
+    readonly issueSort: IssueSort;
+    readonly issueOrder: IssueOrder;
+} => {
+    const parts = value.split(":");
+    if (parts.length > 2) {
+        throw new Error(
+            "Option --issue-sort requires <created|updated|comments> with an optional :asc or :desc.",
+        );
+    }
+    const sort = z.enum(IssueSort).parse(parts[0] ?? "");
+    const order =
+        parts[1] === undefined
+            ? IssueOrder.Ascending
+            : z.enum(IssueOrder).parse(parts[1]);
+    return { issueSort: sort, issueOrder: order };
+};
+
 /** Parse the public `ralphie <repository> [options]` command line. */
 export const parseCliArgs = (args: ReadonlyArray<string>): ParsedCli => {
     const parsed = parseArgs({
@@ -121,6 +136,12 @@ export const parseCliArgs = (args: ReadonlyArray<string>): ParsedCli => {
                   z.string().trim().min(1).parse(label),
               );
     const modelValue = asString(values, "model");
+    const issueSortValue = asNonEmptyString(values, "issue-sort");
+    const thinkingValue = asNonEmptyString(values, "thinking");
+    const cleanValue = asNonEmptyString(values, "clean");
+    const rawOutput = asNonEmptyString(values, "output");
+    const outputValue =
+        rawOutput === undefined ? undefined : outputModeSchema.parse(rawOutput);
 
     return {
         help: asBoolean(values, "help"),
@@ -132,42 +153,32 @@ export const parseCliArgs = (args: ReadonlyArray<string>): ParsedCli => {
                 asString(values, "workflow") === undefined
                     ? undefined
                     : z.enum(WorkflowMode).parse(asString(values, "workflow")),
-            issueConcurrency: asNumber(values, "issue-concurrency"),
-            agentConcurrency: asNumber(values, "agent-concurrency"),
+            parallel: asNumber(values, "parallel"),
+            piConcurrency: asNumber(values, "pi-concurrency"),
             maxIssues: asNumber(values, "max-issues"),
             issueLabels,
-            issueSort:
-                asString(values, "issue-sort") === undefined
-                    ? undefined
-                    : z.enum(IssueSort).parse(asString(values, "issue-sort")),
-            issueOrder:
-                asString(values, "issue-order") === undefined
-                    ? undefined
-                    : z.enum(IssueOrder).parse(asString(values, "issue-order")),
+            ...(issueSortValue === undefined
+                ? {}
+                : parseIssueSort(issueSortValue)),
             model:
                 modelValue === undefined
                     ? undefined
                     : piModelSchema.parse(modelValue),
-            modelVariant:
-                asNonEmptyString(values, "model-variant") === undefined
+            thinking:
+                thinkingValue === undefined
                     ? undefined
-                    : piModelVariantSchema.parse(
-                          asNonEmptyString(values, "model-variant"),
-                      ),
-            modelBaseUrl: asNonEmptyString(values, "model-base-url"),
-            modelApiKey: asNonEmptyString(values, "api-key"),
-            modelProvider: asNonEmptyString(values, "model-provider"),
-            modelId: asNonEmptyString(values, "model-id"),
-            agentDir: asNonEmptyString(values, "agent-dir"),
-            agent: asNonEmptyString(values, "agent"),
+                    : piModelVariantSchema.parse(thinkingValue),
+            piDir: asNonEmptyString(values, "pi-dir"),
             workspace: asNonEmptyString(values, "workspace"),
-            cleanup: asBoolean(values, "cleanup"),
-            startClean: asBoolean(values, "start-clean"),
+            clean:
+                cleanValue === undefined
+                    ? undefined
+                    : cleanWhenSchema.parse(cleanValue),
             dryRun: asBoolean(values, "dry-run"),
             resume: asNonEmptyString(values, "resume"),
-            verbose: asBoolean(values, "verbose"),
-            json: asBoolean(values, "json"),
-            quiet: asBoolean(values, "quiet"),
+            verbose: outputValue === "verbose",
+            json: outputValue === "json",
+            quiet: outputValue === "quiet",
         },
     };
 };
@@ -176,9 +187,8 @@ const resolvePiConfig = (config: ResolvedRalphieConfig): PiProviderConfig => ({
     workspace: config.workspace,
     modelBaseUrl: config.modelBaseUrl,
     modelApiKey: config.modelApiKey,
-    modelProvider: config.modelProvider ?? config.model?.providerID,
-    modelId: config.modelId ?? config.model?.modelID,
-    agentDir: config.agentDir,
+    model: config.model,
+    agentDir: config.piDir,
 });
 
 export type CliTerminalInfo = {
@@ -213,30 +223,25 @@ Run a GitHub issue queue through Pi.
 Options:
   -b, --branch <name>          Branch to operate on
       --workflow <mode>        lgtm, pr, or parallel-pr
-      --issue-concurrency <n>  Concurrent issues in parallel-pr mode
-      --agent-concurrency <n>  Maximum concurrent Pi tasks
+      --parallel <n>           Concurrent issues in parallel-pr mode
+      --pi-concurrency <n>     Maximum concurrent Pi tasks
       --max-issues <n>         Maximum issues to process
       --issue-label <label>    Include only issues with this label (repeatable)
-      --issue-sort <field>     created, updated, or comments
-      --issue-order <order>    asc or desc
+      --issue-sort <sort>      created, updated, or comments, optionally :asc or :desc
       --model <provider/model> Pi model selection
-      --model-variant <level>  Pi thinking level
-      --model-base-url <url>   OpenAI-compatible model base URL
-      --api-key <key>          Model API key
-      --model-provider <id>    Model provider id
-      --model-id <id>          Model id
-      --agent-dir <path>       Existing Pi agent directory
-      --agent <name>            Pi agent name (default: build)
+      --thinking <level>       Pi thinking level: off, minimal, low, medium, high, xhigh, or max
+      --pi-dir <path>          Existing Pi agent directory
       --workspace <path>       Workspace directory
-      --resume <path>          Resume saved run state
-      --verbose                Include detailed progress
-      --json                   Emit JSON Lines progress
-      --quiet                  Emit failures only
       --dry-run                Assess without mutations
-      --cleanup                Remove workspace after success
-      --start-clean            Remove workspace before starting
+      --resume <path>          Resume saved run state
+      --clean <when>           Remove the workspace at start, end, or both
+      --output <mode>          Progress output: default, verbose, quiet, or json
   -h, --help                   Show this help
   -v, --version                Show version
+
+Environment:
+  RALPHIE_MODEL_BASE_URL       OpenAI-compatible model base URL
+  RALPHIE_MODEL_API_KEY        Model API key
 `;
 
 type RunCommandInput = {
@@ -301,8 +306,8 @@ const workflowOptionsFor = (
     resumeState: RunState | undefined,
 ) => ({
     workflow: config.workflow,
-    issueConcurrency: config.issueConcurrency,
-    agentConcurrency: config.agentConcurrency,
+    issueConcurrency: config.parallel,
+    agentConcurrency: config.piConcurrency,
     repo: config.repo,
     branch: config.branch,
     maxIssues: config.maxIssues,
@@ -312,11 +317,11 @@ const workflowOptionsFor = (
         order: config.issueOrder,
     },
     model: config.model,
-    modelVariant: config.modelVariant,
+    modelVariant: config.thinking,
     agent: config.agent,
     workspace: config.workspace,
-    cleanup: config.cleanup,
-    startClean: config.startClean,
+    cleanup: config.cleanEnd,
+    startClean: config.cleanStart,
     signal: input.signal,
     runId,
     resumeState,

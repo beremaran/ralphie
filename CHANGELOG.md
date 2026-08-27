@@ -17,7 +17,21 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Changed
 
-- Replace Bunli and Effect with Bun's built-in argument parser, native promises,
+- Consolidate the CLI surface: replace `--issue-concurrency` and
+  `--agent-concurrency` with `--parallel` and `--pi-concurrency`; fold
+  `--issue-order` into `--issue-sort <field>[:asc|desc]`; replace
+  `--model-variant` with `--thinking` and `--agent-dir` with `--pi-dir`;
+  replace `--start-clean` and `--cleanup` with `--clean <start|end|both>`;
+  and replace `--verbose`, `--json`, and `--quiet` with
+  `--output <default|verbose|quiet|json>`.
+- Drop the `--agent` compatibility label and the `--model-base-url`,
+  `--api-key`, `--model-provider`, and `--model-id` flags: model selection is
+  owned by `--model <provider/model>` and credentials come from the
+  `RALPHIE_MODEL_BASE_URL` and `RALPHIE_MODEL_API_KEY` environment variables.
+
+### Added
+
+- Native Bun CLI foundation with GitHub, Git, workspace, and Pi domain
   explicit service factories, and an ordinary runtime dependency object.
 - Focus execution on one required repository and accept all configuration through
   CLI arguments and flags; remove JSON configuration, named projects, repository
@@ -37,7 +51,7 @@ All notable changes to Ralphie are documented here. The project follows
 ### Fixed
 
 - Prevent final progress events from recreating a workspace removed by
-  `--cleanup`.
+  `--clean end`.
 - Prevent viewport repainting, split-stream output, and accumulating
   `CliRenderer` destroy listeners during long runs.
 - Prevent no-change agent runs from being silently skipped without proving

@@ -14,27 +14,23 @@ export enum WorkflowMode {
 
 export const DEFAULT_WORKFLOW_MODE = WorkflowMode.Lgtm;
 
+export type CleanWhen = "start" | "end" | "both";
+
 export type RalphieCliOptions = {
     readonly repo?: string;
     readonly workflow?: WorkflowMode;
     readonly branch?: string;
-    readonly issueConcurrency?: number;
-    readonly agentConcurrency?: number;
+    readonly parallel?: number;
+    readonly piConcurrency?: number;
     readonly maxIssues?: number;
     readonly issueLabels?: ReadonlyArray<string>;
     readonly issueSort?: IssueSort;
     readonly issueOrder?: IssueOrder;
     readonly model?: PiModel;
-    readonly modelVariant?: string;
-    readonly modelBaseUrl?: string;
-    readonly modelApiKey?: string;
-    readonly modelProvider?: string;
-    readonly modelId?: string;
-    readonly agentDir?: string;
-    readonly agent?: string;
+    readonly thinking?: string;
+    readonly piDir?: string;
     readonly workspace?: string;
-    readonly cleanup?: boolean;
-    readonly startClean?: boolean;
+    readonly clean?: CleanWhen;
     readonly dryRun?: boolean;
     readonly resume?: string;
     readonly verbose?: boolean;
@@ -46,23 +42,21 @@ export type ResolvedRalphieConfig = {
     readonly repo: string;
     readonly workflow: WorkflowMode;
     readonly branch?: string;
-    readonly issueConcurrency: number;
-    readonly agentConcurrency?: number;
+    readonly parallel: number;
+    readonly piConcurrency?: number;
     readonly maxIssues?: number;
     readonly issueLabels: ReadonlyArray<string>;
     readonly issueSort: IssueSort;
     readonly issueOrder: IssueOrder;
     readonly model?: PiModel;
-    readonly modelVariant?: string;
+    readonly thinking?: string;
+    readonly piDir?: string;
     readonly modelBaseUrl?: string;
     readonly modelApiKey?: string;
-    readonly modelProvider?: string;
-    readonly modelId?: string;
-    readonly agentDir?: string;
     readonly agent: string;
     readonly workspace: string;
-    readonly cleanup: boolean;
-    readonly startClean: boolean;
+    readonly cleanStart: boolean;
+    readonly cleanEnd: boolean;
     readonly dryRun: boolean;
     readonly resume?: string;
     readonly verbose: boolean;
@@ -89,32 +83,21 @@ const buildResolvedConfig = (
     repo: parseRepositorySlug(options.repo!).slug,
     workflow: withDefault(options.workflow, DEFAULT_WORKFLOW_MODE),
     ...optionalProperty("branch", options.branch),
-    issueConcurrency: options.issueConcurrency ?? 1,
-    ...optionalProperty("agentConcurrency", options.agentConcurrency),
+    parallel: options.parallel ?? 1,
+    ...optionalProperty("piConcurrency", options.piConcurrency),
     ...optionalProperty("maxIssues", options.maxIssues),
     issueLabels: [...(options.issueLabels ?? [])],
     issueSort: options.issueSort ?? IssueSort.Created,
     issueOrder: options.issueOrder ?? IssueOrder.Ascending,
     ...optionalProperty("model", options.model),
-    ...optionalProperty("modelVariant", options.modelVariant),
-    agent: options.agent ?? DEFAULT_PI_AGENT,
-    ...optionalProperty("modelBaseUrl", options.modelBaseUrl),
-    ...optionalProperty("modelApiKey", options.modelApiKey),
-    ...optionalProperty("modelProvider", options.modelProvider),
-    ...optionalProperty("modelId", options.modelId),
-    ...optionalProperty("agentDir", options.agentDir),
-    // Flags take precedence over the documented environment variables.
-    ...optionalProperty(
-        "modelBaseUrl",
-        options.modelBaseUrl ?? process.env[MODEL_BASE_URL_ENV],
-    ),
-    ...optionalProperty(
-        "modelApiKey",
-        options.modelApiKey ?? process.env[MODEL_API_KEY_ENV],
-    ),
+    ...optionalProperty("thinking", options.thinking),
+    ...optionalProperty("piDir", options.piDir),
+    ...optionalProperty("modelBaseUrl", process.env[MODEL_BASE_URL_ENV]),
+    ...optionalProperty("modelApiKey", process.env[MODEL_API_KEY_ENV]),
+    agent: DEFAULT_PI_AGENT,
     workspace: options.workspace ?? DEFAULT_WORKSPACE,
-    cleanup: options.cleanup ?? false,
-    startClean: options.startClean ?? false,
+    cleanStart: options.clean === "start" || options.clean === "both",
+    cleanEnd: options.clean === "end" || options.clean === "both",
     dryRun: options.dryRun ?? false,
     ...optionalProperty("resume", options.resume),
     verbose: options.verbose ?? false,

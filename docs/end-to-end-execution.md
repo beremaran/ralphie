@@ -35,10 +35,12 @@ flowchart TD
    `resolveRalphieConfig`.
 3. `resolveRalphieConfig` parses an `owner/repository` slug or GitHub clone URL
    and resolves defaults:
-   `lgtm`, one issue at a time, created/ascending issue order, the `build` Pi
-   agent, `~/.ralphie`, and no cleanup, dry-run, JSON, or quiet mode.
-   `--model-base-url` and `--api-key` take precedence over their documented
-   environment variables. JSON and quiet output cannot be combined.
+   `lgtm`, one issue at a time, created/ascending issue sort, the `build` Pi
+   agent, `~/.ralphie`, and no clean, dry-run, or alternate output mode.
+   Model credentials come from the `RALPHIE_MODEL_BASE_URL` and
+   `RALPHIE_MODEL_API_KEY` environment variables. One `--output` flag selects
+   `default`, `verbose`, `quiet`, or `json`, so `json` and `quiet` cannot be
+   combined.
 4. With `--resume`, the command loads and Zod-validates the requested state
    file before starting the workflow. A supplied branch/repository must be
    compatible with that state. A resumed run reuses its saved run id.
@@ -58,7 +60,7 @@ order:
 | Order | Stage | Operation and boundary |
 | --- | --- | --- |
 | 0 | Cancellation | Refuse to begin if the signal is already aborted. |
-| 1 | Optional cleanup | `--start-clean` removes the selected workspace after protected-path checks. |
+| 1 | Optional cleanup | `--clean start` removes the selected workspace after protected-path checks. |
 | 2 | Workspace | Create the workspace directory. |
 | 3 | GitHub authentication | Run `gh auth status`, read `gh auth token`, and initialize an authenticated Octokit client. |
 | 4 | Git | Verify `git --version`. |
@@ -86,15 +88,14 @@ known or completed numbers.
 After the initial state save, Ralphie starts one embedded Pi runtime and keeps
 it alive for the queue. `makePiService` chooses one of three agent configurations:
 
-- an explicitly supplied `--agent-dir`;
+- an explicitly supplied `--pi-dir`;
 - a temporary `0600` directory containing generated `models.json` and
-  `auth.json` when `--model-base-url` is used; or
+  `auth.json` when `RALPHIE_MODEL_BASE_URL` is used; or
 - Pi's default agent directory.
 
 The temporary directory is removed when the runtime is closed. If
-`--agent-concurrency` is set, a semaphore limits complete session-and-prompt
-operations while `--issue-concurrency` limits concurrent `parallel-pr` issue
-workers.
+`--pi-concurrency` is set, a semaphore limits complete session-and-prompt
+operations while `--parallel` limits concurrent `parallel-pr` issue workers.
 
 ```mermaid
 flowchart TD
@@ -280,7 +281,7 @@ the queue.
 | --- | --- | --- | --- |
 | `lgtm` | Selected base branch | Commit and non-force push directly to that branch; verify remote SHA and clean checkout | Close directly as `completed` after verified delivery. |
 | `pr` | `ralphie/issue-<number>` in the main checkout | Push feature branch, create/find matching PR, publish stored review attempts as marked comments, merge, and verify merged state | PR body contains `Closes #<issue>`; GitHub closes the issue on merge. Serial mode restores the base checkout afterward. |
-| `parallel-pr` | One isolated Git worktree and feature branch per active issue | Same PR lifecycle, concurrently up to `--issue-concurrency` | GitHub closes the linked issue on merge; successful worktrees are removed. |
+| `parallel-pr` | One isolated Git worktree and feature branch per active issue | Same PR lifecycle, concurrently up to `--parallel` | GitHub closes the linked issue on merge; successful worktrees are removed. |
 | `--dry-run` | Prepared normal checkout | Assess complexity and report the route only; no implementation, decomposition, commit, push, issue mutation, or PR mutation | No issue is closed. The result is `skipped`. |
 
 The direct-push path never uses force. A push rejection is authoritative: the
@@ -345,7 +346,7 @@ stateDiagram-v2
     Active --> Complete: queue empty or budget reached
     Active --> Stopped: error (saved as active)
     Active --> Stopped: AbortSignal
-    Complete --> Cleaned: --cleanup
+    Complete --> Cleaned: --clean end
     Complete --> Retained: default
     Stopped --> Retained: keep state/artifacts
     Cleaned --> [*]
@@ -359,9 +360,9 @@ stateDiagram-v2
 - Cancellation is checked before long-running boundaries and passed into Pi.
   For a non-parallel active checkout, Ralphie attempts to restore the clean
   issue checkpoint, saves resumable state, skips cleanup, and exits `130`.
-- Successful completion persists `complete` before optional `--cleanup` removes
-  the entire workspace. Cleanup is skipped on failure so state and diagnostics
-  remain available.
+- Successful completion persists `complete` before optional `--clean end`
+  removes the entire workspace. Cleanup is skipped on failure so state and
+  diagnostics remain available.
 
 ## Source map
 

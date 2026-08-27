@@ -4,13 +4,14 @@ import { join } from "node:path";
 
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
+import { type PiModel } from "../agent/model.ts";
 import { RalphieError } from "../shared/error.ts";
 import { resolveWorkspacePath } from "../workspace/workspace.ts";
 
 /**
  * How Pi's runtime should resolve models and credentials.
  *
- * - `baseUrl` + `apiKey` (or their env-var equivalents) enable Option B:
+ * - `modelBaseUrl` + `modelApiKey` (env vars) enable Option B:
  *   Ralphie writes a throwaway `models.json`/`auth.json` into an isolated
  *   `0600` directory inside the workspace so users never need a pre-existing
  *   Pi configuration.
@@ -22,8 +23,7 @@ export type PiProviderConfig = {
     readonly modelBaseUrl?: string;
     readonly modelApiKey?: string;
     readonly agentDir?: string;
-    readonly modelProvider?: string;
-    readonly modelId?: string;
+    readonly model?: PiModel;
 };
 
 type AgentDirResolution = {
@@ -34,11 +34,12 @@ type AgentDirResolution = {
     readonly authPath: string;
 };
 
-/** Environment variable names that back the `--model-base-url`/`--api-key` flags. */
+/** Environment variable names that supply the model credentials. */
 export const MODEL_BASE_URL_ENV = "RALPHIE_MODEL_BASE_URL";
 export const MODEL_API_KEY_ENV = "RALPHIE_MODEL_API_KEY";
 
 const DEFAULT_MODEL_PROVIDER = "openai";
+const DEFAULT_MODEL_ID = "gpt-4o";
 
 /**
  * Decide which agent directory Pi should read, and (for Option B) write the
@@ -60,8 +61,8 @@ export const resolvePiAgentDir = async (
 
     // Option B: generate a throwaway config for an OpenAI-compatible endpoint.
     if (config.modelBaseUrl !== undefined) {
-        const providerId = config.modelProvider ?? DEFAULT_MODEL_PROVIDER;
-        const modelId = config.modelId ?? "gpt-4o";
+        const providerId = config.model?.providerID ?? DEFAULT_MODEL_PROVIDER;
+        const modelId = config.model?.modelID ?? DEFAULT_MODEL_ID;
         if (providerId.trim().length === 0) {
             throw new RalphieError({
                 message: "Ralphie model provider id must not be empty.",
