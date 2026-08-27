@@ -310,6 +310,8 @@ const makeCommandTranscript = (
                       )),
               colors: terminal.isInteractive && !terminal.isCI,
               json: config.json,
+              verbose: config.verbose,
+              width: () => process.stderr.columns ?? terminal.width,
           });
 
 const workflowOptionsFor = (

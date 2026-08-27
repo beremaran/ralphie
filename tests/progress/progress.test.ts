@@ -169,6 +169,43 @@ describe("progress reporting", () => {
         expect(output).toEndWith("…");
     });
 
+    test("separates progress from a raw stream that ends mid-line", async () => {
+        let output = "";
+        const progress = makeProgressReporter({
+            mode: "interactive",
+            verbose: false,
+            colors: false,
+            write: (text) => {
+                output += text;
+            },
+            runId: "run-1",
+        });
+        await progress.emit({
+            stage: "implementation",
+            status: "started",
+            message: "Implementing...",
+        });
+        progress.writeRaw?.("partial token");
+        await progress.emit({
+            stage: "implementation",
+            status: "info",
+            message: "Still working.",
+        });
+        progress.writeRaw?.("next token");
+        await progress.emit({
+            stage: "review",
+            status: "started",
+            message: "Reviewing...",
+        });
+
+        expect(output).toBe(
+            "◐ Implementing...\r\x1b[2Kpartial token\n" +
+                "• Still working.\n" +
+                "◐ Implementing...\r\x1b[2Knext token\n" +
+                "◐ Reviewing...",
+        );
+    });
+
     test("quiet mode only emits failures", async () => {
         let output = "";
         const progress = makeProgressReporter({

@@ -17,6 +17,9 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Changed
 
+- Polish human-readable Pi streaming with grouped session blocks, readable tool
+  calls, indented de-duplicated tool output, bounded previews, and safe handling
+  of terminal control sequences while preserving the lossless JSON event stream.
 - Stream the complete Pi event transcript, including token-level thinking and
   assistant output plus tool calls and results, and remove parallel issue and
   Pi session execution.

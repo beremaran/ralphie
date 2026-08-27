@@ -447,6 +447,12 @@ Ralphie streams the complete Pi transcript while each task runs, including
 thinking deltas, assistant text, tool calls, and tool results. Tasks and issues
 are intentionally processed sequentially so this output remains ordered.
 
+Human-readable transcript output groups each Pi session into a compact block:
+thinking and assistant text stream immediately, tool calls are shown as readable
+commands, and tool output is indented, de-duplicated, and bounded. Use
+`--output verbose` for a larger tool-output preview. JSON output remains the
+lossless event stream for integrations.
+
 Ralphie adapts its progress renderer to its environment:
 
 - interactive terminals receive streamed Pi output plus one in-place status line

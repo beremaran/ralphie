@@ -179,6 +179,7 @@ export const makeProgressReporter = ({
 }: ProgressRendererOptions): ProgressReporterService => {
     const activeProgress: ActiveProgress[] = [];
     let liveLineVisible = false;
+    let rawLineOpen = false;
     let persistEvents = true;
 
     const renderLine = (event: ProgressEvent): string => {
@@ -205,6 +206,12 @@ export const makeProgressReporter = ({
         liveLineVisible = false;
     };
 
+    const finishRawLine = () => {
+        if (!rawLineOpen) return;
+        write("\n");
+        rawLineOpen = false;
+    };
+
     const renderLiveLine = () => {
         const active = activeProgress.at(-1);
         if (active === undefined) return;
@@ -214,6 +221,7 @@ export const makeProgressReporter = ({
 
     const appendLine = (line: string) => {
         clearLiveLine();
+        finishRawLine();
         write(`${line}\n`);
         renderLiveLine();
     };
@@ -239,6 +247,7 @@ export const makeProgressReporter = ({
     ): void => {
         if (event.status === "started") {
             clearLiveLine();
+            finishRawLine();
             removeActive(progressIdentity(event));
             activeProgress.push({
                 identity: progressIdentity(event),
@@ -281,6 +290,7 @@ export const makeProgressReporter = ({
         writeRaw: (text) => {
             clearLiveLine();
             write(text);
+            if (text.length > 0) rawLineOpen = !text.endsWith("\n");
         },
         emit: async (update) => {
             const emittedAt = now();
@@ -288,6 +298,7 @@ export const makeProgressReporter = ({
             persistEvent(event);
 
             if (mode === "json") {
+                finishRawLine();
                 write(`${JSON.stringify(event)}\n`);
                 return;
             }
@@ -297,6 +308,7 @@ export const makeProgressReporter = ({
 
             const line = renderLine(event);
             if (mode !== "interactive") {
+                finishRawLine();
                 write(`${line}\n`);
                 return;
             }
