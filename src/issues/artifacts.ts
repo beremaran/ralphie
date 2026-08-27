@@ -11,11 +11,13 @@ import {
     complexityDecisionSchema,
     issueBreakdownDecisionSchema,
     issueResolutionDecisionSchema,
+    needsAttentionDecisionSchema,
     reviewDecisionSchema,
     type CommitMessageDecision,
     type ComplexityDecision,
     type IssueBreakdownDecision,
     type IssueResolutionDecision,
+    type NeedsAttentionDecision,
 } from "./decisions.ts";
 import type { ReviewAttempt } from "./recovery.ts";
 import { REVIEW_ITERATION_LIMIT } from "./stage.ts";
@@ -27,11 +29,34 @@ export enum IssueArtifactKind {
     CommitMessageDecision = "commit-message-decision",
     CreatedCommit = "created-commit",
     IssueResolutionDecision = "issue-resolution-decision",
+    NeedsAttentionDecision = "needs-attention-decision",
     IssueBreakdownDecision = "issue-breakdown-decision",
     CreatedIssueNumbers = "created-issue-numbers",
 }
 
 export type CreatedIssueNumberMapping = Readonly<Record<string, number>>;
+
+export type IssueFreshnessFingerprint =
+    | {
+          readonly updatedAt: string;
+          readonly commentCount: number;
+          readonly commentVersion?: number | string;
+      }
+    | {
+          readonly updatedAt: string;
+          readonly commentCount?: number;
+          readonly commentVersion: number | string;
+      };
+
+export type IssueFreshness = IssueFreshnessFingerprint;
+
+export type NeedsAttentionDecisionArtifact = {
+    readonly decision: NeedsAttentionDecision;
+    readonly fingerprint: IssueFreshnessFingerprint;
+};
+
+export type NeedsAttentionArtifact = NeedsAttentionDecisionArtifact;
+
 export type IssueArtifactValues = {
     readonly [IssueArtifactKind.ComplexityDecision]: ComplexityDecision;
     readonly [IssueArtifactKind.IssueCheckpoint]: IssueCheckpoint;
@@ -42,6 +67,7 @@ export type IssueArtifactValues = {
         readonly treeSha: string;
     };
     readonly [IssueArtifactKind.IssueResolutionDecision]: IssueResolutionDecision;
+    readonly [IssueArtifactKind.NeedsAttentionDecision]: NeedsAttentionDecisionArtifact;
     readonly [IssueArtifactKind.IssueBreakdownDecision]: IssueBreakdownDecision;
     readonly [IssueArtifactKind.CreatedIssueNumbers]: CreatedIssueNumberMapping;
 };
@@ -63,6 +89,13 @@ export type IssueArtifactStore = {
     ) => Promise<void>;
     /** Drop artifacts from an interrupted implementation attempt after checkout restore. */
     readonly resetImplementationAttempt: () => Promise<void>;
+    /** Remove a needs-attention decision only when the issue has changed. */
+    readonly invalidateStaleNeedsAttentionDecision: (
+        fingerprint: IssueFreshnessFingerprint,
+    ) => Promise<boolean>;
+    readonly invalidateNeedsAttentionDecision: (
+        fingerprint: IssueFreshnessFingerprint,
+    ) => Promise<boolean>;
 };
 
 export type IssueArtifactScope = {
@@ -103,12 +136,42 @@ const issueCheckpointSchema = z.object({
     branch: z.string().min(1),
     sha: z.string().min(1),
 });
+
+export const issueFreshnessFingerprintSchema = z
+    .object({
+        updatedAt: z.string().datetime(),
+        commentCount: z.number().int().nonnegative().optional(),
+        commentVersion: z
+            .union([z.number().int().nonnegative(), z.string().min(1)])
+            .optional(),
+    })
+    .strict()
+    .superRefine((fingerprint, context) => {
+        if (
+            fingerprint.commentCount === undefined &&
+            fingerprint.commentVersion === undefined
+        ) {
+            context.addIssue({
+                code: "custom",
+                message: "A freshness fingerprint must track issue comments.",
+                path: ["commentCount"],
+            });
+        }
+    });
+
+export const needsAttentionDecisionArtifactSchema = z
+    .object({
+        decision: needsAttentionDecisionSchema,
+        fingerprint: issueFreshnessFingerprintSchema,
+    })
+    .strict();
+
 const createdCommitSchema = z.object({
     sha: z.string().min(1),
     treeSha: z.string().min(1),
 });
 
-const persistedArtifactsSchema = z
+const persistedArtifactsV2Schema = z
     .object({
         [IssueArtifactKind.ComplexityDecision]:
             complexityDecisionSchema.optional(),
@@ -130,12 +193,30 @@ const persistedArtifactsSchema = z
     })
     .strict();
 
+const persistedArtifactsSchema = persistedArtifactsV2Schema
+    .extend({
+        [IssueArtifactKind.NeedsAttentionDecision]:
+            needsAttentionDecisionArtifactSchema.optional(),
+    })
+    .strict();
+
+export const ISSUE_ARTIFACT_VERSION = 3 as const;
+
 const persistedArtifactStateSchema = z
+    .object({
+        version: z.literal(ISSUE_ARTIFACT_VERSION),
+        issueNumber: z.number().int().positive(),
+        repository: z.string().min(1).optional(),
+        artifacts: persistedArtifactsSchema,
+    })
+    .strict();
+
+const legacyPersistedArtifactStateSchema = z
     .object({
         version: z.literal(2),
         issueNumber: z.number().int().positive(),
         repository: z.string().min(1).optional(),
-        artifacts: persistedArtifactsSchema,
+        artifacts: persistedArtifactsV2Schema,
     })
     .strict();
 
@@ -145,7 +226,10 @@ type ArtifactPersistence = (state: PersistedArtifactState) => Promise<void>;
 const safeRunId = (runId: string): string =>
     runId.replace(/[^a-zA-Z0-9_-]/g, "_") || "run";
 
-const artifactPath = (scope: IssueArtifactScope, issueNumber: number): string =>
+export const issueArtifactPath = (
+    scope: IssueArtifactScope,
+    issueNumber: number,
+): string =>
     join(
         resolveWorkspacePath(scope.workspace),
         ".ralphie",
@@ -155,6 +239,9 @@ const artifactPath = (scope: IssueArtifactScope, issueNumber: number): string =>
         String(issueNumber),
         "artifacts.json",
     );
+
+export const getIssueArtifactPath = issueArtifactPath;
+export const artifactPath = issueArtifactPath;
 
 const toPersistedState = (
     issueNumber: number,
@@ -167,7 +254,7 @@ const toPersistedState = (
         if (value !== undefined) artifacts[kind] = value;
     }
     return persistedArtifactStateSchema.parse({
-        version: 2,
+        version: ISSUE_ARTIFACT_VERSION,
         issueNumber,
         ...(scope?.repository === undefined
             ? {}
@@ -197,11 +284,51 @@ const persistAtomically = async (
     }
 };
 
+type LoadedArtifactState = {
+    readonly state: PersistedArtifactState;
+    readonly migrated: boolean;
+};
+
+const migrateArtifactState = (
+    value: unknown,
+    filePath: string,
+): LoadedArtifactState => {
+    if (
+        typeof value === "object" &&
+        value !== null &&
+        "version" in value &&
+        value.version === 2
+    ) {
+        const legacy = legacyPersistedArtifactStateSchema.parse(value);
+        return {
+            state: persistedArtifactStateSchema.parse({
+                ...legacy,
+                version: ISSUE_ARTIFACT_VERSION,
+            }),
+            migrated: true,
+        };
+    }
+    if (
+        typeof value === "object" &&
+        value !== null &&
+        "version" in value &&
+        value.version !== ISSUE_ARTIFACT_VERSION
+    ) {
+        throw new RalphieError({
+            message: `Persisted artifacts at ${filePath} use unsupported version ${String(value.version)}; expected version ${ISSUE_ARTIFACT_VERSION}.`,
+        });
+    }
+    return {
+        state: persistedArtifactStateSchema.parse(value),
+        migrated: false,
+    };
+};
+
 const loadPersistedState = async (
     filePath: string,
     issueNumber: number,
     scope?: IssueArtifactScope,
-): Promise<PersistedArtifactState | undefined> => {
+): Promise<LoadedArtifactState | undefined> => {
     let encoded: string;
     try {
         encoded = await readFile(filePath, "utf8");
@@ -215,26 +342,56 @@ const loadPersistedState = async (
     }
 
     try {
-        const parsed = persistedArtifactStateSchema.parse(JSON.parse(encoded));
-        if (parsed.issueNumber !== issueNumber) {
+        const loaded = migrateArtifactState(JSON.parse(encoded), filePath);
+        const { state } = loaded;
+        if (state.issueNumber !== issueNumber) {
             throw new RalphieError({
-                message: `Persisted artifacts at ${filePath} belong to issue ${parsed.issueNumber}, not issue ${issueNumber}.`,
+                message: `Persisted artifacts at ${filePath} belong to issue ${state.issueNumber}, not issue ${issueNumber}.`,
             });
         }
         if (
-            parsed.repository !== undefined &&
+            state.repository !== undefined &&
             scope?.repository !== undefined &&
-            parsed.repository !== scope.repository
+            state.repository !== scope.repository
         ) {
             throw new RalphieError({
-                message: `Persisted artifacts at ${filePath} belong to repository ${parsed.repository}, not ${scope.repository}.`,
+                message: `Persisted artifacts at ${filePath} belong to repository ${state.repository}, not ${scope.repository}.`,
             });
         }
-        return parsed;
+        return loaded;
     } catch (cause) {
-        if (cause instanceof RalphieError) throw cause;
+        if (cause instanceof RalphieError) {
+            throw new RalphieError({
+                message: `Failed to load issue artifacts at ${filePath}: ${cause.message}`,
+                cause,
+            });
+        }
         throw new RalphieError({
             message: `Failed to load issue artifacts at ${filePath}.`,
+            cause,
+        });
+    }
+};
+
+const sameFreshnessFingerprint = (
+    left: IssueFreshnessFingerprint,
+    right: IssueFreshnessFingerprint,
+): boolean =>
+    left.updatedAt === right.updatedAt &&
+    left.commentCount === right.commentCount &&
+    left.commentVersion === right.commentVersion;
+
+const validateArtifactValue = (
+    issueNumber: number,
+    kind: IssueArtifactKind,
+    value: unknown,
+): void => {
+    if (kind !== IssueArtifactKind.NeedsAttentionDecision) return;
+    try {
+        needsAttentionDecisionArtifactSchema.parse(value);
+    } catch (cause) {
+        throw new RalphieError({
+            message: `Needs-attention decision for issue ${issueNumber} is invalid.`,
             cause,
         });
     }
@@ -261,6 +418,29 @@ const makeStore = (
         for (const [kind, value] of nextValues) values.set(kind, value);
     };
 
+    const invalidateStaleNeedsAttentionDecision = async (
+        fingerprint: IssueFreshnessFingerprint,
+    ): Promise<boolean> => {
+        try {
+            issueFreshnessFingerprintSchema.parse(fingerprint);
+        } catch (cause) {
+            throw new RalphieError({
+                message: `Freshness fingerprint for issue ${issueNumber} is invalid.`,
+                cause,
+            });
+        }
+        const existing = values.get(IssueArtifactKind.NeedsAttentionDecision);
+        if (existing === undefined) return false;
+        const artifact = existing as NeedsAttentionDecisionArtifact;
+        if (sameFreshnessFingerprint(artifact.fingerprint, fingerprint)) {
+            return false;
+        }
+        const nextValues = new Map(values);
+        nextValues.delete(IssueArtifactKind.NeedsAttentionDecision);
+        await save(nextValues);
+        return true;
+    };
+
     return {
         issueNumber,
         write: async (kind, value) => {
@@ -269,6 +449,7 @@ const makeStore = (
                     message: `Artifact ${kind} has already been produced for issue ${issueNumber}.`,
                 });
             }
+            validateArtifactValue(issueNumber, kind, value);
             if (
                 kind === IssueArtifactKind.ReviewAttempts &&
                 !validReviewOrder(value as ReadonlyArray<ReviewAttempt>)
@@ -363,6 +544,9 @@ const makeStore = (
             nextValues.delete(IssueArtifactKind.IssueResolutionDecision);
             await save(nextValues);
         },
+
+        invalidateStaleNeedsAttentionDecision,
+        invalidateNeedsAttentionDecision: invalidateStaleNeedsAttentionDecision,
     };
 };
 
@@ -386,12 +570,13 @@ export const makeDurableIssueArtifactStore = async (
             message: `Cannot create an artifact store for issue ${issueNumber}.`,
         });
     }
-    const filePath = artifactPath(scope, issueNumber);
-    const state = await loadPersistedState(filePath, issueNumber, scope);
+    const filePath = issueArtifactPath(scope, issueNumber);
+    const loaded = await loadPersistedState(filePath, issueNumber, scope);
+    if (loaded?.migrated) await persistAtomically(filePath, loaded.state);
     const values = new Map<IssueArtifactKind, unknown>();
-    if (state !== undefined) {
+    if (loaded !== undefined) {
         for (const kind of Object.values(IssueArtifactKind)) {
-            const value = state.artifacts[kind];
+            const value = loaded.state.artifacts[kind];
             if (value !== undefined) values.set(kind, value);
         }
     }

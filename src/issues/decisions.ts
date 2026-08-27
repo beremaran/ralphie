@@ -31,6 +31,22 @@ export enum IssueResolutionStatus {
     Unresolved = "unresolved",
 }
 
+export enum NeedsAttentionReason {
+    OutdatedPremise = "outdated_premise",
+    ConflictingRequirements = "conflicting_requirements",
+    MissingInformation = "missing_information",
+    ExternalDependency = "external_dependency",
+    CannotReproduce = "cannot_reproduce",
+}
+
+export enum GroundingDisposition {
+    Actionable = "actionable",
+    AlreadyResolved = "already_resolved",
+    NeedsAttention = "needs_attention",
+}
+
+export { GroundingDisposition as GroundingDecisionDisposition };
+
 export const complexityDecisionSchema = z.object({
     complexity: z
         .enum(ComplexityLevel)
@@ -90,6 +106,49 @@ export const issueResolutionDecisionSchema = z.object({
 export type IssueResolutionDecision = z.infer<
     typeof issueResolutionDecisionSchema
 >;
+
+export const nonBlankStringSchema = z
+    .string()
+    .refine((value) => value.trim().length > 0, {
+        message: "Expected a non-blank string.",
+    });
+
+const groundingActionableDecisionSchema = z
+    .object({
+        disposition: z.literal(GroundingDisposition.Actionable),
+    })
+    .strict();
+
+const groundingAlreadyResolvedDecisionSchema = z
+    .object({
+        disposition: z.literal(GroundingDisposition.AlreadyResolved),
+    })
+    .strict();
+
+export const needsAttentionDecisionSchema = z
+    .object({
+        disposition: z.literal(GroundingDisposition.NeedsAttention),
+        reason: z.enum(NeedsAttentionReason),
+        summary: nonBlankStringSchema,
+        evidence: z.array(nonBlankStringSchema).min(1),
+        questions: z.array(nonBlankStringSchema).min(1),
+    })
+    .strict();
+
+export const groundingDecisionSchema = z.discriminatedUnion("disposition", [
+    groundingActionableDecisionSchema,
+    groundingAlreadyResolvedDecisionSchema,
+    needsAttentionDecisionSchema,
+]);
+
+export type GroundingDecision = z.infer<typeof groundingDecisionSchema>;
+export type NeedsAttentionDecision = Omit<
+    z.infer<typeof needsAttentionDecisionSchema>,
+    "evidence" | "questions"
+> & {
+    readonly evidence: ReadonlyArray<string>;
+    readonly questions: ReadonlyArray<string>;
+};
 
 export const commitMessageDecisionSchema = z.object({
     subject: z.string().min(1).max(72),

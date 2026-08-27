@@ -7,6 +7,7 @@ import {
     type IssueCompletionKind,
     IssueExecutionOutcomeKind,
 } from "../../src/issues/execution.ts";
+import { NeedsAttentionReason } from "../../src/issues/decisions.ts";
 import {
     RUN_STATE_VERSION,
     RunStateStatus,
@@ -80,6 +81,63 @@ describe("run state store", () => {
         }
     });
 
+    test("migrates version 2 state while preserving completed and escalated outcomes", async () => {
+        const directory = await mkdtemp(
+            join(tmpdir(), "ralphie-state-legacy-"),
+        );
+        const path = join(directory, "state.json");
+        try {
+            const legacy = {
+                ...structuredClone(state),
+                version: 2,
+                outcomes: [
+                    {
+                        issueNumber: 1,
+                        outcome: {
+                            kind: IssueExecutionOutcomeKind.Completed,
+                            completion: "pushed-commit",
+                            commitSha: "abc123",
+                        },
+                    },
+                    {
+                        issueNumber: 3,
+                        outcome: {
+                            kind: IssueExecutionOutcomeKind.Escalated,
+                            diagnosticsPath: "/tmp/diagnostics",
+                            reason: "review budget exhausted",
+                        },
+                    },
+                ],
+            };
+            await writeFile(path, JSON.stringify(legacy));
+            const loaded = await RunStateStoreLive.load(path);
+            expect(loaded.version).toBe(RUN_STATE_VERSION);
+            expect(loaded.outcomes).toEqual([
+                {
+                    issueNumber: 1,
+                    outcome: {
+                        kind: IssueExecutionOutcomeKind.Completed,
+                        completion: "pushed-commit",
+                        commitSha: "abc123",
+                    },
+                },
+                {
+                    issueNumber: 3,
+                    outcome: {
+                        kind: IssueExecutionOutcomeKind.Escalated,
+                        diagnosticsPath: "/tmp/diagnostics",
+                        reason: "review budget exhausted",
+                    },
+                },
+            ]);
+            expect(JSON.parse(await readFile(path, "utf8")).version).toBe(
+                RUN_STATE_VERSION,
+            );
+        } finally {
+            await rm(directory, { recursive: true, force: true });
+        }
+    });
+
     test("migrates legacy completed outcomes to pushed-commit completions", async () => {
         const directory = await mkdtemp(
             join(tmpdir(), "ralphie-state-legacy-"),
@@ -97,6 +155,70 @@ describe("run state store", () => {
                 completion: "pushed-commit",
                 commitSha: "abc123",
             });
+        } finally {
+            await rm(directory, { recursive: true, force: true });
+        }
+    });
+
+    test("persists every needs-attention outcome detail", async () => {
+        const directory = await mkdtemp(join(tmpdir(), "ralphie-state-"));
+        const path = join(directory, "state.json");
+        try {
+            const needsAttentionState: RunState = {
+                ...state,
+                outcomes: [
+                    {
+                        issueNumber: 1,
+                        outcome: {
+                            kind: IssueExecutionOutcomeKind.NeedsAttention,
+                            reason: NeedsAttentionReason.ExternalDependency,
+                            summary:
+                                "The issue depends on an unavailable service.",
+                            evidence: [
+                                "The service endpoint is not configured.",
+                            ],
+                            questions: ["When will the service be available?"],
+                            artifactPath: "/tmp/needs-attention/artifacts.json",
+                        },
+                    },
+                ],
+            };
+            await RunStateStoreLive.save(path, needsAttentionState);
+            expect(await RunStateStoreLive.load(path)).toEqual(
+                needsAttentionState,
+            );
+        } finally {
+            await rm(directory, { recursive: true, force: true });
+        }
+    });
+
+    test("rejects blank needs-attention outcome content", async () => {
+        const directory = await mkdtemp(join(tmpdir(), "ralphie-state-"));
+        const path = join(directory, "state.json");
+        try {
+            await writeFile(
+                path,
+                JSON.stringify({
+                    ...state,
+                    outcomes: [
+                        {
+                            issueNumber: 1,
+                            outcome: {
+                                kind: IssueExecutionOutcomeKind.NeedsAttention,
+                                reason: NeedsAttentionReason.MissingInformation,
+                                summary: "   ",
+                                evidence: ["concrete evidence"],
+                                questions: ["What is missing?"],
+                                artifactPath:
+                                    "/tmp/needs-attention/artifacts.json",
+                            },
+                        },
+                    ],
+                }),
+            );
+            await expect(RunStateStoreLive.load(path)).rejects.toThrow(
+                "invalid or unreadable",
+            );
         } finally {
             await rm(directory, { recursive: true, force: true });
         }

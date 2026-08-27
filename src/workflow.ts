@@ -61,6 +61,8 @@ const outcomeMessage = (
                 : `Issue #${issueNumber} implemented and pushed.`;
         case IssueExecutionOutcomeKind.Decomposed:
             return `Issue #${issueNumber} decomposed into ${outcome.childIssueNumbers.length} child issues.`;
+        case IssueExecutionOutcomeKind.NeedsAttention:
+            return `Issue #${issueNumber} needs attention: ${outcome.summary}`;
         case IssueExecutionOutcomeKind.Escalated:
             return `Issue #${issueNumber} escalated: ${outcome.reason}`;
         case IssueExecutionOutcomeKind.Failed:
@@ -89,6 +91,12 @@ const copyOutcome = (
             return {
                 ...outcome,
                 childIssueNumbers: [...outcome.childIssueNumbers],
+            };
+        case IssueExecutionOutcomeKind.NeedsAttention:
+            return {
+                ...outcome,
+                evidence: [...outcome.evidence],
+                questions: [...outcome.questions],
             };
         case IssueExecutionOutcomeKind.Escalated:
             return {

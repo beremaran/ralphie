@@ -11,7 +11,9 @@ import {
 } from "../../src/issues/artifacts.ts";
 import {
     ComplexityLevel,
+    GroundingDisposition,
     ImplementationComplexityLevel,
+    NeedsAttentionReason,
     ReviewFindingSeverity,
     ReviewVerdict,
 } from "../../src/issues/decisions.ts";
@@ -199,6 +201,114 @@ describe("per-issue artifact store", () => {
             expect(
                 await reset.read(IssueArtifactKind.ComplexityDecision),
             ).toEqual(complexity);
+        } finally {
+            await rm(workspace, { recursive: true, force: true });
+        }
+    });
+
+    test("reloads and explicitly invalidates stale needs-attention decisions", async () => {
+        const workspace = await mkdtemp(join(tmpdir(), "ralphie-artifacts-"));
+        try {
+            const scope = {
+                workspace,
+                runId: "run-freshness",
+                repository: "owner/repo",
+            };
+            const fingerprint = {
+                updatedAt: "2026-08-24T00:00:00.000Z",
+                commentCount: 2,
+            } as const;
+            const artifact = {
+                decision: {
+                    disposition: GroundingDisposition.NeedsAttention,
+                    reason: NeedsAttentionReason.MissingInformation,
+                    summary: "The issue omits the target runtime.",
+                    evidence: ["The repository contains multiple runtimes."],
+                    questions: ["Which runtime should be supported?"],
+                },
+                fingerprint,
+            } as const;
+            const first = await makeDurableIssueArtifactStore(42, scope);
+            await first.write(
+                IssueArtifactKind.NeedsAttentionDecision,
+                artifact,
+            );
+
+            const reloaded = await makeDurableIssueArtifactStore(42, scope);
+            expect(
+                await reloaded.read(IssueArtifactKind.NeedsAttentionDecision),
+            ).toEqual(artifact);
+            expect(
+                await reloaded.invalidateStaleNeedsAttentionDecision(
+                    fingerprint,
+                ),
+            ).toBe(false);
+            expect(
+                await reloaded.invalidateStaleNeedsAttentionDecision({
+                    ...fingerprint,
+                    commentCount: 3,
+                }),
+            ).toBe(true);
+            expect(reloaded.has(IssueArtifactKind.NeedsAttentionDecision)).toBe(
+                false,
+            );
+            const persisted = await Bun.file(
+                join(
+                    workspace,
+                    ".ralphie",
+                    "runs",
+                    "run-freshness",
+                    "issues",
+                    "42",
+                    "artifacts.json",
+                ),
+            ).json();
+            expect(persisted.version).toBe(3);
+            expect(persisted.artifacts).not.toHaveProperty(
+                IssueArtifactKind.NeedsAttentionDecision,
+            );
+        } finally {
+            await rm(workspace, { recursive: true, force: true });
+        }
+    });
+
+    test("migrates version 2 durable artifacts without losing old values", async () => {
+        const workspace = await mkdtemp(join(tmpdir(), "ralphie-artifacts-"));
+        try {
+            const path = join(
+                workspace,
+                ".ralphie",
+                "runs",
+                "run-legacy",
+                "issues",
+                "42",
+                "artifacts.json",
+            );
+            await mkdir(join(path, ".."), { recursive: true });
+            await writeFile(
+                path,
+                JSON.stringify({
+                    version: 2,
+                    issueNumber: 42,
+                    artifacts: {
+                        [IssueArtifactKind.ComplexityDecision]: {
+                            complexity: ComplexityLevel.Level1,
+                            rationale: "Legacy decision.",
+                        },
+                    },
+                }),
+            );
+            const loaded = await makeDurableIssueArtifactStore(42, {
+                workspace,
+                runId: "run-legacy",
+            });
+            expect(
+                await loaded.read(IssueArtifactKind.ComplexityDecision),
+            ).toEqual({
+                complexity: ComplexityLevel.Level1,
+                rationale: "Legacy decision.",
+            });
+            expect((await Bun.file(path).json()).version).toBe(3);
         } finally {
             await rm(workspace, { recursive: true, force: true });
         }

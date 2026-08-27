@@ -2,6 +2,7 @@ import type { Octokit } from "octokit";
 import type { PiClient } from "../pi/client.ts";
 
 import type { GitHubIssue } from "../github/issues.ts";
+import type { NeedsAttentionReason } from "./decisions.ts";
 import type { PiSelection } from "../agent/model.ts";
 import type { PiSessionDiagnostics } from "../agent/task-session.ts";
 import type { GitRepositoryInvariantService } from "../git/repository-invariant.ts";
@@ -15,6 +16,7 @@ import type { GitRepositoryInvariantService } from "../git/repository-invariant.
 export enum IssueExecutionOutcomeKind {
     Completed = "completed",
     Decomposed = "decomposed",
+    NeedsAttention = "needs-attention",
     Escalated = "escalated",
     Skipped = "skipped",
     Failed = "failed",
@@ -42,6 +44,24 @@ export type IssueExecutionOutcome =
           /** Issues created from the original issue's decomposition. */
           readonly childIssueNumbers: ReadonlyArray<number>;
       }
+    | ({
+          readonly kind: IssueExecutionOutcomeKind.NeedsAttention;
+          readonly reason: NeedsAttentionReason;
+          readonly summary: string;
+          readonly evidence: ReadonlyArray<string>;
+          readonly questions: ReadonlyArray<string>;
+      } & (
+          | {
+                /** Where the validated needs-attention artifact was written. */
+                readonly artifactPath: string;
+                readonly diagnosticsPath?: never;
+            }
+          | {
+                /** Alternate name used when the local record is diagnostic output. */
+                readonly artifactPath?: never;
+                readonly diagnosticsPath: string;
+            }
+      ))
     | {
           readonly kind: IssueExecutionOutcomeKind.Escalated;
           /** Where recovery diagnostics for the escalation were written. */

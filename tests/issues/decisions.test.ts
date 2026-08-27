@@ -3,10 +3,13 @@ import { describe, expect, test } from "bun:test";
 import {
     ComplexityLevel,
     complexityDecisionSchema,
+    GroundingDisposition,
+    groundingDecisionSchema,
     ImplementationComplexityLevel,
     issueBreakdownDecisionSchema,
     issueResolutionDecisionSchema,
     IssueResolutionStatus,
+    NeedsAttentionReason,
     ReviewFindingSeverity,
     reviewDecisionSchema,
     ReviewVerdict,
@@ -54,6 +57,45 @@ describe("issue pipeline decisions", () => {
                 ],
             }).success,
         ).toBe(false);
+    });
+
+    test("validates each grounding disposition and needs-attention evidence", () => {
+        expect(
+            groundingDecisionSchema.safeParse({
+                disposition: GroundingDisposition.Actionable,
+            }).success,
+        ).toBe(true);
+        expect(
+            groundingDecisionSchema.safeParse({
+                disposition: GroundingDisposition.AlreadyResolved,
+            }).success,
+        ).toBe(true);
+        const needsAttention = {
+            disposition: GroundingDisposition.NeedsAttention,
+            reason: NeedsAttentionReason.MissingInformation,
+            summary: "The issue does not identify the required runtime.",
+            evidence: ["The repository supports multiple runtimes."],
+            questions: ["Which runtime should the change support first?"],
+        };
+        expect(groundingDecisionSchema.safeParse(needsAttention).success).toBe(
+            true,
+        );
+        for (const invalid of [
+            { ...needsAttention, summary: "" },
+            { ...needsAttention, summary: "   " },
+            { ...needsAttention, evidence: [] },
+            { ...needsAttention, evidence: ["   "] },
+            { ...needsAttention, questions: [] },
+            { ...needsAttention, questions: ["   "] },
+            {
+                disposition: GroundingDisposition.Actionable,
+                reason: NeedsAttentionReason.MissingInformation,
+            },
+        ]) {
+            expect(groundingDecisionSchema.safeParse(invalid).success).toBe(
+                false,
+            );
+        }
     });
 
     test("requires concrete evidence for issue resolution decisions", () => {

@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { z } from "zod";
 
@@ -6,10 +6,14 @@ import {
     type IssueCompletionKind,
     IssueExecutionOutcomeKind,
 } from "../issues/execution.ts";
+import {
+    NeedsAttentionReason,
+    nonBlankStringSchema,
+} from "../issues/decisions.ts";
 import { RalphieError } from "../shared/error.ts";
 import { WorkflowMode } from "../options.ts";
 
-export const RUN_STATE_VERSION = 2 as const;
+export const RUN_STATE_VERSION = 3 as const;
 
 export enum RunStateStatus {
     Active = "active",
@@ -47,6 +51,28 @@ const currentOutcomeSchema = z.union([
         reason: z.string().min(1),
         childIssueNumbers: z.array(z.number().int().positive()).optional(),
     }),
+    z.union([
+        z
+            .object({
+                kind: z.literal(IssueExecutionOutcomeKind.NeedsAttention),
+                reason: z.enum(NeedsAttentionReason),
+                summary: nonBlankStringSchema,
+                evidence: z.array(nonBlankStringSchema).min(1),
+                questions: z.array(nonBlankStringSchema).min(1),
+                artifactPath: z.string().min(1),
+            })
+            .strict(),
+        z
+            .object({
+                kind: z.literal(IssueExecutionOutcomeKind.NeedsAttention),
+                reason: z.enum(NeedsAttentionReason),
+                summary: nonBlankStringSchema,
+                evidence: z.array(nonBlankStringSchema).min(1),
+                questions: z.array(nonBlankStringSchema).min(1),
+                diagnosticsPath: z.string().min(1),
+            })
+            .strict(),
+    ]),
     z.object({
         kind: z.literal(IssueExecutionOutcomeKind.Skipped),
         reason: z.string().min(1),
@@ -74,8 +100,9 @@ const outcomeSchema = z.preprocess((value) => {
     return value;
 }, currentOutcomeSchema);
 
-export const runStateSchema = z.object({
-    version: z.literal(RUN_STATE_VERSION),
+export const runStateOutcomeSchema = outcomeSchema;
+
+const runStateFields = {
     status: z.enum(RunStateStatus),
     runId: z.string().min(1),
     repository: z.string().min(1),
@@ -117,9 +144,73 @@ export const runStateSchema = z.object({
         })
         .optional(),
     updatedAt: z.string().datetime(),
+};
+
+export const runStateSchema = z.object({
+    version: z.literal(RUN_STATE_VERSION),
+    ...runStateFields,
+});
+
+const legacyRunStateSchema = z.object({
+    version: z.literal(2),
+    ...runStateFields,
 });
 
 export type RunState = z.infer<typeof runStateSchema>;
+
+type LoadedRunState = {
+    readonly state: RunState;
+    readonly migrated: boolean;
+};
+
+const migrateRunState = (value: unknown): LoadedRunState => {
+    if (
+        typeof value === "object" &&
+        value !== null &&
+        "version" in value &&
+        value.version === 2
+    ) {
+        const legacy = legacyRunStateSchema.parse(value);
+        return {
+            state: runStateSchema.parse({
+                ...legacy,
+                version: RUN_STATE_VERSION,
+            }),
+            migrated: true,
+        };
+    }
+    if (
+        typeof value === "object" &&
+        value !== null &&
+        "version" in value &&
+        value.version !== RUN_STATE_VERSION
+    ) {
+        throw new RalphieError({
+            message: `Run state uses unsupported version ${String(value.version)}; expected version ${RUN_STATE_VERSION}.`,
+        });
+    }
+    return { state: runStateSchema.parse(value), migrated: false };
+};
+
+const persistRunStateAtomically = async (
+    path: string,
+    state: RunState,
+): Promise<void> => {
+    const temporaryPath = `${path}.tmp-${crypto.randomUUID()}`;
+    try {
+        await mkdir(dirname(path), { recursive: true });
+        await writeFile(temporaryPath, `${JSON.stringify(state, null, 2)}\n`, {
+            flag: "wx",
+        });
+        await rename(temporaryPath, path);
+    } catch (cause) {
+        await rm(temporaryPath, { force: true }).catch(() => undefined);
+        throw new RalphieError({
+            message: `Failed to persist run state at ${path}.`,
+            cause,
+        });
+    }
+};
 
 export type RunStateStoreService = {
     readonly save: (path: string, state: RunState) => Promise<void>;
@@ -130,16 +221,7 @@ export const RunStateStoreLive: RunStateStoreService = {
     save: async (path, state) => {
         try {
             const validated = runStateSchema.parse(state);
-            await mkdir(dirname(path), { recursive: true });
-            const temporaryPath = `${path}.tmp-${crypto.randomUUID()}`;
-            await writeFile(
-                temporaryPath,
-                `${JSON.stringify(validated, null, 2)}\n`,
-                {
-                    flag: "wx",
-                },
-            );
-            await rename(temporaryPath, path);
+            await persistRunStateAtomically(path, validated);
         } catch (cause) {
             throw new RalphieError({
                 message: `Failed to persist run state at ${path}.`,
@@ -150,12 +232,19 @@ export const RunStateStoreLive: RunStateStoreService = {
 
     load: async (path) => {
         try {
-            return runStateSchema.parse(
+            const loaded = migrateRunState(
                 JSON.parse(await readFile(path, "utf8")),
             );
+            if (loaded.migrated) {
+                await persistRunStateAtomically(path, loaded.state);
+            }
+            return loaded.state;
         } catch (cause) {
             throw new RalphieError({
-                message: `Run state at ${path} is invalid or unreadable.`,
+                message:
+                    cause instanceof RalphieError
+                        ? `Run state at ${path} is invalid or unreadable: ${cause.message}`
+                        : `Run state at ${path} is invalid or unreadable.`,
                 cause,
             });
         }
