@@ -17,17 +17,18 @@ mutations, run state, recovery, and safety checks deterministic.
 > [!CAUTION]
 > Ralphie defaults to the `lgtm` workflow: it works directly on the branch
 > selected by `--branch`, commits approved work, and pushes directly to that
-> branch. Use `--workflow pr` to create a feature branch and pull request
-> instead.
+> branch. Use `--workflow pr` to deliver through an automatically merged feature
+> branch and pull request instead.
 
 > [!NOTE]
-> Ralphie is pre-1.0 and currently installed from source. Start with a one-issue
-> `--dry-run` against a repository you control before enabling mutations.
+> Ralphie is pre-1.0 and currently run from source. It is a private Bun package,
+> so `bunx ralphie` is not available. Start with a one-issue `--dry-run` against
+> a repository you control before enabling mutations.
 
 ## Why Ralphie?
 
-- **Issue-native automation** — the GitHub issue is the unit of planning,
-  execution, recovery, and reporting.
+- **Issue-native automation** — each run focuses on one GitHub repository, with
+  the issue as the unit of planning, execution, recovery, and reporting.
 - **Structured agent decisions** — complexity, reviews, decompositions, and
   commit messages are validated against explicit schemas.
 - **Fresh-context review loops** — implementation, review, and review-fix work
@@ -44,64 +45,9 @@ mutations, run state, recovery, and safety checks deterministic.
 
 ## Installation
 
-Ralphie ships through four channels. Choose whichever fits your environment.
-
-### 1. `bunx` (no install)
-
-Requires Bun on `PATH`; `bunx` installs it automatically.
-
-```bash
-bunx ralphie owner/repository --dry-run --max-issues 1
-```
-
-### 2. Standalone binary (curl script)
-
-Installs a self-contained native executable for your platform
-(`darwin-arm64`, `darwin-x64`, `linux-arm64`, `linux-x64`).
-
-```bash
-sh scripts/install.sh            # installs to ~/.local/bin (or ~/bin)
-sh scripts/install.sh /usr/local/bin
-RALPHIE_VERSION=0.1.0 sh scripts/install.sh   # pin a version
-```
-
-### 3. Homebrew
-
-Install from a tap that downloads the matching release binary.
-
-```bash
-brew install beremaran/tap/ralphie
-# or, from the formula in ./Formula:
-brew install --formula Formula/ralphie.rb
-```
-
-### 4. Docker
-
-A multi-stage image built from `oven/bun` and published to `ghcr.io/beremaran/ralphie`
-(`linux/amd64` and `linux/arm64`).
-
-```bash
-docker run --rm \
-  -e GITHUB_TOKEN=$GITHUB_TOKEN \
-  -v "$HOME/.ralphie:/root/.ralphie" \
-  ghcr.io/beremaran/ralphie owner/repository --max-issues 5
-```
-
-## Quick start
-
-### Prerequisites
-
-Ralphie expects the following tools on `PATH`:
-
-- [Bun](https://bun.sh/)
-- [Git](https://git-scm.com/)
-- [GitHub CLI](https://cli.github.com/), authenticated with `gh auth login`
-- model credentials supported by [Pi](https://github.com/earendil-works/pi), configured through
-  environment variables or Pi's `~/.pi/agent/auth.json`
-
-Your GitHub account must be able to read the target repository and its issues.
-Non-dry runs also require permission to push to the selected branch and manage
-issues when decomposition is needed.
+Ralphie is a private Bun package and is currently run from source. The release
+workflow contains packaging for tagged releases, but the source installation
+below is the supported setup for this checkout.
 
 ### Install from source
 
@@ -118,17 +64,44 @@ bun link
 ralphie --version
 ```
 
-You can always run the source entry point directly instead:
+## Quick start
+
+### Prerequisites
+
+Ralphie expects the following tools on `PATH`:
+
+- [Bun](https://bun.sh/)
+- [Git](https://git-scm.com/)
+- [GitHub CLI](https://cli.github.com/), authenticated with `gh auth login`
+- model credentials supported by [Pi](https://github.com/earendil-works/pi)
+
+By default, configure Pi in `~/.pi/agent/auth.json`, or point `--pi-dir` at an
+existing Pi agent directory. For an OpenAI-compatible endpoint, set
+`RALPHIE_MODEL_BASE_URL` and, when required by the provider,
+`RALPHIE_MODEL_API_KEY`; when `--pi-dir` is not supplied, Ralphie creates a
+temporary Pi configuration for that run.
+
+Your GitHub account must be able to read the target repository and its issues.
+Non-dry runs also require permission to push to the selected branch and create,
+update, and close issues. `--workflow pr` additionally requires permission to
+create, comment on, and merge pull requests.
+
+### Verify the installation
+
+Run the source entry point from the checkout:
 
 ```bash
 bun run index.ts --version
 ```
 
+If you used `bun link`, `ralphie --version` is equivalent.
+
 ### Preview the first issue
 
 This performs authentication and Git preflight, prepares a clean checkout,
-discovers issues, and asks Pi for a complexity decision. It does not edit
-files, create or close issues, commit, or push.
+discovers issues, and asks Pi for a complexity decision. It may create or reset
+the local workspace and write run artifacts, but it does not ask Pi to edit the
+repository, create commits, push, or mutate GitHub.
 
 ```bash
 ralphie owner/repository --dry-run --max-issues 1
@@ -148,14 +121,16 @@ ralphie owner/repository --max-issues 5
 ```
 
 When no branch is configured, Ralphie uses `main` when it exists and otherwise
-`master`. Issues are processed oldest-first. Without `--max-issues`, the issue budget is
+`master`. With the default `created:asc` sort, issues are processed oldest-first;
+all issue work is sequential. Without `--max-issues`, the issue budget is
 unlimited.
 
 The default `lgtm` workflow commits and pushes directly to the selected branch.
-The `pr` workflow creates a branch, pushes it, and opens a pull request for
-review. The pull request body links the source issue with `Closes #<issue>` so
-GitHub closes the issue automatically when the pull request is merged. Select
-the workflow on the command line:
+The `pr` workflow creates and pushes a feature branch, opens or reuses a matching
+pull request, publishes the automated review attempts, and merges it. It is not
+a wait-for-human-review mode. The pull request body links the source issue with
+`Closes #<issue>` so GitHub closes the issue automatically when the pull request
+is merged. Select the workflow on the command line:
 
 ```bash
 ralphie owner/repository --workflow pr
@@ -205,9 +180,9 @@ flowchart TD
 7. Generate a validated commit message and commit the changes.
 8. In `lgtm` mode, recheck the remote and push the commit without force, then
    close the source issue after the push is verified. In `pr` mode, create a
-   feature branch, push it, and open a pull request linked with `Closes #<issue>`;
-   review results are published on the pull request and the issue closes when
-   GitHub merges it.
+   feature branch, push it, open a pull request linked with `Closes #<issue>`,
+   publish the review results, and merge it automatically so GitHub closes the
+   issue.
 
 When implementation produces no changes, a fresh read-only session must prove
 that the current checkout already resolves the issue and return concrete
@@ -254,8 +229,8 @@ sequenceDiagram
             R->>O: Generate structured commit message
             R->>G: Commit exact staged tree on feature branch
             R->>GH: Open pull request with Closes #issue
-            R->>GH: Publish review comments and await merge
-            GH-->>R: Merge PR and close linked issue
+            R->>GH: Publish review comments and merge PR
+            GH-->>R: Confirm merge; GitHub closes linked issue
         else Review budget exhausted
             R->>G: Preserve patch and restore checkpoint
             R->>GH: Continue through decomposition
@@ -297,8 +272,9 @@ flowchart LR
 
 ## Safety model
 
-Delivery automation deserves explicit guardrails. In `lgtm` mode, before agent
-work and again before pushing, Ralphie verifies that:
+Delivery automation deserves explicit guardrails. For `lgtm` delivery, and for
+the feature-branch pushes used by `pr`, Ralphie verifies before agent work and
+again before a push that:
 
 - the checkout and `origin` match the requested GitHub repository;
 - the local checkout is still on the selected branch and expected commit;
@@ -320,21 +296,22 @@ GitHub rejects the push, Ralphie surfaces the complete Git response, retains the
 created commit and run artifacts, and halts for inspection or resume.
 
 There is one intentionally destructive local behavior: when reusing an existing
-repository checkout, Ralphie aligns it to the requested branch with the
-equivalent of `git reset --hard` and `git clean -fd`. Tracked modifications and
-untracked files inside that checkout are discarded. Keep unrelated work outside
-Ralphie's workspace.
+repository checkout that is not clean, Ralphie runs the equivalent of `git reset
+--hard` and `git clean -fd`, then aligns it with the selected remote branch.
+Tracked modifications and untracked, non-ignored files inside that checkout are
+discarded. Keep unrelated work outside Ralphie's workspace.
 
-For a mutation-free validation, use:
+For a delivery-mutation-free validation, use:
 
 ```bash
 ralphie owner/repository --dry-run --max-issues 1
 ```
 
 Dry-run mode still performs real preflight, cloning, issue discovery, and
-Pi complexity assessment, but it cannot invoke implementation,
-decomposition, commits, pushes, or GitHub mutations. A resumed dry run remains a
-dry run.
+Pi complexity assessment. It can change the local workspace during preparation
+and saves state and complexity artifacts, but it cannot invoke implementation,
+decomposition, commits, pushes, or GitHub mutations. A resumed dry run remains
+a dry run.
 
 ## Common recipes
 
@@ -418,7 +395,7 @@ HTTPS/SSH clone URL.
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `--workflow <mode>` | `lgtm` | Select sequential `lgtm` or `pr` delivery. |
+| `--workflow <mode>` | `lgtm` | Select direct-push `lgtm` or automatically merged `pr` delivery. |
 | `-b, --branch <name>` | `main`, otherwise `master` | Base branch; `lgtm` pushes it directly, while PR workflows open against it. |
 | `--max-issues <count>` | unlimited | Positive maximum number of issues charged to this run. |
 | `--issue-label <label>` | none | Require a label; repeat the flag to require multiple labels. |
@@ -427,7 +404,7 @@ HTTPS/SSH clone URL.
 | `--thinking <level>` | Pi default | Pi thinking level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. |
 | `--pi-dir <path>` | Pi default | Existing Pi agent directory. |
 | `--workspace <path>` | `~/.ralphie` | Root directory for repository checkouts and run artifacts. |
-| `--dry-run` | off | Assess and route issues without implementation or mutations. |
+| `--dry-run` | off | Assess and route issues without implementation, GitHub, or delivery mutations. |
 | `--resume <state.json>` | none | Continue a compatible saved run. |
 | `--clean <when>` | off | Remove the workspace at `start`, `end`, or `both` (before any step and/or after success). |
 | `--output <mode>` | `default` | Output mode: live transcript and progress, `verbose`, `quiet`, or `json`. |
@@ -463,11 +440,10 @@ Ralphie adapts its progress renderer to its environment:
 - `--output quiet` suppresses everything except failures.
 
 JSON events use a stable operational vocabulary and include `runId`,
-`timestamp`, `stage`, `status`, and `message`. Multi-repository events also
-include `repository` and `repositoryRunId`. Depending on the event, they may
-also include issue position, review attempt, session ID, commit SHA, created
-issue numbers, or diagnostic paths. Credentials and sensitive environment values
-are redacted at the reporting boundary.
+`timestamp`, `stage`, `status`, and `message`. Depending on the event, they may
+also include the repository, issue position, review attempt, session ID, commit
+SHA, created issue numbers, or diagnostic paths. Credentials and sensitive
+environment values are redacted at the reporting boundary.
 
 Run artifacts live under:
 
