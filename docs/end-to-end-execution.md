@@ -7,8 +7,8 @@ triggered by a GitHub webhook; the trigger is the public CLI invocation:
 ralphie owner/repository [options]
 ```
 
-The default delivery mode is `lgtm`. `pr`, `parallel-pr`, `--dry-run`, and
-`--resume` change the path at the points called out below.
+The default delivery mode is `lgtm`. `pr`, `--dry-run`, and `--resume` change
+the path at the points called out below.
 
 ## 1. Trigger and bootstrap
 
@@ -49,8 +49,8 @@ flowchart TD
    `<workspace>/.ralphie/runs/<run-id>/events.jsonl`; resumed runs use the
    directory containing the supplied state file.
 6. The command assembles the live services in `src/runtime.ts`, configures the
-   Pi service from the model flags, creates the progress reporter, and then
-   executes `workflow` with the explicit runtime object.
+   Pi service from the model flags, connects its event stream to the transcript
+   renderer, and then executes `workflow` with the explicit runtime object.
 
 ## 2. Workflow preflight
 
@@ -93,9 +93,8 @@ it alive for the queue. `makePiService` chooses one of three agent configuration
   `auth.json` when `RALPHIE_MODEL_BASE_URL` is used; or
 - Pi's default agent directory.
 
-The temporary directory is removed when the runtime is closed. If
-`--pi-concurrency` is set, a semaphore limits complete session-and-prompt
-operations while `--parallel` limits concurrent `parallel-pr` issue workers.
+The temporary directory is removed when the runtime is closed. Pi sessions and
+issues are processed sequentially, which keeps the live transcript ordered.
 
 ```mermaid
 flowchart TD
@@ -104,38 +103,33 @@ flowchart TD
     C -->|yes| D["Persist active state and fail"]
     C -->|no| E["Persist complete state"]
     B -->|yes| F["Dequeue issue; charge budget; mark active"]
-    F --> G{"parallel-pr and not dry-run?"}
-    G -->|yes| H["Prepare isolated worktree and issue branch"]
-    G -->|no| I["Use prepared repository checkout"]
-    H --> J["For PR modes, seed-push feature branch"]
-    I --> J
-    J --> K["IssueExecutor or DryRunIssueExecutor"]
-    K --> L{"Outcome"}
-    L -->|completed| M["Issue closure / PR delivery"]
-    L -->|decomposed or escalated| N["Mark complete; refresh open issue queue"]
-    L -->|skipped| O["Record skip; continue until budget/queue ends"]
-    L -->|failed| P["Persist active issue; halt"]
-    M --> Q["Persist checkout and queue progress"]
-    N --> Q
-    O --> Q
-    Q --> B
+    F --> G["Use prepared repository checkout"]
+    G --> H["For PR mode, seed-push feature branch"]
+    H --> I["IssueExecutor or DryRunIssueExecutor"]
+    I --> J{"Outcome"}
+    J -->|completed| K["Issue closure / PR delivery"]
+    J -->|decomposed or escalated| L["Mark complete; refresh open issue queue"]
+    J -->|skipped| M["Record skip; continue until budget/queue ends"]
+    J -->|failed| N["Persist active issue; halt"]
+    K --> O["Persist checkout and queue progress"]
+    L --> O
+    M --> O
+    O --> B
     E --> R["Close Pi runtime; optional successful cleanup; summarize"]
     D --> S["Close Pi runtime; retain state and artifacts"]
-    P --> S
+    N --> S
 ```
 
 For each dequeued issue, the worker:
 
 1. Saves the current checkout invariant (`branch` and `HEAD`) and active issue
    in run state.
-2. In `parallel-pr`, creates or resumes
-   `.ralphie/worktrees/<run-id>/issue-<number>/...` at the captured base SHA.
-3. In `pr` or `parallel-pr` (but not dry-run), creates or resumes
+2. In `pr` (but not dry-run), creates or resumes
    `ralphie/issue-<number>` and pushes that branch non-force before agent work.
-4. Passes the issue, concrete repository path, target branch, Octokit client,
+3. Passes the issue, concrete repository path, target branch, Octokit client,
    shared Pi client, model selection, diagnostics, invariant service, and
    AbortSignal to the selected issue executor.
-5. Persists the outcome, performs delivery/closure, marks successful transitions
+4. Persists the outcome, performs delivery/closure, marks successful transitions
    in the queue, refreshes after decomposition, and continues.
 
 A normal issue execution obtains a durable per-issue artifact store at:
@@ -212,7 +206,7 @@ Detailed behavior:
   remote base, ahead/behind counts, and non-force policy before implementation
   and again before the push.
 - The implementation agent gets edit/write/read/bash tools but is denied
-  commits, pushes, branch/worktree/reset/clean operations, and `gh` commands.
+  commits, pushes, branch/reset/clean operations, and `gh` commands.
   A fresh session is used for implementation and for every review fix.
 - Staging is deterministic (`git add --all`). Ralphie reads the exact staged
   binary diff; the review prompt receives only the issue and that diff, bounded
@@ -280,8 +274,7 @@ the queue.
 | Mode | Issue checkout | Delivery | Source issue closure |
 | --- | --- | --- | --- |
 | `lgtm` | Selected base branch | Commit and non-force push directly to that branch; verify remote SHA and clean checkout | Close directly as `completed` after verified delivery. |
-| `pr` | `ralphie/issue-<number>` in the main checkout | Push feature branch, create/find matching PR, publish stored review attempts as marked comments, merge, and verify merged state | PR body contains `Closes #<issue>`; GitHub closes the issue on merge. Serial mode restores the base checkout afterward. |
-| `parallel-pr` | One isolated Git worktree and feature branch per active issue | Same PR lifecycle, concurrently up to `--parallel` | GitHub closes the linked issue on merge; successful worktrees are removed. |
+| `pr` | `ralphie/issue-<number>` in the main checkout | Push feature branch, create/find matching PR, publish stored review attempts as marked comments, merge, and verify merged state | PR body contains `Closes #<issue>`; GitHub closes the issue on merge. The serial run restores the base checkout afterward. |
 | `--dry-run` | Prepared normal checkout | Assess complexity and report the route only; no implementation, decomposition, commit, push, issue mutation, or PR mutation | No issue is closed. The result is `skipped`. |
 
 The direct-push path never uses force. A push rejection is authoritative: the
@@ -331,11 +324,13 @@ Examples of resumable boundaries:
 - a partially created decomposition reuses marker-discovered children and the
   saved key mapping.
 
-Progress events include `runId`, timestamp, stage, status, and message. JSON
-mode emits redacted JSON Lines to stdout; normal modes render to stderr, and
-quiet mode renders failures only. Event details can include issue positions,
-review attempts, session ids, commit SHAs, created issue numbers, and diagnostic
-paths without exposing credentials.
+Progress events include `runId`, timestamp, stage, status, and message. The
+normal output also streams Pi `thinking_delta`, `text_delta`, tool-call, and
+tool-result events as they arrive. JSON mode emits redacted progress and
+`pi_event` JSON Lines to stdout; normal modes render to stderr, and quiet mode
+renders failures only. Event details can include issue positions, review
+attempts, session ids, commit SHAs, created issue numbers, and diagnostic paths
+without exposing credentials.
 
 ## 9. Completion, failure, and cancellation
 
@@ -358,8 +353,8 @@ stateDiagram-v2
 - Pi is closed on success, failure, cancellation, and scoped defects. Ordinary
   failures set process exit code `1`.
 - Cancellation is checked before long-running boundaries and passed into Pi.
-  For a non-parallel active checkout, Ralphie attempts to restore the clean
-  issue checkpoint, saves resumable state, skips cleanup, and exits `130`.
+  Ralphie attempts to restore the clean issue checkpoint, saves resumable state,
+  skips cleanup, and exits `130`.
 - Successful completion persists `complete` before optional `--clean end`
   removes the entire workspace. Cleanup is skipped on failure so state and
   diagnostics remain available.
@@ -375,6 +370,6 @@ stateDiagram-v2
 | Implementation/review/delivery | `src/issues/implementation-executor.ts` |
 | Decomposition and GitHub mutations | `src/issues/decomposition-executor.ts`, `src/github/` |
 | Pi sessions and structured results | `src/agent/`, `src/pi/` |
-| Git checkpoints, safety, branches, and worktrees | `src/git/` |
+| Git checkpoints, safety, and branches | `src/git/` |
 | Durable state and reconciliation | `src/run/`, `src/issues/artifacts.ts` |
 | Progress, redaction, and exit semantics | `src/progress/`, `src/shared/redaction.ts`, `src/process/exit-code.ts` |

@@ -17,9 +17,11 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Changed
 
-- Consolidate the CLI surface: replace `--issue-concurrency` and
-  `--agent-concurrency` with `--parallel` and `--pi-concurrency`; fold
-  `--issue-order` into `--issue-sort <field>[:asc|desc]`; replace
+- Stream the complete Pi event transcript, including token-level thinking and
+  assistant output plus tool calls and results, and remove parallel issue and
+  Pi session execution.
+- Consolidate the CLI surface: fold `--issue-order` into
+  `--issue-sort <field>[:asc|desc]`; replace
   `--model-variant` with `--thinking` and `--agent-dir` with `--pi-dir`;
   replace `--start-clean` and `--cleanup` with `--clean <start|end|both>`;
   and replace `--verbose`, `--json`, and `--quiet` with

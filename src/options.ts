@@ -9,7 +9,6 @@ export const DEFAULT_WORKSPACE = "~/.ralphie";
 export enum WorkflowMode {
     Lgtm = "lgtm",
     Pr = "pr",
-    ParallelPr = "parallel-pr",
 }
 
 export const DEFAULT_WORKFLOW_MODE = WorkflowMode.Lgtm;
@@ -20,8 +19,6 @@ export type RalphieCliOptions = {
     readonly repo?: string;
     readonly workflow?: WorkflowMode;
     readonly branch?: string;
-    readonly parallel?: number;
-    readonly piConcurrency?: number;
     readonly maxIssues?: number;
     readonly issueLabels?: ReadonlyArray<string>;
     readonly issueSort?: IssueSort;
@@ -42,8 +39,6 @@ export type ResolvedRalphieConfig = {
     readonly repo: string;
     readonly workflow: WorkflowMode;
     readonly branch?: string;
-    readonly parallel: number;
-    readonly piConcurrency?: number;
     readonly maxIssues?: number;
     readonly issueLabels: ReadonlyArray<string>;
     readonly issueSort: IssueSort;
@@ -83,8 +78,6 @@ const buildResolvedConfig = (
     repo: parseRepositorySlug(options.repo!).slug,
     workflow: withDefault(options.workflow, DEFAULT_WORKFLOW_MODE),
     ...optionalProperty("branch", options.branch),
-    parallel: options.parallel ?? 1,
-    ...optionalProperty("piConcurrency", options.piConcurrency),
     ...optionalProperty("maxIssues", options.maxIssues),
     issueLabels: [...(options.issueLabels ?? [])],
     issueSort: options.issueSort ?? IssueSort.Created,

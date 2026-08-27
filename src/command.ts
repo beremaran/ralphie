@@ -14,6 +14,7 @@ import {
     makeProgressReporter,
     type ProgressRenderMode,
 } from "./progress/progress.ts";
+import { makePiTranscriptRenderer } from "./progress/transcript.ts";
 import { type PiProviderConfig } from "./pi/config.ts";
 import { makePiService } from "./pi/server.ts";
 import { makeLiveRuntime } from "./runtime.ts";
@@ -27,8 +28,6 @@ import { resolveWorkspacePath } from "./workspace/workspace.ts";
 const cliOptions = {
     branch: { type: "string", short: "b" },
     workflow: { type: "string" },
-    parallel: { type: "string" },
-    "pi-concurrency": { type: "string" },
     "max-issues": { type: "string" },
     "issue-label": { type: "string", multiple: true },
     "issue-sort": { type: "string" },
@@ -153,8 +152,6 @@ export const parseCliArgs = (args: ReadonlyArray<string>): ParsedCli => {
                 asString(values, "workflow") === undefined
                     ? undefined
                     : z.enum(WorkflowMode).parse(asString(values, "workflow")),
-            parallel: asNumber(values, "parallel"),
-            piConcurrency: asNumber(values, "pi-concurrency"),
             maxIssues: asNumber(values, "max-issues"),
             issueLabels,
             ...(issueSortValue === undefined
@@ -222,9 +219,7 @@ Run a GitHub issue queue through Pi.
 
 Options:
   -b, --branch <name>          Branch to operate on
-      --workflow <mode>        lgtm, pr, or parallel-pr
-      --parallel <n>           Concurrent issues in parallel-pr mode
-      --pi-concurrency <n>     Maximum concurrent Pi tasks
+      --workflow <mode>        lgtm or pr
       --max-issues <n>         Maximum issues to process
       --issue-label <label>    Include only issues with this label (repeatable)
       --issue-sort <sort>      created, updated, or comments, optionally :asc or :desc
@@ -235,7 +230,7 @@ Options:
       --dry-run                Assess without mutations
       --resume <path>          Resume saved run state
       --clean <when>           Remove the workspace at start, end, or both
-      --output <mode>          Progress output: default, verbose, quiet, or json
+      --output <mode>          Output: live transcript/progress, verbose, quiet, or json
   -h, --help                   Show this help
   -v, --version                Show version
 
@@ -299,6 +294,24 @@ const makeCommandProgress = (
         eventLogPath: eventLogPathFor(config, runId),
     });
 
+const makeCommandTranscript = (
+    config: ResolvedRalphieConfig,
+    terminal: CliTerminalInfo,
+    progress: ReturnType<typeof makeProgressReporter>,
+) =>
+    config.quiet
+        ? undefined
+        : makePiTranscriptRenderer({
+              write:
+                  progress.writeRaw ??
+                  ((text) =>
+                      (config.json ? process.stdout : process.stderr).write(
+                          text,
+                      )),
+              colors: terminal.isInteractive && !terminal.isCI,
+              json: config.json,
+          });
+
 const workflowOptionsFor = (
     config: ResolvedRalphieConfig,
     input: RunCommandInput,
@@ -306,8 +319,6 @@ const workflowOptionsFor = (
     resumeState: RunState | undefined,
 ) => ({
     workflow: config.workflow,
-    issueConcurrency: config.parallel,
-    agentConcurrency: config.piConcurrency,
     repo: config.repo,
     branch: config.branch,
     maxIssues: config.maxIssues,
@@ -350,8 +361,9 @@ export const runCommand = async (
     const terminal = input.terminal ?? terminalInfo();
     const runId = resumeState?.runId ?? crypto.randomUUID();
     const progress = makeCommandProgress(config, terminal, runId);
+    const transcript = makeCommandTranscript(config, terminal, progress);
     const runtime = makeLiveRuntime({
-        pi: makePiService(resolvePiConfig(config)),
+        pi: makePiService(resolvePiConfig(config), transcript),
         progress,
     });
 

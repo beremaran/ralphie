@@ -6,7 +6,7 @@ import {
     resolvePiAgentDir,
     type PiProviderConfig,
 } from "./config.ts";
-import { makePiClient, type PiClient } from "./client.ts";
+import { makePiClient, type PiClient, type PiEventListener } from "./client.ts";
 
 export type PiRuntime = {
     readonly url: string;
@@ -19,7 +19,10 @@ export type PiService = {
 };
 
 /** Build the Pi service for a resolved run configuration. */
-export const makePiService = (config: PiProviderConfig): PiService => {
+export const makePiService = (
+    config: PiProviderConfig,
+    eventListener?: PiEventListener,
+): PiService => {
     let resolvedPromise:
         | Promise<Awaited<ReturnType<typeof resolvePiAgentDir>>>
         | undefined;
@@ -41,7 +44,7 @@ export const makePiService = (config: PiProviderConfig): PiService => {
                     authPath: resolved.authPath,
                     modelsPath: resolved.modelsPath,
                 });
-                const client = makePiClient(modelRuntime);
+                const client = makePiClient(modelRuntime, eventListener);
                 return {
                     url: "embedded://pi",
                     client,

@@ -36,8 +36,9 @@ mutations, run state, recovery, and safety checks deterministic.
   resulting changes itself; agents do not own the delivery protocol.
 - **Crash-safe recovery** — versioned run state, issue checkpoints, artifacts,
   and idempotent reconciliation make interrupted runs resumable.
-- **Observable by default** — interactive progress, durable audit events,
-  JSON Lines output, quiet mode, and credential redaction are built in.
+- **Observable by default** — live token-level Pi transcripts, interactive
+  progress, durable audit events, JSON Lines output, quiet mode, and credential
+  redaction are built in.
 - **Bounded autonomy** — review loops stop after five attempts, unsafe direct
   pushes are refused, and force pushes are never used.
 
@@ -158,16 +159,6 @@ the workflow on the command line:
 
 ```bash
 ralphie owner/repository --workflow pr
-```
-
-`parallel-pr` uses the same PR lifecycle but gives every active issue an isolated
-Git worktree and runs up to `--parallel` issues concurrently. A
-`--pi-concurrency` limit independently bounds complete Pi agent tasks, which
-is useful for protecting a local inference server:
-
-```bash
-ralphie owner/repository --workflow parallel-pr \
-  --parallel 4 --pi-concurrency 2
 ```
 
 ## How it works
@@ -354,9 +345,7 @@ is supplied explicitly as an option:
 
 ```bash
 ralphie owner/repository \
-  --workflow parallel-pr \
-  --parallel 4 \
-  --pi-concurrency 2 \
+  --workflow pr \
   --branch main \
   --issue-label bug \
   --max-issues 10
@@ -429,9 +418,7 @@ HTTPS/SSH clone URL.
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `--workflow <mode>` | `lgtm` | Select `lgtm`, `pr`, or isolated concurrent `parallel-pr` delivery. |
-| `--parallel <count>` | `1` | Concurrent issues in `parallel-pr`. |
-| `--pi-concurrency <count>` | unlimited | Maximum concurrent Pi agent tasks. |
+| `--workflow <mode>` | `lgtm` | Select sequential `lgtm` or `pr` delivery. |
 | `-b, --branch <name>` | `main`, otherwise `master` | Base branch; `lgtm` pushes it directly, while PR workflows open against it. |
 | `--max-issues <count>` | unlimited | Positive maximum number of issues charged to this run. |
 | `--issue-label <label>` | none | Require a label; repeat the flag to require multiple labels. |
@@ -443,7 +430,7 @@ HTTPS/SSH clone URL.
 | `--dry-run` | off | Assess and route issues without implementation or mutations. |
 | `--resume <state.json>` | none | Continue a compatible saved run. |
 | `--clean <when>` | off | Remove the workspace at `start`, `end`, or `both` (before any step and/or after success). |
-| `--output <mode>` | `default` | Progress mode: `default`, `verbose`, `quiet`, or `json`. |
+| `--output <mode>` | `default` | Output mode: live transcript and progress, `verbose`, `quiet`, or `json`. |
 
 Model credentials are read from environment variables:
 
@@ -456,13 +443,17 @@ Run `ralphie --help` for the help generated from the current command schema.
 
 ## Progress, state, and recovery
 
+Ralphie streams the complete Pi transcript while each task runs, including
+thinking deltas, assistant text, tool calls, and tool results. Tasks and issues
+are intentionally processed sequentially so this output remains ordered.
+
 Ralphie adapts its progress renderer to its environment:
 
-- interactive terminals receive one in-place status line for the active leaf
-  stage, while completed milestones remain in the scrollback;
+- interactive terminals receive streamed Pi output plus one in-place status line
+  for the active leaf stage, while completed milestones remain in the scrollback;
 - CI and redirected output receive durable, append-only lines;
 - `--output verbose` adds operational details;
-- `--output json` writes one JSON object per line to stdout; and
+- `--output json` writes progress and `pi_event` objects one per line to stdout; and
 - `--output quiet` suppresses everything except failures.
 
 JSON events use a stable operational vocabulary and include `runId`,

@@ -23,7 +23,6 @@ describe("CLI configuration", () => {
         ).toEqual({
             repo: "owner/repo",
             workflow: DEFAULT_WORKFLOW_MODE,
-            parallel: 1,
             issueLabels: [],
             issueSort: IssueSort.Created,
             issueOrder: IssueOrder.Ascending,
@@ -42,10 +41,8 @@ describe("CLI configuration", () => {
         expect(
             resolveRalphieConfig({
                 repo: "https://github.com/Owner/Repo.git",
-                workflow: WorkflowMode.ParallelPr,
+                workflow: WorkflowMode.Pr,
                 branch: "develop",
-                parallel: 4,
-                piConcurrency: 2,
                 maxIssues: 3,
                 issueLabels: ["bug", "ready"],
                 issueSort: IssueSort.Updated,
@@ -65,10 +62,8 @@ describe("CLI configuration", () => {
             }),
         ).toMatchObject({
             repo: "Owner/Repo",
-            workflow: WorkflowMode.ParallelPr,
+            workflow: WorkflowMode.Pr,
             branch: "develop",
-            parallel: 4,
-            piConcurrency: 2,
             maxIssues: 3,
             issueLabels: ["bug", "ready"],
             issueSort: IssueSort.Updated,

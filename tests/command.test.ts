@@ -9,14 +9,10 @@ describe("native CLI parser", () => {
         const parsed = parseCliArgs([
             "owner/repository",
             "--workflow",
-            "parallel-pr",
+            "pr",
             "--issue-label",
             "bug",
             "--issue-label=ready",
-            "--parallel",
-            "2",
-            "--pi-concurrency",
-            "3",
             "--max-issues",
             "3",
             "--dry-run",
@@ -26,10 +22,8 @@ describe("native CLI parser", () => {
         expect(parsed.version).toBe(false);
         expect(parsed.options).toMatchObject({
             repo: "owner/repository",
-            workflow: WorkflowMode.ParallelPr,
+            workflow: WorkflowMode.Pr,
             issueLabels: ["bug", "ready"],
-            parallel: 2,
-            piConcurrency: 3,
             maxIssues: 3,
             dryRun: true,
         });

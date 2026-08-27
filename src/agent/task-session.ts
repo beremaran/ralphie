@@ -13,7 +13,6 @@ import {
 } from "../progress/progress.ts";
 import { RalphieError } from "../shared/error.ts";
 import type { PiModel, PiSelection } from "./model.ts";
-import { withPiAgentPermit } from "./concurrency.ts";
 
 export type PiTaskSessionRequest = {
     readonly directory: string;
@@ -398,26 +397,25 @@ export const createPiTaskSession = async (
 };
 
 /** Run an ordinary text task in a new session. */
-export const runPiTask = (
+export const runPiTask = async (
     client: PiClient,
     request: PiTaskRequest,
-): Promise<PiTaskResult> =>
-    withPiAgentPermit(client, async () => {
-        try {
-            const session = await createPiTaskSession(client, request);
-            return await promptPiTask(client, session, request);
-        } catch (cause) {
-            const error =
-                cause instanceof RalphieError
-                    ? cause
-                    : new RalphieError({
-                          message: "Failed to run an Pi task.",
-                          cause,
-                      });
-            await reportPiFailure(request, error);
-            throw error;
-        }
-    });
+): Promise<PiTaskResult> => {
+    try {
+        const session = await createPiTaskSession(client, request);
+        return await promptPiTask(client, session, request);
+    } catch (cause) {
+        const error =
+            cause instanceof RalphieError
+                ? cause
+                : new RalphieError({
+                      message: "Failed to run an Pi task.",
+                      cause,
+                  });
+        await reportPiFailure(request, error);
+        throw error;
+    }
+};
 
 export type PiTaskSessionService = {
     readonly create: (request: PiTaskSessionRequest) => Promise<PiTaskSession>;

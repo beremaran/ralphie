@@ -27,10 +27,6 @@ import {
     type GitRepositoryService,
 } from "./git/repository.ts";
 import {
-    makeGitWorktreeService,
-    type GitWorktreeService,
-} from "./git/worktree.ts";
-import {
     makeGitHubClientService,
     type GitHubClientService,
 } from "./github/client.ts";
@@ -92,7 +88,6 @@ export type RalphieRuntime = {
     readonly gitIssueOperations: GitIssueOperationsService;
     readonly gitIssuePreparation: GitIssuePreparationService;
     readonly gitRemoteSafety: GitRemoteSafetyService;
-    readonly gitWorktrees: GitWorktreeService;
     readonly issueArtifactStore: IssueArtifactStoreService;
     readonly complexityAssessment: ComplexityAssessmentService;
     readonly decompositionExecutor: DecompositionExecutorService;
@@ -132,7 +127,6 @@ export const makeLiveRuntime = ({
     const gitIssueCheckpoint = makeGitIssueCheckpointService(commandRunner);
     const gitIssueOperations = makeGitIssueOperationsService(commandRunner);
     const gitRemoteSafety = makeGitRemoteSafetyService(commandRunner);
-    const gitWorktrees = makeGitWorktreeService(commandRunner);
     const issueArtifactStore = makeIssueArtifactStoreService();
     const actualGitIssuePreparation = makeGitIssuePreparationService(
         gitIssueCheckpoint,
@@ -178,7 +172,6 @@ export const makeLiveRuntime = ({
         gitIssueOperations,
         gitIssuePreparation: actualGitIssuePreparation,
         gitRemoteSafety,
-        gitWorktrees,
         issueArtifactStore,
         complexityAssessment,
         decompositionExecutor,

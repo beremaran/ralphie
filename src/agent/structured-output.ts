@@ -1,7 +1,6 @@
 import type { PiClient } from "../pi/client.ts";
 import { z } from "zod";
 
-import { withPiAgentPermit } from "./concurrency.ts";
 import { RalphieError } from "../shared/error.ts";
 import type { PiModel } from "./model.ts";
 import {
@@ -172,36 +171,35 @@ const promptForStructuredOutput = async <Output>(
 export const requestStructuredOutput = async <Output>(
     client: PiClient,
     request: StructuredOutputRequest<Output>,
-): Promise<StructuredOutputResult<Output>> =>
-    withPiAgentPermit(client, async () => {
-        try {
-            const session = await client.session.create(
-                createSessionInput(request),
-                signalOptions(request.signal),
+): Promise<StructuredOutputResult<Output>> => {
+    try {
+        const session = await client.session.create(
+            createSessionInput(request),
+            signalOptions(request.signal),
+        );
+
+        if (session.error !== undefined || session.data === undefined) {
+            throw new Error(
+                `Could not create Pi session: ${describeApiError(session.error)}`,
             );
-
-            if (session.error !== undefined || session.data === undefined) {
-                throw new Error(
-                    `Could not create Pi session: ${describeApiError(session.error)}`,
-                );
-            }
-
-            recordSessionDiagnostics(request, session.data.id);
-
-            return await promptForStructuredOutput(
-                client,
-                request,
-                session.data.id,
-            );
-        } catch (cause) {
-            const error =
-                cause instanceof RalphieError
-                    ? cause
-                    : new RalphieError({
-                          message: "Failed to get structured output from Pi.",
-                          cause,
-                      });
-            await reportPiFailure(request, error);
-            throw error;
         }
-    });
+
+        recordSessionDiagnostics(request, session.data.id);
+
+        return await promptForStructuredOutput(
+            client,
+            request,
+            session.data.id,
+        );
+    } catch (cause) {
+        const error =
+            cause instanceof RalphieError
+                ? cause
+                : new RalphieError({
+                      message: "Failed to get structured output from Pi.",
+                      cause,
+                  });
+        await reportPiFailure(request, error);
+        throw error;
+    }
+};

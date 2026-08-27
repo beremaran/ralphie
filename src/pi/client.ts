@@ -5,6 +5,7 @@ import {
     getAgentDir,
     ModelRuntime,
     SessionManager,
+    type AgentSessionEvent,
     type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { randomUUID } from "node:crypto";
@@ -41,6 +42,19 @@ export type PiPart = {
     readonly text?: string;
     readonly [key: string]: unknown;
 };
+
+export type PiSessionEvent = AgentSessionEvent;
+
+export type PiEventContext = {
+    readonly sessionID: string;
+    readonly directory: string;
+    readonly title?: string;
+};
+
+export type PiEventListener = (
+    event: PiSessionEvent,
+    context: PiEventContext,
+) => void;
 
 type CreateSessionInput = {
     readonly directory: string;
@@ -436,7 +450,10 @@ const makePromptResponse = (
     };
 };
 
-export const makePiClient = (modelRuntime: ModelRuntime): PiClient => {
+export const makePiClient = (
+    modelRuntime: ModelRuntime,
+    eventListener?: PiEventListener,
+): PiClient => {
     const pending = new Map<string, PendingSession>();
     const active = new Set<{
         abort: () => Promise<void>;
@@ -475,6 +492,16 @@ export const makePiClient = (modelRuntime: ModelRuntime): PiClient => {
                     tools,
                 );
                 active.add(session);
+                const unsubscribe =
+                    eventListener === undefined
+                        ? undefined
+                        : session.subscribe((event) =>
+                              eventListener(event, {
+                                  sessionID: input.sessionID,
+                                  directory: input.directory,
+                                  title: created.title,
+                              }),
+                          );
                 const abort = () => void session.abort();
                 options?.signal?.addEventListener("abort", abort, {
                     once: true,
@@ -492,6 +519,7 @@ export const makePiClient = (modelRuntime: ModelRuntime): PiClient => {
                     );
                     return makePromptResponse(input, assistant, structured);
                 } finally {
+                    unsubscribe?.();
                     options?.signal?.removeEventListener("abort", abort);
                     active.delete(session);
                     pending.delete(input.sessionID);

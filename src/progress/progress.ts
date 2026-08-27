@@ -70,6 +70,8 @@ export type ProgressEvent = ProgressUpdate & {
 
 export type ProgressReporterService = {
     readonly emit: (update: ProgressUpdate) => Promise<void>;
+    /** Write streamed agent output without allowing an interactive status line to corrupt it. */
+    readonly writeRaw?: (text: string) => void;
     /** Stop writing durable events while continuing to render progress. */
     readonly stopPersisting: () => Promise<void>;
 };
@@ -276,6 +278,10 @@ export const makeProgressReporter = ({
     };
 
     return {
+        writeRaw: (text) => {
+            clearLiveLine();
+            write(text);
+        },
         emit: async (update) => {
             const emittedAt = now();
             const event = makeProgressEvent(update, runId, emittedAt);

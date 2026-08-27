@@ -7,7 +7,6 @@ import type { GitRepositoryService } from "../src/git/repository.ts";
 import type { GitRepositoryInvariantService } from "../src/git/repository-invariant.ts";
 import type { GitIssueCheckpointService } from "../src/git/issue-checkpoint.ts";
 import type { GitIssueOperationsService } from "../src/git/issue-operations.ts";
-import type { GitWorktreeService } from "../src/git/worktree.ts";
 import type { GitHubClientService } from "../src/github/client.ts";
 import type { GitHubPullRequestService } from "../src/github/pull-requests.ts";
 import type { GitHubIssueMutationService } from "../src/github/issue-mutations.ts";
@@ -210,26 +209,6 @@ const testRuntime = (
             calls.push(`restoreBase:${branch}`);
         },
     };
-    const worktrees: GitWorktreeService = {
-        prepareIssue: async ({
-            workspace,
-            runId,
-            issueNumber,
-            branch,
-            repository,
-        }) => {
-            calls.push(`prepareWorktrees:${issueNumber}`);
-            return {
-                path: `${workspace}/.ralphie/worktrees/${runId}/issue-${issueNumber}`,
-                ...repository,
-                repositoryPath: `${workspace}/.ralphie/worktrees/${runId}/issue-${issueNumber}/${repository.repository.split("/").at(-1)}`,
-                branch,
-            };
-        },
-        removeIssue: async (_sources, prepared) => {
-            calls.push(`removeWorktrees:${prepared.path}`);
-        },
-    };
     const artifactStore: IssueArtifactStoreService = {
         forIssue: (issueNumber) => makeIssueArtifactStore(issueNumber),
     };
@@ -305,7 +284,6 @@ const testRuntime = (
         gitIssueOperations: operations,
         gitIssuePreparation: {} as never,
         gitRemoteSafety: {} as never,
-        gitWorktrees: worktrees,
         issueArtifactStore: artifactStore,
         complexityAssessment: {} as never,
         decompositionExecutor: {} as never,
@@ -394,57 +372,6 @@ describe("workflow", () => {
         expect(calls).toContain("mergePullRequest:owner/repo:1");
         expect(calls).toContain("restoreBase:develop");
         expect(calls).not.toContain("closeIssue:42");
-    });
-
-    test("parallel-pr runs isolated issues concurrently and removes successful worktrees", async () => {
-        const calls: string[] = [];
-        const states: RunState[] = [];
-        let active = 0;
-        let maximumActive = 0;
-        let release: (() => void) | undefined;
-        const barrier = new Promise<void>((resolve) => {
-            release = resolve;
-        });
-        const summary = await workflow(
-            {
-                ...baseOptions,
-                workflow: WorkflowMode.ParallelPr,
-                issueConcurrency: 2,
-                maxIssues: 2,
-            },
-            testRuntime(calls, states, {
-                issueLists: [[firstIssue, secondIssue]],
-                outcomes: [
-                    {
-                        kind: IssueExecutionOutcomeKind.Completed,
-                        completion: "pushed-commit",
-                        commitSha: "commit-42",
-                    },
-                    {
-                        kind: IssueExecutionOutcomeKind.Completed,
-                        completion: "pushed-commit",
-                        commitSha: "commit-43",
-                    },
-                ],
-                executeGate: async () => {
-                    active += 1;
-                    maximumActive = Math.max(maximumActive, active);
-                    if (active === 2) release?.();
-                    await barrier;
-                    active -= 1;
-                },
-            }),
-        );
-        expect(summary.counts.completed).toBe(2);
-        expect(maximumActive).toBe(2);
-        expect(states.at(-1)?.issueConcurrency).toBe(2);
-        expect(calls).toContain("prepareWorktrees:42");
-        expect(calls).toContain("prepareWorktrees:43");
-        expect(
-            calls.filter((call) => call.startsWith("removeWorktrees:")),
-        ).toHaveLength(2);
-        expect(calls).not.toContain("closeIssue:42");
-        expect(calls).not.toContain("closeIssue:43");
     });
 
     test("dry-run assesses through the queue without invoking mutation execution", async () => {

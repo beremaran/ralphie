@@ -1,17 +1,9 @@
 import { join } from "node:path";
 
-import {
-    registerPiAgentSemaphore,
-    makePiAgentSemaphore,
-} from "./agent/concurrency.ts";
 import { makePiSessionDiagnostics } from "./agent/task-session.ts";
 import type { PiModel, PiSelection } from "./agent/model.ts";
 import { type GitHubIssueCloseReason } from "./github/issue-mutations.ts";
 import type { GitHubIssue, IssueFilters } from "./github/issues.ts";
-import type {
-    PreparedIssueWorktree,
-    RepositoryCheckout,
-} from "./git/worktree.ts";
 import {
     type IssueCompletionKind,
     IssueExecutionOutcomeKind,
@@ -186,7 +178,6 @@ type PersistWorkflowStateInput = {
     readonly repository: string;
     readonly branch: string;
     readonly workflowMode: WorkflowMode;
-    readonly issueConcurrency: number;
     readonly dryRun: boolean;
     readonly selection: PiSelection;
     readonly issueLimit?: number;
@@ -223,7 +214,6 @@ const persistWorkflowState = async (
         repository: input.repository,
         branch: input.branch,
         workflow: input.workflowMode,
-        issueConcurrency: input.issueConcurrency,
         dryRun: input.dryRun,
         selection: input.selection,
         ...(input.issueLimit === undefined
@@ -250,9 +240,14 @@ type WorkflowIssueContext = {
     readonly total: number;
     readonly featureBranch: string;
     readonly issueBaseCheckout: WorkflowCheckout;
-    readonly preparedIssueWorktree?: PreparedIssueWorktree;
     readonly issueRepositories: ReadonlyArray<RepositoryCheckout>;
     readonly resumedClosureOutcome?: IssueExecutionOutcome;
+};
+
+type RepositoryCheckout = {
+    readonly repository: string;
+    readonly repositoryPath: string;
+    readonly branch: string;
 };
 
 const resumedClosureOutcomeFor = (
@@ -275,8 +270,6 @@ const resumedClosureOutcomeFor = (
 
 export type WorkflowOptions = {
     readonly workflow?: WorkflowMode;
-    readonly issueConcurrency?: number;
-    readonly agentConcurrency?: number;
     readonly repo: string;
     readonly branch?: string;
     readonly maxIssues?: number;
@@ -297,8 +290,6 @@ export type WorkflowOptions = {
 
 type WorkflowConfiguration = {
     readonly requestedWorkflow: WorkflowMode;
-    readonly issueConcurrency: number;
-    readonly agentConcurrency?: number;
     readonly repo: string;
     readonly requestedBranch?: string;
     readonly maxIssues?: number;
@@ -318,7 +309,6 @@ type WorkflowConfiguration = {
     readonly actualRunId: string;
     readonly effectiveDryRun: boolean;
     readonly workflowMode: WorkflowMode;
-    readonly effectiveIssueConcurrency: number;
     readonly usesPullRequests: boolean;
     readonly statePath: string;
 };
@@ -335,8 +325,6 @@ const makeWorkflowConfiguration = (
 ): WorkflowConfiguration => {
     const {
         workflow: requestedWorkflow = DEFAULT_WORKFLOW_MODE,
-        issueConcurrency = 1,
-        agentConcurrency,
         repo,
         branch: requestedBranch,
         maxIssues,
@@ -357,11 +345,7 @@ const makeWorkflowConfiguration = (
     const actualRunId = resumeState?.runId ?? runId;
     const effectiveDryRun = resumeState?.dryRun ?? dryRun;
     const workflowMode = resumeState?.workflow ?? requestedWorkflow;
-    const effectiveIssueConcurrency =
-        resumeState?.issueConcurrency ?? issueConcurrency;
-    const usesPullRequests =
-        workflowMode === WorkflowMode.Pr ||
-        workflowMode === WorkflowMode.ParallelPr;
+    const usesPullRequests = workflowMode === WorkflowMode.Pr;
     const statePath =
         resumePath ??
         join(
@@ -373,8 +357,6 @@ const makeWorkflowConfiguration = (
         );
     return {
         requestedWorkflow,
-        issueConcurrency,
-        agentConcurrency,
         repo,
         requestedBranch,
         maxIssues,
@@ -394,7 +376,6 @@ const makeWorkflowConfiguration = (
         actualRunId,
         effectiveDryRun,
         workflowMode,
-        effectiveIssueConcurrency,
         usesPullRequests,
         statePath,
     };
@@ -500,8 +481,6 @@ export const workflow = async (
     const config = makeWorkflowConfiguration(options);
     const {
         requestedWorkflow,
-        issueConcurrency,
-        agentConcurrency,
         repo,
         requestedBranch,
         maxIssues,
@@ -521,7 +500,6 @@ export const workflow = async (
         actualRunId,
         effectiveDryRun,
         workflowMode,
-        effectiveIssueConcurrency,
         usesPullRequests,
         statePath,
     } = config;
@@ -537,7 +515,6 @@ export const workflow = async (
         gitRepositoryInvariant: invariantService,
         gitIssueCheckpoint: checkpoints,
         gitIssueOperations: issueOperations,
-        gitWorktrees: worktrees,
         issueArtifactStore: artifactStores,
         issueExecutor: normalIssueExecutor,
         dryRunIssueExecutor,
@@ -721,7 +698,6 @@ export const workflow = async (
                         repository: repo,
                         branch,
                         workflowMode,
-                        issueConcurrency: effectiveIssueConcurrency,
                         dryRun: effectiveDryRun,
                         selection,
                         issueLimit: resumeState?.maxIssues ?? maxIssues,
@@ -768,24 +744,6 @@ export const workflow = async (
             diagnostics,
         } = await prepareWorkflow();
 
-        const prepareIssueWorktree = async (
-            issue: GitHubIssue,
-            featureBranch: string,
-            issueBaseCheckout: WorkflowCheckout,
-        ): Promise<PreparedIssueWorktree | undefined> => {
-            if (workflowMode !== WorkflowMode.ParallelPr || effectiveDryRun) {
-                return undefined;
-            }
-            return await worktrees.prepareIssue({
-                workspace,
-                runId: actualRunId,
-                issueNumber: issue.number,
-                branch: featureBranch,
-                repository: repositoryCheckouts[0]!,
-                baseSha: issueBaseCheckout.head,
-            });
-        };
-
         const pushIssueBranch = async (
             issueRepositories: ReadonlyArray<RepositoryCheckout>,
             featureBranch: string,
@@ -802,14 +760,12 @@ export const workflow = async (
             await Promise.all(
                 issueRepositories.map(async (issueRepository) => {
                     const preparedBranch =
-                        workflowMode === WorkflowMode.ParallelPr
-                            ? { headSha: issueBaseCheckout.head }
-                            : await issueOperations.createOrCheckoutFeatureBranch(
-                                  issueRepository.repositoryPath,
-                                  featureBranch,
-                                  issueRepository.branch,
-                                  issueBaseCheckout.head,
-                              );
+                        await issueOperations.createOrCheckoutFeatureBranch(
+                            issueRepository.repositoryPath,
+                            featureBranch,
+                            issueRepository.branch,
+                            issueBaseCheckout.head,
+                        );
                     await issueOperations.push(
                         issueRepository.repositoryPath,
                         featureBranch,
@@ -819,11 +775,9 @@ export const workflow = async (
             );
         };
 
-        const restoreIssueCheckout = (
-            issueBaseCheckout: WorkflowCheckout,
-        ): (() => Promise<void>) | undefined => {
-            if (workflowMode === WorkflowMode.ParallelPr) return undefined;
-            return async () => {
+        const restoreIssueCheckout =
+            (issueBaseCheckout: WorkflowCheckout): (() => Promise<void>) =>
+            async () => {
                 await Promise.all(
                     repositoryCheckouts.map((issueRepository) =>
                         checkpoints.restore(issueRepository.repositoryPath, {
@@ -833,7 +787,6 @@ export const workflow = async (
                     ),
                 );
             };
-        };
 
         const prepareIssue = async (
             issue: GitHubIssue,
@@ -857,15 +810,7 @@ export const workflow = async (
             };
             const issueBaseCheckout = { ...checkout };
             const featureBranch = issueFeatureBranch(issue.number);
-            const preparedIssueWorktree = await prepareIssueWorktree(
-                issue,
-                featureBranch,
-                issueBaseCheckout,
-            );
-            const issueRepositories: ReadonlyArray<RepositoryCheckout> =
-                preparedIssueWorktree
-                    ? [preparedIssueWorktree]
-                    : repositoryCheckouts;
+            const issueRepositories = repositoryCheckouts;
             await pushIssueBranch(
                 issueRepositories,
                 featureBranch,
@@ -881,7 +826,6 @@ export const workflow = async (
                 total,
                 featureBranch,
                 issueBaseCheckout,
-                preparedIssueWorktree,
                 issueRepositories,
                 resumedClosureOutcome,
             };
@@ -966,12 +910,10 @@ export const workflow = async (
                 reviews,
             );
             await githubPullRequests.merge(octokit, repo, pullRequest.number);
-            if (workflowMode !== WorkflowMode.ParallelPr) {
-                await issueOperations.restoreBaseCheckout(
-                    issueRepository.repositoryPath,
-                    branch,
-                );
-            }
+            await issueOperations.restoreBaseCheckout(
+                issueRepository.repositoryPath,
+                branch,
+            );
         };
 
         const closeCompletedIssue = async (
@@ -996,12 +938,6 @@ export const workflow = async (
                         details: { completion: outcome.completion },
                     },
                 );
-                if (issueContext.preparedIssueWorktree !== undefined) {
-                    await worktrees.removeIssue(
-                        repositoryCheckouts[0]!,
-                        issueContext.preparedIssueWorktree,
-                    );
-                }
                 return;
             }
             await track(
@@ -1072,28 +1008,10 @@ export const workflow = async (
             }
         };
 
-        const removeIssueWorktree = async (
-            issueContext: WorkflowIssueContext,
-            outcome: IssueExecutionOutcome,
-        ): Promise<void> => {
-            if (issueContext.preparedIssueWorktree === undefined) return;
-            if (
-                outcome.kind === IssueExecutionOutcomeKind.Completed &&
-                outcome.completion === "pushed-commit"
-            ) {
-                return;
-            }
-            await worktrees.removeIssue(
-                repositoryCheckouts[0]!,
-                issueContext.preparedIssueWorktree,
-            );
-        };
-
         const finishSuccessfulIssue = async (
             issueContext: WorkflowIssueContext,
             outcome: IssueExecutionOutcome,
         ): Promise<void> => {
-            await removeIssueWorktree(issueContext, outcome);
             activeIssue = undefined;
             activeQueueIssues.delete(issueContext.issue.number);
             restoreCancellationCheckout = undefined;
@@ -1166,16 +1084,7 @@ export const workflow = async (
                     if (!(await processNextIssue(server))) break;
                 }
             };
-            if (workflowMode === WorkflowMode.ParallelPr) {
-                await Promise.all(
-                    Array.from(
-                        { length: Math.max(1, effectiveIssueConcurrency) },
-                        () => worker(),
-                    ),
-                );
-            } else {
-                await worker();
-            }
+            await worker();
         };
 
         const server = await track(
@@ -1185,14 +1094,6 @@ export const workflow = async (
             () => pi.start(),
             "Pi runtime ready.",
         );
-
-        // Attach the run-wide permit before any issue worker starts.
-        if (agentConcurrency !== undefined) {
-            registerPiAgentSemaphore(
-                server.client,
-                makePiAgentSemaphore(agentConcurrency),
-            );
-        }
 
         try {
             await processQueue(server);
