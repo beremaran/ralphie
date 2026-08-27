@@ -1,60 +1,32 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Exit, Layer } from "effect";
 
-import {
-  GitRepositoryInvariant,
-  GitRepositoryInvariantLive,
-} from "../../src/git/repository-invariant.ts";
-import { CommandRunner } from "../../src/process/command-runner.ts";
+import { makeGitRepositoryInvariantService } from "../../src/git/repository-invariant.ts";
 
-const runnerLayer = (outputs: ReadonlyArray<string>) => {
-  let index = 0;
-  return Layer.succeed(CommandRunner, {
-    run: () =>
-      Effect.succeed({
-        exitCode: 0,
-        stdout: outputs[index++] ?? "",
-        stderr: "",
-      }),
-  });
+const runner = (outputs: ReadonlyArray<string>) => {
+    let index = 0;
+    return {
+        run: async () => ({
+            exitCode: 0,
+            stdout: outputs[index++] ?? "",
+            stderr: "",
+        }),
+    };
 };
 
 describe("Git repository invariants", () => {
-  test("captures branch and HEAD", async () => {
-    const invariant = await Effect.gen(function* () {
-      const service = yield* GitRepositoryInvariant;
-      return yield* service.capture("/workspace/repo");
-    }).pipe(
-      Effect.provide(
-        GitRepositoryInvariantLive.pipe(
-          Layer.provide(runnerLayer(["main", "abc123"])),
-        ),
-      ),
-      Effect.runPromise,
-    );
+    test("captures branch and HEAD", async () => {
+        const invariant = await makeGitRepositoryInvariantService(
+            runner(["main", "abc123"]),
+        ).capture("/workspace/repo");
 
-    expect(invariant).toEqual({
-      branch: "main",
-      head: "abc123",
+        expect(invariant).toEqual({ branch: "main", head: "abc123" });
     });
-  });
 
-  test("fails when branch or HEAD changes", async () => {
-    const branchExit = await Effect.gen(function* () {
-      const service = yield* GitRepositoryInvariant;
-      yield* service.verify("/workspace/repo", {
-        branch: "main",
-        head: "abc123",
-      });
-    }).pipe(
-      Effect.provide(
-        GitRepositoryInvariantLive.pipe(
-          Layer.provide(runnerLayer(["feature", "abc123"])),
-        ),
-      ),
-      Effect.runPromiseExit,
-    );
-
-    expect(Exit.isFailure(branchExit)).toBe(true);
-  });
+    test("fails when branch or HEAD changes", async () => {
+        await expect(
+            makeGitRepositoryInvariantService(
+                runner(["feature", "abc123"]),
+            ).verify("/workspace/repo", { branch: "main", head: "abc123" }),
+        ).rejects.toThrow("Repository branch changed");
+    });
 });

@@ -1,14 +1,25 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.5.10/schema.json",
   "files": {
-    "includes": ["**", "!!dist", "!!.bunli", "!!coverage"]
+    "includes": ["**", "!!dist", "!!coverage"]
   },
   "formatter": {
     "enabled": true,
     "useEditorconfig": true
   },
   "linter": {
-    "enabled": false
+    "enabled": true,
+    "rules": {
+      "preset": "none",
+      "complexity": {
+        "noExcessiveCognitiveComplexity": {
+          "level": "warn",
+          "options": {
+            "maxAllowedComplexity": 12
+          }
+        }
+      }
+    }
   },
   "assist": {
     "enabled": false

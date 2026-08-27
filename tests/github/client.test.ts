@@ -1,101 +1,57 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Exit, Layer } from "effect";
 import { Octokit } from "octokit";
 
-import { GitHubClient, GitHubClientLive } from "../../src/github/client.ts";
-import {
-  CommandRunner,
-  type CommandResult,
-} from "../../src/process/command-runner.ts";
+import { makeGitHubClientService } from "../../src/github/client.ts";
+import type { CommandResult } from "../../src/process/command-runner.ts";
 
-const testLayer = (calls: string[], results: CommandResult[]) =>
-  GitHubClientLive.pipe(
-    Layer.provide(
-      Layer.succeed(CommandRunner, {
-        run: (command, args) => {
-          calls.push(`${command} ${args.join(" ")}`);
-          return Effect.succeed(
-            results.shift() ?? {
-              exitCode: 0,
-              stdout: "",
-              stderr: "",
-            },
-          );
+const testService = (calls: string[], results: CommandResult[]) =>
+    makeGitHubClientService({
+        run: async (command, args) => {
+            calls.push(`${command} ${args.join(" ")}`);
+            return (
+                results.shift() ?? {
+                    exitCode: 0,
+                    stdout: "",
+                    stderr: "",
+                }
+            );
         },
-      }),
-    ),
-  );
-
-const initialize = Effect.gen(function* () {
-  const github = yield* GitHubClient;
-  return yield* github.initialize;
-});
+    });
 
 describe("GitHub client", () => {
-  test("checks auth, retrieves the token, and initializes Octokit", async () => {
-    const calls: string[] = [];
-    const client = await initialize.pipe(
-      Effect.provide(
-        testLayer(calls, [
-          {
-            exitCode: 0,
-            stdout: "",
-            stderr: "",
-          },
-          {
-            exitCode: 0,
-            stdout: "test-token",
-            stderr: "",
-          },
-        ]),
-      ),
-      Effect.runPromise,
-    );
+    test("checks auth, retrieves the token, and initializes Octokit", async () => {
+        const calls: string[] = [];
+        const client = await testService(calls, [
+            { exitCode: 0, stdout: "", stderr: "" },
+            { exitCode: 0, stdout: "test-token", stderr: "" },
+        ]).initialize();
 
-    expect(client).toBeInstanceOf(Octokit);
-    expect(calls).toEqual(["gh auth status", "gh auth token"]);
-  });
+        expect(client).toBeInstanceOf(Octokit);
+        expect(calls).toEqual(["gh auth status", "gh auth token"]);
+    });
 
-  test("stops when authentication fails", async () => {
-    const calls: string[] = [];
-    const exit = await initialize.pipe(
-      Effect.provide(
-        testLayer(calls, [
-          {
-            exitCode: 1,
-            stdout: "",
-            stderr: "not logged in",
-          },
-        ]),
-      ),
-      Effect.runPromiseExit,
-    );
+    test("stops when authentication fails", async () => {
+        const calls: string[] = [];
+        const service = testService(calls, [
+            { exitCode: 1, stdout: "", stderr: "not logged in" },
+        ]);
 
-    expect(Exit.isFailure(exit)).toBeTrue();
-    expect(calls).toEqual(["gh auth status"]);
-  });
+        await expect(service.initialize()).rejects.toThrow(
+            "GitHub authentication check failed",
+        );
+        expect(calls).toEqual(["gh auth status"]);
+    });
 
-  test("rejects an empty token", async () => {
-    const calls: string[] = [];
-    const exit = await initialize.pipe(
-      Effect.provide(
-        testLayer(calls, [
-          {
-            exitCode: 0,
-            stdout: "",
-            stderr: "",
-          },
-          {
-            exitCode: 0,
-            stdout: "",
-            stderr: "",
-          },
-        ]),
-      ),
-      Effect.runPromiseExit,
-    );
+    test("rejects an empty token", async () => {
+        const calls: string[] = [];
+        const service = testService(calls, [
+            { exitCode: 0, stdout: "", stderr: "" },
+            { exitCode: 0, stdout: "", stderr: "" },
+        ]);
 
-    expect(Exit.isFailure(exit)).toBeTrue();
-    expect(calls).toEqual(["gh auth status", "gh auth token"]);
-  });
+        await expect(service.initialize()).rejects.toThrow(
+            "GitHub CLI returned an empty authentication token",
+        );
+        expect(calls).toEqual(["gh auth status", "gh auth token"]);
+    });
 });

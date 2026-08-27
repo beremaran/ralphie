@@ -6,85 +6,86 @@ export const MAX_DECOMPOSITION_DEPTH = 3;
 export const RALPHIE_DECOMPOSITION_MARKER = "ralphie:decomposition";
 
 export type DecompositionLineage = {
-  readonly rootIssueNumber: number;
-  readonly parentIssueNumber: number;
-  readonly depth: number;
+    readonly rootIssueNumber: number;
+    readonly parentIssueNumber: number;
+    readonly depth: number;
 };
 
 const validateDepth = (depth: number): void => {
-  if (
-    !Number.isInteger(depth) ||
-    depth < 1 ||
-    depth > MAX_DECOMPOSITION_DEPTH
-  ) {
-    throw new RalphieError({
-      message: `Decomposition depth ${depth} is outside the supported range 1–${MAX_DECOMPOSITION_DEPTH}.`,
-    });
-  }
+    if (
+        !Number.isInteger(depth) ||
+        depth < 1 ||
+        depth > MAX_DECOMPOSITION_DEPTH
+    ) {
+        throw new RalphieError({
+            message: `Decomposition depth ${depth} is outside the supported range 1–${MAX_DECOMPOSITION_DEPTH}.`,
+        });
+    }
 };
 
 const issueLink = (number: number): string => `#${number}`;
 
 export const decompositionMarker = (
-  lineage: DecompositionLineage,
-  key: string,
+    lineage: DecompositionLineage,
+    key: string,
 ): string => {
-  validateDepth(lineage.depth);
-  return `<!-- ${RALPHIE_DECOMPOSITION_MARKER} root=${lineage.rootIssueNumber} parent=${lineage.parentIssueNumber} key=${JSON.stringify(key)} depth=${lineage.depth} -->`;
+    validateDepth(lineage.depth);
+    return `<!-- ${RALPHIE_DECOMPOSITION_MARKER} root=${lineage.rootIssueNumber} parent=${lineage.parentIssueNumber} key=${JSON.stringify(key)} depth=${lineage.depth} -->`;
 };
 
 /** Derive lineage for the children of an issue, including recursively generated children. */
 export const nextDecompositionLineage = (
-  issue: GitHubIssue,
+    issue: GitHubIssue,
 ): DecompositionLineage => {
-  const marker = issue.body?.match(
-    /<!-- ralphie:decomposition root=(\d+) parent=(\d+) key="[^"]+" depth=(\d+) -->/,
-  );
-  const previousRoot =
-    marker?.[1] === undefined ? undefined : Number(marker[1]);
-  const previousDepth =
-    marker?.[3] === undefined ? undefined : Number(marker[3]);
-  const depth = previousDepth === undefined ? 1 : previousDepth + 1;
-  validateDepth(depth);
-  return {
-    rootIssueNumber: previousRoot ?? issue.number,
-    parentIssueNumber: issue.number,
-    depth,
-  };
+    const marker = issue.body?.match(
+        /<!-- ralphie:decomposition root=(\d+) parent=(\d+) key="[^"]+" depth=(\d+) -->/,
+    );
+    const previousRoot =
+        marker?.[1] === undefined ? undefined : Number(marker[1]);
+    const previousDepth =
+        marker?.[3] === undefined ? undefined : Number(marker[3]);
+    const depth = previousDepth === undefined ? 1 : previousDepth + 1;
+    validateDepth(depth);
+    return {
+        rootIssueNumber: previousRoot ?? issue.number,
+        parentIssueNumber: issue.number,
+        depth,
+    };
 };
 
 /** Read GitHub issue-number dependencies from a generated child body. */
 export const parseGeneratedIssueDependencies = (
-  issue: GitHubIssue,
+    issue: GitHubIssue,
 ): ReadonlyArray<number> => {
-  if (!issue.body?.includes(`<!-- ${RALPHIE_DECOMPOSITION_MARKER} `)) return [];
-  const dependencySection = issue.body
-    .split("## Dependencies\n\n")[1]
-    ?.split("\n\n## ")[0];
-  if (dependencySection === undefined) return [];
-  return [...dependencySection.matchAll(/^- #(\d+)(?:\s|$)/gm)].map((match) =>
-    Number(match[1]),
-  );
+    if (!issue.body?.includes(`<!-- ${RALPHIE_DECOMPOSITION_MARKER} `))
+        return [];
+    const dependencySection = issue.body
+        .split("## Dependencies\n\n")[1]
+        ?.split("\n\n## ")[0];
+    if (dependencySection === undefined) return [];
+    return [...dependencySection.matchAll(/^- #(\d+)(?:\s|$)/gm)].map((match) =>
+        Number(match[1]),
+    );
 };
 
 export const renderChildIssueBody = (input: {
-  readonly child: IssueBreakdownDecision["issues"][number];
-  readonly lineage: DecompositionLineage;
-  readonly issueNumbers: Readonly<Record<string, number>>;
+    readonly child: IssueBreakdownDecision["issues"][number];
+    readonly lineage: DecompositionLineage;
+    readonly issueNumbers: Readonly<Record<string, number>>;
 }): string => {
-  const { child, lineage, issueNumbers } = input;
-  const siblingEntries = Object.entries(issueNumbers);
-  const dependencies = child.dependsOn.map((key) => {
-    const number = issueNumbers[key];
-    if (number === undefined) {
-      throw new RalphieError({
-        message: `Cannot render dependency ${key}; its GitHub issue number is unknown.`,
-      });
-    }
-    return `- ${issueLink(number)} (${key})`;
-  });
+    const { child, lineage, issueNumbers } = input;
+    const siblingEntries = Object.entries(issueNumbers);
+    const dependencies = child.dependsOn.map((key) => {
+        const number = issueNumbers[key];
+        if (number === undefined) {
+            throw new RalphieError({
+                message: `Cannot render dependency ${key}; its GitHub issue number is unknown.`,
+            });
+        }
+        return `- ${issueLink(number)} (${key})`;
+    });
 
-  return `${decompositionMarker(lineage, child.key)}
+    return `${decompositionMarker(lineage, child.key)}
 
 ${child.body}
 
@@ -104,38 +105,38 @@ ${dependencies.length === 0 ? "- None" : dependencies.join("\n")}`;
 };
 
 export const renderDecomposedOriginalBody = (input: {
-  readonly original: GitHubIssue;
-  readonly breakdown: IssueBreakdownDecision;
-  readonly issueNumbers: Readonly<Record<string, number>>;
-  readonly lineage: DecompositionLineage;
+    readonly original: GitHubIssue;
+    readonly breakdown: IssueBreakdownDecision;
+    readonly issueNumbers: Readonly<Record<string, number>>;
+    readonly lineage: DecompositionLineage;
 }): string => {
-  validateDepth(input.lineage.depth);
-  const originalSection = "## Original issue content\n\n";
-  const originalBody = input.original.body ?? "";
-  const preservedOriginal = originalBody.includes(
-    `<!-- ${RALPHIE_DECOMPOSITION_MARKER} original=`,
-  )
-    ? (originalBody.split(originalSection)[1] ?? "")
-    : originalBody;
-  const stack = input.breakdown.issues.map((child) => {
-    const number = input.issueNumbers[child.key];
-    if (number === undefined) {
-      throw new RalphieError({
-        message: `Cannot rewrite the original issue; child ${child.key} has no GitHub issue number.`,
-      });
-    }
-    const dependencies = child.dependsOn
-      .map((key) => input.issueNumbers[key])
-      .filter((value): value is number => value !== undefined)
-      .map(issueLink);
-    return `- ${issueLink(number)} — ${child.title}${
-      dependencies.length === 0
-        ? ""
-        : ` (depends on ${dependencies.join(", ")})`
-    }`;
-  });
+    validateDepth(input.lineage.depth);
+    const originalSection = "## Original issue content\n\n";
+    const originalBody = input.original.body ?? "";
+    const preservedOriginal = originalBody.includes(
+        `<!-- ${RALPHIE_DECOMPOSITION_MARKER} original=`,
+    )
+        ? (originalBody.split(originalSection)[1] ?? "")
+        : originalBody;
+    const stack = input.breakdown.issues.map((child) => {
+        const number = input.issueNumbers[child.key];
+        if (number === undefined) {
+            throw new RalphieError({
+                message: `Cannot rewrite the original issue; child ${child.key} has no GitHub issue number.`,
+            });
+        }
+        const dependencies = child.dependsOn
+            .map((key) => input.issueNumbers[key])
+            .filter((value): value is number => value !== undefined)
+            .map(issueLink);
+        return `- ${issueLink(number)} — ${child.title}${
+            dependencies.length === 0
+                ? ""
+                : ` (depends on ${dependencies.join(", ")})`
+        }`;
+    });
 
-  return `<!-- ${RALPHIE_DECOMPOSITION_MARKER} original=${input.original.number} depth=${input.lineage.depth} -->
+    return `<!-- ${RALPHIE_DECOMPOSITION_MARKER} original=${input.original.number} depth=${input.lineage.depth} -->
 
 This issue was decomposed into the following independently actionable issue stack:
 

@@ -1,7 +1,7 @@
 import type { IssueArtifactStore } from "./artifacts.ts";
 import type {
-  IssueExecutionContext,
-  IssueExecutionOutcome,
+    IssueExecutionContext,
+    IssueExecutionOutcome,
 } from "./execution.ts";
 
 /**
@@ -13,8 +13,8 @@ import type {
  * per-issue store in tests and in a future live implementation.
  */
 export type WorkflowExecutorInput = {
-  readonly context: IssueExecutionContext;
-  readonly artifacts: IssueArtifactStore;
+    readonly context: IssueExecutionContext;
+    readonly artifacts: IssueArtifactStore;
 };
 
 export type WorkflowExecutorResult = IssueExecutionOutcome;

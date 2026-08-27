@@ -1,8 +1,9 @@
 export enum RalphieExitCode {
-  Success = 0,
-  Failure = 1,
-  Cancelled = 130,
+    Success = 0,
+    Failure = 1,
+    Cancelled = 130,
 }
 
-export const exitCodeForFailure = (signal: AbortSignal): RalphieExitCode =>
-  signal.aborted ? RalphieExitCode.Cancelled : RalphieExitCode.Failure;
+export const exitCodeForFailure = (signal: AbortSignal): RalphieExitCode => {
+    return signal.aborted ? RalphieExitCode.Cancelled : RalphieExitCode.Failure;
+};

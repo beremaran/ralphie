@@ -1,276 +1,200 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
 
 import {
-  IssueArtifactKind,
-  IssueArtifactStore,
-  IssueArtifactStoreLive,
+    IssueArtifactKind,
+    makeIssueArtifactStoreService,
 } from "../../src/issues/artifacts.ts";
-import { ComplexityAssessment } from "../../src/issues/complexity.ts";
+import type { ComplexityAssessmentService } from "../../src/issues/complexity.ts";
 import { ComplexityLevel } from "../../src/issues/decisions.ts";
-import { DecompositionExecutor } from "../../src/issues/decomposition-executor.ts";
+import type { DecompositionExecutorService } from "../../src/issues/decomposition-executor.ts";
 import {
-  IssueCompletionKind,
-  IssueExecutionOutcomeKind,
-  type IssueExecutionContext,
+    IssueCompletionKind,
+    IssueExecutionOutcomeKind,
+    type IssueExecutionContext,
 } from "../../src/issues/execution.ts";
-import { IssueExecutor, IssueExecutorLive } from "../../src/issues/executor.ts";
-import { ImplementationExecutor } from "../../src/issues/implementation-executor.ts";
+import { makeIssueExecutorService } from "../../src/issues/executor.ts";
+import type { ImplementationExecutorService } from "../../src/issues/implementation-executor.ts";
 import { RalphieError } from "../../src/shared/error.ts";
 
+const context = (number: number): IssueExecutionContext =>
+    ({ issue: { number } }) as IssueExecutionContext;
+
 describe("IssueExecutor", () => {
-  test("exposes issue execution behind an Effect service", async () => {
-    const context = {
-      issue: {
-        number: 42,
-      },
-    } as IssueExecutionContext;
-    const outcome = await Effect.gen(function* () {
-      const executor = yield* IssueExecutor;
-      return yield* executor.execute(context);
-    }).pipe(
-      Effect.provide(
-        Layer.succeed(IssueExecutor, {
-          execute: (received) =>
-            Effect.succeed({
-              kind: IssueExecutionOutcomeKind.Skipped,
-              reason: `Issue ${received.issue.number} is not ready.`,
+    test("executes through an explicitly supplied service", async () => {
+        const outcome = await {
+            execute: async (received: IssueExecutionContext) => ({
+                kind: IssueExecutionOutcomeKind.Skipped,
+                reason: `Issue ${received.issue.number} is not ready.`,
             }),
-        }),
-      ),
-      Effect.runPromise,
-    );
-
-    expect(outcome).toEqual({
-      kind: IssueExecutionOutcomeKind.Skipped,
-      reason: "Issue 42 is not ready.",
-    });
-  });
-
-  for (const complexity of Object.values(ComplexityLevel).filter(
-    (value): value is ComplexityLevel => typeof value === "number",
-  )) {
-    test(`stores and routes complexity ${complexity}`, async () => {
-      let implementationCalls = 0;
-      let decompositionCalls = 0;
-      const context = {
-        issue: {
-          number: complexity + 1,
-        },
-      } as IssueExecutionContext;
-      const dependencies = Layer.mergeAll(
-        IssueArtifactStoreLive,
-        Layer.succeed(ComplexityAssessment, {
-          assess: () =>
-            Effect.succeed({
-              decision: {
-                complexity,
-                rationale: `Complexity ${complexity} rationale`,
-              },
-              sessionID: `complexity-${complexity}`,
-            }),
-        }),
-        Layer.succeed(ImplementationExecutor, {
-          execute: () => {
-            implementationCalls += 1;
-            return Effect.succeed({
-              kind: IssueExecutionOutcomeKind.Completed,
-              completion: IssueCompletionKind.PushedCommit,
-              commitSha: "implementation-sha",
-            });
-          },
-        }),
-        Layer.succeed(DecompositionExecutor, {
-          execute: () => {
-            decompositionCalls += 1;
-            return Effect.succeed({
-              kind: IssueExecutionOutcomeKind.Decomposed,
-              childIssueNumbers: [101, 102],
-            });
-          },
-        }),
-      );
-
-      const result = await Effect.gen(function* () {
-        const executor = yield* IssueExecutor;
-        const outcome = yield* executor.execute(context);
-        const stores = yield* IssueArtifactStore;
-        const artifacts = yield* stores.forIssue(context.issue.number);
-        const decision = yield* artifacts.read(
-          IssueArtifactKind.ComplexityDecision,
-        );
-        return {
-          outcome,
-          decision,
-        };
-      }).pipe(
-        Effect.provide(IssueExecutorLive),
-        Effect.provide(dependencies),
-        Effect.runPromise,
-      );
-
-      expect(result.decision).toEqual({
-        complexity,
-        rationale: `Complexity ${complexity} rationale`,
-      });
-      if (complexity <= ComplexityLevel.Level3) {
-        expect(result.outcome.kind).toBe(IssueExecutionOutcomeKind.Completed);
-        expect(implementationCalls).toBe(1);
-        expect(decompositionCalls).toBe(0);
-      } else {
-        expect(result.outcome.kind).toBe(IssueExecutionOutcomeKind.Decomposed);
-        expect(implementationCalls).toBe(0);
-        expect(decompositionCalls).toBe(1);
-      }
-    });
-  }
-
-  test("reuses a persisted complexity decision when retrying an issue", async () => {
-    let assessmentCalls = 0;
-    let implementationCalls = 0;
-    const context = {
-      issue: {
-        number: 42,
-      },
-    } as IssueExecutionContext;
-    const dependencies = Layer.mergeAll(
-      IssueArtifactStoreLive,
-      Layer.succeed(ComplexityAssessment, {
-        assess: () => {
-          assessmentCalls += 1;
-          return Effect.succeed({
-            decision: {
-              complexity: ComplexityLevel.Level2,
-              rationale: "Persisted routing decision.",
-            },
-            sessionID: "complexity-session",
-          });
-        },
-      }),
-      Layer.succeed(ImplementationExecutor, {
-        execute: () => {
-          implementationCalls += 1;
-          return Effect.succeed({
+        }.execute(context(42));
+        expect(outcome).toEqual({
             kind: IssueExecutionOutcomeKind.Skipped,
-            reason: "test retry",
-          });
-        },
-      }),
-      Layer.succeed(DecompositionExecutor, {
-        execute: () => Effect.die("must not decompose"),
-      }),
-    );
-
-    await Effect.gen(function* () {
-      const executor = yield* IssueExecutor;
-      yield* executor.execute(context);
-      yield* executor.execute(context);
-    }).pipe(
-      Effect.provide(IssueExecutorLive),
-      Effect.provide(dependencies),
-      Effect.runPromise,
-    );
-
-    expect(assessmentCalls).toBe(1);
-    expect(implementationCalls).toBe(2);
-  });
-
-  test("turns an invalid or missing complexity decision into a failed outcome", async () => {
-    let workflowCalls = 0;
-    const context = {
-      issue: {
-        number: 42,
-      },
-    } as IssueExecutionContext;
-    const dependencies = Layer.mergeAll(
-      IssueArtifactStoreLive,
-      Layer.succeed(ComplexityAssessment, {
-        assess: () =>
-          Effect.fail(
-            new RalphieError({
-              message: "Structured decision is missing.",
-            }),
-          ),
-      }),
-      Layer.succeed(ImplementationExecutor, {
-        execute: () => {
-          workflowCalls += 1;
-          return Effect.die("must not run");
-        },
-      }),
-      Layer.succeed(DecompositionExecutor, {
-        execute: () => {
-          workflowCalls += 1;
-          return Effect.die("must not run");
-        },
-      }),
-    );
-
-    const outcome = await Effect.gen(function* () {
-      const executor = yield* IssueExecutor;
-      return yield* executor.execute(context);
-    }).pipe(
-      Effect.provide(IssueExecutorLive),
-      Effect.provide(dependencies),
-      Effect.runPromise,
-    );
-
-    expect(outcome).toEqual({
-      kind: IssueExecutionOutcomeKind.Failed,
-      message: "Structured decision is missing.",
+            reason: "Issue 42 is not ready.",
+        });
     });
-    expect(workflowCalls).toBe(0);
-  });
 
-  test("hands a restored review escalation to decomposition", async () => {
-    const context = {
-      issue: {
-        number: 42,
-      },
-    } as IssueExecutionContext;
-    const dependencies = Layer.mergeAll(
-      IssueArtifactStoreLive,
-      Layer.succeed(ComplexityAssessment, {
-        assess: () =>
-          Effect.succeed({
-            decision: {
-              complexity: ComplexityLevel.Level3,
-              rationale: "Implementation is appropriate.",
+    for (const complexity of Object.values(ComplexityLevel).filter(
+        (value): value is ComplexityLevel => typeof value === "number",
+    )) {
+        test(`stores and routes complexity ${complexity}`, async () => {
+            let implementationCalls = 0;
+            let decompositionCalls = 0;
+            const stores = makeIssueArtifactStoreService();
+            const assessment: ComplexityAssessmentService = {
+                assess: async () => ({
+                    decision: {
+                        complexity,
+                        rationale: `Complexity ${complexity} rationale`,
+                    },
+                    sessionID: `complexity-${complexity}`,
+                }),
+            };
+            const implementation: ImplementationExecutorService = {
+                execute: async () => {
+                    implementationCalls += 1;
+                    return {
+                        kind: IssueExecutionOutcomeKind.Completed,
+                        completion: IssueCompletionKind.PushedCommit,
+                        commitSha: "implementation-sha",
+                    } as const;
+                },
+            };
+            const decomposition: DecompositionExecutorService = {
+                execute: async () => {
+                    decompositionCalls += 1;
+                    return {
+                        kind: IssueExecutionOutcomeKind.Decomposed,
+                        childIssueNumbers: [101, 102],
+                    } as const;
+                },
+            };
+            const executor = makeIssueExecutorService(
+                stores,
+                assessment,
+                implementation,
+                decomposition,
+            );
+            const result = await executor.execute(context(complexity + 1));
+            const artifacts = await stores.forIssue(complexity + 1);
+            const decision = await artifacts.read(
+                IssueArtifactKind.ComplexityDecision,
+            );
+
+            expect(decision.complexity).toBe(complexity);
+            if (complexity <= ComplexityLevel.Level3) {
+                expect(result.kind).toBe(IssueExecutionOutcomeKind.Completed);
+                expect(implementationCalls).toBe(1);
+                expect(decompositionCalls).toBe(0);
+            } else {
+                expect(result.kind).toBe(IssueExecutionOutcomeKind.Decomposed);
+                expect(implementationCalls).toBe(0);
+                expect(decompositionCalls).toBe(1);
+            }
+        });
+    }
+
+    test("reuses a persisted complexity decision when retrying an issue", async () => {
+        let assessmentCalls = 0;
+        let implementationCalls = 0;
+        const stores = makeIssueArtifactStoreService();
+        const executor = makeIssueExecutorService(
+            stores,
+            {
+                assess: async () => {
+                    assessmentCalls += 1;
+                    return {
+                        decision: {
+                            complexity: ComplexityLevel.Level2,
+                            rationale: "Persisted routing decision.",
+                        },
+                        sessionID: "complexity-session",
+                    };
+                },
             },
-            sessionID: "complexity-session",
-          }),
-      }),
-      Layer.succeed(ImplementationExecutor, {
-        execute: () =>
-          Effect.succeed({
+            {
+                execute: async () => {
+                    implementationCalls += 1;
+                    return {
+                        kind: IssueExecutionOutcomeKind.Skipped,
+                        reason: "test retry",
+                    } as const;
+                },
+            },
+            {
+                execute: async () => ({
+                    kind: IssueExecutionOutcomeKind.Decomposed,
+                    childIssueNumbers: [],
+                }),
+            },
+        );
+        await executor.execute(context(42));
+        await executor.execute(context(42));
+        expect(assessmentCalls).toBe(1);
+        expect(implementationCalls).toBe(2);
+    });
+
+    test("turns a missing complexity decision into a failed outcome", async () => {
+        let workflowCalls = 0;
+        const outcome = await makeIssueExecutorService(
+            makeIssueArtifactStoreService(),
+            {
+                assess: async () => {
+                    throw new RalphieError({
+                        message: "Structured decision is missing.",
+                    });
+                },
+            },
+            {
+                execute: async () => {
+                    workflowCalls += 1;
+                    throw new Error("must not run");
+                },
+            },
+            {
+                execute: async () => {
+                    workflowCalls += 1;
+                    throw new Error("must not run");
+                },
+            },
+        ).execute(context(42));
+        expect(outcome).toEqual({
+            kind: IssueExecutionOutcomeKind.Failed,
+            message: "Structured decision is missing.",
+        });
+        expect(workflowCalls).toBe(0);
+    });
+
+    test("hands a review escalation to decomposition", async () => {
+        const outcome = await makeIssueExecutorService(
+            makeIssueArtifactStoreService(),
+            {
+                assess: async () => ({
+                    decision: {
+                        complexity: ComplexityLevel.Level3,
+                        rationale: "Implementation is appropriate.",
+                    },
+                    sessionID: "complexity-session",
+                }),
+            },
+            {
+                execute: async () => ({
+                    kind: IssueExecutionOutcomeKind.Escalated,
+                    diagnosticsPath: "/workspace/diagnostics",
+                    reason: "Review budget exhausted.",
+                }),
+            },
+            {
+                execute: async () => ({
+                    kind: IssueExecutionOutcomeKind.Decomposed,
+                    childIssueNumbers: [101, 102],
+                }),
+            },
+        ).execute(context(42));
+        expect(outcome).toEqual({
             kind: IssueExecutionOutcomeKind.Escalated,
             diagnosticsPath: "/workspace/diagnostics",
             reason: "Review budget exhausted.",
-          }),
-      }),
-      Layer.succeed(DecompositionExecutor, {
-        execute: () =>
-          Effect.succeed({
-            kind: IssueExecutionOutcomeKind.Decomposed,
             childIssueNumbers: [101, 102],
-          }),
-      }),
-    );
-
-    const outcome = await Effect.gen(function* () {
-      const executor = yield* IssueExecutor;
-      return yield* executor.execute(context);
-    }).pipe(
-      Effect.provide(IssueExecutorLive),
-      Effect.provide(dependencies),
-      Effect.runPromise,
-    );
-
-    expect(outcome).toEqual({
-      kind: IssueExecutionOutcomeKind.Escalated,
-      diagnosticsPath: "/workspace/diagnostics",
-      reason: "Review budget exhausted.",
-      childIssueNumbers: [101, 102],
+        });
     });
-  });
 });

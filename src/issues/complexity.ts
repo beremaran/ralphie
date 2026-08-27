@@ -1,120 +1,107 @@
-import { Context, Effect, Layer } from "effect";
-
 import { requestStructuredOutput } from "../agent/structured-output.ts";
 import { buildComplexityPrompt } from "../agent/prompts.ts";
 import {
-  ProgressReporter,
-  ProgressStage,
-  ProgressStatus,
+    ProgressStage,
+    ProgressStatus,
+    type ProgressReporterService,
 } from "../progress/progress.ts";
 import { RalphieError } from "../shared/error.ts";
 import {
-  complexityDecisionSchema,
-  type ComplexityDecision,
+    complexityDecisionSchema,
+    type ComplexityDecision,
 } from "./decisions.ts";
 import type { IssueExecutionContext } from "./execution.ts";
 
 export type ComplexityAssessmentResult = {
-  readonly decision: ComplexityDecision;
-  readonly sessionID: string;
+    readonly decision: ComplexityDecision;
+    readonly sessionID: string;
 };
 
 export type ComplexityAssessmentService = {
-  readonly assess: (
-    context: IssueExecutionContext,
-  ) => Effect.Effect<ComplexityAssessmentResult, RalphieError>;
+    readonly assess: (
+        context: IssueExecutionContext,
+    ) => Promise<ComplexityAssessmentResult>;
 };
 
-export const ComplexityAssessment =
-  Context.GenericTag<ComplexityAssessmentService>(
-    "ralphie/ComplexityAssessment",
-  );
+const messageOf = (error: unknown): string =>
+    error instanceof Error ? error.message : String(error);
 
-export const ComplexityAssessmentLive = Layer.effect(
-  ComplexityAssessment,
-  Effect.gen(function* () {
-    const progress = yield* ProgressReporter;
-
-    return {
-      assess: (context) => {
+export const makeComplexityAssessmentService = (
+    progress: ProgressReporterService,
+): ComplexityAssessmentService => ({
+    assess: async (context) => {
         const issueProgress = {
-          issue: {
-            number: context.issue.number,
-            title: context.issue.title,
-          },
+            issue: {
+                number: context.issue.number,
+                title: context.issue.title,
+            },
         };
-
-        return progress
-          .emit({
+        await progress.emit({
             ...issueProgress,
             stage: ProgressStage.ComplexityAssessment,
             status: ProgressStatus.Started,
             message: `Assessing complexity for #${context.issue.number}...`,
-          })
-          .pipe(
-            Effect.zipRight(
-              Effect.gen(function* () {
-                const checkpoint = yield* context.repositoryInvariant.capture(
-                  context.repositoryPath,
-                );
-                if (checkpoint.branch !== context.targetBranch) {
-                  return yield* new RalphieError({
-                    message: `Complexity assessment requires branch ${context.targetBranch}, but checkout is on ${checkpoint.branch}.`,
-                  });
-                }
+        });
 
-                return yield* requestStructuredOutput(context.pi, {
-                  directory: context.repositoryPath,
-                  title: `Assess issue #${context.issue.number}`,
-                  prompt: buildComplexityPrompt({
+        try {
+            const checkpoint = await context.repositoryInvariant.capture(
+                context.repositoryPath,
+            );
+            if (checkpoint.branch !== context.targetBranch) {
+                throw new RalphieError({
+                    message: `Complexity assessment requires branch ${context.targetBranch}, but checkout is on ${checkpoint.branch}.`,
+                });
+            }
+
+            const result = await requestStructuredOutput(context.pi, {
+                directory: context.repositoryPath,
+                title: `Assess issue #${context.issue.number}`,
+                prompt: buildComplexityPrompt({
                     issue: context.issue,
                     repositoryPath: context.repositoryPath,
                     targetBranch: context.targetBranch,
-                  }),
-                  schema: complexityDecisionSchema,
-                  agent: context.piSelection.agent,
-                  model: context.piSelection.model,
-                  variant: context.piSelection.variant,
-                  runId: context.runId,
-                  diagnostics: context.piDiagnostics,
-                  verifyAfter: () =>
+                }),
+                schema: complexityDecisionSchema,
+                agent: context.piSelection.agent,
+                model: context.piSelection.model,
+                variant: context.piSelection.variant,
+                runId: context.runId,
+                diagnostics: context.piDiagnostics,
+                verifyAfter: () =>
                     context.repositoryInvariant.verify(
-                      context.repositoryPath,
-                      checkpoint,
+                        context.repositoryPath,
+                        checkpoint,
                     ),
-                  progress,
-                  progressStage: ProgressStage.ComplexityAssessment,
-                  progressIssue: issueProgress.issue,
-                  signal: context.signal,
-                });
-              }),
-            ),
-            Effect.map(({ output, sessionID }) => ({
-              decision: output,
-              sessionID,
-            })),
-            Effect.tap((result) =>
-              progress.emit({
+                progress,
+                progressStage: ProgressStage.ComplexityAssessment,
+                progressIssue: issueProgress.issue,
+                signal: context.signal,
+            });
+            const assessed = {
+                decision: result.output,
+                sessionID: result.sessionID,
+            };
+            await progress.emit({
                 ...issueProgress,
                 stage: ProgressStage.ComplexityAssessment,
                 status: ProgressStatus.Succeeded,
-                message: `Assessed #${context.issue.number} at complexity ${result.decision.complexity}/5.`,
+                message: `Assessed #${context.issue.number} at complexity ${assessed.decision.complexity}/5.`,
                 details: {
-                  rationale: result.decision.rationale,
-                  sessionID: result.sessionID,
+                    rationale: assessed.decision.rationale,
+                    sessionID: assessed.sessionID,
                 },
-              }),
-            ),
-            Effect.tapError((error) =>
-              progress.emit({
+            });
+            return assessed;
+        } catch (error) {
+            await progress.emit({
                 ...issueProgress,
                 stage: ProgressStage.ComplexityAssessment,
                 status: ProgressStatus.Failed,
-                message: `Complexity assessment failed: ${error.message}`,
-              }),
-            ),
-          );
-      },
-    } satisfies ComplexityAssessmentService;
-  }),
-);
+                message: `Complexity assessment failed: ${messageOf(error)}`,
+            });
+            throw error;
+        }
+    },
+});
+
+export const ComplexityAssessmentLive = makeComplexityAssessmentService;

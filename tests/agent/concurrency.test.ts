@@ -1,44 +1,28 @@
 import { expect, test } from "bun:test";
 import type { PiClient } from "../../src/pi/client.ts";
-import { Effect } from "effect";
 
 import {
-  registerPiAgentSemaphore,
-  withPiAgentPermit,
+    makePiAgentSemaphore,
+    registerPiAgentSemaphore,
+    withPiAgentPermit,
 } from "../../src/agent/concurrency.ts";
 
 test("global Pi semaphore bounds tasks sharing one client", async () => {
-  const client = {} as PiClient;
-  const semaphore = await Effect.runPromise(Effect.makeSemaphore(2));
-  registerPiAgentSemaphore(client, semaphore);
-  let active = 0;
-  let maximumActive = 0;
+    const client = {} as PiClient;
+    registerPiAgentSemaphore(client, makePiAgentSemaphore(2));
+    let active = 0;
+    let maximumActive = 0;
 
-  await Effect.runPromise(
-    Effect.all(
-      Array.from(
-        {
-          length: 6,
-        },
-        () =>
-          withPiAgentPermit(
-            client,
-            Effect.acquireUseRelease(
-              Effect.sync(() => {
+    await Promise.all(
+        Array.from({ length: 6 }, () =>
+            withPiAgentPermit(client, async () => {
                 active += 1;
                 maximumActive = Math.max(maximumActive, active);
-              }),
-              () => Effect.sleep("5 millis"),
-              () => Effect.sync(() => (active -= 1)),
-            ),
-          ),
-      ),
-      {
-        concurrency: "unbounded",
-        discard: true,
-      },
-    ),
-  );
+                await Bun.sleep(5);
+                active -= 1;
+            }),
+        ),
+    );
 
-  expect(maximumActive).toBe(2);
+    expect(maximumActive).toBe(2);
 });

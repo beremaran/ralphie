@@ -1,189 +1,177 @@
-import { Context, Effect, Layer } from "effect";
 import { mkdir, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import simpleGit from "simple-git";
 
 import { parseRepositorySlug } from "../github/repository.ts";
 import {
-  CommandRunner,
-  requireSuccessfulCommand,
+    CommandRunnerLive,
+    requireSuccess,
+    type CommandRunnerService,
 } from "../process/command-runner.ts";
 import { RalphieError } from "../shared/error.ts";
 import { resolveWorkspacePath } from "../workspace/workspace.ts";
 
 export type PreparedRepository = {
-  readonly path: string;
-  readonly branch: string;
-  readonly cloned: boolean;
-  readonly branchChanged: boolean;
-  readonly cleaned: boolean;
+    readonly path: string;
+    readonly branch: string;
+    readonly cloned: boolean;
+    readonly branchChanged: boolean;
+    readonly cleaned: boolean;
 };
 
 export type GitRepositoryService = {
-  readonly verifyInstalled: Effect.Effect<void, RalphieError>;
-  readonly prepare: (
-    repository: string,
-    branch: string | undefined,
-    workspace: string,
-    destinationPath?: string,
-  ) => Effect.Effect<PreparedRepository, RalphieError>;
+    readonly verifyInstalled: () => Promise<void>;
+    readonly prepare: (
+        repository: string,
+        branch: string | undefined,
+        workspace: string,
+        destinationPath?: string,
+    ) => Promise<PreparedRepository>;
 };
-
-export const GitRepository = Context.GenericTag<GitRepositoryService>(
-  "ralphie/GitRepository",
-);
 
 const pathExists = async (path: string): Promise<boolean> => {
-  try {
-    await stat(path);
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return false;
+    try {
+        await stat(path);
+        return true;
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+        throw error;
     }
-    throw error;
-  }
 };
 
-export const GitRepositoryLive = Layer.effect(
-  GitRepository,
-  Effect.gen(function* () {
-    const runner = yield* CommandRunner;
+export const makeGitRepositoryService = (
+    runner: CommandRunnerService = CommandRunnerLive,
+): GitRepositoryService => ({
+    verifyInstalled: async () => {
+        await requireSuccess(
+            runner,
+            "git",
+            ["--version"],
+            "Git is not installed or is not available on PATH.",
+        );
+    },
 
-    return {
-      verifyInstalled: requireSuccessfulCommand(
-        runner,
-        "git",
-        ["--version"],
-        "Git is not installed or is not available on PATH.",
-      ).pipe(Effect.asVoid),
+    prepare: async (repository, branch, workspace, destinationPath) => {
+        let parsed;
+        try {
+            parsed = parseRepositorySlug(repository);
+        } catch (cause) {
+            if (cause instanceof RalphieError) throw cause;
+            throw new RalphieError({
+                message: `Invalid GitHub repository: ${repository}.`,
+                cause,
+            });
+        }
 
-      prepare: (repository, branch, workspace, destinationPath) =>
-        Effect.gen(function* () {
-          const parsed = yield* Effect.try({
-            try: () => parseRepositorySlug(repository),
-            catch: (cause) =>
-              cause instanceof RalphieError
-                ? cause
-                : new RalphieError({
-                    message: `Invalid GitHub repository: ${repository}.`,
-                    cause,
-                  }),
-          });
-          const workspacePath = resolveWorkspacePath(workspace);
-          const repositoryPath =
+        const workspacePath = resolveWorkspacePath(workspace);
+        const repositoryPath =
             destinationPath ?? join(workspacePath, parsed.owner, parsed.name);
 
-          const exists = yield* Effect.tryPromise({
-            try: async () => {
-              await mkdir(dirname(repositoryPath), {
-                recursive: true,
-              });
-              return pathExists(repositoryPath);
-            },
-            catch: (cause) =>
-              new RalphieError({
+        let exists: boolean;
+        try {
+            await mkdir(dirname(repositoryPath), { recursive: true });
+            exists = await pathExists(repositoryPath);
+        } catch (cause) {
+            throw new RalphieError({
                 message: `Failed to prepare workspace: ${workspacePath}`,
                 cause,
-              }),
-          });
+            });
+        }
 
-          if (!exists) {
-            const clone = yield* runner.run("gh", [
-              "repo",
-              "clone",
-              parsed.slug,
-              repositoryPath,
+        if (!exists) {
+            const clone = await runner.run("gh", [
+                "repo",
+                "clone",
+                parsed.slug,
+                repositoryPath,
             ]);
             if (clone.exitCode !== 0) {
-              const detail = clone.stderr ? `\n${clone.stderr}` : "";
-              return yield* new RalphieError({
-                message: `Failed to clone ${parsed.slug}.${detail}`,
-              });
+                const detail = clone.stderr ? `\n${clone.stderr}` : "";
+                throw new RalphieError({
+                    message: `Failed to clone ${parsed.slug}.${detail}`,
+                });
             }
-          }
+        }
 
-          const repositoryState = yield* Effect.tryPromise({
-            try: async () => {
-              const git = simpleGit(repositoryPath);
-              if (!(await git.checkIsRepo())) {
+        let repositoryState: Omit<PreparedRepository, "path" | "cloned">;
+        try {
+            const git = simpleGit(repositoryPath);
+            if (!(await git.checkIsRepo())) {
                 throw new Error(`${repositoryPath} is not a Git repository.`);
-              }
+            }
 
-              const remotes = await git.getRemotes(true);
-              const origin = remotes.find((remote) => remote.name === "origin");
-              const originUrl = origin?.refs.fetch;
-              if (!originUrl) {
+            const remotes = await git.getRemotes(true);
+            const origin = remotes.find((remote) => remote.name === "origin");
+            const originUrl = origin?.refs.fetch;
+            if (!originUrl) {
                 throw new Error(`${repositoryPath} has no origin remote.`);
-              }
+            }
 
-              const originSlug = parseRepositorySlug(originUrl).slug;
-              if (originSlug.toLowerCase() !== parsed.slug.toLowerCase()) {
+            const originSlug = parseRepositorySlug(originUrl).slug;
+            if (originSlug.toLowerCase() !== parsed.slug.toLowerCase()) {
                 throw new Error(
-                  `${repositoryPath} contains ${originSlug}, not ${parsed.slug}.`,
+                    `${repositoryPath} contains ${originSlug}, not ${parsed.slug}.`,
                 );
-              }
+            }
 
-              if (exists) {
-                await git.raw(["fetch", "--prune", "origin"]);
-              }
+            if (exists) await git.raw(["fetch", "--prune", "origin"]);
 
-              const status = await git.status();
-              const cleaned = exists && !status.isClean();
-              if (cleaned) {
+            const status = await git.status();
+            const cleaned = exists && !status.isClean();
+            if (cleaned) {
                 await git.raw(["reset", "--hard"]);
                 await git.raw(["clean", "-fd"]);
-              }
+            }
 
-              const selectedBranch =
+            const selectedBranch =
                 branch ??
                 (await git
-                  .revparse(["--verify", "refs/remotes/origin/main"])
-                  .then(
-                    () => "main",
-                    () =>
-                      git
-                        .revparse(["--verify", "refs/remotes/origin/master"])
-                        .then(() => "master"),
-                  ));
-              if (selectedBranch === undefined) {
+                    .revparse(["--verify", "refs/remotes/origin/main"])
+                    .then(
+                        () => "main",
+                        () =>
+                            git
+                                .revparse([
+                                    "--verify",
+                                    "refs/remotes/origin/master",
+                                ])
+                                .then(() => "master"),
+                    ));
+            if (selectedBranch === undefined) {
                 throw new Error(
-                  "Neither origin/main nor origin/master exists; specify a branch explicitly.",
+                    "Neither origin/main nor origin/master exists; specify a branch explicitly.",
                 );
-              }
+            }
 
-              const currentBranch = (
+            const currentBranch = (
                 await git.revparse(["--abbrev-ref", "HEAD"])
-              ).trim();
-              const branchChanged = currentBranch !== selectedBranch;
-              if (branchChanged) {
-                await git.checkout(selectedBranch);
-              }
+            ).trim();
+            const branchChanged = currentBranch !== selectedBranch;
+            if (branchChanged) await git.checkout(selectedBranch);
 
-              if (cleaned) {
+            if (cleaned) {
                 await git.raw(["reset", "--hard", `origin/${selectedBranch}`]);
                 await git.raw(["clean", "-fd"]);
-              }
+            }
 
-              return {
+            repositoryState = {
                 branch: selectedBranch,
                 branchChanged,
                 cleaned,
-              };
-            },
-            catch: (cause) =>
-              new RalphieError({
+            };
+        } catch (cause) {
+            throw new RalphieError({
                 message: `Failed to prepare ${parsed.slug} on branch ${branch}.`,
                 cause,
-              }),
-          });
+            });
+        }
 
-          return {
+        return {
             path: repositoryPath,
             cloned: !exists,
             ...repositoryState,
-          };
-        }),
-    };
-  }),
-);
+        };
+    },
+});
+
+export const GitRepositoryLive = makeGitRepositoryService;

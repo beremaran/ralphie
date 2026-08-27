@@ -7,8 +7,8 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Added
 
-- Bunli and Effect CLI foundation with GitHub, Git, workspace, and Pi
-  domain services.
+- Native Bun CLI foundation with GitHub, Git, workspace, and Pi domain
+  services.
 - Resumable issue execution with complexity routing, bounded review loops,
   deterministic commits and pushes, and dependency-aware decomposition.
 - Typed progress events, JSON Lines output, diagnostics, and credential
@@ -17,6 +17,8 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Changed
 
+- Replace Bunli and Effect with Bun's built-in argument parser, native promises,
+  explicit service factories, and an ordinary runtime dependency object.
 - Focus execution on one required repository and accept all configuration through
   CLI arguments and flags; remove JSON configuration, named projects, repository
   patterns, and multi-repository orchestration.

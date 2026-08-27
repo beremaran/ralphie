@@ -1,3 +1,5 @@
 #!/usr/bin/env bun
 
-import "./src/cli.ts";
+import { runCli } from "./src/cli.ts";
+
+await runCli(Bun.argv.slice(2));

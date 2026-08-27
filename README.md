@@ -172,6 +172,9 @@ ralphie owner/repository --workflow parallel-pr \
 
 ## How it works
 
+For a source-level trigger-to-exit trace, see the
+[end-to-end execution trace](./docs/end-to-end-execution.md).
+
 Every matching open issue receives a schema-validated complexity score from 0
 through 5.
 
@@ -517,13 +520,13 @@ failure so recovery remains possible.
 
 ## Architecture
 
-Ralphie uses [Bunli](https://bunli.dev/) for its command surface and
-[Effect](https://effect.website/) for typed services, failures, resource scopes,
-and dependency assembly.
+Ralphie uses Bun's built-in argument parser and native promises. Services are
+assembled as an explicit dependency object, which keeps the runtime small and
+makes tests straightforward without a framework-specific execution model.
 
 ```mermaid
 flowchart LR
-    U[Operator] --> CLI[Bunli CLI]
+    U[Operator] --> CLI[Native Bun CLI]
 
     subgraph RP["Ralphie process"]
         CLI --> W[Workflow orchestrator]
@@ -559,7 +562,7 @@ effects and validate their invariants at the boundary.
 | `src/process/` | External command execution and process exit semantics. |
 
 `src/workflow.ts` orchestrates the domain services. `src/runtime.ts` assembles
-their live Effect layers.
+their live implementations into one explicit runtime object.
 
 ## Development
 
@@ -578,6 +581,7 @@ Useful individual commands:
 | `bun run typecheck` | Type-check without emitting JavaScript. |
 | `bun run format` | Format the repository with Biome. |
 | `bun run format:check` | Verify formatting without modifying files. |
+| `bun run lint` | Check TypeScript cognitive complexity (maximum 12). |
 | `bun run build` | Build the standalone executable at `dist/cli`. |
 | `bun run probe:structured-output` | Exercise a real schema-validated Pi decision. |
 

@@ -14,7 +14,7 @@ enough to implement, review, and commit independently.
 - [x] Define an `IssueExecutionContext` containing the issue, repository path,
       target branch, workspace, run ID, Octokit client, Pi client, and
       model/agent selection.
-- [x] Add an `IssueExecutor` Effect service that accepts an execution context and
+- [x] Add an `IssueExecutor` async service that accepts an execution context and
       returns an `IssueExecutionOutcome`.
 - [x] Add explicit `ImplementationExecutor` and `DecompositionExecutor` services.
 - [x] Keep stage enums as the audit/progress vocabulary rather than building an
@@ -221,7 +221,7 @@ enough to implement, review, and commit independently.
 
 ## 13. Cancellation and process lifecycle
 
-- [x] Pass Bunli's `AbortSignal` into the workflow and executors.
+- [x] Pass the CLI's `AbortSignal` into the workflow and executors.
 - [x] Abort active Pi prompts when the user presses Ctrl-C.
 - [x] Dispose active Pi sessions on success, failure, cancellation, and defects.
 - [x] Preserve or restore the active issue checkout on cancellation.

@@ -14,29 +14,25 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.10",
-    "@types/bun": "latest",
-    "bunli": "^0.9.1"
+    "@types/bun": "latest"
   },
   "peerDependencies": {
     "typescript": "^5"
   },
   "dependencies": {
-    "@bunli/core": "^0.9.1",
     "@earendil-works/pi-coding-agent": "^0.84.3",
-    "effect": "^3.22.1",
-    "execa": "^10.0.1",
     "octokit": "^5.0.5",
     "simple-git": "^3.36.0",
-    "zod": "^4.4.3",
-    "zx": "^8.8.5"
+    "zod": "^4.4.3"
   },
   "scripts": {
     "start": "bun run index.ts",
-    "dev": "bunli dev --entry ./src/cli.ts",
-    "build": "bunli build --targets native",
-    "check": "bun run format:check && bun run typecheck && bun run test && bun run build",
+    "dev": "bun --watch ./index.ts",
+    "build": "bun build ./index.ts --compile --outfile ./dist/cli",
+    "check": "bun run format:check && bun run lint && bun run typecheck && bun run test && bun run build",
     "format": "biome format --write .",
     "format:check": "biome format .",
+    "lint": "biome lint .",
     "probe:structured-output": "bun run scripts/probe-structured-output.ts",
     "test": "bun test tests",
     "typecheck": "bunx tsc --noEmit"

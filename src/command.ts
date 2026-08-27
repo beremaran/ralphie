@@ -1,381 +1,345 @@
-import { defineCommand, option } from "@bunli/core";
-import { Effect } from "effect";
+import { parseArgs } from "node:util";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 
 import {
-  WorkflowMode,
-  resolveRalphieConfig,
-  type ResolvedRalphieConfig,
+    type ResolvedRalphieConfig,
+    resolveRalphieConfig,
+    WorkflowMode,
 } from "./options.ts";
 import { IssueOrder, IssueSort } from "./github/issues.ts";
 import { piModelSchema, piModelVariantSchema } from "./agent/model.ts";
 import {
-  makeProgressReporterLayer,
-  ProgressRenderMode,
+    makeProgressReporter,
+    ProgressRenderMode,
 } from "./progress/progress.ts";
 import { type PiProviderConfig } from "./pi/config.ts";
-import { PiLive } from "./pi/server.ts";
-import { LiveRuntime } from "./runtime.ts";
+import { makePiService } from "./pi/server.ts";
+import { makeLiveRuntime } from "./runtime.ts";
 import { exitCodeForFailure } from "./process/exit-code.ts";
 import { workflow } from "./workflow.ts";
 import { redactSensitiveText } from "./shared/redaction.ts";
-import {
-  type RunState,
-  RunStateStore,
-  RunStateStoreLive,
-} from "./run/state.ts";
+import { type RunState, RunStateStoreLive } from "./run/state.ts";
 import { reconcileRunState } from "./run/reconciliation.ts";
 import { resolveWorkspacePath } from "./workspace/workspace.ts";
-import { type PiModel } from "./agent/model.ts";
 
-/**
- * Build the Pi provider configuration for this run.
- *
- * When `--model-base-url` is supplied, the provider/model id default to the
- * `--model` segments so the common case needs no extra flags; explicit
- * `--model-provider`/`--model-id` override them. `--agent-dir` opts out of the
- * generated config entirely (Option A).
- */
-const resolvePiConfig = (
-  config: ResolvedRalphieConfig,
-  model: PiModel | undefined,
-  modelBaseUrl: string | undefined,
-  modelApiKey: string | undefined,
-  modelProvider: string | undefined,
-  modelId: string | undefined,
-  agentDir: string | undefined,
-): PiProviderConfig => ({
-  workspace: config.workspace,
-  modelBaseUrl,
-  modelApiKey,
-  modelProvider: modelProvider ?? model?.providerID,
-  modelId: modelId ?? model?.modelID,
-  agentDir,
-});
+const cliOptions = {
+    branch: { type: "string", short: "b" },
+    workflow: { type: "string" },
+    "issue-concurrency": { type: "string" },
+    "agent-concurrency": { type: "string" },
+    "max-issues": { type: "string" },
+    "issue-label": { type: "string", multiple: true },
+    "issue-sort": { type: "string" },
+    "issue-order": { type: "string" },
+    model: { type: "string" },
+    "model-variant": { type: "string" },
+    "model-base-url": { type: "string" },
+    "api-key": { type: "string" },
+    "model-provider": { type: "string" },
+    "model-id": { type: "string" },
+    "agent-dir": { type: "string" },
+    agent: { type: "string" },
+    verbose: { type: "boolean" },
+    json: { type: "boolean" },
+    quiet: { type: "boolean" },
+    "dry-run": { type: "boolean" },
+    workspace: { type: "string" },
+    cleanup: { type: "boolean" },
+    "start-clean": { type: "boolean" },
+    resume: { type: "string" },
+    help: { type: "boolean", short: "h" },
+    version: { type: "boolean", short: "v" },
+} as const;
 
-export const runCommand = defineCommand({
-  name: "run",
-  description: "Run Ralphie against a GitHub repository",
-  options: {
-    branch: option(z.string().min(1).optional(), {
-      short: "b",
-      description: "Branch to operate on (default: main, otherwise master)",
-    }),
-    workflow: option(z.enum(WorkflowMode).optional(), {
-      description: "Delivery workflow: lgtm, pr, or parallel-pr",
-    }),
-    "issue-concurrency": option(z.coerce.number().int().positive().optional(), {
-      description: "Concurrent issues in parallel-pr mode",
-    }),
-    "agent-concurrency": option(z.coerce.number().int().positive().optional(), {
-      description: "Maximum concurrent Pi agent tasks",
-    }),
-    "max-issues": option(z.coerce.number().int().positive().optional(), {
-      description: "Maximum number of issues to process (default: unlimited)",
-    }),
-    "issue-label": option(z.array(z.string().trim().min(1)).optional(), {
-      description: "Only include issues with this label (repeatable)",
-      repeatable: true,
-    }),
-    "issue-sort": option(z.enum(IssueSort).optional(), {
-      description: "Sort issues by created, updated, or comments",
-    }),
-    "issue-order": option(z.enum(IssueOrder).optional(), {
-      description: "Sort issues in ascending or descending order",
-    }),
-    model: option(piModelSchema.optional(), {
-      description: "Pi model in provider/model format",
-    }),
-    "model-variant": option(piModelVariantSchema.optional(), {
-      description: "Pi thinking level (off through max)",
-    }),
-    "model-base-url": option(z.string().trim().min(1).optional(), {
-      description:
-        "OpenAI-compatible base URL for the model runtime (env: RALPHIE_MODEL_BASE_URL). When set, Ralphie writes a throwaway, 0600 Pi config into the workspace so no pre-existing Pi setup is required.",
-    }),
-    "api-key": option(z.string().trim().min(1).optional(), {
-      description:
-        "API key for the OpenAI-compatible model runtime (env: RALPHIE_MODEL_API_KEY). Written to a 0600 file in the workspace and removed after the run.",
-    }),
-    "model-provider": option(z.string().trim().min(1).optional(), {
-      description:
-        "Provider id to register for the OpenAI-compatible runtime (default: openai, or the --model provider segment)",
-    }),
-    "model-id": option(z.string().trim().min(1).optional(), {
-      description: "Model id to register for the OpenAI-compatible runtime",
-    }),
-    "agent-dir": option(z.string().trim().min(1).optional(), {
-      description:
-        "Use an existing Pi agent directory (models.json/auth.json) instead of generating a temporary one",
-    }),
-    agent: option(z.string().trim().min(1).optional(), {
-      description: "Compatibility label for task diagnostics (default: build)",
-    }),
-    verbose: option(z.coerce.boolean().optional(), {
-      description: "Include detailed progress information",
-      argumentKind: "flag",
-    }),
-    json: option(z.coerce.boolean().optional(), {
-      description: "Emit progress as JSON Lines",
-      argumentKind: "flag",
-    }),
-    quiet: option(z.coerce.boolean().optional(), {
-      description: "Only emit failures",
-      argumentKind: "flag",
-    }),
-    "dry-run": option(z.coerce.boolean().optional(), {
-      description:
-        "Assess and route issues without implementation or mutations",
-      argumentKind: "flag",
-    }),
-    workspace: option(z.string().trim().min(1).optional(), {
-      description: "Directory used to clone and work on the repository",
-    }),
-    cleanup: option(z.coerce.boolean().optional(), {
-      description: "Remove the workspace after a successful run",
-      argumentKind: "flag",
-    }),
-    "start-clean": option(z.coerce.boolean().optional(), {
-      description: "Remove an existing workspace before starting",
-      argumentKind: "flag",
-    }),
-    resume: option(z.string().trim().min(1).optional(), {
-      description: "Resume from a saved run-state JSON file",
-    }),
-  },
-  handler: async ({ flags, positional, terminal, signal }) => {
-    const [positionalRepo, ...extra] = positional;
-    if (extra.length > 0) throw new Error(`Unexpected argument: ${extra[0]}`);
+type ParsedCli = {
+    readonly help: boolean;
+    readonly version: boolean;
+    readonly options: Parameters<typeof resolveRalphieConfig>[0];
+};
 
-    const config = resolveRalphieConfig({
-      ...(positionalRepo === undefined
-        ? {}
-        : {
-            repo: positionalRepo,
-          }),
-      ...(flags.workflow === undefined
-        ? {}
-        : {
-            workflow: flags.workflow,
-          }),
-      ...(flags["issue-concurrency"] === undefined
-        ? {}
-        : {
-            issueConcurrency: flags["issue-concurrency"],
-          }),
-      ...(flags["agent-concurrency"] === undefined
-        ? {}
-        : {
-            agentConcurrency: flags["agent-concurrency"],
-          }),
-      ...(flags.branch === undefined
-        ? {}
-        : {
-            branch: flags.branch,
-          }),
-      ...(flags["max-issues"] === undefined
-        ? {}
-        : {
-            maxIssues: flags["max-issues"],
-          }),
-      ...(flags["issue-label"] === undefined
-        ? {}
-        : {
-            issueLabels: flags["issue-label"],
-          }),
-      ...(flags["issue-sort"] === undefined
-        ? {}
-        : {
-            issueSort: flags["issue-sort"],
-          }),
-      ...(flags["issue-order"] === undefined
-        ? {}
-        : {
-            issueOrder: flags["issue-order"],
-          }),
-      ...(flags.model === undefined
-        ? {}
-        : {
-            model: flags.model,
-          }),
-      ...(flags["model-variant"] === undefined
-        ? {}
-        : {
-            modelVariant: flags["model-variant"],
-          }),
-      ...(flags["model-base-url"] === undefined
-        ? {}
-        : {
-            modelBaseUrl: flags["model-base-url"],
-          }),
-      ...(flags["api-key"] === undefined
-        ? {}
-        : {
-            modelApiKey: flags["api-key"],
-          }),
-      ...(flags["model-provider"] === undefined
-        ? {}
-        : {
-            modelProvider: flags["model-provider"],
-          }),
-      ...(flags["model-id"] === undefined
-        ? {}
-        : {
-            modelId: flags["model-id"],
-          }),
-      ...(flags["agent-dir"] === undefined
-        ? {}
-        : {
-            agentDir: flags["agent-dir"],
-          }),
-      ...(flags.agent === undefined
-        ? {}
-        : {
-            agent: flags.agent,
-          }),
-      ...(flags.workspace === undefined
-        ? {}
-        : {
-            workspace: flags.workspace,
-          }),
-      ...(flags.cleanup === undefined
-        ? {}
-        : {
-            cleanup: flags.cleanup,
-          }),
-      ...(flags["start-clean"] === undefined
-        ? {}
-        : {
-            startClean: flags["start-clean"],
-          }),
-      ...(flags["dry-run"] === undefined
-        ? {}
-        : {
-            dryRun: flags["dry-run"],
-          }),
-      ...(flags.resume === undefined
-        ? {}
-        : {
-            resume: flags.resume,
-          }),
-      ...(flags.verbose === undefined
-        ? {}
-        : {
-            verbose: flags.verbose,
-          }),
-      ...(flags.json === undefined
-        ? {}
-        : {
-            json: flags.json,
-          }),
-      ...(flags.quiet === undefined
-        ? {}
-        : {
-            quiet: flags.quiet,
-          }),
+const asString = (
+    values: Record<string, unknown>,
+    name: string,
+): string | undefined => {
+    const value = values[name];
+    if (value === undefined) return undefined;
+    if (typeof value !== "string") {
+        throw new Error(`Option --${name} requires a string value.`);
+    }
+    return value;
+};
+
+const asNonEmptyString = (
+    values: Record<string, unknown>,
+    name: string,
+): string | undefined => {
+    const value = asString(values, name);
+    return value === undefined
+        ? undefined
+        : z.string().trim().min(1).parse(value);
+};
+
+const asNumber = (
+    values: Record<string, unknown>,
+    name: string,
+): number | undefined => {
+    const value = asString(values, name);
+    return value === undefined
+        ? undefined
+        : z.coerce.number().int().positive().parse(value);
+};
+
+const asBoolean = (values: Record<string, unknown>, name: string): boolean =>
+    values[name] === true;
+
+/** Parse the public `ralphie <repository> [options]` command line. */
+export const parseCliArgs = (args: ReadonlyArray<string>): ParsedCli => {
+    const parsed = parseArgs({
+        args: [...args],
+        options: cliOptions,
+        allowPositionals: true,
+        strict: true,
     });
-
-    let resumeState: RunState | undefined;
-    if (config.resume !== undefined) {
-      resumeState = await Effect.gen(function* () {
-        const store = yield* RunStateStore;
-        return yield* store.load(config.resume!);
-      }).pipe(Effect.provide(RunStateStoreLive), Effect.runPromise);
-      if (config.branch !== undefined) {
-        const reconciliation = reconcileRunState(resumeState, {
-          repository: config.repo,
-          branch: config.branch,
-        });
-        if (!reconciliation.compatible) {
-          throw new Error(
-            `Cannot resume run ${resumeState.runId}: ${reconciliation.reasons.join("; ")}.`,
-          );
-        }
-      }
+    if (parsed.positionals.length > 1) {
+        throw new Error(`Unexpected argument: ${parsed.positionals[1]}`);
     }
 
-    const progressMode = config.json
-      ? ProgressRenderMode.Json
-      : config.quiet
-        ? ProgressRenderMode.Quiet
-        : terminal.isInteractive &&
-            !terminal.isCI &&
-            process.stderr.isTTY === true
-          ? ProgressRenderMode.Interactive
-          : ProgressRenderMode.Plain;
+    const values = parsed.values as Record<string, unknown>;
+    const labels = values["issue-label"];
+    if (
+        labels !== undefined &&
+        !Array.isArray(labels) &&
+        typeof labels !== "string"
+    ) {
+        throw new Error("Option --issue-label requires a value.");
+    }
+    const issueLabels =
+        labels === undefined
+            ? undefined
+            : (Array.isArray(labels) ? labels : [labels]).map((label) =>
+                  z.string().trim().min(1).parse(label),
+              );
+    const modelValue = asString(values, "model");
+
+    return {
+        help: asBoolean(values, "help"),
+        version: asBoolean(values, "version"),
+        options: {
+            repo: parsed.positionals[0],
+            branch: asString(values, "branch"),
+            workflow:
+                asString(values, "workflow") === undefined
+                    ? undefined
+                    : z.enum(WorkflowMode).parse(asString(values, "workflow")),
+            issueConcurrency: asNumber(values, "issue-concurrency"),
+            agentConcurrency: asNumber(values, "agent-concurrency"),
+            maxIssues: asNumber(values, "max-issues"),
+            issueLabels,
+            issueSort:
+                asString(values, "issue-sort") === undefined
+                    ? undefined
+                    : z.enum(IssueSort).parse(asString(values, "issue-sort")),
+            issueOrder:
+                asString(values, "issue-order") === undefined
+                    ? undefined
+                    : z.enum(IssueOrder).parse(asString(values, "issue-order")),
+            model:
+                modelValue === undefined
+                    ? undefined
+                    : piModelSchema.parse(modelValue),
+            modelVariant:
+                asNonEmptyString(values, "model-variant") === undefined
+                    ? undefined
+                    : piModelVariantSchema.parse(
+                          asNonEmptyString(values, "model-variant"),
+                      ),
+            modelBaseUrl: asNonEmptyString(values, "model-base-url"),
+            modelApiKey: asNonEmptyString(values, "api-key"),
+            modelProvider: asNonEmptyString(values, "model-provider"),
+            modelId: asNonEmptyString(values, "model-id"),
+            agentDir: asNonEmptyString(values, "agent-dir"),
+            agent: asNonEmptyString(values, "agent"),
+            workspace: asNonEmptyString(values, "workspace"),
+            cleanup: asBoolean(values, "cleanup"),
+            startClean: asBoolean(values, "start-clean"),
+            dryRun: asBoolean(values, "dry-run"),
+            resume: asNonEmptyString(values, "resume"),
+            verbose: asBoolean(values, "verbose"),
+            json: asBoolean(values, "json"),
+            quiet: asBoolean(values, "quiet"),
+        },
+    };
+};
+
+const resolvePiConfig = (config: ResolvedRalphieConfig): PiProviderConfig => ({
+    workspace: config.workspace,
+    modelBaseUrl: config.modelBaseUrl,
+    modelApiKey: config.modelApiKey,
+    modelProvider: config.modelProvider ?? config.model?.providerID,
+    modelId: config.modelId ?? config.model?.modelID,
+    agentDir: config.agentDir,
+});
+
+export type CliTerminalInfo = {
+    readonly isInteractive: boolean;
+    readonly isCI: boolean;
+    readonly width: number;
+};
+
+export const terminalInfo = (): CliTerminalInfo => ({
+    isInteractive:
+        process.stdin.isTTY === true && process.stderr.isTTY === true,
+    isCI: process.env.CI === "true" || process.env.CI === "1",
+    width: process.stderr.columns ?? 80,
+});
+
+const resolveProgressMode = (
+    config: ResolvedRalphieConfig,
+    terminal: CliTerminalInfo,
+): ProgressRenderMode => {
+    if (config.json) return ProgressRenderMode.Json;
+    if (config.quiet) return ProgressRenderMode.Quiet;
+    if (terminal.isInteractive && !terminal.isCI && process.stderr.isTTY) {
+        return ProgressRenderMode.Interactive;
+    }
+    return ProgressRenderMode.Plain;
+};
+
+export const HELP_TEXT = `Usage: ralphie <owner/repository> [options]
+
+Run a GitHub issue queue through Pi.
+
+Options:
+  -b, --branch <name>          Branch to operate on
+      --workflow <mode>        lgtm, pr, or parallel-pr
+      --issue-concurrency <n>  Concurrent issues in parallel-pr mode
+      --agent-concurrency <n>  Maximum concurrent Pi tasks
+      --max-issues <n>         Maximum issues to process
+      --issue-label <label>    Include only issues with this label (repeatable)
+      --issue-sort <field>     created, updated, or comments
+      --issue-order <order>    asc or desc
+      --model <provider/model> Pi model selection
+      --model-variant <level>  Pi thinking level
+      --model-base-url <url>   OpenAI-compatible model base URL
+      --api-key <key>          Model API key
+      --model-provider <id>    Model provider id
+      --model-id <id>          Model id
+      --agent-dir <path>       Existing Pi agent directory
+      --agent <name>            Pi agent name (default: build)
+      --workspace <path>       Workspace directory
+      --resume <path>          Resume saved run state
+      --verbose                Include detailed progress
+      --json                   Emit JSON Lines progress
+      --quiet                  Emit failures only
+      --dry-run                Assess without mutations
+      --cleanup                Remove workspace after success
+      --start-clean            Remove workspace before starting
+  -h, --help                   Show this help
+  -v, --version                Show version
+`;
+
+/** Execute one Ralphie command. */
+export const runCommand = async (
+    args: ReadonlyArray<string> = Bun.argv.slice(2),
+    input: {
+        readonly signal?: AbortSignal;
+        readonly terminal?: CliTerminalInfo;
+    } = {},
+): Promise<void> => {
+    const parsed = parseCliArgs(args);
+    if (parsed.help) {
+        process.stdout.write(HELP_TEXT);
+        return;
+    }
+    if (parsed.version) {
+        process.stdout.write("0.1.0\n");
+        return;
+    }
+
+    const config = resolveRalphieConfig(parsed.options);
+    let resumeState: RunState | undefined;
+    if (config.resume !== undefined) {
+        resumeState = await RunStateStoreLive.load(config.resume);
+        if (config.branch !== undefined) {
+            const reconciliation = reconcileRunState(resumeState, {
+                repository: config.repo,
+                branch: config.branch,
+            });
+            if (!reconciliation.compatible) {
+                throw new Error(
+                    `Cannot resume run ${resumeState.runId}: ${reconciliation.reasons.join("; ")}.`,
+                );
+            }
+        }
+    }
+
+    const terminal = input.terminal ?? terminalInfo();
+    const progressMode = resolveProgressMode(config, terminal);
     const runId = resumeState?.runId ?? crypto.randomUUID();
     const eventLogPath =
-      config.resume === undefined
-        ? join(
-            resolveWorkspacePath(config.workspace),
-            ".ralphie",
-            "runs",
-            runId,
-            "events.jsonl",
-          )
-        : join(dirname(config.resume), "events.jsonl");
-    const progressLayer = makeProgressReporterLayer({
-      mode: progressMode,
-      verbose: config.verbose,
-      width: () => process.stderr.columns ?? terminal.width,
-      write: config.json
-        ? (text) => process.stdout.write(text)
-        : (text) => process.stderr.write(text),
-      runId,
-      eventLogPath,
+        config.resume === undefined
+            ? join(
+                  resolveWorkspacePath(config.workspace),
+                  ".ralphie",
+                  "runs",
+                  runId,
+                  "events.jsonl",
+              )
+            : join(dirname(config.resume), "events.jsonl");
+    const progress = makeProgressReporter({
+        mode: progressMode,
+        verbose: config.verbose,
+        width: () => process.stderr.columns ?? terminal.width,
+        write: config.json
+            ? (text) => process.stdout.write(text)
+            : (text) => process.stderr.write(text),
+        runId,
+        eventLogPath,
+    });
+    const runtime = makeLiveRuntime({
+        pi: makePiService(resolvePiConfig(config)),
+        progress,
     });
 
     try {
-      await workflow({
-        workflow: config.workflow,
-        issueConcurrency: config.issueConcurrency,
-        agentConcurrency: config.agentConcurrency,
-        repo: config.repo,
-        branch: config.branch,
-        maxIssues: config.maxIssues,
-        issueFilters: {
-          labels: config.issueLabels,
-          sort: config.issueSort,
-          order: config.issueOrder,
-        },
-        model: config.model,
-        modelVariant: config.modelVariant,
-        agent: config.agent,
-        workspace: config.workspace,
-        cleanup: config.cleanup,
-        startClean: config.startClean,
-        signal,
-        runId,
-        resumeState,
-        resumePath: config.resume,
-        dryRun: config.dryRun,
-      }).pipe(
-        Effect.provide(LiveRuntime),
-        Effect.provide(
-          PiLive(
-            resolvePiConfig(
-              config,
-              flags.model,
-              flags["model-base-url"],
-              flags["api-key"],
-              flags["model-provider"],
-              flags["model-id"],
-              flags["agent-dir"],
-            ),
-          ),
-        ),
-        Effect.provide(progressLayer),
-        Effect.catchAll((error) =>
-          Effect.fail(new Error(redactSensitiveText(error.message))),
-        ),
-        Effect.runPromise,
-      );
+        await workflow(
+            {
+                workflow: config.workflow,
+                issueConcurrency: config.issueConcurrency,
+                agentConcurrency: config.agentConcurrency,
+                repo: config.repo,
+                branch: config.branch,
+                maxIssues: config.maxIssues,
+                issueFilters: {
+                    labels: config.issueLabels,
+                    sort: config.issueSort,
+                    order: config.issueOrder,
+                },
+                model: config.model,
+                modelVariant: config.modelVariant,
+                agent: config.agent,
+                workspace: config.workspace,
+                cleanup: config.cleanup,
+                startClean: config.startClean,
+                signal: input.signal,
+                runId,
+                resumeState,
+                resumePath: config.resume,
+                dryRun: config.dryRun,
+            },
+            runtime,
+        );
     } catch (error) {
-      process.exitCode = exitCodeForFailure(signal);
-      throw error;
+        const message =
+            error instanceof Error
+                ? redactSensitiveText(error.message)
+                : String(error);
+        process.exitCode = exitCodeForFailure(
+            input.signal ?? new AbortController().signal,
+        );
+        throw new Error(message, { cause: error });
     }
-  },
-});
+};
 
 export default runCommand;
