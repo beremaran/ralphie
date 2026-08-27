@@ -329,3 +329,27 @@ export const makeProgressRecorder = (
     },
     stopPersisting: async () => {},
 });
+
+export {
+    DISPLAY_ACTIVITY_LABELS,
+    PROGRESS_STAGE_LABELS,
+    activityLabelFor,
+    createDisplayState,
+    initialDisplayState,
+    progressStageLabel,
+    reduceDisplayState,
+    reducePiSessionEvent,
+    reduceProgressUpdate,
+    updateDisplayState,
+    updateDisplayStateFromPi,
+    updateDisplayStateFromProgress,
+} from "./display-state.ts";
+export type {
+    DisplayActivity,
+    DisplayClock,
+    DisplayIssue,
+    DisplayReviewAttempt,
+    DisplayState,
+    DisplayStateOptions,
+    DisplayTimestamp,
+} from "./display-state.ts";
