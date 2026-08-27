@@ -20,15 +20,12 @@ export enum IssueExecutionOutcomeKind {
     Failed = "failed",
 }
 
-export enum IssueCompletionKind {
-    PushedCommit = "pushed-commit",
-    AlreadyResolved = "already-resolved",
-}
+export type IssueCompletionKind = "pushed-commit" | "already-resolved";
 
 export type IssueExecutionOutcome =
     | {
           readonly kind: IssueExecutionOutcomeKind.Completed;
-          readonly completion: IssueCompletionKind.PushedCommit;
+          readonly completion: "pushed-commit";
           /** The commit created for the issue's implementation. */
           readonly commitSha: string;
           /** Number of structured review decisions required to converge. */
@@ -36,7 +33,7 @@ export type IssueExecutionOutcome =
       }
     | {
           readonly kind: IssueExecutionOutcomeKind.Completed;
-          readonly completion: IssueCompletionKind.AlreadyResolved;
+          readonly completion: "already-resolved";
           readonly resolutionSummary: string;
           readonly evidence: ReadonlyArray<string>;
       }

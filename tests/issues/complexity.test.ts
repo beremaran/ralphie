@@ -5,8 +5,8 @@ import type { Octokit } from "octokit";
 import {
     makeProgressRecorder,
     type ProgressUpdate,
-    ProgressStage,
-    ProgressStatus,
+    type ProgressStage,
+    type ProgressStatus,
 } from "../../src/progress/progress.ts";
 import { makeComplexityAssessmentService } from "../../src/issues/complexity.ts";
 import { ComplexityLevel } from "../../src/issues/decisions.ts";
@@ -87,12 +87,12 @@ describe("complexity assessment", () => {
         });
         expect(events.map(({ stage, status }) => ({ stage, status }))).toEqual([
             {
-                stage: ProgressStage.ComplexityAssessment,
-                status: ProgressStatus.Started,
+                stage: "complexity-assessment",
+                status: "started",
             },
             {
-                stage: ProgressStage.ComplexityAssessment,
-                status: ProgressStatus.Succeeded,
+                stage: "complexity-assessment",
+                status: "succeeded",
             },
         ]);
     });
@@ -118,7 +118,7 @@ describe("complexity assessment", () => {
                 makeProgressRecorder(events),
             ).assess(context(client)),
         ).rejects.toThrow("structured output");
-        expect(events.at(-1)?.status).toBe(ProgressStatus.Failed);
+        expect(events.at(-1)?.status).toBe("failed");
     });
 
     test("records the assessment session and verifies its checkout invariant", async () => {

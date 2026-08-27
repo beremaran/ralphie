@@ -1,28 +1,27 @@
-import { IssueStageKind } from "../issues/stage.ts";
-import { StructuredOutputName } from "../agent/session.ts";
+import { type IssueStageKind } from "../issues/stage.ts";
+import { type StructuredOutputName } from "../agent/session.ts";
 
-export enum GitIssueAction {
-    CaptureIssueBase = "capture-issue-base",
-    StageAll = "stage-all",
-    Commit = "commit",
-    Push = "push",
-}
+export type GitIssueAction =
+    | "capture-issue-base"
+    | "stage-all"
+    | "commit"
+    | "push";
 
 export const GitIssueOutput = "issue-base" as const;
 export type GitIssueOutput = typeof GitIssueOutput;
 
 export type GitIssueStage =
     | {
-          readonly kind: IssueStageKind.GitTask;
-          readonly action: GitIssueAction.CaptureIssueBase;
+          readonly kind: "git-task";
+          readonly action: "capture-issue-base";
           readonly output: GitIssueOutput;
       }
     | {
-          readonly kind: IssueStageKind.GitTask;
-          readonly action: GitIssueAction.StageAll | GitIssueAction.Push;
+          readonly kind: "git-task";
+          readonly action: "stage-all" | "push";
       }
     | {
-          readonly kind: IssueStageKind.GitTask;
-          readonly action: GitIssueAction.Commit;
-          readonly messageFrom: StructuredOutputName.CommitMessageDecision;
+          readonly kind: "git-task";
+          readonly action: "commit";
+          readonly messageFrom: "commit-message-decision";
       };

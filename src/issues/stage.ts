@@ -1,14 +1,10 @@
-export enum IssueStageKind {
-    GitTask = "git-task",
-    GitHubTask = "github-task",
-    PiSession = "pi-session",
-    ReviewLoop = "review-loop",
-}
+export type IssueStageKind =
+    | "git-task"
+    | "github-task"
+    | "pi-session"
+    | "review-loop";
 
-export enum IssueWorkflowKind {
-    Implementation = "implementation",
-    Decomposition = "decomposition",
-}
+export type IssueWorkflowKind = "implementation" | "decomposition";
 
 export const ReviewLoopExhaustion = "escalate-to-decomposition" as const;
 export type ReviewLoopExhaustion = typeof ReviewLoopExhaustion;

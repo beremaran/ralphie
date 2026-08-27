@@ -5,11 +5,7 @@ import type { GitHubIssue } from "./issues.ts";
 import { parseRepositorySlug } from "./repository.ts";
 
 /** Reasons accepted by GitHub when closing an issue. */
-export enum GitHubIssueCloseReason {
-    Completed = "completed",
-    NotPlanned = "not_planned",
-    Duplicate = "duplicate",
-}
+export type GitHubIssueCloseReason = "completed" | "not_planned" | "duplicate";
 
 export const GitHubMutationRecoveryOutcome = "recovery-required" as const;
 export type GitHubMutationRecoveryOutcome =

@@ -10,7 +10,7 @@ import { makeGitIssueCheckpointService } from "../../src/git/issue-checkpoint.ts
 import { makeGitIssueOperationsService } from "../../src/git/issue-operations.ts";
 import { makeGitIssuePreparationService } from "../../src/git/issue-preparation.ts";
 import {
-    GitPushMode,
+    type GitPushMode,
     type GitRemoteSafetyService,
 } from "../../src/git/remote-safety.ts";
 import { makeGitRepositoryInvariantService } from "../../src/git/repository-invariant.ts";
@@ -19,7 +19,7 @@ import { makeComplexityAssessmentService } from "../../src/issues/complexity.ts"
 import { ComplexityLevel, ReviewVerdict } from "../../src/issues/decisions.ts";
 import type { DecompositionExecutorService } from "../../src/issues/decomposition-executor.ts";
 import {
-    IssueCompletionKind,
+    type IssueCompletionKind,
     IssueExecutionOutcomeKind,
     type IssueExecutionContext,
 } from "../../src/issues/execution.ts";
@@ -186,7 +186,7 @@ describe("local implementation end-to-end", () => {
                         commitsBehindBase: 0,
                         commitsAheadBase:
                             input.expectedCommitSha === undefined ? 0 : 1,
-                        pushMode: GitPushMode.NonForce,
+                        pushMode: "non-force",
                     };
                 },
             };
@@ -246,7 +246,7 @@ describe("local implementation end-to-end", () => {
             });
             if (
                 outcome.kind !== IssueExecutionOutcomeKind.Completed ||
-                outcome.completion !== IssueCompletionKind.PushedCommit
+                outcome.completion !== "pushed-commit"
             )
                 throw new Error("Expected pushed completion");
             expect(outcome.commitSha).not.toBe(initialSha);

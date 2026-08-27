@@ -7,8 +7,8 @@ import {
 } from "../git/issue-checkpoint.ts";
 import type { GitHubIssue } from "../github/issues.ts";
 import {
-    ProgressStage,
-    ProgressStatus,
+    type ProgressStage,
+    type ProgressStatus,
     type ProgressReporterService,
 } from "../progress/progress.ts";
 import { RalphieError } from "../shared/error.ts";
@@ -16,7 +16,7 @@ import { resolveWorkspacePath } from "../workspace/workspace.ts";
 import { type ReviewDecision, ReviewVerdict } from "./decisions.ts";
 import {
     IssueQueueResumeStrategy,
-    IssueWorkflowKind,
+    type IssueWorkflowKind,
     REVIEW_ITERATION_LIMIT,
 } from "./stage.ts";
 
@@ -36,14 +36,12 @@ export type ReviewExhaustionInput = {
     readonly reviews: ReadonlyArray<ReviewAttempt>;
 };
 
-export enum ReviewExhaustionOutcome {
-    EscalatedToDecomposition = "escalated-to-decomposition",
-}
+export type ReviewExhaustionOutcome = "escalated-to-decomposition";
 
 export type ReviewExhaustionResult = {
-    readonly outcome: ReviewExhaustionOutcome.EscalatedToDecomposition;
+    readonly outcome: "escalated-to-decomposition";
     readonly diagnosticsPath: string;
-    readonly nextWorkflow: IssueWorkflowKind.Decomposition;
+    readonly nextWorkflow: "decomposition";
     readonly resume: IssueQueueResumeStrategy;
 };
 
@@ -147,8 +145,8 @@ export const makeIssueRecoveryService = (
 
         await progress.emit({
             ...issueContext,
-            stage: ProgressStage.CheckoutRestore,
-            status: ProgressStatus.Started,
+            stage: "checkout-restore",
+            status: "started",
             message: `Restoring ${input.checkpoint.branch} to ${input.checkpoint.sha}...`,
             details: { diagnosticsPath },
         });
@@ -157,8 +155,8 @@ export const makeIssueRecoveryService = (
         } catch (error) {
             await progress.emit({
                 ...issueContext,
-                stage: ProgressStage.CheckoutRestore,
-                status: ProgressStatus.Failed,
+                stage: "checkout-restore",
+                status: "failed",
                 message: `Checkout restoration failed: ${error instanceof Error ? error.message : String(error)}`,
                 details: { diagnosticsPath },
             });
@@ -166,8 +164,8 @@ export const makeIssueRecoveryService = (
         }
         await progress.emit({
             ...issueContext,
-            stage: ProgressStage.CheckoutRestore,
-            status: ProgressStatus.Succeeded,
+            stage: "checkout-restore",
+            status: "succeeded",
             message: `Restored ${input.checkpoint.branch} to the clean issue base.`,
             details: { diagnosticsPath },
         });
@@ -186,8 +184,8 @@ export const makeIssueRecoveryService = (
             };
             await progress.emit({
                 ...issueContext,
-                stage: ProgressStage.ReviewExhaustion,
-                status: ProgressStatus.Info,
+                stage: "review-exhaustion",
+                status: "info",
                 message: `Review did not converge; escalating #${input.issue.number} to decomposition.`,
             });
 
@@ -196,9 +194,9 @@ export const makeIssueRecoveryService = (
             await restoreCheckout(input, diagnosticsPath);
 
             return {
-                outcome: ReviewExhaustionOutcome.EscalatedToDecomposition,
+                outcome: "escalated-to-decomposition",
                 diagnosticsPath,
-                nextWorkflow: IssueWorkflowKind.Decomposition,
+                nextWorkflow: "decomposition",
                 resume: IssueQueueResumeStrategy,
             };
         },

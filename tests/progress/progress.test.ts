@@ -5,9 +5,9 @@ import { join } from "node:path";
 
 import {
     makeProgressReporter,
-    ProgressRenderMode,
-    ProgressStage,
-    ProgressStatus,
+    type ProgressRenderMode,
+    type ProgressStage,
+    type ProgressStatus,
 } from "../../src/progress/progress.ts";
 import { cyan, dim, green, red, yellow } from "../../src/progress/colors.ts";
 
@@ -15,7 +15,7 @@ describe("progress reporting", () => {
     test("renders deterministic JSON Lines events", async () => {
         let output = "";
         const progress = makeProgressReporter({
-            mode: ProgressRenderMode.Json,
+            mode: "json",
             verbose: false,
             write: (text) => {
                 output += text;
@@ -24,8 +24,8 @@ describe("progress reporting", () => {
             runId: "run-1",
         });
         await progress.emit({
-            stage: ProgressStage.Review,
-            status: ProgressStatus.Started,
+            stage: "review",
+            status: "started",
             message: "Reviewing changes...",
             repository: "owner/repo",
             issue: { number: 42, title: "Fix issue" },
@@ -36,8 +36,8 @@ describe("progress reporting", () => {
         expect(JSON.parse(output)).toEqual({
             runId: "run-1",
             timestamp: "2026-08-24T01:02:03.000Z",
-            stage: ProgressStage.Review,
-            status: ProgressStatus.Started,
+            stage: "review",
+            status: "started",
             message: "Reviewing changes...",
             repository: "owner/repo",
             issue: { number: 42, title: "Fix issue" },
@@ -49,7 +49,7 @@ describe("progress reporting", () => {
     test("renders plain progress and optional verbose details", async () => {
         let output = "";
         const progress = makeProgressReporter({
-            mode: ProgressRenderMode.Plain,
+            mode: "plain",
             verbose: true,
             write: (text) => {
                 output += text;
@@ -57,8 +57,8 @@ describe("progress reporting", () => {
             runId: "run-1",
         });
         await progress.emit({
-            stage: ProgressStage.IssuePlanning,
-            status: ProgressStatus.Succeeded,
+            stage: "issue-planning",
+            status: "succeeded",
             message: "Issue prepared.",
             repository: "owner/repo",
             issue: { number: 42, title: "Fix issue" },
@@ -75,7 +75,7 @@ describe("progress reporting", () => {
         let output = "";
         let second = 0;
         const progress = makeProgressReporter({
-            mode: ProgressRenderMode.Interactive,
+            mode: "interactive",
             verbose: false,
             colors: true,
             write: (text) => {
@@ -87,48 +87,48 @@ describe("progress reporting", () => {
         });
         const issue = { number: 42, title: "Fix issue" };
         await progress.emit({
-            stage: ProgressStage.IssueExecution,
-            status: ProgressStatus.Started,
+            stage: "issue-execution",
+            status: "started",
             message: "Working on issue...",
             issue,
         });
         await progress.emit({
-            stage: ProgressStage.ComplexityAssessment,
-            status: ProgressStatus.Started,
+            stage: "complexity-assessment",
+            status: "started",
             message: "Assessing complexity...",
             issue,
         });
         await progress.emit({
-            stage: ProgressStage.ComplexityAssessment,
-            status: ProgressStatus.Succeeded,
+            stage: "complexity-assessment",
+            status: "succeeded",
             message: "Complexity assessed.",
             issue,
         });
         await progress.emit({
-            stage: ProgressStage.IssuePlanning,
-            status: ProgressStatus.Info,
+            stage: "issue-planning",
+            status: "info",
             message: "Using implementation workflow.",
             issue,
         });
         await progress.emit({
-            stage: ProgressStage.IssueExecution,
-            status: ProgressStatus.Succeeded,
+            stage: "issue-execution",
+            status: "succeeded",
             message: "Issue finished.",
             issue,
         });
         await progress.emit({
-            stage: ProgressStage.Push,
-            status: ProgressStatus.Started,
+            stage: "push",
+            status: "started",
             message: "Pushing...",
         });
         await progress.emit({
-            stage: ProgressStage.Push,
-            status: ProgressStatus.Failed,
+            stage: "push",
+            status: "failed",
             message: "Push failed.",
         });
         await progress.emit({
-            stage: ProgressStage.Run,
-            status: ProgressStatus.Failed,
+            stage: "run",
+            status: "failed",
             message: "Run failed.",
         });
 
@@ -152,7 +152,7 @@ describe("progress reporting", () => {
     test("clips an interactive live line before it can wrap", async () => {
         let output = "";
         const progress = makeProgressReporter({
-            mode: ProgressRenderMode.Interactive,
+            mode: "interactive",
             verbose: false,
             write: (text) => {
                 output += text;
@@ -161,8 +161,8 @@ describe("progress reporting", () => {
             runId: "run-1",
         });
         await progress.emit({
-            stage: ProgressStage.RepositoryPreparation,
-            status: ProgressStatus.Started,
+            stage: "repository-preparation",
+            status: "started",
             message: "Preparing a repository with a very long name...",
         });
         expect(Bun.stringWidth(output)).toBeLessThanOrEqual(23);
@@ -172,7 +172,7 @@ describe("progress reporting", () => {
     test("quiet mode only emits failures", async () => {
         let output = "";
         const progress = makeProgressReporter({
-            mode: ProgressRenderMode.Quiet,
+            mode: "quiet",
             verbose: false,
             write: (text) => {
                 output += text;
@@ -180,13 +180,13 @@ describe("progress reporting", () => {
             runId: "run-1",
         });
         await progress.emit({
-            stage: ProgressStage.Run,
-            status: ProgressStatus.Succeeded,
+            stage: "run",
+            status: "succeeded",
             message: "Done.",
         });
         await progress.emit({
-            stage: ProgressStage.Run,
-            status: ProgressStatus.Failed,
+            stage: "run",
+            status: "failed",
             message: "Failed.",
         });
         expect(output).toBe("✗ Failed.\n");
@@ -195,7 +195,7 @@ describe("progress reporting", () => {
     test("redacts credentials from messages and nested JSON details", async () => {
         let output = "";
         const progress = makeProgressReporter({
-            mode: ProgressRenderMode.Json,
+            mode: "json",
             verbose: true,
             write: (text) => {
                 output += text;
@@ -203,8 +203,8 @@ describe("progress reporting", () => {
             runId: "run-1",
         });
         await progress.emit({
-            stage: ProgressStage.Run,
-            status: ProgressStatus.Failed,
+            stage: "run",
+            status: "failed",
             message: "Request failed with Bearer private-value",
             details: {
                 githubToken: "private-value",
@@ -221,7 +221,7 @@ describe("progress reporting", () => {
         const eventLogPath = join(directory, "run", "events.jsonl");
         try {
             const progress = makeProgressReporter({
-                mode: ProgressRenderMode.Quiet,
+                mode: "quiet",
                 verbose: false,
                 write: () => undefined,
                 now: () => new Date("2026-08-24T01:02:03.000Z"),
@@ -229,8 +229,8 @@ describe("progress reporting", () => {
                 eventLogPath,
             });
             await progress.emit({
-                stage: ProgressStage.Commit,
-                status: ProgressStatus.Succeeded,
+                stage: "commit",
+                status: "succeeded",
                 message: "Committed with Bearer private-value.",
                 details: { commitSha: "abc123", token: "private-value" },
             });
@@ -242,8 +242,8 @@ describe("progress reporting", () => {
                 {
                     runId: "run-durable",
                     timestamp: "2026-08-24T01:02:03.000Z",
-                    stage: ProgressStage.Commit,
-                    status: ProgressStatus.Succeeded,
+                    stage: "commit",
+                    status: "succeeded",
                     message: "Committed with Bearer [REDACTED]",
                     details: { commitSha: "abc123", token: "[REDACTED]" },
                 },
@@ -262,7 +262,7 @@ describe("progress reporting", () => {
         let output = "";
         try {
             const progress = makeProgressReporter({
-                mode: ProgressRenderMode.Json,
+                mode: "json",
                 verbose: false,
                 write: (text) => {
                     output += text;
@@ -271,20 +271,20 @@ describe("progress reporting", () => {
                 eventLogPath,
             });
             await progress.emit({
-                stage: ProgressStage.WorkspaceCleanup,
-                status: ProgressStatus.Started,
+                stage: "workspace-cleanup",
+                status: "started",
                 message: "Removing workspace...",
             });
             await progress.stopPersisting();
             await rm(runDirectory, { recursive: true, force: true });
             await progress.emit({
-                stage: ProgressStage.WorkspaceCleanup,
-                status: ProgressStatus.Succeeded,
+                stage: "workspace-cleanup",
+                status: "succeeded",
                 message: "Workspace removed.",
             });
             await progress.emit({
-                stage: ProgressStage.Run,
-                status: ProgressStatus.Succeeded,
+                stage: "run",
+                status: "succeeded",
                 message: "Run completed.",
             });
             expect(output).toContain("Removing workspace...");
@@ -299,7 +299,7 @@ describe("progress reporting", () => {
     test("renders a representative non-interactive run as append-only lines", async () => {
         let output = "";
         const progress = makeProgressReporter({
-            mode: ProgressRenderMode.Plain,
+            mode: "plain",
             verbose: false,
             colors: true,
             write: (text) => {
@@ -308,13 +308,13 @@ describe("progress reporting", () => {
             runId: "run-snapshot",
         });
         await progress.emit({
-            stage: ProgressStage.Run,
-            status: ProgressStatus.Info,
+            stage: "run",
+            status: "info",
             message: "Run started.",
         });
         await progress.emit({
-            stage: ProgressStage.Review,
-            status: ProgressStatus.Started,
+            stage: "review",
+            status: "started",
             message: "Reviewing changes...",
             issue: { number: 42, title: "Fix issue" },
             current: 1,
@@ -323,8 +323,8 @@ describe("progress reporting", () => {
             maxAttempts: 5,
         });
         await progress.emit({
-            stage: ProgressStage.Review,
-            status: ProgressStatus.Succeeded,
+            stage: "review",
+            status: "succeeded",
             message: "Review approved.",
             issue: { number: 42, title: "Fix issue" },
             current: 1,
@@ -333,8 +333,8 @@ describe("progress reporting", () => {
             maxAttempts: 5,
         });
         await progress.emit({
-            stage: ProgressStage.Run,
-            status: ProgressStatus.Succeeded,
+            stage: "run",
+            status: "succeeded",
             message: "Run completed.",
         });
         expect(output).toBe(

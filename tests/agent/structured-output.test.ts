@@ -5,7 +5,7 @@ import { z } from "zod";
 import { requestStructuredOutput } from "../../src/agent/structured-output.ts";
 import {
     PI_DECISION_PERMISSION_POLICY,
-    PiAssistantErrorKind,
+    type PiAssistantErrorKind,
     makePiSessionDiagnostics,
     toPiAssistantError,
 } from "../../src/agent/task-session.ts";
@@ -283,15 +283,15 @@ describe("Pi structured output", () => {
 
     test.each([
         [
-            PiAssistantErrorKind.Aborted,
+            "aborted",
             { name: "MessageAbortedError", data: { message: "Aborted." } },
         ],
         [
-            PiAssistantErrorKind.OutputLengthExceeded,
+            "output-length-exceeded",
             { name: "MessageOutputLengthError", data: {} },
         ],
         [
-            PiAssistantErrorKind.StructuredOutputRetryExhausted,
+            "structured-output-retry-exhausted",
             {
                 name: "StructuredOutputError",
                 data: { message: "Schema retries exhausted.", retries: 2 },
@@ -320,8 +320,8 @@ describe("Pi structured output", () => {
         }
 
         const typed = toPiAssistantError(error as never);
-        expect(typed.kind).toBe(kind);
-        if (kind === PiAssistantErrorKind.StructuredOutputRetryExhausted) {
+        expect(typed.kind).toBe(kind as PiAssistantErrorKind);
+        if (kind === "structured-output-retry-exhausted") {
             expect(typed.retries).toBe(2);
         }
     });

@@ -8,7 +8,7 @@ import type { ComplexityAssessmentService } from "../../src/issues/complexity.ts
 import { ComplexityLevel } from "../../src/issues/decisions.ts";
 import type { DecompositionExecutorService } from "../../src/issues/decomposition-executor.ts";
 import {
-    IssueCompletionKind,
+    type IssueCompletionKind,
     IssueExecutionOutcomeKind,
     type IssueExecutionContext,
 } from "../../src/issues/execution.ts";
@@ -54,7 +54,7 @@ describe("IssueExecutor", () => {
                     implementationCalls += 1;
                     return {
                         kind: IssueExecutionOutcomeKind.Completed,
-                        completion: IssueCompletionKind.PushedCommit,
+                        completion: "pushed-commit",
                         commitSha: "implementation-sha",
                     } as const;
                 },

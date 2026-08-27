@@ -2,9 +2,9 @@ import { describe, expect, test } from "bun:test";
 
 import type { CommandResult } from "../../src/process/command-runner.ts";
 import {
-    GitDirectPushPolicy,
-    GitPushMode,
-    GitRemoteSafetyFailureKind,
+    type GitDirectPushPolicy,
+    type GitPushMode,
+    type GitRemoteSafetyFailureKind,
     makeGitRemoteSafetyService,
 } from "../../src/git/remote-safety.ts";
 
@@ -54,32 +54,22 @@ describe("Git remote safety", () => {
             branch: "main",
             commitsBehindBase: 0,
             commitsAheadBase: 0,
-            pushMode: GitPushMode.NonForce,
+            pushMode: "non-force",
         });
     });
 
     test.each([
-        [
-            "diverged base",
-            { counts: "1 2" },
-            GitRemoteSafetyFailureKind.DivergedBase,
-        ],
-        [
-            "moved remote",
-            { remoteSha: "newbase" },
-            GitRemoteSafetyFailureKind.DivergedBase,
-        ],
+        ["diverged base", { counts: "1 2" }, "diverged-base"],
+        ["moved remote", { remoteSha: "newbase" }, "diverged-base"],
     ])("refuses %s", async (_name, options) => {
         await expect(verify(options)).rejects.toMatchObject({
-            kind: GitRemoteSafetyFailureKind.DivergedBase,
+            kind: "diverged-base",
         });
     });
 
     test("refuses a force-push mode before any remote checks", async () => {
-        await expect(
-            verify({ pushMode: GitPushMode.Force }),
-        ).rejects.toMatchObject({
-            policy: GitDirectPushPolicy.NonForceOnly,
+        await expect(verify({ pushMode: "force" })).rejects.toMatchObject({
+            policy: "non-force-only",
         });
     });
 

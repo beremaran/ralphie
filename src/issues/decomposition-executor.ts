@@ -8,13 +8,16 @@ import {
 import {
     GitHubMutationRecoveryError,
     GitHubMutationRecoveryOutcome,
-    GitHubIssueCloseReason,
+    type GitHubIssueCloseReason,
     type GitHubIssueMutationService,
 } from "../github/issue-mutations.ts";
 import type { GitHubIssuesService } from "../github/issues.ts";
 import { buildDecompositionPrompt } from "../agent/prompts.ts";
 import { requestStructuredOutput } from "../agent/structured-output.ts";
-import { ProgressStage, ProgressStatus } from "../progress/progress.ts";
+import {
+    type ProgressStage,
+    type ProgressStatus,
+} from "../progress/progress.ts";
 import type { ProgressReporterService } from "../progress/progress.ts";
 import { RalphieError } from "../shared/error.ts";
 import {
@@ -64,13 +67,11 @@ export const makeDecompositionExecutorService = (
     ): Promise<Output> => {
         const context = issueContext(input);
         const stage =
-            operation === "close-original"
-                ? ProgressStage.IssueClosure
-                : ProgressStage.IssueCreation;
+            operation === "close-original" ? "issue-closure" : "issue-creation";
         await progress.emit({
             ...context,
             stage,
-            status: ProgressStatus.Started,
+            status: "started",
             message: `Applying GitHub mutation ${operation}...`,
             details: { operation },
         });
@@ -79,7 +80,7 @@ export const makeDecompositionExecutorService = (
             await progress.emit({
                 ...context,
                 stage,
-                status: ProgressStatus.Succeeded,
+                status: "succeeded",
                 message: `GitHub mutation ${operation} completed.`,
                 details: {
                     operation,
@@ -98,7 +99,7 @@ export const makeDecompositionExecutorService = (
             await progress.emit({
                 ...context,
                 stage,
-                status: ProgressStatus.Failed,
+                status: "failed",
                 message: `GitHub mutation ${operation} requires recovery: ${message}`,
                 details: {
                     outcome: GitHubMutationRecoveryOutcome,
@@ -120,8 +121,8 @@ export const makeDecompositionExecutorService = (
     ): Promise<never> => {
         await progress.emit({
             ...issueContext(input),
-            stage: ProgressStage.IssueCreation,
-            status: ProgressStatus.Failed,
+            stage: "issue-creation",
+            status: "failed",
             message: `GitHub mutation state is ambiguous: ${message}`,
             details: {
                 ...details,
@@ -184,7 +185,7 @@ export const makeDecompositionExecutorService = (
                     invariant,
                 ),
             progress,
-            progressStage: ProgressStage.Decomposition,
+            progressStage: "decomposition",
             progressIssue: issueContext(input).issue,
             signal: context.signal,
         });
@@ -383,7 +384,7 @@ export const makeDecompositionExecutorService = (
                     context.octokit,
                     context.repository,
                     context.issue.number,
-                    GitHubIssueCloseReason.Duplicate,
+                    "duplicate",
                 ),
             input,
         );

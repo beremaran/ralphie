@@ -4,7 +4,7 @@ import {
 } from "../git/issue-operations.ts";
 import type { GitIssuePreparationService } from "../git/issue-preparation.ts";
 import {
-    GitPushMode,
+    type GitPushMode,
     type GitRemoteSafetyService,
 } from "../git/remote-safety.ts";
 import {
@@ -17,8 +17,8 @@ import {
 import { requestStructuredOutput } from "../agent/structured-output.ts";
 import { runPiTask } from "../agent/task-session.ts";
 import {
-    ProgressStage,
-    ProgressStatus,
+    type ProgressStage,
+    type ProgressStatus,
     type ProgressReporterService,
 } from "../progress/progress.ts";
 import { RalphieError } from "../shared/error.ts";
@@ -35,7 +35,10 @@ import {
     reviewDecisionSchema,
     ReviewVerdict,
 } from "./decisions.ts";
-import { IssueCompletionKind, IssueExecutionOutcomeKind } from "./execution.ts";
+import {
+    type IssueCompletionKind,
+    IssueExecutionOutcomeKind,
+} from "./execution.ts";
 import { type IssueRecoveryService, type ReviewAttempt } from "./recovery.ts";
 import { REVIEW_ITERATION_LIMIT } from "./stage.ts";
 
@@ -92,14 +95,14 @@ const stage = async <A>(
     };
     await progress.emit({
         ...base,
-        status: ProgressStatus.Started,
+        status: "started",
         message: startedMessage,
     });
     try {
         const value = await operation();
         await progress.emit({
             ...base,
-            status: ProgressStatus.Succeeded,
+            status: "succeeded",
             message:
                 typeof succeededMessage === "function"
                     ? succeededMessage(value)
@@ -109,7 +112,7 @@ const stage = async <A>(
     } catch (error) {
         await progress.emit({
             ...base,
-            status: ProgressStatus.Failed,
+            status: "failed",
             message: `${startedMessage.replace(/\.{3}$/, "")} failed: ${
                 error instanceof Error ? error.message : String(error)
             }`,
@@ -141,7 +144,7 @@ export const makeImplementationExecutorService = (
         resolution.status === IssueResolutionStatus.Resolved
             ? {
                   kind: IssueExecutionOutcomeKind.Completed,
-                  completion: IssueCompletionKind.AlreadyResolved,
+                  completion: "already-resolved",
                   resolutionSummary: resolution.summary,
                   evidence: resolution.evidence,
               }
@@ -177,7 +180,7 @@ export const makeImplementationExecutorService = (
                 branch: context.targetBranch,
                 intendedBaseSha: storedCheckpoint.sha,
                 expectedCommitSha: createdCommit.sha,
-                pushMode: GitPushMode.NonForce,
+                pushMode: "non-force",
             });
             await operations.push(
                 context.repositoryPath,
@@ -189,7 +192,7 @@ export const makeImplementationExecutorService = (
                 : [];
             return {
                 kind: IssueExecutionOutcomeKind.Completed,
-                completion: IssueCompletionKind.PushedCommit,
+                completion: "pushed-commit",
                 commitSha: createdCommit.sha,
                 reviewCount: savedReviews.length,
             } as const;
@@ -222,7 +225,7 @@ export const makeImplementationExecutorService = (
         await stage(
             progress,
             input,
-            ProgressStage.RemoteSafety,
+            "remote-safety",
             "Checking repository push safety...",
             () =>
                 remoteSafety.verifyDirectPush({
@@ -230,7 +233,7 @@ export const makeImplementationExecutorService = (
                     repositoryPath: context.repositoryPath,
                     branch: context.targetBranch,
                     intendedBaseSha: checkpoint.sha,
-                    pushMode: GitPushMode.NonForce,
+                    pushMode: "non-force",
                 }),
             "Repository push safety checks passed.",
         );
@@ -245,7 +248,7 @@ export const makeImplementationExecutorService = (
         await stage(
             progress,
             input,
-            ProgressStage.Implementation,
+            "implementation",
             `Implementing #${context.issue.number}...`,
             () =>
                 runPiTask(context.pi, {
@@ -263,7 +266,7 @@ export const makeImplementationExecutorService = (
                     verifyRepositoryInvariant:
                         context.repositoryInvariant.verify,
                     progress,
-                    progressStage: ProgressStage.Implementation,
+                    progressStage: "implementation",
                     progressIssue: issueProgress(input).issue,
                     signal: context.signal,
                 }),
@@ -279,7 +282,7 @@ export const makeImplementationExecutorService = (
         const resolution = await stage(
             progress,
             input,
-            ProgressStage.ResolutionVerification,
+            "resolution-verification",
             "Verifying whether the issue is already resolved...",
             () =>
                 requestStructuredOutput(context.pi, {
@@ -300,7 +303,7 @@ export const makeImplementationExecutorService = (
                     verifyRepositoryInvariant:
                         context.repositoryInvariant.verify,
                     progress,
-                    progressStage: ProgressStage.ResolutionVerification,
+                    progressStage: "resolution-verification",
                     progressIssue: issueProgress(input).issue,
                     signal: context.signal,
                 }),
@@ -334,7 +337,7 @@ export const makeImplementationExecutorService = (
         const reviewResult = await stage(
             progress,
             input,
-            ProgressStage.Review,
+            "review",
             `Reviewing staged changes (attempt ${attempt}/${REVIEW_ITERATION_LIMIT})...`,
             () =>
                 requestStructuredOutput(context.pi, {
@@ -356,7 +359,7 @@ export const makeImplementationExecutorService = (
                     verifyRepositoryInvariant:
                         context.repositoryInvariant.verify,
                     progress,
-                    progressStage: ProgressStage.Review,
+                    progressStage: "review",
                     progressIssue: issueProgress(input).issue,
                     signal: context.signal,
                 }),
@@ -385,7 +388,7 @@ export const makeImplementationExecutorService = (
         const commitMessage = await stage(
             progress,
             input,
-            ProgressStage.CommitMessage,
+            "commit-message",
             "Generating a commit message...",
             () =>
                 requestStructuredOutput(context.pi, {
@@ -407,7 +410,7 @@ export const makeImplementationExecutorService = (
                     verifyRepositoryInvariant:
                         context.repositoryInvariant.verify,
                     progress,
-                    progressStage: ProgressStage.CommitMessage,
+                    progressStage: "commit-message",
                     progressIssue: issueProgress(input).issue,
                     signal: context.signal,
                 }),
@@ -420,7 +423,7 @@ export const makeImplementationExecutorService = (
         const commit = await stage(
             progress,
             input,
-            ProgressStage.Commit,
+            "commit",
             "Committing implementation changes...",
             () =>
                 operations.commit(context.repositoryPath, commitMessage.output),
@@ -430,15 +433,15 @@ export const makeImplementationExecutorService = (
         checkSignal(context.signal);
         await progress.emit({
             ...issueProgress(input),
-            stage: ProgressStage.Commit,
-            status: ProgressStatus.Info,
+            stage: "commit",
+            status: "info",
             message: "Created the issue commit.",
             details: { commitSha: commit.sha },
         });
         await stage(
             progress,
             input,
-            ProgressStage.Push,
+            "push",
             `Pushing ${context.targetBranch}...`,
             async () => {
                 await remoteSafety.verifyDirectPush({
@@ -447,7 +450,7 @@ export const makeImplementationExecutorService = (
                     branch: context.targetBranch,
                     intendedBaseSha: checkpoint.sha,
                     expectedCommitSha: commit.sha,
-                    pushMode: GitPushMode.NonForce,
+                    pushMode: "non-force",
                 });
                 await operations.push(
                     context.repositoryPath,
@@ -460,7 +463,7 @@ export const makeImplementationExecutorService = (
         );
         return {
             kind: IssueExecutionOutcomeKind.Completed,
-            completion: IssueCompletionKind.PushedCommit,
+            completion: "pushed-commit",
             commitSha: commit.sha,
             reviewCount,
         } as const;
@@ -479,7 +482,7 @@ export const makeImplementationExecutorService = (
         await stage(
             progress,
             input,
-            ProgressStage.ReviewFix,
+            "review-fix",
             `Addressing review findings (attempt ${attempt})...`,
             () =>
                 runPiTask(context.pi, {
@@ -499,7 +502,7 @@ export const makeImplementationExecutorService = (
                     verifyRepositoryInvariant:
                         context.repositoryInvariant.verify,
                     progress,
-                    progressStage: ProgressStage.ReviewFix,
+                    progressStage: "review-fix",
                     progressIssue: issueProgress(input).issue,
                     signal: context.signal,
                 }),
@@ -511,7 +514,7 @@ export const makeImplementationExecutorService = (
         await stage(
             progress,
             input,
-            ProgressStage.ChangeStaging,
+            "change-staging",
             `Restaging review-fix changes (attempt ${attempt})...`,
             () => operations.stageAll(context.repositoryPath),
             "Review-fix changes staged.",
@@ -523,8 +526,8 @@ export const makeImplementationExecutorService = (
         }
         await progress.emit({
             ...issueProgress(input),
-            stage: ProgressStage.ReviewFix,
-            status: ProgressStatus.Failed,
+            stage: "review-fix",
+            status: "failed",
             attempt,
             maxAttempts: REVIEW_ITERATION_LIMIT,
             message: `Review fix attempt ${attempt} produced no changes.`,
@@ -606,7 +609,7 @@ export const makeImplementationExecutorService = (
         await stage(
             progress,
             input,
-            ProgressStage.ChangeStaging,
+            "change-staging",
             "Staging all implementation changes...",
             () => operations.stageAll(context.repositoryPath),
             "Implementation changes staged.",

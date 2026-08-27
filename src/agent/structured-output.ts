@@ -12,7 +12,7 @@ import {
     toPiAssistantError,
 } from "./task-session.ts";
 import {
-    ProgressStage,
+    type ProgressStage,
     type ProgressIssue,
     type ProgressReporterService,
 } from "../progress/progress.ts";

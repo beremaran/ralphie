@@ -3,7 +3,7 @@ import { dirname } from "node:path";
 import { z } from "zod";
 
 import {
-    IssueCompletionKind,
+    type IssueCompletionKind,
     IssueExecutionOutcomeKind,
 } from "../issues/execution.ts";
 import { RalphieError } from "../shared/error.ts";
@@ -27,13 +27,13 @@ const issueSchema = z.object({
 const currentOutcomeSchema = z.union([
     z.object({
         kind: z.literal(IssueExecutionOutcomeKind.Completed),
-        completion: z.literal(IssueCompletionKind.PushedCommit),
+        completion: z.literal("pushed-commit"),
         commitSha: z.string().min(1),
         reviewCount: z.number().int().positive().optional(),
     }),
     z.object({
         kind: z.literal(IssueExecutionOutcomeKind.Completed),
-        completion: z.literal(IssueCompletionKind.AlreadyResolved),
+        completion: z.literal("already-resolved"),
         resolutionSummary: z.string().min(1),
         evidence: z.array(z.string().min(1)).min(1),
     }),
@@ -68,7 +68,7 @@ const outcomeSchema = z.preprocess((value) => {
     ) {
         return {
             ...value,
-            completion: IssueCompletionKind.PushedCommit,
+            completion: "pushed-commit",
         };
     }
     return value;

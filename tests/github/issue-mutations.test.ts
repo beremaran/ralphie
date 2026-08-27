@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { Octokit } from "octokit";
 
 import {
-    GitHubIssueCloseReason,
+    type GitHubIssueCloseReason,
     makeGitHubIssueMutationsService,
 } from "../../src/github/issue-mutations.ts";
 
@@ -108,7 +108,7 @@ describe("GitHub issue mutations", () => {
                     update: async (parameters: Record<string, unknown>) => {
                         request = parameters;
                         state = "closed";
-                        stateReason = GitHubIssueCloseReason.Duplicate;
+                        stateReason = "duplicate";
                         return issueResponse(
                             33,
                             "Issue",
@@ -125,7 +125,7 @@ describe("GitHub issue mutations", () => {
             client,
             "git@github.com:owner/repository.git",
             33,
-            GitHubIssueCloseReason.Duplicate,
+            "duplicate",
         );
 
         expect(request).toEqual({
@@ -148,7 +148,7 @@ describe("GitHub issue mutations", () => {
                             "Issue",
                             "Body",
                             "closed",
-                            GitHubIssueCloseReason.Completed,
+                            "completed",
                         ),
                     update: async () => {
                         updated = true;
@@ -162,7 +162,7 @@ describe("GitHub issue mutations", () => {
             client,
             "owner/repository",
             34,
-            GitHubIssueCloseReason.Completed,
+            "completed",
         );
         expect(issue.number).toBe(34);
         expect(updated).toBeFalse();
@@ -182,7 +182,7 @@ describe("GitHub issue mutations", () => {
                                   "Issue",
                                   "Body",
                                   "closed",
-                                  GitHubIssueCloseReason.Completed,
+                                  "completed",
                               );
                     },
                     update: async () => {
@@ -196,7 +196,7 @@ describe("GitHub issue mutations", () => {
             client,
             "owner/repository",
             35,
-            GitHubIssueCloseReason.Completed,
+            "completed",
         );
         expect(issue.number).toBe(35);
         expect(reads).toBe(2);

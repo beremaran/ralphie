@@ -1,16 +1,15 @@
 import { RunStateStatus, type RunState } from "./state.ts";
 import { RalphieError } from "../shared/error.ts";
 import { IssueExecutionOutcomeKind } from "../issues/execution.ts";
-import { ProgressStage } from "../progress/progress.ts";
+import { type ProgressStage } from "../progress/progress.ts";
 
-export enum RunReconciliationStatus {
-    Compatible = "compatible",
-    RepositoryMismatch = "repository-mismatch",
-    BranchMismatch = "branch-mismatch",
-    GitMismatch = "git-mismatch",
-    GitHubMismatch = "github-mismatch",
-    Stale = "stale",
-}
+export type RunReconciliationStatus =
+    | "compatible"
+    | "repository-mismatch"
+    | "branch-mismatch"
+    | "git-mismatch"
+    | "github-mismatch"
+    | "stale";
 
 export type RunGitInputs = {
     readonly branch: string;
@@ -48,7 +47,7 @@ const repositoryFindings = (
     if (state.repository !== inputs.repository) {
         return [
             {
-                status: RunReconciliationStatus.RepositoryMismatch,
+                status: "repository-mismatch",
                 reason: `saved repository is ${state.repository}, requested repository is ${inputs.repository}`,
             },
         ];
@@ -56,7 +55,7 @@ const repositoryFindings = (
     if (state.branch !== inputs.branch) {
         return [
             {
-                status: RunReconciliationStatus.BranchMismatch,
+                status: "branch-mismatch",
                 reason: `saved branch is ${state.branch}, requested branch is ${inputs.branch}`,
             },
         ];
@@ -72,7 +71,7 @@ const gitFindings = (
     const findings: ReconciliationFinding[] = [];
     if (inputs.git.branch !== state.branch) {
         findings.push({
-            status: RunReconciliationStatus.GitMismatch,
+            status: "git-mismatch",
             reason: `current checkout is on ${inputs.git.branch}, expected ${state.branch}`,
         });
     }
@@ -81,7 +80,7 @@ const gitFindings = (
         inputs.git.head.toLowerCase() !== state.checkout.head.toLowerCase()
     ) {
         findings.push({
-            status: RunReconciliationStatus.GitMismatch,
+            status: "git-mismatch",
             reason: `current HEAD is ${inputs.git.head}, expected ${state.checkout.head}`,
         });
     }
@@ -95,7 +94,7 @@ const githubFindings = (
     if (inputs.github === undefined) return [];
     const openIssues = new Set(inputs.github.openIssueNumbers);
     const recoverableClosureIssue =
-        state.activeIssue?.stage === ProgressStage.IssueClosure &&
+        state.activeIssue?.stage === "issue-closure" &&
         state.outcomes.some(
             ({ issueNumber, outcome }) =>
                 issueNumber === state.activeIssue?.issueNumber &&
@@ -112,7 +111,7 @@ const githubFindings = (
     if (missing.length === 0) return [];
     return [
         {
-            status: RunReconciliationStatus.GitHubMismatch,
+            status: "github-mismatch",
             reason: `saved pending issues are no longer open: ${missing.join(", ")}`,
         },
     ];
@@ -132,7 +131,7 @@ const ageFindings = (
     }
     return [
         {
-            status: RunReconciliationStatus.Stale,
+            status: "stale",
             reason: `saved state was last updated at ${state.updatedAt}`,
         },
     ];
@@ -148,7 +147,7 @@ export const reconcileRunState = (
         ...githubFindings(state, inputs),
         ...ageFindings(state, inputs),
     ];
-    let status = RunReconciliationStatus.Compatible;
+    let status: RunReconciliationStatus = "compatible";
     const reasons: string[] = [];
     for (const finding of findings) {
         status = finding.status;
@@ -190,15 +189,12 @@ export const makeRunReconciliationService = (): RunReconciliationService => ({
     },
 });
 
-export enum RunStateCleanupAction {
-    Preserve = "preserve",
-    Remove = "remove",
-}
+export type RunStateCleanupAction = "preserve" | "remove";
 
 export const planRunStateCleanup = (
     state: RunState,
     cleanupRequested: boolean,
 ): RunStateCleanupAction =>
     state.status === RunStateStatus.Complete && cleanupRequested
-        ? RunStateCleanupAction.Remove
-        : RunStateCleanupAction.Preserve;
+        ? "remove"
+        : "preserve";

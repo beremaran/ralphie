@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import {
-    IssueCompletionKind,
+    type IssueCompletionKind,
     IssueExecutionOutcomeKind,
 } from "../../src/issues/execution.ts";
 import {
-    RunReconciliationStatus,
-    RunStateCleanupAction,
+    type RunReconciliationStatus,
+    type RunStateCleanupAction,
     makeRunReconciliationService,
     planRunStateCleanup,
     reconcileRunState,
@@ -15,7 +15,7 @@ import {
     RunStateStatus,
     type RunState,
 } from "../../src/run/state.ts";
-import { ProgressStage } from "../../src/progress/progress.ts";
+import { type ProgressStage } from "../../src/progress/progress.ts";
 
 const state: RunState = {
     version: RUN_STATE_VERSION,
@@ -44,7 +44,7 @@ const state: RunState = {
             issueNumber: 1,
             outcome: {
                 kind: IssueExecutionOutcomeKind.Completed,
-                completion: IssueCompletionKind.PushedCommit,
+                completion: "pushed-commit",
                 commitSha: "abc123",
             },
         },
@@ -64,7 +64,7 @@ describe("run-state reconciliation", () => {
                 repository: "other/repo",
                 branch: "main",
             },
-            RunReconciliationStatus.RepositoryMismatch,
+            "repository-mismatch",
         ],
         [
             "branch",
@@ -72,7 +72,7 @@ describe("run-state reconciliation", () => {
                 repository: "owner/repo",
                 branch: "develop",
             },
-            RunReconciliationStatus.BranchMismatch,
+            "branch-mismatch",
         ],
         [
             "Git checkout",
@@ -84,7 +84,7 @@ describe("run-state reconciliation", () => {
                     head: "def456",
                 },
             },
-            RunReconciliationStatus.GitMismatch,
+            "git-mismatch",
         ],
         [
             "GitHub queue",
@@ -95,12 +95,12 @@ describe("run-state reconciliation", () => {
                     openIssueNumbers: [],
                 },
             },
-            RunReconciliationStatus.GitHubMismatch,
+            "github-mismatch",
         ],
     ])("rejects a %s mismatch", (_name, inputs, status) => {
         const result = reconcileRunState(state, inputs);
         expect(result.compatible).toBe(false);
-        expect(result.status).toBe(status);
+        expect(result.status).toBe(status as RunReconciliationStatus);
         expect(result.reasons.length).toBeGreaterThan(0);
     });
 
@@ -119,7 +119,7 @@ describe("run-state reconciliation", () => {
             }),
         ).toEqual({
             compatible: true,
-            status: RunReconciliationStatus.Compatible,
+            status: "compatible",
             reasons: [],
         });
     });
@@ -142,7 +142,7 @@ describe("run-state reconciliation", () => {
             },
             activeIssue: {
                 issueNumber: 1,
-                stage: ProgressStage.IssueClosure,
+                stage: "issue-closure",
             },
         };
 
@@ -164,7 +164,7 @@ describe("run-state reconciliation", () => {
             now: new Date("2026-08-25T00:00:00.000Z"),
             maxAgeMs: 60_000,
         });
-        expect(result.status).toBe(RunReconciliationStatus.Stale);
+        expect(result.status).toBe("stale");
     });
 
     test("exposes reconciliation as an async service", async () => {
@@ -176,9 +176,7 @@ describe("run-state reconciliation", () => {
     });
 
     test("preserves active state even when cleanup is requested", () => {
-        expect(planRunStateCleanup(state, true)).toBe(
-            RunStateCleanupAction.Preserve,
-        );
+        expect(planRunStateCleanup(state, true)).toBe("preserve");
         expect(
             planRunStateCleanup(
                 {
@@ -187,7 +185,7 @@ describe("run-state reconciliation", () => {
                 },
                 true,
             ),
-        ).toBe(RunStateCleanupAction.Remove);
+        ).toBe("remove");
         expect(
             planRunStateCleanup(
                 {
@@ -196,6 +194,6 @@ describe("run-state reconciliation", () => {
                 },
                 false,
             ),
-        ).toBe(RunStateCleanupAction.Preserve);
+        ).toBe("preserve");
     });
 });

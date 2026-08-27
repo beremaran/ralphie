@@ -11,7 +11,7 @@ import { IssueOrder, IssueSort } from "./github/issues.ts";
 import { piModelSchema, piModelVariantSchema } from "./agent/model.ts";
 import {
     makeProgressReporter,
-    ProgressRenderMode,
+    type ProgressRenderMode,
 } from "./progress/progress.ts";
 import { type PiProviderConfig } from "./pi/config.ts";
 import { makePiService } from "./pi/server.ts";
@@ -198,12 +198,12 @@ const resolveProgressMode = (
     config: ResolvedRalphieConfig,
     terminal: CliTerminalInfo,
 ): ProgressRenderMode => {
-    if (config.json) return ProgressRenderMode.Json;
-    if (config.quiet) return ProgressRenderMode.Quiet;
+    if (config.json) return "json";
+    if (config.quiet) return "quiet";
     if (terminal.isInteractive && !terminal.isCI && process.stderr.isTTY) {
-        return ProgressRenderMode.Interactive;
+        return "interactive";
     }
-    return ProgressRenderMode.Plain;
+    return "plain";
 };
 
 export const HELP_TEXT = `Usage: ralphie <owner/repository> [options]

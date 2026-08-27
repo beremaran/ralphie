@@ -1,8 +1,8 @@
 import { requestStructuredOutput } from "../agent/structured-output.ts";
 import { buildComplexityPrompt } from "../agent/prompts.ts";
 import {
-    ProgressStage,
-    ProgressStatus,
+    type ProgressStage,
+    type ProgressStatus,
     type ProgressReporterService,
 } from "../progress/progress.ts";
 import { RalphieError } from "../shared/error.ts";
@@ -38,8 +38,8 @@ export const makeComplexityAssessmentService = (
         };
         await progress.emit({
             ...issueProgress,
-            stage: ProgressStage.ComplexityAssessment,
-            status: ProgressStatus.Started,
+            stage: "complexity-assessment",
+            status: "started",
             message: `Assessing complexity for #${context.issue.number}...`,
         });
 
@@ -73,7 +73,7 @@ export const makeComplexityAssessmentService = (
                         checkpoint,
                     ),
                 progress,
-                progressStage: ProgressStage.ComplexityAssessment,
+                progressStage: "complexity-assessment",
                 progressIssue: issueProgress.issue,
                 signal: context.signal,
             });
@@ -83,8 +83,8 @@ export const makeComplexityAssessmentService = (
             };
             await progress.emit({
                 ...issueProgress,
-                stage: ProgressStage.ComplexityAssessment,
-                status: ProgressStatus.Succeeded,
+                stage: "complexity-assessment",
+                status: "succeeded",
                 message: `Assessed #${context.issue.number} at complexity ${assessed.decision.complexity}/5.`,
                 details: {
                     rationale: assessed.decision.rationale,
@@ -95,8 +95,8 @@ export const makeComplexityAssessmentService = (
         } catch (error) {
             await progress.emit({
                 ...issueProgress,
-                stage: ProgressStage.ComplexityAssessment,
-                status: ProgressStatus.Failed,
+                stage: "complexity-assessment",
+                status: "failed",
                 message: `Complexity assessment failed: ${messageOf(error)}`,
             });
             throw error;

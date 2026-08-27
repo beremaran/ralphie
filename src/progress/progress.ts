@@ -7,50 +7,43 @@ import {
 } from "../shared/redaction.ts";
 import { cyan, dim, green, red, yellow } from "./colors.ts";
 
-export enum ProgressStage {
-    Run = "run",
-    WorkspacePreparation = "workspace-preparation",
-    WorkspaceCleanup = "workspace-cleanup",
-    GitHubAuthentication = "github-authentication",
-    GitVerification = "git-verification",
-    RemoteSafety = "remote-safety",
-    RepositoryDiscovery = "repository-discovery",
-    RepositoryPreparation = "repository-preparation",
-    IssueDiscovery = "issue-discovery",
-    PiRuntime = "pi-runtime",
-    IssuePlanning = "issue-planning",
-    IssueExecution = "issue-execution",
-    IssueQueue = "issue-queue",
-    ComplexityAssessment = "complexity-assessment",
-    Implementation = "implementation",
-    ChangeStaging = "change-staging",
-    ResolutionVerification = "resolution-verification",
-    Review = "review",
-    ReviewFix = "review-fix",
-    ReviewExhaustion = "review-exhaustion",
-    CheckoutRestore = "checkout-restore",
-    CommitMessage = "commit-message",
-    Commit = "commit",
-    Push = "push",
-    Decomposition = "decomposition",
-    IssueCreation = "issue-creation",
-    IssueClosure = "issue-closure",
-}
+export type ProgressStage =
+    | "run"
+    | "workspace-preparation"
+    | "workspace-cleanup"
+    | "github-authentication"
+    | "git-verification"
+    | "remote-safety"
+    | "repository-discovery"
+    | "repository-preparation"
+    | "issue-discovery"
+    | "pi-runtime"
+    | "issue-planning"
+    | "issue-execution"
+    | "issue-queue"
+    | "complexity-assessment"
+    | "implementation"
+    | "change-staging"
+    | "resolution-verification"
+    | "review"
+    | "review-fix"
+    | "review-exhaustion"
+    | "checkout-restore"
+    | "commit-message"
+    | "commit"
+    | "push"
+    | "decomposition"
+    | "issue-creation"
+    | "issue-closure";
 
-export enum ProgressStatus {
-    Started = "started",
-    Succeeded = "succeeded",
-    Failed = "failed",
-    Skipped = "skipped",
-    Info = "info",
-}
+export type ProgressStatus =
+    | "started"
+    | "succeeded"
+    | "failed"
+    | "skipped"
+    | "info";
 
-export enum ProgressRenderMode {
-    Interactive = "interactive",
-    Plain = "plain",
-    Json = "json",
-    Quiet = "quiet",
-}
+export type ProgressRenderMode = "interactive" | "plain" | "json" | "quiet";
 
 export type ProgressIssue = {
     readonly number: number;
@@ -96,28 +89,28 @@ export type ProgressRendererOptions = {
 const statusSymbol = (status: ProgressStatus, colors: boolean): string => {
     if (!colors) {
         switch (status) {
-            case ProgressStatus.Succeeded:
+            case "succeeded":
                 return "✓";
-            case ProgressStatus.Failed:
+            case "failed":
                 return "✗";
-            case ProgressStatus.Skipped:
+            case "skipped":
                 return "−";
-            case ProgressStatus.Started:
+            case "started":
                 return "◐";
-            case ProgressStatus.Info:
+            case "info":
                 return "•";
         }
     }
     switch (status) {
-        case ProgressStatus.Succeeded:
+        case "succeeded":
             return green("✓");
-        case ProgressStatus.Failed:
+        case "failed":
             return red("✗");
-        case ProgressStatus.Skipped:
+        case "skipped":
             return dim("−");
-        case ProgressStatus.Started:
+        case "started":
             return yellow("◐");
-        case ProgressStatus.Info:
+        case "info":
             return cyan("•");
     }
 };
@@ -242,7 +235,7 @@ export const makeProgressReporter = ({
         line: string,
         emittedAt: Date,
     ): void => {
-        if (event.status === ProgressStatus.Started) {
+        if (event.status === "started") {
             clearLiveLine();
             removeActive(progressIdentity(event));
             activeProgress.push({
@@ -255,13 +248,12 @@ export const makeProgressReporter = ({
         }
 
         const terminalRunEvent =
-            event.stage === ProgressStage.Run &&
-            (event.status === ProgressStatus.Succeeded ||
-                event.status === ProgressStatus.Failed);
+            event.stage === "run" &&
+            (event.status === "succeeded" || event.status === "failed");
         const settled =
-            event.status === ProgressStatus.Succeeded ||
-            event.status === ProgressStatus.Failed ||
-            event.status === ProgressStatus.Skipped;
+            event.status === "succeeded" ||
+            event.status === "failed" ||
+            event.status === "skipped";
         const active = settled
             ? removeActive(progressIdentity(event))
             : undefined;
@@ -289,19 +281,16 @@ export const makeProgressReporter = ({
             const event = makeProgressEvent(update, runId, emittedAt);
             persistEvent(event);
 
-            if (mode === ProgressRenderMode.Json) {
+            if (mode === "json") {
                 write(`${JSON.stringify(event)}\n`);
                 return;
             }
-            if (
-                mode === ProgressRenderMode.Quiet &&
-                event.status !== ProgressStatus.Failed
-            ) {
+            if (mode === "quiet" && event.status !== "failed") {
                 return;
             }
 
             const line = renderLine(event);
-            if (mode !== ProgressRenderMode.Interactive) {
+            if (mode !== "interactive") {
                 write(`${line}\n`);
                 return;
             }

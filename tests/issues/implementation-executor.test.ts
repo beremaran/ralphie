@@ -10,29 +10,29 @@ import {
 import type { GitIssueOperationsService } from "../../src/git/issue-operations.ts";
 import {
     GitPushError,
-    GitPushFailureKind,
+    type GitPushFailureKind,
     GitPushFailurePolicy,
 } from "../../src/git/issue-operations.ts";
 import type { GitIssuePreparationService } from "../../src/git/issue-preparation.ts";
 import {
-    GitPushMode,
+    type GitPushMode,
     type GitRemoteSafetyInput,
     type GitRemoteSafetyService,
 } from "../../src/git/remote-safety.ts";
 import {
-    IssueCompletionKind,
+    type IssueCompletionKind,
     IssueExecutionOutcomeKind,
     type IssueExecutionContext,
 } from "../../src/issues/execution.ts";
 import type { WorkflowExecutorResult } from "../../src/issues/workflow-executor-input.ts";
 import { makeImplementationExecutorService } from "../../src/issues/implementation-executor.ts";
 import {
-    ReviewExhaustionOutcome,
+    type ReviewExhaustionOutcome,
     type IssueRecoveryService,
 } from "../../src/issues/recovery.ts";
 import {
     IssueQueueResumeStrategy,
-    IssueWorkflowKind,
+    type IssueWorkflowKind,
 } from "../../src/issues/stage.ts";
 import { RalphieError } from "../../src/shared/error.ts";
 import { makePiSessionDiagnostics } from "../../src/agent/task-session.ts";
@@ -150,9 +150,9 @@ const services = (options: ServiceOptions = {}) => {
     };
     const recovery: IssueRecoveryService = {
         handleReviewExhaustion: async () => ({
-            outcome: ReviewExhaustionOutcome.EscalatedToDecomposition,
+            outcome: "escalated-to-decomposition",
             diagnosticsPath: "/workspace/review-exhaustion",
-            nextWorkflow: IssueWorkflowKind.Decomposition,
+            nextWorkflow: "decomposition",
             resume: IssueQueueResumeStrategy,
         }),
         ...options.recovery,
@@ -166,7 +166,7 @@ const services = (options: ServiceOptions = {}) => {
                 origin: "https://github.com/owner/repository.git",
                 commitsBehindBase: 0,
                 commitsAheadBase: input.expectedCommitSha === undefined ? 0 : 1,
-                pushMode: GitPushMode.NonForce,
+                pushMode: "non-force",
             };
         },
         ...options.remoteSafety,
@@ -213,7 +213,7 @@ describe("implementation executor", () => {
         );
         expect(result).toEqual({
             kind: IssueExecutionOutcomeKind.Completed,
-            completion: IssueCompletionKind.PushedCommit,
+            completion: "pushed-commit",
             commitSha: "commit-1",
             reviewCount: 1,
         });
@@ -330,7 +330,7 @@ describe("implementation executor", () => {
         const result = await run(client, artifacts, setup);
         expect(result).toEqual({
             kind: IssueExecutionOutcomeKind.Completed,
-            completion: IssueCompletionKind.AlreadyResolved,
+            completion: "already-resolved",
             resolutionSummary:
                 "The checkout already closes every response body.",
             evidence: ["bodyclose reports zero findings"],
@@ -416,7 +416,7 @@ describe("implementation executor", () => {
             operations: {
                 push: async () => {
                     throw new GitPushError({
-                        kind: GitPushFailureKind.NonFastForward,
+                        kind: "non-fast-forward",
                         policy: GitPushFailurePolicy,
                         branch: "main",
                         message: "rejected",
@@ -446,10 +446,9 @@ describe("implementation executor", () => {
                 handleReviewExhaustion: async (input) => {
                     recoveryInput = input.reviews.length;
                     return {
-                        outcome:
-                            ReviewExhaustionOutcome.EscalatedToDecomposition,
+                        outcome: "escalated-to-decomposition",
                         diagnosticsPath: "/workspace/recovery",
-                        nextWorkflow: IssueWorkflowKind.Decomposition,
+                        nextWorkflow: "decomposition",
                         resume: IssueQueueResumeStrategy,
                     };
                 },

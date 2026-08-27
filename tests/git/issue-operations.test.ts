@@ -8,7 +8,7 @@ import { makeGitIssueCheckpointService } from "../../src/git/issue-checkpoint.ts
 import {
     GitPushError,
     GitPushFailurePolicy,
-    GitPushFailureKind,
+    type GitPushFailureKind,
     makeGitIssueOperationsService,
 } from "../../src/git/issue-operations.ts";
 
@@ -176,7 +176,7 @@ describe("deterministic Git issue operations", () => {
             await expect(
                 operations.push(repositoryPath, "main", commit.sha),
             ).rejects.toMatchObject({
-                kind: GitPushFailureKind.NonFastForward,
+                kind: "non-fast-forward",
                 policy: GitPushFailurePolicy,
                 branch: "main",
             });

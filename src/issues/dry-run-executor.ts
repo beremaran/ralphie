@@ -1,6 +1,6 @@
 import {
-    ProgressStage,
-    ProgressStatus,
+    type ProgressStage,
+    type ProgressStatus,
     type ProgressReporterService,
 } from "../progress/progress.ts";
 import {
@@ -43,8 +43,8 @@ export const makeDryRunIssueExecutorService = (
                 number: context.issue.number,
                 title: context.issue.title,
             },
-            stage: ProgressStage.IssuePlanning,
-            status: ProgressStatus.Info,
+            stage: "issue-planning",
+            status: "info",
             message: `Dry run would route #${context.issue.number} (complexity ${result.decision.complexity}/5) to ${route}.`,
             details: {
                 dryRun: true,

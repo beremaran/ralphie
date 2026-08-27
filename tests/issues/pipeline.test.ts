@@ -1,14 +1,17 @@
 import { describe, expect, test } from "bun:test";
-import { GitIssueAction, GitIssueOutput } from "../../src/git/issue-task.ts";
+import {
+    type GitIssueAction,
+    GitIssueOutput,
+} from "../../src/git/issue-task.ts";
 import type { GitHubIssue } from "../../src/github/issues.ts";
 import {
-    GitHubIssueAction,
+    type GitHubIssueAction,
     IssueLinkStrategy,
 } from "../../src/github/issue-task.ts";
 import {
     PiSessionContext,
-    PiSessionPurpose,
-    StructuredOutputName,
+    type PiSessionPurpose,
+    type StructuredOutputName,
 } from "../../src/agent/session.ts";
 import { DEFAULT_PI_AGENT } from "../../src/agent/model.ts";
 import { ComplexityLevel, ReviewVerdict } from "../../src/issues/decisions.ts";
@@ -21,8 +24,8 @@ import {
 import {
     CheckoutRestorePoint,
     IssueQueueResumeStrategy,
-    IssueStageKind,
-    IssueWorkflowKind,
+    type IssueStageKind,
+    type IssueWorkflowKind,
     REVIEW_ITERATION_LIMIT,
     ReviewLoopExhaustion,
 } from "../../src/issues/stage.ts";
@@ -71,9 +74,9 @@ describe("issue pipeline", () => {
         });
         expect(plan).not.toHaveProperty("issueBranch");
         expect(plan.assessment).toEqual({
-            kind: IssueStageKind.PiSession,
-            purpose: PiSessionPurpose.AssessComplexity,
-            output: StructuredOutputName.ComplexityDecision,
+            kind: "pi-session",
+            purpose: "assess-complexity",
+            output: "complexity-decision",
         });
     });
 
@@ -82,22 +85,22 @@ describe("issue pipeline", () => {
 
         for (const complexity of [0, 1, 2, 3]) {
             expect(selectWorkflow(plan, complexity)?.kind).toBe(
-                IssueWorkflowKind.Implementation,
+                "implementation",
             );
         }
 
         expect(selectWorkflow(plan, 3)?.stages).toEqual([
             {
-                kind: IssueStageKind.GitTask,
-                action: GitIssueAction.CaptureIssueBase,
+                kind: "git-task",
+                action: "capture-issue-base",
                 output: GitIssueOutput,
             },
             {
-                kind: IssueStageKind.PiSession,
-                purpose: PiSessionPurpose.Implement,
+                kind: "pi-session",
+                purpose: "implement",
             },
             {
-                kind: IssueStageKind.ReviewLoop,
+                kind: "review-loop",
                 maxIterations: REVIEW_ITERATION_LIMIT,
                 onExhausted: {
                     action: ReviewLoopExhaustion,
@@ -106,38 +109,38 @@ describe("issue pipeline", () => {
                     resume: IssueQueueResumeStrategy,
                 },
                 convergeWhen: {
-                    output: StructuredOutputName.ReviewDecision,
+                    output: "review-decision",
                     verdict: ReviewVerdict.Approved,
                 },
                 stageChanges: {
-                    kind: IssueStageKind.GitTask,
-                    action: GitIssueAction.StageAll,
+                    kind: "git-task",
+                    action: "stage-all",
                 },
                 review: {
-                    kind: IssueStageKind.PiSession,
-                    purpose: PiSessionPurpose.ReviewDiff,
-                    output: StructuredOutputName.ReviewDecision,
+                    kind: "pi-session",
+                    purpose: "review-diff",
+                    output: "review-decision",
                 },
                 onChangesRequested: {
-                    kind: IssueStageKind.PiSession,
-                    purpose: PiSessionPurpose.AddressReview,
+                    kind: "pi-session",
+                    purpose: "address-review",
                     context: PiSessionContext,
-                    input: StructuredOutputName.ReviewDecision,
+                    input: "review-decision",
                 },
             },
             {
-                kind: IssueStageKind.PiSession,
-                purpose: PiSessionPurpose.GenerateCommitMessage,
-                output: StructuredOutputName.CommitMessageDecision,
+                kind: "pi-session",
+                purpose: "generate-commit-message",
+                output: "commit-message-decision",
             },
             {
-                kind: IssueStageKind.GitTask,
-                action: GitIssueAction.Commit,
-                messageFrom: StructuredOutputName.CommitMessageDecision,
+                kind: "git-task",
+                action: "commit",
+                messageFrom: "commit-message-decision",
             },
             {
-                kind: IssueStageKind.GitTask,
-                action: GitIssueAction.Push,
+                kind: "git-task",
+                action: "push",
             },
         ]);
     });
@@ -147,35 +150,35 @@ describe("issue pipeline", () => {
 
         for (const complexity of [4, 5]) {
             expect(selectWorkflow(plan, complexity)?.kind).toBe(
-                IssueWorkflowKind.Decomposition,
+                "decomposition",
             );
         }
         expect(selectWorkflow(plan, 4)?.stages).toEqual([
             {
-                kind: IssueStageKind.PiSession,
-                purpose: PiSessionPurpose.DecomposeIssue,
-                output: StructuredOutputName.IssueBreakdownDecision,
+                kind: "pi-session",
+                purpose: "decompose-issue",
+                output: "issue-breakdown-decision",
             },
             {
-                kind: IssueStageKind.GitHubTask,
-                action: GitHubIssueAction.CreateBreakdownIssues,
-                input: StructuredOutputName.IssueBreakdownDecision,
+                kind: "github-task",
+                action: "create-breakdown-issues",
+                input: "issue-breakdown-decision",
                 links: IssueLinkStrategy,
                 includeDependencies: true,
             },
             {
-                kind: IssueStageKind.GitHubTask,
-                action: GitHubIssueAction.RewriteOriginalAsDuplicate,
-                input: StructuredOutputName.IssueBreakdownDecision,
+                kind: "github-task",
+                action: "rewrite-original-as-duplicate",
+                input: "issue-breakdown-decision",
             },
             {
-                kind: IssueStageKind.GitHubTask,
-                action: GitHubIssueAction.CloseOriginalAsDuplicate,
+                kind: "github-task",
+                action: "close-original-as-duplicate",
             },
         ]);
-        expect(
-            selectWorkflowByKind(plan, IssueWorkflowKind.Decomposition)?.kind,
-        ).toBe(IssueWorkflowKind.Decomposition);
+        expect(selectWorkflowByKind(plan, "decomposition")?.kind).toBe(
+            "decomposition",
+        );
     });
 
     test("does not route invalid complexity values", async () => {

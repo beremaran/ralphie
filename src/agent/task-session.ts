@@ -6,8 +6,8 @@ import type {
 } from "../pi/client.ts";
 
 import {
-    ProgressStage,
-    ProgressStatus,
+    type ProgressStage,
+    type ProgressStatus,
     type ProgressIssue,
     type ProgressReporterService,
 } from "../progress/progress.ts";
@@ -46,12 +46,11 @@ export type PiTaskResult = {
     readonly parts: ReadonlyArray<PiPart>;
 };
 
-export enum PiAssistantErrorKind {
-    Aborted = "aborted",
-    OutputLengthExceeded = "output-length-exceeded",
-    StructuredOutputRetryExhausted = "structured-output-retry-exhausted",
-    Other = "other",
-}
+export type PiAssistantErrorKind =
+    | "aborted"
+    | "output-length-exceeded"
+    | "structured-output-retry-exhausted"
+    | "other";
 
 export class PiAssistantError extends Error {
     readonly _tag = "PiAssistantError";
@@ -188,12 +187,12 @@ export const toPiAssistantError = (
 ): PiAssistantError => {
     const kind =
         error.name === "MessageAbortedError"
-            ? PiAssistantErrorKind.Aborted
+            ? "aborted"
             : error.name === "MessageOutputLengthError"
-              ? PiAssistantErrorKind.OutputLengthExceeded
+              ? "output-length-exceeded"
               : error.name === "StructuredOutputError"
-                ? PiAssistantErrorKind.StructuredOutputRetryExhausted
-                : PiAssistantErrorKind.Other;
+                ? "structured-output-retry-exhausted"
+                : "other";
 
     return new PiAssistantError({
         kind,
@@ -252,8 +251,8 @@ export const reportPiFailure = async (
 
     try {
         await request.progress.emit({
-            stage: request.progressStage ?? ProgressStage.Implementation,
-            status: ProgressStatus.Failed,
+            stage: request.progressStage ?? "implementation",
+            status: "failed",
             ...(request.progressIssue === undefined
                 ? {}
                 : { issue: request.progressIssue }),

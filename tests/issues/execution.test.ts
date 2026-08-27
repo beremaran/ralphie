@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { makePiSessionDiagnostics } from "../../src/agent/task-session.ts";
 
 import {
-    IssueCompletionKind,
+    type IssueCompletionKind,
     IssueExecutionOutcomeKind,
     type IssueExecutionOutcome,
     type IssueExecutionContext,
@@ -21,7 +21,7 @@ describe("issue execution domain types", () => {
         const outcomes: ReadonlyArray<IssueExecutionOutcome> = [
             {
                 kind: IssueExecutionOutcomeKind.Completed,
-                completion: IssueCompletionKind.PushedCommit,
+                completion: "pushed-commit",
                 commitSha: "abc123",
             },
             {
@@ -46,8 +46,7 @@ describe("issue execution domain types", () => {
         const descriptions = outcomes.map((outcome) => {
             switch (outcome.kind) {
                 case IssueExecutionOutcomeKind.Completed:
-                    return outcome.completion ===
-                        IssueCompletionKind.PushedCommit
+                    return outcome.completion === "pushed-commit"
                         ? outcome.commitSha
                         : outcome.resolutionSummary;
                 case IssueExecutionOutcomeKind.Decomposed:

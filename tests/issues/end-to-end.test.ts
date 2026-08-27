@@ -16,14 +16,14 @@ import {
 import { makeDecompositionExecutorService } from "../../src/issues/decomposition-executor.ts";
 import type { IssueExecutionContext } from "../../src/issues/execution.ts";
 import {
-    IssueCompletionKind,
+    type IssueCompletionKind,
     IssueExecutionOutcomeKind,
 } from "../../src/issues/execution.ts";
 import type { GitIssueOperationsService } from "../../src/git/issue-operations.ts";
 import { makeImplementationExecutorService } from "../../src/issues/implementation-executor.ts";
 import type { GitIssuePreparationService } from "../../src/git/issue-preparation.ts";
 import {
-    GitPushMode,
+    type GitPushMode,
     type GitRemoteSafetyService,
 } from "../../src/git/remote-safety.ts";
 import type { GitHubIssueMutationService } from "../../src/github/issue-mutations.ts";
@@ -36,9 +36,9 @@ import {
 import type { IssueRecoveryService } from "../../src/issues/recovery.ts";
 import {
     IssueQueueResumeStrategy,
-    IssueWorkflowKind,
+    type IssueWorkflowKind,
 } from "../../src/issues/stage.ts";
-import { ReviewExhaustionOutcome } from "../../src/issues/recovery.ts";
+import { type ReviewExhaustionOutcome } from "../../src/issues/recovery.ts";
 import { createIssueQueue, toQueuedIssues } from "../../src/issues/queue.ts";
 import { makeIssueExecutorService } from "../../src/issues/executor.ts";
 import { RalphieError } from "../../src/shared/error.ts";
@@ -152,14 +152,14 @@ const implementationDependencies = (
             origin: "https://github.com/owner/repository.git",
             commitsBehindBase: 0,
             commitsAheadBase: input.expectedCommitSha === undefined ? 0 : 1,
-            pushMode: GitPushMode.NonForce,
+            pushMode: "non-force",
         }),
     };
     const recovery: IssueRecoveryService = {
         handleReviewExhaustion: async () => ({
-            outcome: ReviewExhaustionOutcome.EscalatedToDecomposition,
+            outcome: "escalated-to-decomposition",
             diagnosticsPath: "/workspace/recovery",
-            nextWorkflow: IssueWorkflowKind.Decomposition,
+            nextWorkflow: "decomposition",
             resume: IssueQueueResumeStrategy,
         }),
     };
@@ -223,7 +223,7 @@ describe("mocked end-to-end issue workflows", () => {
         });
         expect(result).toEqual({
             kind: IssueExecutionOutcomeKind.Completed,
-            completion: IssueCompletionKind.PushedCommit,
+            completion: "pushed-commit",
             commitSha: "commit-e2e",
             reviewCount: 1,
         });

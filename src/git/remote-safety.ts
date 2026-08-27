@@ -6,22 +6,17 @@ import { RalphieError } from "../shared/error.ts";
 import { parseRepositorySlug } from "../github/repository.ts";
 import { runGit } from "./run-git.ts";
 
-export enum GitRemoteSafetyFailureKind {
-    OriginMismatch = "origin-mismatch",
-    DivergedBase = "diverged-base",
-    InvalidPushMode = "invalid-push-mode",
-}
+export type GitRemoteSafetyFailureKind =
+    | "origin-mismatch"
+    | "diverged-base"
+    | "invalid-push-mode";
 
-export enum GitDirectPushPolicy {
-    RequireOwnedOrigin = "require-owned-origin",
-    RequireExpectedBase = "require-expected-base",
-    NonForceOnly = "non-force-only",
-}
+export type GitDirectPushPolicy =
+    | "require-owned-origin"
+    | "require-expected-base"
+    | "non-force-only";
 
-export enum GitPushMode {
-    NonForce = "non-force",
-    Force = "force",
-}
+export type GitPushMode = "non-force" | "force";
 
 export class GitRemoteSafetyError extends RalphieError {
     override readonly _tag = "GitRemoteSafetyError";
@@ -58,7 +53,7 @@ export type GitRemoteSafetyReport = {
     readonly origin: string;
     readonly commitsBehindBase: number;
     readonly commitsAheadBase: number;
-    readonly pushMode: GitPushMode.NonForce;
+    readonly pushMode: "non-force";
 };
 
 export type GitRemoteSafetyService = {
@@ -89,10 +84,10 @@ const parseCounts = (output: string): readonly [number, number] | undefined => {
 };
 
 const validateDirectPushInput = (input: GitRemoteSafetyInput): string => {
-    if ((input.pushMode ?? GitPushMode.NonForce) !== GitPushMode.NonForce) {
+    if ((input.pushMode ?? "non-force") !== "non-force") {
         fail(
-            GitRemoteSafetyFailureKind.InvalidPushMode,
-            GitDirectPushPolicy.NonForceOnly,
+            "invalid-push-mode",
+            "non-force-only",
             "Direct pushes must use Git's non-force mode; force pushes are refused.",
         );
     }
@@ -109,8 +104,8 @@ const validateDirectPushInput = (input: GitRemoteSafetyInput): string => {
     }
     if (input.intendedBaseSha.trim().length === 0) {
         fail(
-            GitRemoteSafetyFailureKind.DivergedBase,
-            GitDirectPushPolicy.RequireExpectedBase,
+            "diverged-base",
+            "require-expected-base",
             "An intended base commit is required before a direct push.",
         );
     }
@@ -133,16 +128,16 @@ const readAndVerifyOrigin = async (
         originSlug = parseRepositorySlug(origin).slug;
     } catch (cause) {
         throw new GitRemoteSafetyError({
-            kind: GitRemoteSafetyFailureKind.OriginMismatch,
-            policy: GitDirectPushPolicy.RequireOwnedOrigin,
+            kind: "origin-mismatch",
+            policy: "require-owned-origin",
             message: `Repository origin ${origin} is not a GitHub repository owned by ${slug}.`,
             cause,
         });
     }
     if (originSlug.toLowerCase() !== slug.toLowerCase()) {
         fail(
-            GitRemoteSafetyFailureKind.OriginMismatch,
-            GitDirectPushPolicy.RequireOwnedOrigin,
+            "origin-mismatch",
+            "require-owned-origin",
             `Repository origin ${originSlug} does not match ${slug}.`,
         );
     }
@@ -155,8 +150,8 @@ const verifyBranch = (
 ): void => {
     if (localBranch !== input.branch) {
         fail(
-            GitRemoteSafetyFailureKind.OriginMismatch,
-            GitDirectPushPolicy.RequireOwnedOrigin,
+            "origin-mismatch",
+            "require-owned-origin",
             `Checkout is on ${localBranch}, expected ${input.branch}.`,
         );
     }
@@ -168,8 +163,8 @@ const verifyHead = (input: GitRemoteSafetyInput, head: string): void => {
         head.toLowerCase() !== input.expectedCommitSha.toLowerCase()
     ) {
         fail(
-            GitRemoteSafetyFailureKind.DivergedBase,
-            GitDirectPushPolicy.RequireExpectedBase,
+            "diverged-base",
+            "require-expected-base",
             `Local HEAD ${head} does not match expected commit ${input.expectedCommitSha}.`,
         );
     }
@@ -188,8 +183,8 @@ const verifyRemoteBase = (
         normalizedRemoteSha === input.expectedCommitSha.toLowerCase();
     if (!remoteIsIntendedBase && !remoteIsExpectedCommit) {
         fail(
-            GitRemoteSafetyFailureKind.DivergedBase,
-            GitDirectPushPolicy.RequireExpectedBase,
+            "diverged-base",
+            "require-expected-base",
             `Remote origin/${input.branch} moved from intended base ${input.intendedBaseSha} to ${remoteSha || "no commit"}.`,
         );
     }
@@ -202,8 +197,8 @@ const verifyAheadBehindCounts = (
     const counts = parseCounts(countsOutput);
     if (counts === undefined) {
         fail(
-            GitRemoteSafetyFailureKind.DivergedBase,
-            GitDirectPushPolicy.RequireExpectedBase,
+            "diverged-base",
+            "require-expected-base",
             `Git returned an invalid ahead/behind count: ${countsOutput}.`,
         );
         throw new Error("unreachable");
@@ -212,8 +207,8 @@ const verifyAheadBehindCounts = (
     const expectedAhead = input.expectedCommitSha === undefined ? 0 : 1;
     if (behind !== 0 || ahead !== expectedAhead) {
         fail(
-            GitRemoteSafetyFailureKind.DivergedBase,
-            GitDirectPushPolicy.RequireExpectedBase,
+            "diverged-base",
+            "require-expected-base",
             `Checkout diverged from intended base: ${behind} behind and ${ahead} ahead; expected 0 behind and ${expectedAhead} ahead.`,
         );
     }
@@ -270,7 +265,7 @@ export const makeGitRemoteSafetyService = (
             origin,
             commitsBehindBase: behind,
             commitsAheadBase: ahead,
-            pushMode: GitPushMode.NonForce,
+            pushMode: "non-force",
         };
     },
 });

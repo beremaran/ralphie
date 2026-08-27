@@ -7,10 +7,7 @@ import {
 import { RalphieError } from "../shared/error.ts";
 import { runGit } from "./run-git.ts";
 
-export enum GitPushFailureKind {
-    NonFastForward = "non-fast-forward",
-    Other = "other",
-}
+export type GitPushFailureKind = "non-fast-forward" | "other";
 
 /** Push failures halt so their created commit can be reconciled on resume. */
 export const GitPushFailurePolicy = "halt" as const;
@@ -178,11 +175,9 @@ export const makeGitIssueOperationsService = (
         const output = [result.stdout, result.stderr]
             .filter(Boolean)
             .join("\n");
-        const kind = isNonFastForward(output)
-            ? GitPushFailureKind.NonFastForward
-            : GitPushFailureKind.Other;
+        const kind = isNonFastForward(output) ? "non-fast-forward" : "other";
         const summary =
-            kind === GitPushFailureKind.NonFastForward
+            kind === "non-fast-forward"
                 ? `Push to origin/${branch} was rejected because the remote branch moved; push failure policy is halt.`
                 : `Push to origin/${branch} failed; push failure policy is halt.`;
         throw new GitPushError({

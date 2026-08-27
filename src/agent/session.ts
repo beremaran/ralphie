@@ -1,41 +1,39 @@
-import { IssueStageKind } from "../issues/stage.ts";
+import { type IssueStageKind } from "../issues/stage.ts";
 
-export enum StructuredOutputName {
-    ComplexityDecision = "complexity-decision",
-    ReviewDecision = "review-decision",
-    CommitMessageDecision = "commit-message-decision",
-    IssueBreakdownDecision = "issue-breakdown-decision",
-}
+export type StructuredOutputName =
+    | "complexity-decision"
+    | "review-decision"
+    | "commit-message-decision"
+    | "issue-breakdown-decision";
 
-export enum PiSessionPurpose {
-    Implement = "implement",
-    AddressReview = "address-review",
-    AssessComplexity = "assess-complexity",
-    ReviewDiff = "review-diff",
-    GenerateCommitMessage = "generate-commit-message",
-    DecomposeIssue = "decompose-issue",
-}
+export type PiSessionPurpose =
+    | "implement"
+    | "address-review"
+    | "assess-complexity"
+    | "review-diff"
+    | "generate-commit-message"
+    | "decompose-issue";
 
 export const PiSessionContext = "fresh" as const;
 export type PiSessionContext = typeof PiSessionContext;
 
 export type PiSessionStage =
     | {
-          readonly kind: IssueStageKind.PiSession;
-          readonly purpose: PiSessionPurpose.Implement;
+          readonly kind: "pi-session";
+          readonly purpose: "implement";
       }
     | {
-          readonly kind: IssueStageKind.PiSession;
-          readonly purpose: PiSessionPurpose.AddressReview;
+          readonly kind: "pi-session";
+          readonly purpose: "address-review";
           readonly context: PiSessionContext;
-          readonly input: StructuredOutputName.ReviewDecision;
+          readonly input: "review-decision";
       }
     | {
-          readonly kind: IssueStageKind.PiSession;
+          readonly kind: "pi-session";
           readonly purpose:
-              | PiSessionPurpose.AssessComplexity
-              | PiSessionPurpose.ReviewDiff
-              | PiSessionPurpose.GenerateCommitMessage
-              | PiSessionPurpose.DecomposeIssue;
+              | "assess-complexity"
+              | "review-diff"
+              | "generate-commit-message"
+              | "decompose-issue";
           readonly output: StructuredOutputName;
       };

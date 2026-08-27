@@ -13,7 +13,7 @@ import type { GitHubPullRequestService } from "../src/github/pull-requests.ts";
 import type { GitHubIssueMutationService } from "../src/github/issue-mutations.ts";
 import type { GitHubIssue, GitHubIssuesService } from "../src/github/issues.ts";
 import {
-    IssueCompletionKind,
+    type IssueCompletionKind,
     type IssueExecutionContext,
     type IssueExecutionOutcome,
     IssueExecutionOutcomeKind,
@@ -28,8 +28,8 @@ import {
     makeProgressRecorder,
     type ProgressReporterService,
     type ProgressUpdate,
-    ProgressStage,
-    ProgressStatus,
+    type ProgressStage,
+    type ProgressStatus,
 } from "../src/progress/progress.ts";
 import {
     type RunState,
@@ -85,7 +85,7 @@ const testRuntime = (
     const outcomes = options.outcomes ?? [
         {
             kind: IssueExecutionOutcomeKind.Completed,
-            completion: IssueCompletionKind.PushedCommit,
+            completion: "pushed-commit",
             commitSha: "abc123",
             reviewCount: 1,
         },
@@ -368,9 +368,9 @@ describe("workflow", () => {
             "closeRuntime",
             "removeWorkspace:/tmp/ralphie",
         ]);
-        expect(
-            events.some(({ stage }) => stage === ProgressStage.IssueExecution),
-        ).toBe(true);
+        expect(events.some(({ stage }) => stage === "issue-execution")).toBe(
+            true,
+        );
     });
 
     test("uses an issue branch and merged pull request without closing the issue directly", async () => {
@@ -417,12 +417,12 @@ describe("workflow", () => {
                 outcomes: [
                     {
                         kind: IssueExecutionOutcomeKind.Completed,
-                        completion: IssueCompletionKind.PushedCommit,
+                        completion: "pushed-commit",
                         commitSha: "commit-42",
                     },
                     {
                         kind: IssueExecutionOutcomeKind.Completed,
-                        completion: IssueCompletionKind.PushedCommit,
+                        completion: "pushed-commit",
                         commitSha: "commit-43",
                     },
                 ],
@@ -473,12 +473,12 @@ describe("workflow", () => {
     test.each([
         {
             kind: IssueExecutionOutcomeKind.Completed,
-            completion: IssueCompletionKind.PushedCommit,
+            completion: "pushed-commit",
             commitSha: "abc",
         },
         {
             kind: IssueExecutionOutcomeKind.Completed,
-            completion: IssueCompletionKind.AlreadyResolved,
+            completion: "already-resolved",
             resolutionSummary: "The checkout already satisfies the issue.",
             evidence: ["targeted validation passed"],
         },
@@ -554,7 +554,7 @@ describe("workflow", () => {
         expect(calls).toContain("closeIssue:42");
         expect(states.at(-1)?.activeIssue).toEqual({
             issueNumber: 42,
-            stage: ProgressStage.IssueClosure,
+            stage: "issue-closure",
         });
         expect(
             states.at(-1)?.queue.pending.map(({ number }) => number),
@@ -612,7 +612,7 @@ describe("workflow", () => {
                     },
                     {
                         kind: IssueExecutionOutcomeKind.Completed,
-                        completion: IssueCompletionKind.PushedCommit,
+                        completion: "pushed-commit",
                         commitSha: "child-sha",
                     },
                 ],

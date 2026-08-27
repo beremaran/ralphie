@@ -10,7 +10,7 @@ import {
     makePiTaskSessionService,
     PI_SESSION_RETENTION_POLICY,
     PiSessionRetentionPolicy,
-    PiAssistantErrorKind,
+    type PiAssistantErrorKind,
     PiAssistantError,
     PI_TASK_PERMISSION_POLICY,
     makePiSessionDiagnostics,
@@ -63,9 +63,7 @@ const responseParts: ReadonlyArray<PiPart> = [
 
 describe("Pi task sessions", () => {
     test("retains successful sessions for inspection", () => {
-        expect(PI_SESSION_RETENTION_POLICY).toBe(
-            PiSessionRetentionPolicy,
-        );
+        expect(PI_SESSION_RETENTION_POLICY).toBe(PiSessionRetentionPolicy);
     });
 
     test("creates a fresh session in the checkout with agent and model", async () => {
@@ -422,17 +420,17 @@ describe("Pi task sessions", () => {
     test.each([
         [
             "MessageAbortedError",
-            PiAssistantErrorKind.Aborted,
+            "aborted",
             { name: "MessageAbortedError", data: { message: "Aborted." } },
         ],
         [
             "MessageOutputLengthError",
-            PiAssistantErrorKind.OutputLengthExceeded,
+            "output-length-exceeded",
             { name: "MessageOutputLengthError", data: {} },
         ],
         [
             "StructuredOutputError",
-            PiAssistantErrorKind.StructuredOutputRetryExhausted,
+            "structured-output-retry-exhausted",
             {
                 name: "StructuredOutputError",
                 data: { message: "Could not satisfy schema.", retries: 3 },
@@ -441,6 +439,6 @@ describe("Pi task sessions", () => {
     ])("classifies %s as %s", (_name, kind, sdkError) => {
         const typedError = toPiAssistantError(sdkError as never);
         expect(typedError).toBeInstanceOf(PiAssistantError);
-        expect(typedError.kind).toBe(kind);
+        expect(typedError.kind).toBe(kind as PiAssistantErrorKind);
     });
 });

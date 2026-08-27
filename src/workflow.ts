@@ -6,14 +6,14 @@ import {
 } from "./agent/concurrency.ts";
 import { makePiSessionDiagnostics } from "./agent/task-session.ts";
 import type { PiModel, PiSelection } from "./agent/model.ts";
-import { GitHubIssueCloseReason } from "./github/issue-mutations.ts";
+import { type GitHubIssueCloseReason } from "./github/issue-mutations.ts";
 import type { GitHubIssue, IssueFilters } from "./github/issues.ts";
 import type {
     PreparedIssueWorktree,
     RepositoryCheckout,
 } from "./git/worktree.ts";
 import {
-    IssueCompletionKind,
+    type IssueCompletionKind,
     IssueExecutionOutcomeKind,
     type IssueExecutionOutcome,
 } from "./issues/execution.ts";
@@ -26,8 +26,8 @@ import {
 import type { PiRuntime } from "./pi/server.ts";
 import {
     type ProgressReporterService,
-    ProgressStage,
-    ProgressStatus,
+    type ProgressStage,
+    type ProgressStatus,
     type ProgressUpdate,
 } from "./progress/progress.ts";
 import { reconcileRunState } from "./run/reconciliation.ts";
@@ -64,7 +64,7 @@ const outcomeMessage = (
 ): string => {
     switch (outcome.kind) {
         case IssueExecutionOutcomeKind.Completed:
-            return outcome.completion === IssueCompletionKind.AlreadyResolved
+            return outcome.completion === "already-resolved"
                 ? `Issue #${issueNumber} was already resolved.`
                 : `Issue #${issueNumber} implemented and pushed.`;
         case IssueExecutionOutcomeKind.Decomposed:
@@ -83,7 +83,7 @@ const copyOutcome = (
 ): RunState["outcomes"][number]["outcome"] => {
     switch (outcome.kind) {
         case IssueExecutionOutcomeKind.Completed:
-            return outcome.completion === IssueCompletionKind.AlreadyResolved
+            return outcome.completion === "already-resolved"
                 ? { ...outcome, evidence: [...outcome.evidence] }
                 : {
                       kind: outcome.kind,
@@ -125,7 +125,7 @@ const track = async <Result>(
     await progress.emit({
         ...context,
         stage,
-        status: ProgressStatus.Started,
+        status: "started",
         message: startedMessage,
     });
     try {
@@ -133,7 +133,7 @@ const track = async <Result>(
         await progress.emit({
             ...context,
             stage,
-            status: ProgressStatus.Succeeded,
+            status: "succeeded",
             message:
                 typeof succeededMessage === "function"
                     ? succeededMessage(result)
@@ -144,7 +144,7 @@ const track = async <Result>(
         await progress.emit({
             ...context,
             stage,
-            status: ProgressStatus.Failed,
+            status: "failed",
             message: `${startedMessage.replace(/\.{3}$/, "")} failed: ${errorMessage(error)}`,
         });
         throw error;
@@ -262,7 +262,7 @@ const resumedClosureOutcomeFor = (
 ): IssueExecutionOutcome | undefined => {
     if (
         resumeState?.activeIssue?.issueNumber !== issueNumber ||
-        resumeState.activeIssue.stage !== ProgressStage.IssueClosure
+        resumeState.activeIssue.stage !== "issue-closure"
     ) {
         return undefined;
     }
@@ -405,8 +405,8 @@ const emitRunStarted = async (
     config: WorkflowConfiguration,
 ): Promise<void> => {
     await progress.emit({
-        stage: ProgressStage.Run,
-        status: ProgressStatus.Info,
+        stage: "run",
+        status: "info",
         message: `Ralphie started for ${config.repo} on ${config.requestedBranch ?? "default branch"}.`,
         details: {
             repository: config.repo,
@@ -436,8 +436,8 @@ const emitRunSucceeded = async (
     summary: WorkflowSummary,
 ): Promise<void> => {
     await progress.emit({
-        stage: ProgressStage.Run,
-        status: ProgressStatus.Succeeded,
+        stage: "run",
+        status: "succeeded",
         message:
             `Run completed: ${summary.counts.completed} completed, ` +
             `${summary.counts.decomposed} decomposed, ${summary.counts.escalated} escalated, ` +
@@ -485,8 +485,8 @@ const emitRunFailed = async (
     error: unknown,
 ): Promise<void> => {
     await progress.emit({
-        stage: ProgressStage.Run,
-        status: ProgressStatus.Failed,
+        stage: "run",
+        status: "failed",
         message: `Run failed: ${errorMessage(error)}`,
         details: { runId: config.actualRunId, statePath: config.statePath },
     });
@@ -559,7 +559,7 @@ export const workflow = async (
             if (startClean) {
                 await track(
                     progress,
-                    ProgressStage.WorkspaceCleanup,
+                    "workspace-cleanup",
                     `Removing existing workspace ${workspace}...`,
                     () => workspaceService.remove(workspace),
                     `Existing workspace removed: ${workspace}.`,
@@ -568,7 +568,7 @@ export const workflow = async (
 
             await track(
                 progress,
-                ProgressStage.WorkspacePreparation,
+                "workspace-preparation",
                 `Preparing workspace ${workspace}...`,
                 () => workspaceService.prepare(workspace),
                 `Workspace ready: ${workspace}.`,
@@ -576,7 +576,7 @@ export const workflow = async (
 
             const octokit = await track(
                 progress,
-                ProgressStage.GitHubAuthentication,
+                "github-authentication",
                 "Checking GitHub authentication...",
                 () => githubClient.initialize(),
                 "GitHub authentication verified and Octokit initialized.",
@@ -585,7 +585,7 @@ export const workflow = async (
 
             await track(
                 progress,
-                ProgressStage.GitVerification,
+                "git-verification",
                 "Checking Git installation...",
                 () => repository.verifyInstalled(),
                 "Git installation verified.",
@@ -594,7 +594,7 @@ export const workflow = async (
 
             const prepared = await track(
                 progress,
-                ProgressStage.RepositoryPreparation,
+                "repository-preparation",
                 `Preparing ${repo} on ${requestedBranch ?? "main/master"}...`,
                 () => repository.prepare(repo, requestedBranch, workspace),
                 (result) => `Repository ready: ${result.path}.`,
@@ -613,7 +613,7 @@ export const workflow = async (
 
             const discoveredIssues = await track(
                 progress,
-                ProgressStage.IssueDiscovery,
+                "issue-discovery",
                 "Fetching matching open issues...",
                 () => githubIssues.listOpen(octokit, repo, issueFilters),
                 (result) =>
@@ -852,8 +852,8 @@ export const workflow = async (
                 issueNumber: issue.number,
                 stage:
                     resumedClosureOutcome === undefined
-                        ? ProgressStage.ComplexityAssessment
-                        : ProgressStage.IssueClosure,
+                        ? "complexity-assessment"
+                        : "issue-closure",
             };
             const issueBaseCheckout = { ...checkout };
             const featureBranch = issueFeatureBranch(issue.number);
@@ -901,7 +901,7 @@ export const workflow = async (
                 )?.repositoryPath ?? prepared.path;
             return await track(
                 progress,
-                ProgressStage.IssueExecution,
+                "issue-execution",
                 `Executing #${issueContext.issue.number} ${issueContext.issue.title}...`,
                 () =>
                     issueExecutor.execute({
@@ -981,13 +981,10 @@ export const workflow = async (
                 { readonly kind: IssueExecutionOutcomeKind.Completed }
             >,
         ): Promise<void> => {
-            if (
-                usesPullRequests &&
-                outcome.completion === IssueCompletionKind.PushedCommit
-            ) {
+            if (usesPullRequests && outcome.completion === "pushed-commit") {
                 await track(
                     progress,
-                    ProgressStage.IssueClosure,
+                    "issue-closure",
                     `Opening and merging pull request for issue #${issueContext.issue.number}...`,
                     () => deliverPullRequest(issueContext),
                     "Pull request merged; GitHub will close the issue.",
@@ -1009,14 +1006,14 @@ export const workflow = async (
             }
             await track(
                 progress,
-                ProgressStage.IssueClosure,
+                "issue-closure",
                 `Closing issue #${issueContext.issue.number} as completed...`,
                 () =>
                     issueMutations.close(
                         octokit,
                         repo,
                         issueContext.issue.number,
-                        GitHubIssueCloseReason.Completed,
+                        "completed",
                     ),
                 `Issue #${issueContext.issue.number} closed as completed.`,
                 {
@@ -1037,7 +1034,7 @@ export const workflow = async (
             checkout = await captureCheckout();
             activeIssue = {
                 issueNumber: issueContext.issue.number,
-                stage: ProgressStage.IssueClosure,
+                stage: "issue-closure",
             };
             await persistState(RunStateStatus.Active, activeIssue);
             await closeCompletedIssue(issueContext, outcome);
@@ -1066,7 +1063,7 @@ export const workflow = async (
             checkout = await captureCheckout();
             await persistState(RunStateStatus.Active, {
                 issueNumber: issueContext.issue.number,
-                stage: ProgressStage.IssueExecution,
+                stage: "issue-execution",
             });
             if (issueFailurePolicy === IssueFailurePolicy) {
                 throw new RalphieError({
@@ -1082,7 +1079,7 @@ export const workflow = async (
             if (issueContext.preparedIssueWorktree === undefined) return;
             if (
                 outcome.kind === IssueExecutionOutcomeKind.Completed &&
-                outcome.completion === IssueCompletionKind.PushedCommit
+                outcome.completion === "pushed-commit"
             ) {
                 return;
             }
@@ -1115,15 +1112,15 @@ export const workflow = async (
             }
             const refreshed = await track(
                 progress,
-                ProgressStage.IssueDiscovery,
+                "issue-discovery",
                 "Refreshing issue list...",
                 () => githubIssues.listOpen(octokit, repo, issueFilters),
                 (result) => `Refreshed ${result.length} matching open issues.`,
             );
             const added = queue.refresh(toQueuedIssues(refreshed));
             await progress.emit({
-                stage: ProgressStage.IssueQueue,
-                status: ProgressStatus.Info,
+                stage: "issue-queue",
+                status: "info",
                 message: `Issue queue refreshed; added ${added} new issues.`,
                 details: { added, pending: queue.pendingCount() },
             });
@@ -1183,7 +1180,7 @@ export const workflow = async (
 
         const server = await track(
             progress,
-            ProgressStage.PiRuntime,
+            "pi-runtime",
             "Starting Pi runtime...",
             () => pi.start(),
             "Pi runtime ready.",
@@ -1218,16 +1215,16 @@ export const workflow = async (
         if (cleanup) {
             const startedMessage = `Removing workspace ${workspace}...`;
             await progress.emit({
-                stage: ProgressStage.WorkspaceCleanup,
-                status: ProgressStatus.Started,
+                stage: "workspace-cleanup",
+                status: "started",
                 message: startedMessage,
             });
             try {
                 await workspaceService.remove(workspace);
             } catch (error) {
                 await progress.emit({
-                    stage: ProgressStage.WorkspaceCleanup,
-                    status: ProgressStatus.Failed,
+                    stage: "workspace-cleanup",
+                    status: "failed",
                     message: `${startedMessage.replace(/\.{3}$/, "")} failed: ${errorMessage(error)}`,
                 });
                 throw error;
@@ -1236,8 +1233,8 @@ export const workflow = async (
             // removal so cleanup-success and run-success events cannot recreate it.
             await progress.stopPersisting();
             await progress.emit({
-                stage: ProgressStage.WorkspaceCleanup,
-                status: ProgressStatus.Succeeded,
+                stage: "workspace-cleanup",
+                status: "succeeded",
                 message: `Workspace removed: ${workspace}.`,
             });
         }

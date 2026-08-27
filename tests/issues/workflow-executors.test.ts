@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { makeIssueArtifactStore } from "../../src/issues/artifacts.ts";
 import {
-    IssueCompletionKind,
+    type IssueCompletionKind,
     IssueExecutionOutcomeKind,
     type IssueExecutionContext,
 } from "../../src/issues/execution.ts";
@@ -18,14 +18,14 @@ describe("concrete issue workflow executors", () => {
                 artifacts: typeof artifacts;
             }) => ({
                 kind: IssueExecutionOutcomeKind.Completed,
-                completion: IssueCompletionKind.PushedCommit,
+                completion: "pushed-commit",
                 commitSha: `issue-${input.artifacts.issueNumber}`,
             }),
         };
         const outcome = await executor.execute({ context, artifacts });
         expect(outcome).toEqual({
             kind: IssueExecutionOutcomeKind.Completed,
-            completion: IssueCompletionKind.PushedCommit,
+            completion: "pushed-commit",
             commitSha: "issue-42",
         });
     });

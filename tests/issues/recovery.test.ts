@@ -8,8 +8,8 @@ import type { GitHubIssue } from "../../src/github/issues.ts";
 import {
     makeProgressRecorder,
     type ProgressUpdate,
-    ProgressStage,
-    ProgressStatus,
+    type ProgressStage,
+    type ProgressStatus,
 } from "../../src/progress/progress.ts";
 import {
     ReviewFindingSeverity,
@@ -18,11 +18,11 @@ import {
 import {
     makeIssueRecoveryService,
     REVIEW_DIAGNOSTIC_PATCH_LIMIT_BYTES,
-    ReviewExhaustionOutcome,
+    type ReviewExhaustionOutcome,
 } from "../../src/issues/recovery.ts";
 import {
     IssueQueueResumeStrategy,
-    IssueWorkflowKind,
+    type IssueWorkflowKind,
     REVIEW_ITERATION_LIMIT,
 } from "../../src/issues/stage.ts";
 
@@ -107,12 +107,12 @@ describe("review exhaustion recovery", () => {
                 reviews,
             });
             expect(result).toEqual({
-                outcome: ReviewExhaustionOutcome.EscalatedToDecomposition,
+                outcome: "escalated-to-decomposition",
                 diagnosticsPath: join(
                     workspace,
                     ".ralphie/runs/run_unsafe/issues/42/review-exhaustion",
                 ),
-                nextWorkflow: IssueWorkflowKind.Decomposition,
+                nextWorkflow: "decomposition",
                 resume: IssueQueueResumeStrategy,
             });
             expect(calls).toEqual(["createPatch", `restore:${checkpoint.sha}`]);
@@ -135,16 +135,16 @@ describe("review exhaustion recovery", () => {
                 progressEvents.map(({ stage, status }) => ({ stage, status })),
             ).toEqual([
                 {
-                    stage: ProgressStage.ReviewExhaustion,
-                    status: ProgressStatus.Info,
+                    stage: "review-exhaustion",
+                    status: "info",
                 },
                 {
-                    stage: ProgressStage.CheckoutRestore,
-                    status: ProgressStatus.Started,
+                    stage: "checkout-restore",
+                    status: "started",
                 },
                 {
-                    stage: ProgressStage.CheckoutRestore,
-                    status: ProgressStatus.Succeeded,
+                    stage: "checkout-restore",
+                    status: "succeeded",
                 },
             ]);
         } finally {

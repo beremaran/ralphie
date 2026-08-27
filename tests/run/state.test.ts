@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import {
-    IssueCompletionKind,
+    type IssueCompletionKind,
     IssueExecutionOutcomeKind,
 } from "../../src/issues/execution.ts";
 import {
@@ -40,7 +40,7 @@ const state: RunState = {
             issueNumber: 1,
             outcome: {
                 kind: IssueExecutionOutcomeKind.Completed,
-                completion: IssueCompletionKind.PushedCommit,
+                completion: "pushed-commit",
                 commitSha: "abc123",
             },
         },
@@ -94,7 +94,7 @@ describe("run state store", () => {
             const loaded = await RunStateStoreLive.load(path);
             expect(loaded.outcomes[0]?.outcome).toMatchObject({
                 kind: IssueExecutionOutcomeKind.Completed,
-                completion: IssueCompletionKind.PushedCommit,
+                completion: "pushed-commit",
                 commitSha: "abc123",
             });
         } finally {
