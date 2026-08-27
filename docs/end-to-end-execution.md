@@ -326,11 +326,16 @@ Examples of resumable boundaries:
 
 Progress events include `runId`, timestamp, stage, status, and message. The
 normal output also streams Pi `thinking_delta`, `text_delta`, tool-call, and
-tool-result events as they arrive. JSON mode emits redacted progress and
-`pi_event` JSON Lines to stdout; normal modes render to stderr, and quiet mode
-renders failures only. Event details can include issue positions, review
-attempts, session ids, commit SHAs, created issue numbers, and diagnostic paths
-without exposing credentials.
+tool-result events as they arrive. Human-readable Pi transcript output groups
+each session into a compact block: thinking and assistant text stream
+immediately, tool calls are shown as readable commands, and tool output is
+indented, de-duplicated, and bounded. Use `--output verbose` for a larger
+tool-output preview. Terminal control sequences are sanitized and sensitive
+values are redacted before terminal rendering. JSON mode emits redacted
+progress and `pi_event` JSON Lines to stdout; normal modes render to stderr,
+and quiet mode renders failures only. Event details can include issue
+positions, review attempts, session ids, commit SHAs, created issue numbers,
+and diagnostic paths without exposing credentials.
 
 ## 9. Completion, failure, and cancellation
 
