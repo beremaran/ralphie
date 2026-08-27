@@ -64,7 +64,7 @@ const responseParts: ReadonlyArray<PiPart> = [
 describe("Pi task sessions", () => {
     test("retains successful sessions for inspection", () => {
         expect(PI_SESSION_RETENTION_POLICY).toBe(
-            PiSessionRetentionPolicy.Retain,
+            PiSessionRetentionPolicy,
         );
     });
 

@@ -102,11 +102,10 @@ export type PiSessionDiagnosticInput = Omit<
 >;
 
 /** Successful sessions remain available for post-run inspection. */
-export enum PiSessionRetentionPolicy {
-    Retain = "retain",
-}
+export const PiSessionRetentionPolicy = "retain" as const;
+export type PiSessionRetentionPolicy = typeof PiSessionRetentionPolicy;
 
-export const PI_SESSION_RETENTION_POLICY = PiSessionRetentionPolicy.Retain;
+export const PI_SESSION_RETENTION_POLICY = PiSessionRetentionPolicy;
 
 export type PiSessionDiagnostics = {
     readonly record: (runId: string, session: PiSessionDiagnosticInput) => void;

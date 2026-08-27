@@ -101,7 +101,7 @@ export const makeDecompositionExecutorService = (
                 status: ProgressStatus.Failed,
                 message: `GitHub mutation ${operation} requires recovery: ${message}`,
                 details: {
-                    outcome: GitHubMutationRecoveryOutcome.RecoveryRequired,
+                    outcome: GitHubMutationRecoveryOutcome,
                     operation,
                 },
             });
@@ -125,7 +125,7 @@ export const makeDecompositionExecutorService = (
             message: `GitHub mutation state is ambiguous: ${message}`,
             details: {
                 ...details,
-                outcome: GitHubMutationRecoveryOutcome.RecoveryRequired,
+                outcome: GitHubMutationRecoveryOutcome,
             },
         });
         throw new GitHubMutationRecoveryError({

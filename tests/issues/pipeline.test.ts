@@ -90,7 +90,7 @@ describe("issue pipeline", () => {
             {
                 kind: IssueStageKind.GitTask,
                 action: GitIssueAction.CaptureIssueBase,
-                output: GitIssueOutput.IssueBase,
+                output: GitIssueOutput,
             },
             {
                 kind: IssueStageKind.PiSession,
@@ -100,10 +100,10 @@ describe("issue pipeline", () => {
                 kind: IssueStageKind.ReviewLoop,
                 maxIterations: REVIEW_ITERATION_LIMIT,
                 onExhausted: {
-                    action: ReviewLoopExhaustion.EscalateToDecomposition,
+                    action: ReviewLoopExhaustion,
                     preserveDiagnostics: true,
-                    restore: CheckoutRestorePoint.IssueBase,
-                    resume: IssueQueueResumeStrategy.RefreshOpenIssues,
+                    restore: CheckoutRestorePoint,
+                    resume: IssueQueueResumeStrategy,
                 },
                 convergeWhen: {
                     output: StructuredOutputName.ReviewDecision,
@@ -121,7 +121,7 @@ describe("issue pipeline", () => {
                 onChangesRequested: {
                     kind: IssueStageKind.PiSession,
                     purpose: PiSessionPurpose.AddressReview,
-                    context: PiSessionContext.Fresh,
+                    context: PiSessionContext,
                     input: StructuredOutputName.ReviewDecision,
                 },
             },
@@ -160,7 +160,7 @@ describe("issue pipeline", () => {
                 kind: IssueStageKind.GitHubTask,
                 action: GitHubIssueAction.CreateBreakdownIssues,
                 input: StructuredOutputName.IssueBreakdownDecision,
-                links: IssueLinkStrategy.OriginalAndSiblings,
+                links: IssueLinkStrategy,
                 includeDependencies: true,
             },
             {

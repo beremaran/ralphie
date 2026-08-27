@@ -160,7 +160,7 @@ const implementationDependencies = (
             outcome: ReviewExhaustionOutcome.EscalatedToDecomposition,
             diagnosticsPath: "/workspace/recovery",
             nextWorkflow: IssueWorkflowKind.Decomposition,
-            resume: IssueQueueResumeStrategy.RefreshOpenIssues,
+            resume: IssueQueueResumeStrategy,
         }),
     };
     return makeImplementationExecutorService(

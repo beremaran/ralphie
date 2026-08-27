@@ -113,7 +113,7 @@ describe("review exhaustion recovery", () => {
                     ".ralphie/runs/run_unsafe/issues/42/review-exhaustion",
                 ),
                 nextWorkflow: IssueWorkflowKind.Decomposition,
-                resume: IssueQueueResumeStrategy.RefreshOpenIssues,
+                resume: IssueQueueResumeStrategy,
             });
             expect(calls).toEqual(["createPatch", `restore:${checkpoint.sha}`]);
             expect(

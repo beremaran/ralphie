@@ -13,9 +13,8 @@ export enum GitPushFailureKind {
 }
 
 /** Push failures halt so their created commit can be reconciled on resume. */
-export enum GitPushFailurePolicy {
-    Halt = "halt",
-}
+export const GitPushFailurePolicy = "halt" as const;
+export type GitPushFailurePolicy = typeof GitPushFailurePolicy;
 
 export class GitPushError extends RalphieError {
     override readonly _tag = "GitPushError";
@@ -33,7 +32,7 @@ export class GitPushError extends RalphieError {
         super(input);
         this.name = "GitPushError";
         this.kind = input.kind;
-        this.policy = input.policy ?? GitPushFailurePolicy.Halt;
+        this.policy = input.policy ?? GitPushFailurePolicy;
         this.branch = input.branch;
     }
 }

@@ -177,7 +177,7 @@ describe("deterministic Git issue operations", () => {
                 operations.push(repositoryPath, "main", commit.sha),
             ).rejects.toMatchObject({
                 kind: GitPushFailureKind.NonFastForward,
-                policy: GitPushFailurePolicy.Halt,
+                policy: GitPushFailurePolicy,
                 branch: "main",
             });
         } finally {

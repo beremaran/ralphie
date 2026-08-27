@@ -8,15 +8,14 @@ export enum GitIssueAction {
     Push = "push",
 }
 
-export enum GitIssueOutput {
-    IssueBase = "issue-base",
-}
+export const GitIssueOutput = "issue-base" as const;
+export type GitIssueOutput = typeof GitIssueOutput;
 
 export type GitIssueStage =
     | {
           readonly kind: IssueStageKind.GitTask;
           readonly action: GitIssueAction.CaptureIssueBase;
-          readonly output: GitIssueOutput.IssueBase;
+          readonly output: GitIssueOutput;
       }
     | {
           readonly kind: IssueStageKind.GitTask;

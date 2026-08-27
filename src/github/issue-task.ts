@@ -7,16 +7,15 @@ export enum GitHubIssueAction {
     CloseOriginalAsDuplicate = "close-original-as-duplicate",
 }
 
-export enum IssueLinkStrategy {
-    OriginalAndSiblings = "original-and-siblings",
-}
+export const IssueLinkStrategy = "original-and-siblings" as const;
+export type IssueLinkStrategy = typeof IssueLinkStrategy;
 
 export type GitHubIssueStage =
     | {
           readonly kind: IssueStageKind.GitHubTask;
           readonly action: GitHubIssueAction.CreateBreakdownIssues;
           readonly input: StructuredOutputName.IssueBreakdownDecision;
-          readonly links: IssueLinkStrategy.OriginalAndSiblings;
+          readonly links: IssueLinkStrategy;
           readonly includeDependencies: true;
       }
     | {

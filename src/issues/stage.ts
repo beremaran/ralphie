@@ -10,16 +10,13 @@ export enum IssueWorkflowKind {
     Decomposition = "decomposition",
 }
 
-export enum ReviewLoopExhaustion {
-    EscalateToDecomposition = "escalate-to-decomposition",
-}
+export const ReviewLoopExhaustion = "escalate-to-decomposition" as const;
+export type ReviewLoopExhaustion = typeof ReviewLoopExhaustion;
 
-export enum CheckoutRestorePoint {
-    IssueBase = "issue-base",
-}
+export const CheckoutRestorePoint = "issue-base" as const;
+export type CheckoutRestorePoint = typeof CheckoutRestorePoint;
 
-export enum IssueQueueResumeStrategy {
-    RefreshOpenIssues = "refresh-open-issues",
-}
+export const IssueQueueResumeStrategy = "refresh-open-issues" as const;
+export type IssueQueueResumeStrategy = typeof IssueQueueResumeStrategy;
 
 export const REVIEW_ITERATION_LIMIT = 5;

@@ -16,9 +16,8 @@ export enum PiSessionPurpose {
     DecomposeIssue = "decompose-issue",
 }
 
-export enum PiSessionContext {
-    Fresh = "fresh",
-}
+export const PiSessionContext = "fresh" as const;
+export type PiSessionContext = typeof PiSessionContext;
 
 export type PiSessionStage =
     | {
@@ -28,7 +27,7 @@ export type PiSessionStage =
     | {
           readonly kind: IssueStageKind.PiSession;
           readonly purpose: PiSessionPurpose.AddressReview;
-          readonly context: PiSessionContext.Fresh;
+          readonly context: PiSessionContext;
           readonly input: StructuredOutputName.ReviewDecision;
       }
     | {

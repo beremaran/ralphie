@@ -35,10 +35,10 @@ export type ReviewLoopStage = {
     readonly kind: IssueStageKind.ReviewLoop;
     readonly maxIterations: typeof REVIEW_ITERATION_LIMIT;
     readonly onExhausted: {
-        readonly action: ReviewLoopExhaustion.EscalateToDecomposition;
+        readonly action: ReviewLoopExhaustion;
         readonly preserveDiagnostics: true;
-        readonly restore: CheckoutRestorePoint.IssueBase;
-        readonly resume: IssueQueueResumeStrategy.RefreshOpenIssues;
+        readonly restore: CheckoutRestorePoint;
+        readonly resume: IssueQueueResumeStrategy;
     };
     readonly convergeWhen: {
         readonly output: StructuredOutputName.ReviewDecision;
@@ -94,7 +94,7 @@ const implementationWorkflow: IssueWorkflow = {
         {
             kind: IssueStageKind.GitTask,
             action: GitIssueAction.CaptureIssueBase,
-            output: GitIssueOutput.IssueBase,
+            output: GitIssueOutput,
         },
         {
             kind: IssueStageKind.PiSession,
@@ -104,10 +104,10 @@ const implementationWorkflow: IssueWorkflow = {
             kind: IssueStageKind.ReviewLoop,
             maxIterations: REVIEW_ITERATION_LIMIT,
             onExhausted: {
-                action: ReviewLoopExhaustion.EscalateToDecomposition,
+                action: ReviewLoopExhaustion,
                 preserveDiagnostics: true,
-                restore: CheckoutRestorePoint.IssueBase,
-                resume: IssueQueueResumeStrategy.RefreshOpenIssues,
+                restore: CheckoutRestorePoint,
+                resume: IssueQueueResumeStrategy,
             },
             convergeWhen: {
                 output: StructuredOutputName.ReviewDecision,
@@ -125,7 +125,7 @@ const implementationWorkflow: IssueWorkflow = {
             onChangesRequested: {
                 kind: IssueStageKind.PiSession,
                 purpose: PiSessionPurpose.AddressReview,
-                context: PiSessionContext.Fresh,
+                context: PiSessionContext,
                 input: StructuredOutputName.ReviewDecision,
             },
         },
@@ -162,7 +162,7 @@ const decompositionWorkflow: IssueWorkflow = {
             kind: IssueStageKind.GitHubTask,
             action: GitHubIssueAction.CreateBreakdownIssues,
             input: StructuredOutputName.IssueBreakdownDecision,
-            links: IssueLinkStrategy.OriginalAndSiblings,
+            links: IssueLinkStrategy,
             includeDependencies: true,
         },
         {

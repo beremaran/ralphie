@@ -153,7 +153,7 @@ const services = (options: ServiceOptions = {}) => {
             outcome: ReviewExhaustionOutcome.EscalatedToDecomposition,
             diagnosticsPath: "/workspace/review-exhaustion",
             nextWorkflow: IssueWorkflowKind.Decomposition,
-            resume: IssueQueueResumeStrategy.RefreshOpenIssues,
+            resume: IssueQueueResumeStrategy,
         }),
         ...options.recovery,
     };
@@ -417,7 +417,7 @@ describe("implementation executor", () => {
                 push: async () => {
                     throw new GitPushError({
                         kind: GitPushFailureKind.NonFastForward,
-                        policy: GitPushFailurePolicy.Halt,
+                        policy: GitPushFailurePolicy,
                         branch: "main",
                         message: "rejected",
                     });
@@ -450,7 +450,7 @@ describe("implementation executor", () => {
                             ReviewExhaustionOutcome.EscalatedToDecomposition,
                         diagnosticsPath: "/workspace/recovery",
                         nextWorkflow: IssueWorkflowKind.Decomposition,
-                        resume: IssueQueueResumeStrategy.RefreshOpenIssues,
+                        resume: IssueQueueResumeStrategy,
                     };
                 },
             },

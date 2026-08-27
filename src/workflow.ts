@@ -151,9 +151,8 @@ const track = async <Result>(
     }
 };
 
-export enum IssueFailurePolicy {
-    Halt = "halt",
-}
+export const IssueFailurePolicy = "halt" as const;
+export type IssueFailurePolicy = typeof IssueFailurePolicy;
 
 export type WorkflowSummary = {
     readonly runId: string;
@@ -352,7 +351,7 @@ const makeWorkflowConfiguration = (
         runId = crypto.randomUUID(),
         resumeState,
         resumePath,
-        issueFailurePolicy = IssueFailurePolicy.Halt,
+        issueFailurePolicy = IssueFailurePolicy,
         dryRun = false,
     } = options;
     const actualRunId = resumeState?.runId ?? runId;
@@ -1069,7 +1068,7 @@ export const workflow = async (
                 issueNumber: issueContext.issue.number,
                 stage: ProgressStage.IssueExecution,
             });
-            if (issueFailurePolicy === IssueFailurePolicy.Halt) {
+            if (issueFailurePolicy === IssueFailurePolicy) {
                 throw new RalphieError({
                     message: `Issue #${issueContext.issue.number} failed: ${outcome.message}`,
                 });

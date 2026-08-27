@@ -44,7 +44,7 @@ export type ReviewExhaustionResult = {
     readonly outcome: ReviewExhaustionOutcome.EscalatedToDecomposition;
     readonly diagnosticsPath: string;
     readonly nextWorkflow: IssueWorkflowKind.Decomposition;
-    readonly resume: IssueQueueResumeStrategy.RefreshOpenIssues;
+    readonly resume: IssueQueueResumeStrategy;
 };
 
 export const REVIEW_DIAGNOSTIC_PATCH_LIMIT_BYTES = 10 * 1024 * 1024;
@@ -199,7 +199,7 @@ export const makeIssueRecoveryService = (
                 outcome: ReviewExhaustionOutcome.EscalatedToDecomposition,
                 diagnosticsPath,
                 nextWorkflow: IssueWorkflowKind.Decomposition,
-                resume: IssueQueueResumeStrategy.RefreshOpenIssues,
+                resume: IssueQueueResumeStrategy,
             };
         },
     };

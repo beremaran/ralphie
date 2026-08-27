@@ -11,14 +11,14 @@ export enum GitHubIssueCloseReason {
     Duplicate = "duplicate",
 }
 
-export enum GitHubMutationRecoveryOutcome {
-    RecoveryRequired = "recovery-required",
-}
+export const GitHubMutationRecoveryOutcome = "recovery-required" as const;
+export type GitHubMutationRecoveryOutcome =
+    typeof GitHubMutationRecoveryOutcome;
 
 /** A mutation may have reached GitHub even though its response was lost. */
 export class GitHubMutationRecoveryError extends RalphieError {
     override readonly _tag = "GitHubMutationRecoveryError";
-    readonly outcome = GitHubMutationRecoveryOutcome.RecoveryRequired;
+    readonly outcome = GitHubMutationRecoveryOutcome;
     readonly operation: string;
 
     constructor(input: {
