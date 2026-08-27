@@ -62,6 +62,113 @@ const describeApiError = (error: unknown): string => {
     return `${name}: ${message}`;
 };
 
+const signalOptions = (signal: AbortSignal | undefined) =>
+    signal === undefined ? undefined : { signal };
+
+const createSessionInput = <Output>(
+    request: StructuredOutputRequest<Output>,
+) => ({
+    directory: request.directory,
+    title: request.title,
+    ...(request.agent === undefined ? {} : { agent: request.agent }),
+    permission: PI_DECISION_PERMISSION_POLICY,
+});
+
+const validateStructuredOutput = <Output>(
+    schema: z.ZodType<Output>,
+    value: unknown,
+): { readonly success: boolean; readonly error?: string } => {
+    const parsed = schema.safeParse(value);
+    return parsed.success
+        ? { success: true }
+        : { success: false, error: z.prettifyError(parsed.error) };
+};
+
+const promptInput = <Output>(
+    request: StructuredOutputRequest<Output>,
+    sessionID: string,
+) => ({
+    sessionID,
+    directory: request.directory,
+    ...(request.agent === undefined ? {} : { agent: request.agent }),
+    ...(request.model === undefined ? {} : { model: request.model }),
+    ...(request.variant === undefined ? {} : { variant: request.variant }),
+    format: {
+        type: "json_schema" as const,
+        schema: z.toJSONSchema(request.schema),
+        retryCount: request.retryCount ?? 2,
+        validate: (value: unknown) =>
+            validateStructuredOutput(request.schema, value),
+    },
+    parts: [{ type: "text" as const, text: request.prompt }],
+});
+
+const recordSessionDiagnostics = <Output>(
+    request: StructuredOutputRequest<Output>,
+    sessionID: string,
+): void => {
+    if (request.runId === undefined || request.diagnostics === undefined) {
+        return;
+    }
+    request.diagnostics.record(request.runId, {
+        sessionID,
+        directory: request.directory,
+        ...(request.agent === undefined ? {} : { agent: request.agent }),
+        ...(request.model === undefined ? {} : { model: request.model }),
+        ...(request.variant === undefined ? {} : { variant: request.variant }),
+    });
+};
+
+const verifyStructuredOutputRequest = async <Output>(
+    request: StructuredOutputRequest<Output>,
+): Promise<void> => {
+    if (
+        request.repositoryInvariant !== undefined &&
+        request.verifyRepositoryInvariant !== undefined
+    ) {
+        await request.verifyRepositoryInvariant(
+            request.directory,
+            request.repositoryInvariant,
+        );
+    }
+    if (request.verifyAfter !== undefined) await request.verifyAfter();
+};
+
+const promptForStructuredOutput = async <Output>(
+    client: PiClient,
+    request: StructuredOutputRequest<Output>,
+    sessionID: string,
+): Promise<StructuredOutputResult<Output>> => {
+    const response = await client.session.prompt(
+        promptInput(request, sessionID),
+        signalOptions(request.signal),
+    );
+
+    if (response.error !== undefined || response.data === undefined) {
+        throw new Error(
+            `Pi prompt failed: ${describeApiError(response.error)}`,
+        );
+    }
+
+    if (response.data.info.error !== undefined) {
+        const assistantError = toPiAssistantError(response.data.info.error);
+        throw new RalphieError({
+            message: `Pi assistant failed (${assistantError.kind}): ${assistantError.message}`,
+            cause: assistantError,
+        });
+    }
+
+    const parsed = request.schema.safeParse(response.data.info.structured);
+    if (!parsed.success) {
+        throw new Error(
+            `Pi returned invalid structured output: ${z.prettifyError(parsed.error)}`,
+        );
+    }
+
+    await verifyStructuredOutputRequest(request);
+    return { sessionID, output: parsed.data };
+};
+
 export const requestStructuredOutput = async <Output>(
     client: PiClient,
     request: StructuredOutputRequest<Output>,
@@ -69,17 +176,8 @@ export const requestStructuredOutput = async <Output>(
     withPiAgentPermit(client, async () => {
         try {
             const session = await client.session.create(
-                {
-                    directory: request.directory,
-                    title: request.title,
-                    ...(request.agent === undefined
-                        ? {}
-                        : { agent: request.agent }),
-                    permission: PI_DECISION_PERMISSION_POLICY,
-                },
-                request.signal === undefined
-                    ? undefined
-                    : { signal: request.signal },
+                createSessionInput(request),
+                signalOptions(request.signal),
             );
 
             if (session.error !== undefined || session.data === undefined) {
@@ -88,96 +186,13 @@ export const requestStructuredOutput = async <Output>(
                 );
             }
 
-            if (
-                request.runId !== undefined &&
-                request.diagnostics !== undefined
-            ) {
-                request.diagnostics.record(request.runId, {
-                    sessionID: session.data.id,
-                    directory: request.directory,
-                    ...(request.agent === undefined
-                        ? {}
-                        : { agent: request.agent }),
-                    ...(request.model === undefined
-                        ? {}
-                        : { model: request.model }),
-                    ...(request.variant === undefined
-                        ? {}
-                        : { variant: request.variant }),
-                });
-            }
+            recordSessionDiagnostics(request, session.data.id);
 
-            const response = await client.session.prompt(
-                {
-                    sessionID: session.data.id,
-                    directory: request.directory,
-                    ...(request.agent === undefined
-                        ? {}
-                        : { agent: request.agent }),
-                    ...(request.model === undefined
-                        ? {}
-                        : { model: request.model }),
-                    ...(request.variant === undefined
-                        ? {}
-                        : { variant: request.variant }),
-                    format: {
-                        type: "json_schema",
-                        schema: z.toJSONSchema(request.schema),
-                        retryCount: request.retryCount ?? 2,
-                        validate: (value) => {
-                            const parsed = request.schema.safeParse(value);
-                            return parsed.success
-                                ? { success: true }
-                                : {
-                                      success: false,
-                                      error: z.prettifyError(parsed.error),
-                                  };
-                        },
-                    },
-                    parts: [{ type: "text", text: request.prompt }],
-                },
-                request.signal === undefined
-                    ? undefined
-                    : { signal: request.signal },
+            return await promptForStructuredOutput(
+                client,
+                request,
+                session.data.id,
             );
-
-            if (response.error !== undefined || response.data === undefined) {
-                throw new Error(
-                    `Pi prompt failed: ${describeApiError(response.error)}`,
-                );
-            }
-
-            if (response.data.info.error !== undefined) {
-                const assistantError = toPiAssistantError(
-                    response.data.info.error,
-                );
-                throw new RalphieError({
-                    message: `Pi assistant failed (${assistantError.kind}): ${assistantError.message}`,
-                    cause: assistantError,
-                });
-            }
-
-            const parsed = request.schema.safeParse(
-                response.data.info.structured,
-            );
-            if (!parsed.success) {
-                throw new Error(
-                    `Pi returned invalid structured output: ${z.prettifyError(parsed.error)}`,
-                );
-            }
-
-            if (
-                request.repositoryInvariant !== undefined &&
-                request.verifyRepositoryInvariant !== undefined
-            ) {
-                await request.verifyRepositoryInvariant(
-                    request.directory,
-                    request.repositoryInvariant,
-                );
-            }
-            if (request.verifyAfter !== undefined) await request.verifyAfter();
-
-            return { sessionID: session.data.id, output: parsed.data };
         } catch (cause) {
             const error =
                 cause instanceof RalphieError

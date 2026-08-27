@@ -96,6 +96,55 @@ const mutationError = (message: string, cause: unknown): RalphieError =>
         ? cause
         : new RalphieError({ message, cause });
 
+const updateAndReconcileClose = async (
+    client: Octokit,
+    parameters: ReturnType<typeof repositoryParameters> & {
+        readonly issue_number: number;
+    },
+    reason: GitHubIssueCloseReason,
+): Promise<GitHubIssue> => {
+    try {
+        const response = await client.rest.issues.update({
+            ...parameters,
+            state: "closed",
+            state_reason: reason,
+        });
+        return mapIssue(response.data);
+    } catch (cause) {
+        // The update may have reached GitHub even when its response was lost.
+        const reconciled = await client.rest.issues.get(parameters);
+        if (
+            reconciled.data.state === "closed" &&
+            reconciled.data.state_reason === reason
+        ) {
+            return mapIssue(reconciled.data);
+        }
+        throw cause;
+    }
+};
+
+const closeIssue = async (
+    client: Octokit,
+    repository: string,
+    issueNumber: number,
+    reason: GitHubIssueCloseReason,
+): Promise<GitHubIssue> => {
+    const parameters = {
+        ...repositoryParameters(repository),
+        issue_number: issueNumber,
+    };
+    const current = await client.rest.issues.get(parameters);
+    if (current.data.state === "closed") {
+        if (current.data.state_reason !== reason) {
+            throw new RalphieError({
+                message: `Issue #${issueNumber} is already closed with reason ${current.data.state_reason ?? "unknown"}, not ${reason}.`,
+            });
+        }
+        return mapIssue(current.data);
+    }
+    return updateAndReconcileClose(client, parameters, reason);
+};
+
 export const makeGitHubIssueMutationsService =
     (): GitHubIssueMutationService => ({
         create: async (client, repository, input) => {
@@ -141,38 +190,12 @@ export const makeGitHubIssueMutationsService =
 
         close: async (client, repository, issueNumber, reason) => {
             try {
-                const parameters = {
-                    ...repositoryParameters(repository),
-                    issue_number: issueNumber,
-                };
-                const current = await client.rest.issues.get(parameters);
-                if (current.data.state === "closed") {
-                    if (current.data.state_reason !== reason) {
-                        throw new RalphieError({
-                            message: `Issue #${issueNumber} is already closed with reason ${current.data.state_reason ?? "unknown"}, not ${reason}.`,
-                        });
-                    }
-                    return mapIssue(current.data);
-                }
-
-                try {
-                    const response = await client.rest.issues.update({
-                        ...parameters,
-                        state: "closed",
-                        state_reason: reason,
-                    });
-                    return mapIssue(response.data);
-                } catch (cause) {
-                    // The update may have reached GitHub even when its response was lost.
-                    const reconciled = await client.rest.issues.get(parameters);
-                    if (
-                        reconciled.data.state === "closed" &&
-                        reconciled.data.state_reason === reason
-                    ) {
-                        return mapIssue(reconciled.data);
-                    }
-                    throw cause;
-                }
+                return await closeIssue(
+                    client,
+                    repository,
+                    issueNumber,
+                    reason,
+                );
             } catch (cause) {
                 throw mutationError(
                     `Failed to close issue #${issueNumber} in ${repository}.`,

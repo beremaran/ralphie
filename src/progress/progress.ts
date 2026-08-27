@@ -148,6 +148,24 @@ const clipToWidth = (text: string, width: number): string => {
 const progressIdentity = (event: ProgressEvent): string =>
     `${event.stage}:${event.issue?.number ?? ""}:${event.attempt ?? ""}`;
 
+const makeProgressEvent = (
+    update: ProgressUpdate,
+    runId: string,
+    timestamp: Date,
+): ProgressEvent => ({
+    ...update,
+    message: redactSensitiveText(update.message),
+    ...(update.details === undefined
+        ? {}
+        : {
+              details: redactSensitiveValue(update.details) as Readonly<
+                  Record<string, unknown>
+              >,
+          }),
+    runId,
+    timestamp: timestamp.toISOString(),
+});
+
 type ActiveProgress = {
     readonly identity: string;
     readonly line: string;
@@ -213,31 +231,63 @@ export const makeProgressReporter = ({
         return undefined;
     };
 
+    const persistEvent = (event: ProgressEvent): void => {
+        if (eventLogPath === undefined || !persistEvents) return;
+        mkdirSync(dirname(eventLogPath), { recursive: true });
+        appendFileSync(eventLogPath, `${JSON.stringify(event)}\n`, "utf8");
+    };
+
+    const renderInteractiveEvent = (
+        event: ProgressEvent,
+        line: string,
+        emittedAt: Date,
+    ): void => {
+        if (event.status === ProgressStatus.Started) {
+            clearLiveLine();
+            removeActive(progressIdentity(event));
+            activeProgress.push({
+                identity: progressIdentity(event),
+                line,
+                startedAt: emittedAt.getTime(),
+            });
+            renderLiveLine();
+            return;
+        }
+
+        const terminalRunEvent =
+            event.stage === ProgressStage.Run &&
+            (event.status === ProgressStatus.Succeeded ||
+                event.status === ProgressStatus.Failed);
+        const settled =
+            event.status === ProgressStatus.Succeeded ||
+            event.status === ProgressStatus.Failed ||
+            event.status === ProgressStatus.Skipped;
+        const active = settled
+            ? removeActive(progressIdentity(event))
+            : undefined;
+        if (terminalRunEvent) activeProgress.length = 0;
+        const duration =
+            active === undefined
+                ? ""
+                : (() => {
+                      const elapsedMs = Math.max(
+                          0,
+                          emittedAt.getTime() - active.startedAt,
+                      );
+                      const elapsedSec = (elapsedMs / 1000).toFixed(1);
+                      const durationText = `(${elapsedSec}s)`;
+                      return colors
+                          ? ` ${dim(durationText)}`
+                          : ` ${durationText}`;
+                  })();
+        appendLine(`${line}${duration}`);
+    };
+
     return {
         emit: async (update) => {
             const emittedAt = now();
-            const event: ProgressEvent = {
-                ...update,
-                message: redactSensitiveText(update.message),
-                ...(update.details === undefined
-                    ? {}
-                    : {
-                          details: redactSensitiveValue(
-                              update.details,
-                          ) as Readonly<Record<string, unknown>>,
-                      }),
-                runId,
-                timestamp: emittedAt.toISOString(),
-            };
-
-            if (eventLogPath !== undefined && persistEvents) {
-                mkdirSync(dirname(eventLogPath), { recursive: true });
-                appendFileSync(
-                    eventLogPath,
-                    `${JSON.stringify(event)}\n`,
-                    "utf8",
-                );
-            }
+            const event = makeProgressEvent(update, runId, emittedAt);
+            persistEvent(event);
 
             if (mode === ProgressRenderMode.Json) {
                 write(`${JSON.stringify(event)}\n`);
@@ -256,44 +306,7 @@ export const makeProgressReporter = ({
                 return;
             }
 
-            if (event.status === ProgressStatus.Started) {
-                clearLiveLine();
-                removeActive(progressIdentity(event));
-                activeProgress.push({
-                    identity: progressIdentity(event),
-                    line,
-                    startedAt: emittedAt.getTime(),
-                });
-                renderLiveLine();
-                return;
-            }
-
-            const terminalRunEvent =
-                event.stage === ProgressStage.Run &&
-                (event.status === ProgressStatus.Succeeded ||
-                    event.status === ProgressStatus.Failed);
-            const settled =
-                event.status === ProgressStatus.Succeeded ||
-                event.status === ProgressStatus.Failed ||
-                event.status === ProgressStatus.Skipped;
-            const active = settled
-                ? removeActive(progressIdentity(event))
-                : undefined;
-            if (terminalRunEvent) activeProgress.length = 0;
-            const duration =
-                active === undefined
-                    ? ""
-                    : (() => {
-                          const elapsedMs = Math.max(
-                              0,
-                              emittedAt.getTime() - active.startedAt,
-                          );
-                          const elapsedSec = (elapsedMs / 1000).toFixed(1);
-                          return colors
-                              ? ` ${dim(`(${elapsedSec}s)`)}`
-                              : ` (${elapsedSec}s)`;
-                      })();
-            appendLine(`${line}${duration}`);
+            renderInteractiveEvent(event, line, emittedAt);
         },
         stopPersisting: async () => {
             persistEvents = false;

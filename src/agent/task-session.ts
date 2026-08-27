@@ -284,6 +284,51 @@ const createSessionModel = (model: PiModel) => ({
     id: model.modelID,
 });
 
+const signalOptions = (signal: AbortSignal | undefined) =>
+    signal === undefined ? undefined : { signal };
+
+const verifyPiTaskRequest = async (request: PiTaskRequest): Promise<void> => {
+    if (
+        request.repositoryInvariant !== undefined &&
+        request.verifyRepositoryInvariant !== undefined
+    ) {
+        await request.verifyRepositoryInvariant(
+            request.directory,
+            request.repositoryInvariant,
+        );
+    }
+    if (request.verifyAfter !== undefined) await request.verifyAfter();
+};
+
+const promptPiTask = async (
+    client: PiClient,
+    session: PiTaskSession,
+    request: PiTaskRequest,
+): Promise<PiTaskResult> => {
+    const response = await client.session.prompt(
+        taskSessionPromptParameters(session, {
+            parts: [{ type: "text", text: request.prompt }],
+        }),
+        signalOptions(request.signal),
+    );
+
+    if (response.error !== undefined || response.data === undefined) {
+        throw new Error(
+            `Pi task prompt failed: ${describeApiError(response.error)}`,
+        );
+    }
+    if (response.data.info.error !== undefined) {
+        throw assistantFailure("Pi assistant failed", response.data.info.error);
+    }
+
+    await verifyPiTaskRequest(request);
+    return {
+        session,
+        response: response.data.info,
+        parts: response.data.parts,
+    };
+};
+
 /** Build prompt parameters for a task session. */
 export const taskSessionPromptParameters = (
     session: PiTaskSession,
@@ -362,43 +407,7 @@ export const runPiTask = (
     withPiAgentPermit(client, async () => {
         try {
             const session = await createPiTaskSession(client, request);
-            const response = await client.session.prompt(
-                taskSessionPromptParameters(session, {
-                    parts: [{ type: "text", text: request.prompt }],
-                }),
-                request.signal === undefined
-                    ? undefined
-                    : { signal: request.signal },
-            );
-
-            if (response.error !== undefined || response.data === undefined) {
-                throw new Error(
-                    `Pi task prompt failed: ${describeApiError(response.error)}`,
-                );
-            }
-            if (response.data.info.error !== undefined) {
-                throw assistantFailure(
-                    "Pi assistant failed",
-                    response.data.info.error,
-                );
-            }
-
-            if (
-                request.repositoryInvariant !== undefined &&
-                request.verifyRepositoryInvariant !== undefined
-            ) {
-                await request.verifyRepositoryInvariant(
-                    request.directory,
-                    request.repositoryInvariant,
-                );
-            }
-            if (request.verifyAfter !== undefined) await request.verifyAfter();
-
-            return {
-                session,
-                response: response.data.info,
-                parts: response.data.parts,
-            };
+            return await promptPiTask(client, session, request);
         } catch (cause) {
             const error =
                 cause instanceof RalphieError

@@ -62,8 +62,8 @@ const safeRunId = (runId: string): string =>
 export const makeIssueRecoveryService = (
     git: GitIssueCheckpointService,
     progress: ProgressReporterService,
-): IssueRecoveryService => ({
-    handleReviewExhaustion: async (input) => {
+): IssueRecoveryService => {
+    const validateReviewExhaustion = (input: ReviewExhaustionInput): void => {
         const attemptsAreComplete = input.reviews.every(
             (review, index) => review.attempt === index + 1,
         );
@@ -77,23 +77,12 @@ export const makeIssueRecoveryService = (
                 message: `Review exhaustion requires ${REVIEW_ITERATION_LIMIT} ordered attempts ending in changes requested.`,
             });
         }
+    };
 
-        const issueContext = {
-            issue: {
-                number: input.issue.number,
-                title: input.issue.title,
-            },
-            attempt: input.reviews.length,
-            maxAttempts: REVIEW_ITERATION_LIMIT,
-        };
-        await progress.emit({
-            ...issueContext,
-            stage: ProgressStage.ReviewExhaustion,
-            status: ProgressStatus.Info,
-            message: `Review did not converge; escalating #${input.issue.number} to decomposition.`,
-        });
-
-        const patch = await git.createPatch(input.repositoryPath);
+    const writeDiagnostics = async (
+        input: ReviewExhaustionInput,
+        patch: string,
+    ): Promise<string> => {
         if (Buffer.byteLength(patch) > REVIEW_DIAGNOSTIC_PATCH_LIMIT_BYTES) {
             throw new RalphieError({
                 message: `Review diagnostic patch exceeds ${REVIEW_DIAGNOSTIC_PATCH_LIMIT_BYTES} bytes. Checkout was not restored.`,
@@ -140,6 +129,21 @@ export const makeIssueRecoveryService = (
                 cause,
             });
         }
+        return diagnosticsPath;
+    };
+
+    const restoreCheckout = async (
+        input: ReviewExhaustionInput,
+        diagnosticsPath: string,
+    ): Promise<void> => {
+        const issueContext = {
+            issue: {
+                number: input.issue.number,
+                title: input.issue.title,
+            },
+            attempt: input.reviews.length,
+            maxAttempts: REVIEW_ITERATION_LIMIT,
+        };
 
         await progress.emit({
             ...issueContext,
@@ -167,14 +171,38 @@ export const makeIssueRecoveryService = (
             message: `Restored ${input.checkpoint.branch} to the clean issue base.`,
             details: { diagnosticsPath },
         });
+    };
 
-        return {
-            outcome: ReviewExhaustionOutcome.EscalatedToDecomposition,
-            diagnosticsPath,
-            nextWorkflow: IssueWorkflowKind.Decomposition,
-            resume: IssueQueueResumeStrategy.RefreshOpenIssues,
-        };
-    },
-});
+    return {
+        handleReviewExhaustion: async (input) => {
+            validateReviewExhaustion(input);
+            const issueContext = {
+                issue: {
+                    number: input.issue.number,
+                    title: input.issue.title,
+                },
+                attempt: input.reviews.length,
+                maxAttempts: REVIEW_ITERATION_LIMIT,
+            };
+            await progress.emit({
+                ...issueContext,
+                stage: ProgressStage.ReviewExhaustion,
+                status: ProgressStatus.Info,
+                message: `Review did not converge; escalating #${input.issue.number} to decomposition.`,
+            });
+
+            const patch = await git.createPatch(input.repositoryPath);
+            const diagnosticsPath = await writeDiagnostics(input, patch);
+            await restoreCheckout(input, diagnosticsPath);
+
+            return {
+                outcome: ReviewExhaustionOutcome.EscalatedToDecomposition,
+                diagnosticsPath,
+                nextWorkflow: IssueWorkflowKind.Decomposition,
+                resume: IssueQueueResumeStrategy.RefreshOpenIssues,
+            };
+        },
+    };
+};
 
 export const IssueRecoveryLive = makeIssueRecoveryService;

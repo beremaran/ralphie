@@ -239,13 +239,95 @@ Options:
   -v, --version                Show version
 `;
 
+type RunCommandInput = {
+    readonly signal?: AbortSignal;
+    readonly terminal?: CliTerminalInfo;
+};
+
+const loadResumeState = async (
+    config: ResolvedRalphieConfig,
+): Promise<RunState | undefined> => {
+    if (config.resume === undefined) return undefined;
+
+    const resumeState = await RunStateStoreLive.load(config.resume);
+    if (config.branch === undefined) return resumeState;
+
+    const reconciliation = reconcileRunState(resumeState, {
+        repository: config.repo,
+        branch: config.branch,
+    });
+    if (!reconciliation.compatible) {
+        throw new Error(
+            `Cannot resume run ${resumeState.runId}: ${reconciliation.reasons.join("; ")}.`,
+        );
+    }
+    return resumeState;
+};
+
+const eventLogPathFor = (
+    config: ResolvedRalphieConfig,
+    runId: string,
+): string =>
+    config.resume === undefined
+        ? join(
+              resolveWorkspacePath(config.workspace),
+              ".ralphie",
+              "runs",
+              runId,
+              "events.jsonl",
+          )
+        : join(dirname(config.resume), "events.jsonl");
+
+const makeCommandProgress = (
+    config: ResolvedRalphieConfig,
+    terminal: CliTerminalInfo,
+    runId: string,
+): ReturnType<typeof makeProgressReporter> =>
+    makeProgressReporter({
+        mode: resolveProgressMode(config, terminal),
+        verbose: config.verbose,
+        width: () => process.stderr.columns ?? terminal.width,
+        write: config.json
+            ? (text) => process.stdout.write(text)
+            : (text) => process.stderr.write(text),
+        runId,
+        eventLogPath: eventLogPathFor(config, runId),
+    });
+
+const workflowOptionsFor = (
+    config: ResolvedRalphieConfig,
+    input: RunCommandInput,
+    runId: string,
+    resumeState: RunState | undefined,
+) => ({
+    workflow: config.workflow,
+    issueConcurrency: config.issueConcurrency,
+    agentConcurrency: config.agentConcurrency,
+    repo: config.repo,
+    branch: config.branch,
+    maxIssues: config.maxIssues,
+    issueFilters: {
+        labels: config.issueLabels,
+        sort: config.issueSort,
+        order: config.issueOrder,
+    },
+    model: config.model,
+    modelVariant: config.modelVariant,
+    agent: config.agent,
+    workspace: config.workspace,
+    cleanup: config.cleanup,
+    startClean: config.startClean,
+    signal: input.signal,
+    runId,
+    resumeState,
+    resumePath: config.resume,
+    dryRun: config.dryRun,
+});
+
 /** Execute one Ralphie command. */
 export const runCommand = async (
     args: ReadonlyArray<string> = Bun.argv.slice(2),
-    input: {
-        readonly signal?: AbortSignal;
-        readonly terminal?: CliTerminalInfo;
-    } = {},
+    input: RunCommandInput = {},
 ): Promise<void> => {
     const parsed = parseCliArgs(args);
     if (parsed.help) {
@@ -258,45 +340,11 @@ export const runCommand = async (
     }
 
     const config = resolveRalphieConfig(parsed.options);
-    let resumeState: RunState | undefined;
-    if (config.resume !== undefined) {
-        resumeState = await RunStateStoreLive.load(config.resume);
-        if (config.branch !== undefined) {
-            const reconciliation = reconcileRunState(resumeState, {
-                repository: config.repo,
-                branch: config.branch,
-            });
-            if (!reconciliation.compatible) {
-                throw new Error(
-                    `Cannot resume run ${resumeState.runId}: ${reconciliation.reasons.join("; ")}.`,
-                );
-            }
-        }
-    }
+    const resumeState = await loadResumeState(config);
 
     const terminal = input.terminal ?? terminalInfo();
-    const progressMode = resolveProgressMode(config, terminal);
     const runId = resumeState?.runId ?? crypto.randomUUID();
-    const eventLogPath =
-        config.resume === undefined
-            ? join(
-                  resolveWorkspacePath(config.workspace),
-                  ".ralphie",
-                  "runs",
-                  runId,
-                  "events.jsonl",
-              )
-            : join(dirname(config.resume), "events.jsonl");
-    const progress = makeProgressReporter({
-        mode: progressMode,
-        verbose: config.verbose,
-        width: () => process.stderr.columns ?? terminal.width,
-        write: config.json
-            ? (text) => process.stdout.write(text)
-            : (text) => process.stderr.write(text),
-        runId,
-        eventLogPath,
-    });
+    const progress = makeCommandProgress(config, terminal, runId);
     const runtime = makeLiveRuntime({
         pi: makePiService(resolvePiConfig(config)),
         progress,
@@ -304,30 +352,7 @@ export const runCommand = async (
 
     try {
         await workflow(
-            {
-                workflow: config.workflow,
-                issueConcurrency: config.issueConcurrency,
-                agentConcurrency: config.agentConcurrency,
-                repo: config.repo,
-                branch: config.branch,
-                maxIssues: config.maxIssues,
-                issueFilters: {
-                    labels: config.issueLabels,
-                    sort: config.issueSort,
-                    order: config.issueOrder,
-                },
-                model: config.model,
-                modelVariant: config.modelVariant,
-                agent: config.agent,
-                workspace: config.workspace,
-                cleanup: config.cleanup,
-                startClean: config.startClean,
-                signal: input.signal,
-                runId,
-                resumeState,
-                resumePath: config.resume,
-                dryRun: config.dryRun,
-            },
+            workflowOptionsFor(config, input, runId, resumeState),
             runtime,
         );
     } catch (error) {

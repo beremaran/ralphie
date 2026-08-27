@@ -13,7 +13,7 @@
       "preset": "none",
       "complexity": {
         "noExcessiveCognitiveComplexity": {
-          "level": "warn",
+          "level": "error",
           "options": {
             "maxAllowedComplexity": 12
           }

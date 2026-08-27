@@ -5,10 +5,13 @@ import {
     makePiAgentSemaphore,
 } from "./agent/concurrency.ts";
 import { makePiSessionDiagnostics } from "./agent/task-session.ts";
-import type { PiModel } from "./agent/model.ts";
+import type { PiModel, PiSelection } from "./agent/model.ts";
 import { GitHubIssueCloseReason } from "./github/issue-mutations.ts";
 import type { GitHubIssue, IssueFilters } from "./github/issues.ts";
-import type { PreparedIssueWorktree } from "./git/worktree.ts";
+import type {
+    PreparedIssueWorktree,
+    RepositoryCheckout,
+} from "./git/worktree.ts";
 import {
     IssueCompletionKind,
     IssueExecutionOutcomeKind,
@@ -172,6 +175,105 @@ const summarize = (
     return { runId, outcomes, counts };
 };
 
+type WorkflowCheckout = NonNullable<RunState["checkout"]>;
+type WorkflowOutcomeEntry = WorkflowSummary["outcomes"][number];
+
+type PersistWorkflowStateInput = {
+    readonly stateStore: RalphieRuntime["runStateStore"];
+    readonly statePath: string;
+    readonly queue: ReturnType<typeof createIssueQueue>;
+    readonly activeQueueIssues: ReadonlyMap<number, GitHubIssue>;
+    readonly actualRunId: string;
+    readonly repository: string;
+    readonly branch: string;
+    readonly workflowMode: WorkflowMode;
+    readonly issueConcurrency: number;
+    readonly dryRun: boolean;
+    readonly selection: PiSelection;
+    readonly issueLimit?: number;
+    readonly outcomes: ReadonlyArray<WorkflowOutcomeEntry>;
+    readonly checkout: WorkflowCheckout;
+};
+
+const persistWorkflowState = async (
+    input: PersistWorkflowStateInput,
+    status: RunStateStatus,
+    currentIssue?: RunState["activeIssue"],
+): Promise<void> => {
+    const snapshot = input.queue.snapshot();
+    const pending = snapshot.pending.map(({ issue }) => ({
+        ...issue,
+        labels: [...issue.labels],
+    }));
+    for (const issue of input.activeQueueIssues.values()) {
+        if (!pending.some(({ number }) => number === issue.number)) {
+            pending.unshift({ ...issue, labels: [...issue.labels] });
+        }
+    }
+    const processedCount =
+        input.activeQueueIssues.size > 0
+            ? Math.max(
+                  0,
+                  snapshot.processedCount - input.activeQueueIssues.size,
+              )
+            : snapshot.processedCount;
+    await input.stateStore.save(input.statePath, {
+        version: RUN_STATE_VERSION,
+        status,
+        runId: input.actualRunId,
+        repository: input.repository,
+        branch: input.branch,
+        workflow: input.workflowMode,
+        issueConcurrency: input.issueConcurrency,
+        dryRun: input.dryRun,
+        selection: input.selection,
+        ...(input.issueLimit === undefined
+            ? {}
+            : { maxIssues: input.issueLimit }),
+        queue: {
+            pending,
+            completedIssueNumbers: [...snapshot.completedIssueNumbers],
+            processedCount,
+        },
+        outcomes: input.outcomes.map(({ issueNumber, outcome }) => ({
+            issueNumber,
+            outcome: copyOutcome(outcome),
+        })),
+        ...(currentIssue === undefined ? {} : { activeIssue: currentIssue }),
+        checkout: input.checkout,
+        updatedAt: new Date().toISOString(),
+    });
+};
+
+type WorkflowIssueContext = {
+    readonly issue: GitHubIssue;
+    readonly current: number;
+    readonly total: number;
+    readonly featureBranch: string;
+    readonly issueBaseCheckout: WorkflowCheckout;
+    readonly preparedIssueWorktree?: PreparedIssueWorktree;
+    readonly issueRepositories: ReadonlyArray<RepositoryCheckout>;
+    readonly resumedClosureOutcome?: IssueExecutionOutcome;
+};
+
+const resumedClosureOutcomeFor = (
+    resumeState: RunState | undefined,
+    issueNumber: number,
+    outcomes: ReadonlyArray<WorkflowOutcomeEntry>,
+): IssueExecutionOutcome | undefined => {
+    if (
+        resumeState?.activeIssue?.issueNumber !== issueNumber ||
+        resumeState.activeIssue.stage !== ProgressStage.IssueClosure
+    ) {
+        return undefined;
+    }
+    return outcomes.find(
+        (entry) =>
+            entry.issueNumber === issueNumber &&
+            entry.outcome.kind === IssueExecutionOutcomeKind.Completed,
+    )?.outcome;
+};
+
 export type WorkflowOptions = {
     readonly workflow?: WorkflowMode;
     readonly issueConcurrency?: number;
@@ -194,9 +296,45 @@ export type WorkflowOptions = {
     readonly dryRun?: boolean;
 };
 
-/** Run Ralphie using an explicit dependency object. */
-export const workflow = async (
-    {
+type WorkflowConfiguration = {
+    readonly requestedWorkflow: WorkflowMode;
+    readonly issueConcurrency: number;
+    readonly agentConcurrency?: number;
+    readonly repo: string;
+    readonly requestedBranch?: string;
+    readonly maxIssues?: number;
+    readonly issueFilters: IssueFilters;
+    readonly agent: string;
+    readonly model?: PiModel;
+    readonly modelVariant?: string;
+    readonly workspace: string;
+    readonly cleanup: boolean;
+    readonly startClean: boolean;
+    readonly signal?: AbortSignal;
+    readonly runId: string;
+    readonly resumeState?: RunState;
+    readonly resumePath?: string;
+    readonly issueFailurePolicy: IssueFailurePolicy;
+    readonly dryRun: boolean;
+    readonly actualRunId: string;
+    readonly effectiveDryRun: boolean;
+    readonly workflowMode: WorkflowMode;
+    readonly effectiveIssueConcurrency: number;
+    readonly usesPullRequests: boolean;
+    readonly statePath: string;
+};
+
+type WorkflowLifecycle = {
+    activeIssue?: RunState["activeIssue"];
+    readonly activeQueueIssues: Map<number, GitHubIssue>;
+    persistCancellationState?: () => Promise<void>;
+    restoreCancellationCheckout?: () => Promise<void>;
+};
+
+const makeWorkflowConfiguration = (
+    options: WorkflowOptions,
+): WorkflowConfiguration => {
+    const {
         workflow: requestedWorkflow = DEFAULT_WORKFLOW_MODE,
         issueConcurrency = 1,
         agentConcurrency,
@@ -216,9 +354,178 @@ export const workflow = async (
         resumePath,
         issueFailurePolicy = IssueFailurePolicy.Halt,
         dryRun = false,
-    }: WorkflowOptions,
+    } = options;
+    const actualRunId = resumeState?.runId ?? runId;
+    const effectiveDryRun = resumeState?.dryRun ?? dryRun;
+    const workflowMode = resumeState?.workflow ?? requestedWorkflow;
+    const effectiveIssueConcurrency =
+        resumeState?.issueConcurrency ?? issueConcurrency;
+    const usesPullRequests =
+        workflowMode === WorkflowMode.Pr ||
+        workflowMode === WorkflowMode.ParallelPr;
+    const statePath =
+        resumePath ??
+        join(
+            resolveWorkspacePath(workspace),
+            ".ralphie",
+            "runs",
+            actualRunId,
+            "state.json",
+        );
+    return {
+        requestedWorkflow,
+        issueConcurrency,
+        agentConcurrency,
+        repo,
+        requestedBranch,
+        maxIssues,
+        issueFilters,
+        agent,
+        model,
+        modelVariant,
+        workspace,
+        cleanup,
+        startClean,
+        signal,
+        runId,
+        resumeState,
+        resumePath,
+        issueFailurePolicy,
+        dryRun,
+        actualRunId,
+        effectiveDryRun,
+        workflowMode,
+        effectiveIssueConcurrency,
+        usesPullRequests,
+        statePath,
+    };
+};
+
+const emitRunStarted = async (
+    progress: ProgressReporterService,
+    config: WorkflowConfiguration,
+): Promise<void> => {
+    await progress.emit({
+        stage: ProgressStage.Run,
+        status: ProgressStatus.Info,
+        message: `Ralphie started for ${config.repo} on ${config.requestedBranch ?? "default branch"}.`,
+        details: {
+            repository: config.repo,
+            ...(config.requestedBranch === undefined
+                ? {}
+                : { branch: config.requestedBranch }),
+            workspace: config.workspace,
+            model: config.model
+                ? `${config.model.providerID}/${config.model.modelID}`
+                : "Pi default",
+            variant: config.modelVariant ?? "Pi default",
+            agent: config.agent,
+            issueLimit: config.maxIssues ?? "unlimited",
+            runId: config.actualRunId,
+            dryRun: config.effectiveDryRun,
+            workflow: config.workflowMode,
+            ...(config.resumeState === undefined
+                ? {}
+                : { resumed: true, statePath: config.statePath }),
+        },
+    });
+};
+
+const emitRunSucceeded = async (
+    progress: ProgressReporterService,
+    config: WorkflowConfiguration,
+    summary: WorkflowSummary,
+): Promise<void> => {
+    await progress.emit({
+        stage: ProgressStage.Run,
+        status: ProgressStatus.Succeeded,
+        message:
+            `Run completed: ${summary.counts.completed} completed, ` +
+            `${summary.counts.decomposed} decomposed, ${summary.counts.escalated} escalated, ` +
+            `${summary.counts.skipped} skipped, ${summary.counts.failed} failed.`,
+        details: {
+            runId: summary.runId,
+            counts: summary.counts,
+            statePath: config.statePath,
+        },
+    });
+};
+
+const cancellationError = async (
+    error: unknown,
+    config: WorkflowConfiguration,
+    lifecycle: WorkflowLifecycle,
+): Promise<unknown> => {
+    if (!config.signal?.aborted) return error;
+    let restoreError: unknown;
+    if (
+        lifecycle.activeIssue !== undefined &&
+        lifecycle.restoreCancellationCheckout !== undefined
+    ) {
+        try {
+            await lifecycle.restoreCancellationCheckout();
+        } catch (failure) {
+            restoreError = failure;
+        }
+    }
+    if (lifecycle.persistCancellationState !== undefined) {
+        await lifecycle.persistCancellationState();
+    }
+    return new RalphieError({
+        message:
+            restoreError === undefined
+                ? "Run cancelled; active checkout was preserved and resumable state was saved."
+                : "Run cancelled; resumable state was saved but active checkout restoration failed.",
+        cause: restoreError ?? error,
+    });
+};
+
+const emitRunFailed = async (
+    progress: ProgressReporterService,
+    config: WorkflowConfiguration,
+    error: unknown,
+): Promise<void> => {
+    await progress.emit({
+        stage: ProgressStage.Run,
+        status: ProgressStatus.Failed,
+        message: `Run failed: ${errorMessage(error)}`,
+        details: { runId: config.actualRunId, statePath: config.statePath },
+    });
+};
+
+/** Run Ralphie using an explicit dependency object. */
+export const workflow = async (
+    options: WorkflowOptions,
     runtime: RalphieRuntime,
 ): Promise<WorkflowSummary> => {
+    const config = makeWorkflowConfiguration(options);
+    const {
+        requestedWorkflow,
+        issueConcurrency,
+        agentConcurrency,
+        repo,
+        requestedBranch,
+        maxIssues,
+        issueFilters,
+        agent,
+        model,
+        modelVariant,
+        workspace,
+        cleanup,
+        startClean,
+        signal,
+        runId,
+        resumeState,
+        resumePath,
+        issueFailurePolicy,
+        dryRun,
+        actualRunId,
+        effectiveDryRun,
+        workflowMode,
+        effectiveIssueConcurrency,
+        usesPullRequests,
+        statePath,
+    } = config;
     const {
         progress,
         runStateStore: stateStore,
@@ -238,46 +545,7 @@ export const workflow = async (
         pi,
     } = runtime;
 
-    const actualRunId = resumeState?.runId ?? runId;
-    const effectiveDryRun = resumeState?.dryRun ?? dryRun;
-    const workflowMode = resumeState?.workflow ?? requestedWorkflow;
-    const effectiveIssueConcurrency =
-        resumeState?.issueConcurrency ?? issueConcurrency;
-    const usesPullRequests =
-        workflowMode === WorkflowMode.Pr ||
-        workflowMode === WorkflowMode.ParallelPr;
-    const statePath =
-        resumePath ??
-        join(
-            resolveWorkspacePath(workspace),
-            ".ralphie",
-            "runs",
-            actualRunId,
-            "state.json",
-        );
-
-    await progress.emit({
-        stage: ProgressStage.Run,
-        status: ProgressStatus.Info,
-        message: `Ralphie started for ${repo} on ${requestedBranch ?? "default branch"}.`,
-        details: {
-            repository: repo,
-            ...(requestedBranch === undefined
-                ? {}
-                : { branch: requestedBranch }),
-            workspace,
-            model: model
-                ? `${model.providerID}/${model.modelID}`
-                : "Pi default",
-            variant: modelVariant ?? "Pi default",
-            agent,
-            issueLimit: maxIssues ?? "unlimited",
-            runId: actualRunId,
-            dryRun: effectiveDryRun,
-            workflow: workflowMode,
-            ...(resumeState === undefined ? {} : { resumed: true, statePath }),
-        },
-    });
+    await emitRunStarted(progress, config);
 
     let activeIssue: RunState["activeIssue"] | undefined;
     const activeQueueIssues = new Map<number, GitHubIssue>();
@@ -286,84 +554,91 @@ export const workflow = async (
 
     const run = async (): Promise<WorkflowSummary> => {
         checkCancellation(signal);
-        if (startClean) {
+        let checkout: WorkflowCheckout;
+
+        const prepareWorkspaceAndIssues = async () => {
+            if (startClean) {
+                await track(
+                    progress,
+                    ProgressStage.WorkspaceCleanup,
+                    `Removing existing workspace ${workspace}...`,
+                    () => workspaceService.remove(workspace),
+                    `Existing workspace removed: ${workspace}.`,
+                );
+            }
+
             await track(
                 progress,
-                ProgressStage.WorkspaceCleanup,
-                `Removing existing workspace ${workspace}...`,
-                () => workspaceService.remove(workspace),
-                `Existing workspace removed: ${workspace}.`,
+                ProgressStage.WorkspacePreparation,
+                `Preparing workspace ${workspace}...`,
+                () => workspaceService.prepare(workspace),
+                `Workspace ready: ${workspace}.`,
             );
-        }
 
-        await track(
-            progress,
-            ProgressStage.WorkspacePreparation,
-            `Preparing workspace ${workspace}...`,
-            () => workspaceService.prepare(workspace),
-            `Workspace ready: ${workspace}.`,
-        );
+            const octokit = await track(
+                progress,
+                ProgressStage.GitHubAuthentication,
+                "Checking GitHub authentication...",
+                () => githubClient.initialize(),
+                "GitHub authentication verified and Octokit initialized.",
+            );
+            checkCancellation(signal);
 
-        const octokit = await track(
-            progress,
-            ProgressStage.GitHubAuthentication,
-            "Checking GitHub authentication...",
-            () => githubClient.initialize(),
-            "GitHub authentication verified and Octokit initialized.",
-        );
-        checkCancellation(signal);
+            await track(
+                progress,
+                ProgressStage.GitVerification,
+                "Checking Git installation...",
+                () => repository.verifyInstalled(),
+                "Git installation verified.",
+            );
+            checkCancellation(signal);
 
-        await track(
-            progress,
-            ProgressStage.GitVerification,
-            "Checking Git installation...",
-            () => repository.verifyInstalled(),
-            "Git installation verified.",
-        );
-        checkCancellation(signal);
-
-        const prepared = await track(
-            progress,
-            ProgressStage.RepositoryPreparation,
-            `Preparing ${repo} on ${requestedBranch ?? "main/master"}...`,
-            () => repository.prepare(repo, requestedBranch, workspace),
-            (result) => `Repository ready: ${result.path}.`,
-            {
-                details: {
-                    repository: repo,
-                    ...(requestedBranch === undefined
-                        ? {}
-                        : { branch: requestedBranch }),
-                    workspace,
+            const prepared = await track(
+                progress,
+                ProgressStage.RepositoryPreparation,
+                `Preparing ${repo} on ${requestedBranch ?? "main/master"}...`,
+                () => repository.prepare(repo, requestedBranch, workspace),
+                (result) => `Repository ready: ${result.path}.`,
+                {
+                    details: {
+                        repository: repo,
+                        ...(requestedBranch === undefined
+                            ? {}
+                            : { branch: requestedBranch }),
+                        workspace,
+                    },
                 },
-            },
-        );
-        const branch = prepared.branch;
-        checkCancellation(signal);
+            );
+            const branch = prepared.branch;
+            checkCancellation(signal);
 
-        const discoveredIssues = await track(
-            progress,
-            ProgressStage.IssueDiscovery,
-            "Fetching matching open issues...",
-            () => githubIssues.listOpen(octokit, repo, issueFilters),
-            (result) =>
-                result.length === 0
-                    ? "No open issues match the current filters."
-                    : `Found ${result.length} matching open issues.`,
-            { details: { filters: issueFilters } },
-        );
-        checkCancellation(signal);
+            const discoveredIssues = await track(
+                progress,
+                ProgressStage.IssueDiscovery,
+                "Fetching matching open issues...",
+                () => githubIssues.listOpen(octokit, repo, issueFilters),
+                (result) =>
+                    result.length === 0
+                        ? "No open issues match the current filters."
+                        : `Found ${result.length} matching open issues.`,
+                { details: { filters: issueFilters } },
+            );
+            checkCancellation(signal);
 
-        const repositoryCheckouts = [
-            {
-                repository: repo,
-                repositoryPath: prepared.path,
+            return {
+                octokit,
+                prepared,
                 branch: prepared.branch,
-            },
-        ];
-        const captureCheckout = () => invariantService.capture(prepared.path);
-        let checkout = await captureCheckout();
-        if (resumeState !== undefined) {
+                discoveredIssues,
+            };
+        };
+
+        const verifyResumeState = (
+            branch: string,
+            checkout: WorkflowCheckout,
+            discoveredIssues: ReadonlyArray<GitHubIssue>,
+        ): void => {
+            if (resumeState === undefined) return;
             const reconciliation = reconcileRunState(resumeState, {
                 repository: repo,
                 branch,
@@ -379,401 +654,522 @@ export const workflow = async (
                     message: `Cannot resume run ${resumeState.runId}: ${reconciliation.reasons.join("; ")}.`,
                 });
             }
-        }
+        };
 
-        const initialIssues =
-            resumeState === undefined
-                ? discoveredIssues
-                : resumeState.queue.pending;
-        const queue = createIssueQueue(
-            toQueuedIssues(initialIssues),
-            resumeState?.maxIssues ?? maxIssues,
-            resumeState === undefined
-                ? undefined
-                : {
-                      completedIssueNumbers:
-                          resumeState.queue.completedIssueNumbers,
-                      processedCount: resumeState.queue.processedCount,
-                  },
-        );
-        const outcomes: Array<{
-            readonly issueNumber: number;
-            readonly outcome: IssueExecutionOutcome;
-        }> = [...(resumeState?.outcomes ?? [])];
-        const selection = { agent, model, variant: modelVariant };
+        const makeQueue = (initialIssues: ReadonlyArray<GitHubIssue>) =>
+            createIssueQueue(
+                toQueuedIssues(initialIssues),
+                resumeState?.maxIssues ?? maxIssues,
+                resumeState === undefined
+                    ? undefined
+                    : {
+                          completedIssueNumbers:
+                              resumeState.queue.completedIssueNumbers,
+                          processedCount: resumeState.queue.processedCount,
+                      },
+            );
 
-        const persistState = async (
-            status: RunStateStatus,
-            currentIssue?: RunState["activeIssue"],
-        ): Promise<void> => {
-            const snapshot = queue.snapshot();
-            const pending = snapshot.pending.map(({ issue }) => ({
-                ...issue,
-                labels: [...issue.labels],
-            }));
-            for (const issue of activeQueueIssues.values()) {
-                if (!pending.some(({ number }) => number === issue.number)) {
-                    pending.unshift({ ...issue, labels: [...issue.labels] });
-                }
-            }
-            await stateStore.save(statePath, {
-                version: RUN_STATE_VERSION,
-                status,
-                runId: actualRunId,
-                repository: repo,
-                branch,
-                workflow: workflowMode,
-                issueConcurrency: effectiveIssueConcurrency,
-                dryRun: effectiveDryRun,
-                selection,
-                ...((resumeState?.maxIssues ?? maxIssues) === undefined
-                    ? {}
-                    : { maxIssues: resumeState?.maxIssues ?? maxIssues }),
-                queue: {
-                    pending,
-                    completedIssueNumbers: [...snapshot.completedIssueNumbers],
-                    processedCount:
-                        activeQueueIssues.size > 0
-                            ? Math.max(
-                                  0,
-                                  snapshot.processedCount -
-                                      activeQueueIssues.size,
-                              )
-                            : snapshot.processedCount,
+        const prepareRunState = async (input: {
+            readonly prepared: Awaited<ReturnType<typeof repository.prepare>>;
+            readonly branch: string;
+            readonly discoveredIssues: ReadonlyArray<GitHubIssue>;
+        }) => {
+            const { prepared, branch, discoveredIssues } = input;
+            const repositoryCheckouts: ReadonlyArray<RepositoryCheckout> = [
+                {
+                    repository: repo,
+                    repositoryPath: prepared.path,
+                    branch: prepared.branch,
                 },
-                outcomes: outcomes.map(({ issueNumber, outcome }) => ({
-                    issueNumber,
-                    outcome: copyOutcome(outcome),
-                })),
-                ...(currentIssue === undefined
-                    ? {}
-                    : { activeIssue: currentIssue }),
-                checkout,
-                updatedAt: new Date().toISOString(),
+            ];
+            const captureCheckout = () =>
+                invariantService.capture(prepared.path);
+            checkout = await captureCheckout();
+            verifyResumeState(branch, checkout, discoveredIssues);
+            const initialIssues =
+                resumeState === undefined
+                    ? discoveredIssues
+                    : resumeState.queue.pending;
+            const queue = makeQueue(initialIssues);
+            return { repositoryCheckouts, captureCheckout, queue };
+        };
+
+        const prepareWorkflow = async () => {
+            const preparedInput = await prepareWorkspaceAndIssues();
+            const { repositoryCheckouts, captureCheckout, queue } =
+                await prepareRunState(preparedInput);
+            const { octokit, prepared, branch } = preparedInput;
+            const outcomes: Array<WorkflowOutcomeEntry> = [
+                ...(resumeState?.outcomes ?? []),
+            ];
+            const selection: PiSelection = {
+                agent,
+                model,
+                variant: modelVariant,
+            };
+
+            const persistState = (
+                status: RunStateStatus,
+                currentIssue?: RunState["activeIssue"],
+            ): Promise<void> =>
+                persistWorkflowState(
+                    {
+                        stateStore,
+                        statePath,
+                        queue,
+                        activeQueueIssues,
+                        actualRunId,
+                        repository: repo,
+                        branch,
+                        workflowMode,
+                        issueConcurrency: effectiveIssueConcurrency,
+                        dryRun: effectiveDryRun,
+                        selection,
+                        issueLimit: resumeState?.maxIssues ?? maxIssues,
+                        outcomes,
+                        checkout,
+                    },
+                    status,
+                    currentIssue,
+                );
+
+            persistCancellationState = () =>
+                persistState(RunStateStatus.Active, activeIssue);
+            await persistState(RunStateStatus.Active);
+            const issueExecutor = effectiveDryRun
+                ? dryRunIssueExecutor
+                : normalIssueExecutor;
+            const diagnostics = makePiSessionDiagnostics();
+            return {
+                octokit,
+                prepared,
+                branch,
+                repositoryCheckouts,
+                captureCheckout,
+                queue,
+                outcomes,
+                selection,
+                persistState,
+                issueExecutor,
+                diagnostics,
+            };
+        };
+
+        const {
+            octokit,
+            prepared,
+            branch,
+            repositoryCheckouts,
+            captureCheckout,
+            queue,
+            outcomes,
+            selection,
+            persistState,
+            issueExecutor,
+            diagnostics,
+        } = await prepareWorkflow();
+
+        const prepareIssueWorktree = async (
+            issue: GitHubIssue,
+            featureBranch: string,
+            issueBaseCheckout: WorkflowCheckout,
+        ): Promise<PreparedIssueWorktree | undefined> => {
+            if (workflowMode !== WorkflowMode.ParallelPr || effectiveDryRun) {
+                return undefined;
+            }
+            return await worktrees.prepareIssue({
+                workspace,
+                runId: actualRunId,
+                issueNumber: issue.number,
+                branch: featureBranch,
+                repository: repositoryCheckouts[0]!,
+                baseSha: issueBaseCheckout.head,
             });
         };
 
-        persistCancellationState = () =>
-            persistState(RunStateStatus.Active, activeIssue);
-        await persistState(RunStateStatus.Active);
-        const issueExecutor = effectiveDryRun
-            ? dryRunIssueExecutor
-            : normalIssueExecutor;
-        const diagnostics = makePiSessionDiagnostics();
+        const pushIssueBranch = async (
+            issueRepositories: ReadonlyArray<RepositoryCheckout>,
+            featureBranch: string,
+            issueBaseCheckout: WorkflowCheckout,
+            resumedClosureOutcome: IssueExecutionOutcome | undefined,
+        ): Promise<void> => {
+            if (
+                !usesPullRequests ||
+                effectiveDryRun ||
+                resumedClosureOutcome !== undefined
+            ) {
+                return;
+            }
+            await Promise.all(
+                issueRepositories.map(async (issueRepository) => {
+                    const preparedBranch =
+                        workflowMode === WorkflowMode.ParallelPr
+                            ? { headSha: issueBaseCheckout.head }
+                            : await issueOperations.createOrCheckoutFeatureBranch(
+                                  issueRepository.repositoryPath,
+                                  featureBranch,
+                                  issueRepository.branch,
+                                  issueBaseCheckout.head,
+                              );
+                    await issueOperations.push(
+                        issueRepository.repositoryPath,
+                        featureBranch,
+                        preparedBranch.headSha,
+                    );
+                }),
+            );
+        };
+
+        const restoreIssueCheckout = (
+            issueBaseCheckout: WorkflowCheckout,
+        ): (() => Promise<void>) | undefined => {
+            if (workflowMode === WorkflowMode.ParallelPr) return undefined;
+            return async () => {
+                await Promise.all(
+                    repositoryCheckouts.map((issueRepository) =>
+                        checkpoints.restore(issueRepository.repositoryPath, {
+                            branch: issueBaseCheckout.branch,
+                            sha: issueBaseCheckout.head,
+                        }),
+                    ),
+                );
+            };
+        };
+
+        const prepareIssue = async (
+            issue: GitHubIssue,
+        ): Promise<WorkflowIssueContext> => {
+            const current = queue.processedCount();
+            const total =
+                resumeState?.maxIssues ??
+                maxIssues ??
+                current + queue.pendingCount();
+            const resumedClosureOutcome = resumedClosureOutcomeFor(
+                resumeState,
+                issue.number,
+                outcomes,
+            );
+            activeIssue = {
+                issueNumber: issue.number,
+                stage:
+                    resumedClosureOutcome === undefined
+                        ? ProgressStage.ComplexityAssessment
+                        : ProgressStage.IssueClosure,
+            };
+            const issueBaseCheckout = { ...checkout };
+            const featureBranch = issueFeatureBranch(issue.number);
+            const preparedIssueWorktree = await prepareIssueWorktree(
+                issue,
+                featureBranch,
+                issueBaseCheckout,
+            );
+            const issueRepositories: ReadonlyArray<RepositoryCheckout> =
+                preparedIssueWorktree
+                    ? [preparedIssueWorktree]
+                    : repositoryCheckouts;
+            await pushIssueBranch(
+                issueRepositories,
+                featureBranch,
+                issueBaseCheckout,
+                resumedClosureOutcome,
+            );
+            restoreCancellationCheckout =
+                restoreIssueCheckout(issueBaseCheckout);
+            await persistState(RunStateStatus.Active, activeIssue);
+            return {
+                issue,
+                current,
+                total,
+                featureBranch,
+                issueBaseCheckout,
+                preparedIssueWorktree,
+                issueRepositories,
+                resumedClosureOutcome,
+            };
+        };
+
+        const executeIssue = async (
+            issueContext: WorkflowIssueContext,
+            server: PiRuntime,
+        ): Promise<IssueExecutionOutcome> => {
+            if (issueContext.resumedClosureOutcome !== undefined) {
+                return issueContext.resumedClosureOutcome;
+            }
+            const repositoryPath =
+                issueContext.issueRepositories.find(
+                    ({ repository }) =>
+                        repository.toLowerCase() === repo.toLowerCase(),
+                )?.repositoryPath ?? prepared.path;
+            return await track(
+                progress,
+                ProgressStage.IssueExecution,
+                `Executing #${issueContext.issue.number} ${issueContext.issue.title}...`,
+                () =>
+                    issueExecutor.execute({
+                        issue: issueContext.issue,
+                        repository: repo,
+                        repositoryPath,
+                        targetBranch:
+                            usesPullRequests && !effectiveDryRun
+                                ? issueContext.featureBranch
+                                : branch,
+                        workspace,
+                        runId: actualRunId,
+                        octokit,
+                        pi: server.client,
+                        piSelection: selection,
+                        piDiagnostics: diagnostics,
+                        repositoryInvariant: invariantService,
+                        signal,
+                    }),
+                (result) => outcomeMessage(issueContext.issue.number, result),
+                {
+                    issue: {
+                        number: issueContext.issue.number,
+                        title: issueContext.issue.title,
+                    },
+                    current: issueContext.current,
+                    total: issueContext.total,
+                },
+            );
+        };
+
+        const deliverPullRequest = async (
+            issueContext: WorkflowIssueContext,
+        ): Promise<void> => {
+            const artifacts = await artifactStores.forIssue(
+                issueContext.issue.number,
+                {
+                    workspace,
+                    runId: actualRunId,
+                    repository: repo,
+                },
+            );
+            const reviews = artifacts.has(IssueArtifactKind.ReviewAttempts)
+                ? await artifacts.read(IssueArtifactKind.ReviewAttempts)
+                : [];
+            const issueRepository = issueContext.issueRepositories[0]!;
+            const pullRequest = await githubPullRequests.createOrFind(
+                octokit,
+                repo,
+                {
+                    title: `Fix #${issueContext.issue.number}: ${issueContext.issue.title}`,
+                    issueNumber: issueContext.issue.number,
+                    closesIssue: true,
+                    head: issueContext.featureBranch,
+                    base: branch,
+                },
+            );
+            await githubPullRequests.publishReviewAttempts(
+                octokit,
+                repo,
+                pullRequest.number,
+                reviews,
+            );
+            await githubPullRequests.merge(octokit, repo, pullRequest.number);
+            if (workflowMode !== WorkflowMode.ParallelPr) {
+                await issueOperations.restoreBaseCheckout(
+                    issueRepository.repositoryPath,
+                    branch,
+                );
+            }
+        };
+
+        const closeCompletedIssue = async (
+            issueContext: WorkflowIssueContext,
+            outcome: Extract<
+                IssueExecutionOutcome,
+                { readonly kind: IssueExecutionOutcomeKind.Completed }
+            >,
+        ): Promise<void> => {
+            if (
+                usesPullRequests &&
+                outcome.completion === IssueCompletionKind.PushedCommit
+            ) {
+                await track(
+                    progress,
+                    ProgressStage.IssueClosure,
+                    `Opening and merging pull request for issue #${issueContext.issue.number}...`,
+                    () => deliverPullRequest(issueContext),
+                    "Pull request merged; GitHub will close the issue.",
+                    {
+                        issue: {
+                            number: issueContext.issue.number,
+                            title: issueContext.issue.title,
+                        },
+                        details: { completion: outcome.completion },
+                    },
+                );
+                if (issueContext.preparedIssueWorktree !== undefined) {
+                    await worktrees.removeIssue(
+                        repositoryCheckouts[0]!,
+                        issueContext.preparedIssueWorktree,
+                    );
+                }
+                return;
+            }
+            await track(
+                progress,
+                ProgressStage.IssueClosure,
+                `Closing issue #${issueContext.issue.number} as completed...`,
+                () =>
+                    issueMutations.close(
+                        octokit,
+                        repo,
+                        issueContext.issue.number,
+                        GitHubIssueCloseReason.Completed,
+                    ),
+                `Issue #${issueContext.issue.number} closed as completed.`,
+                {
+                    issue: {
+                        number: issueContext.issue.number,
+                        title: issueContext.issue.title,
+                    },
+                    details: { completion: outcome.completion },
+                },
+            );
+        };
+
+        const completeIssue = async (
+            issueContext: WorkflowIssueContext,
+            outcome: IssueExecutionOutcome,
+        ): Promise<void> => {
+            if (outcome.kind !== IssueExecutionOutcomeKind.Completed) return;
+            checkout = await captureCheckout();
+            activeIssue = {
+                issueNumber: issueContext.issue.number,
+                stage: ProgressStage.IssueClosure,
+            };
+            await persistState(RunStateStatus.Active, activeIssue);
+            await closeCompletedIssue(issueContext, outcome);
+        };
+
+        const completeQueueItem = (
+            issueNumber: number,
+            outcome: IssueExecutionOutcome,
+        ): void => {
+            if (
+                outcome.kind === IssueExecutionOutcomeKind.Completed ||
+                outcome.kind === IssueExecutionOutcomeKind.Decomposed ||
+                outcome.kind === IssueExecutionOutcomeKind.Escalated
+            ) {
+                queue.complete(issueNumber);
+            }
+        };
+
+        const handleFailedIssue = async (
+            issueContext: WorkflowIssueContext,
+            outcome: Extract<
+                IssueExecutionOutcome,
+                { readonly kind: IssueExecutionOutcomeKind.Failed }
+            >,
+        ): Promise<void> => {
+            checkout = await captureCheckout();
+            await persistState(RunStateStatus.Active, {
+                issueNumber: issueContext.issue.number,
+                stage: ProgressStage.IssueExecution,
+            });
+            if (issueFailurePolicy === IssueFailurePolicy.Halt) {
+                throw new RalphieError({
+                    message: `Issue #${issueContext.issue.number} failed: ${outcome.message}`,
+                });
+            }
+        };
+
+        const removeIssueWorktree = async (
+            issueContext: WorkflowIssueContext,
+            outcome: IssueExecutionOutcome,
+        ): Promise<void> => {
+            if (issueContext.preparedIssueWorktree === undefined) return;
+            if (
+                outcome.kind === IssueExecutionOutcomeKind.Completed &&
+                outcome.completion === IssueCompletionKind.PushedCommit
+            ) {
+                return;
+            }
+            await worktrees.removeIssue(
+                repositoryCheckouts[0]!,
+                issueContext.preparedIssueWorktree,
+            );
+        };
+
+        const finishSuccessfulIssue = async (
+            issueContext: WorkflowIssueContext,
+            outcome: IssueExecutionOutcome,
+        ): Promise<void> => {
+            await removeIssueWorktree(issueContext, outcome);
+            activeIssue = undefined;
+            activeQueueIssues.delete(issueContext.issue.number);
+            restoreCancellationCheckout = undefined;
+            checkout = await captureCheckout();
+            await persistState(RunStateStatus.Active);
+        };
+
+        const refreshAfterDecomposition = async (
+            outcome: IssueExecutionOutcome,
+        ): Promise<void> => {
+            if (
+                outcome.kind !== IssueExecutionOutcomeKind.Decomposed &&
+                outcome.kind !== IssueExecutionOutcomeKind.Escalated
+            ) {
+                return;
+            }
+            const refreshed = await track(
+                progress,
+                ProgressStage.IssueDiscovery,
+                "Refreshing issue list...",
+                () => githubIssues.listOpen(octokit, repo, issueFilters),
+                (result) => `Refreshed ${result.length} matching open issues.`,
+            );
+            const added = queue.refresh(toQueuedIssues(refreshed));
+            await progress.emit({
+                stage: ProgressStage.IssueQueue,
+                status: ProgressStatus.Info,
+                message: `Issue queue refreshed; added ${added} new issues.`,
+                details: { added, pending: queue.pendingCount() },
+            });
+            await persistState(RunStateStatus.Active);
+        };
+
+        const finalizeIssue = async (
+            issueContext: WorkflowIssueContext,
+            outcome: IssueExecutionOutcome,
+        ): Promise<void> => {
+            if (issueContext.resumedClosureOutcome === undefined) {
+                outcomes.push({
+                    issueNumber: issueContext.issue.number,
+                    outcome,
+                });
+            }
+            await completeIssue(issueContext, outcome);
+            completeQueueItem(issueContext.issue.number, outcome);
+            if (outcome.kind === IssueExecutionOutcomeKind.Failed) {
+                await handleFailedIssue(issueContext, outcome);
+                return;
+            }
+            await finishSuccessfulIssue(issueContext, outcome);
+            await refreshAfterDecomposition(outcome);
+        };
+
+        const processNextIssue = async (
+            server: PiRuntime,
+        ): Promise<boolean> => {
+            checkCancellation(signal);
+            const issue = queue.next();
+            if (issue === undefined) return false;
+            activeQueueIssues.set(issue.number, issue);
+            const issueContext = await prepareIssue(issue);
+            const outcome = await executeIssue(issueContext, server);
+            await finalizeIssue(issueContext, outcome);
+            return true;
+        };
 
         const processQueue = async (server: PiRuntime): Promise<void> => {
             const worker = async (): Promise<void> => {
                 while (queue.state() === IssueQueueState.Ready) {
-                    checkCancellation(signal);
-                    const issue = queue.next();
-                    if (issue === undefined) break;
-                    activeQueueIssues.set(issue.number, issue);
-                    const current = queue.processedCount();
-                    const total =
-                        resumeState?.maxIssues ??
-                        maxIssues ??
-                        current + queue.pendingCount();
-                    const resumedClosureOutcome =
-                        resumeState?.activeIssue?.issueNumber ===
-                            issue.number &&
-                        resumeState.activeIssue.stage ===
-                            ProgressStage.IssueClosure
-                            ? outcomes.find(
-                                  (entry) =>
-                                      entry.issueNumber === issue.number &&
-                                      entry.outcome.kind ===
-                                          IssueExecutionOutcomeKind.Completed,
-                              )?.outcome
-                            : undefined;
-                    activeIssue = {
-                        issueNumber: issue.number,
-                        stage:
-                            resumedClosureOutcome === undefined
-                                ? ProgressStage.ComplexityAssessment
-                                : ProgressStage.IssueClosure,
-                    };
-                    const issueBaseCheckout = { ...checkout };
-                    const featureBranch = issueFeatureBranch(issue.number);
-                    let preparedIssueWorktree:
-                        | PreparedIssueWorktree
-                        | undefined;
-                    if (
-                        workflowMode === WorkflowMode.ParallelPr &&
-                        !effectiveDryRun
-                    ) {
-                        preparedIssueWorktree = await worktrees.prepareIssue({
-                            workspace,
-                            runId: actualRunId,
-                            issueNumber: issue.number,
-                            branch: featureBranch,
-                            repository: repositoryCheckouts[0]!,
-                            baseSha: issueBaseCheckout.head,
-                        });
-                    }
-                    const issueRepositories = preparedIssueWorktree
-                        ? [preparedIssueWorktree]
-                        : repositoryCheckouts;
-
-                    if (
-                        usesPullRequests &&
-                        !effectiveDryRun &&
-                        resumedClosureOutcome === undefined
-                    ) {
-                        await Promise.all(
-                            issueRepositories.map(async (issueRepository) => {
-                                const preparedBranch =
-                                    workflowMode === WorkflowMode.ParallelPr
-                                        ? { headSha: issueBaseCheckout.head }
-                                        : await issueOperations.createOrCheckoutFeatureBranch(
-                                              issueRepository.repositoryPath,
-                                              featureBranch,
-                                              issueRepository.branch,
-                                              issueBaseCheckout.head,
-                                          );
-                                await issueOperations.push(
-                                    issueRepository.repositoryPath,
-                                    featureBranch,
-                                    preparedBranch.headSha,
-                                );
-                            }),
-                        );
-                    }
-
-                    restoreCancellationCheckout =
-                        workflowMode === WorkflowMode.ParallelPr
-                            ? undefined
-                            : async () => {
-                                  await Promise.all(
-                                      repositoryCheckouts.map(
-                                          (issueRepository) =>
-                                              checkpoints.restore(
-                                                  issueRepository.repositoryPath,
-                                                  {
-                                                      branch: issueBaseCheckout.branch,
-                                                      sha: issueBaseCheckout.head,
-                                                  },
-                                              ),
-                                      ),
-                                  );
-                              };
-                    await persistState(RunStateStatus.Active, activeIssue);
-
-                    const outcome =
-                        resumedClosureOutcome ??
-                        (await track(
-                            progress,
-                            ProgressStage.IssueExecution,
-                            `Executing #${issue.number} ${issue.title}...`,
-                            () =>
-                                issueExecutor.execute({
-                                    issue,
-                                    repository: repo,
-                                    repositoryPath:
-                                        issueRepositories.find(
-                                            ({ repository }) =>
-                                                repository.toLowerCase() ===
-                                                repo.toLowerCase(),
-                                        )?.repositoryPath ?? prepared.path,
-                                    targetBranch:
-                                        usesPullRequests && !effectiveDryRun
-                                            ? featureBranch
-                                            : branch,
-                                    workspace,
-                                    runId: actualRunId,
-                                    octokit,
-                                    pi: server.client,
-                                    piSelection: selection,
-                                    piDiagnostics: diagnostics,
-                                    repositoryInvariant: invariantService,
-                                    signal,
-                                }),
-                            (result) => outcomeMessage(issue.number, result),
-                            {
-                                issue: {
-                                    number: issue.number,
-                                    title: issue.title,
-                                },
-                                current,
-                                total,
-                            },
-                        ));
-                    if (resumedClosureOutcome === undefined) {
-                        outcomes.push({ issueNumber: issue.number, outcome });
-                    }
-
-                    if (outcome.kind === IssueExecutionOutcomeKind.Completed) {
-                        checkout = await captureCheckout();
-                        activeIssue = {
-                            issueNumber: issue.number,
-                            stage: ProgressStage.IssueClosure,
-                        };
-                        await persistState(RunStateStatus.Active, activeIssue);
-                        if (
-                            usesPullRequests &&
-                            outcome.completion ===
-                                IssueCompletionKind.PushedCommit
-                        ) {
-                            const artifacts = await artifactStores.forIssue(
-                                issue.number,
-                                {
-                                    workspace,
-                                    runId: actualRunId,
-                                    repository: repo,
-                                },
-                            );
-                            const reviews = artifacts.has(
-                                IssueArtifactKind.ReviewAttempts,
-                            )
-                                ? await artifacts.read(
-                                      IssueArtifactKind.ReviewAttempts,
-                                  )
-                                : [];
-                            const issueRepository = issueRepositories[0]!;
-                            const deliver = async () => {
-                                const pullRequest =
-                                    await githubPullRequests.createOrFind(
-                                        octokit,
-                                        repo,
-                                        {
-                                            title: `Fix #${issue.number}: ${issue.title}`,
-                                            issueNumber: issue.number,
-                                            closesIssue: true,
-                                            head: featureBranch,
-                                            base: branch,
-                                        },
-                                    );
-                                await githubPullRequests.publishReviewAttempts(
-                                    octokit,
-                                    repo,
-                                    pullRequest.number,
-                                    reviews,
-                                );
-                                await githubPullRequests.merge(
-                                    octokit,
-                                    repo,
-                                    pullRequest.number,
-                                );
-                                if (workflowMode !== WorkflowMode.ParallelPr) {
-                                    await issueOperations.restoreBaseCheckout(
-                                        issueRepository.repositoryPath,
-                                        branch,
-                                    );
-                                }
-                            };
-                            await track(
-                                progress,
-                                ProgressStage.IssueClosure,
-                                `Opening and merging pull request for issue #${issue.number}...`,
-                                deliver,
-                                "Pull request merged; GitHub will close the issue.",
-                                {
-                                    issue: {
-                                        number: issue.number,
-                                        title: issue.title,
-                                    },
-                                    details: { completion: outcome.completion },
-                                },
-                            );
-                            if (preparedIssueWorktree !== undefined) {
-                                await worktrees.removeIssue(
-                                    repositoryCheckouts[0]!,
-                                    preparedIssueWorktree,
-                                );
-                            }
-                        } else {
-                            await track(
-                                progress,
-                                ProgressStage.IssueClosure,
-                                `Closing issue #${issue.number} as completed...`,
-                                () =>
-                                    issueMutations.close(
-                                        octokit,
-                                        repo,
-                                        issue.number,
-                                        GitHubIssueCloseReason.Completed,
-                                    ),
-                                `Issue #${issue.number} closed as completed.`,
-                                {
-                                    issue: {
-                                        number: issue.number,
-                                        title: issue.title,
-                                    },
-                                    details: { completion: outcome.completion },
-                                },
-                            );
-                        }
-                    }
-
-                    if (
-                        outcome.kind === IssueExecutionOutcomeKind.Completed ||
-                        outcome.kind === IssueExecutionOutcomeKind.Decomposed ||
-                        outcome.kind === IssueExecutionOutcomeKind.Escalated
-                    ) {
-                        queue.complete(issue.number);
-                    }
-
-                    if (outcome.kind === IssueExecutionOutcomeKind.Failed) {
-                        checkout = await captureCheckout();
-                        await persistState(RunStateStatus.Active, {
-                            issueNumber: issue.number,
-                            stage: ProgressStage.IssueExecution,
-                        });
-                        if (issueFailurePolicy === IssueFailurePolicy.Halt) {
-                            throw new RalphieError({
-                                message: `Issue #${issue.number} failed: ${outcome.message}`,
-                            });
-                        }
-                    } else {
-                        if (
-                            preparedIssueWorktree !== undefined &&
-                            !(
-                                outcome.kind ===
-                                    IssueExecutionOutcomeKind.Completed &&
-                                outcome.completion ===
-                                    IssueCompletionKind.PushedCommit
-                            )
-                        ) {
-                            await worktrees.removeIssue(
-                                repositoryCheckouts[0]!,
-                                preparedIssueWorktree,
-                            );
-                        }
-                        activeIssue = undefined;
-                        activeQueueIssues.delete(issue.number);
-                        restoreCancellationCheckout = undefined;
-                        checkout = await captureCheckout();
-                        await persistState(RunStateStatus.Active);
-                    }
-
-                    if (
-                        outcome.kind === IssueExecutionOutcomeKind.Decomposed ||
-                        outcome.kind === IssueExecutionOutcomeKind.Escalated
-                    ) {
-                        const refreshed = await track(
-                            progress,
-                            ProgressStage.IssueDiscovery,
-                            "Refreshing issue list...",
-                            () =>
-                                githubIssues.listOpen(
-                                    octokit,
-                                    repo,
-                                    issueFilters,
-                                ),
-                            (result) =>
-                                `Refreshed ${result.length} matching open issues.`,
-                        );
-                        const added = queue.refresh(toQueuedIssues(refreshed));
-                        await progress.emit({
-                            stage: ProgressStage.IssueQueue,
-                            status: ProgressStatus.Info,
-                            message: `Issue queue refreshed; added ${added} new issues.`,
-                            details: { added, pending: queue.pendingCount() },
-                        });
-                        await persistState(RunStateStatus.Active);
-                    }
+                    if (!(await processNextIssue(server))) break;
                 }
             };
-
             if (workflowMode === WorkflowMode.ParallelPr) {
                 await Promise.all(
                     Array.from(
@@ -851,51 +1247,16 @@ export const workflow = async (
 
     try {
         const summary = await run();
-        await progress.emit({
-            stage: ProgressStage.Run,
-            status: ProgressStatus.Succeeded,
-            message:
-                `Run completed: ${summary.counts.completed} completed, ` +
-                `${summary.counts.decomposed} decomposed, ${summary.counts.escalated} escalated, ` +
-                `${summary.counts.skipped} skipped, ${summary.counts.failed} failed.`,
-            details: {
-                runId: summary.runId,
-                counts: summary.counts,
-                statePath,
-            },
-        });
+        await emitRunSucceeded(progress, config, summary);
         return summary;
     } catch (error) {
-        if (signal?.aborted) {
-            let restoreError: unknown;
-            if (
-                activeIssue !== undefined &&
-                restoreCancellationCheckout !== undefined
-            ) {
-                try {
-                    await restoreCancellationCheckout();
-                } catch (failure) {
-                    restoreError = failure;
-                }
-            }
-            if (persistCancellationState !== undefined) {
-                await persistCancellationState();
-            }
-            error = new RalphieError({
-                message:
-                    restoreError === undefined
-                        ? "Run cancelled; active checkout was preserved and resumable state was saved."
-                        : "Run cancelled; resumable state was saved but active checkout restoration failed.",
-                cause: restoreError ?? error,
-            });
-        }
-
-        await progress.emit({
-            stage: ProgressStage.Run,
-            status: ProgressStatus.Failed,
-            message: `Run failed: ${errorMessage(error)}`,
-            details: { runId: actualRunId, statePath },
+        const finalError = await cancellationError(error, config, {
+            activeIssue,
+            activeQueueIssues,
+            persistCancellationState,
+            restoreCancellationCheckout,
         });
-        throw error;
+        await emitRunFailed(progress, config, finalError);
+        throw finalError;
     }
 };

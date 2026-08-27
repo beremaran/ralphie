@@ -267,6 +267,175 @@ const modelFor = (
     return resolved;
 };
 
+type PromptFormat = NonNullable<PromptInput["format"]>;
+type PiSession = Awaited<ReturnType<typeof createAgentSession>>["session"];
+
+const makeStructuredResultTool = (
+    format: PromptFormat,
+    setStructured: (value: unknown) => void,
+): AnyToolDefinition =>
+    ({
+        name: "submit_result",
+        label: "Submit result",
+        description:
+            "Mandatory final response tool. After completing the task, call this tool exactly once with the complete result matching its schema. Never return the result as prose, Markdown, or printed JSON, and never end the turn without calling this tool. If validation rejects an invocation, correct every reported field and call it again.",
+        parameters: format.schema as never,
+        constrainedSampling: {
+            type: "json_schema",
+            strict: "prefer",
+        },
+        executionMode: "sequential",
+        execute: async (_toolCallId, params) => {
+            if (format.validate !== undefined) {
+                const validation = format.validate(params);
+                if (!validation.success) {
+                    throw new Error(
+                        validation.error === undefined
+                            ? "Structured result failed Ralphie's schema validation. Correct the arguments and call submit_result again."
+                            : `Structured result failed Ralphie's schema validation:\n${validation.error}\nCorrect the arguments and call submit_result again.`,
+                    );
+                }
+            }
+            setStructured(params);
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: "Structured result accepted.",
+                    },
+                ],
+                details: {},
+                terminate: true,
+            };
+        },
+    }) as AnyToolDefinition;
+
+const promptForAttempt = (
+    input: PromptInput,
+    prompt: string,
+    attempt: number,
+): string => {
+    if (attempt !== 0) {
+        return "RESPONSE CONTRACT VIOLATION: your previous response ended without a valid submit_result call. Call submit_result now with the complete schema-valid result. Do not provide more analysis, prose, Markdown, or printed JSON. If validation reports errors, correct them and call the tool again.";
+    }
+    if (input.format === undefined) return prompt;
+    return `${prompt}\n\nMANDATORY RESPONSE CONTRACT:\n- Complete the analysis before submitting.\n- Your final action must be exactly one call to the submit_result tool.\n- Supply every required field and obey all field relationships in the schema.\n- Do not return prose, Markdown, a code fence, or printed JSON as the final answer.\n- Do not end the turn without a successful submit_result call.\n- If the tool reports validation errors, correct all errors and call it again.`;
+};
+
+const runPromptAttempts = async (
+    session: PiSession,
+    input: PromptInput,
+    prompt: string,
+    structured: () => unknown,
+): Promise<{
+    readonly assistant: ReturnType<typeof finalAssistant>;
+    readonly structured: unknown;
+}> => {
+    const maximumAttempts =
+        input.format === undefined ? 1 : (input.format.retryCount ?? 2) + 1;
+    let assistant: ReturnType<typeof finalAssistant>;
+    for (let attempt = 0; attempt < maximumAttempts; attempt += 1) {
+        await session.prompt(promptForAttempt(input, prompt, attempt), {
+            expandPromptTemplates: false,
+        });
+        assistant = finalAssistant(session.messages);
+        if (
+            structured() !== undefined ||
+            assistant?.stopReason === "aborted" ||
+            assistant?.stopReason === "error"
+        ) {
+            break;
+        }
+    }
+    return { assistant, structured: structured() };
+};
+
+type PromptTools = {
+    readonly activeTools: string[];
+    readonly customTools: AnyToolDefinition[];
+};
+
+const makePromptTools = (
+    input: PromptInput,
+    created: PendingSession,
+    setStructured: (value: unknown) => void,
+): PromptTools => {
+    const readOnly =
+        created.permission?.some(
+            (rule) => rule.permission === "edit" && rule.action === "deny",
+        ) ?? false;
+    const customTools: AnyToolDefinition[] = readOnly
+        ? []
+        : [makeBashTool(input.directory)];
+    const activeTools = readOnly
+        ? ["read", "grep", "find", "ls"]
+        : ["read", "bash", "edit", "write"];
+    if (input.format !== undefined) {
+        customTools.push(makeStructuredResultTool(input.format, setStructured));
+        activeTools.push("submit_result");
+    }
+    return { activeTools, customTools };
+};
+
+const createPromptSession = async (
+    modelRuntime: ModelRuntime,
+    input: PromptInput,
+    created: PendingSession,
+    tools: PromptTools,
+): Promise<PiSession> => {
+    const resourceLoader = new DefaultResourceLoader({
+        cwd: input.directory,
+        agentDir: process.env.PI_CODING_AGENT_DIR ?? getAgentDir(),
+        noExtensions: true,
+        noSkills: true,
+        noPromptTemplates: true,
+        noThemes: true,
+    });
+    await resourceLoader.reload();
+    const { session } = await createAgentSession({
+        cwd: input.directory,
+        modelRuntime,
+        model: modelFor(modelRuntime, input.model ?? created.model),
+        thinkingLevel: thinkingLevelFor(input.variant),
+        tools: tools.activeTools,
+        customTools: tools.customTools,
+        resourceLoader,
+        sessionManager: SessionManager.inMemory(input.directory, {
+            id: input.sessionID,
+        }),
+    });
+    return session;
+};
+
+const makePromptResponse = (
+    input: PromptInput,
+    assistant: ReturnType<typeof finalAssistant>,
+    structured: unknown,
+): {
+    readonly data: {
+        readonly info: PiAssistantMessage;
+        readonly parts: ReadonlyArray<PiPart>;
+    };
+} => {
+    const error = assistantError(
+        assistant,
+        input.format !== undefined && structured === undefined
+            ? (input.format.retryCount ?? 2)
+            : 0,
+    );
+    return {
+        data: {
+            info: {
+                id: input.sessionID,
+                role: "assistant",
+                ...(error === undefined ? {} : { error }),
+                ...(structured === undefined ? {} : { structured }),
+            },
+            parts: assistantParts(assistant),
+        },
+    };
+};
+
 export const makePiClient = (modelRuntime: ModelRuntime): PiClient => {
     const pending = new Map<string, PendingSession>();
     const active = new Set<{
@@ -295,81 +464,16 @@ export const makePiClient = (modelRuntime: ModelRuntime): PiClient => {
                     };
                 }
 
-                const readOnly =
-                    created.permission?.some(
-                        (rule) =>
-                            rule.permission === "edit" &&
-                            rule.action === "deny",
-                    ) ?? false;
                 let structured: unknown;
-                const customTools: AnyToolDefinition[] = readOnly
-                    ? []
-                    : [makeBashTool(input.directory)];
-                const activeTools = readOnly
-                    ? ["read", "grep", "find", "ls"]
-                    : ["read", "bash", "edit", "write"];
-
-                if (input.format !== undefined) {
-                    customTools.push({
-                        name: "submit_result",
-                        label: "Submit result",
-                        description:
-                            "Mandatory final response tool. After completing the task, call this tool exactly once with the complete result matching its schema. Never return the result as prose, Markdown, or printed JSON, and never end the turn without calling this tool. If validation rejects an invocation, correct every reported field and call it again.",
-                        parameters: input.format.schema as never,
-                        constrainedSampling: {
-                            type: "json_schema",
-                            strict: "prefer",
-                        },
-                        executionMode: "sequential",
-                        execute: async (_toolCallId, params) => {
-                            if (input.format?.validate !== undefined) {
-                                const validation =
-                                    input.format.validate(params);
-                                if (!validation.success) {
-                                    throw new Error(
-                                        validation.error === undefined
-                                            ? "Structured result failed Ralphie's schema validation. Correct the arguments and call submit_result again."
-                                            : `Structured result failed Ralphie's schema validation:\n${validation.error}\nCorrect the arguments and call submit_result again.`,
-                                    );
-                                }
-                            }
-                            structured = params;
-                            return {
-                                content: [
-                                    {
-                                        type: "text",
-                                        text: "Structured result accepted.",
-                                    },
-                                ],
-                                details: {},
-                                terminate: true,
-                            };
-                        },
-                    } as AnyToolDefinition);
-                    activeTools.push("submit_result");
-                }
-
-                const resourceLoader = new DefaultResourceLoader({
-                    cwd: input.directory,
-                    agentDir: process.env.PI_CODING_AGENT_DIR ?? getAgentDir(),
-                    noExtensions: true,
-                    noSkills: true,
-                    noPromptTemplates: true,
-                    noThemes: true,
+                const tools = makePromptTools(input, created, (value) => {
+                    structured = value;
                 });
-                await resourceLoader.reload();
-                const { session } = await createAgentSession({
-                    cwd: input.directory,
+                const session = await createPromptSession(
                     modelRuntime,
-                    model: modelFor(modelRuntime, input.model ?? created.model),
-                    thinkingLevel: thinkingLevelFor(input.variant),
-                    tools: activeTools,
-                    customTools,
-                    resourceLoader,
-                    sessionManager: SessionManager.inMemory(input.directory, {
-                        id: input.sessionID,
-                    }),
-                });
+                    input,
+                    created,
+                    tools,
+                );
                 active.add(session);
                 const abort = () => void session.abort();
                 options?.signal?.addEventListener("abort", abort, {
@@ -380,61 +484,13 @@ export const makePiClient = (modelRuntime: ModelRuntime): PiClient => {
                     const prompt = input.parts
                         .map((part) => part.text)
                         .join("\n");
-                    const maximumAttempts =
-                        input.format === undefined
-                            ? 1
-                            : (input.format.retryCount ?? 2) + 1;
-                    let assistant: ReturnType<typeof finalAssistant>;
-                    for (
-                        let attempt = 0;
-                        attempt < maximumAttempts;
-                        attempt += 1
-                    ) {
-                        await session.prompt(
-                            attempt === 0
-                                ? input.format === undefined
-                                    ? prompt
-                                    : `${prompt}\n\nMANDATORY RESPONSE CONTRACT:\n- Complete the analysis before submitting.\n- Your final action must be exactly one call to the submit_result tool.\n- Supply every required field and obey all field relationships in the schema.\n- Do not return prose, Markdown, a code fence, or printed JSON as the final answer.\n- Do not end the turn without a successful submit_result call.\n- If the tool reports validation errors, correct all errors and call it again.`
-                                : "RESPONSE CONTRACT VIOLATION: your previous response ended without a valid submit_result call. Call submit_result now with the complete schema-valid result. Do not provide more analysis, prose, Markdown, or printed JSON. If validation reports errors, correct them and call the tool again.",
-                            {
-                                expandPromptTemplates: false,
-                            },
-                        );
-                        assistant = finalAssistant(session.messages);
-                        if (
-                            structured !== undefined ||
-                            assistant?.stopReason === "aborted" ||
-                            assistant?.stopReason === "error"
-                        ) {
-                            break;
-                        }
-                    }
-                    const error = assistantError(
-                        assistant,
-                        input.format !== undefined && structured === undefined
-                            ? (input.format.retryCount ?? 2)
-                            : 0,
+                    const { assistant } = await runPromptAttempts(
+                        session,
+                        input,
+                        prompt,
+                        () => structured,
                     );
-                    const parts = assistantParts(assistant);
-                    return {
-                        data: {
-                            info: {
-                                id: input.sessionID,
-                                role: "assistant",
-                                ...(error === undefined
-                                    ? {}
-                                    : {
-                                          error,
-                                      }),
-                                ...(structured === undefined
-                                    ? {}
-                                    : {
-                                          structured,
-                                      }),
-                            },
-                            parts,
-                        },
-                    };
+                    return makePromptResponse(input, assistant, structured);
                 } finally {
                     options?.signal?.removeEventListener("abort", abort);
                     active.delete(session);

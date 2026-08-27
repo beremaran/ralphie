@@ -4,7 +4,7 @@ import {
     type IssueArtifactStoreService,
 } from "./artifacts.ts";
 import type { ComplexityAssessmentService } from "./complexity.ts";
-import { ComplexityLevel } from "./decisions.ts";
+import { ComplexityLevel, type ComplexityDecision } from "./decisions.ts";
 import type {
     IssueExecutionContext,
     IssueExecutionOutcome,
@@ -25,63 +25,72 @@ export const makeIssueExecutorService = (
     complexityAssessment: ComplexityAssessmentService,
     implementationExecutor: ImplementationExecutorService,
     decompositionExecutor: DecompositionExecutorService,
-): IssueExecutorService => ({
-    execute: async (context) => {
-        try {
-            const artifacts = await artifactStores.forIssue(
-                context.issue.number,
-                context.workspace && context.runId
-                    ? {
-                          workspace: context.workspace,
-                          runId: context.runId,
-                          repository: context.repository,
-                      }
-                    : undefined,
-            );
-            const decision = artifacts.has(IssueArtifactKind.ComplexityDecision)
-                ? await artifacts.read(IssueArtifactKind.ComplexityDecision)
-                : await complexityAssessment
-                      .assess(context)
-                      .then(async ({ decision }) => {
-                          await artifacts.write(
-                              IssueArtifactKind.ComplexityDecision,
-                              decision,
-                          );
-                          return decision;
-                      });
-
-            const input = { context, artifacts };
-            if (decision.complexity >= ComplexityLevel.Level4) {
-                return await decompositionExecutor.execute(input);
-            }
-
-            const implementation = await implementationExecutor.execute(input);
-            if (implementation.kind !== IssueExecutionOutcomeKind.Escalated) {
-                return implementation;
-            }
-
-            const decomposition = await decompositionExecutor.execute(input);
-            if (decomposition.kind !== IssueExecutionOutcomeKind.Decomposed) {
-                return {
-                    kind: IssueExecutionOutcomeKind.Failed,
-                    message:
-                        "Review escalation did not complete decomposition.",
-                } as const;
-            }
-            return {
-                ...implementation,
-                childIssueNumbers: decomposition.childIssueNumbers,
-            };
-        } catch (error) {
-            if (error instanceof RalphieError) {
-                return {
-                    kind: IssueExecutionOutcomeKind.Failed,
-                    message: error.message,
-                } as const;
-            }
-            throw error;
+): IssueExecutorService => {
+    const assessOrReadDecision = async (
+        context: IssueExecutionContext,
+        artifacts: Awaited<ReturnType<IssueArtifactStoreService["forIssue"]>>,
+    ): Promise<ComplexityDecision> => {
+        if (artifacts.has(IssueArtifactKind.ComplexityDecision)) {
+            return await artifacts.read(IssueArtifactKind.ComplexityDecision);
         }
-    },
-});
+        const { decision } = await complexityAssessment.assess(context);
+        await artifacts.write(IssueArtifactKind.ComplexityDecision, decision);
+        return decision;
+    };
+
+    const executeIssue = async (
+        context: IssueExecutionContext,
+        artifacts: Awaited<ReturnType<IssueArtifactStoreService["forIssue"]>>,
+    ): Promise<IssueExecutionOutcome> => {
+        const decision = await assessOrReadDecision(context, artifacts);
+        const input = { context, artifacts };
+        if (decision.complexity >= ComplexityLevel.Level4) {
+            return await decompositionExecutor.execute(input);
+        }
+
+        const implementation = await implementationExecutor.execute(input);
+        if (implementation.kind !== IssueExecutionOutcomeKind.Escalated) {
+            return implementation;
+        }
+
+        const decomposition = await decompositionExecutor.execute(input);
+        if (decomposition.kind !== IssueExecutionOutcomeKind.Decomposed) {
+            return {
+                kind: IssueExecutionOutcomeKind.Failed,
+                message: "Review escalation did not complete decomposition.",
+            } as const;
+        }
+        return {
+            ...implementation,
+            childIssueNumbers: decomposition.childIssueNumbers,
+        };
+    };
+
+    return {
+        execute: async (context) => {
+            try {
+                const artifacts = await artifactStores.forIssue(
+                    context.issue.number,
+                    context.workspace && context.runId
+                        ? {
+                              workspace: context.workspace,
+                              runId: context.runId,
+                              repository: context.repository,
+                          }
+                        : undefined,
+                );
+                return await executeIssue(context, artifacts);
+            } catch (error) {
+                if (error instanceof RalphieError) {
+                    return {
+                        kind: IssueExecutionOutcomeKind.Failed,
+                        message: error.message,
+                    } as const;
+                }
+                throw error;
+            }
+        },
+    };
+};
 
 export const IssueExecutorLive = makeIssueExecutorService;

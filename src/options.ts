@@ -70,6 +70,58 @@ export type ResolvedRalphieConfig = {
     readonly quiet: boolean;
 };
 
+const optionalProperty = <Key extends string, Value>(
+    key: Key,
+    value: Value | undefined,
+): { [Property in Key]: Value } | Record<never, never> =>
+    value === undefined
+        ? {}
+        : ({ [key]: value } as { [Property in Key]: Value });
+
+const withDefault = <Value>(value: Value | undefined, fallback: Value): Value =>
+    value ?? fallback;
+
+const buildResolvedConfig = (
+    options: RalphieCliOptions,
+    json: boolean,
+    quiet: boolean,
+): ResolvedRalphieConfig => ({
+    repo: parseRepositorySlug(options.repo!).slug,
+    workflow: withDefault(options.workflow, DEFAULT_WORKFLOW_MODE),
+    ...optionalProperty("branch", options.branch),
+    issueConcurrency: options.issueConcurrency ?? 1,
+    ...optionalProperty("agentConcurrency", options.agentConcurrency),
+    ...optionalProperty("maxIssues", options.maxIssues),
+    issueLabels: [...(options.issueLabels ?? [])],
+    issueSort: options.issueSort ?? IssueSort.Created,
+    issueOrder: options.issueOrder ?? IssueOrder.Ascending,
+    ...optionalProperty("model", options.model),
+    ...optionalProperty("modelVariant", options.modelVariant),
+    agent: options.agent ?? DEFAULT_PI_AGENT,
+    ...optionalProperty("modelBaseUrl", options.modelBaseUrl),
+    ...optionalProperty("modelApiKey", options.modelApiKey),
+    ...optionalProperty("modelProvider", options.modelProvider),
+    ...optionalProperty("modelId", options.modelId),
+    ...optionalProperty("agentDir", options.agentDir),
+    // Flags take precedence over the documented environment variables.
+    ...optionalProperty(
+        "modelBaseUrl",
+        options.modelBaseUrl ?? process.env[MODEL_BASE_URL_ENV],
+    ),
+    ...optionalProperty(
+        "modelApiKey",
+        options.modelApiKey ?? process.env[MODEL_API_KEY_ENV],
+    ),
+    workspace: options.workspace ?? DEFAULT_WORKSPACE,
+    cleanup: options.cleanup ?? false,
+    startClean: options.startClean ?? false,
+    dryRun: options.dryRun ?? false,
+    ...optionalProperty("resume", options.resume),
+    verbose: options.verbose ?? false,
+    json,
+    quiet,
+});
+
 /** Resolve the complete run configuration from CLI arguments only. */
 export const resolveRalphieConfig = (
     options: RalphieCliOptions,
@@ -89,88 +141,5 @@ export const resolveRalphieConfig = (
         });
     }
 
-    return {
-        repo: parseRepositorySlug(options.repo).slug,
-        workflow: options.workflow ?? DEFAULT_WORKFLOW_MODE,
-        ...(options.branch === undefined
-            ? {}
-            : {
-                  branch: options.branch,
-              }),
-        issueConcurrency: options.issueConcurrency ?? 1,
-        ...(options.agentConcurrency === undefined
-            ? {}
-            : {
-                  agentConcurrency: options.agentConcurrency,
-              }),
-        ...(options.maxIssues === undefined
-            ? {}
-            : {
-                  maxIssues: options.maxIssues,
-              }),
-        issueLabels: [...(options.issueLabels ?? [])],
-        issueSort: options.issueSort ?? IssueSort.Created,
-        issueOrder: options.issueOrder ?? IssueOrder.Ascending,
-        ...(options.model === undefined
-            ? {}
-            : {
-                  model: options.model,
-              }),
-        ...(options.modelVariant === undefined
-            ? {}
-            : {
-                  modelVariant: options.modelVariant,
-              }),
-        agent: options.agent ?? DEFAULT_PI_AGENT,
-        ...(options.modelBaseUrl === undefined
-            ? {}
-            : {
-                  modelBaseUrl: options.modelBaseUrl,
-              }),
-        ...(options.modelApiKey === undefined
-            ? {}
-            : {
-                  modelApiKey: options.modelApiKey,
-              }),
-        ...(options.modelProvider === undefined
-            ? {}
-            : {
-                  modelProvider: options.modelProvider,
-              }),
-        ...(options.modelId === undefined
-            ? {}
-            : {
-                  modelId: options.modelId,
-              }),
-        ...(options.agentDir === undefined
-            ? {}
-            : {
-                  agentDir: options.agentDir,
-              }),
-        // Flags take precedence over the documented environment variables.
-        ...(options.modelBaseUrl === undefined &&
-        process.env[MODEL_BASE_URL_ENV] !== undefined
-            ? {
-                  modelBaseUrl: process.env[MODEL_BASE_URL_ENV],
-              }
-            : {}),
-        ...(options.modelApiKey === undefined &&
-        process.env[MODEL_API_KEY_ENV] !== undefined
-            ? {
-                  modelApiKey: process.env[MODEL_API_KEY_ENV],
-              }
-            : {}),
-        workspace: options.workspace ?? DEFAULT_WORKSPACE,
-        cleanup: options.cleanup ?? false,
-        startClean: options.startClean ?? false,
-        dryRun: options.dryRun ?? false,
-        ...(options.resume === undefined
-            ? {}
-            : {
-                  resume: options.resume,
-              }),
-        verbose: options.verbose ?? false,
-        json,
-        quiet,
-    };
+    return buildResolvedConfig(options, json, quiet);
 };

@@ -63,6 +63,77 @@ const issueLabels = (
         typeof label === "string" ? [label] : label.name ? [label.name] : [],
     );
 
+type GitHubIssueRecord = {
+    readonly number: number;
+    readonly title: string;
+    readonly html_url: string;
+    readonly body?: string | null;
+    readonly pull_request?: unknown;
+    readonly labels: ReadonlyArray<
+        | string
+        | {
+              readonly name?: string | null;
+          }
+    >;
+};
+
+type ParsedDecompositionMarker = {
+    readonly body: string;
+    readonly decompositionKey: string;
+};
+
+const parseDecompositionMarker = (
+    issue: GitHubIssueRecord,
+    query: DecompositionChildrenQuery,
+    markerPattern: RegExp,
+): ParsedDecompositionMarker | undefined => {
+    const body = issue.body;
+    if (issue.pull_request || body == null) return undefined;
+
+    const marker = body.match(markerPattern);
+    if (marker === null) return undefined;
+    const rootIssueNumber = Number(marker[1]);
+    const parentIssueNumber = Number(marker[2]);
+    const depth = Number(marker[4]);
+    if (
+        rootIssueNumber !== query.rootIssueNumber ||
+        parentIssueNumber !== query.parentIssueNumber ||
+        depth !== query.depth
+    ) {
+        return undefined;
+    }
+
+    try {
+        const decompositionKey = JSON.parse(marker[3]!);
+        return typeof decompositionKey === "string" &&
+            decompositionKey.length > 0
+            ? { body, decompositionKey }
+            : undefined;
+    } catch {
+        return undefined;
+    }
+};
+
+const mapDecompositionChild = (
+    issue: GitHubIssueRecord,
+    query: DecompositionChildrenQuery,
+    markerPattern: RegExp,
+): ReadonlyArray<GitHubDecompositionChild> => {
+    const marker = parseDecompositionMarker(issue, query, markerPattern);
+    if (marker === undefined) return [];
+
+    return [
+        {
+            number: issue.number,
+            title: issue.title,
+            url: issue.html_url,
+            body: marker.body,
+            labels: issueLabels(issue.labels),
+            decompositionKey: marker.decompositionKey,
+        },
+    ];
+};
+
 export const makeGitHubIssuesService = (): GitHubIssuesService => ({
     listOpen: async (client, repository, filters) => {
         try {
@@ -111,46 +182,9 @@ export const makeGitHubIssuesService = (): GitHubIssuesService => ({
 
             const markerPattern =
                 /<!-- ralphie:decomposition root=(\d+) parent=(\d+) key=("(?:\\.|[^"\\])*") depth=(\d+) -->/;
-            return data.flatMap((issue) => {
-                const body = issue.body;
-                if (issue.pull_request || body == null) return [];
-                const marker = body.match(markerPattern);
-                if (marker === null) return [];
-                const rootIssueNumber = Number(marker[1]);
-                const parentIssueNumber = Number(marker[2]);
-                const depth = Number(marker[4]);
-                if (
-                    rootIssueNumber !== query.rootIssueNumber ||
-                    parentIssueNumber !== query.parentIssueNumber ||
-                    depth !== query.depth
-                ) {
-                    return [];
-                }
-
-                let decompositionKey: unknown;
-                try {
-                    decompositionKey = JSON.parse(marker[3]!);
-                } catch {
-                    return [];
-                }
-                if (
-                    typeof decompositionKey !== "string" ||
-                    decompositionKey.length === 0
-                ) {
-                    return [];
-                }
-
-                return [
-                    {
-                        number: issue.number,
-                        title: issue.title,
-                        url: issue.html_url,
-                        body,
-                        labels: issueLabels(issue.labels),
-                        decompositionKey,
-                    },
-                ];
-            });
+            return data.flatMap((issue) =>
+                mapDecompositionChild(issue, query, markerPattern),
+            );
         } catch (cause) {
             if (cause instanceof RalphieError) throw cause;
             throw new RalphieError({

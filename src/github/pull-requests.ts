@@ -116,6 +116,75 @@ const findMatchingPullRequest = (
             pullRequest.base?.ref === input.base,
     );
 
+type ReviewAttemptParameters = ReturnType<typeof repositoryParameters> & {
+    readonly issue_number: number;
+};
+
+const hasPublishedReviewAttempt = async (
+    client: Octokit,
+    parameters: ReviewAttemptParameters,
+    attempt: ReviewAttempt,
+): Promise<boolean> => {
+    const comments = await client.paginate(client.rest.issues.listComments, {
+        ...parameters,
+        per_page: 100,
+    });
+    return comments.some(
+        (comment) => reviewAttemptFromComment(comment.body) === attempt.attempt,
+    );
+};
+
+const publishReviewAttempt = async (
+    client: Octokit,
+    parameters: ReviewAttemptParameters,
+    attempt: ReviewAttempt,
+): Promise<void> => {
+    try {
+        await client.rest.issues.createComment({
+            ...parameters,
+            body: reviewCommentBody(attempt),
+        });
+    } catch (cause) {
+        if (await hasPublishedReviewAttempt(client, parameters, attempt))
+            return;
+        throw cause;
+    }
+};
+
+type PullRequestParameters = ReturnType<typeof repositoryParameters> & {
+    readonly pull_number: number;
+};
+
+const mergePullRequest = async (
+    client: Octokit,
+    parameters: PullRequestParameters,
+    pullRequestNumber: number,
+): Promise<GitHubPullRequest> => {
+    const current = await client.rest.pulls.get(parameters);
+    if (isMerged(current.data)) return mapPullRequest(current.data);
+    if (current.data.state !== "open") {
+        throw new RalphieError({
+            message: `Pull request #${pullRequestNumber} is closed but not merged.`,
+        });
+    }
+
+    try {
+        await client.rest.pulls.merge(parameters);
+    } catch (cause) {
+        const reconciled = await client.rest.pulls.get(parameters);
+        if (isMerged(reconciled.data)) return mapPullRequest(reconciled.data);
+        throw cause;
+    }
+
+    const merged = await client.rest.pulls.get(parameters);
+    if (!isMerged(merged.data)) {
+        throw new RalphieError({
+            message: `Pull request #${pullRequestNumber} did not reach the merged state.`,
+        });
+    }
+    return mapPullRequest(merged.data);
+};
+
 export const makeGitHubPullRequestService = (): GitHubPullRequestService => ({
     createOrFind: async (client, repository, input) => {
         try {
@@ -187,29 +256,7 @@ export const makeGitHubPullRequestService = (): GitHubPullRequestService => ({
 
             for (const attempt of attempts) {
                 if (published.has(attempt.attempt)) continue;
-                const body = reviewCommentBody(attempt);
-                try {
-                    await client.rest.issues.createComment({
-                        ...parameters,
-                        body,
-                    });
-                } catch (cause) {
-                    const reconciled = await client.paginate(
-                        client.rest.issues.listComments,
-                        { ...parameters, per_page: 100 },
-                    );
-                    if (
-                        reconciled.some(
-                            (comment) =>
-                                reviewAttemptFromComment(comment.body) ===
-                                attempt.attempt,
-                        )
-                    ) {
-                        published.add(attempt.attempt);
-                        continue;
-                    }
-                    throw cause;
-                }
+                await publishReviewAttempt(client, parameters, attempt);
                 published.add(attempt.attempt);
             }
         } catch (cause) {
@@ -226,30 +273,11 @@ export const makeGitHubPullRequestService = (): GitHubPullRequestService => ({
                 ...repositoryParameters(repository),
                 pull_number: pullRequestNumber,
             };
-            const current = await client.rest.pulls.get(parameters);
-            if (isMerged(current.data)) return mapPullRequest(current.data);
-            if (current.data.state !== "open") {
-                throw new RalphieError({
-                    message: `Pull request #${pullRequestNumber} is closed but not merged.`,
-                });
-            }
-
-            try {
-                await client.rest.pulls.merge(parameters);
-            } catch (cause) {
-                const reconciled = await client.rest.pulls.get(parameters);
-                if (isMerged(reconciled.data))
-                    return mapPullRequest(reconciled.data);
-                throw cause;
-            }
-
-            const merged = await client.rest.pulls.get(parameters);
-            if (!isMerged(merged.data)) {
-                throw new RalphieError({
-                    message: `Pull request #${pullRequestNumber} did not reach the merged state.`,
-                });
-            }
-            return mapPullRequest(merged.data);
+            return await mergePullRequest(
+                client,
+                parameters,
+                pullRequestNumber,
+            );
         } catch (cause) {
             throw mutationError(
                 `Failed to merge pull request #${pullRequestNumber} in ${repository}.`,

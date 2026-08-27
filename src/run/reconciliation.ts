@@ -36,77 +36,123 @@ export type RunReconciliation = {
     readonly reasons: ReadonlyArray<string>;
 };
 
+type ReconciliationFinding = {
+    readonly status: RunReconciliationStatus;
+    readonly reason: string;
+};
+
+const repositoryFindings = (
+    state: RunState,
+    inputs: RunReconciliationInputs,
+): ReadonlyArray<ReconciliationFinding> => {
+    if (state.repository !== inputs.repository) {
+        return [
+            {
+                status: RunReconciliationStatus.RepositoryMismatch,
+                reason: `saved repository is ${state.repository}, requested repository is ${inputs.repository}`,
+            },
+        ];
+    }
+    if (state.branch !== inputs.branch) {
+        return [
+            {
+                status: RunReconciliationStatus.BranchMismatch,
+                reason: `saved branch is ${state.branch}, requested branch is ${inputs.branch}`,
+            },
+        ];
+    }
+    return [];
+};
+
+const gitFindings = (
+    state: RunState,
+    inputs: RunReconciliationInputs,
+): ReadonlyArray<ReconciliationFinding> => {
+    if (inputs.git === undefined) return [];
+    const findings: ReconciliationFinding[] = [];
+    if (inputs.git.branch !== state.branch) {
+        findings.push({
+            status: RunReconciliationStatus.GitMismatch,
+            reason: `current checkout is on ${inputs.git.branch}, expected ${state.branch}`,
+        });
+    }
+    if (
+        state.checkout !== undefined &&
+        inputs.git.head.toLowerCase() !== state.checkout.head.toLowerCase()
+    ) {
+        findings.push({
+            status: RunReconciliationStatus.GitMismatch,
+            reason: `current HEAD is ${inputs.git.head}, expected ${state.checkout.head}`,
+        });
+    }
+    return findings;
+};
+
+const githubFindings = (
+    state: RunState,
+    inputs: RunReconciliationInputs,
+): ReadonlyArray<ReconciliationFinding> => {
+    if (inputs.github === undefined) return [];
+    const openIssues = new Set(inputs.github.openIssueNumbers);
+    const recoverableClosureIssue =
+        state.activeIssue?.stage === ProgressStage.IssueClosure &&
+        state.outcomes.some(
+            ({ issueNumber, outcome }) =>
+                issueNumber === state.activeIssue?.issueNumber &&
+                outcome.kind === IssueExecutionOutcomeKind.Completed,
+        )
+            ? state.activeIssue.issueNumber
+            : undefined;
+    const missing = state.queue.pending
+        .map((issue) => issue.number)
+        .filter(
+            (number) =>
+                !openIssues.has(number) && number !== recoverableClosureIssue,
+        );
+    if (missing.length === 0) return [];
+    return [
+        {
+            status: RunReconciliationStatus.GitHubMismatch,
+            reason: `saved pending issues are no longer open: ${missing.join(", ")}`,
+        },
+    ];
+};
+
+const ageFindings = (
+    state: RunState,
+    inputs: RunReconciliationInputs,
+): ReadonlyArray<ReconciliationFinding> => {
+    if (
+        inputs.maxAgeMs === undefined ||
+        inputs.now === undefined ||
+        inputs.now.getTime() - new Date(state.updatedAt).getTime() <=
+            inputs.maxAgeMs
+    ) {
+        return [];
+    }
+    return [
+        {
+            status: RunReconciliationStatus.Stale,
+            reason: `saved state was last updated at ${state.updatedAt}`,
+        },
+    ];
+};
+
 export const reconcileRunState = (
     state: RunState,
     inputs: RunReconciliationInputs,
 ): RunReconciliation => {
-    const reasons: string[] = [];
+    const findings = [
+        ...repositoryFindings(state, inputs),
+        ...gitFindings(state, inputs),
+        ...githubFindings(state, inputs),
+        ...ageFindings(state, inputs),
+    ];
     let status = RunReconciliationStatus.Compatible;
-
-    if (state.repository !== inputs.repository) {
-        status = RunReconciliationStatus.RepositoryMismatch;
-        reasons.push(
-            `saved repository is ${state.repository}, requested repository is ${inputs.repository}`,
-        );
-    } else if (state.branch !== inputs.branch) {
-        status = RunReconciliationStatus.BranchMismatch;
-        reasons.push(
-            `saved branch is ${state.branch}, requested branch is ${inputs.branch}`,
-        );
-    }
-
-    if (inputs.git !== undefined) {
-        if (inputs.git.branch !== state.branch) {
-            status = RunReconciliationStatus.GitMismatch;
-            reasons.push(
-                `current checkout is on ${inputs.git.branch}, expected ${state.branch}`,
-            );
-        }
-        if (
-            state.checkout !== undefined &&
-            inputs.git.head.toLowerCase() !== state.checkout.head.toLowerCase()
-        ) {
-            status = RunReconciliationStatus.GitMismatch;
-            reasons.push(
-                `current HEAD is ${inputs.git.head}, expected ${state.checkout.head}`,
-            );
-        }
-    }
-
-    if (inputs.github !== undefined) {
-        const openIssues = new Set(inputs.github.openIssueNumbers);
-        const recoverableClosureIssue =
-            state.activeIssue?.stage === ProgressStage.IssueClosure &&
-            state.outcomes.some(
-                ({ issueNumber, outcome }) =>
-                    issueNumber === state.activeIssue?.issueNumber &&
-                    outcome.kind === IssueExecutionOutcomeKind.Completed,
-            )
-                ? state.activeIssue.issueNumber
-                : undefined;
-        const missing = state.queue.pending
-            .map((issue) => issue.number)
-            .filter(
-                (number) =>
-                    !openIssues.has(number) &&
-                    number !== recoverableClosureIssue,
-            );
-        if (missing.length > 0) {
-            status = RunReconciliationStatus.GitHubMismatch;
-            reasons.push(
-                `saved pending issues are no longer open: ${missing.join(", ")}`,
-            );
-        }
-    }
-
-    if (
-        inputs.maxAgeMs !== undefined &&
-        inputs.now !== undefined &&
-        inputs.now.getTime() - new Date(state.updatedAt).getTime() >
-            inputs.maxAgeMs
-    ) {
-        status = RunReconciliationStatus.Stale;
-        reasons.push(`saved state was last updated at ${state.updatedAt}`);
+    const reasons: string[] = [];
+    for (const finding of findings) {
+        status = finding.status;
+        reasons.push(finding.reason);
     }
 
     return {

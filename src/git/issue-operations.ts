@@ -1,6 +1,7 @@
 import type { CommitMessageDecision } from "../issues/decisions.ts";
 import {
     CommandRunnerLive,
+    type CommandResult,
     type CommandRunnerService,
 } from "../process/command-runner.ts";
 import { RalphieError } from "../shared/error.ts";
@@ -169,6 +170,219 @@ export const makeGitIssueOperationsService = (
             "Failed to resolve the requested Git base commit",
         );
 
+    const assertPushSucceeded = (
+        branch: string,
+        result: CommandResult,
+    ): void => {
+        if (result.exitCode === 0) return;
+
+        const output = [result.stdout, result.stderr]
+            .filter(Boolean)
+            .join("\n");
+        const kind = isNonFastForward(output)
+            ? GitPushFailureKind.NonFastForward
+            : GitPushFailureKind.Other;
+        const summary =
+            kind === GitPushFailureKind.NonFastForward
+                ? `Push to origin/${branch} was rejected because the remote branch moved; push failure policy is halt.`
+                : `Push to origin/${branch} failed; push failure policy is halt.`;
+        throw new GitPushError({
+            kind,
+            branch,
+            message:
+                output.trim().length > 0
+                    ? `${summary}\n${output.trim()}`
+                    : summary,
+            cause: output,
+        });
+    };
+
+    const verifyPushedCommit = async (
+        repositoryPath: string,
+        branch: string,
+        expectedCommitSha: string,
+    ): Promise<void> => {
+        const remote = await runGit(
+            runner,
+            repositoryPath,
+            ["ls-remote", "origin", `refs/heads/${branch}`],
+            "Failed to verify the pushed issue commit",
+        );
+        const remoteSha = remote.split(/\s+/)[0] ?? "";
+        if (remoteSha.toLowerCase() !== expectedCommitSha.toLowerCase()) {
+            throw new RalphieError({
+                message: `Remote origin/${branch} points to ${remoteSha || "no commit"}, expected ${expectedCommitSha}.`,
+            });
+        }
+
+        const checkoutStatus = await runGit(
+            runner,
+            repositoryPath,
+            ["status", "--porcelain=v1"],
+            "Failed to verify the issue checkout after push",
+        );
+        if (checkoutStatus !== "") {
+            throw new RalphieError({
+                message: "Issue checkout is dirty after push.",
+            });
+        }
+    };
+
+    const pushIssueCommit = async (
+        repositoryPath: string,
+        branch: string,
+        expectedCommitSha: string,
+    ): Promise<void> => {
+        if (!validBranch(branch)) {
+            throw new RalphieError({
+                message: "Cannot push an issue commit to an empty branch name.",
+            });
+        }
+        const result = await runner.run("git", [
+            "-C",
+            repositoryPath,
+            "push",
+            "--no-force",
+            "origin",
+            `HEAD:refs/heads/${branch}`,
+        ]);
+        assertPushSucceeded(branch, result);
+        await verifyPushedCommit(repositoryPath, branch, expectedCommitSha);
+    };
+
+    const validateFeatureBranchInput = async (
+        repositoryPath: string,
+        branch: string,
+        baseBranch: string,
+        baseSha: string,
+    ): Promise<void> => {
+        await validateBranchName(repositoryPath, branch, "Feature branch");
+        await validateBranchName(repositoryPath, baseBranch, "Base branch");
+        if (branch === baseBranch) {
+            throw new RalphieError({
+                message: "Feature branch must differ from the base branch.",
+            });
+        }
+        if (!validGitSha.test(baseSha)) {
+            throw new RalphieError({
+                message: `Refusing to create a feature branch from invalid Git base commit: ${baseSha}.`,
+            });
+        }
+    };
+
+    const resolveFeatureBase = async (
+        repositoryPath: string,
+        baseSha: string,
+    ): Promise<string> => {
+        const resolvedBaseSha = await resolveCommit(repositoryPath, baseSha);
+        if (resolvedBaseSha.toLowerCase() !== baseSha.toLowerCase()) {
+            throw new RalphieError({
+                message: `Requested Git base commit ${baseSha} resolved to ${resolvedBaseSha}.`,
+            });
+        }
+        return resolvedBaseSha;
+    };
+
+    const verifyFeatureBranchAncestry = async (
+        repositoryPath: string,
+        branch: string,
+        baseSha: string,
+    ): Promise<void> => {
+        const ancestry = await runner.run("git", [
+            "-C",
+            repositoryPath,
+            "merge-base",
+            "--is-ancestor",
+            baseSha,
+            `refs/heads/${branch}`,
+        ]);
+        if (ancestry.exitCode === 0) return;
+        if (ancestry.exitCode === 1) {
+            throw new RalphieError({
+                message: `Existing feature branch ${branch} is not based on ${baseSha}; refusing to resume it.`,
+            });
+        }
+        const detail = ancestry.stderr ? ` ${ancestry.stderr}` : "";
+        throw new RalphieError({
+            message: `Failed to verify the ancestry of feature branch ${branch}.${detail}`,
+        });
+    };
+
+    const resumeFeatureBranch = async (
+        repositoryPath: string,
+        branch: string,
+        baseBranch: string,
+        baseSha: string,
+        resolvedBaseSha: string,
+        actualBranch: string,
+    ): Promise<GitFeatureBranchResult> => {
+        const branchSha = await runGit(
+            runner,
+            repositoryPath,
+            ["rev-parse", `refs/heads/${branch}^{commit}`],
+            `Failed to read feature branch ${branch}`,
+        );
+        await verifyFeatureBranchAncestry(repositoryPath, branch, baseSha);
+        if (actualBranch !== branch) {
+            if ((await status(repositoryPath)) !== "") {
+                throw new RalphieError({
+                    message: `Cannot checkout feature branch ${branch}; the current checkout is dirty.`,
+                });
+            }
+            await runGit(
+                runner,
+                repositoryPath,
+                ["checkout", branch],
+                `Failed to checkout existing feature branch ${branch}`,
+            );
+        }
+        return {
+            branch,
+            baseBranch,
+            baseSha: resolvedBaseSha,
+            headSha: branchSha,
+            created: false,
+        };
+    };
+
+    const createFeatureBranch = async (
+        repositoryPath: string,
+        branch: string,
+        baseBranch: string,
+        baseSha: string,
+        resolvedBaseSha: string,
+    ): Promise<GitFeatureBranchResult> => {
+        if ((await status(repositoryPath)) !== "") {
+            throw new RalphieError({
+                message: `Cannot create feature branch ${branch}; the current checkout is dirty.`,
+            });
+        }
+        await runGit(
+            runner,
+            repositoryPath,
+            ["checkout", "-b", branch, baseSha],
+            `Failed to create feature branch ${branch}`,
+        );
+        const headSha = await runGit(
+            runner,
+            repositoryPath,
+            ["rev-parse", "HEAD"],
+            "Failed to verify the created feature branch",
+        );
+        if (headSha.toLowerCase() !== baseSha.toLowerCase()) {
+            throw new RalphieError({
+                message: `Created feature branch ${branch} at ${headSha}, expected base commit ${baseSha}.`,
+            });
+        }
+        return {
+            branch,
+            baseBranch,
+            baseSha: resolvedBaseSha,
+            headSha,
+            created: true,
+        };
+    };
+
     return {
         stageAll: async (repositoryPath) => {
             await runGit(
@@ -257,67 +471,8 @@ export const makeGitIssueOperationsService = (
             return { sha, treeSha: actualTree };
         },
 
-        push: async (repositoryPath, branch, expectedCommitSha) => {
-            if (!validBranch(branch)) {
-                throw new RalphieError({
-                    message:
-                        "Cannot push an issue commit to an empty branch name.",
-                });
-            }
-            const result = await runner.run("git", [
-                "-C",
-                repositoryPath,
-                "push",
-                "--no-force",
-                "origin",
-                `HEAD:refs/heads/${branch}`,
-            ]);
-            if (result.exitCode !== 0) {
-                const output = [result.stdout, result.stderr]
-                    .filter(Boolean)
-                    .join("\n");
-                const kind = isNonFastForward(output)
-                    ? GitPushFailureKind.NonFastForward
-                    : GitPushFailureKind.Other;
-                const summary =
-                    kind === GitPushFailureKind.NonFastForward
-                        ? `Push to origin/${branch} was rejected because the remote branch moved; push failure policy is halt.`
-                        : `Push to origin/${branch} failed; push failure policy is halt.`;
-                throw new GitPushError({
-                    kind,
-                    branch,
-                    message:
-                        output.trim().length > 0
-                            ? `${summary}\n${output.trim()}`
-                            : summary,
-                    cause: output,
-                });
-            }
-
-            const remote = await runGit(
-                runner,
-                repositoryPath,
-                ["ls-remote", "origin", `refs/heads/${branch}`],
-                "Failed to verify the pushed issue commit",
-            );
-            const remoteSha = remote.split(/\s+/)[0] ?? "";
-            if (remoteSha.toLowerCase() !== expectedCommitSha.toLowerCase()) {
-                throw new RalphieError({
-                    message: `Remote origin/${branch} points to ${remoteSha || "no commit"}, expected ${expectedCommitSha}.`,
-                });
-            }
-            const checkoutStatus = await runGit(
-                runner,
-                repositoryPath,
-                ["status", "--porcelain=v1"],
-                "Failed to verify the issue checkout after push",
-            );
-            if (checkoutStatus !== "") {
-                throw new RalphieError({
-                    message: "Issue checkout is dirty after push.",
-                });
-            }
-        },
+        push: (repositoryPath, branch, expectedCommitSha) =>
+            pushIssueCommit(repositoryPath, branch, expectedCommitSha),
 
         createOrCheckoutFeatureBranch: async (
             repositoryPath,
@@ -325,109 +480,34 @@ export const makeGitIssueOperationsService = (
             baseBranch,
             baseSha,
         ) => {
-            await validateBranchName(repositoryPath, branch, "Feature branch");
-            await validateBranchName(repositoryPath, baseBranch, "Base branch");
-            if (branch === baseBranch) {
-                throw new RalphieError({
-                    message: "Feature branch must differ from the base branch.",
-                });
-            }
-            if (!validGitSha.test(baseSha)) {
-                throw new RalphieError({
-                    message: `Refusing to create a feature branch from invalid Git base commit: ${baseSha}.`,
-                });
-            }
-
-            const resolvedBaseSha = await resolveCommit(
+            await validateFeatureBranchInput(
+                repositoryPath,
+                branch,
+                baseBranch,
+                baseSha,
+            );
+            const resolvedBaseSha = await resolveFeatureBase(
                 repositoryPath,
                 baseSha,
             );
-            if (resolvedBaseSha.toLowerCase() !== baseSha.toLowerCase()) {
-                throw new RalphieError({
-                    message: `Requested Git base commit ${baseSha} resolved to ${resolvedBaseSha}.`,
-                });
-            }
-
             const exists = await branchExists(repositoryPath, branch);
             const actualBranch = await currentBranch(repositoryPath);
-            if (exists) {
-                const branchSha = await runGit(
-                    runner,
-                    repositoryPath,
-                    ["rev-parse", `refs/heads/${branch}^{commit}`],
-                    `Failed to read feature branch ${branch}`,
-                );
-                const ancestry = await runner.run("git", [
-                    "-C",
-                    repositoryPath,
-                    "merge-base",
-                    "--is-ancestor",
-                    baseSha,
-                    `refs/heads/${branch}`,
-                ]);
-                if (ancestry.exitCode !== 0) {
-                    if (ancestry.exitCode === 1) {
-                        throw new RalphieError({
-                            message: `Existing feature branch ${branch} is not based on ${baseSha}; refusing to resume it.`,
-                        });
-                    }
-                    const detail = ancestry.stderr ? ` ${ancestry.stderr}` : "";
-                    throw new RalphieError({
-                        message: `Failed to verify the ancestry of feature branch ${branch}.${detail}`,
-                    });
-                }
-
-                if (actualBranch !== branch) {
-                    if ((await status(repositoryPath)) !== "") {
-                        throw new RalphieError({
-                            message: `Cannot checkout feature branch ${branch}; the current checkout is dirty.`,
-                        });
-                    }
-                    await runGit(
-                        runner,
-                        repositoryPath,
-                        ["checkout", branch],
-                        `Failed to checkout existing feature branch ${branch}`,
-                    );
-                }
-                return {
-                    branch,
-                    baseBranch,
-                    baseSha: resolvedBaseSha,
-                    headSha: branchSha,
-                    created: false,
-                };
-            }
-
-            if ((await status(repositoryPath)) !== "") {
-                throw new RalphieError({
-                    message: `Cannot create feature branch ${branch}; the current checkout is dirty.`,
-                });
-            }
-            await runGit(
-                runner,
-                repositoryPath,
-                ["checkout", "-b", branch, baseSha],
-                `Failed to create feature branch ${branch}`,
-            );
-            const headSha = await runGit(
-                runner,
-                repositoryPath,
-                ["rev-parse", "HEAD"],
-                "Failed to verify the created feature branch",
-            );
-            if (headSha.toLowerCase() !== baseSha.toLowerCase()) {
-                throw new RalphieError({
-                    message: `Created feature branch ${branch} at ${headSha}, expected base commit ${baseSha}.`,
-                });
-            }
-            return {
-                branch,
-                baseBranch,
-                baseSha: resolvedBaseSha,
-                headSha,
-                created: true,
-            };
+            return exists
+                ? resumeFeatureBranch(
+                      repositoryPath,
+                      branch,
+                      baseBranch,
+                      baseSha,
+                      resolvedBaseSha,
+                      actualBranch,
+                  )
+                : createFeatureBranch(
+                      repositoryPath,
+                      branch,
+                      baseBranch,
+                      baseSha,
+                      resolvedBaseSha,
+                  );
         },
 
         restoreBaseCheckout: async (repositoryPath, baseBranch) => {
