@@ -11,10 +11,10 @@ import {
 import { IssueOrder, IssueSort } from "./github/issues.ts";
 import { piModelSchema, piModelVariantSchema } from "./agent/model.ts";
 import {
-    makeProgressReporter,
-    type ProgressRenderMode,
-} from "./progress/progress.ts";
-import { makePiTranscriptRenderer } from "./progress/transcript.ts";
+    makeProgressCoordinator,
+    type ProgressCoordinator,
+} from "./progress/coordinator.ts";
+import { type ProgressRenderMode } from "./progress/progress.ts";
 import { type PiProviderConfig } from "./pi/config.ts";
 import { makePiService } from "./pi/server.ts";
 import { makeLiveRuntime } from "./runtime.ts";
@@ -278,41 +278,22 @@ const eventLogPathFor = (
           )
         : join(dirname(config.resume), "events.jsonl");
 
-const makeCommandProgress = (
+const makeCommandCoordinator = (
     config: ResolvedRalphieConfig,
     terminal: CliTerminalInfo,
     runId: string,
-): ReturnType<typeof makeProgressReporter> =>
-    makeProgressReporter({
+): ProgressCoordinator =>
+    makeProgressCoordinator({
         mode: resolveProgressMode(config, terminal),
         verbose: config.verbose,
         width: () => process.stderr.columns ?? terminal.width,
         write: config.json
             ? (text) => process.stdout.write(text)
             : (text) => process.stderr.write(text),
+        colors: terminal.isInteractive && !terminal.isCI,
         runId,
         eventLogPath: eventLogPathFor(config, runId),
     });
-
-const makeCommandTranscript = (
-    config: ResolvedRalphieConfig,
-    terminal: CliTerminalInfo,
-    progress: ReturnType<typeof makeProgressReporter>,
-) =>
-    config.quiet
-        ? undefined
-        : makePiTranscriptRenderer({
-              write:
-                  progress.writeRaw ??
-                  ((text) =>
-                      (config.json ? process.stdout : process.stderr).write(
-                          text,
-                      )),
-              colors: terminal.isInteractive && !terminal.isCI,
-              json: config.json,
-              verbose: config.verbose,
-              width: () => process.stderr.columns ?? terminal.width,
-          });
 
 const workflowOptionsFor = (
     config: ResolvedRalphieConfig,
@@ -362,14 +343,14 @@ export const runCommand = async (
 
     const terminal = input.terminal ?? terminalInfo();
     const runId = resumeState?.runId ?? crypto.randomUUID();
-    const progress = makeCommandProgress(config, terminal, runId);
-    const transcript = makeCommandTranscript(config, terminal, progress);
-    const runtime = makeLiveRuntime({
-        pi: makePiService(resolvePiConfig(config), transcript),
-        progress,
-    });
+    let coordinator: ProgressCoordinator | undefined;
 
     try {
+        coordinator = makeCommandCoordinator(config, terminal, runId);
+        const runtime = makeLiveRuntime({
+            pi: makePiService(resolvePiConfig(config), coordinator.piListener),
+            progress: coordinator.progress,
+        });
         await workflow(
             workflowOptionsFor(config, input, runId, resumeState),
             runtime,
@@ -383,6 +364,8 @@ export const runCommand = async (
             input.signal ?? new AbortController().signal,
         );
         throw new Error(message, { cause: error });
+    } finally {
+        await coordinator?.dispose();
     }
 };
 

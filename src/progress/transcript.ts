@@ -17,6 +17,11 @@ export type PiTranscriptRendererOptions = {
     readonly width?: () => number;
 };
 
+/** A transcript listener with a coordinator-facing line interruption hook. */
+export type PiTranscriptRenderer = PiEventListener & {
+    readonly interruptLine: () => void;
+};
+
 const plain = (text: string): string => text;
 
 const ANSI_ESCAPE =
@@ -208,6 +213,8 @@ const makeTranscriptWriter = (
         fallbackLabel: string,
     ) => void;
     readonly endStream: (key: StreamKey) => void;
+    /** Finish an external interruption while retaining the active stream key. */
+    readonly interruptLine: () => void;
     readonly line: (
         text: string,
         options?: { readonly blankBefore?: boolean; readonly key?: StreamKey },
@@ -223,6 +230,12 @@ const makeTranscriptWriter = (
         if (lineOpen) write("\n");
         lineOpen = false;
         activeKey = undefined;
+    };
+
+    const interruptLine = (): void => {
+        if (!lineOpen) return;
+        write("\n");
+        lineOpen = false;
     };
 
     const blankBeforeBlock = (): void => {
@@ -326,6 +339,7 @@ const makeTranscriptWriter = (
         startStream,
         writeStream,
         endStream,
+        interruptLine,
         line,
         finishSession,
     };
@@ -714,7 +728,7 @@ export const makePiTranscriptRenderer = ({
     json = false,
     verbose = false,
     width = () => process.stderr.columns ?? 100,
-}: PiTranscriptRendererOptions): PiEventListener => {
+}: PiTranscriptRendererOptions): PiTranscriptRenderer => {
     const styles: TranscriptStyles = colors
         ? {
               assistant: cyan,
@@ -735,7 +749,7 @@ export const makePiTranscriptRenderer = ({
     const writer = makeTranscriptWriter(write, styles);
     const toolStates = new Map<string, ToolExecutionState>();
 
-    return (event, context) => {
+    const render: PiEventListener = (event, context) => {
         if (json) {
             write(`${eventJson(event, context)}\n`);
             return;
@@ -751,4 +765,5 @@ export const makePiTranscriptRenderer = ({
             width,
         );
     };
+    return Object.assign(render, { interruptLine: writer.interruptLine });
 };

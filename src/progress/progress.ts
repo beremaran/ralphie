@@ -76,10 +76,25 @@ export type ProgressReporterService = {
     readonly stopPersisting: () => Promise<void>;
 };
 
+/**
+ * Shared output primitives used by progress and transcript renderers.
+ *
+ * Keeping line ownership here lets a coordinator route both streams through
+ * one sink without making the transcript know about the progress service.
+ */
+export type ProgressOutput = {
+    readonly beginLive: (line: string) => void;
+    readonly appendLine: (line: string, liveLine?: string) => void;
+    readonly writeLine: (line: string) => void;
+    readonly writeTranscript: (text: string) => void;
+    readonly dispose: () => void;
+};
+
 export type ProgressRendererOptions = {
     readonly mode: ProgressRenderMode;
     readonly verbose: boolean;
     readonly write?: (text: string) => void;
+    readonly output?: ProgressOutput;
     readonly width?: () => number;
     readonly colors?: boolean;
     readonly now?: () => Date;
@@ -122,6 +137,8 @@ const formatDetails = (
 ): string => (details === undefined ? "" : ` ${JSON.stringify(details)}`);
 
 const CLEAR_LIVE_LINE = "\r\x1b[2K";
+const ANSI_ESCAPE =
+    /\u001b(?:\][^\u0007]*(?:\u0007|\u001b\\)|\[[0-?]*[ -/]*[@-~])/g;
 
 const clipToWidth = (text: string, width: number): string => {
     const available = Math.max(1, width - 1);
@@ -138,6 +155,74 @@ const clipToWidth = (text: string, width: number): string => {
         used += characterWidth;
     }
     return `${clipped}…`;
+};
+
+/** Create the single line-aware sink shared by progress and Pi output. */
+export const makeProgressOutput = ({
+    mode,
+    write = mode === "json"
+        ? (text) => process.stdout.write(text)
+        : (text) => process.stderr.write(text),
+}: {
+    readonly mode: ProgressRenderMode;
+    readonly write?: (text: string) => void;
+}): ProgressOutput => {
+    let liveLineVisible = false;
+    let rawLineOpen = false;
+
+    const clearLiveLine = (): void => {
+        if (!liveLineVisible) return;
+        if (mode === "interactive") write(CLEAR_LIVE_LINE);
+        liveLineVisible = false;
+    };
+
+    const finishRawLine = (): void => {
+        if (!rawLineOpen) return;
+        write("\n");
+        rawLineOpen = false;
+    };
+
+    const renderLiveLine = (line: string): void => {
+        if (mode !== "interactive") return;
+        write(line);
+        liveLineVisible = true;
+    };
+
+    return {
+        beginLive: (line) => {
+            clearLiveLine();
+            finishRawLine();
+            renderLiveLine(line);
+        },
+        appendLine: (line, liveLine) => {
+            clearLiveLine();
+            finishRawLine();
+            write(`${line}\n`);
+            if (liveLine !== undefined) renderLiveLine(liveLine);
+        },
+        writeLine: (line) => {
+            clearLiveLine();
+            finishRawLine();
+            write(`${line}\n`);
+        },
+        writeTranscript: (text) => {
+            if (text.length === 0) return;
+            clearLiveLine();
+            write(text);
+            rawLineOpen = !text.replace(ANSI_ESCAPE, "").endsWith("\n");
+        },
+        dispose: () => {
+            if (rawLineOpen) {
+                write("\n");
+                rawLineOpen = false;
+                return;
+            }
+            if (liveLineVisible) {
+                write("\n");
+                liveLineVisible = false;
+            }
+        },
+    };
 };
 
 const progressIdentity = (event: ProgressEvent): string =>
@@ -172,58 +257,53 @@ export const makeProgressReporter = ({
     verbose,
     colors = verbose,
     write = (text) => process.stderr.write(text),
+    output: configuredOutput,
     width = () => process.stderr.columns ?? 80,
     now = () => new Date(),
     runId = crypto.randomUUID(),
     eventLogPath,
 }: ProgressRendererOptions): ProgressReporterService => {
+    const output =
+        configuredOutput ??
+        makeProgressOutput({
+            mode,
+            write,
+        });
     const activeProgress: ActiveProgress[] = [];
-    let liveLineVisible = false;
-    let rawLineOpen = false;
     let persistEvents = true;
 
     const renderLine = (event: ProgressEvent): string => {
+        const style = (
+            render: (text: string) => string,
+            text: string,
+        ): string => (colors ? render(text) : text);
         const scope = event.repository
-            ? ` ${dim(`[${event.repository}]`)}`
+            ? ` ${style(dim, `[${event.repository}]`)}`
             : "";
-        const issue = event.issue ? ` ${cyan(`#${event.issue.number}`)}` : "";
+        const issue = event.issue
+            ? ` ${style(cyan, `#${event.issue.number}`)}`
+            : "";
         const position =
             event.current !== undefined && event.total !== undefined
-                ? ` ${dim(`[${event.current}/${event.total}]`)}`
+                ? ` ${style(dim, `[${event.current}/${event.total}]`)}`
                 : "";
         const attempt =
             event.attempt !== undefined && event.maxAttempts !== undefined
-                ? ` ${dim(`(${event.attempt}/${event.maxAttempts})`)}`
+                ? ` ${style(dim, `(${event.attempt}/${event.maxAttempts})`)}`
                 : "";
         const details = verbose ? formatDetails(event.details) : "";
         const status = statusSymbol(event.status, colors);
         return `${status}${scope}${position}${attempt}${issue} ${event.message}${details}`;
     };
 
-    const clearLiveLine = () => {
-        if (!liveLineVisible) return;
-        write(CLEAR_LIVE_LINE);
-        liveLineVisible = false;
-    };
-
-    const finishRawLine = () => {
-        if (!rawLineOpen) return;
-        write("\n");
-        rawLineOpen = false;
-    };
-
-    const renderLiveLine = () => {
-        const active = activeProgress.at(-1);
-        if (active === undefined) return;
-        write(clipToWidth(active.line, width()));
-        liveLineVisible = true;
-    };
-
     const appendLine = (line: string) => {
-        clearLiveLine();
-        finishRawLine();
-        write(`${line}\n`);
-        renderLiveLine();
+        const active = activeProgress.at(-1);
+        output.appendLine(
+            line,
+            active === undefined
+                ? undefined
+                : clipToWidth(active.line, width()),
+        );
     };
 
     const removeActive = (identity: string): ActiveProgress | undefined => {
@@ -246,15 +326,13 @@ export const makeProgressReporter = ({
         emittedAt: Date,
     ): void => {
         if (event.status === "started") {
-            clearLiveLine();
-            finishRawLine();
             removeActive(progressIdentity(event));
             activeProgress.push({
                 identity: progressIdentity(event),
                 line,
                 startedAt: emittedAt.getTime(),
             });
-            renderLiveLine();
+            output.beginLive(clipToWidth(line, width()));
             return;
         }
 
@@ -287,19 +365,14 @@ export const makeProgressReporter = ({
     };
 
     return {
-        writeRaw: (text) => {
-            clearLiveLine();
-            write(text);
-            if (text.length > 0) rawLineOpen = !text.endsWith("\n");
-        },
+        writeRaw: output.writeTranscript,
         emit: async (update) => {
             const emittedAt = now();
             const event = makeProgressEvent(update, runId, emittedAt);
             persistEvent(event);
 
             if (mode === "json") {
-                finishRawLine();
-                write(`${JSON.stringify(event)}\n`);
+                output.writeLine(JSON.stringify(event));
                 return;
             }
             if (mode === "quiet" && event.status !== "failed") {
@@ -308,8 +381,7 @@ export const makeProgressReporter = ({
 
             const line = renderLine(event);
             if (mode !== "interactive") {
-                finishRawLine();
-                write(`${line}\n`);
+                output.writeLine(line);
                 return;
             }
 
@@ -353,3 +425,11 @@ export type {
     DisplayStateOptions,
     DisplayTimestamp,
 } from "./display-state.ts";
+export {
+    makeDisplayCoordinator,
+    makeProgressCoordinator,
+} from "./coordinator.ts";
+export type {
+    ProgressCoordinator,
+    ProgressCoordinatorOptions,
+} from "./coordinator.ts";
