@@ -41,6 +41,9 @@ All notable changes to Ralphie are documented here. The project follows
 - Publish multi-architecture Docker images from inspected, immutable
   candidates with validated version and revision OCI metadata, using an
   explicit normalized-version tag and stable-only `latest` alias.
+- Define the container runtime contract as UID/GID `65532:65532` with
+  `/home/nonroot` as `HOME` and the working directory, and include the
+  external GitHub, Git, Pi search, shell, and CA-certificate dependencies.
 - Stage and smoke-test immutable `linux/amd64` and `linux/arm64` container
   candidates from the validated release ref, including per-platform OCI
   archives, image digests, and promotion metadata; defer registry publication

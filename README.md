@@ -186,6 +186,26 @@ When running from source, use the source entry point instead:
 bun run index.ts owner/repository --dry-run --max-issues 1
 ```
 
+### Run the published container
+
+The container runs as UID/GID `65532:65532` with `HOME` and its working
+directory set to `/home/nonroot`. Supply credentials only at runtime and
+keep the persistent state/workspace in a dedicated volume:
+
+```bash
+docker run --rm \
+  --env GH_TOKEN \
+  --env RALPHIE_MODEL_BASE_URL \
+  --env RALPHIE_MODEL_API_KEY \
+  --mount type=volume,source=ralphie-state,target=/home/nonroot/.ralphie \
+  ghcr.io/beremaran/ralphie:latest owner/repository \
+  --workspace /home/nonroot/.ralphie \
+  --dry-run --max-issues 1
+```
+
+The image contains the GitHub CLI, Git, Pi's shell/search tools, and CA
+certificates; it does not contain credentials or credential-bearing defaults.
+
 ### Run the issue pipeline
 
 The top-level `--mode` defaults to `issues`:

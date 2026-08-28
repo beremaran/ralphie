@@ -18,6 +18,22 @@ describe("release container metadata contract", () => {
         expect(dockerfile).toContain(
             'org.opencontainers.image.revision="$RALPHIE_COMMIT_SHA"',
         );
+        expect(dockerfile).toContain("FROM debian:bookworm-slim");
+        expect(dockerfile).toContain("ENV HOME=/home/nonroot");
+        expect(dockerfile).toContain("WORKDIR /home/nonroot");
+        expect(dockerfile).toContain("USER 65532:65532");
+        for (const command of [
+            "bash",
+            "ca-certificates",
+            "fd-find",
+            "gh",
+            "git",
+            "openssh-client",
+            "ripgrep",
+        ]) {
+            expect(dockerfile).toContain(command);
+        }
+        expect(dockerfile).not.toContain("/root/.ralphie");
     });
 
     test("validated release outputs are the container build inputs and labels", async () => {

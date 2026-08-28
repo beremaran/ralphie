@@ -248,6 +248,35 @@ jobs:
           jq -e --arg version "$EXPECTED_VERSION" --arg revision "$EXPECTED_REVISION" \
             '.version == $version and .commitSha == $revision' <<< "$version_json"
 
+          runtime_config="$(docker image inspect "$IMAGE" --format '{{json .Config}}')"
+          jq -e \
+            '(.User == "65532:65532") and
+             (.WorkingDir == "/home/nonroot") and
+             (.Env | index("HOME=/home/nonroot") != null)' \
+            <<< "$runtime_config" > /dev/null
+
+          docker run --rm --platform "$PLATFORM" --entrypoint /bin/bash "$IMAGE" -c '
+            set -eu
+            test "$(id -u)" = 65532
+            test "$(id -g)" = 65532
+            test "$HOME" = /home/nonroot
+            test "$(pwd)" = /home/nonroot
+            command -v bash >/dev/null
+            command -v git >/dev/null
+            command -v gh >/dev/null
+            command -v ssh >/dev/null
+            command -v rg >/dev/null
+            command -v fdfind >/dev/null
+            git --version >/dev/null
+            gh --version >/dev/null
+            test -s /etc/ssl/certs/ca-certificates.crt
+            state_dir="$HOME/.ralphie"
+            test ! -e "$state_dir"
+            mkdir -p "$state_dir"
+            printf "smoke\\n" > "$state_dir/probe"
+            test -s "$state_dir/probe"
+          '
+
       # Candidate contract v1 for the final publisher:
       # - artifact: ralphie-container-candidate-<version>-<arch>
       # - archive: the platform-specific OCI archive below
