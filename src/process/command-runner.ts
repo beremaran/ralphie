@@ -1,4 +1,5 @@
 import { RalphieError } from "../shared/error.ts";
+import { redactSensitiveText } from "../shared/redaction.ts";
 
 export type CommandResult = {
     readonly exitCode: number;
@@ -9,6 +10,8 @@ export type CommandResult = {
 export type CommandRunOptions = {
     readonly trimStdout?: boolean;
     readonly cwd?: string;
+    /** Environment values overlaid on the live parent environment. */
+    readonly env?: Readonly<Record<string, string | undefined>>;
 };
 
 export type CommandRunnerService = {
@@ -24,6 +27,10 @@ export const CommandRunnerLive: CommandRunnerService = {
         try {
             const result = Bun.spawnSync([command, ...args], {
                 cwd: options?.cwd,
+                env:
+                    options?.env === undefined
+                        ? undefined
+                        : { ...process.env, ...options.env },
                 stdout: "pipe",
                 stderr: "pipe",
             });
@@ -50,10 +57,16 @@ export const requireSuccess = async (
     command: string,
     args: ReadonlyArray<string>,
     failureMessage: string,
+    options?: CommandRunOptions,
 ): Promise<CommandResult> => {
-    const result = await runner.run(command, args);
+    const result =
+        options === undefined
+            ? await runner.run(command, args)
+            : await runner.run(command, args, options);
     if (result.exitCode !== 0) {
-        const detail = result.stderr ? `\n${result.stderr}` : "";
+        const detail = result.stderr
+            ? `\n${redactSensitiveText(result.stderr)}`
+            : "";
         throw new RalphieError({
             message: `${failureMessage}${detail}`,
         });

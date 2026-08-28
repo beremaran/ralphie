@@ -44,6 +44,9 @@ All notable changes to Ralphie are documented here. The project follows
 - Define the container runtime contract as UID/GID `65532:65532` with
   `/home/nonroot` as `HOME` and the working directory, and include the
   external GitHub, Git, Pi search, shell, and CA-certificate dependencies.
+- Define noninteractive `github.com` authentication through the preferred
+  `GH_TOKEN` and fallback `GITHUB_TOKEN` environment variables, without
+  requiring `gh auth login` or a mounted GitHub CLI profile.
 - Stage and smoke-test immutable `linux/amd64` and `linux/arm64` container
   candidates from the validated release ref, including per-platform OCI
   archives, image digests, and promotion metadata; defer registry publication

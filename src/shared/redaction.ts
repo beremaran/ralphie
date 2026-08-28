@@ -16,7 +16,7 @@ export const redactSensitiveText = (value: string): string => {
         if (
             sensitiveKey.test(key) &&
             environmentValue !== undefined &&
-            environmentValue.length >= 4
+            environmentValue.length > 0
         ) {
             redacted = redacted.split(environmentValue).join(REDACTED);
         }

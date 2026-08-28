@@ -336,6 +336,9 @@ Options:
   -v, --version                Show version (use --output json for build metadata)
 
 Environment:
+  GH_TOKEN                     GitHub.com token for gh (preferred)
+  GITHUB_TOKEN                 Fallback GitHub.com token alias for gh
+                               Interactive \`gh auth login\` or a mounted GitHub CLI profile is not required
   RALPHIE_MODEL_BASE_URL       OpenAI-compatible model base URL
   RALPHIE_MODEL_API_KEY        Model API key
 `;

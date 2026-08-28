@@ -143,7 +143,7 @@ Ralphie expects the following tools on `PATH`:
 
 - [Bun](https://bun.sh/)
 - [Git](https://git-scm.com/)
-- [GitHub CLI](https://cli.github.com/), authenticated with `gh auth login`
+- [GitHub CLI](https://cli.github.com/)
 - model credentials supported by [Pi](https://github.com/earendil-works/pi)
 
 By default, configure Pi in `~/.pi/agent/auth.json`, or point `--pi-dir` at an
@@ -151,6 +151,12 @@ existing Pi agent directory. For an OpenAI-compatible endpoint, set
 `RALPHIE_MODEL_BASE_URL` and, when required by the provider,
 `RALPHIE_MODEL_API_KEY`; when `--pi-dir` is not supplied, Ralphie creates a
 temporary Pi configuration for that run.
+
+For `github.com`, set `GH_TOKEN` (preferred) or `GITHUB_TOKEN` (fallback)
+for noninteractive GitHub CLI authentication. Ralphie verifies the token with
+`gh auth status` and reads it with `gh auth token`; an interactive `gh auth
+login` and a mounted GitHub CLI profile are not required. This contract covers
+`github.com` only.
 
 Your GitHub account must be able to read the target repository and its issues.
 Non-dry runs also require permission to push to the selected branch and create,
@@ -205,6 +211,9 @@ docker run --rm \
 
 The image contains the GitHub CLI, Git, Pi's shell/search tools, and CA
 certificates; it does not contain credentials or credential-bearing defaults.
+For `github.com`, pass `GH_TOKEN` (preferred) or `GITHUB_TOKEN` (fallback) at
+runtime. Authentication is noninteractive: `gh auth login` and a mounted
+GitHub CLI profile are not required.
 
 ### Run the issue pipeline
 

@@ -253,6 +253,39 @@ describe("progress reporting", () => {
         expect(output).toContain("[REDACTED]");
     });
 
+    test("redacts GitHub auth tokens from progress and event output", async () => {
+        const token = "private-auth-token";
+        const previous = process.env.GH_TOKEN;
+        const directory = await mkdtemp(join(tmpdir(), "ralphie-auth-output-"));
+        const eventLogPath = join(directory, "events.jsonl");
+        let output = "";
+        process.env.GH_TOKEN = token;
+        try {
+            const progress = makeProgressReporter({
+                mode: "json",
+                verbose: true,
+                write: (text) => {
+                    output += text;
+                },
+                eventLogPath,
+            });
+            await progress.emit({
+                stage: "github-authentication",
+                status: "failed",
+                message: `Authentication failed: ${token}`,
+                details: { stderr: token },
+            });
+
+            const events = await readFile(eventLogPath, "utf8");
+            expect(output).not.toContain(token);
+            expect(events).not.toContain(token);
+        } finally {
+            if (previous === undefined) delete process.env.GH_TOKEN;
+            else process.env.GH_TOKEN = previous;
+            await rm(directory, { recursive: true, force: true });
+        }
+    });
+
     test("persists redacted JSON Lines independently of the renderer", async () => {
         const directory = await mkdtemp(join(tmpdir(), "ralphie-progress-"));
         const eventLogPath = join(directory, "run", "events.jsonl");
