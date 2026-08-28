@@ -1,22 +1,49 @@
 {
-  "name": "ralphie",
+  "name": "@beremaran/ralphie",
   "version": "0.1.0",
-  "module": "index.ts",
+  "description": "Turn a GitHub issue queue into reviewed commits with Pi.",
+  "module": "./dist/ralphie.js",
+  "main": "./dist/ralphie.js",
   "type": "module",
-  "private": true,
   "bin": {
-    "ralphie": "./index.ts"
+    "ralphie": "./dist/ralphie.js"
   },
   "exports": {
-    ".": {
-      "import": "./index.ts"
-    }
+    ".": "./dist/ralphie.js"
+  },
+  "files": [
+    "dist/ralphie.js",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/beremaran/ralphie"
+  },
+  "homepage": "https://github.com/beremaran/ralphie",
+  "bugs": {
+    "url": "https://github.com/beremaran/ralphie/issues"
+  },
+  "license": "MIT",
+  "keywords": [
+    "bun",
+    "cli",
+    "github",
+    "github-issues",
+    "automation",
+    "ai",
+    "pi"
+  ],
+  "engines": {
+    "bun": ">=1.3.0"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.10",
-    "@types/bun": "latest"
-  },
-  "peerDependencies": {
+    "@types/bun": "latest",
     "typescript": "^5"
   },
   "dependencies": {
@@ -29,10 +56,13 @@
     "start": "bun run index.ts",
     "dev": "bun --watch ./index.ts",
     "build": "bun build ./index.ts --compile --outfile ./dist/cli",
+    "build:package": "bun build ./index.ts --target bun --outfile ./dist/ralphie.js",
     "check": "bun run format:check && bun run lint && bun run typecheck && bun run test && bun run build",
     "format": "biome format --write .",
     "format:check": "biome format .",
     "lint": "biome lint .",
+    "package:check": "bun run build:package && npm pack --dry-run",
+    "prepack": "bun run build:package",
     "probe:structured-output": "bun run scripts/probe-structured-output.ts",
     "test": "bun test tests",
     "typecheck": "bunx tsc --noEmit"

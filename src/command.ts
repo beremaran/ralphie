@@ -29,6 +29,7 @@ import type { PiEventListener } from "./pi/client.ts";
 import { exitCodeForFailure } from "./process/exit-code.ts";
 import { workflow } from "./workflow.ts";
 import { redactSensitiveText } from "./shared/redaction.ts";
+import { RALPHIE_VERSION } from "./version.ts";
 import { type RunState, RunStateStoreLive } from "./run/state.ts";
 import { reconcileRunState } from "./run/reconciliation.ts";
 import { resolveWorkspacePath } from "./workspace/workspace.ts";
@@ -461,7 +462,7 @@ export const runCommand = async (
         return;
     }
     if (parsed.version) {
-        output.stdout("0.1.0\n");
+        output.stdout(`${RALPHIE_VERSION}\n`);
         return;
     }
 

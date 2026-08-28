@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "ralphie",
+      "name": "@beremaran/ralphie",
       "dependencies": {
         "@earendil-works/pi-coding-agent": "^0.84.3",
         "octokit": "^5.0.5",
@@ -13,8 +13,6 @@
       "devDependencies": {
         "@biomejs/biome": "^2.5.10",
         "@types/bun": "latest",
-      },
-      "peerDependencies": {
         "typescript": "^5",
       },
     },

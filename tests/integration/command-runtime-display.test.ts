@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { RALPHIE_VERSION } from "../../src/version.ts";
 import { makeCommandRuntimeHarness } from "./command-runtime-harness.ts";
 
 describe("command/runtime display harness", () => {
@@ -45,7 +46,7 @@ describe("command/runtime display harness", () => {
 
         await harness.run(["--version"]);
 
-        expect(harness.stdout).toEqual(["0.1.0\n"]);
+        expect(harness.stdout).toEqual([`${RALPHIE_VERSION}\n`]);
         expect(harness.stderr).toEqual([]);
         expect(harness.lifecycle).toEqual([]);
     });
