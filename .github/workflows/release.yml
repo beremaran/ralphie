@@ -162,27 +162,19 @@ jobs:
           test -x dist/cli
           ./dist/cli --version
 
-      - name: Prepare release assets
+      - name: Prepare release asset
         env:
           TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
-          asset="ralphie-${TARGET}"
-          mv dist/cli "$asset"
-          if [[ "$RUNNER_OS" == "macOS" ]]; then
-            shasum -a 256 "$asset" > "$asset.sha256"
-          else
-            sha256sum "$asset" > "$asset.sha256"
-          fi
+          mv dist/cli "ralphie-${TARGET}"
 
       # Artifacts are only staging. The token cannot publish a release asset.
-      - name: Stage release assets
+      - name: Stage release asset
         uses: actions/upload-artifact@v4
         with:
           name: ralphie-${{ needs.validate.outputs.version }}-${{ matrix.target }}
-          path: |
-            ralphie-${{ matrix.target }}
-            ralphie-${{ matrix.target }}.sha256
+          path: ralphie-${{ matrix.target }}
           if-no-files-found: error
           # Keep staged inputs through the protected-environment approval
           # window; 90 days is the maximum GitHub Actions artifact lifetime.
@@ -466,22 +458,53 @@ jobs:
           ref: ${{ needs.validate.outputs.source_ref }}
           persist-credentials: false
 
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
       - name: Download staged binaries
         uses: actions/download-artifact@v4
         with:
           pattern: ralphie-${{ needs.validate.outputs.version }}-*
           path: release-assets
-          merge-multiple: true
+          # Preserve each immutable artifact boundary so the collector can
+          # reject missing, duplicate, cross-platform, and cross-release files.
+          merge-multiple: false
+
+      # This copies only the four expected binaries into one directory and
+      # hashes those exact files. The same paths are passed to gh below.
+      - name: Collect binaries and create SHA256SUMS
+        env:
+          TAG: ${{ needs.validate.outputs.tag }}
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          set -euo pipefail
+          test "$TAG" = "v$VERSION"
+          bun scripts/create-sha256sums.ts \
+            --version "$VERSION" \
+            --artifacts-dir release-assets \
+            --output-dir release-assets
 
       # The release tag is protected against updates/deletions, so the
-      # validated source_ref remains bound to TAG through this request.
+      # validated source_ref remains bound to TAG through this request. Keep
+      # this explicit list in sync with RELEASE_TARGETS in the collector.
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.validate.outputs.tag }}
         run: |
           set -euo pipefail
-          gh release create "$TAG" release-assets/* \
+          assets=(
+            release-assets/ralphie-darwin-arm64
+            release-assets/ralphie-darwin-x64
+            release-assets/ralphie-linux-arm64
+            release-assets/ralphie-linux-x64
+            release-assets/SHA256SUMS
+          )
+          for asset in "${assets[@]}"; do
+            test -f "$asset"
+          done
+          gh release create "$TAG" "${assets[@]}" \
             --verify-tag \
             --generate-notes \
             --title "$TAG"

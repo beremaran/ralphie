@@ -84,4 +84,34 @@ describe("release container metadata contract", () => {
             ),
         ).toBeLessThan(pushJobStart);
     });
+
+    test("collects and hashes the four release binaries before one upload", async () => {
+        const workflow = await readRepositoryFile(
+            ".github/workflows/release.yml",
+        );
+        const publishJob = workflow.slice(workflow.indexOf("  publish:"));
+        const collectStep = publishJob.slice(
+            publishJob.indexOf("name: Collect binaries and create SHA256SUMS"),
+            publishJob.indexOf("name: Create GitHub release"),
+        );
+        const releaseStep = publishJob.slice(
+            publishJob.indexOf("name: Create GitHub release"),
+        );
+
+        expect(publishJob).toContain("merge-multiple: false");
+        expect(collectStep).toContain("scripts/create-sha256sums.ts");
+        expect(collectStep).toContain('test "$TAG" = "v$VERSION"');
+        for (const target of [
+            "darwin-arm64",
+            "darwin-x64",
+            "linux-arm64",
+            "linux-x64",
+        ]) {
+            expect(releaseStep).toContain(`release-assets/ralphie-${target}`);
+        }
+        expect(releaseStep).toContain("release-assets/SHA256SUMS");
+        expect(releaseStep).toContain(
+            'gh release create "$TAG" "${assets[@]}"',
+        );
+    });
 });

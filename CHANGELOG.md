@@ -29,6 +29,8 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Changed
 
+- Publish a deterministic SHA256SUMS manifest alongside the four native
+  release binaries, hashing the exact files uploaded to GitHub.
 - Publish multi-architecture Docker images from inspected, immutable
   candidates with validated version and revision OCI metadata, using an
   explicit normalized-version tag and stable-only `latest` alias.
