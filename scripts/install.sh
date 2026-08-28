@@ -22,12 +22,20 @@
 set -eu
 
 TEMP_FILE=
+CHECKSUMS_FILE=
+BUNDLE_FILE=
 cleanup_status=0
 
 trap '
   cleanup_status=$?
   if [ -n "$TEMP_FILE" ]; then
     rm -f "$TEMP_FILE" || :
+  fi
+  if [ -n "$CHECKSUMS_FILE" ]; then
+    rm -f "$CHECKSUMS_FILE" || :
+  fi
+  if [ -n "$BUNDLE_FILE" ]; then
+    rm -f "$BUNDLE_FILE" || :
   fi
   exit "$cleanup_status"
 ' 0
@@ -63,6 +71,22 @@ is_valid_release_tag() {
       *[!0-9]*) return 1 ;;
     esac
   done
+}
+
+is_valid_sha256() {
+  candidate=$1
+  case "$candidate" in
+    ''|*[!0-9a-f]*) return 1 ;;
+  esac
+  [ "${#candidate}" -eq 64 ]
+}
+
+is_valid_commit_sha() {
+  candidate=$1
+  case "$candidate" in
+    ''|*[!0-9a-f]*) return 1 ;;
+  esac
+  [ "${#candidate}" -eq 40 ]
 }
 
 # --- destination -----------------------------------------------------------
@@ -113,8 +137,15 @@ if [ "$RALPHIE_VERSION" = latest ]; then
     echo "ralphie: could not resolve latest release (check network)" >&2
     exit 1
   }
-  RELEASE_TAG="$(
+
+  # grep -o emits every matching field on its own line. Keeping all matches
+  # means a response containing more than one tag cannot silently select one.
+  TAG_MATCHES="$(
     printf '%s\n' "$API_RESPONSE" |
+      grep -Eo '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' || :
+  )"
+  RELEASE_TAG="$(
+    printf '%s\n' "$TAG_MATCHES" |
       sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'
   )"
   if ! is_valid_release_tag "$RELEASE_TAG"; then
@@ -162,25 +193,157 @@ esac
 
 ASSET="ralphie-${OS}-${ARCH}"
 EXPECTED_VERSION=${RELEASE_TAG#v}
-RELEASE_URL="https://github.com/beremaran/ralphie/releases/download/$RELEASE_TAG/$ASSET"
+RELEASE_BASE="https://github.com/beremaran/ralphie/releases/download/$RELEASE_TAG"
+RELEASE_URL="$RELEASE_BASE/$ASSET"
+CHECKSUMS_URL="$RELEASE_BASE/SHA256SUMS"
+BUNDLE_URL="$RELEASE_BASE/SHA256SUMS.sigstore.json"
+COMMIT_URL="https://api.github.com/repos/beremaran/ralphie/commits/$RELEASE_TAG"
+CERT_IDENTITY="https://github.com/beremaran/ralphie/.github/workflows/release.yml@refs/tags/$RELEASE_TAG"
 
-if ! TEMP_FILE="$(mktemp "$DEST/.ralphie.XXXXXX")"; then
-  echo "ralphie: could not create a temporary file in '$DEST'" >&2
+# Verification is mandatory. In particular, never fall back to an unsigned
+# checksum, a different hash utility, or an unverified downloaded binary.
+if ! command -v sigstore >/dev/null 2>&1; then
+  echo "ralphie: sigstore verifier is required but was not found on PATH" >&2
   exit 1
 fi
-if [ -z "$TEMP_FILE" ]; then
-  echo "ralphie: temporary file creation returned an empty path" >&2
+if ! command -v sha256sum >/dev/null 2>&1 &&
+  ! command -v shasum >/dev/null 2>&1; then
+  echo "ralphie: no SHA-256 verifier (sha256sum or shasum) was found on PATH" >&2
   exit 1
 fi
 
-echo "ralphie: downloading $ASSET ($RELEASE_TAG) -> $TARGET"
+# Resolve the commit targeted by the same tag. The Sigstore trust policy binds
+# the GitHub Actions certificate to this commit as well as to the tag.
+COMMIT_RESPONSE="$(
+  curl -fsSL -H "Accept: application/vnd.github+json" "$COMMIT_URL"
+)" || {
+  echo "ralphie: could not resolve release commit (check network)" >&2
+  exit 1
+}
+SHA_MATCHES="$(
+  printf '%s\n' "$COMMIT_RESPONSE" |
+    grep -Eo '"sha"[[:space:]]*:[[:space:]]*"[0-9a-f]{40}"' || :
+)"
+SOURCE_REF="$(
+  printf '%s\n' "$SHA_MATCHES" |
+    sed -n '1s/.*"sha"[[:space:]]*:[[:space:]]*"\([0-9a-f]*\)".*/\1/p'
+)"
+if ! is_valid_commit_sha "$SOURCE_REF"; then
+  echo "ralphie: release commit response did not contain one valid commit SHA" >&2
+  exit 1
+fi
+
+# These are independent temporary files in DEST, so the final rename remains
+# on the destination filesystem and can atomically replace an existing target.
+if ! TEMP_FILE="$(mktemp "$DEST/.ralphie.XXXXXX")" ||
+  [ -z "$TEMP_FILE" ] || [ ! -f "$TEMP_FILE" ]; then
+  echo "ralphie: could not create a temporary binary in '$DEST'" >&2
+  exit 1
+fi
+if ! CHECKSUMS_FILE="$(mktemp "$DEST/.ralphie.XXXXXX")" ||
+  [ -z "$CHECKSUMS_FILE" ] || [ ! -f "$CHECKSUMS_FILE" ]; then
+  echo "ralphie: could not create a temporary checksum manifest in '$DEST'" >&2
+  exit 1
+fi
+if ! BUNDLE_FILE="$(mktemp "$DEST/.ralphie.XXXXXX")" ||
+  [ -z "$BUNDLE_FILE" ] || [ ! -f "$BUNDLE_FILE" ]; then
+  echo "ralphie: could not create a temporary Sigstore bundle in '$DEST'" >&2
+  exit 1
+fi
+
 if ! curl -fsSL --retry 3 -o "$TEMP_FILE" "$RELEASE_URL"; then
   echo "ralphie: download failed for $RELEASE_URL" >&2
   exit 1
 fi
+if [ ! -s "$TEMP_FILE" ]; then
+  echo "ralphie: downloaded asset is empty" >&2
+  exit 1
+fi
+
+if ! curl -fsSL --retry 3 -o "$CHECKSUMS_FILE" "$CHECKSUMS_URL"; then
+  echo "ralphie: checksum manifest download failed for $CHECKSUMS_URL" >&2
+  exit 1
+fi
+if [ ! -s "$CHECKSUMS_FILE" ]; then
+  echo "ralphie: checksum manifest is missing or empty" >&2
+  exit 1
+fi
+
+if ! curl -fsSL --retry 3 -o "$BUNDLE_FILE" "$BUNDLE_URL"; then
+  echo "ralphie: Sigstore bundle download failed for $BUNDLE_URL" >&2
+  exit 1
+fi
+if [ ! -s "$BUNDLE_FILE" ]; then
+  echo "ralphie: Sigstore bundle is missing or empty" >&2
+  exit 1
+fi
+
+# Verify the exact manifest before reading any checksum from it. These options
+# are the repository, workflow, issuer, event, tag, and commit constraints from
+# the release checksum trust policy. Both events are explicit policy choices;
+# the identity, source tag, and source commit remain fixed in either case.
+verify_manifest() {
+  source_event=$1
+  sigstore verify github "$CHECKSUMS_FILE" \
+    --bundle "$BUNDLE_FILE" \
+    --repository beremaran/ralphie \
+    --workflow release.yml \
+    --cert-identity "$CERT_IDENTITY" \
+    --cert-oidc-issuer https://token.actions.githubusercontent.com \
+    --source-event "$source_event" \
+    --source-sha "$SOURCE_REF" \
+    --source-tag "$RELEASE_TAG"
+}
+
+if ! verify_manifest push && ! verify_manifest workflow_dispatch; then
+  echo "ralphie: Sigstore verification failed for $RELEASE_TAG" >&2
+  exit 1
+fi
+
+# Do not use a generic --check operation: it could accept another platform's
+# line or a duplicate. The manifest must contain one well-formed entry whose
+# filename is exactly the selected asset.
+if ! EXPECTED_SHA256="$(
+  awk -v asset="$ASSET" '
+    $2 == asset {
+      entries++
+      if (NF != 2 || length($1) != 64 || $1 ~ /[^0-9A-Fa-f]/) invalid=1
+      digest=$1
+    }
+    END {
+      if (entries != 1 || invalid) exit 1
+      print digest
+    }
+  ' "$CHECKSUMS_FILE"
+)"; then
+  echo "ralphie: checksum manifest has no single valid entry for $ASSET" >&2
+  exit 1
+fi
+if ! is_valid_sha256 "$EXPECTED_SHA256"; then
+  echo "ralphie: checksum manifest has an invalid digest for $ASSET" >&2
+  exit 1
+fi
+
+if command -v sha256sum >/dev/null 2>&1; then
+  if ! HASH_OUTPUT="$(sha256sum "$TEMP_FILE")"; then
+    echo "ralphie: could not calculate the asset SHA-256" >&2
+    exit 1
+  fi
+else
+  if ! HASH_OUTPUT="$(shasum -a 256 "$TEMP_FILE")"; then
+    echo "ralphie: could not calculate the asset SHA-256" >&2
+    exit 1
+  fi
+fi
+ACTUAL_SHA256=${HASH_OUTPUT%%[[:space:]]*}
+if ! is_valid_sha256 "$ACTUAL_SHA256" ||
+  [ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]; then
+  echo "ralphie: checksum mismatch for $ASSET" >&2
+  exit 1
+fi
 
 if ! chmod +x "$TEMP_FILE"; then
-  echo "ralphie: could not make the downloaded binary executable" >&2
+  echo "ralphie: could not make the verified binary executable" >&2
   exit 1
 fi
 

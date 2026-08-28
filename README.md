@@ -61,7 +61,10 @@ it is not read from the runtime environment. Local builds use the documented
 
 The standalone installer downloads and verifies the native release binary for
 macOS or Linux. It uses this stable, unauthenticated repository entry point
-and installs the latest release by default:
+and installs the latest release by default. Verification is mandatory: install
+the Sigstore CLI (`sigstore`) and ensure either `sha256sum` (Linux) or
+`shasum` (macOS) is available on `PATH` before running it. The installer has no
+unsigned or checksum-only fallback:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/beremaran/ralphie/main/scripts/install.sh | sh
@@ -103,6 +106,11 @@ ralphie --version
 
 If your shell uses a different startup file, add the same `export PATH=...`
 line there instead.
+
+The installer verifies the signed checksum manifest against the release tag,
+workflow, GitHub OIDC issuer, source event, and tag commit before replacing the
+binary. Missing verification tools or any failed metadata, signature, or
+checksum check leave an existing installation untouched.
 
 ### Run the published package
 

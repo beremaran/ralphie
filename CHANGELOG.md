@@ -29,6 +29,8 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Changed
 
+- Make the standalone installer fail closed by requiring the signed checksum
+  manifest, exact platform entry, and atomic temporary-file replacement.
 - Sign the exact `SHA256SUMS` bytes with keyless Sigstore through GitHub OIDC,
   publish the canonical `SHA256SUMS.sigstore.json` bundle, and document the
   downstream trust policy.

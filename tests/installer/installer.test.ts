@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, expect, test } from "bun:test";
 import {
     chmod,
@@ -17,8 +18,16 @@ const repositoryRoot = resolve(import.meta.dir, "../..");
 const apiUrl = "https://api.github.com/repos/beremaran/ralphie/releases/latest";
 const canonicalUrl =
     "https://github.com/beremaran/ralphie/releases/download/v0.1.0/ralphie-linux-x64";
+const commitUrl =
+    "https://api.github.com/repos/beremaran/ralphie/commits/v0.1.0";
+const checksumsUrl =
+    "https://github.com/beremaran/ralphie/releases/download/v0.1.0/SHA256SUMS";
+const bundleUrl =
+    "https://github.com/beremaran/ralphie/releases/download/v0.1.0/SHA256SUMS.sigstore.json";
+const sourceSha = "0123456789abcdef0123456789abcdef01234567";
 
 type CurlMode = "success" | "failure";
+type ManifestMode = "valid" | "wrong-platform" | "checksum-mismatch";
 
 type InstallerOptions = {
     readonly version?: string;
@@ -26,7 +35,12 @@ type InstallerOptions = {
     readonly arch?: string;
     readonly apiResponse?: string;
     readonly apiMode?: CurlMode;
+    readonly commitMode?: CurlMode;
     readonly assetMode?: CurlMode;
+    readonly sigstoreMode?: CurlMode;
+    readonly manifestMode?: ManifestMode;
+    readonly assetContents?: string;
+    readonly manifestAssetContents?: string;
     readonly binaryVersion?: string;
     readonly existingContents?: string;
 };
@@ -39,6 +53,7 @@ type InstallerFixture = {
     readonly defaultTarget: string;
     readonly explicitTarget: string;
     readonly urls: string;
+    readonly sigstoreArgs: string;
     readonly environment: Record<string, string>;
 };
 
@@ -79,15 +94,36 @@ case "$url" in
         [ "$RALPHIE_TEST_API_MODE" = success ] || exit 22
         printf '%s\\n' "$RALPHIE_TEST_API_RESPONSE"
         ;;
-    https://github.com/beremaran/ralphie/releases/download/*)
+    https://api.github.com/repos/beremaran/ralphie/commits/*)
+        [ "$RALPHIE_TEST_COMMIT_MODE" = success ] || exit 22
+        printf '{"sha":"%s"}\\n' "$RALPHIE_TEST_SOURCE_SHA"
+        ;;
+    https://github.com/beremaran/ralphie/releases/download/*/ralphie-*)
         [ "$RALPHIE_TEST_ASSET_MODE" = success ] || exit 22
         [ -n "$output" ] || exit 2
         cp "$RALPHIE_TEST_ASSET" "$output"
+        ;;
+    https://github.com/beremaran/ralphie/releases/download/*/SHA256SUMS)
+        [ -n "$output" ] || exit 2
+        printf '%s' "$RALPHIE_TEST_MANIFEST" > "$output"
+        ;;
+    https://github.com/beremaran/ralphie/releases/download/*/SHA256SUMS.sigstore.json)
+        [ -n "$output" ] || exit 2
+        printf '%s\\n' '{"bundle":"fixture"}' > "$output"
         ;;
     *)
         exit 2
         ;;
 esac
+`;
+
+const sigstoreFixture = `#!/bin/sh
+set -eu
+: > "$RALPHIE_TEST_SIGSTORE_ARGS"
+for argument do
+    printf '%s\\n' "$argument" >> "$RALPHIE_TEST_SIGSTORE_ARGS"
+done
+[ "$RALPHIE_TEST_SIGSTORE_MODE" = success ]
 `;
 
 const unameFixture = `#!/bin/sh
@@ -110,6 +146,25 @@ async function writeExecutable(path: string, contents: string): Promise<void> {
     await chmod(path, 0o755);
 }
 
+function makeManifest(
+    options: InstallerOptions,
+    assetContents: string,
+): string {
+    const manifestAssetContents =
+        options.manifestAssetContents ?? assetContents;
+    const assetDigest = createHash("sha256")
+        .update(manifestAssetContents)
+        .digest("hex");
+    switch (options.manifestMode) {
+        case "wrong-platform":
+            return `${assetDigest}  ralphie-linux-arm64\n`;
+        case "checksum-mismatch":
+            return `${"0".repeat(64)}  ralphie-linux-x64\n`;
+        default:
+            return `${assetDigest}  ralphie-linux-x64\n`;
+    }
+}
+
 async function makeFixture(
     options: InstallerOptions = {},
 ): Promise<InstallerFixture> {
@@ -119,18 +174,23 @@ async function makeFixture(
     const destination = join(root, "destination");
     const defaultDestination = join(home, ".local", "bin");
     const urls = join(root, "urls");
+    const sigstoreArgs = join(root, "sigstore-args");
     const asset = join(root, "asset");
     const defaultTarget = join(defaultDestination, "ralphie");
     const explicitTarget = join(destination, "ralphie");
     const version = options.version ?? "0.1.0";
     const binaryVersion = options.binaryVersion ?? "0.1.0";
+    const assetContents = options.assetContents ?? executableFixture;
+    const manifest = makeManifest(options, assetContents);
 
     await mkdir(tools, { recursive: true });
     await mkdir(home, { recursive: true });
     await writeFile(urls, "");
+    await writeFile(sigstoreArgs, "");
     await writeExecutable(join(tools, "curl"), curlFixture);
+    await writeExecutable(join(tools, "sigstore"), sigstoreFixture);
     await writeExecutable(join(tools, "uname"), unameFixture);
-    await writeExecutable(asset, executableFixture);
+    await writeFile(asset, assetContents);
 
     if (options.existingContents !== undefined) {
         await mkdir(destination, { recursive: true });
@@ -144,7 +204,12 @@ async function makeFixture(
         RALPHIE_TEST_API_MODE: options.apiMode ?? "success",
         RALPHIE_TEST_API_RESPONSE:
             options.apiResponse ?? '{"tag_name":"v0.1.0"}',
+        RALPHIE_TEST_COMMIT_MODE: options.commitMode ?? "success",
+        RALPHIE_TEST_SOURCE_SHA: sourceSha,
         RALPHIE_TEST_ASSET_MODE: options.assetMode ?? "success",
+        RALPHIE_TEST_SIGSTORE_MODE: options.sigstoreMode ?? "success",
+        RALPHIE_TEST_SIGSTORE_ARGS: sigstoreArgs,
+        RALPHIE_TEST_MANIFEST: manifest,
         RALPHIE_TEST_ASSET: asset,
         RALPHIE_TEST_BINARY_VERSION: binaryVersion,
         RALPHIE_TEST_OS: options.os ?? "Linux",
@@ -160,6 +225,7 @@ async function makeFixture(
         defaultTarget,
         explicitTarget,
         urls,
+        sigstoreArgs,
         environment,
     };
 }
@@ -217,6 +283,13 @@ async function requestedUrls(fixture: InstallerFixture): Promise<string[]> {
     return contents.length === 0 ? [] : contents.trimEnd().split("\n");
 }
 
+async function requestedSigstoreArgs(
+    fixture: InstallerFixture,
+): Promise<string[]> {
+    const contents = await readFile(fixture.sigstoreArgs, "utf8");
+    return contents.length === 0 ? [] : contents.trimEnd().split("\n");
+}
+
 async function pathExists(path: string): Promise<boolean> {
     try {
         await access(path);
@@ -264,7 +337,12 @@ async function runPinnedVersion(version: string): Promise<string[]> {
         const result = runInstaller(fixture);
         expect(result.exitCode).toBe(0);
         expect(result.stderr).toBe("");
-        expect(await requestedUrls(fixture)).toEqual([canonicalUrl]);
+        expect(await requestedUrls(fixture)).toEqual([
+            commitUrl,
+            canonicalUrl,
+            checksumsUrl,
+            bundleUrl,
+        ]);
         expect(await pathExists(fixture.defaultTarget)).toBe(true);
         return requestedUrls(fixture);
     });
@@ -286,8 +364,35 @@ describe("standalone installer", () => {
                 );
 
                 const urls = await requestedUrls(fixture);
-                expect(urls).toEqual([apiUrl, canonicalUrl]);
-                expect((urls[1]?.match(/v/g) ?? []).length).toBe(1);
+                expect(urls).toEqual([
+                    apiUrl,
+                    commitUrl,
+                    canonicalUrl,
+                    checksumsUrl,
+                    bundleUrl,
+                ]);
+                expect((urls[2]?.match(/v/g) ?? []).length).toBe(1);
+                const verifierArgs = await requestedSigstoreArgs(fixture);
+                expect(verifierArgs).toContain("verify");
+                expect(verifierArgs).toContain("github");
+                expect(verifierArgs).toContain("--repository");
+                expect(verifierArgs).toContain("beremaran/ralphie");
+                expect(verifierArgs).toContain("--workflow");
+                expect(verifierArgs).toContain("release.yml");
+                expect(verifierArgs).toContain("--cert-identity");
+                expect(verifierArgs).toContain(
+                    "https://github.com/beremaran/ralphie/.github/workflows/release.yml@refs/tags/v0.1.0",
+                );
+                expect(verifierArgs).toContain("--cert-oidc-issuer");
+                expect(verifierArgs).toContain(
+                    "https://token.actions.githubusercontent.com",
+                );
+                expect(verifierArgs).toContain("--source-event");
+                expect(verifierArgs).toContain("push");
+                expect(verifierArgs).toContain("--source-sha");
+                expect(verifierArgs).toContain(sourceSha);
+                expect(verifierArgs).toContain("--source-tag");
+                expect(verifierArgs).toContain("v0.1.0");
             },
         );
     });
@@ -298,7 +403,10 @@ describe("standalone installer", () => {
             await runPinnedVersion("v0.1.0"),
         ];
 
-        expect(urls).toEqual([[canonicalUrl], [canonicalUrl]]);
+        expect(urls).toEqual([
+            [commitUrl, canonicalUrl, checksumsUrl, bundleUrl],
+            [commitUrl, canonicalUrl, checksumsUrl, bundleUrl],
+        ]);
     });
 
     test("rejects an unsupported operating system before asset installation", async () => {
@@ -399,7 +507,96 @@ describe("standalone installer", () => {
 
                 expect(result.exitCode).toBe(1);
                 expect(result.stderr).toContain("ralphie: download failed");
-                expect(await requestedUrls(fixture)).toEqual([canonicalUrl]);
+                expect(await requestedUrls(fixture)).toEqual([
+                    commitUrl,
+                    canonicalUrl,
+                ]);
+                await expectExistingTarget(
+                    fixture.explicitTarget,
+                    fixture.destination,
+                    existingContents,
+                );
+            },
+        );
+    });
+
+    test("keeps a pre-existing target when the signed manifest is tampered", async () => {
+        const existingContents = "old executable\n";
+        await withFixture(
+            { sigstoreMode: "failure", existingContents },
+            async (fixture) => {
+                const result = runInstaller(fixture, fixture.destination);
+
+                expect(result.exitCode).toBe(1);
+                expect(result.stderr).toContain(
+                    "ralphie: Sigstore verification failed",
+                );
+                expect(await requestedUrls(fixture)).toEqual([
+                    commitUrl,
+                    canonicalUrl,
+                    checksumsUrl,
+                    bundleUrl,
+                ]);
+                await expectExistingTarget(
+                    fixture.explicitTarget,
+                    fixture.destination,
+                    existingContents,
+                );
+            },
+        );
+    });
+
+    test("rejects a wrong-platform manifest without replacing the target", async () => {
+        const existingContents = "old executable\n";
+        await withFixture(
+            { manifestMode: "wrong-platform", existingContents },
+            async (fixture) => {
+                const result = runInstaller(fixture, fixture.destination);
+
+                expect(result.exitCode).toBe(1);
+                expect(result.stderr).toContain(
+                    "no single valid entry for ralphie-linux-x64",
+                );
+                await expectExistingTarget(
+                    fixture.explicitTarget,
+                    fixture.destination,
+                    existingContents,
+                );
+            },
+        );
+    });
+
+    test("rejects a tampered asset when its signed checksum does not match", async () => {
+        const existingContents = "old executable\n";
+        await withFixture(
+            {
+                assetContents: `${executableFixture}\ntampered`,
+                manifestAssetContents: executableFixture,
+                existingContents,
+            },
+            async (fixture) => {
+                const result = runInstaller(fixture, fixture.destination);
+
+                expect(result.exitCode).toBe(1);
+                expect(result.stderr).toContain("ralphie: checksum mismatch");
+                await expectExistingTarget(
+                    fixture.explicitTarget,
+                    fixture.destination,
+                    existingContents,
+                );
+            },
+        );
+    });
+
+    test("rejects a checksum mismatch without replacing the target", async () => {
+        const existingContents = "old executable\n";
+        await withFixture(
+            { manifestMode: "checksum-mismatch", existingContents },
+            async (fixture) => {
+                const result = runInstaller(fixture, fixture.destination);
+
+                expect(result.exitCode).toBe(1);
+                expect(result.stderr).toContain("ralphie: checksum mismatch");
                 await expectExistingTarget(
                     fixture.explicitTarget,
                     fixture.destination,
@@ -420,7 +617,12 @@ describe("standalone installer", () => {
                 expect(result.stderr).toContain(
                     "reports version '9.9.9', expected '0.1.0'",
                 );
-                expect(await requestedUrls(fixture)).toEqual([canonicalUrl]);
+                expect(await requestedUrls(fixture)).toEqual([
+                    commitUrl,
+                    canonicalUrl,
+                    checksumsUrl,
+                    bundleUrl,
+                ]);
                 await expectExistingTarget(
                     fixture.explicitTarget,
                     fixture.destination,
@@ -439,7 +641,12 @@ describe("standalone installer", () => {
                 result,
             );
 
-            expect(await requestedUrls(fixture)).toEqual([canonicalUrl]);
+            expect(await requestedUrls(fixture)).toEqual([
+                commitUrl,
+                canonicalUrl,
+                checksumsUrl,
+                bundleUrl,
+            ]);
             expect(await pathExists(join(fixture.home, ".local"))).toBe(false);
         });
     });
