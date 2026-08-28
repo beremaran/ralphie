@@ -7,6 +7,8 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Added
 
+- Read-only issue grounding with a persisted needs-attention escape hatch, so
+  dependency-blocked issues remain open while later queue items continue.
 - Native Bun CLI foundation with GitHub, Git, workspace, and Pi domain
   services.
 - Resumable issue execution with complexity routing, bounded review loops,

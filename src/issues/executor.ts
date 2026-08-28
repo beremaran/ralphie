@@ -1,10 +1,15 @@
 import { RalphieError } from "../shared/error.ts";
 import {
     IssueArtifactKind,
+    issueArtifactPath,
     type IssueArtifactStoreService,
 } from "./artifacts.ts";
 import type { ComplexityAssessmentService } from "./complexity.ts";
-import { ComplexityLevel, type ComplexityDecision } from "./decisions.ts";
+import {
+    ComplexityLevel,
+    type ComplexityDecision,
+    GroundingDisposition,
+} from "./decisions.ts";
 import type {
     IssueExecutionContext,
     IssueExecutionOutcome,
@@ -12,6 +17,7 @@ import type {
 import { IssueExecutionOutcomeKind } from "./execution.ts";
 import type { DecompositionExecutorService } from "./decomposition-executor.ts";
 import type { ImplementationExecutorService } from "./implementation-executor.ts";
+import type { GroundingAssessmentService } from "./grounding.ts";
 
 export type IssueExecutorService = {
     readonly execute: (
@@ -25,7 +31,61 @@ export const makeIssueExecutorService = (
     complexityAssessment: ComplexityAssessmentService,
     implementationExecutor: ImplementationExecutorService,
     decompositionExecutor: DecompositionExecutorService,
+    groundingAssessment?: GroundingAssessmentService,
 ): IssueExecutorService => {
+    const freshnessFingerprint = (context: IssueExecutionContext) => ({
+        updatedAt: context.issue.updatedAt ?? "1970-01-01T00:00:00.000Z",
+        commentCount: context.issue.commentCount ?? 0,
+    });
+
+    const assessGrounding = async (
+        context: IssueExecutionContext,
+        artifacts: Awaited<ReturnType<IssueArtifactStoreService["forIssue"]>>,
+    ): Promise<IssueExecutionOutcome | undefined> => {
+        if (groundingAssessment === undefined) return undefined;
+        const fingerprint = freshnessFingerprint(context);
+        await artifacts.invalidateStaleNeedsAttentionDecision(fingerprint);
+        if (artifacts.has(IssueArtifactKind.NeedsAttentionDecision)) {
+            const { decision } = await artifacts.read(
+                IssueArtifactKind.NeedsAttentionDecision,
+            );
+            const { disposition: _disposition, ...details } = decision;
+            return {
+                kind: IssueExecutionOutcomeKind.NeedsAttention,
+                ...details,
+                artifactPath: issueArtifactPath(
+                    {
+                        workspace: context.workspace,
+                        runId: context.runId,
+                        repository: context.repository,
+                    },
+                    context.issue.number,
+                ),
+            };
+        }
+        const { decision } = await groundingAssessment.assess(context);
+        if (decision.disposition !== GroundingDisposition.NeedsAttention) {
+            return undefined;
+        }
+        await artifacts.write(IssueArtifactKind.NeedsAttentionDecision, {
+            decision,
+            fingerprint,
+        });
+        const { disposition: _disposition, ...details } = decision;
+        return {
+            kind: IssueExecutionOutcomeKind.NeedsAttention,
+            ...details,
+            artifactPath: issueArtifactPath(
+                {
+                    workspace: context.workspace,
+                    runId: context.runId,
+                    repository: context.repository,
+                },
+                context.issue.number,
+            ),
+        };
+    };
+
     const assessOrReadDecision = async (
         context: IssueExecutionContext,
         artifacts: Awaited<ReturnType<IssueArtifactStoreService["forIssue"]>>,
@@ -42,6 +102,8 @@ export const makeIssueExecutorService = (
         context: IssueExecutionContext,
         artifacts: Awaited<ReturnType<IssueArtifactStoreService["forIssue"]>>,
     ): Promise<IssueExecutionOutcome> => {
+        const deferred = await assessGrounding(context, artifacts);
+        if (deferred !== undefined) return deferred;
         const decision = await assessOrReadDecision(context, artifacts);
         const input = { context, artifacts };
         if (decision.complexity >= ComplexityLevel.Level4) {

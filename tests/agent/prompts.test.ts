@@ -5,6 +5,7 @@ import {
     ReviewVerdict,
 } from "../../src/issues/decisions.ts";
 import {
+    buildGroundingPrompt,
     buildCommitMessagePrompt,
     buildComplexityPrompt,
     buildDecompositionPrompt,
@@ -15,6 +16,25 @@ import {
 } from "../../src/agent/prompts.ts";
 
 describe("Pi prompts", () => {
+    test("builds a read-only readiness prompt with a dependency escape hatch", () => {
+        const prompt = buildGroundingPrompt({
+            issue: {
+                number: 41,
+                title: "Dependent work",
+                url: "issue/41",
+                body: "Depends on #40.",
+                labels: [],
+            },
+            repositoryPath: "/workspace/repository",
+            targetBranch: "main",
+        });
+
+        expect(prompt).toContain('Return "needs_attention"');
+        expect(prompt).toContain('reason "external_dependency"');
+        expect(prompt).toContain("Do not edit files");
+        expect(prompt).toContain("Depends on #40.");
+    });
+
     test("builds a complexity prompt with the complete rubric and issue context", () => {
         const prompt = buildComplexityPrompt({
             issue: {

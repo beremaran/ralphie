@@ -5,7 +5,11 @@ import {
     makeIssueArtifactStoreService,
 } from "../../src/issues/artifacts.ts";
 import type { ComplexityAssessmentService } from "../../src/issues/complexity.ts";
-import { ComplexityLevel } from "../../src/issues/decisions.ts";
+import {
+    ComplexityLevel,
+    GroundingDisposition,
+    NeedsAttentionReason,
+} from "../../src/issues/decisions.ts";
 import type { DecompositionExecutorService } from "../../src/issues/decomposition-executor.ts";
 import {
     type IssueCompletionKind,
@@ -20,6 +24,76 @@ const context = (number: number): IssueExecutionContext =>
     ({ issue: { number } }) as IssueExecutionContext;
 
 describe("IssueExecutor", () => {
+    test("defers a dependency-blocked issue before complexity or implementation", async () => {
+        let routed = false;
+        const stores = makeIssueArtifactStoreService();
+        const executor = makeIssueExecutorService(
+            stores,
+            {
+                assess: async () => {
+                    routed = true;
+                    throw new Error("must not assess complexity");
+                },
+            },
+            {
+                execute: async () => {
+                    routed = true;
+                    throw new Error("must not implement");
+                },
+            },
+            {
+                execute: async () => {
+                    routed = true;
+                    throw new Error("must not decompose");
+                },
+            },
+            {
+                assess: async () => ({
+                    sessionID: "grounding-session",
+                    decision: {
+                        disposition: GroundingDisposition.NeedsAttention,
+                        reason: NeedsAttentionReason.ExternalDependency,
+                        summary: "Issue #41 must be completed first.",
+                        evidence: ["The issue declares a dependency on #41."],
+                        questions: [
+                            "Complete issue #41, then retry this issue.",
+                        ],
+                    },
+                }),
+            },
+        );
+        const result = await executor.execute({
+            ...context(42),
+            issue: {
+                number: 42,
+                title: "Dependent work",
+                url: "issue/42",
+                body: "Depends on #41.",
+                labels: [],
+                updatedAt: "2026-08-28T00:00:00.000Z",
+                commentCount: 0,
+            },
+            repository: "owner/repo",
+            workspace: "/tmp/ralphie",
+            runId: "run-1",
+        });
+
+        expect(result).toMatchObject({
+            kind: IssueExecutionOutcomeKind.NeedsAttention,
+            reason: NeedsAttentionReason.ExternalDependency,
+            summary: "Issue #41 must be completed first.",
+        });
+        expect(routed).toBe(false);
+        const artifact = await stores.forIssue(42, {
+            workspace: "/tmp/ralphie",
+            runId: "run-1",
+            repository: "owner/repo",
+        });
+        expect(artifact.has(IssueArtifactKind.NeedsAttentionDecision)).toBe(
+            true,
+        );
+    });
+
     test("executes through an explicitly supplied service", async () => {
         const outcome = await {
             execute: async (received: IssueExecutionContext) => ({

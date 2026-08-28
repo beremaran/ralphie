@@ -36,6 +36,10 @@ export type GitHubIssue = {
     readonly url: string;
     readonly body: string | null;
     readonly labels: ReadonlyArray<string>;
+    /** Used to invalidate a deferred decision when the issue changes. */
+    readonly updatedAt?: string;
+    /** Used with updatedAt so new discussion makes a deferred issue eligible again. */
+    readonly commentCount?: number;
 };
 
 export type GitHubIssuesService = {
@@ -68,6 +72,8 @@ type GitHubIssueRecord = {
     readonly title: string;
     readonly html_url: string;
     readonly body?: string | null;
+    readonly updated_at?: string;
+    readonly comments?: number;
     readonly pull_request?: unknown;
     readonly labels: ReadonlyArray<
         | string
@@ -129,6 +135,12 @@ const mapDecompositionChild = (
             url: issue.html_url,
             body: marker.body,
             labels: issueLabels(issue.labels),
+            ...(issue.updated_at === undefined
+                ? {}
+                : { updatedAt: issue.updated_at }),
+            ...(issue.comments === undefined
+                ? {}
+                : { commentCount: issue.comments }),
             decompositionKey: marker.decompositionKey,
         },
     ];
@@ -159,6 +171,12 @@ export const makeGitHubIssuesService = (): GitHubIssuesService => ({
                     url: issue.html_url,
                     body: issue.body ?? null,
                     labels: issueLabels(issue.labels),
+                    ...(issue.updated_at === undefined
+                        ? {}
+                        : { updatedAt: issue.updated_at }),
+                    ...(issue.comments === undefined
+                        ? {}
+                        : { commentCount: issue.comments }),
                 }));
         } catch (cause) {
             if (cause instanceof RalphieError) throw cause;

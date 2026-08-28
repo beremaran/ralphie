@@ -430,6 +430,7 @@ const emitRunSucceeded = async (
         message:
             `Run completed: ${summary.counts.completed} completed, ` +
             `${summary.counts.decomposed} decomposed, ${summary.counts.escalated} escalated, ` +
+            `${summary.counts[IssueExecutionOutcomeKind.NeedsAttention]} deferred, ` +
             `${summary.counts.skipped} skipped, ${summary.counts.failed} failed.`,
         details: {
             runId: summary.runId,

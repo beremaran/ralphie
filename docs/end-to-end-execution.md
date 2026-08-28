@@ -110,10 +110,12 @@ flowchart TD
     J -->|completed| K["Issue closure / PR delivery"]
     J -->|decomposed or escalated| L["Mark complete; refresh open issue queue"]
     J -->|skipped| M["Record skip; continue until budget/queue ends"]
+    J -->|needs attention| P["Record deferral; leave open; continue queue"]
     J -->|failed| N["Persist active issue; halt"]
     K --> O["Persist checkout and queue progress"]
     L --> O
     M --> O
+    P --> O
     O --> B
     E --> R["Close Pi runtime; optional successful cleanup; summarize"]
     D --> S["Close Pi runtime; retain state and artifacts"]
@@ -138,11 +140,26 @@ A normal issue execution obtains a durable per-issue artifact store at:
 <workspace>/.ralphie/runs/<run-id>/issues/<issue-number>/artifacts.json
 ```
 
-The store prevents accidental overwrites and records complexity decisions,
-checkpoints, review attempts, commit messages, created commits, resolution
-proof, decomposition decisions, and created child-number mappings.
+The store prevents accidental overwrites and records readiness deferrals,
+complexity decisions, checkpoints, review attempts, commit messages, created
+commits, resolution proof, decomposition decisions, and created child-number
+mappings.
 
-## 4. Complexity assessment and routing
+## 4. Readiness, complexity assessment, and routing
+
+Before complexity routing, `IssueExecutor` starts a read-only structured
+grounding session. It returns one of three dispositions:
+
+- `actionable`: proceed normally;
+- `already_resolved`: proceed to the existing implementation/no-change proof
+  path; or
+- `needs_attention`: persist a summary, evidence, questions, and issue freshness
+  fingerprint, then defer the issue without closing it or marking its dependency
+  complete.
+
+An unfinished prerequisite uses the `external_dependency` reason. A deferred
+outcome advances the current queue, while an ordinary failed outcome still
+halts the run. A new run discovers the still-open issue and assesses it again.
 
 `IssueExecutor` first reuses a persisted complexity decision when one exists.
 Otherwise `ComplexityAssessment`:

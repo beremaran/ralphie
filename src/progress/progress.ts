@@ -21,6 +21,7 @@ export type ProgressStage =
     | "issue-planning"
     | "issue-execution"
     | "issue-queue"
+    | "issue-grounding"
     | "complexity-assessment"
     | "implementation"
     | "change-staging"

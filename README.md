@@ -141,14 +141,20 @@ ralphie owner/repository --workflow pr
 For a source-level trigger-to-exit trace, see the
 [end-to-end execution trace](./docs/end-to-end-execution.md).
 
-Every matching open issue receives a schema-validated complexity score from 0
-through 5.
+Before normal execution, every matching open issue is checked by a read-only,
+schema-validated grounding session. Actionable issues then receive a complexity
+score from 0 through 5. An issue whose prerequisite is still open, or which
+otherwise needs human attention, is deferred for the current run without being
+closed or marked complete; Ralphie records the reason and continues with the
+next queue item.
 
 ### Issue routing
 
 ```mermaid
 flowchart TD
-    A[Open GitHub issue] --> B[Structured complexity assessment]
+    A[Open GitHub issue] --> Z[Structured readiness check]
+    Z -->|Needs attention or open dependency| Y[Defer and continue queue]
+    Z -->|Actionable or apparently resolved| B[Structured complexity assessment]
     B -->|0–3| C[Implementation session]
     C --> D[Deterministically stage changes]
     D -->|Changes present| E[Fresh review session]
@@ -463,6 +469,12 @@ Ordinary failures exit with status 1.
 One issue failure currently halts the run. This preserves the checkout and
 diagnostics at the first uncertain boundary instead of allowing later issues to
 continue on questionable state.
+
+A validated needs-attention decision is not a failure. Ralphie preserves its
+summary, evidence, questions, and issue freshness metadata in the run artifacts,
+leaves the issue open, and advances to later work. A later run evaluates the
+issue again, so completing its dependency makes it eligible without editing the
+queue manually.
 
 ```mermaid
 stateDiagram-v2

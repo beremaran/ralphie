@@ -31,6 +31,8 @@ describe("GitHub issues", () => {
                         html_url:
                             "https://github.com/owner/repository/issues/12",
                         body: "Issue body",
+                        updated_at: "2026-08-28T00:00:00.000Z",
+                        comments: 3,
                         labels: ["bug", { name: "priority" }, { name: null }],
                     },
                     {
@@ -61,6 +63,8 @@ describe("GitHub issues", () => {
                 url: "https://github.com/owner/repository/issues/12",
                 body: "Issue body",
                 labels: ["bug", "priority"],
+                updatedAt: "2026-08-28T00:00:00.000Z",
+                commentCount: 3,
             },
         ]);
     });

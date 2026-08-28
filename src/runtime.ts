@@ -70,6 +70,10 @@ import {
     makeIssueRecoveryService,
     type IssueRecoveryService,
 } from "./issues/recovery.ts";
+import {
+    makeGroundingAssessmentService,
+    type GroundingAssessmentService,
+} from "./issues/grounding.ts";
 import { makePiService, type PiService } from "./pi/server.ts";
 import { type ProgressReporterService } from "./progress/progress.ts";
 import { RunStateStoreLive, type RunStateStoreService } from "./run/state.ts";
@@ -90,6 +94,7 @@ export type RalphieRuntime = {
     readonly gitRemoteSafety: GitRemoteSafetyService;
     readonly issueArtifactStore: IssueArtifactStoreService;
     readonly complexityAssessment: ComplexityAssessmentService;
+    readonly groundingAssessment: GroundingAssessmentService;
     readonly decompositionExecutor: DecompositionExecutorService;
     readonly implementationExecutor: ImplementationExecutorService;
     readonly dryRunIssueExecutor: DryRunIssueExecutorService;
@@ -137,6 +142,7 @@ export const makeLiveRuntime = ({
         progress,
     );
     const complexityAssessment = makeComplexityAssessmentService(progress);
+    const groundingAssessment = makeGroundingAssessmentService(progress);
     const decompositionExecutor = makeDecompositionExecutorService(
         githubIssueMutations,
         githubIssues,
@@ -159,6 +165,7 @@ export const makeLiveRuntime = ({
         complexityAssessment,
         implementationExecutor,
         decompositionExecutor,
+        groundingAssessment,
     );
     return {
         commandRunner,
@@ -174,6 +181,7 @@ export const makeLiveRuntime = ({
         gitRemoteSafety,
         issueArtifactStore,
         complexityAssessment,
+        groundingAssessment,
         decompositionExecutor,
         implementationExecutor,
         dryRunIssueExecutor,

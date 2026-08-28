@@ -26,6 +26,8 @@ const issueSchema = z.object({
     url: z.string(),
     body: z.string().nullable(),
     labels: z.array(z.string()),
+    updatedAt: z.string().datetime().optional(),
+    commentCount: z.number().int().nonnegative().optional(),
 });
 
 const currentOutcomeSchema = z.union([

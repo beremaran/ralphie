@@ -41,6 +41,7 @@ import { WorkflowMode } from "../src/options.ts";
 import { IssueOrder, IssueSort } from "../src/github/issues.ts";
 import type { RalphieRuntime } from "../src/runtime.ts";
 import { RalphieError } from "../src/shared/error.ts";
+import { NeedsAttentionReason } from "../src/issues/decisions.ts";
 
 const firstIssue: GitHubIssue = {
     number: 42,
@@ -286,6 +287,7 @@ const testRuntime = (
         gitRemoteSafety: {} as never,
         issueArtifactStore: artifactStore,
         complexityAssessment: {} as never,
+        groundingAssessment: {} as never,
         decompositionExecutor: {} as never,
         implementationExecutor: {} as never,
         dryRunIssueExecutor,
@@ -395,6 +397,42 @@ describe("workflow", () => {
             "executeIssue:42:/tmp/ralphie/repo:develop:build",
         );
         expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
+    });
+
+    test("defers an issue needing attention and continues with the queue", async () => {
+        const calls: string[] = [];
+        const states: RunState[] = [];
+        const summary = await workflow(
+            { ...baseOptions, maxIssues: 2 },
+            testRuntime(calls, states, {
+                issueLists: [[firstIssue, secondIssue]],
+                outcomes: [
+                    {
+                        kind: IssueExecutionOutcomeKind.NeedsAttention,
+                        reason: NeedsAttentionReason.ExternalDependency,
+                        summary: "A prerequisite is still open.",
+                        evidence: ["Issue body links the prerequisite."],
+                        questions: ["Complete the prerequisite, then retry."],
+                        artifactPath: "/tmp/needs-attention.json",
+                    },
+                    {
+                        kind: IssueExecutionOutcomeKind.Completed,
+                        completion: "pushed-commit",
+                        commitSha: "second-sha",
+                    },
+                ],
+            }),
+        );
+
+        expect(summary.outcomes.map(({ issueNumber }) => issueNumber)).toEqual([
+            42, 43,
+        ]);
+        expect(summary.counts[IssueExecutionOutcomeKind.NeedsAttention]).toBe(
+            1,
+        );
+        expect(states.at(-1)?.queue.completedIssueNumbers).toEqual([43]);
+        expect(calls).not.toContain("closeIssue:42");
+        expect(calls).toContain("closeIssue:43");
     });
 
     test.each([
