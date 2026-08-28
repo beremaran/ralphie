@@ -427,6 +427,17 @@ export type {
     DisplayTimestamp,
 } from "./display-state.ts";
 export {
+    clipFooter,
+    makeFooterRefreshScheduler,
+    renderFooter,
+} from "./footer.ts";
+export type {
+    FooterRefreshScheduler,
+    FooterRefreshSchedulerOptions,
+    FooterTimer,
+    FooterViewOptions,
+} from "./footer.ts";
+export {
     makeDisplayCoordinator,
     makeProgressCoordinator,
 } from "./coordinator.ts";
