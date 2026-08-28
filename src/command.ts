@@ -18,11 +18,14 @@ import { piModelSchema, piModelVariantSchema } from "./agent/model.ts";
 import {
     makeProgressCoordinator,
     type ProgressCoordinator,
+    type ProgressCoordinatorOptions,
 } from "./progress/coordinator.ts";
 import { type ProgressRenderMode } from "./progress/progress.ts";
 import { type PiProviderConfig } from "./pi/config.ts";
 import { makePiService } from "./pi/server.ts";
-import { makeLiveRuntime } from "./runtime.ts";
+import { makeLiveRuntime, type RalphieRuntime } from "./runtime.ts";
+import type { PiService } from "./pi/server.ts";
+import type { PiEventListener } from "./pi/client.ts";
 import { exitCodeForFailure } from "./process/exit-code.ts";
 import { workflow } from "./workflow.ts";
 import { redactSensitiveText } from "./shared/redaction.ts";
@@ -299,10 +302,52 @@ Environment:
   RALPHIE_MODEL_API_KEY        Model API key
 `;
 
-type RunCommandInput = {
+export type CommandRuntime = RalphieRuntime & {
+    readonly dispose?: () => Promise<void>;
+};
+
+export type CommandFactories = {
+    readonly makeCoordinator?: (
+        options: ProgressCoordinatorOptions,
+    ) => ProgressCoordinator;
+    readonly makePi?: (
+        config: PiProviderConfig,
+        listener: PiEventListener,
+    ) => PiService;
+    readonly makeRuntime?: (input: {
+        readonly pi: PiService;
+        readonly progress: ProgressCoordinator["progress"];
+    }) => CommandRuntime;
+    readonly runWorkflow?: typeof workflow;
+};
+
+export type CommandOutput = {
+    readonly stdout: (text: string) => void;
+    readonly stderr: (text: string) => void;
+};
+
+export type RunCommandInput = {
     readonly signal?: AbortSignal;
     readonly terminal?: CliTerminalInfo;
+    /** Explicit test seams; production callers should use the defaults. */
+    readonly factories?: CommandFactories;
+    readonly output?: CommandOutput;
 };
+
+const commandOutput = (output?: CommandOutput): CommandOutput =>
+    output ?? {
+        stdout: (text) => process.stdout.write(text),
+        stderr: (text) => process.stderr.write(text),
+    };
+
+const resolveCommandFactories = (
+    factories: CommandFactories = {},
+): Required<CommandFactories> => ({
+    makeCoordinator: factories.makeCoordinator ?? makeProgressCoordinator,
+    makePi: factories.makePi ?? makePiService,
+    makeRuntime: factories.makeRuntime ?? makeLiveRuntime,
+    runWorkflow: factories.runWorkflow ?? workflow,
+});
 
 const loadResumeState = async (
     config: ResolvedRalphieConfig,
@@ -342,14 +387,14 @@ const makeCommandCoordinator = (
     config: ResolvedRalphieConfig,
     terminal: CliTerminalInfo,
     runId: string,
+    factory: NonNullable<CommandFactories["makeCoordinator"]>,
+    output: CommandOutput,
 ): ProgressCoordinator =>
-    makeProgressCoordinator({
+    factory({
         mode: resolveProgressMode(config, terminal),
         verbose: config.verbose,
         width: () => process.stderr.columns ?? terminal.width,
-        write: config.json
-            ? (text) => process.stdout.write(text)
-            : (text) => process.stderr.write(text),
+        write: config.json ? output.stdout : output.stderr,
         colors: terminal.isInteractive && !terminal.isCI,
         runId,
         eventLogPath: eventLogPathFor(config, runId),
@@ -384,17 +429,39 @@ const workflowOptionsFor = (
 });
 
 /** Execute one Ralphie command. */
+const disposeCommandResources = async (
+    runtime: CommandRuntime | undefined,
+    coordinator: ProgressCoordinator | undefined,
+    commandError: Error | undefined,
+): Promise<void> => {
+    let cleanupError: unknown;
+    try {
+        await runtime?.dispose?.();
+    } catch (error) {
+        cleanupError = error;
+    }
+    try {
+        await coordinator?.dispose();
+    } catch (error) {
+        cleanupError ??= error;
+    }
+    if (commandError === undefined && cleanupError !== undefined) {
+        throw cleanupError;
+    }
+};
+
 export const runCommand = async (
     args: ReadonlyArray<string> = Bun.argv.slice(2),
     input: RunCommandInput = {},
 ): Promise<void> => {
+    const output = commandOutput(input.output);
     const parsed = parseCliArgs(args);
     if (parsed.help) {
-        process.stdout.write(HELP_TEXT);
+        output.stdout(HELP_TEXT);
         return;
     }
     if (parsed.version) {
-        process.stdout.write("0.1.0\n");
+        output.stdout("0.1.0\n");
         return;
     }
 
@@ -410,17 +477,27 @@ export const runCommand = async (
     const terminal = input.terminal ?? terminalInfo();
     const runId = resumeState?.runId ?? crypto.randomUUID();
     let coordinator: ProgressCoordinator | undefined;
+    let runtime: CommandRuntime | undefined;
+    let commandError: Error | undefined;
 
     try {
-        coordinator = makeCommandCoordinator(issueConfig, terminal, runId);
-        const runtime = makeLiveRuntime({
-            pi: makePiService(
-                resolvePiConfig(issueConfig),
-                coordinator.piListener,
-            ),
+        const factories = resolveCommandFactories(input.factories);
+        coordinator = makeCommandCoordinator(
+            issueConfig,
+            terminal,
+            runId,
+            factories.makeCoordinator,
+            output,
+        );
+        const pi = factories.makePi(
+            resolvePiConfig(issueConfig),
+            coordinator.piListener,
+        );
+        runtime = factories.makeRuntime({
+            pi,
             progress: coordinator.progress,
         });
-        await workflow(
+        await factories.runWorkflow(
             workflowOptionsFor(issueConfig, input, runId, resumeState),
             runtime,
         );
@@ -432,9 +509,10 @@ export const runCommand = async (
         process.exitCode = exitCodeForFailure(
             input.signal ?? new AbortController().signal,
         );
-        throw new Error(message, { cause: error });
+        commandError = new Error(message, { cause: error });
+        throw commandError;
     } finally {
-        await coordinator?.dispose();
+        await disposeCommandResources(runtime, coordinator, commandError);
     }
 };
 
