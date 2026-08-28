@@ -5,6 +5,7 @@ import {
     DISPLAY_ACTIVITY_LABELS,
     PROGRESS_STAGE_LABELS,
     createDisplayState,
+    progressStageLabel,
     reducePiSessionEvent,
     reduceProgressUpdate,
     type DisplayClock,
@@ -258,5 +259,28 @@ describe("display state", () => {
         expect(next.activityLabel).not.toContain("private-value");
         expect(next.activityLabel).not.toContain("\u001b");
         expect(next.activityLabel).toContain("[REDACTED]");
+    });
+
+    test("removes terminal controls at the display-state boundary", () => {
+        const state = reduceProgressUpdate(undefined, {
+            ...baseProgress,
+            repository: "\u001b[31mowner/repo\u001b[0m\r\nforged",
+            issue: { number: 13, title: "title\u0007\nsecond line" },
+        });
+        const next = reducePiSessionEvent(
+            state,
+            piEvent({
+                type: "tool_execution_start",
+                toolCallId: "tool-1",
+                toolName: "read\u001b[2J\nforged",
+                args: {},
+            }),
+            context,
+        );
+
+        expect(state.repository).toBe("owner/repo forged");
+        expect(state.issue?.title).toBe("title second line");
+        expect(next.activityLabel).toBe("Using read forged");
+        expect(progressStageLabel(next.stage!)).toBe("Executing issue");
     });
 });

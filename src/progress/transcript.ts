@@ -8,6 +8,7 @@ import {
     redactSensitiveValue,
 } from "../shared/redaction.ts";
 import { cyan, dim, green, red, yellow } from "./colors.ts";
+import { progressStageLabel, type DisplayState } from "./display-state.ts";
 
 export type PiTranscriptRendererOptions = {
     readonly write: (text: string) => void;
@@ -15,6 +16,8 @@ export type PiTranscriptRendererOptions = {
     readonly json?: boolean;
     readonly verbose?: boolean;
     readonly width?: () => number;
+    /** Current sanitized workflow state, sampled when a session header opens. */
+    readonly getDisplayState?: () => DisplayState;
 };
 
 /** A transcript listener with a coordinator-facing line interruption hook. */
@@ -199,9 +202,31 @@ type StreamKey = string;
 
 type TranscriptWriter = ReturnType<typeof makeTranscriptWriter>;
 
+const workflowHeader = (state: DisplayState | undefined): string => {
+    if (state === undefined) return "";
+    const segments: string[] = [];
+    if (state.repository !== undefined && oneLine(state.repository) !== "") {
+        segments.push(oneLine(state.repository));
+    }
+    if (state.issue !== undefined) {
+        segments.push(
+            `issue ${state.issue.current}/${state.issue.total} · #${state.issue.number}`,
+        );
+    }
+    if (state.stage !== undefined)
+        segments.push(progressStageLabel(state.stage));
+    if (state.reviewAttempt !== undefined) {
+        segments.push(
+            `attempt ${state.reviewAttempt.current}/${state.reviewAttempt.total}`,
+        );
+    }
+    return segments.length === 0 ? "" : ` · ${segments.join(" · ")}`;
+};
+
 const makeTranscriptWriter = (
     write: (text: string) => void,
     styles: TranscriptStyles,
+    getDisplayState?: () => DisplayState,
 ): {
     readonly beginSession: (context: PiEventContext) => void;
     readonly ensureSession: (context: PiEventContext) => void;
@@ -247,8 +272,9 @@ const makeTranscriptWriter = (
         if (sessionOpen) finishSession("interrupted");
         const title = oneLine(context.title ?? "Pi task") || "Pi task";
         const session = oneLine(context.sessionID);
+        const workflow = workflowHeader(getDisplayState?.());
         write(
-            `╭─ ${styles.assistant("Pi")} · ${title}${session === "" ? "" : ` · ${styles.event(session)}`}\n│\n`,
+            `╭─ ${styles.assistant("Pi")} · ${title}${session === "" ? "" : ` · ${styles.event(session)}`}${styles.event(workflow)}\n│\n`,
         );
         sessionOpen = true;
         hasBlock = false;
@@ -728,6 +754,7 @@ export const makePiTranscriptRenderer = ({
     json = false,
     verbose = false,
     width = () => process.stderr.columns ?? 100,
+    getDisplayState,
 }: PiTranscriptRendererOptions): PiTranscriptRenderer => {
     const styles: TranscriptStyles = colors
         ? {
@@ -746,7 +773,7 @@ export const makePiTranscriptRenderer = ({
               tool: plain,
               success: plain,
           };
-    const writer = makeTranscriptWriter(write, styles);
+    const writer = makeTranscriptWriter(write, styles, getDisplayState);
     const toolStates = new Map<string, ToolExecutionState>();
 
     const render: PiEventListener = (event, context) => {

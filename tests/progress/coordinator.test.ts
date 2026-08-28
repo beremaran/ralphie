@@ -46,6 +46,35 @@ describe("progress output coordinator", () => {
         expect(coordinator.getDisplayState().activity).toBe("responding");
     });
 
+    test("passes complete reduced workflow context to session headers", async () => {
+        let output = "";
+        const coordinator = makeProgressCoordinator({
+            mode: "plain",
+            verbose: false,
+            colors: false,
+            write: (text) => {
+                output += text;
+            },
+        });
+
+        await coordinator.progress.emit({
+            stage: "review-fix",
+            status: "started",
+            message: "Fixing review.",
+            repository: "owner/repo",
+            issue: { number: 56, title: "Context" },
+            current: 2,
+            total: 4,
+            attempt: 1,
+            maxAttempts: 3,
+        });
+        coordinator.listener(event({ type: "agent_start" }), context);
+
+        expect(output).toContain(
+            "╭─ Pi · Task · session-1 · owner/repo · issue 2/4 · #56 · Addressing review findings · attempt 1/3\n",
+        );
+    });
+
     test("routes partial transcript output through the shared sink", async () => {
         let output = "";
         const coordinator = makeProgressCoordinator({
@@ -90,7 +119,7 @@ describe("progress output coordinator", () => {
         );
 
         expect(output).toBe(
-            "◐ Implementing...\r\x1b[2K╭─ Pi · Task · session-1\n│\n" +
+            "◐ Implementing...\r\x1b[2K╭─ Pi · Task · session-1 · Implementing changes\n│\n" +
                 "│  ✦ assistant partial token\n" +
                 "• Still working.\n◐ Implementing..." +
                 "\r\x1b[2K│    continued",

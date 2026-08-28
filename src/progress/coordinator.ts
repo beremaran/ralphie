@@ -51,6 +51,7 @@ export type ProgressCoordinator = {
 const transcriptFor = (
     options: ProgressCoordinatorOptions,
     output: ProgressOutput,
+    getDisplayState: () => DisplayState,
 ): PiTranscriptRenderer | undefined => {
     if (options.mode === "quiet") return undefined;
     return makePiTranscriptRenderer({
@@ -59,6 +60,7 @@ const transcriptFor = (
         json: options.mode === "json",
         verbose: options.verbose,
         width: options.width,
+        getDisplayState,
     });
 };
 
@@ -74,9 +76,9 @@ export const makeProgressCoordinator = (
         ...options,
         output,
     });
-    const transcript = transcriptFor(options, output);
     const now = options.now ?? (() => new Date());
     let state = createDisplayState();
+    const transcript = transcriptFor(options, output, () => state);
     let disposed = false;
 
     const piListener: PiEventListener = (event, context) => {

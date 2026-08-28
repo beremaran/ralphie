@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import type { PiSessionEvent } from "../../src/pi/client.ts";
+import type { DisplayState } from "../../src/progress/display-state.ts";
 import { makePiTranscriptRenderer } from "../../src/progress/transcript.ts";
 
 const context = {
@@ -108,6 +109,85 @@ describe("Pi transcript rendering", () => {
         );
     });
 
+    test("snapshots complete workflow context for an explicit session", () => {
+        let output = "";
+        const state: DisplayState = {
+            repository: "owner/repo",
+            issue: { current: 2, total: 4, number: 56, title: "Context" },
+            stage: "review-fix",
+            reviewAttempt: { current: 1, total: 3 },
+            activity: "waiting",
+            activityLabel: "Waiting",
+        };
+        const render = makePiTranscriptRenderer({
+            write: (text) => {
+                output += text;
+            },
+            getDisplayState: () => state,
+        });
+
+        render(event({ type: "agent_start" }), context);
+
+        expect(output).toStartWith(
+            "╭─ Pi · Implement issue #42 · session-1 · owner/repo · issue 2/4 · #56 · Addressing review findings · attempt 1/3\n",
+        );
+    });
+
+    test("samples partial context when an implicit session opens and on later sessions", () => {
+        let output = "";
+        let state: DisplayState = {
+            repository: "owner/repo",
+            activity: "waiting",
+            activityLabel: "Waiting",
+        };
+        const render = makePiTranscriptRenderer({
+            write: (text) => {
+                output += text;
+            },
+            getDisplayState: () => state,
+        });
+
+        render(event({ type: "turn_start" }), context);
+        render(event({ type: "agent_settled" }), context);
+        state = { ...state, stage: "implementation" };
+        render(event({ type: "turn_start" }), context);
+
+        expect(output).toContain(
+            "╭─ Pi · Implement issue #42 · session-1 · owner/repo\n",
+        );
+        expect(output).toContain(
+            "╭─ Pi · Implement issue #42 · session-1 · owner/repo · Implementing changes\n",
+        );
+        expect(output).not.toContain("undefined");
+    });
+
+    test("redacts secrets and terminal controls in header fields", () => {
+        let output = "";
+        const render = makePiTranscriptRenderer({
+            write: (text) => {
+                output += text;
+            },
+            getDisplayState: () => ({
+                repository:
+                    "\u001b[31mowner/repo?token=private-value\u001b[0m\nforged",
+                activity: "waiting",
+                activityLabel: "Waiting",
+            }),
+        });
+
+        render(event({ type: "agent_start" }), {
+            ...context,
+            sessionID: "session\u001b[2J Bearer private-value",
+            title: "Task\r\nBearer private-value",
+        });
+
+        expect(output).not.toContain("private-value");
+        expect(output).not.toContain("\u001b");
+        expect(output).not.toContain("Task\r\n");
+        expect(output).toContain("[REDACTED]");
+        expect(output.split("\n")[0]).toContain("forged");
+    });
+
     test("redacts streamed text and emits complete JSON events", () => {
         let output = "";
         const render = makePiTranscriptRenderer({
@@ -115,6 +195,12 @@ describe("Pi transcript rendering", () => {
                 output += text;
             },
             json: true,
+            getDisplayState: () => ({
+                repository: "must-not-be-added",
+                stage: "implementation",
+                activity: "waiting",
+                activityLabel: "Waiting",
+            }),
         });
 
         render(
@@ -140,6 +226,10 @@ describe("Pi transcript rendering", () => {
                 },
             },
         });
+        expect(parsed).not.toHaveProperty("repository");
+        expect(output.trimEnd().split("\n")).toHaveLength(1);
+        expect(output).not.toContain("must-not-be-added");
+        expect(output).not.toContain("╭─");
     });
 
     test("keeps interleaved streams readable and de-duplicates tool output", () => {
