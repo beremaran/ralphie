@@ -1,19 +1,128 @@
 name: Release
 
 on:
+  # Run validation for every tag so an unsupported tag fails explicitly rather
+  # than being ignored by the workflow trigger.
   push:
     tags:
-      - "v*"
+      - "**"
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Existing release tag (v<major>.<minor>.<patch>)"
+        required: true
+        type: string
+      ref:
+        description: "Full 40-character commit SHA targeted by the version tag"
+        required: true
+        type: string
+      dry_run:
+        description: "Validate and build artifacts without publishing a release or image"
+        required: false
+        default: true
+        type: boolean
 
-permissions:
-  contents: write
-  packages: write
+# Jobs must opt into their small, explicit permission set.
+permissions: {}
 
 jobs:
+  validate:
+    name: Validate release context
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.release-context.outputs.version }}
+      tag: ${{ steps.release-context.outputs.tag }}
+      source_ref: ${{ steps.release-context.outputs.source_ref }}
+      dry_run: ${{ steps.release-context.outputs.dry_run }}
+    steps:
+      - name: Check out requested source
+        uses: actions/checkout@v4
+        with:
+          # A manual run must never silently check out the workflow's default
+          # branch. The validation step below proves this ref is the tag's
+          # commit before any later job can run.
+          ref: ${{ github.event_name == 'push' && github.ref || inputs.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate and resolve release context
+        id: release-context
+        env:
+          RELEASE_VERSION: ${{ github.event_name == 'push' && github.ref_name || inputs.version }}
+          RELEASE_REF: ${{ github.event_name == 'push' && github.sha || inputs.ref }}
+          RELEASE_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+        run: |
+          set -euo pipefail
+
+          # This is the deliberately narrow release grammar. Numeric
+          # components cannot have leading zeroes, and prerelease/build
+          # suffixes are not release versions.
+          if [[ ! "$RELEASE_VERSION" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Unsupported release tag: $RELEASE_VERSION" >&2
+            echo 'Expected v<major>.<minor>.<patch>, for example v0.1.0.' >&2
+            exit 1
+          fi
+
+          if [[ "$RELEASE_DRY_RUN" != true && "$RELEASE_DRY_RUN" != false ]]; then
+            echo "dry_run must resolve to true or false" >&2
+            exit 1
+          fi
+
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+            # A manual run must be started from the same protected tag it is
+            # releasing; the input SHA is then checked against that tag below.
+            if [[ "$GITHUB_REF" != "refs/tags/$RELEASE_VERSION" ]]; then
+              echo "workflow_dispatch must be run from the version tag $RELEASE_VERSION" >&2
+              exit 1
+            fi
+            if [[ ! "$RELEASE_REF" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "workflow_dispatch ref must be a 40-character lowercase commit SHA" >&2
+              exit 1
+            fi
+          elif [[ "$GITHUB_REF" != "refs/tags/$RELEASE_VERSION" ]]; then
+            echo "The push ref is not the validated release tag" >&2
+            exit 1
+          fi
+
+          # This is the invariant that makes the validated commit stable
+          # through the build and publication jobs. A read-then-publish API
+          # check cannot close the race with a tag update.
+          if [[ "$GITHUB_REF_PROTECTED" != true ]]; then
+            echo "The release tag must be protected against updates and deletions" >&2
+            exit 1
+          fi
+
+          tag_commit="$(git rev-parse --verify "refs/tags/$RELEASE_VERSION^{commit}" 2>/dev/null)" || {
+            echo "Release tag $RELEASE_VERSION does not exist in the checkout" >&2
+            exit 1
+          }
+          source_commit="$(git rev-parse --verify "${RELEASE_REF}^{commit}" 2>/dev/null)" || {
+            echo "Release ref $RELEASE_REF is not a commit" >&2
+            exit 1
+          }
+
+          if [[ "$source_commit" != "$tag_commit" ]]; then
+            echo "Release ref $RELEASE_REF does not target $RELEASE_VERSION ($tag_commit)" >&2
+            exit 1
+          fi
+
+          # Downstream jobs consume only these canonical values: the package
+          # version without v, and the immutable commit targeted by the tag.
+          {
+            echo "version=${RELEASE_VERSION#v}"
+            echo "tag=$RELEASE_VERSION"
+            echo "source_ref=$tag_commit"
+            echo "dry_run=$RELEASE_DRY_RUN"
+          } >> "$GITHUB_OUTPUT"
+
   build-binaries:
     name: ${{ matrix.name }} (${{ matrix.arch }})
+    needs: validate
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -24,10 +133,15 @@ jobs:
           - { name: linux, os: ubuntu-latest, arch: x64 }
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.source_ref }}
+          persist-credentials: false
 
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.14
+
+      - run: bun install --frozen-lockfile
 
       # Native builds target the host OS/arch, so arm64 and x64 must be built
       # on runners of that architecture where possible.
@@ -37,46 +151,86 @@ jobs:
       - name: Rename asset
         run: mv dist/cli "ralphie-${{ matrix.name }}-${{ matrix.arch }}"
 
-      - name: Upload release asset
-        uses: actions/upload-release-asset@v1
+      # Artifacts are only staging. The token cannot publish a release asset.
+      - name: Stage release asset
+        uses: actions/upload-artifact@v4
         with:
-          upload_url: "${{ github.event.repo.upload_url }}"
-          asset_path: "ralphie-${{ matrix.name }}-${{ matrix.arch }}"
-          asset_name: "ralphie-${{ matrix.name }}-${{ matrix.arch }}"
-          asset_content_type: application/octet-stream
-        env:
-          GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+          name: ralphie-${{ needs.validate.outputs.version }}-${{ matrix.name }}-${{ matrix.arch }}
+          path: "ralphie-${{ matrix.name }}-${{ matrix.arch }}"
+          if-no-files-found: error
+          # Keep staged inputs through the protected-environment approval
+          # window; 90 days is the maximum GitHub Actions artifact lifetime.
+          retention-days: 90
 
-  docker:
-    name: Publish Docker image
+  publish:
+    name: Publish release and container
+    needs:
+      - validate
+      - build-binaries
+    if: needs.validate.outputs.dry_run == 'false'
     runs-on: ubuntu-latest
+    # Configure this environment in repository settings with required
+    # reviewers. Its protection gate is the only approval before publication.
+    environment:
+      name: release
+      url: https://github.com/${{ github.repository }}/releases/tag/${{ needs.validate.outputs.tag }}
+    permissions:
+      contents: write
+      packages: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.source_ref }}
+          persist-credentials: false
+
+      - name: Download staged binaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ralphie-${{ needs.validate.outputs.version }}-*
+          path: release-assets
+          merge-multiple: true
+
+      # The release tag is protected against updates/deletions, so the
+      # validated source_ref remains bound to TAG through this request.
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.validate.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" release-assets/* \
+            --verify-tag \
+            --generate-notes \
+            --title "$TAG"
 
       - uses: docker/setup-buildx-action@v3
 
-      - uses: docker/login-action@v3
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
-          username: "${{ github.actor }}"
-          password: "${{ secrets.GITHUB_TOKEN }}"
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Derive tags
+      - name: Derive container tags
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/beremaran/ralphie
           tags: |
-            type=ref,event=tag
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha,prefix=sha-
+            type=semver,pattern={{version}},value=v${{ needs.validate.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=v${{ needs.validate.outputs.version }}
+            type=raw,value=sha-${{ needs.validate.outputs.source_ref }}
+          labels: |
+            org.opencontainers.image.revision=${{ needs.validate.outputs.source_ref }}
 
-      - name: Build and push
+      # The same protected-tag invariant applies to the registry publication;
+      # a separate API recheck would leave a check-then-use race.
+      - name: Build and push container
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          tags: "${{ steps.meta.outputs.tags }}"
-          labels: "${{ steps.meta.outputs.labels }}"
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64,linux/arm64

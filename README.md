@@ -648,3 +648,26 @@ Ralphie follows [Semantic Versioning](https://semver.org/). Until 1.0, minor
 releases may change the CLI or persisted state schema; patch releases should
 remain backward compatible. Release candidates must pass `bun run check` and
 document notable changes in [`CHANGELOG.md`](./CHANGELOG.md).
+
+The release workflow accepts only strict tags of the form
+`v<major>.<minor>.<patch>`, with numeric components that have no leading zeroes
+(`v0.1.0` is valid). Prerelease and build suffixes are not accepted. Every run
+resolves the tag to its immutable commit before building; a manual dispatch
+must be started from the matching protected `version` tag and provide its full
+40-character lowercase commit `ref`. A mismatched ref fails before release or
+registry publication rather than falling back to the default branch.
+
+The repository must enforce that binding with an active tag ruleset covering
+`v*`. Configure **Settings → Rules → Rulesets** to target tags matching `v*`,
+restrict both tag updates and deletions, and configure no bypass actors. The
+workflow requires the triggering ref to report as protected before it builds;
+this protection, rather than a non-atomic API recheck, closes the check/use
+race between validation and publication.
+
+Manual dispatches default to `dry_run: true`. A dry run validates the context
+and builds staged binary artifacts but skips GitHub Release and GHCR
+publication. A normal tag push is not a dry run. Non-dry publication runs in
+the protected GitHub `release` environment. Repository administrators must
+configure that environment in **Settings → Environments → release** with the
+required reviewer(s); approval is required before the final publisher can
+write release assets or packages.
