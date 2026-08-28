@@ -2,9 +2,20 @@
 # Install the standalone Ralphie binary.
 #
 # Usage:
-#   sh scripts/install.sh            # installs to $HOME/.local/bin
-#   sh scripts/install.sh /usr/local/bin
-#   RALPHIE_VERSION=latest sh scripts/install.sh
+#   curl -fsSL https://raw.githubusercontent.com/beremaran/ralphie/main/scripts/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/beremaran/ralphie/main/scripts/install.sh -o install-ralphie.sh
+#   sh install-ralphie.sh
+#   curl -fsSL https://raw.githubusercontent.com/beremaran/ralphie/main/scripts/install.sh | sh -s -- /usr/local/bin
+#   curl -fsSL https://raw.githubusercontent.com/beremaran/ralphie/main/scripts/install.sh | RALPHIE_VERSION=0.1.0 sh
+#   curl -fsSL https://raw.githubusercontent.com/beremaran/ralphie/main/scripts/install.sh | RALPHIE_VERSION=v0.1.0 sh
+#
+# With no destination argument, installs exactly to $HOME/.local/bin. One
+# optional positional argument selects the destination directory; it must be
+# writable. For the default destination, add it to PATH persistently and load
+# the change before running `ralphie --version`:
+#   echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.profile"
+#   . "$HOME/.profile"
+#   ralphie --version
 #
 # The release asset name is derived from the current platform:
 #   ralphie-<os>-<arch>  (e.g. ralphie-darwin-arm64)

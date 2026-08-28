@@ -57,6 +57,53 @@ it is not read from the runtime environment. Local builds use the documented
 
 ## Installation
 
+### Install the standalone release
+
+The standalone installer downloads and verifies the native release binary for
+macOS or Linux. It uses this stable, unauthenticated repository entry point
+and installs the latest release by default:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/beremaran/ralphie/main/scripts/install.sh | sh
+```
+
+To download the script before running it, save it locally so you can inspect it
+first:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/beremaran/ralphie/main/scripts/install.sh \
+  -o install-ralphie.sh
+sh install-ralphie.sh
+```
+
+With no positional argument, the installer creates the destination if needed
+and installs exactly to `$HOME/.local/bin`. The optional positional argument is
+a destination directory; for example, this installs to `/usr/local/bin` when
+that directory is writable:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/beremaran/ralphie/main/scripts/install.sh | sh -s -- /usr/local/bin
+```
+
+To pin a release, set `RALPHIE_VERSION` to either `0.1.0` or `v0.1.0` on the
+installer process:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/beremaran/ralphie/main/scripts/install.sh | RALPHIE_VERSION=0.1.0 sh
+```
+
+Add the installation directory to `PATH` persistently, then load the change in
+the current shell before verifying the command:
+
+```bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.profile"
+. "$HOME/.profile"
+ralphie --version
+```
+
+If your shell uses a different startup file, add the same `export PATH=...`
+line there instead.
+
 ### Run the published package
 
 Use Bun's package runner to run the latest published version without a global
@@ -69,9 +116,9 @@ bunx @beremaran/ralphie --version
 The `@beremaran` scope is intentional. Do not substitute the unrelated
 unscoped npm package named `ralphie`; use `@beremaran/ralphie` for this CLI.
 
-### Install from source
+### Alternative: install from source
 
-For development or to run the current checkout:
+For development or to run the current checkout instead of a standalone release:
 
 ```bash
 git clone https://github.com/beremaran/ralphie.git
