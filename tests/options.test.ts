@@ -3,7 +3,10 @@ import { describe, expect, test } from "bun:test";
 import { IssueOrder, IssueSort } from "../src/github/issues.ts";
 import {
     DEFAULT_WORKSPACE,
+    DEFAULT_EXECUTION_MODE,
     DEFAULT_WORKFLOW_MODE,
+    ExecutionMode,
+    parsePipelineTimeout,
     resolveRalphieConfig,
     WorkflowMode,
 } from "../src/options.ts";
@@ -22,6 +25,7 @@ describe("CLI configuration", () => {
             }),
         ).toEqual({
             repo: "owner/repo",
+            mode: DEFAULT_EXECUTION_MODE,
             workflow: DEFAULT_WORKFLOW_MODE,
             issueLabels: [],
             issueSort: IssueSort.Created,
@@ -106,6 +110,57 @@ describe("CLI configuration", () => {
         });
     });
 
+    test("resolves pipeline mode with its own defaults and options", () => {
+        expect(
+            resolveRalphieConfig({
+                repo: "owner/repo",
+                mode: ExecutionMode.GetPipelinesGreen,
+            }),
+        ).toMatchObject({
+            mode: ExecutionMode.GetPipelinesGreen,
+            maxAttempts: 3,
+        });
+
+        expect(
+            resolveRalphieConfig({
+                repo: "owner/repo",
+                mode: ExecutionMode.GetPipelinesGreen,
+                maxAttempts: 5,
+                pipelineTimeout: parsePipelineTimeout("10m"),
+            }),
+        ).toEqual({
+            repo: "owner/repo",
+            mode: ExecutionMode.GetPipelinesGreen,
+            maxAttempts: 5,
+            pipelineTimeout: { value: 10, unit: "minutes" },
+            agent: "build",
+            workspace: DEFAULT_WORKSPACE,
+            cleanStart: false,
+            cleanEnd: false,
+            dryRun: false,
+            verbose: false,
+            json: false,
+            quiet: false,
+        });
+    });
+
+    test("rejects options from the other execution mode", () => {
+        expect(() =>
+            resolveRalphieConfig({
+                repo: "owner/repo",
+                mode: ExecutionMode.GetPipelinesGreen,
+                maxIssues: 1,
+            }),
+        ).toThrow("--max-issues");
+        expect(() =>
+            resolveRalphieConfig({
+                repo: "owner/repo",
+                mode: ExecutionMode.Issues,
+                maxAttempts: 1,
+            }),
+        ).toThrow("--max-attempts");
+    });
+
     test("rejects incompatible output modes", () => {
         expect(() =>
             resolveRalphieConfig({
@@ -114,5 +169,21 @@ describe("CLI configuration", () => {
                 quiet: true,
             }),
         ).toThrow("JSON and quiet output modes cannot be enabled together.");
+    });
+
+    test("parses only positive integer pipeline durations", () => {
+        expect(parsePipelineTimeout("30s")).toEqual({
+            value: 30,
+            unit: "seconds",
+        });
+        expect(parsePipelineTimeout("2h")).toEqual({
+            value: 2,
+            unit: "hours",
+        });
+        for (const value of ["0s", "30", "1.5h", "2ms", " 30s", "30s "]) {
+            expect(() => parsePipelineTimeout(value)).toThrow(
+                "--pipeline-timeout",
+            );
+        }
     });
 });

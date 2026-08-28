@@ -4,8 +4,13 @@ import { z } from "zod";
 
 import {
     type CleanWhen,
+    DEFAULT_EXECUTION_MODE,
+    ExecutionMode,
+    parsePipelineTimeout,
     type ResolvedRalphieConfig,
     resolveRalphieConfig,
+    type IssueRalphieConfig,
+    validateRalphieCliOptions,
     WorkflowMode,
 } from "./options.ts";
 import { IssueOrder, IssueSort } from "./github/issues.ts";
@@ -26,11 +31,14 @@ import { reconcileRunState } from "./run/reconciliation.ts";
 import { resolveWorkspacePath } from "./workspace/workspace.ts";
 
 const cliOptions = {
+    mode: { type: "string" },
     branch: { type: "string", short: "b" },
     workflow: { type: "string" },
     "max-issues": { type: "string" },
     "issue-label": { type: "string", multiple: true },
     "issue-sort": { type: "string" },
+    "max-attempts": { type: "string" },
+    "pipeline-timeout": { type: "string" },
     model: { type: "string" },
     thinking: { type: "string" },
     "pi-dir": { type: "string" },
@@ -107,6 +115,106 @@ const parseIssueSort = (
     return { issueSort: sort, issueOrder: order };
 };
 
+const parseIssueLabels = (
+    values: Record<string, unknown>,
+): ReadonlyArray<string> | undefined => {
+    const labels = values["issue-label"];
+    if (labels === undefined) return undefined;
+    if (!Array.isArray(labels) && typeof labels !== "string") {
+        throw new Error("Option --issue-label requires a value.");
+    }
+    return (Array.isArray(labels) ? labels : [labels]).map((label) =>
+        z.string().trim().min(1).parse(label),
+    );
+};
+
+const validateExplicitModeOptions = (
+    values: Record<string, unknown>,
+    mode: ExecutionMode,
+): void => {
+    if (mode === ExecutionMode.GetPipelinesGreen) {
+        validateRalphieCliOptions({
+            mode,
+            maxIssues: values["max-issues"] === undefined ? undefined : 1,
+            issueLabels: values["issue-label"] === undefined ? undefined : [],
+            issueSort:
+                values["issue-sort"] === undefined
+                    ? undefined
+                    : IssueSort.Created,
+            workflow:
+                values.workflow === undefined ? undefined : WorkflowMode.Lgtm,
+        });
+        return;
+    }
+
+    validateRalphieCliOptions({
+        mode,
+        maxAttempts: values["max-attempts"] === undefined ? undefined : 1,
+        pipelineTimeout:
+            values["pipeline-timeout"] === undefined
+                ? undefined
+                : { value: 1, unit: "seconds" },
+    });
+};
+
+const parseCliOptions = (
+    values: Record<string, unknown>,
+    repo: string | undefined,
+): Parameters<typeof resolveRalphieConfig>[0] => {
+    const modeValue = asNonEmptyString(values, "mode");
+    const mode =
+        modeValue === undefined
+            ? DEFAULT_EXECUTION_MODE
+            : z.enum(ExecutionMode).parse(modeValue);
+    validateExplicitModeOptions(values, mode);
+
+    const modelValue = asString(values, "model");
+    const issueSortValue = asNonEmptyString(values, "issue-sort");
+    const thinkingValue = asNonEmptyString(values, "thinking");
+    const pipelineTimeoutValue = asString(values, "pipeline-timeout");
+    const cleanValue = asNonEmptyString(values, "clean");
+    const rawOutput = asNonEmptyString(values, "output");
+    const outputValue =
+        rawOutput === undefined ? undefined : outputModeSchema.parse(rawOutput);
+
+    return {
+        repo,
+        mode,
+        branch: asString(values, "branch"),
+        workflow:
+            asString(values, "workflow") === undefined
+                ? undefined
+                : z.enum(WorkflowMode).parse(asString(values, "workflow")),
+        maxIssues: asNumber(values, "max-issues"),
+        issueLabels: parseIssueLabels(values),
+        ...(issueSortValue === undefined ? {} : parseIssueSort(issueSortValue)),
+        maxAttempts: asNumber(values, "max-attempts"),
+        pipelineTimeout:
+            pipelineTimeoutValue === undefined
+                ? undefined
+                : parsePipelineTimeout(pipelineTimeoutValue),
+        model:
+            modelValue === undefined
+                ? undefined
+                : piModelSchema.parse(modelValue),
+        thinking:
+            thinkingValue === undefined
+                ? undefined
+                : piModelVariantSchema.parse(thinkingValue),
+        piDir: asNonEmptyString(values, "pi-dir"),
+        workspace: asNonEmptyString(values, "workspace"),
+        clean:
+            cleanValue === undefined
+                ? undefined
+                : cleanWhenSchema.parse(cleanValue),
+        dryRun: asBoolean(values, "dry-run"),
+        resume: asNonEmptyString(values, "resume"),
+        verbose: outputValue === "verbose",
+        json: outputValue === "json",
+        quiet: outputValue === "quiet",
+    };
+};
+
 /** Parse the public `ralphie <repository> [options]` command line. */
 export const parseCliArgs = (args: ReadonlyArray<string>): ParsedCli => {
     const parsed = parseArgs({
@@ -120,63 +228,12 @@ export const parseCliArgs = (args: ReadonlyArray<string>): ParsedCli => {
     }
 
     const values = parsed.values as Record<string, unknown>;
-    const labels = values["issue-label"];
-    if (
-        labels !== undefined &&
-        !Array.isArray(labels) &&
-        typeof labels !== "string"
-    ) {
-        throw new Error("Option --issue-label requires a value.");
-    }
-    const issueLabels =
-        labels === undefined
-            ? undefined
-            : (Array.isArray(labels) ? labels : [labels]).map((label) =>
-                  z.string().trim().min(1).parse(label),
-              );
-    const modelValue = asString(values, "model");
-    const issueSortValue = asNonEmptyString(values, "issue-sort");
-    const thinkingValue = asNonEmptyString(values, "thinking");
-    const cleanValue = asNonEmptyString(values, "clean");
-    const rawOutput = asNonEmptyString(values, "output");
-    const outputValue =
-        rawOutput === undefined ? undefined : outputModeSchema.parse(rawOutput);
-
+    const options = parseCliOptions(values, parsed.positionals[0]);
+    validateRalphieCliOptions(options);
     return {
         help: asBoolean(values, "help"),
         version: asBoolean(values, "version"),
-        options: {
-            repo: parsed.positionals[0],
-            branch: asString(values, "branch"),
-            workflow:
-                asString(values, "workflow") === undefined
-                    ? undefined
-                    : z.enum(WorkflowMode).parse(asString(values, "workflow")),
-            maxIssues: asNumber(values, "max-issues"),
-            issueLabels,
-            ...(issueSortValue === undefined
-                ? {}
-                : parseIssueSort(issueSortValue)),
-            model:
-                modelValue === undefined
-                    ? undefined
-                    : piModelSchema.parse(modelValue),
-            thinking:
-                thinkingValue === undefined
-                    ? undefined
-                    : piModelVariantSchema.parse(thinkingValue),
-            piDir: asNonEmptyString(values, "pi-dir"),
-            workspace: asNonEmptyString(values, "workspace"),
-            clean:
-                cleanValue === undefined
-                    ? undefined
-                    : cleanWhenSchema.parse(cleanValue),
-            dryRun: asBoolean(values, "dry-run"),
-            resume: asNonEmptyString(values, "resume"),
-            verbose: outputValue === "verbose",
-            json: outputValue === "json",
-            quiet: outputValue === "quiet",
-        },
+        options,
     };
 };
 
@@ -215,14 +272,17 @@ const resolveProgressMode = (
 
 export const HELP_TEXT = `Usage: ralphie <owner/repository> [options]
 
-Run a GitHub issue queue through Pi.
+Run an issue queue or get-pipelines-green through Pi.
 
 Options:
   -b, --branch <name>          Branch to operate on
-      --workflow <mode>        lgtm or pr
+      --mode <mode>            issues (default) or get-pipelines-green
+      --workflow <mode>        Issue workflow: lgtm or pr
       --max-issues <n>         Maximum issues to process
       --issue-label <label>    Include only issues with this label (repeatable)
       --issue-sort <sort>      created, updated, or comments, optionally :asc or :desc
+      --max-attempts <n>       Pipeline attempts (positive; default 3)
+      --pipeline-timeout <t>  Pipeline timeout: e.g. 30s, 10m, or 2h
       --model <provider/model> Pi model selection
       --thinking <level>       Pi thinking level: off, minimal, low, medium, high, xhigh, or max
       --pi-dir <path>          Existing Pi agent directory
@@ -296,7 +356,7 @@ const makeCommandCoordinator = (
     });
 
 const workflowOptionsFor = (
-    config: ResolvedRalphieConfig,
+    config: IssueRalphieConfig,
     input: RunCommandInput,
     runId: string,
     resumeState: RunState | undefined,
@@ -339,20 +399,29 @@ export const runCommand = async (
     }
 
     const config = resolveRalphieConfig(parsed.options);
-    const resumeState = await loadResumeState(config);
+    if (config.mode === ExecutionMode.GetPipelinesGreen) {
+        throw new Error(
+            "The get-pipelines-green execution mode is not implemented yet.",
+        );
+    }
+    const issueConfig: IssueRalphieConfig = config;
+    const resumeState = await loadResumeState(issueConfig);
 
     const terminal = input.terminal ?? terminalInfo();
     const runId = resumeState?.runId ?? crypto.randomUUID();
     let coordinator: ProgressCoordinator | undefined;
 
     try {
-        coordinator = makeCommandCoordinator(config, terminal, runId);
+        coordinator = makeCommandCoordinator(issueConfig, terminal, runId);
         const runtime = makeLiveRuntime({
-            pi: makePiService(resolvePiConfig(config), coordinator.piListener),
+            pi: makePiService(
+                resolvePiConfig(issueConfig),
+                coordinator.piListener,
+            ),
             progress: coordinator.progress,
         });
         await workflow(
-            workflowOptionsFor(config, input, runId, resumeState),
+            workflowOptionsFor(issueConfig, input, runId, resumeState),
             runtime,
         );
     } catch (error) {

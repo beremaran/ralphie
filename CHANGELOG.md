@@ -7,6 +7,9 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Added
 
+- Discriminated top-level CLI configuration for issue and
+  `get-pipelines-green` modes, including bounded attempts and strict pipeline
+  timeout values.
 - Read-only issue grounding with a persisted needs-attention escape hatch, so
   dependency-blocked issues remain open while later queue items continue.
 - Native Bun CLI foundation with GitHub, Git, workspace, and Pi domain

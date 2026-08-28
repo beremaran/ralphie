@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { parseCliArgs } from "../src/command.ts";
-import { WorkflowMode } from "../src/options.ts";
+import { ExecutionMode, WorkflowMode } from "../src/options.ts";
 import { IssueOrder, IssueSort } from "../src/github/issues.ts";
 
 describe("native CLI parser", () => {
@@ -22,10 +22,29 @@ describe("native CLI parser", () => {
         expect(parsed.version).toBe(false);
         expect(parsed.options).toMatchObject({
             repo: "owner/repository",
+            mode: ExecutionMode.Issues,
             workflow: WorkflowMode.Pr,
             issueLabels: ["bug", "ready"],
             maxIssues: 3,
             dryRun: true,
+        });
+    });
+
+    test("parses pipeline mode and its options", () => {
+        expect(
+            parseCliArgs([
+                "owner/repository",
+                "--mode",
+                "get-pipelines-green",
+                "--max-attempts",
+                "5",
+                "--pipeline-timeout",
+                "10m",
+            ]).options,
+        ).toMatchObject({
+            mode: ExecutionMode.GetPipelinesGreen,
+            maxAttempts: 5,
+            pipelineTimeout: { value: 10, unit: "minutes" },
         });
     });
 
@@ -34,6 +53,46 @@ describe("native CLI parser", () => {
             "Unexpected argument",
         );
         expect(() => parseCliArgs(["owner/repository", "--unknown"])).toThrow();
+    });
+
+    test("rejects non-positive pipeline attempt counts", () => {
+        expect(() =>
+            parseCliArgs([
+                "owner/repository",
+                "--mode",
+                "get-pipelines-green",
+                "--max-attempts",
+                "0",
+            ]),
+        ).toThrow();
+    });
+
+    test("rejects issue flags in pipeline mode and pipeline flags in issue mode", () => {
+        expect(() =>
+            parseCliArgs([
+                "owner/repository",
+                "--mode",
+                "get-pipelines-green",
+                "--issue-sort",
+                "invalid",
+            ]),
+        ).toThrow(
+            "Option --issue-sort is only available in issues mode and cannot be used with --mode get-pipelines-green.",
+        );
+        expect(() =>
+            parseCliArgs([
+                "owner/repository",
+                "--mode",
+                "get-pipelines-green",
+                "--issue-label",
+                "",
+            ]),
+        ).toThrow(
+            "Option --issue-label is only available in issues mode and cannot be used with --mode get-pipelines-green.",
+        );
+        expect(() =>
+            parseCliArgs(["owner/repository", "--max-attempts", "2"]),
+        ).toThrow("--max-attempts");
     });
 
     test("parses compound issue sort and validates enums", () => {

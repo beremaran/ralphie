@@ -116,6 +116,8 @@ bun run index.ts owner/repository --dry-run --max-issues 1
 
 ### Run the issue pipeline
 
+The top-level `--mode` defaults to `issues`:
+
 ```bash
 ralphie owner/repository --max-issues 5
 ```
@@ -124,6 +126,17 @@ When no branch is configured, Ralphie uses `main` when it exists and otherwise
 `master`. With the default `created:asc` sort, issues are processed oldest-first;
 all issue work is sequential. Without `--max-issues`, the issue budget is
 unlimited.
+
+The `get-pipelines-green` mode is selected explicitly and keeps its retry
+settings separate from issue options:
+
+```bash
+ralphie owner/repository --mode get-pipelines-green \
+  --max-attempts 3 --pipeline-timeout 10m
+```
+
+`--pipeline-timeout` accepts a positive integer followed by `s`, `m`, or `h`.
+Issue-only options and pipeline-only options cannot be mixed between modes.
 
 The default `lgtm` workflow commits and pushes directly to the selected branch.
 The `pr` workflow creates and pushes a feature branch, opens or reuses a matching
