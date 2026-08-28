@@ -23,6 +23,20 @@ const checkpoint = {
     sha: "0123456789abcdef0123456789abcdef01234567",
 } as const;
 
+const pullRequestReview = (attempt: number, overrides = {}) => ({
+    pullRequestNumber: 42,
+    baseSha: "a".repeat(40),
+    reviewedHeadSha: "b".repeat(40),
+    attempt,
+    sessionID: `pr-session-${attempt}`,
+    decision: {
+        verdict: ReviewVerdict.Approved,
+        summary: "Approved.",
+        findings: [],
+    },
+    ...overrides,
+});
+
 const review = (attempt: number) => ({
     attempt,
     sessionID: `session-${attempt}`,
@@ -146,6 +160,127 @@ describe("per-issue artifact store", () => {
         await expect(makeIssueArtifactStore(0)).rejects.toThrow(
             "Cannot create",
         );
+    });
+
+    test("persists ordered PR review evidence and rejects malformed histories", async () => {
+        const store = await makeIssueArtifactStore(42);
+        await store.appendPullRequestReview(pullRequestReview(1));
+        await expect(
+            store.appendPullRequestReview(
+                pullRequestReview(2, { baseSha: "c".repeat(40) }),
+            ),
+        ).rejects.toThrow("does not match");
+        await store.write(
+            IssueArtifactKind.ApprovedPullRequestReviewEvidence,
+            pullRequestReview(1),
+        );
+        expect(
+            await store.read(
+                IssueArtifactKind.ApprovedPullRequestReviewEvidence,
+            ),
+        ).toMatchObject({ reviewedHeadSha: "b".repeat(40) });
+
+        await store.appendPullRequestReview(
+            pullRequestReview(2, { reviewedHeadSha: "d".repeat(40) }),
+        );
+        expect(
+            store.has(IssueArtifactKind.ApprovedPullRequestReviewEvidence),
+        ).toBe(false);
+    });
+
+    test("rejects approval evidence that does not match a stored attempt", async () => {
+        const store = await makeIssueArtifactStore(42);
+        await store.appendPullRequestReview(pullRequestReview(1));
+        await expect(
+            store.write(
+                IssueArtifactKind.ApprovedPullRequestReviewEvidence,
+                pullRequestReview(1, {
+                    reviewedHeadSha: "c".repeat(40),
+                }),
+            ),
+        ).rejects.toThrow("must match a stored approved attempt");
+    });
+
+    test("rejects stale PR approval evidence when loading durable state", async () => {
+        const workspace = await mkdtemp(join(tmpdir(), "ralphie-artifacts-"));
+        try {
+            const artifactDirectory = join(
+                workspace,
+                ".ralphie",
+                "runs",
+                "stale-approval",
+                "issues",
+                "42",
+            );
+            await mkdir(artifactDirectory, { recursive: true });
+            await writeFile(
+                join(artifactDirectory, "artifacts.json"),
+                JSON.stringify({
+                    version: 3,
+                    issueNumber: 42,
+                    repository: "owner/repo",
+                    artifacts: {
+                        [IssueArtifactKind.PullRequestReviewAttempts]: [
+                            pullRequestReview(1),
+                        ],
+                        [IssueArtifactKind.ApprovedPullRequestReviewEvidence]:
+                            pullRequestReview(1, {
+                                reviewedHeadSha: "c".repeat(40),
+                            }),
+                    },
+                }),
+            );
+            await expect(
+                makeDurableIssueArtifactStore(42, {
+                    workspace,
+                    runId: "stale-approval",
+                    repository: "owner/repo",
+                }),
+            ).rejects.toThrow("Failed to load issue artifacts");
+        } finally {
+            await rm(workspace, { recursive: true, force: true });
+        }
+    });
+
+    test("rejects malformed PR review histories when loading durable state", async () => {
+        const workspace = await mkdtemp(join(tmpdir(), "ralphie-artifacts-"));
+        try {
+            const artifactDirectory = join(
+                workspace,
+                ".ralphie",
+                "runs",
+                "malformed",
+                "issues",
+                "42",
+            );
+            await mkdir(artifactDirectory, { recursive: true });
+            await writeFile(
+                join(artifactDirectory, "artifacts.json"),
+                JSON.stringify({
+                    version: 3,
+                    issueNumber: 42,
+                    repository: "owner/repo",
+                    artifacts: {
+                        [IssueArtifactKind.PullRequestReviewAttempts]: [
+                            pullRequestReview(1),
+                            pullRequestReview(1, {
+                                pullRequestNumber: 99,
+                                baseSha: "c".repeat(40),
+                            }),
+                        ],
+                    },
+                }),
+            );
+            await expect(
+                makeDurableIssueArtifactStore(42, {
+                    workspace,
+                    runId: "malformed",
+                    repository: "owner/repo",
+                }),
+            ).rejects.toThrow("Failed to load issue artifacts");
+        } finally {
+            await rm(workspace, { recursive: true, force: true });
+        }
     });
 
     test("keeps stores isolated by issue while reusing a store for that issue", async () => {

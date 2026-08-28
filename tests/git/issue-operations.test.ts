@@ -10,6 +10,7 @@ import {
     GitPushFailurePolicy,
     type GitPushFailureKind,
     makeGitIssueOperationsService,
+    MAX_COMMITTED_DIFF_BYTES,
 } from "../../src/git/issue-operations.ts";
 
 const runGit = (
@@ -72,6 +73,78 @@ describe("deterministic Git issue operations", () => {
             expect(actualDiff).toBe(expectedDiff);
             expect(actualDiff).toContain("GIT binary patch");
             expect(actualDiff).toContain("untracked.txt");
+        } finally {
+            await rm(repositoryPath, { recursive: true, force: true });
+        }
+    });
+
+    test("reads the exact committed SHA range with binary patches and ignores the index", async () => {
+        const repositoryPath = await setupRepository();
+        try {
+            const baseSha = (
+                await runGit(repositoryPath, ["rev-parse", "HEAD"])
+            ).stdout;
+            await writeFile(
+                join(repositoryPath, "binary.dat"),
+                Buffer.from([0, 9, 8, 7]),
+            );
+            await runGit(repositoryPath, ["add", "--all"]);
+            await runGit(repositoryPath, ["commit", "-m", "binary change"]);
+            const headSha = (
+                await runGit(repositoryPath, ["rev-parse", "HEAD"])
+            ).stdout;
+            await writeFile(join(repositoryPath, "stale.txt"), "staged only\n");
+            await runGit(repositoryPath, ["add", "--all"]);
+
+            const patch =
+                await makeGitIssueOperationsService().readCommittedBinaryDiff(
+                    repositoryPath,
+                    baseSha,
+                    headSha,
+                );
+            expect(patch).toContain("GIT binary patch");
+            expect(patch).not.toContain("stale.txt");
+            expect(patch).toBe(
+                (
+                    await runGit(
+                        repositoryPath,
+                        [
+                            "diff",
+                            "--binary",
+                            "--no-ext-diff",
+                            `${baseSha}..${headSha}`,
+                        ],
+                        false,
+                    )
+                ).stdout,
+            );
+        } finally {
+            await rm(repositoryPath, { recursive: true, force: true });
+        }
+    });
+
+    test("rejects committed patches over the documented byte limit", async () => {
+        const repositoryPath = await setupRepository();
+        try {
+            const baseSha = (
+                await runGit(repositoryPath, ["rev-parse", "HEAD"])
+            ).stdout;
+            await writeFile(
+                join(repositoryPath, "large.txt"),
+                "x".repeat(MAX_COMMITTED_DIFF_BYTES + 1),
+            );
+            await runGit(repositoryPath, ["add", "--all"]);
+            await runGit(repositoryPath, ["commit", "-m", "large change"]);
+            const headSha = (
+                await runGit(repositoryPath, ["rev-parse", "HEAD"])
+            ).stdout;
+            await expect(
+                makeGitIssueOperationsService().readCommittedBinaryDiff(
+                    repositoryPath,
+                    baseSha,
+                    headSha,
+                ),
+            ).rejects.toThrow(`maximum is ${MAX_COMMITTED_DIFF_BYTES} bytes`);
         } finally {
             await rm(repositoryPath, { recursive: true, force: true });
         }

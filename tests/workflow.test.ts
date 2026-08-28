@@ -175,6 +175,15 @@ const testRuntime = (
         read: async () => {
             throw new RalphieError({ message: "unused" });
         },
+        readSnapshot: async () => {
+            throw new RalphieError({ message: "unused" });
+        },
+        rereadMatchingSnapshot: async () => {
+            throw new RalphieError({ message: "unused" });
+        },
+        publishPullRequestReviewAttempts: async () => {
+            throw new RalphieError({ message: "unused" });
+        },
         publishReviewAttempts: async (_client, repo, number) => {
             calls.push(`publishReviews:${repo}:${number}`);
         },
@@ -191,6 +200,7 @@ const testRuntime = (
     const operations: GitIssueOperationsService = {
         stageAll: async () => {},
         readStagedBinaryDiff: async () => "",
+        readCommittedBinaryDiff: async () => "",
         hasStagedChanges: async () => false,
         commit: async () => ({ sha: "a".repeat(40), treeSha: "b".repeat(40) }),
         push: async (_path, branch) => {

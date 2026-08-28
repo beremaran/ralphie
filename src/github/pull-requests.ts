@@ -1,5 +1,10 @@
 import type { Octokit } from "octokit";
 
+import {
+    gitObjectIdSchema,
+    pullRequestReviewAttemptSchema,
+    type PullRequestReviewAttempt,
+} from "../issues/pull-request-review.ts";
 import type { ReviewAttempt } from "../issues/recovery.ts";
 import { RalphieError } from "../shared/error.ts";
 import { parseRepositorySlug } from "./repository.ts";
@@ -13,6 +18,13 @@ export type CreateGitHubPullRequestInput = {
     readonly issueRepository?: string;
     readonly head: string;
     readonly base: string;
+};
+
+export type PullRequestSnapshot = {
+    readonly number: number;
+    readonly url: string;
+    readonly baseSha: string;
+    readonly headSha: string;
 };
 
 export type GitHubPullRequest = {
@@ -35,6 +47,23 @@ export type GitHubPullRequestService = {
         repository: string,
         pullRequestNumber: number,
     ) => Promise<GitHubPullRequest>;
+    /** Read immutable review inputs and verify this is still the same PR/base. */
+    readonly readSnapshot: (
+        client: Octokit,
+        repository: string,
+        pullRequestNumber: number,
+    ) => Promise<PullRequestSnapshot>;
+    readonly rereadMatchingSnapshot: (
+        client: Octokit,
+        repository: string,
+        snapshot: PullRequestSnapshot,
+    ) => Promise<PullRequestSnapshot>;
+    /** Publish head-scoped PR review evidence idempotently. */
+    readonly publishPullRequestReviewAttempts: (
+        client: Octokit,
+        repository: string,
+        attempts: ReadonlyArray<PullRequestReviewAttempt>,
+    ) => Promise<void>;
     /** Publish each review attempt at most once using its deterministic marker. */
     readonly publishReviewAttempts: (
         client: Octokit,
@@ -69,6 +98,10 @@ const isMerged = (pullRequest: {
 type PullRequestResponse = {
     readonly number: number;
     readonly html_url: string;
+    readonly base?: {
+        readonly ref?: string | null;
+        readonly sha?: string | null;
+    } | null;
     readonly merged?: boolean | null;
     readonly merged_at?: string | null;
     readonly head?: { readonly sha?: string | null } | null;
@@ -85,6 +118,30 @@ const mapPullRequest = (
         merged: isMerged(pullRequest),
         headSha,
     };
+};
+
+const mapPullRequestSnapshot = (
+    pullRequest: PullRequestResponse,
+): PullRequestSnapshot | undefined => {
+    const baseSha = gitObjectIdSchema.safeParse(pullRequest.base?.sha);
+    const headSha = gitObjectIdSchema.safeParse(pullRequest.head?.sha);
+    if (!baseSha.success || !headSha.success) return undefined;
+    return {
+        number: pullRequest.number,
+        url: pullRequest.html_url,
+        baseSha: baseSha.data,
+        headSha: headSha.data,
+    };
+};
+
+const requirePullRequestSnapshot = (
+    pullRequest: PullRequestResponse,
+): PullRequestSnapshot => {
+    const snapshot = mapPullRequestSnapshot(pullRequest);
+    if (snapshot) return snapshot;
+    throw new RalphieError({
+        message: `Pull request #${pullRequest.number} has no unambiguous base/head SHA.`,
+    });
 };
 
 const requireMappedPullRequest = (
@@ -109,6 +166,39 @@ const pullRequestBody = (input: CreateGitHubPullRequestInput): string => {
     const reference = issueReference(input);
     if (body.includes(reference)) return body;
     return body.length === 0 ? reference : `${body}\n\n${reference}`;
+};
+
+export const pullRequestReviewMarker = (
+    pullRequestNumber: number,
+    reviewedHeadSha: string,
+    attempt: number,
+): string =>
+    `<!-- ralphie:pr-review pr=${pullRequestNumber} head=${reviewedHeadSha} attempt=${attempt} -->`;
+
+const pullRequestReviewCommentBody = (
+    attempt: PullRequestReviewAttempt,
+): string =>
+    `${pullRequestReviewMarker(attempt.pullRequestNumber, attempt.reviewedHeadSha, attempt.attempt)}\n### Ralphie PR review attempt ${attempt.attempt}\n\n\`\`\`json\n${JSON.stringify(attempt, null, 2)}\n\`\`\``;
+
+const pullRequestReviewFromComment = (
+    body: string | null | undefined,
+): PullRequestReviewAttempt | undefined => {
+    const match = body?.match(
+        /<!-- ralphie:pr-review pr=(\d+) head=([0-9a-f]{40}(?:[0-9a-f]{24})?) attempt=(\d+) -->\s*[\s\S]*?```json\s*([\s\S]*?)\s*```/i,
+    );
+    if (!match) return undefined;
+    try {
+        const parsed = pullRequestReviewAttemptSchema.parse(
+            JSON.parse(match[4] ?? ""),
+        );
+        return parsed.pullRequestNumber === Number(match[1]) &&
+            parsed.reviewedHeadSha.toLowerCase() === match[2]?.toLowerCase() &&
+            parsed.attempt === Number(match[3])
+            ? parsed
+            : undefined;
+    } catch {
+        return undefined;
+    }
 };
 
 /** The marker is stable for an attempt, making retries safe after a lost response. */
@@ -149,6 +239,52 @@ const findMatchingPullRequest = (
 
 type ReviewAttemptParameters = ReturnType<typeof repositoryParameters> & {
     readonly issue_number: number;
+};
+
+const isSamePullRequestReview = (
+    published: PullRequestReviewAttempt,
+    expected: PullRequestReviewAttempt,
+): boolean =>
+    published.pullRequestNumber === expected.pullRequestNumber &&
+    published.baseSha.toLowerCase() === expected.baseSha.toLowerCase() &&
+    published.reviewedHeadSha.toLowerCase() ===
+        expected.reviewedHeadSha.toLowerCase() &&
+    published.attempt === expected.attempt &&
+    published.sessionID === expected.sessionID &&
+    JSON.stringify(published.decision) === JSON.stringify(expected.decision);
+
+const hasPublishedPullRequestReview = async (
+    client: Octokit,
+    parameters: ReviewAttemptParameters,
+    attempt: PullRequestReviewAttempt,
+): Promise<boolean> => {
+    const comments = await client.paginate(client.rest.issues.listComments, {
+        ...parameters,
+        per_page: 100,
+    });
+    return comments.some((comment) => {
+        const published = pullRequestReviewFromComment(comment.body);
+        return published ? isSamePullRequestReview(published, attempt) : false;
+    });
+};
+
+const publishPullRequestReview = async (
+    client: Octokit,
+    parameters: ReviewAttemptParameters,
+    attempt: PullRequestReviewAttempt,
+): Promise<void> => {
+    if (await hasPublishedPullRequestReview(client, parameters, attempt))
+        return;
+    try {
+        await client.rest.issues.createComment({
+            ...parameters,
+            body: pullRequestReviewCommentBody(attempt),
+        });
+    } catch (cause) {
+        if (await hasPublishedPullRequestReview(client, parameters, attempt))
+            return;
+        throw cause;
+    }
 };
 
 const hasPublishedReviewAttempt = async (
@@ -307,6 +443,57 @@ export const makeGitHubPullRequestService = (): GitHubPullRequestService => ({
         } catch (cause) {
             throw mutationError(
                 `Failed to read pull request #${pullRequestNumber} in ${repository}.`,
+                cause,
+            );
+        }
+    },
+
+    readSnapshot: async (client, repository, pullRequestNumber) => {
+        try {
+            const response = await client.rest.pulls.get({
+                ...repositoryParameters(repository),
+                pull_number: pullRequestNumber,
+            });
+            return requirePullRequestSnapshot(response.data);
+        } catch (cause) {
+            throw mutationError(
+                `Failed to read pull request #${pullRequestNumber} snapshot in ${repository}.`,
+                cause,
+            );
+        }
+    },
+
+    rereadMatchingSnapshot: async (client, repository, snapshot) => {
+        const response = await client.rest.pulls.get({
+            ...repositoryParameters(repository),
+            pull_number: snapshot.number,
+        });
+        const current = requirePullRequestSnapshot(response.data);
+        if (
+            current.number !== snapshot.number ||
+            current.baseSha !== snapshot.baseSha
+        ) {
+            throw new RalphieError({
+                message: `Pull request #${snapshot.number} no longer matches its captured base.`,
+            });
+        }
+        return current;
+    },
+
+    publishPullRequestReviewAttempts: async (client, repository, attempts) => {
+        try {
+            for (const rawAttempt of attempts) {
+                const attempt =
+                    pullRequestReviewAttemptSchema.parse(rawAttempt);
+                const parameters = {
+                    ...repositoryParameters(repository),
+                    issue_number: attempt.pullRequestNumber,
+                };
+                await publishPullRequestReview(client, parameters, attempt);
+            }
+        } catch (cause) {
+            throw mutationError(
+                "Failed to publish pull request review evidence.",
                 cause,
             );
         }

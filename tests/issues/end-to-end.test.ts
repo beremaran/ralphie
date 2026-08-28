@@ -144,6 +144,9 @@ const implementationDependencies = (
         }),
         restoreBaseCheckout: async () => {},
         ...operations,
+        readCommittedBinaryDiff:
+            operations.readCommittedBinaryDiff ??
+            (async () => "diff --git a/file b/file\n"),
     };
     const safety: GitRemoteSafetyService = {
         verifyDirectPush: async (input) => ({

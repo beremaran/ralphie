@@ -147,6 +147,9 @@ const services = (options: ServiceOptions = {}) => {
         }),
         restoreBaseCheckout: async () => {},
         ...options.operations,
+        readCommittedBinaryDiff:
+            options.operations?.readCommittedBinaryDiff ??
+            (async () => "diff --git a/file b/file\n"),
     };
     const recovery: IssueRecoveryService = {
         handleReviewExhaustion: async () => ({

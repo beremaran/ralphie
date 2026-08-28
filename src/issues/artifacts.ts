@@ -19,6 +19,13 @@ import {
     type IssueResolutionDecision,
     type NeedsAttentionDecision,
 } from "./decisions.ts";
+import {
+    approvedPullRequestReviewEvidenceSchema,
+    pullRequestReviewAttemptsSchema,
+    pullRequestReviewAttemptSchema,
+    type ApprovedPullRequestReviewEvidence,
+    type PullRequestReviewAttempt,
+} from "./pull-request-review.ts";
 import type { ReviewAttempt } from "./recovery.ts";
 import { REVIEW_ITERATION_LIMIT } from "./stage.ts";
 
@@ -26,6 +33,8 @@ export enum IssueArtifactKind {
     ComplexityDecision = "complexity-decision",
     IssueCheckpoint = "issue-checkpoint",
     ReviewAttempts = "review-attempts",
+    PullRequestReviewAttempts = "pull-request-review-attempts",
+    ApprovedPullRequestReviewEvidence = "approved-pull-request-review-evidence",
     CommitMessageDecision = "commit-message-decision",
     CreatedCommit = "created-commit",
     IssueResolutionDecision = "issue-resolution-decision",
@@ -61,6 +70,8 @@ export type IssueArtifactValues = {
     readonly [IssueArtifactKind.ComplexityDecision]: ComplexityDecision;
     readonly [IssueArtifactKind.IssueCheckpoint]: IssueCheckpoint;
     readonly [IssueArtifactKind.ReviewAttempts]: ReadonlyArray<ReviewAttempt>;
+    readonly [IssueArtifactKind.PullRequestReviewAttempts]: ReadonlyArray<PullRequestReviewAttempt>;
+    readonly [IssueArtifactKind.ApprovedPullRequestReviewEvidence]: ApprovedPullRequestReviewEvidence;
     readonly [IssueArtifactKind.CommitMessageDecision]: CommitMessageDecision;
     readonly [IssueArtifactKind.CreatedCommit]: {
         readonly sha: string;
@@ -83,6 +94,9 @@ export type IssueArtifactStore = {
     ) => Promise<IssueArtifactValues[K]>;
     readonly has: (kind: IssueArtifactKind) => boolean;
     readonly appendReview: (review: ReviewAttempt) => Promise<void>;
+    readonly appendPullRequestReview: (
+        review: PullRequestReviewAttempt,
+    ) => Promise<void>;
     readonly recordCreatedIssue: (
         key: string,
         issueNumber: number,
@@ -171,7 +185,62 @@ const createdCommitSchema = z.object({
     treeSha: z.string().min(1),
 });
 
-const persistedArtifactsV2Schema = z
+const matchingPullRequestApproval = (
+    attempts: ReadonlyArray<PullRequestReviewAttempt> | undefined,
+    evidence: ApprovedPullRequestReviewEvidence | undefined,
+): boolean =>
+    evidence === undefined ||
+    attempts?.some(
+        (attempt) =>
+            attempt.pullRequestNumber === evidence.pullRequestNumber &&
+            attempt.baseSha.toLowerCase() === evidence.baseSha.toLowerCase() &&
+            attempt.reviewedHeadSha.toLowerCase() ===
+                evidence.reviewedHeadSha.toLowerCase() &&
+            attempt.attempt === evidence.attempt &&
+            attempt.sessionID === evidence.sessionID &&
+            JSON.stringify(attempt.decision) ===
+                JSON.stringify(evidence.decision),
+    ) === true;
+
+const invalidateApprovalForDifferentHead = (
+    nextValues: Map<IssueArtifactKind, unknown>,
+    currentValues: ReadonlyMap<IssueArtifactKind, unknown>,
+    reviewedHeadSha: string,
+): void => {
+    const approval = currentValues.get(
+        IssueArtifactKind.ApprovedPullRequestReviewEvidence,
+    ) as ApprovedPullRequestReviewEvidence | undefined;
+    if (
+        approval !== undefined &&
+        approval.reviewedHeadSha.toLowerCase() !== reviewedHeadSha.toLowerCase()
+    ) {
+        nextValues.delete(IssueArtifactKind.ApprovedPullRequestReviewEvidence);
+    }
+};
+
+const validatePullRequestApproval = (
+    artifacts: {
+        readonly [IssueArtifactKind.PullRequestReviewAttempts]?: ReadonlyArray<PullRequestReviewAttempt>;
+        readonly [IssueArtifactKind.ApprovedPullRequestReviewEvidence]?: ApprovedPullRequestReviewEvidence;
+    },
+    context: z.RefinementCtx,
+): void => {
+    if (
+        !matchingPullRequestApproval(
+            artifacts[IssueArtifactKind.PullRequestReviewAttempts],
+            artifacts[IssueArtifactKind.ApprovedPullRequestReviewEvidence],
+        )
+    ) {
+        context.addIssue({
+            code: "custom",
+            message:
+                "Approved pull request review evidence must match a stored approved attempt.",
+            path: [IssueArtifactKind.ApprovedPullRequestReviewEvidence],
+        });
+    }
+};
+
+const persistedArtifactsV2BaseSchema = z
     .object({
         [IssueArtifactKind.ComplexityDecision]:
             complexityDecisionSchema.optional(),
@@ -180,6 +249,12 @@ const persistedArtifactsV2Schema = z
             .array(reviewAttemptSchema)
             .max(REVIEW_ITERATION_LIMIT)
             .optional(),
+        [IssueArtifactKind.PullRequestReviewAttempts]:
+            pullRequestReviewAttemptsSchema
+                .max(REVIEW_ITERATION_LIMIT)
+                .optional(),
+        [IssueArtifactKind.ApprovedPullRequestReviewEvidence]:
+            approvedPullRequestReviewEvidenceSchema.optional(),
         [IssueArtifactKind.CommitMessageDecision]:
             commitMessageDecisionSchema.optional(),
         [IssueArtifactKind.CreatedCommit]: createdCommitSchema.optional(),
@@ -193,12 +268,17 @@ const persistedArtifactsV2Schema = z
     })
     .strict();
 
-const persistedArtifactsSchema = persistedArtifactsV2Schema
+const persistedArtifactsV2Schema = persistedArtifactsV2BaseSchema.superRefine(
+    validatePullRequestApproval,
+);
+
+const persistedArtifactsSchema = persistedArtifactsV2BaseSchema
     .extend({
         [IssueArtifactKind.NeedsAttentionDecision]:
             needsAttentionDecisionArtifactSchema.optional(),
     })
-    .strict();
+    .strict()
+    .superRefine(validatePullRequestApproval);
 
 export const ISSUE_ARTIFACT_VERSION = 3 as const;
 
@@ -386,12 +466,18 @@ const validateArtifactValue = (
     kind: IssueArtifactKind,
     value: unknown,
 ): void => {
-    if (kind !== IssueArtifactKind.NeedsAttentionDecision) return;
+    const schema =
+        kind === IssueArtifactKind.NeedsAttentionDecision
+            ? needsAttentionDecisionArtifactSchema
+            : kind === IssueArtifactKind.ApprovedPullRequestReviewEvidence
+              ? approvedPullRequestReviewEvidenceSchema
+              : undefined;
+    if (!schema) return;
     try {
-        needsAttentionDecisionArtifactSchema.parse(value);
+        schema.parse(value);
     } catch (cause) {
         throw new RalphieError({
-            message: `Needs-attention decision for issue ${issueNumber} is invalid.`,
+            message: `Artifact ${kind} for issue ${issueNumber} is invalid.`,
             cause,
         });
     }
@@ -468,6 +554,19 @@ const makeStore = (
                     message: `Created issue numbers for issue ${issueNumber} must use non-empty keys and positive issue numbers.`,
                 });
             }
+            if (
+                kind === IssueArtifactKind.ApprovedPullRequestReviewEvidence &&
+                !matchingPullRequestApproval(
+                    values.get(IssueArtifactKind.PullRequestReviewAttempts) as
+                        | ReadonlyArray<PullRequestReviewAttempt>
+                        | undefined,
+                    value as ApprovedPullRequestReviewEvidence,
+                )
+            ) {
+                throw new RalphieError({
+                    message: `Approved pull request review evidence for issue ${issueNumber} must match a stored approved attempt.`,
+                });
+            }
             const nextValues = new Map(values);
             nextValues.set(kind, value);
             await save(nextValues);
@@ -484,6 +583,52 @@ const makeStore = (
         },
 
         has: (kind) => values.has(kind),
+
+        appendPullRequestReview: async (review) => {
+            let validated: PullRequestReviewAttempt;
+            try {
+                validated = pullRequestReviewAttemptSchema.parse(review);
+            } catch (cause) {
+                throw new RalphieError({
+                    message: `Invalid pull request review attempt for issue ${issueNumber}.`,
+                    cause,
+                });
+            }
+            const existing = (values.get(
+                IssueArtifactKind.PullRequestReviewAttempts,
+            ) ?? []) as ReadonlyArray<PullRequestReviewAttempt>;
+            if (validated.attempt !== existing.length + 1) {
+                throw new RalphieError({
+                    message: `Pull request review attempts for issue ${issueNumber} must be appended in order.`,
+                });
+            }
+            if (existing.length >= REVIEW_ITERATION_LIMIT) {
+                throw new RalphieError({
+                    message: `Pull request review attempt budget exhausted for issue ${issueNumber}.`,
+                });
+            }
+            const first = existing[0];
+            if (
+                first &&
+                (first.pullRequestNumber !== validated.pullRequestNumber ||
+                    first.baseSha !== validated.baseSha)
+            ) {
+                throw new RalphieError({
+                    message: `Pull request review attempt does not match the stored PR/base for issue ${issueNumber}.`,
+                });
+            }
+            const nextValues = new Map(values);
+            nextValues.set(IssueArtifactKind.PullRequestReviewAttempts, [
+                ...existing,
+                validated,
+            ]);
+            invalidateApprovalForDifferentHead(
+                nextValues,
+                values,
+                validated.reviewedHeadSha,
+            );
+            await save(nextValues);
+        },
 
         appendReview: async (review) => {
             if (!review || !Number.isInteger(review.attempt)) {

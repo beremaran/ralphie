@@ -4,6 +4,7 @@ import type { Octokit } from "octokit";
 import { ReviewVerdict } from "../../src/issues/decisions.ts";
 import {
     makeGitHubPullRequestService,
+    pullRequestReviewMarker,
     reviewAttemptMarker,
 } from "../../src/github/pull-requests.ts";
 
@@ -23,6 +24,19 @@ const pullRequest = (
     mergeable: true,
     merged,
     merged_at: merged ? "2026-08-25T00:00:00Z" : null,
+});
+
+const prReview = (attempt: number, head = "b".repeat(40)) => ({
+    pullRequestNumber: 42,
+    baseSha: "a".repeat(40),
+    reviewedHeadSha: head,
+    attempt,
+    sessionID: `pr-review-${attempt}`,
+    decision: {
+        verdict: ReviewVerdict.Approved,
+        summary: "Approved.",
+        findings: [],
+    },
 });
 
 const review = (attempt: number) => ({
@@ -158,6 +172,120 @@ describe("GitHub pull requests", () => {
         });
         expect(created[0]?.body).toContain(reviewAttemptMarker(2));
         expect(created[0]?.body).toContain('"verdict": "approved"');
+    });
+
+    test("captures exact PR SHAs and rejects a changed base on reread", async () => {
+        let baseSha = "a".repeat(40);
+        const client = {
+            rest: {
+                pulls: {
+                    get: async () => ({
+                        data: {
+                            ...pullRequest(42, "feature", "main"),
+                            base: { ref: "main", sha: baseSha },
+                            head: { ref: "feature", sha: "b".repeat(40) },
+                        },
+                    }),
+                },
+            },
+        } as unknown as Octokit;
+        const snapshot = await service.readSnapshot(
+            client,
+            "owner/repository",
+            42,
+        );
+        expect(snapshot).toMatchObject({
+            number: 42,
+            baseSha: "a".repeat(40),
+            headSha: "b".repeat(40),
+        });
+        baseSha = "c".repeat(40);
+        await expect(
+            service.rereadMatchingSnapshot(
+                client,
+                "owner/repository",
+                snapshot,
+            ),
+        ).rejects.toThrow("no longer matches");
+    });
+
+    test("validates head-scoped markers and reconciles a lost create response", async () => {
+        const attempt = prReview(1);
+        const comments: Array<{ body: string }> = [
+            {
+                body: `${pullRequestReviewMarker(42, attempt.reviewedHeadSha, 1)}\n\`\`\`json\n{}\n\`\`\``,
+            },
+        ];
+        let creates = 0;
+        const client = {
+            rest: {
+                issues: {
+                    listComments: Symbol("listComments"),
+                    createComment: async (
+                        parameters: Record<string, unknown>,
+                    ) => {
+                        creates += 1;
+                        comments.push({ body: String(parameters.body) });
+                        throw new Error("response lost");
+                    },
+                },
+            },
+            paginate: async () => comments,
+        } as unknown as Octokit;
+
+        await service.publishPullRequestReviewAttempts(
+            client,
+            "owner/repository",
+            [attempt],
+        );
+        expect(creates).toBe(1);
+        await service.publishPullRequestReviewAttempts(
+            client,
+            "owner/repository",
+            [attempt],
+        );
+        expect(creates).toBe(1);
+    });
+
+    test("does not reconcile conflicting valid payloads with the same marker", async () => {
+        const attempt = prReview(1);
+        const conflicting = {
+            ...attempt,
+            baseSha: "c".repeat(40),
+            sessionID: "different-session",
+            decision: {
+                verdict: ReviewVerdict.Approved,
+                summary: "A different approval.",
+                findings: [],
+            },
+        };
+        const comments = [
+            {
+                body: `${pullRequestReviewMarker(42, attempt.reviewedHeadSha, 1)}\n\`\`\`json\n${JSON.stringify(conflicting)}\n\`\`\``,
+            },
+        ];
+        let creates = 0;
+        const client = {
+            rest: {
+                issues: {
+                    listComments: Symbol("listComments"),
+                    createComment: async () => {
+                        creates += 1;
+                        throw new Error("response lost");
+                    },
+                },
+            },
+            paginate: async () => comments,
+        } as unknown as Octokit;
+
+        await expect(
+            service.publishPullRequestReviewAttempts(
+                client,
+                "owner/repository",
+                [attempt],
+            ),
+        ).rejects.toThrow("Failed to publish pull request review evidence");
+        expect(creates).toBe(1);
     });
 
     test("passes the expected SHA and verifies authoritative merged state", async () => {
