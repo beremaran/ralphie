@@ -12,6 +12,34 @@ const context = {
 
 const event = (value: unknown): PiSessionEvent => value as PiSessionEvent;
 
+const graphemeSegmenter = new Intl.Segmenter(undefined, {
+    granularity: "grapheme",
+});
+
+const visibleRows = (text: string, width: number): number => {
+    let rows = 0;
+    let column = 0;
+    let rowCounted = false;
+    for (const { segment } of graphemeSegmenter.segment(text)) {
+        if (segment === "\n") {
+            rows += 1;
+            column = 0;
+            rowCounted = true;
+            continue;
+        }
+        const characterWidth = Bun.stringWidth(segment);
+        if (characterWidth === 0) continue;
+        if (!rowCounted) {
+            rows += 1;
+            rowCounted = true;
+        }
+        const occupied = column + characterWidth;
+        rows += Math.floor((occupied - 1) / width);
+        column = ((occupied - 1) % width) + 1;
+    }
+    return rows;
+};
+
 describe("Pi transcript rendering", () => {
     test("streams thinking, assistant text, tool calls, and results", () => {
         let output = "";
@@ -400,6 +428,107 @@ describe("Pi transcript rendering", () => {
         );
         expect(output).not.toContain("\u001b");
         expect(output).not.toContain("\r");
+    });
+
+    test("meters sanitized incremental output as visible terminal rows", () => {
+        let output = "";
+        let width = 4;
+        const render = makePiTranscriptRenderer({
+            write: (text) => {
+                output += text;
+            },
+            width: () => width,
+        });
+
+        render(event({ type: "agent_start" }), context);
+        for (const character of `${"界".repeat(220)}👨‍👩‍👧‍👦\n\nend\t`) {
+            render(
+                event({
+                    type: "message_update",
+                    message: { role: "assistant" },
+                    assistantMessageEvent: {
+                        type: "text_delta",
+                        delta: `\u001b[31m${character}\u001b[0m`,
+                    },
+                }),
+                context,
+            );
+        }
+
+        expect(render.getVisibleLineCount()).toBe(visibleRows(output, width));
+        expect(visibleRows("👨‍👩‍👧‍👦", 2)).toBe(1);
+        expect(render.getVisibleLineCount()).toBeGreaterThan(100);
+        expect(output).not.toContain("\u001b");
+        expect(output).toContain("    ");
+
+        const beforeTrailingNewline = render.getVisibleLineCount();
+        render(
+            event({
+                type: "message_update",
+                message: { role: "assistant" },
+                assistantMessageEvent: { type: "text_delta", delta: "\n" },
+            }),
+            context,
+        );
+        expect(render.getVisibleLineCount()).toBe(beforeTrailingNewline + 1);
+
+        const beforeConsecutiveNewline = render.getVisibleLineCount();
+        render(
+            event({
+                type: "message_update",
+                message: { role: "assistant" },
+                assistantMessageEvent: { type: "text_delta", delta: "\n" },
+            }),
+            context,
+        );
+        expect(render.getVisibleLineCount()).toBe(beforeConsecutiveNewline + 1);
+        expect(render.getVisibleLineCount()).toBe(visibleRows(output, width));
+
+        width = 2;
+        expect(render.getVisibleLineCount()).toBe(visibleRows(output, width));
+
+        render(event({ type: "agent_settled" }), context);
+        output = "";
+        render(event({ type: "agent_start" }), context);
+        expect(render.getVisibleLineCount()).toBe(visibleRows(output, width));
+    });
+
+    test("meters cumulative tool updates only once", () => {
+        let output = "";
+        const width = 12;
+        const render = makePiTranscriptRenderer({
+            write: (text) => {
+                output += text;
+            },
+            width: () => width,
+        });
+
+        render(
+            event({
+                type: "tool_execution_update",
+                toolCallId: "cumulative",
+                toolName: "read",
+                partialResult: {
+                    content: [{ type: "text", text: "first\n" }],
+                },
+            }),
+            context,
+        );
+        render(
+            event({
+                type: "tool_execution_update",
+                toolCallId: "cumulative",
+                toolName: "read",
+                partialResult: {
+                    content: [{ type: "text", text: "first\nsecond\n" }],
+                },
+            }),
+            context,
+        );
+
+        expect(output.match(/first/g)).toHaveLength(1);
+        expect(output.match(/second/g)).toHaveLength(1);
+        expect(render.getVisibleLineCount()).toBe(visibleRows(output, width));
     });
 
     test("bounds noisy tool results while keeping a useful summary", () => {

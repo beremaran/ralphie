@@ -23,6 +23,8 @@ export type PiTranscriptRendererOptions = {
 /** A transcript listener with a coordinator-facing line interruption hook. */
 export type PiTranscriptRenderer = PiEventListener & {
     readonly interruptLine: () => void;
+    /** Visible terminal rows written during the current Pi session. */
+    readonly getVisibleLineCount: () => number;
 };
 
 const plain = (text: string): string => text;
@@ -42,6 +44,51 @@ const sanitizeTerminalText = (text: string): string =>
 
 const oneLine = (text: string): string =>
     sanitizeTerminalText(text).replace(/\s+/g, " ").trim();
+
+/** Stateful accounting for the terminal rows occupied by incremental writes. */
+const graphemeSegmenter = new Intl.Segmenter(undefined, {
+    granularity: "grapheme",
+});
+
+const makeVisualLineMeter = (width: () => number) => {
+    let transcript = "";
+
+    const getVisibleLineCount = (): number => {
+        const terminalWidth = Math.max(1, Math.floor(width()));
+        let lines = 0;
+        let column = 0;
+        let rowCounted = false;
+
+        for (const { segment } of graphemeSegmenter.segment(transcript)) {
+            if (segment === "\n") {
+                lines += 1;
+                column = 0;
+                rowCounted = true;
+                continue;
+            }
+            const characterWidth = Bun.stringWidth(segment);
+            if (characterWidth === 0) continue;
+            if (!rowCounted) {
+                lines += 1;
+                rowCounted = true;
+            }
+            const occupied = column + characterWidth;
+            lines += Math.floor((occupied - 1) / terminalWidth);
+            column = ((occupied - 1) % terminalWidth) + 1;
+        }
+        return lines;
+    };
+
+    return {
+        measure: (text: string) => {
+            transcript += sanitizeTerminalText(text);
+        },
+        reset: () => {
+            transcript = "";
+        },
+        getVisibleLineCount,
+    };
+};
 
 const stringValue = (value: unknown): string | undefined =>
     typeof value === "string" ? value : undefined;
@@ -227,6 +274,7 @@ const makeTranscriptWriter = (
     write: (text: string) => void,
     styles: TranscriptStyles,
     getDisplayState?: () => DisplayState,
+    resetLineMeter?: () => void,
 ): {
     readonly beginSession: (context: PiEventContext) => void;
     readonly ensureSession: (context: PiEventContext) => void;
@@ -270,6 +318,7 @@ const makeTranscriptWriter = (
 
     const beginSession = (context: PiEventContext): void => {
         if (sessionOpen) finishSession("interrupted");
+        resetLineMeter?.();
         const title = oneLine(context.title ?? "Pi task") || "Pi task";
         const session = oneLine(context.sessionID);
         const workflow = workflowHeader(getDisplayState?.());
@@ -773,7 +822,17 @@ export const makePiTranscriptRenderer = ({
               tool: plain,
               success: plain,
           };
-    const writer = makeTranscriptWriter(write, styles, getDisplayState);
+    const lineMeter = makeVisualLineMeter(width);
+    const measuredWrite = (text: string): void => {
+        lineMeter.measure(text);
+        write(text);
+    };
+    const writer = makeTranscriptWriter(
+        measuredWrite,
+        styles,
+        getDisplayState,
+        lineMeter.reset,
+    );
     const toolStates = new Map<string, ToolExecutionState>();
 
     const render: PiEventListener = (event, context) => {
@@ -792,5 +851,8 @@ export const makePiTranscriptRenderer = ({
             width,
         );
     };
-    return Object.assign(render, { interruptLine: writer.interruptLine });
+    return Object.assign(render, {
+        interruptLine: writer.interruptLine,
+        getVisibleLineCount: lineMeter.getVisibleLineCount,
+    });
 };
