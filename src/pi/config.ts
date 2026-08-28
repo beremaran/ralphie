@@ -1,6 +1,6 @@
-import { randomUUID } from "node:crypto";
-import { mkdir, rm, chmod, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { chmod, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
@@ -12,9 +12,8 @@ import { resolveWorkspacePath } from "../workspace/workspace.ts";
  * How Pi's runtime should resolve models and credentials.
  *
  * - `modelBaseUrl` + `modelApiKey` (env vars) enable Option B:
- *   Ralphie writes a throwaway `models.json`/`auth.json` into an isolated
- *   `0600` directory inside the workspace so users never need a pre-existing
- *   Pi configuration.
+ *   Ralphie writes a throwaway `models.json`/`auth.json` into a private
+ *   temporary directory outside the persistent workspace.
  * - `agentDir` (Option A) points Pi at an existing configuration directory
  *   the operator manages themselves.
  */
@@ -26,7 +25,7 @@ export type PiProviderConfig = {
     readonly model?: PiModel;
 };
 
-type AgentDirResolution = {
+export type AgentDirResolution = {
     readonly mode: "default" | "custom" | "ephemeral";
     readonly dir: string;
     readonly cleanup: boolean;
@@ -40,10 +39,138 @@ export const MODEL_API_KEY_ENV = "RALPHIE_MODEL_API_KEY";
 
 const DEFAULT_MODEL_PROVIDER = "openai";
 const DEFAULT_MODEL_ID = "gpt-4o";
+const EPHEMERAL_DIR_PREFIX = "ralphie-pi-";
+
+const makeResolution = (
+    mode: AgentDirResolution["mode"],
+    dir: string,
+    cleanup: boolean,
+    modelsPath: string | undefined,
+    authPath: string | undefined,
+): AgentDirResolution => ({
+    mode,
+    dir,
+    cleanup,
+    modelsPath: modelsPath ?? join(dir, "models.json"),
+    authPath: authPath ?? join(dir, "auth.json"),
+});
+
+/** Remove a throwaway agent directory created for environment credentials. */
+export const cleanupPiAgentDir = async (dir: string): Promise<void> => {
+    await rm(dir, {
+        recursive: true,
+        force: true,
+    });
+};
+
+const writePrivateJson = async (
+    path: string,
+    value: unknown,
+): Promise<void> => {
+    await writeFile(path, JSON.stringify(value, null, 2), {
+        encoding: "utf8",
+        mode: 0o600,
+    });
+    // `mode` only applies when a file is created. Keep the guarantee true if
+    // the filesystem or umask supplied different permissions.
+    await chmod(path, 0o600);
+};
+
+const canonicalPath = async (path: string): Promise<string> => {
+    try {
+        return await realpath(path);
+    } catch {
+        return resolve(path);
+    }
+};
+
+const isPathWithin = (path: string, parent: string): boolean => {
+    const childPath = relative(parent, path);
+    return (
+        childPath === "" ||
+        (!childPath.startsWith("..") && !isAbsolute(childPath))
+    );
+};
+
+const temporaryRootCandidates = (workspace: string): ReadonlyArray<string> => {
+    const temporaryRoot = tmpdir();
+    return [
+        temporaryRoot,
+        "/tmp",
+        "/var/tmp",
+        dirname(resolveWorkspacePath(workspace)),
+        dirname(temporaryRoot),
+        homedir(),
+    ].filter(
+        (candidate, index, candidates) =>
+            candidates.indexOf(candidate) === index,
+    );
+};
+
+const createPrivateTempDirectory = async (
+    workspace: string,
+): Promise<string> => {
+    const workspacePath = await canonicalPath(resolveWorkspacePath(workspace));
+    let lastError: unknown;
+
+    for (const candidate of temporaryRootCandidates(workspace)) {
+        const root = await canonicalPath(candidate);
+        if (isPathWithin(root, workspacePath)) continue;
+
+        try {
+            const directory = await mkdtemp(join(root, EPHEMERAL_DIR_PREFIX));
+            if (isPathWithin(await canonicalPath(directory), workspacePath)) {
+                await cleanupPiAgentDir(directory);
+                continue;
+            }
+            return directory;
+        } catch (cause) {
+            lastError = cause;
+        }
+    }
+
+    throw new RalphieError({
+        message:
+            "Failed to create a private temporary directory outside the workspace for Pi credentials.",
+        cause: lastError,
+    });
+};
+
+const createEphemeralResolution = async (
+    config: PiProviderConfig,
+): Promise<AgentDirResolution> => {
+    const providerId = config.model?.providerID ?? DEFAULT_MODEL_PROVIDER;
+    const modelId = config.model?.modelID ?? DEFAULT_MODEL_ID;
+    if (providerId.trim().length === 0) {
+        throw new RalphieError({
+            message: "Ralphie model provider id must not be empty.",
+        });
+    }
+
+    const dir = await createPrivateTempDirectory(config.workspace);
+    try {
+        await chmod(dir, 0o700);
+        const modelsPath = join(dir, "models.json");
+        const authPath = join(dir, "auth.json");
+        await writePrivateJson(
+            modelsPath,
+            buildModelsJson(providerId, config.modelBaseUrl!, modelId),
+        );
+        await writePrivateJson(
+            authPath,
+            buildAuthJson(providerId, config.modelApiKey),
+        );
+        return makeResolution("ephemeral", dir, true, modelsPath, authPath);
+    } catch (cause) {
+        await cleanupPiAgentDir(dir).catch(() => undefined);
+        throw cause;
+    }
+};
 
 /**
- * Decide which agent directory Pi should read, and (for Option B) write the
- * throwaway configuration files. The caller must ensure the workspace exists.
+ * Decide which agent directory Pi should read, and (for environment
+ * credentials) write the throwaway configuration files. The workspace is not
+ * used as a credential location.
  */
 export const resolvePiAgentDir = async (
     config: PiProviderConfig,
@@ -61,54 +188,7 @@ export const resolvePiAgentDir = async (
 
     // Option B: generate a throwaway config for an OpenAI-compatible endpoint.
     if (config.modelBaseUrl !== undefined) {
-        const providerId = config.model?.providerID ?? DEFAULT_MODEL_PROVIDER;
-        const modelId = config.model?.modelID ?? DEFAULT_MODEL_ID;
-        if (providerId.trim().length === 0) {
-            throw new RalphieError({
-                message: "Ralphie model provider id must not be empty.",
-            });
-        }
-        const dir = join(
-            resolveWorkspacePath(config.workspace),
-            ".ralphie",
-            "pi",
-            randomUUID(),
-        );
-        await mkdir(dir, {
-            recursive: true,
-        });
-        await chmod(dir, 0o600);
-
-        const modelsPath = join(dir, "models.json");
-        const authPath = join(dir, "auth.json");
-        await writeFile(
-            modelsPath,
-            JSON.stringify(
-                buildModelsJson(providerId, config.modelBaseUrl, modelId),
-                null,
-                2,
-            ),
-            {
-                encoding: "utf8",
-                mode: 0o600,
-            },
-        );
-        await chmod(modelsPath, 0o600);
-        await writeFile(
-            authPath,
-            JSON.stringify(
-                buildAuthJson(providerId, config.modelApiKey),
-                null,
-                2,
-            ),
-            {
-                encoding: "utf8",
-                mode: 0o600,
-            },
-        );
-        await chmod(authPath, 0o600);
-
-        return makeResolution("ephemeral", dir, true, modelsPath, authPath);
+        return createEphemeralResolution(config);
     }
 
     return makeResolution(
@@ -118,28 +198,6 @@ export const resolvePiAgentDir = async (
         undefined,
         undefined,
     );
-};
-
-const makeResolution = (
-    mode: AgentDirResolution["mode"],
-    dir: string,
-    cleanup: boolean,
-    modelsPath: string | undefined,
-    authPath: string | undefined,
-): AgentDirResolution => ({
-    mode,
-    dir,
-    cleanup,
-    modelsPath: modelsPath ?? join(dir, "models.json"),
-    authPath: authPath ?? join(dir, "auth.json"),
-});
-
-/** Remove a throwaway agent directory created for Option B. */
-export const cleanupPiAgentDir = async (dir: string): Promise<void> => {
-    await rm(dir, {
-        recursive: true,
-        force: true,
-    });
 };
 
 const buildModelsJson = (

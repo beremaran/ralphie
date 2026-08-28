@@ -326,7 +326,7 @@ Options:
       --complexity-thinking <level> Complexity reasoning (default medium)
       --review-thinking <level> Review reasoning (default high)
       --commit-thinking <level> Commit-message reasoning (default low)
-      --pi-dir <path>          Existing Pi agent directory
+      --pi-dir <path>          Operator-owned Pi directory outside workspace
       --workspace <path>       Workspace directory
       --dry-run                Assess without mutations
       --resume <path>          Resume saved run state
@@ -339,8 +339,8 @@ Environment:
   GH_TOKEN                     GitHub.com token for gh (preferred)
   GITHUB_TOKEN                 Fallback GitHub.com token alias for gh
                                Interactive \`gh auth login\` or a mounted GitHub CLI profile is not required
-  RALPHIE_MODEL_BASE_URL       OpenAI-compatible model base URL
-  RALPHIE_MODEL_API_KEY        Model API key
+  RALPHIE_MODEL_BASE_URL       OpenAI-compatible URL; uses private temporary config
+  RALPHIE_MODEL_API_KEY        Model API key (environment only)
 `;
 
 export type CommandRuntime = RalphieRuntime & {

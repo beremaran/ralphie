@@ -43,7 +43,10 @@ flowchart TD
    `RALPHIE_MODEL_BASE_URL` and `RALPHIE_MODEL_API_KEY` environment variables.
    One `--output` flag selects
    `default`, `verbose`, `quiet`, or `json`, so `json` and `quiet` cannot be
-   combined.
+   combined. Pi credentials are either read from the default Pi directory, an
+   explicitly supplied `--pi-dir`, or a private temporary directory generated
+   from the model environment variables; they are not part of workspace
+   state.
 4. With `--resume`, the command loads and Zod-validates the requested state
    file before starting the workflow. A supplied branch/repository must be
    compatible with that state. A resumed run reuses its saved run id.
@@ -92,12 +95,18 @@ After the initial state save, Ralphie starts one embedded Pi runtime and keeps
 it alive for the queue. `makePiService` chooses one of three agent configurations:
 
 - an explicitly supplied `--pi-dir`;
-- a temporary `0600` directory containing generated `models.json` and
-  `auth.json` when `RALPHIE_MODEL_BASE_URL` is used; or
+- a private system-temporary `0700` directory containing generated
+  `models.json` and `auth.json` (both `0600`) when
+  `RALPHIE_MODEL_BASE_URL` is used; or
 - Pi's default agent directory.
 
-The temporary directory is removed when the runtime is closed. Pi sessions and
-issues are processed sequentially, which keeps the live transcript ordered.
+The temporary directory is outside the workspace, removed when the runtime
+is closed, and also removed if runtime startup fails. An explicit `--pi-dir` is
+operator-owned and is never removed; mount it outside the workspace. A
+read-only mount is suitable only for a fully provisioned static configuration;
+use a read-write mount when Pi needs to update `auth.json`, `models.json`, or
+its model store. Pi sessions and issues are processed sequentially, which
+keeps the live transcript ordered.
 
 ```mermaid
 flowchart TD
@@ -136,6 +145,11 @@ For each dequeued issue, the worker:
    AbortSignal to the selected issue executor.
 4. Persists the outcome, performs delivery/closure, marks successful transitions
    in the queue, refreshes after decomposition, and continues.
+
+The workspace `.ralphie` tree contains repositories plus Ralphie's run state,
+events, and recovery artifacts only. Pi configuration is kept in the default
+or explicitly supplied `--pi-dir`, or in a private temporary credential
+directory outside the workspace.
 
 A normal issue execution obtains a durable per-issue artifact store at:
 
@@ -315,7 +329,8 @@ reconcile a commit that may already have reached the remote.
 
 ## 8. State, progress, and resume
 
-A successful or interrupted run uses this layout:
+A successful or interrupted run uses this layout (Pi configuration is not
+stored in this tree):
 
 ```text
 <workspace>/.ralphie/runs/<run-id>/

@@ -415,10 +415,11 @@ const createPromptSession = async (
     input: PromptInput,
     created: PendingSession,
     tools: PromptTools,
+    agentDir: string,
 ): Promise<PiSession> => {
     const resourceLoader = new DefaultResourceLoader({
         cwd: input.directory,
-        agentDir: process.env.PI_CODING_AGENT_DIR ?? getAgentDir(),
+        agentDir,
         noExtensions: true,
         noSkills: true,
         noPromptTemplates: true,
@@ -472,6 +473,7 @@ const makePromptResponse = (
 export const makePiClient = (
     modelRuntime: ModelRuntime,
     eventListener?: PiEventListener,
+    agentDir = process.env.PI_CODING_AGENT_DIR ?? getAgentDir(),
 ): PiClient => {
     const pending = new Map<string, PendingSession>();
     const active = new Set<{
@@ -509,6 +511,7 @@ export const makePiClient = (
                     input,
                     created,
                     tools,
+                    agentDir,
                 );
                 active.add(session);
                 const unsubscribe =

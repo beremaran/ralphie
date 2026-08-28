@@ -1112,18 +1112,22 @@ export const workflow = async (
             await worker();
         };
 
-        const server = await track(
-            progress,
-            "pi-runtime",
-            "Starting Pi runtime...",
-            () => pi.start(),
-            "Pi runtime ready.",
-        );
-
+        let server: PiRuntime | undefined;
         try {
-            await processQueue(server);
+            const startedServer = await track(
+                progress,
+                "pi-runtime",
+                "Starting Pi runtime...",
+                async () => {
+                    const started = await pi.start();
+                    server = started;
+                    return started;
+                },
+                "Pi runtime ready.",
+            );
+            await processQueue(startedServer);
         } finally {
-            server.close();
+            await server?.close();
         }
 
         if (queue.state() === IssueQueueState.DependencyBlocked) {

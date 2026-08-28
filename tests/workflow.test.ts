@@ -69,6 +69,7 @@ type TestRuntimeOptions = {
     readonly abortAt?: "github" | "repository" | "issues" | "pi" | "between";
     readonly abortController?: AbortController;
     readonly captureStart?: number;
+    readonly failPiReadyProgress?: boolean;
     readonly executionContexts?: IssueExecutionContext[];
     readonly executeGate?: (context: IssueExecutionContext) => Promise<void>;
 };
@@ -265,7 +266,9 @@ const testRuntime = (
             return {
                 url: "http://127.0.0.1:4096",
                 client: {} as PiClient,
-                close: () => calls.push("closeRuntime"),
+                close: async () => {
+                    calls.push("closeRuntime");
+                },
             };
         },
     };
@@ -286,8 +289,21 @@ const testRuntime = (
             if (options.removeFailure) throw options.removeFailure;
         },
     };
-    const progress: ProgressReporterService =
-        makeProgressRecorder(progressEvents);
+    const progressRecorder = makeProgressRecorder(progressEvents);
+    const progress: ProgressReporterService = options.failPiReadyProgress
+        ? {
+              ...progressRecorder,
+              emit: async (update) => {
+                  if (
+                      update.stage === "pi-runtime" &&
+                      update.status === "succeeded"
+                  ) {
+                      throw new Error("Pi ready progress emission failed");
+                  }
+                  await progressRecorder.emit(update);
+              },
+          }
+        : progressRecorder;
     return {
         commandRunner: CommandRunnerLive,
         githubClient,
@@ -518,6 +534,20 @@ describe("workflow", () => {
         ).toEqual([42]);
         expect(states.at(-1)?.queue.processedCount).toBe(0);
         expect(calls.at(-1)).toBe("closeRuntime");
+    });
+
+    test("closes Pi if ready progress reporting fails after startup", async () => {
+        const calls: string[] = [];
+        const states: RunState[] = [];
+        await expect(
+            workflow(
+                baseOptions,
+                testRuntime(calls, states, {
+                    failPiReadyProgress: true,
+                }),
+            ),
+        ).rejects.toThrow("Pi ready progress emission failed");
+        expect(calls).toContain("closeRuntime");
     });
 
     test("persists a recoverable closure stage when GitHub closure fails", async () => {

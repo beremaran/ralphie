@@ -29,6 +29,10 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Changed
 
+- Keep Pi configuration separate from persistent workspace state: explicit
+  `--pi-dir` directories remain operator-owned, while environment-generated
+  configuration uses a private temporary directory with secure permissions and
+  cleanup on close or startup failure.
 - Add exact per-platform Homebrew formula checksums and a validator that checks
   them against the canonical release manifest.
 - Make the standalone installer fail closed by requiring the signed checksum

@@ -114,7 +114,7 @@ describe("opt-in network smoke tests", () => {
                 );
                 expect(result.sessionID).toBeString();
             } finally {
-                server?.close();
+                await server?.close();
                 await rm(repositoryPath, { recursive: true, force: true });
             }
         },
@@ -157,7 +157,7 @@ describe("opt-in network smoke tests", () => {
                 expect(review.sessionID).toBeString();
                 expect(review.output.summary.length).toBeGreaterThan(0);
             } finally {
-                server?.close();
+                await server?.close();
                 await rm(repositoryPath, { recursive: true, force: true });
             }
         },

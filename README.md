@@ -147,10 +147,17 @@ Ralphie expects the following tools on `PATH`:
 - model credentials supported by [Pi](https://github.com/earendil-works/pi)
 
 By default, configure Pi in `~/.pi/agent/auth.json`, or point `--pi-dir` at an
-existing Pi agent directory. For an OpenAI-compatible endpoint, set
-`RALPHIE_MODEL_BASE_URL` and, when required by the provider,
-`RALPHIE_MODEL_API_KEY`; when `--pi-dir` is not supplied, Ralphie creates a
-temporary Pi configuration for that run.
+existing Pi agent directory outside the Ralphie workspace. An explicitly
+supplied `--pi-dir` is operator-owned and is never removed. A static
+configuration can be mounted read-only, but use a read-write mount when Pi
+must update `auth.json`, `models.json`, or its model store.
+
+For an OpenAI-compatible endpoint, set `RALPHIE_MODEL_BASE_URL` and, when
+required by the provider, `RALPHIE_MODEL_API_KEY`; when `--pi-dir` is not
+supplied, Ralphie creates `models.json` and `auth.json` in a private 0700
+system-temporary directory with 0600 files. That directory is removed on
+normal close and failed startup, and is never placed under the persistent
+workspace.
 
 For `github.com`, set `GH_TOKEN` (preferred) or `GITHUB_TOKEN` (fallback)
 for noninteractive GitHub CLI authentication. Ralphie verifies the token with
@@ -195,25 +202,31 @@ bun run index.ts owner/repository --dry-run --max-issues 1
 ### Run the published container
 
 The container runs as UID/GID `65532:65532` with `HOME` and its working
-directory set to `/home/nonroot`. Supply credentials only at runtime and
-keep the persistent state/workspace in a dedicated volume:
+directory set to `/home/nonroot`. Supply credentials only at runtime and keep
+Pi configuration in a separate mount from the persistent state/workspace. This
+example uses a read-write bind mount because Pi may update its configuration;
+use `readonly` only for a fully provisioned static configuration that does not
+need Pi writes:
 
 ```bash
 docker run --rm \
   --env GH_TOKEN \
-  --env RALPHIE_MODEL_BASE_URL \
-  --env RALPHIE_MODEL_API_KEY \
   --mount type=volume,source=ralphie-state,target=/home/nonroot/.ralphie \
+  --mount type=bind,source="$HOME/.pi/agent",target=/home/nonroot/.pi/agent \
   ghcr.io/beremaran/ralphie:latest owner/repository \
   --workspace /home/nonroot/.ralphie \
+  --pi-dir /home/nonroot/.pi/agent \
   --dry-run --max-issues 1
 ```
 
-The image contains the GitHub CLI, Git, Pi's shell/search tools, and CA
-certificates; it does not contain credentials or credential-bearing defaults.
-For `github.com`, pass `GH_TOKEN` (preferred) or `GITHUB_TOKEN` (fallback) at
-runtime. Authentication is noninteractive: `gh auth login` and a mounted
-GitHub CLI profile are not required.
+Alternatively, omit `--pi-dir` and provide `RALPHIE_MODEL_BASE_URL` (and, when
+required, `RALPHIE_MODEL_API_KEY`) at runtime; Ralphie then uses a private
+system-temporary configuration directory. The image contains the GitHub CLI,
+Git, Pi's shell/search tools, and CA certificates; it does not contain
+credentials or credential-bearing defaults. For `github.com`, pass `GH_TOKEN`
+(preferred) or `GITHUB_TOKEN` (fallback) at runtime. Authentication is
+noninteractive: `gh auth login` and a mounted GitHub CLI profile are not
+required.
 
 ### Run the issue pipeline
 
@@ -543,7 +556,7 @@ HTTPS/SSH clone URL.
 | `--review-thinking <level>` | `high` | Thinking level for staged-change reviews. |
 | `--commit-thinking <level>` | `low` | Thinking level for commit-message generation. |
 | `--verify-command <command>` | discovered `bun run check` | Deterministic verification command; repeat to run multiple commands in order. |
-| `--pi-dir <path>` | Pi default | Existing Pi agent directory. |
+| `--pi-dir <path>` | Pi default | Existing operator-owned Pi agent directory outside the workspace; it is never removed. |
 | `--workspace <path>` | `~/.ralphie` | Root directory for repository checkouts and run artifacts. |
 | `--dry-run` | off | Assess and route issues without implementation, GitHub, or delivery mutations. |
 | `--resume <state.json>` | none | Continue a compatible saved run. |
@@ -554,8 +567,8 @@ Model credentials are read from environment variables:
 
 | Variable | Purpose |
 | --- | --- |
-| `RALPHIE_MODEL_BASE_URL` | OpenAI-compatible model base URL; enables the throwaway Pi configuration. |
-| `RALPHIE_MODEL_API_KEY` | Model API key for the throwaway Pi configuration. |
+| `RALPHIE_MODEL_BASE_URL` | OpenAI-compatible model base URL; enables a private temporary Pi configuration when `--pi-dir` is absent. |
+| `RALPHIE_MODEL_API_KEY` | Model API key for that temporary configuration; supply it only through the environment. |
 
 Run `bunx @beremaran/ralphie --help` for the help generated from the current command schema.
 
@@ -585,6 +598,11 @@ JSON events use a stable operational vocabulary and include `runId`,
 also include the repository, issue position, review attempt, session ID, commit
 SHA, created issue numbers, or diagnostic paths. Credentials and sensitive
 environment values are redacted at the reporting boundary.
+
+The workspace's `.ralphie` directory contains only repository checkouts and
+Ralphie's run state, events, and recovery artifacts. Pi configuration is kept
+in the default or explicitly supplied `--pi-dir`, or in a private temporary
+credential directory, never under this path.
 
 Run artifacts live under:
 
