@@ -757,6 +757,26 @@ bundle for the exact bytes of `SHA256SUMS`. The release publisher uses keyless
 Sigstore signing with the GitHub Actions OIDC issuer; no signing key or OIDC
 token is stored in the repository, build context, logs, or release metadata.
 
+#### Homebrew formula updates
+
+`Formula/ralphie.rb` contains one `sha256` value for each release asset:
+`darwin-arm64`, `darwin-x64`, `linux-arm64`, and `linux-x64`. After publishing a
+release, download `SHA256SUMS` from that same release, update `version` and the
+four matching formula branches, and validate the result before submitting the
+formula change:
+
+```bash
+VERSION=0.1.0
+bun run validate:homebrew-formula -- \
+  --formula Formula/ralphie.rb \
+  --manifest /path/to/SHA256SUMS \
+  --version "$VERSION"
+```
+
+The validator rejects missing or extra mappings, wrong asset names or release
+versions, malformed hashes, and values that differ from the canonical manifest.
+Never copy one platform's checksum to another branch or use a placeholder.
+
 #### Release checksum trust policy
 
 Downstream consumers must accept a checksum manifest only when its bundle

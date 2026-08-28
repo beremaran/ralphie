@@ -29,6 +29,8 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Changed
 
+- Add exact per-platform Homebrew formula checksums and a validator that checks
+  them against the canonical release manifest.
 - Make the standalone installer fail closed by requiring the signed checksum
   manifest, exact platform entry, and atomic temporary-file replacement.
 - Sign the exact `SHA256SUMS` bytes with keyless Sigstore through GitHub OIDC,

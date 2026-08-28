@@ -65,6 +65,7 @@
     "prepack": "bun run build:package",
     "probe:structured-output": "bun run scripts/probe-structured-output.ts",
     "test": "bun test tests",
-    "typecheck": "bunx tsc --noEmit"
+    "typecheck": "bunx tsc --noEmit",
+    "validate:homebrew-formula": "bun scripts/validate-homebrew-formula.ts"
   }
 }
