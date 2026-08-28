@@ -400,6 +400,42 @@ describe("Pi transcript rendering", () => {
         );
     });
 
+    test("resumes an open stream after an inserted lifecycle line", () => {
+        let output = "";
+        const render = makePiTranscriptRenderer({
+            write: (text) => {
+                output += text;
+            },
+        });
+        const update = (assistantMessageEvent: unknown) =>
+            render(
+                event({
+                    type: "message_update",
+                    assistantMessageEvent,
+                }),
+                context,
+            );
+
+        update({ type: "text_delta", delta: "a", contentIndex: 2 });
+        render(
+            event({ type: "thinking_level_changed", level: "high" }),
+            context,
+        );
+        update({ type: "text_delta", delta: "b", contentIndex: 2 });
+        update({ type: "text_end", contentIndex: 2 });
+        render(event({ type: "agent_end", willRetry: false }), context);
+
+        expect(output).toBe(
+            "╭─ Pi · Implement issue #42 · session-1\n" +
+                "│\n" +
+                "│  ✦ assistant a\n" +
+                "│\n" +
+                "│  • thinking level · high\n" +
+                "│    b\n" +
+                "╰─ done\n",
+        );
+    });
+
     test("normalizes terminal control sequences in streamed text", () => {
         let output = "";
         const render = makePiTranscriptRenderer({

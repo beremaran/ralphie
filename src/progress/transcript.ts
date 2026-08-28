@@ -302,17 +302,19 @@ const makeTranscriptWriter = (
     const finishLine = (): void => {
         if (lineOpen) write("\n");
         lineOpen = false;
+    };
+
+    const finishStream = (): void => {
+        finishLine();
         activeKey = undefined;
     };
 
     const interruptLine = (): void => {
-        if (!lineOpen) return;
-        write("\n");
-        lineOpen = false;
+        finishLine();
     };
 
     const blankBeforeBlock = (): void => {
-        finishLine();
+        finishStream();
         if (hasBlock) write("│\n");
     };
 
@@ -382,7 +384,7 @@ const makeTranscriptWriter = (
 
     const endStream = (key: StreamKey): void => {
         if (activeKey !== key) return;
-        finishLine();
+        finishStream();
     };
 
     const line = (
@@ -396,13 +398,13 @@ const makeTranscriptWriter = (
         if (options.blankBefore !== false && hasBlock) write("│\n");
         write(`│  ${text}\n`);
         hasBlock = true;
-        activeKey = options.key;
+        if (options.key !== undefined) activeKey = options.key;
         lineOpen = false;
     };
 
     const finishSession = (label: string): void => {
         if (!sessionOpen) return;
-        finishLine();
+        finishStream();
         write(`╰─ ${label}\n`);
         sessionOpen = false;
         hasBlock = false;
