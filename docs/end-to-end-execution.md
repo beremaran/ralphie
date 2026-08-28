@@ -4,7 +4,7 @@ This is the source-level trace for a command-triggered run. Ralphie is not
 triggered by a GitHub webhook; the trigger is the public CLI invocation:
 
 ```text
-ralphie owner/repository [options]
+bunx @beremaran/ralphie owner/repository [options]
 ```
 
 The default delivery mode is `lgtm`. `pr`, `--dry-run`, and `--resume` change
@@ -14,7 +14,7 @@ the path at the points called out below.
 
 ```mermaid
 flowchart TD
-    A["Operator: ralphie owner/repository ..."] --> B["index.ts"]
+    A["Operator: bunx @beremaran/ralphie owner/repository ..."] --> B["index.ts"]
     B --> C["src/cli.ts: start native CLI"]
     C --> D["Native parser routes the command"]
     D --> E["src/command.ts: validate flags and positional args"]
@@ -29,7 +29,7 @@ flowchart TD
 ```
 
 1. `index.ts` starts `src/cli.ts`, preserving the public
-   `ralphie <repository> [options]` interface.
+   `bunx @beremaran/ralphie <repository> [options]` interface.
 2. `node:util`'s built-in `parseArgs` validates option shapes and rejects extra
    positional arguments; configuration validation remains in Zod and
    `resolveRalphieConfig`.

@@ -27,6 +27,10 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Changed
 
+- Document the published scoped Bun package and use
+  `bunx @beremaran/ralphie` for installation, version verification, dry-run,
+  and workflow examples; the scope distinguishes this CLI from the unrelated
+  unscoped npm package named `ralphie`.
 - Resolve dependencies on decomposed closed issues to their open descendants,
   stop repeated identical review findings early, permit safe compound shell
   inspection commands, and use GitHub REST API version `2026-03-10`.

@@ -21,9 +21,10 @@ mutations, run state, recovery, and safety checks deterministic.
 > branch and pull request instead.
 
 > [!NOTE]
-> Ralphie is pre-1.0 and currently run from source. It is a private Bun package,
-> so `bunx ralphie` is not available. Start with a one-issue `--dry-run` against
-> a repository you control before enabling mutations.
+> Ralphie is pre-1.0 and can be run from its published scoped package with
+> `bunx @beremaran/ralphie`. The scope is intentional: use this package name,
+> not the unrelated unscoped npm package named `ralphie`. Start with a one-issue
+> `--dry-run` against a repository you control before enabling mutations.
 
 ## Why Ralphie?
 
@@ -45,23 +46,27 @@ mutations, run state, recovery, and safety checks deterministic.
 
 ## Installation
 
-Ralphie is a private Bun package and is currently run from source. The release
-workflow contains packaging for tagged releases, but the source installation
-below is the supported setup for this checkout.
+### Run the published package
+
+Use Bun's package runner to run the latest published version without a global
+installation:
+
+```bash
+bunx @beremaran/ralphie --version
+```
+
+The `@beremaran` scope is intentional. Do not substitute the unrelated
+unscoped npm package named `ralphie`; use `@beremaran/ralphie` for this CLI.
 
 ### Install from source
+
+For development or to run the current checkout:
 
 ```bash
 git clone https://github.com/beremaran/ralphie.git
 cd ralphie
 bun install --frozen-lockfile
-```
-
-Optionally expose the `ralphie` command in your local Bun environment:
-
-```bash
-bun link
-ralphie --version
+bun run index.ts --version
 ```
 
 ## Quick start
@@ -86,15 +91,17 @@ Non-dry runs also require permission to push to the selected branch and create,
 update, and close issues. `--workflow pr` additionally requires permission to
 create, comment on, and merge pull requests.
 
-### Verify the installation
+### Verify the published installation
 
-Run the source entry point from the checkout:
+```bash
+bunx @beremaran/ralphie --version
+```
+
+For a source checkout, use the source entry point instead:
 
 ```bash
 bun run index.ts --version
 ```
-
-If you used `bun link`, `ralphie --version` is equivalent.
 
 ### Preview the first issue
 
@@ -104,11 +111,10 @@ the local workspace and write run artifacts, but it does not ask Pi to edit the
 repository, create commits, push, or mutate GitHub.
 
 ```bash
-ralphie owner/repository --dry-run --max-issues 1
+bunx @beremaran/ralphie owner/repository --dry-run --max-issues 1
 ```
 
-When running from source, replace `ralphie` with `bun run index.ts` in any
-example:
+When running from source, use the source entry point instead:
 
 ```bash
 bun run index.ts owner/repository --dry-run --max-issues 1
@@ -119,7 +125,7 @@ bun run index.ts owner/repository --dry-run --max-issues 1
 The top-level `--mode` defaults to `issues`:
 
 ```bash
-ralphie owner/repository --max-issues 5
+bunx @beremaran/ralphie owner/repository --max-issues 5
 ```
 
 When no branch is configured, Ralphie uses `main` when it exists and otherwise
@@ -131,7 +137,7 @@ The `get-pipelines-green` mode is selected explicitly and keeps its retry
 settings separate from issue options:
 
 ```bash
-ralphie owner/repository --mode get-pipelines-green \
+bunx @beremaran/ralphie owner/repository --mode get-pipelines-green \
   --max-attempts 3 --pipeline-timeout 10m
 ```
 
@@ -146,7 +152,7 @@ a wait-for-human-review mode. The pull request body links the source issue with
 is merged. Select the workflow on the command line:
 
 ```bash
-ralphie owner/repository --workflow pr
+bunx @beremaran/ralphie owner/repository --workflow pr
 ```
 
 ## How it works
@@ -323,7 +329,7 @@ discarded. Keep unrelated work outside Ralphie's workspace.
 For a delivery-mutation-free validation, use:
 
 ```bash
-ralphie owner/repository --dry-run --max-issues 1
+bunx @beremaran/ralphie owner/repository --dry-run --max-issues 1
 ```
 
 Dry-run mode still performs real preflight, cloning, issue discovery, and
@@ -340,7 +346,7 @@ Ralphie has no configuration file. The repository is required and every setting
 is supplied explicitly as an option:
 
 ```bash
-ralphie owner/repository \
+bunx @beremaran/ralphie owner/repository \
   --workflow pr \
   --branch main \
   --issue-label bug \
@@ -350,7 +356,7 @@ ralphie owner/repository \
 Process bugs from oldest to newest on a non-default branch:
 
 ```bash
-ralphie owner/repository \
+bunx @beremaran/ralphie owner/repository \
   --branch develop \
   --issue-label bug \
   --issue-sort created:asc \
@@ -360,7 +366,7 @@ ralphie owner/repository \
 Require multiple labels and let Pi choose its configured model:
 
 ```bash
-ralphie owner/repository \
+bunx @beremaran/ralphie owner/repository \
   --issue-label bug \
   --issue-label backend
 ```
@@ -368,7 +374,7 @@ ralphie owner/repository \
 Select a Pi model and thinking level explicitly:
 
 ```bash
-ralphie owner/repository \
+bunx @beremaran/ralphie owner/repository \
   --model openai/gpt-5 \
   --thinking high
 ```
@@ -377,7 +383,7 @@ Use lower reasoning for routing and commit text while retaining a stronger
 review, and override the deterministic project gate when needed:
 
 ```bash
-ralphie owner/repository \
+bunx @beremaran/ralphie owner/repository \
   --grounding-thinking low \
   --complexity-thinking medium \
   --review-thinking high \
@@ -392,13 +398,13 @@ fails closed before review or commit.
 Write machine-readable progress to stdout:
 
 ```bash
-ralphie owner/repository --max-issues 1 --output json > ralphie.jsonl
+bunx @beremaran/ralphie owner/repository --max-issues 1 --output json > ralphie.jsonl
 ```
 
 Start from an empty disposable workspace and remove it after success:
 
 ```bash
-ralphie owner/repository \
+bunx @beremaran/ralphie owner/repository \
   --workspace /tmp/ralphie \
   --clean both
 ```
@@ -410,7 +416,7 @@ ralphie owner/repository \
 Resume an interrupted run:
 
 ```bash
-ralphie owner/repository \
+bunx @beremaran/ralphie owner/repository \
   --branch main \
   --resume ~/.ralphie/.ralphie/runs/<run-id>/state.json
 ```
@@ -422,7 +428,7 @@ already have reached the remote before continuing.
 ## CLI reference
 
 ```text
-ralphie <repository> [options]
+bunx @beremaran/ralphie <repository> [options]
 ```
 
 `<repository>` is required and accepts an `owner/name` slug or a GitHub
@@ -456,7 +462,7 @@ Model credentials are read from environment variables:
 | `RALPHIE_MODEL_BASE_URL` | OpenAI-compatible model base URL; enables the throwaway Pi configuration. |
 | `RALPHIE_MODEL_API_KEY` | Model API key for the throwaway Pi configuration. |
 
-Run `ralphie --help` for the help generated from the current command schema.
+Run `bunx @beremaran/ralphie --help` for the help generated from the current command schema.
 
 ## Progress, state, and recovery
 
