@@ -29,6 +29,9 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Changed
 
+- Sign the exact `SHA256SUMS` bytes with keyless Sigstore through GitHub OIDC,
+  publish the canonical `SHA256SUMS.sigstore.json` bundle, and document the
+  downstream trust policy.
 - Publish a deterministic SHA256SUMS manifest alongside the four native
   release binaries, hashing the exact files uploaded to GitHub.
 - Publish multi-architecture Docker images from inspected, immutable

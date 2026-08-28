@@ -114,4 +114,55 @@ describe("release container metadata contract", () => {
             'gh release create "$TAG" "${assets[@]}"',
         );
     });
+
+    test("signs and verifies the exact manifest before publishing its bundle", async () => {
+        const workflow = await readRepositoryFile(
+            ".github/workflows/release.yml",
+        );
+        const publishJob = workflow.slice(workflow.indexOf("  publish:"));
+        const signStepStart = publishJob.indexOf(
+            "name: Sign and verify SHA256SUMS with Sigstore",
+        );
+        const releaseStepStart = publishJob.indexOf(
+            "name: Create GitHub release",
+        );
+        const signStep = publishJob.slice(signStepStart, releaseStepStart);
+
+        expect(publishJob).toContain("contents: write");
+        expect(publishJob).toContain("id-token: write");
+        expect(signStep).toContain("sigstore/gh-action-sigstore-python@");
+        expect(signStep).toContain("inputs: release-assets/SHA256SUMS");
+        expect(signStep).toContain("verify: true");
+        expect(signStep).toContain(
+            "https://github.com/beremaran/ralphie/.github/workflows/release.yml@refs/tags/${{ needs.validate.outputs.tag }}",
+        );
+        expect(signStep).toContain(
+            "verify-oidc-issuer: https://token.actions.githubusercontent.com",
+        );
+        expect(signStep).toContain("release-signing-artifacts: false");
+        expect(releaseStepStart).toBeGreaterThan(signStepStart);
+        expect(publishJob).toContain("release-assets/SHA256SUMS.sigstore.json");
+    });
+
+    test("documents runnable Sigstore GitHub source selectors", async () => {
+        const readme = await readRepositoryFile("README.md");
+        const commandStart = readme.indexOf(
+            "sigstore verify github SHA256SUMS",
+        );
+        const commandEnd = readme.indexOf(
+            "sha256sum --check SHA256SUMS",
+            commandStart,
+        );
+        const command = readme.slice(commandStart, commandEnd);
+
+        expect(command).toContain("--workflow release.yml");
+        expect(command).toContain('--source-sha "$SOURCE_REF"');
+        expect(command).toContain('--source-tag "$TAG"');
+        expect(command).toContain(
+            "--cert-oidc-issuer https://token.actions.githubusercontent.com",
+        );
+        expect(command).toContain("--source-event push");
+        expect(command).not.toContain("--trigger");
+        expect(command).not.toMatch(/--(?:name|sha|ref)(?:\s|=)/);
+    });
 });

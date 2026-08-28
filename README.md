@@ -743,3 +743,49 @@ protected GitHub `release` environment. Repository administrators must
 configure that environment in **Settings → Environments → release** with the
 required reviewer(s); approval is required before the final publisher can
 write release assets or packages.
+
+Each release also contains `SHA256SUMS.sigstore.json`, a canonical Sigstore
+bundle for the exact bytes of `SHA256SUMS`. The release publisher uses keyless
+Sigstore signing with the GitHub Actions OIDC issuer; no signing key or OIDC
+token is stored in the repository, build context, logs, or release metadata.
+
+#### Release checksum trust policy
+
+Downstream consumers must accept a checksum manifest only when its bundle
+verifies against all of these constraints:
+
+- issuer: `https://token.actions.githubusercontent.com`;
+- repository: `beremaran/ralphie`;
+- workflow identity:
+  `https://github.com/beremaran/ralphie/.github/workflows/release.yml@refs/tags/<tag>`;
+- GitHub workflow event: `push` for the exact `refs/tags/<tag>` (or
+  `workflow_dispatch` only when the manual run is started from that same
+  protected tag); and
+- workflow commit: the exact commit targeted by that protected tag.
+
+For example, after downloading both `SHA256SUMS` and
+`SHA256SUMS.sigstore.json` from the same release, verify the signature before
+using the checksums (`--source-event workflow_dispatch` is used instead for a
+manually published release):
+
+```bash
+TAG=v0.1.0
+SOURCE_REF=<40-character commit SHA targeted by $TAG>
+sigstore verify github SHA256SUMS \
+  --bundle SHA256SUMS.sigstore.json \
+  --repository beremaran/ralphie \
+  --workflow release.yml \
+  --cert-identity "https://github.com/beremaran/ralphie/.github/workflows/release.yml@refs/tags/$TAG" \
+  --cert-oidc-issuer https://token.actions.githubusercontent.com \
+  --source-event push \
+  --source-sha "$SOURCE_REF" \
+  --source-tag "$TAG"
+sha256sum --check SHA256SUMS
+```
+
+Reject the release if any identity, issuer, event, tag/ref, commit, bundle,
+or checksum validation differs. `sigstore verify github` uses GitHub's
+`https://token.actions.githubusercontent.com` issuer; a generic Sigstore
+verifier must be given that issuer explicitly. The release workflow performs
+the same identity and issuer check before publication; its validated
+protected-tag context binds the signing run to `source_ref`.

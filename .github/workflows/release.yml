@@ -452,6 +452,7 @@ jobs:
       url: https://github.com/${{ github.repository }}/releases/tag/${{ needs.validate.outputs.tag }}
     permissions:
       contents: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -485,6 +486,18 @@ jobs:
             --artifacts-dir release-assets \
             --output-dir release-assets
 
+      # Sign the exact manifest that will be published. Ambient GitHub OIDC
+      # credentials stay inside the Sigstore action and are never written to
+      # the checkout, build context, logs, or release assets.
+      - name: Sign and verify SHA256SUMS with Sigstore
+        uses: sigstore/gh-action-sigstore-python@5b79a39c381910c090341a2c9b0bf022c8b387e1 # v3.4.0
+        with:
+          inputs: release-assets/SHA256SUMS
+          verify: true
+          verify-cert-identity: "https://github.com/beremaran/ralphie/.github/workflows/release.yml@refs/tags/${{ needs.validate.outputs.tag }}"
+          verify-oidc-issuer: https://token.actions.githubusercontent.com
+          release-signing-artifacts: false
+
       # The release tag is protected against updates/deletions, so the
       # validated source_ref remains bound to TAG through this request. Keep
       # this explicit list in sync with RELEASE_TARGETS in the collector.
@@ -500,6 +513,7 @@ jobs:
             release-assets/ralphie-linux-arm64
             release-assets/ralphie-linux-x64
             release-assets/SHA256SUMS
+            release-assets/SHA256SUMS.sigstore.json
           )
           for asset in "${assets[@]}"; do
             test -f "$asset"
