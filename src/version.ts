@@ -1,3 +1,4 @@
-import packageJson from "../package.json";
+import { BUILD_INFO } from "./build-info.ts";
 
-export const RALPHIE_VERSION = packageJson.version;
+/** Backwards-compatible access to the package release version. */
+export const RALPHIE_VERSION = BUILD_INFO.version;

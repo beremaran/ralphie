@@ -9,7 +9,8 @@ WORKDIR /src
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 COPY . .
-RUN bun run build
+ARG RALPHIE_COMMIT_SHA=local
+RUN bun run build -- --commit-sha "$RALPHIE_COMMIT_SHA"
 
 # ---- runtime stage --------------------------------------------------------
 FROM gcr.io/distroless/base-debian12:nonroot

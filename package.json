@@ -55,8 +55,8 @@
   "scripts": {
     "start": "bun run index.ts",
     "dev": "bun --watch ./index.ts",
-    "build": "bun build ./index.ts --compile --outfile ./dist/cli",
-    "build:package": "bun build ./index.ts --target bun --outfile ./dist/ralphie.js",
+    "build": "bun run scripts/build.ts",
+    "build:package": "bun run scripts/build.ts --package",
     "check": "bun run format:check && bun run lint && bun run typecheck && bun run test && bun run build",
     "format": "biome format --write .",
     "format:check": "biome format .",

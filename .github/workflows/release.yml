@@ -89,6 +89,13 @@ jobs:
           # This is the invariant that makes the validated commit stable
           # through the build and publication jobs. A read-then-publish API
           # check cannot close the race with a tag update.
+          package_version="$(jq -er '.version | select(type == "string")' package.json)"
+          expected_version="${RELEASE_VERSION#v}"
+          if [[ "$package_version" != "$expected_version" ]]; then
+            echo "Release tag $RELEASE_VERSION does not match package.json version $package_version" >&2
+            exit 1
+          fi
+
           if [[ "$GITHUB_REF_PROTECTED" != true ]]; then
             echo "The release tag must be protected against updates and deletions" >&2
             exit 1
@@ -109,9 +116,9 @@ jobs:
           fi
 
           # Downstream jobs consume only these canonical values: the package
-          # version without v, and the immutable commit targeted by the tag.
+          # version and the immutable commit targeted by the tag.
           {
-            echo "version=${RELEASE_VERSION#v}"
+            echo "version=$package_version"
             echo "tag=$RELEASE_VERSION"
             echo "source_ref=$tag_commit"
             echo "dry_run=$RELEASE_DRY_RUN"
@@ -147,7 +154,7 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Build native binary
-        run: bun run build
+        run: bun run build -- --commit-sha "${{ needs.validate.outputs.source_ref }}"
 
       - name: Verify and smoke-test native binary
         run: |
@@ -220,6 +227,8 @@ jobs:
           context: .
           platforms: ${{ matrix.platform }}
           tags: ${{ env.IMAGE }}
+          build-args: |
+            RALPHIE_COMMIT_SHA=${{ needs.validate.outputs.source_ref }}
           labels: |
             org.opencontainers.image.revision=${{ needs.validate.outputs.source_ref }}
           push: false

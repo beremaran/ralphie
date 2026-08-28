@@ -26,6 +26,17 @@ mutations, run state, recovery, and safety checks deterministic.
 > not the unrelated unscoped npm package named `ralphie`. Start with a one-issue
 > `--dry-run` against a repository you control before enabling mutations.
 
+### Version and build metadata
+
+`ralphie --version` prints only the release version. For automation,
+`ralphie --version --output json` prints a stable object containing `version`
+and `commitSha`. Both forms work without a repository, GitHub credentials, or
+Pi configuration.
+
+Release builds embed the immutable commit SHA supplied by the build entry point;
+it is not read from the runtime environment. Local builds use the documented
+`local` commit sentinel when no release SHA is supplied.
+
 ## Why Ralphie?
 
 - **Issue-native automation** — each run focuses on one GitHub repository, with
@@ -608,7 +619,9 @@ Useful individual commands:
 | `bun run format` | Format the repository with Biome. |
 | `bun run format:check` | Verify formatting without modifying files. |
 | `bun run lint` | Check TypeScript cognitive complexity (maximum 12). |
-| `bun run build` | Build the standalone executable at `dist/cli`. |
+| `bun run build` | Build the standalone executable at `dist/cli` (local builds use the `local` commit sentinel). |
+| `bun run build -- --commit-sha <sha>` | Build with an explicit release commit SHA. |
+| `bun run build:package` | Build the publishable package bundle at `dist/ralphie.js`. |
 | `bun run probe:structured-output` | Exercise a real schema-validated Pi decision. |
 
 Real network integrations are opt-in and skipped by the normal test suite:
@@ -651,7 +664,8 @@ document notable changes in [`CHANGELOG.md`](./CHANGELOG.md).
 
 The release workflow accepts only strict tags of the form
 `v<major>.<minor>.<patch>`, with numeric components that have no leading zeroes
-(`v0.1.0` is valid). Prerelease and build suffixes are not accepted. Every run
+(`v0.1.0` is valid). Prerelease and build suffixes are not accepted. The tag
+version must exactly match `package.json` before artifacts are built. Every run
 resolves the tag to its immutable commit before building; a manual dispatch
 must be started from the matching protected `version` tag and provide its full
 40-character lowercase commit `ref`. A mismatched ref fails before release or

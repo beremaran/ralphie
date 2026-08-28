@@ -7,6 +7,8 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Added
 
+- A single package-version authority with build-time commit metadata and plain
+  or JSON `--version` output that works without repository or Pi configuration.
 - Staged-tree-bound deterministic verification before review, after review
   fixes, and before commit, with persisted command evidence and repeatable
   `--verify-command` overrides.

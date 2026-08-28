@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { RALPHIE_VERSION } from "../../src/version.ts";
+import packageJson from "../../package.json";
 import { makeCommandRuntimeHarness } from "./command-runtime-harness.ts";
 
 describe("command/runtime display harness", () => {
@@ -41,14 +41,24 @@ describe("command/runtime display harness", () => {
         expect(harness.lifecycle).toContain("coordinator.dispose");
     });
 
-    test("captures output written directly by command orchestration", async () => {
-        const harness = makeCommandRuntimeHarness();
+    test("uses the package version for plain and JSON version output", async () => {
+        const plainHarness = makeCommandRuntimeHarness();
+        await plainHarness.run(["--version"]);
 
-        await harness.run(["--version"]);
+        expect(plainHarness.stdout).toEqual([`${packageJson.version}\n`]);
+        expect(plainHarness.stderr).toEqual([]);
+        expect(plainHarness.lifecycle).toEqual([]);
 
-        expect(harness.stdout).toEqual([`${RALPHIE_VERSION}\n`]);
-        expect(harness.stderr).toEqual([]);
-        expect(harness.lifecycle).toEqual([]);
+        const jsonHarness = makeCommandRuntimeHarness();
+        await jsonHarness.run(["--version", "--output", "json"]);
+
+        expect(jsonHarness.stdout).toHaveLength(1);
+        expect(JSON.parse(jsonHarness.stdout[0] ?? "")).toMatchObject({
+            version: packageJson.version,
+            commitSha: expect.any(String),
+        });
+        expect(jsonHarness.stderr).toEqual([]);
+        expect(jsonHarness.lifecycle).toEqual([]);
     });
 
     test("captures deterministic abort and failure triggers", async () => {

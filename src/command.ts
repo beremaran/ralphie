@@ -29,7 +29,7 @@ import type { PiEventListener } from "./pi/client.ts";
 import { exitCodeForFailure } from "./process/exit-code.ts";
 import { workflow } from "./workflow.ts";
 import { redactSensitiveText } from "./shared/redaction.ts";
-import { RALPHIE_VERSION } from "./version.ts";
+import { BUILD_INFO } from "./build-info.ts";
 import { type RunState, RunStateStoreLive } from "./run/state.ts";
 import { reconcileRunState } from "./run/reconciliation.ts";
 import { resolveWorkspacePath } from "./workspace/workspace.ts";
@@ -333,7 +333,7 @@ Options:
       --clean <when>           Remove the workspace at start, end, or both
       --output <mode>          Output: live transcript/progress, verbose, quiet, or json
   -h, --help                   Show this help
-  -v, --version                Show version
+  -v, --version                Show version (use --output json for build metadata)
 
 Environment:
   RALPHIE_MODEL_BASE_URL       OpenAI-compatible model base URL
@@ -506,7 +506,11 @@ export const runCommand = async (
         return;
     }
     if (parsed.version) {
-        output.stdout(`${RALPHIE_VERSION}\n`);
+        output.stdout(
+            parsed.options.json
+                ? `${JSON.stringify(BUILD_INFO)}\n`
+                : `${BUILD_INFO.version}\n`,
+        );
         return;
     }
 
