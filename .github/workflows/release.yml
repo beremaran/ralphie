@@ -228,8 +228,10 @@ jobs:
           platforms: ${{ matrix.platform }}
           tags: ${{ env.IMAGE }}
           build-args: |
+            RALPHIE_VERSION=${{ needs.validate.outputs.version }}
             RALPHIE_COMMIT_SHA=${{ needs.validate.outputs.source_ref }}
           labels: |
+            org.opencontainers.image.version=${{ needs.validate.outputs.version }}
             org.opencontainers.image.revision=${{ needs.validate.outputs.source_ref }}
           push: false
           outputs: |
@@ -237,19 +239,30 @@ jobs:
             type=oci,dest=ralphie-container-${{ matrix.arch }}.oci.tar
           metadata-file: buildx-metadata-${{ matrix.arch }}.json
 
-      - name: Smoke-test entrypoint
+      - name: Smoke-test entrypoint and inspect release metadata
+        env:
+          EXPECTED_VERSION: ${{ needs.validate.outputs.version }}
+          EXPECTED_REVISION: ${{ needs.validate.outputs.source_ref }}
         run: |
           set -euo pipefail
           docker load --input "/tmp/ralphie-container-${ARCH}.docker.tar"
-          docker run --rm --platform "$PLATFORM" "$IMAGE" --version
+
+          version_label="$(docker image inspect "$IMAGE" --format '{{ index .Config.Labels "org.opencontainers.image.version" }}')"
+          revision_label="$(docker image inspect "$IMAGE" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')"
+          test "$version_label" = "$EXPECTED_VERSION"
+          test "$revision_label" = "$EXPECTED_REVISION"
+
+          version_json="$(docker run --rm --platform "$PLATFORM" "$IMAGE" --version --output json)"
+          jq -e --arg version "$EXPECTED_VERSION" --arg revision "$EXPECTED_REVISION" \
+            '.version == $version and .commitSha == $revision' <<< "$version_json"
 
       # Candidate contract v1 for the final publisher:
       # - artifact: ralphie-container-candidate-<version>-<arch>
       # - archive: the platform-specific OCI archive below
       # - digest: the BuildKit image manifest digest
       # - source_ref/platform/archive_sha256: values the publisher must match
-      # before promoting the archive. A failed build or smoke test never reaches
-      # this step or the immutable artifact upload.
+      # before promoting the archive. A failed build, smoke test, or metadata
+      # check never reaches this step or the immutable artifact upload.
       - name: Write candidate digest and platform contract
         run: |
           set -euo pipefail
@@ -259,6 +272,8 @@ jobs:
           digest="$(jq -er '."containerimage.digest" | select(type == "string" and test("^sha256:[0-9a-f]{64}$"))' "buildx-metadata-${ARCH}.json")"
           archive_sha256="$(sha256sum "$archive" | cut -d ' ' -f1)"
           artifact="ralphie-container-candidate-${VERSION}-${ARCH}"
+          image_version="$(docker image inspect "$IMAGE" --format '{{ index .Config.Labels "org.opencontainers.image.version" }}')"
+          image_revision="$(docker image inspect "$IMAGE" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')"
           jq -n \
             --arg schema "ralphie.container-candidate.v1" \
             --arg artifact "$artifact" \
@@ -269,7 +284,9 @@ jobs:
             --arg format "oci-archive" \
             --arg archive "$archive" \
             --arg archive_sha256 "$archive_sha256" \
-            '{schema, artifact, version, source_ref, platform, digest, format, archive, archive_sha256}' \
+            --arg image_version "$image_version" \
+            --arg image_revision "$image_revision" \
+            '{schema, artifact, version, source_ref, platform, digest, format, archive, archive_sha256, image_version, image_revision}' \
             > "$contract"
 
       # v4 artifact names are immutable. The final publisher downloads the two
@@ -283,6 +300,150 @@ jobs:
           if-no-files-found: error
           overwrite: false
           retention-days: 90
+
+  push-container:
+    name: Push container image
+    needs:
+      - validate
+      - stage-container
+    if: needs.validate.outputs.dry_run == 'false'
+    runs-on: ubuntu-latest
+    # Container publication is separately downstream of the metadata check.
+    # Its protected environment prevents a retry from bypassing validation.
+    environment:
+      name: release
+      url: https://github.com/${{ github.repository }}/packages/container/ralphie
+    permissions:
+      packages: write
+    steps:
+      - name: Download tested container candidates
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ralphie-container-candidate-${{ needs.validate.outputs.version }}-*
+          path: container-candidates
+          merge-multiple: true
+
+      # Validate every candidate before the first registry write. The archive
+      # hash and the recorded image metadata bind the promotion input to the
+      # validated version and commit, even when this job is retried.
+      - name: Verify candidate metadata
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+          SOURCE_REF: ${{ needs.validate.outputs.source_ref }}
+        run: |
+          set -euo pipefail
+          for arch in amd64 arm64; do
+            case "$arch" in
+              amd64) platform="linux/amd64" ;;
+              arm64) platform="linux/arm64" ;;
+              *) echo "Unsupported container architecture: $arch" >&2; exit 1 ;;
+            esac
+
+            contract="container-candidates/ralphie-container-${arch}.metadata.json"
+            archive="ralphie-container-${arch}.oci.tar"
+            jq -e \
+              --arg schema "ralphie.container-candidate.v1" \
+              --arg artifact "ralphie-container-candidate-${VERSION}-${arch}" \
+              --arg version "$VERSION" \
+              --arg source_ref "$SOURCE_REF" \
+              --arg platform "$platform" \
+              --arg archive "$archive" \
+              '(.schema == $schema) and
+               (.artifact == $artifact) and
+               (.version == $version) and
+               (.source_ref == $source_ref) and
+               (.platform == $platform) and
+               (.format == "oci-archive") and
+               (.archive == $archive) and
+               (.image_version == $version) and
+               (.image_revision == $source_ref) and
+               (.digest | strings | test("^sha256:[0-9a-f]{64}$")) and
+               (.archive_sha256 | strings | test("^[0-9a-f]{64}$"))' \
+              "$contract" > /dev/null
+            test -s "container-candidates/$archive"
+            expected_sha256="$(jq -er '.archive_sha256' "$contract")"
+            actual_sha256="$(sha256sum "container-candidates/$archive" | cut -d ' ' -f1)"
+            test "$actual_sha256" = "$expected_sha256"
+          done
+
+      - name: Install skopeo
+        run: |
+          set -euo pipefail
+          if ! command -v skopeo >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install --yes skopeo
+          fi
+
+      - name: Inspect OCI metadata before promotion
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+          SOURCE_REF: ${{ needs.validate.outputs.source_ref }}
+        run: |
+          set -euo pipefail
+          for arch in amd64 arm64; do
+            archive="container-candidates/ralphie-container-${arch}.oci.tar"
+            contract="container-candidates/ralphie-container-${arch}.metadata.json"
+            expected_digest="$(jq -er '.digest' "$contract")"
+            actual_digest="$(skopeo inspect --format '{{.Digest}}' "oci-archive:$archive")"
+            version_label="$(skopeo inspect --format '{{ index .Labels "org.opencontainers.image.version" }}' "oci-archive:$archive")"
+            revision_label="$(skopeo inspect --format '{{ index .Labels "org.opencontainers.image.revision" }}' "oci-archive:$archive")"
+            test "$actual_digest" = "$expected_digest"
+            test "$version_label" = "$VERSION"
+            test "$revision_label" = "$SOURCE_REF"
+          done
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The normalized package version is the canonical tag. The minor,
+      # latest, and source-revision tags are explicit aliases; metadata-action
+      # is told not to infer latest so a prerelease can never receive it.
+      - name: Derive container tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/beremaran/ralphie
+          flavor: |
+            latest=false
+          tags: |
+            type=raw,value=${{ needs.validate.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=v${{ needs.validate.outputs.version }}
+            type=raw,value=latest,enable=${{ !contains(needs.validate.outputs.tag, '-') }}
+            type=raw,value=sha-${{ needs.validate.outputs.source_ref }}
+
+      # Promote the inspected OCI archives, rather than rebuilding with a
+      # different ref. All version/revision inputs remain the release-gate
+      # outputs on retries.
+      - name: Push inspected container images
+        env:
+          IMAGE: ghcr.io/beremaran/ralphie
+          VERSION: ${{ needs.validate.outputs.version }}
+          SOURCE_REF: ${{ needs.validate.outputs.source_ref }}
+          IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          for arch in amd64 arm64; do
+            archive="container-candidates/ralphie-container-${arch}.oci.tar"
+            platform_tag="$IMAGE:${VERSION}-${arch}"
+            expected_digest="$(jq -er '.digest' "container-candidates/ralphie-container-${arch}.metadata.json")"
+            skopeo copy --authfile "$HOME/.docker/config.json" --retry-times 3 \
+              "oci-archive:$archive" "docker://$platform_tag"
+            actual_digest="$(skopeo inspect --authfile "$HOME/.docker/config.json" \
+              --retry-times 3 --format '{{.Digest}}' "docker://$platform_tag")"
+            test "$actual_digest" = "$expected_digest"
+          done
+
+          while IFS= read -r tag; do
+            test -n "$tag"
+            docker manifest create "$tag" \
+              "$IMAGE:${VERSION}-amd64" \
+              "$IMAGE:${VERSION}-arm64"
+            docker manifest push "$tag"
+          done <<< "$IMAGE_TAGS"
 
   publish:
     name: Publish release

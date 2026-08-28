@@ -29,6 +29,9 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Changed
 
+- Publish multi-architecture Docker images from inspected, immutable
+  candidates with validated version and revision OCI metadata, using an
+  explicit normalized-version tag and stable-only `latest` alias.
 - Stage and smoke-test immutable `linux/amd64` and `linux/arm64` container
   candidates from the validated release ref, including per-platform OCI
   archives, image digests, and promotion metadata; defer registry publication

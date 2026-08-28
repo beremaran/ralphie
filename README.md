@@ -685,10 +685,14 @@ an immutable `actions/upload-artifact@v4` artifact named
 `ralphie-container-candidate-<version>-<arch>`. Its
 `ralphie-container-<arch>.metadata.json` uses the
 `ralphie.container-candidate.v1` contract and records the validated
-`source_ref`, platform, OCI archive name and SHA-256, and BuildKit image
-manifest `digest`; the final publisher must verify those fields before
-promotion. A dry run skips GitHub Release publication. A normal tag push is
-not a dry run and runs release publication in the protected GitHub `release`
-environment. Repository administrators must configure that environment in
-**Settings → Environments → release** with the required reviewer(s); approval
-is required before the final publisher can write release assets or packages.
+`source_ref`, platform, OCI archive name and SHA-256, BuildKit image
+manifest `digest`, and OCI version/revision labels; the final publisher
+must verify those fields before promotion. The canonical GHCR tag is the
+normalized package version without `v` (for example, `0.1.0`). The minor
+version, `latest` for stable releases only, and `sha-<commit>` are explicit
+aliases. A dry run skips GitHub Release and GHCR publication. A normal tag
+push is not a dry run and runs release and container publication in the
+protected GitHub `release` environment. Repository administrators must
+configure that environment in **Settings → Environments → release** with the
+required reviewer(s); approval is required before the final publisher can
+write release assets or packages.
