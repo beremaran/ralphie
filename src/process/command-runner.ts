@@ -8,6 +8,7 @@ export type CommandResult = {
 
 export type CommandRunOptions = {
     readonly trimStdout?: boolean;
+    readonly cwd?: string;
 };
 
 export type CommandRunnerService = {
@@ -22,6 +23,7 @@ export const CommandRunnerLive: CommandRunnerService = {
     run: async (command, args, options) => {
         try {
             const result = Bun.spawnSync([command, ...args], {
+                cwd: options?.cwd,
                 stdout: "pipe",
                 stderr: "pipe",
             });

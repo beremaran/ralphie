@@ -26,6 +26,7 @@ import {
 } from "../../src/issues/execution.ts";
 import type { WorkflowExecutorResult } from "../../src/issues/workflow-executor-input.ts";
 import { makeImplementationExecutorService } from "../../src/issues/implementation-executor.ts";
+import type { IssueVerificationService } from "../../src/issues/verification.ts";
 import {
     type ReviewExhaustionOutcome,
     type IssueRecoveryService,
@@ -51,7 +52,10 @@ const checkpoint: IssueCheckpoint = {
     sha: "0123456789abcdef0123456789abcdef01234567",
 };
 
-const review = (verdict: "approved" | "changes_requested") => ({
+const review = (
+    verdict: "approved" | "changes_requested",
+    description = "The implementation misses an edge case.",
+) => ({
     verdict,
     summary:
         verdict === "approved" ? "The change is safe." : "Fix the blocker.",
@@ -61,7 +65,7 @@ const review = (verdict: "approved" | "changes_requested") => ({
             : [
                   {
                       severity: "blocking" as const,
-                      description: "The implementation misses an edge case.",
+                      description,
                   },
               ],
 });
@@ -125,6 +129,7 @@ type ServiceOptions = {
     readonly recovery?: Partial<IssueRecoveryService>;
     readonly remoteSafety?: Partial<GitRemoteSafetyService>;
     readonly safetyInputs?: GitRemoteSafetyInput[];
+    readonly verification?: IssueVerificationService;
 };
 
 const services = (options: ServiceOptions = {}) => {
@@ -182,6 +187,7 @@ const services = (options: ServiceOptions = {}) => {
             remoteSafety,
             recovery,
             progress,
+            options.verification,
         ),
         operations,
         recovery,
@@ -226,6 +232,56 @@ describe("implementation executor", () => {
         expect(
             safetyInputs.map(({ expectedCommitSha }) => expectedCommitSha),
         ).toEqual([undefined, "commit-1"]);
+    });
+
+    test("never reviews or commits when deterministic verification fails", async () => {
+        let commitCalled = false;
+        const setup = services({
+            operations: {
+                commit: async () => {
+                    commitCalled = true;
+                    return { sha: "commit-1", treeSha: "tree-1" };
+                },
+            },
+            verification: {
+                stagedTreeSha: async () => "a".repeat(40),
+                verify: async () => {
+                    throw new RalphieError({ message: "bun run check failed" });
+                },
+            },
+        });
+        const artifacts = await makeIssueArtifactStore(42);
+        await expect(
+            run(piClient([undefined]), artifacts, setup),
+        ).rejects.toThrow("bun run check failed");
+        expect(commitCalled).toBe(false);
+    });
+
+    test("refuses commit when the staged tree changes after approval", async () => {
+        let verificationCount = 0;
+        const verification: IssueVerificationService = {
+            stagedTreeSha: async () => "a".repeat(40),
+            verify: async () => ({
+                stagedTreeSha:
+                    ++verificationCount < 3 ? "a".repeat(40) : "b".repeat(40),
+                commands: [
+                    {
+                        command: "bun run check",
+                        exitCode: 0,
+                        stdout: "",
+                        stderr: "",
+                    },
+                ],
+            }),
+        };
+        const artifacts = await makeIssueArtifactStore(42);
+        await expect(
+            run(
+                piClient([undefined, review("approved")]),
+                artifacts,
+                services({ verification }),
+            ),
+        ).rejects.toThrow("staged tree changed after approval");
     });
 
     test("refuses unsafe direct pushes before starting an agent session", async () => {
@@ -465,15 +521,15 @@ describe("implementation executor", () => {
         });
         const client = piClient([
             undefined,
-            review("changes_requested"),
+            review("changes_requested", "Fix blocker one."),
             undefined,
-            review("changes_requested"),
+            review("changes_requested", "Fix blocker two."),
             undefined,
-            review("changes_requested"),
+            review("changes_requested", "Fix blocker three."),
             undefined,
-            review("changes_requested"),
+            review("changes_requested", "Fix blocker four."),
             undefined,
-            review("changes_requested"),
+            review("changes_requested", "Fix blocker five."),
         ]);
         const originalPrompt = client.session.prompt;
         client.session.prompt = (async (parameters: {

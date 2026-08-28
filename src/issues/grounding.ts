@@ -56,7 +56,9 @@ export const makeGroundingAssessmentService = (
                 schema: groundingDecisionSchema,
                 agent: context.piSelection.agent,
                 model: context.piSelection.model,
-                variant: context.piSelection.variant,
+                variant:
+                    context.piStageVariants?.grounding ??
+                    context.piSelection.variant,
                 runId: context.runId,
                 diagnostics: context.piDiagnostics,
                 verifyAfter: () =>

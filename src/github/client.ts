@@ -11,6 +11,9 @@ export type GitHubClientService = {
     readonly initialize: () => Promise<Octokit>;
 };
 
+/** Current GitHub REST contract; 2022-11-28 retires on 2028-03-10. */
+export const GITHUB_REST_API_VERSION = "2026-03-10";
+
 export const makeGitHubClientService = (
     runner: CommandRunnerService = CommandRunnerLive,
 ): GitHubClientService => ({
@@ -36,7 +39,14 @@ export const makeGitHubClientService = (
         }
 
         try {
-            return new Octokit({ auth: authToken });
+            return new Octokit({
+                auth: authToken,
+                request: {
+                    headers: {
+                        "x-github-api-version": GITHUB_REST_API_VERSION,
+                    },
+                },
+            });
         } catch (cause) {
             throw new RalphieError({
                 message: "Failed to initialize Octokit.",

@@ -41,10 +41,15 @@ const cliOptions = {
     "max-issues": { type: "string" },
     "issue-label": { type: "string", multiple: true },
     "issue-sort": { type: "string" },
+    "verify-command": { type: "string", multiple: true },
     "max-attempts": { type: "string" },
     "pipeline-timeout": { type: "string" },
     model: { type: "string" },
     thinking: { type: "string" },
+    "grounding-thinking": { type: "string" },
+    "complexity-thinking": { type: "string" },
+    "review-thinking": { type: "string" },
+    "commit-thinking": { type: "string" },
     "pi-dir": { type: "string" },
     workspace: { type: "string" },
     "dry-run": { type: "boolean" },
@@ -96,6 +101,14 @@ const asNumber = (
 const asBoolean = (values: Record<string, unknown>, name: string): boolean =>
     values[name] === true;
 
+const parseThinking = (
+    values: Record<string, unknown>,
+    name: string,
+): string | undefined => {
+    const value = asNonEmptyString(values, name);
+    return value === undefined ? undefined : piModelVariantSchema.parse(value);
+};
+
 const cleanWhenSchema = z.enum(["start", "end", "both"]);
 const outputModeSchema = z.enum(["default", "verbose", "quiet", "json"]);
 
@@ -129,6 +142,20 @@ const parseIssueLabels = (
     }
     return (Array.isArray(labels) ? labels : [labels]).map((label) =>
         z.string().trim().min(1).parse(label),
+    );
+};
+
+const parseRepeatedStrings = (
+    values: Record<string, unknown>,
+    name: string,
+): ReadonlyArray<string> | undefined => {
+    const raw = values[name];
+    if (raw === undefined) return undefined;
+    if (!Array.isArray(raw) && typeof raw !== "string") {
+        throw new Error(`Option --${name} requires a value.`);
+    }
+    return (Array.isArray(raw) ? raw : [raw]).map((value) =>
+        z.string().trim().min(1).parse(value),
     );
 };
 
@@ -191,6 +218,7 @@ const parseCliOptions = (
                 : z.enum(WorkflowMode).parse(asString(values, "workflow")),
         maxIssues: asNumber(values, "max-issues"),
         issueLabels: parseIssueLabels(values),
+        verificationCommands: parseRepeatedStrings(values, "verify-command"),
         ...(issueSortValue === undefined ? {} : parseIssueSort(issueSortValue)),
         maxAttempts: asNumber(values, "max-attempts"),
         pipelineTimeout:
@@ -205,6 +233,10 @@ const parseCliOptions = (
             thinkingValue === undefined
                 ? undefined
                 : piModelVariantSchema.parse(thinkingValue),
+        groundingThinking: parseThinking(values, "grounding-thinking"),
+        complexityThinking: parseThinking(values, "complexity-thinking"),
+        reviewThinking: parseThinking(values, "review-thinking"),
+        commitThinking: parseThinking(values, "commit-thinking"),
         piDir: asNonEmptyString(values, "pi-dir"),
         workspace: asNonEmptyString(values, "workspace"),
         clean:
@@ -285,10 +317,15 @@ Options:
       --max-issues <n>         Maximum issues to process
       --issue-label <label>    Include only issues with this label (repeatable)
       --issue-sort <sort>      created, updated, or comments, optionally :asc or :desc
+      --verify-command <cmd>   Deterministic pre-commit gate (repeatable)
       --max-attempts <n>       Pipeline attempts (positive; default 3)
       --pipeline-timeout <t>  Pipeline timeout: e.g. 30s, 10m, or 2h
       --model <provider/model> Pi model selection
       --thinking <level>       Pi thinking level: off, minimal, low, medium, high, xhigh, or max
+      --grounding-thinking <level> Readiness reasoning (default low)
+      --complexity-thinking <level> Complexity reasoning (default medium)
+      --review-thinking <level> Review reasoning (default high)
+      --commit-thinking <level> Commit-message reasoning (default low)
       --pi-dir <path>          Existing Pi agent directory
       --workspace <path>       Workspace directory
       --dry-run                Assess without mutations
@@ -418,6 +455,13 @@ const workflowOptionsFor = (
     },
     model: config.model,
     modelVariant: config.thinking,
+    piStageVariants: {
+        grounding: config.groundingThinking ?? "low",
+        complexity: config.complexityThinking ?? "medium",
+        review: config.reviewThinking ?? "high",
+        commitMessage: config.commitThinking ?? "low",
+    },
+    verificationCommands: config.verificationCommands,
     agent: config.agent,
     workspace: config.workspace,
     cleanup: config.cleanEnd,

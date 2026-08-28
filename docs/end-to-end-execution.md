@@ -199,7 +199,8 @@ flowchart TD
     F --> G{"Resolved with evidence?"}
     G -->|yes| H["Completed: already-resolved"]
     G -->|no| I["Failed: issue remains unresolved"]
-    E -->|yes| J["Read exact staged binary diff"]
+    E -->|yes| V["Run deterministic verification; bind evidence to staged tree"]
+    V --> J["Read exact staged binary diff"]
     J --> K["Fresh structured review"]
     K --> L{"Approved?"}
     L -->|yes| M["Fresh commit-message session"]
@@ -208,7 +209,7 @@ flowchart TD
     O --> P["Completed: pushed-commit"]
     L -->|changes requested and attempts < 5| Q["Fresh review-fix session"]
     Q --> R["Restage all changes; require non-empty staged set"]
-    R --> J
+    R --> V
     L -->|changes requested on attempt 5| S["Preserve patch and review metadata"]
     S --> T["Restore clean issue checkpoint"]
     T --> U["Escalate to decomposition"]
@@ -226,9 +227,20 @@ Detailed behavior:
   commits, pushes, branch/reset/clean operations, and `gh` commands.
   A fresh session is used for implementation and for every review fix.
 - Staging is deterministic (`git add --all`). Ralphie reads the exact staged
-  binary diff; the review prompt receives only the issue and that diff, bounded
-  by the prompt-size safeguard. An approved review cannot contain blocking
-  findings; a `changes_requested` review must contain one.
+  binary diff, runs every configured verification command, and records bounded
+  stdout/stderr plus the exact staged-tree hash. The reviewer receives that
+  trusted evidence with the issue and diff. Verification is repeated after
+  every fix and immediately before commit; a changed tree invalidates approval.
+  An approved review cannot contain blocking findings; a
+  `changes_requested` review must contain one. Identical blocking findings
+  repeated after a verified fix stop early rather than consuming the full loop.
+- Verification commands come from repeated `--verify-command` flags or a
+  discovered `package.json` `check` script. Missing commands and non-zero exits
+  fail closed. Review attempts persist their verification evidence for resume
+  diagnostics.
+- Protected maintainer choices such as selecting a project license require the
+  exact choice to be authorized by the issue; otherwise execution halts before
+  review or delivery rather than silently establishing policy.
 - A no-change implementation is not silently accepted. A fresh read-only
   resolution session must return `resolved` plus concrete evidence. Otherwise
   the issue fails and remains open.

@@ -171,6 +171,22 @@ describe("refreshable issue queue", () => {
         ]);
     });
 
+    test("expands a closed decomposed dependency to its open children", () => {
+        const child = {
+            ...issue(160),
+            body: '<!-- ralphie:decomposition root=7 parent=36 key="service" depth=2 -->',
+        };
+        const dependent = {
+            ...issue(37),
+            body: '<!-- ralphie:decomposition root=7 parent=35 key="consumer" depth=2 -->\n\n## Dependencies\n\n- #36 (notification)',
+        };
+
+        expect(toQueuedIssues([dependent, child])).toEqual([
+            { issue: dependent, dependsOn: [160] },
+            { issue: child, dependsOn: [] },
+        ]);
+    });
+
     test("restores processing budget and completed dependencies from a snapshot", () => {
         const queue = createIssueQueue(
             [

@@ -30,6 +30,7 @@ describe("CLI configuration", () => {
             issueLabels: [],
             issueSort: IssueSort.Created,
             issueOrder: IssueOrder.Ascending,
+            verificationCommands: [],
             agent: "build",
             workspace: DEFAULT_WORKSPACE,
             cleanStart: false,

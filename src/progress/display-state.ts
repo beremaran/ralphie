@@ -64,6 +64,7 @@ export const PROGRESS_STAGE_LABELS: Readonly<Record<ProgressStage, string>> = {
     "complexity-assessment": "Assessing complexity",
     implementation: "Implementing changes",
     "change-staging": "Staging changes",
+    verification: "Running verification",
     "resolution-verification": "Verifying resolution",
     review: "Reviewing changes",
     "review-fix": "Addressing review findings",

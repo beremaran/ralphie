@@ -41,6 +41,11 @@ import {
 } from "./execution.ts";
 import { type IssueRecoveryService, type ReviewAttempt } from "./recovery.ts";
 import { REVIEW_ITERATION_LIMIT } from "./stage.ts";
+import { assertProtectedDecisionsAuthorized } from "./scope-policy.ts";
+import type {
+    IssueVerificationService,
+    VerificationEvidence,
+} from "./verification.ts";
 
 /** The implementation workflow for issues with complexity 0 through 3. */
 export type ImplementationExecutorService = {
@@ -48,6 +53,20 @@ export type ImplementationExecutorService = {
         input: WorkflowExecutorInput,
     ) => Promise<WorkflowExecutorResult>;
 };
+
+export type ReviewFixOutcome = {
+    readonly status: "verified";
+    readonly verification: VerificationEvidence;
+    readonly unresolvedFindings: ReadonlyArray<string>;
+};
+
+const sameBlockingFindings = (
+    previous: ReviewAttempt | undefined,
+    current: ReviewAttempt,
+): boolean =>
+    previous?.decision.verdict === ReviewVerdict.ChangesRequested &&
+    JSON.stringify(previous.decision.findings) ===
+        JSON.stringify(current.decision.findings);
 
 const asRalphieError = (error: unknown): RalphieError => {
     if (error instanceof RalphieError) return error;
@@ -137,6 +156,15 @@ export const makeImplementationExecutorService = (
     remoteSafety: GitRemoteSafetyService,
     recovery: IssueRecoveryService,
     progress: ProgressReporterService,
+    verification: IssueVerificationService = {
+        stagedTreeSha: async () => "0".repeat(40),
+        verify: async () => ({
+            stagedTreeSha: "0".repeat(40),
+            commands: [
+                { command: "test", exitCode: 0, stdout: "", stderr: "" },
+            ],
+        }),
+    },
 ): ImplementationExecutorService => {
     const resolutionOutcome = (
         resolution: IssueResolutionDecision,
@@ -325,12 +353,35 @@ export const makeImplementationExecutorService = (
             : outcome;
     };
 
+    const verifyStagedChanges = async (
+        input: WorkflowExecutorInput,
+    ): Promise<VerificationEvidence> => {
+        const diff = await operations.readStagedBinaryDiff(
+            input.context.repositoryPath,
+        );
+        assertProtectedDecisionsAuthorized(input.context.issue, diff);
+        return stage(
+            progress,
+            input,
+            "verification",
+            "Running deterministic verification...",
+            () =>
+                verification.verify(
+                    input.context.repositoryPath,
+                    input.context.verificationCommands ?? [],
+                ),
+            "Deterministic verification passed.",
+        );
+    };
+
     const runReviewAttempt = async (
         input: WorkflowExecutorInput,
         invariant: { readonly branch: string; readonly head: string },
         attempt: number,
+        previousReviews: ReadonlyArray<ReviewAttempt>,
     ): Promise<ReviewAttempt> => {
         const { context } = input;
+        const verificationEvidence = await verifyStagedChanges(input);
         const stagedDiff = await operations.readStagedBinaryDiff(
             context.repositoryPath,
         );
@@ -348,11 +399,17 @@ export const makeImplementationExecutorService = (
                         repositoryPath: context.repositoryPath,
                         targetBranch: context.targetBranch,
                         stagedDiff,
+                        verification: verificationEvidence,
+                        previousReviews: previousReviews.map(
+                            ({ decision }) => decision,
+                        ),
                     }),
                     schema: reviewDecisionSchema,
                     agent: context.piSelection.agent,
                     model: context.piSelection.model,
-                    variant: context.piSelection.variant,
+                    variant:
+                        context.piStageVariants?.review ??
+                        context.piSelection.variant,
                     runId: context.runId,
                     diagnostics: context.piDiagnostics,
                     repositoryInvariant: invariant,
@@ -371,6 +428,8 @@ export const makeImplementationExecutorService = (
         return {
             attempt,
             sessionID: reviewResult.sessionID,
+            stagedTreeSha: verificationEvidence.stagedTreeSha,
+            verification: verificationEvidence,
             decision: reviewResult.output,
         };
     };
@@ -379,9 +438,20 @@ export const makeImplementationExecutorService = (
         input: WorkflowExecutorInput,
         invariant: { readonly branch: string; readonly head: string },
         checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
-        reviewCount: number,
+        approvedReview: ReviewAttempt,
     ): Promise<WorkflowExecutorResult> => {
         const { context, artifacts } = input;
+        const verificationEvidence = await verifyStagedChanges(input);
+        if (
+            approvedReview.stagedTreeSha === undefined ||
+            verificationEvidence.stagedTreeSha.toLowerCase() !==
+                approvedReview.stagedTreeSha.toLowerCase()
+        ) {
+            throw new RalphieError({
+                message:
+                    "The staged tree changed after approval; refusing to commit without a matching review.",
+            });
+        }
         const finalDiff = await operations.readStagedBinaryDiff(
             context.repositoryPath,
         );
@@ -399,11 +469,14 @@ export const makeImplementationExecutorService = (
                         repositoryPath: context.repositoryPath,
                         targetBranch: context.targetBranch,
                         stagedDiff: finalDiff,
+                        verification: verificationEvidence,
                     }),
                     schema: commitMessageDecisionSchema,
                     agent: context.piSelection.agent,
                     model: context.piSelection.model,
-                    variant: context.piSelection.variant,
+                    variant:
+                        context.piStageVariants?.commitMessage ??
+                        context.piSelection.variant,
                     runId: context.runId,
                     diagnostics: context.piDiagnostics,
                     repositoryInvariant: invariant,
@@ -465,7 +538,7 @@ export const makeImplementationExecutorService = (
             kind: IssueExecutionOutcomeKind.Completed,
             completion: "pushed-commit",
             commitSha: commit.sha,
-            reviewCount,
+            reviewCount: approvedReview.attempt,
         } as const;
     };
 
@@ -474,8 +547,9 @@ export const makeImplementationExecutorService = (
         invariant: { readonly branch: string; readonly head: string },
         review: ReviewAttempt,
         attempt: number,
-    ): Promise<WorkflowExecutorResult | undefined> => {
+    ): Promise<WorkflowExecutorResult | ReviewFixOutcome> => {
         const { context } = input;
+        const verificationEvidence = await verifyStagedChanges(input);
         const currentDiff = await operations.readStagedBinaryDiff(
             context.repositoryPath,
         );
@@ -495,6 +569,7 @@ export const makeImplementationExecutorService = (
                         targetBranch: context.targetBranch,
                         stagedDiff: currentDiff,
                         review: review.decision,
+                        verification: verificationEvidence,
                     }),
                     runId: context.runId,
                     diagnostics: context.piDiagnostics,
@@ -506,7 +581,7 @@ export const makeImplementationExecutorService = (
                     progressIssue: issueProgress(input).issue,
                     signal: context.signal,
                 }),
-            "Review findings addressed.",
+            "Review-fix agent finished; deterministic verification pending.",
             undefined,
             attempt,
         );
@@ -522,7 +597,12 @@ export const makeImplementationExecutorService = (
             attempt,
         );
         if (await operations.hasStagedChanges(context.repositoryPath)) {
-            return undefined;
+            const verificationEvidence = await verifyStagedChanges(input);
+            return {
+                status: "verified",
+                verification: verificationEvidence,
+                unresolvedFindings: [],
+            };
         }
         await progress.emit({
             ...issueProgress(input),
@@ -538,6 +618,64 @@ export const makeImplementationExecutorService = (
         } as const;
     };
 
+    const exhaustReviews = async (
+        input: WorkflowExecutorInput,
+        checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
+        reviews: ReadonlyArray<ReviewAttempt>,
+    ): Promise<WorkflowExecutorResult> => {
+        const { context } = input;
+        const exhausted = await recovery.handleReviewExhaustion({
+            runId: context.runId,
+            repository: context.repository,
+            workspace: context.workspace,
+            repositoryPath: context.repositoryPath,
+            issue: context.issue,
+            checkpoint,
+            reviews,
+        });
+        return {
+            kind: IssueExecutionOutcomeKind.Escalated,
+            diagnosticsPath: exhausted.diagnosticsPath,
+            reason: "Review did not converge within the review iteration budget.",
+        };
+    };
+
+    const handleReviewDecision = async (
+        input: WorkflowExecutorInput,
+        checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
+        invariant: { readonly branch: string; readonly head: string },
+        review: ReviewAttempt,
+        reviews: ReadonlyArray<ReviewAttempt>,
+        attempt: number,
+        isRepeated: boolean,
+    ): Promise<WorkflowExecutorResult | undefined> => {
+        if (review.decision.verdict === ReviewVerdict.Approved) {
+            return await commitApprovedReview(
+                input,
+                invariant,
+                checkpoint,
+                review,
+            );
+        }
+        if (isRepeated) {
+            return {
+                kind: IssueExecutionOutcomeKind.Failed,
+                message:
+                    "Review repeated the same blocking findings after a verified fix; stopping instead of looping.",
+            };
+        }
+        if (attempt === REVIEW_ITERATION_LIMIT) {
+            return await exhaustReviews(input, checkpoint, reviews);
+        }
+        const fixOutcome = await applyReviewFix(
+            input,
+            invariant,
+            review,
+            attempt,
+        );
+        return "kind" in fixOutcome ? fixOutcome : undefined;
+    };
+
     const runReviewLoop = async (
         input: WorkflowExecutorInput,
         checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
@@ -547,41 +685,25 @@ export const makeImplementationExecutorService = (
         const reviews: ReviewAttempt[] = [];
         for (let attempt = 1; attempt <= REVIEW_ITERATION_LIMIT; attempt += 1) {
             checkSignal(context.signal);
-            const review = await runReviewAttempt(input, invariant, attempt);
-            reviews.push(review);
-            await artifacts.appendReview(review);
-
-            if (review.decision.verdict === ReviewVerdict.Approved) {
-                return await commitApprovedReview(
-                    input,
-                    invariant,
-                    checkpoint,
-                    reviews.length,
-                );
-            }
-            if (attempt === REVIEW_ITERATION_LIMIT) {
-                const exhausted = await recovery.handleReviewExhaustion({
-                    runId: context.runId,
-                    repository: context.repository,
-                    workspace: context.workspace,
-                    repositoryPath: context.repositoryPath,
-                    issue: context.issue,
-                    checkpoint,
-                    reviews,
-                });
-                return {
-                    kind: IssueExecutionOutcomeKind.Escalated,
-                    diagnosticsPath: exhausted.diagnosticsPath,
-                    reason: "Review did not converge within the review iteration budget.",
-                } as const;
-            }
-            const fixOutcome = await applyReviewFix(
+            const review = await runReviewAttempt(
                 input,
                 invariant,
-                review,
                 attempt,
+                reviews,
             );
-            if (fixOutcome !== undefined) return fixOutcome;
+            const isRepeated = sameBlockingFindings(reviews.at(-1), review);
+            reviews.push(review);
+            await artifacts.appendReview(review);
+            const outcome = await handleReviewDecision(
+                input,
+                checkpoint,
+                invariant,
+                review,
+                reviews,
+                attempt,
+                isRepeated,
+            );
+            if (outcome !== undefined) return outcome;
         }
         throw new RalphieError({
             message: "Implementation review loop ended unexpectedly.",
@@ -617,6 +739,7 @@ export const makeImplementationExecutorService = (
         if (!(await operations.hasStagedChanges(context.repositoryPath))) {
             return await verifyNoChangeResolution(input, invariant);
         }
+        await verifyStagedChanges(input);
         return await runReviewLoop(input, checkpoint, invariant);
     };
 

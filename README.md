@@ -373,6 +373,22 @@ ralphie owner/repository \
   --thinking high
 ```
 
+Use lower reasoning for routing and commit text while retaining a stronger
+review, and override the deterministic project gate when needed:
+
+```bash
+ralphie owner/repository \
+  --grounding-thinking low \
+  --complexity-thinking medium \
+  --review-thinking high \
+  --commit-thinking low \
+  --verify-command "bun run check"
+```
+
+`--verify-command` is repeatable. Without it, Ralphie discovers a
+`package.json` `check` script and runs `bun run check`; if neither exists it
+fails closed before review or commit.
+
 Write machine-readable progress to stdout:
 
 ```bash
@@ -421,6 +437,11 @@ HTTPS/SSH clone URL.
 | `--issue-sort <sort>` | `created` | Sort by `created`, `updated`, or `comments`, optionally `:asc` or `:desc`. |
 | `--model <provider/model>` | Pi default | Override Pi's model selection. |
 | `--thinking <level>` | Pi default | Pi thinking level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. |
+| `--grounding-thinking <level>` | `low` | Thinking level for issue grounding/readiness. |
+| `--complexity-thinking <level>` | `medium` | Thinking level for complexity routing. |
+| `--review-thinking <level>` | `high` | Thinking level for staged-change reviews. |
+| `--commit-thinking <level>` | `low` | Thinking level for commit-message generation. |
+| `--verify-command <command>` | discovered `bun run check` | Deterministic verification command; repeat to run multiple commands in order. |
 | `--pi-dir <path>` | Pi default | Existing Pi agent directory. |
 | `--workspace <path>` | `~/.ralphie` | Root directory for repository checkouts and run artifacts. |
 | `--dry-run` | off | Assess and route issues without implementation, GitHub, or delivery mutations. |

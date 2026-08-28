@@ -7,6 +7,10 @@ describe("Pi task shell policy", () => {
         expect(isPiTaskCommandAllowed("bun test tests/issues")).toBe(true);
         expect(isPiTaskCommandAllowed("git diff --stat")).toBe(true);
         expect(isPiTaskCommandAllowed("rg -n TODO src")).toBe(true);
+        expect(
+            isPiTaskCommandAllowed("git status --short && git diff --check"),
+        ).toBe(true);
+        expect(isPiTaskCommandAllowed("rg -n TODO src | head -20")).toBe(true);
     });
 
     test("reserves Git and GitHub mutations for Ralphie", () => {
@@ -28,6 +32,9 @@ describe("Pi task shell policy", () => {
             "echo ok | sh",
             "echo $(git status)",
             "echo ok > result.txt",
+            "printf Z2l0IHB1c2g= | base64 -d | sh",
+            "git status || git push",
+            "env bash -c 'git push'",
         ]) {
             expect(isPiTaskCommandAllowed(command)).toBe(false);
         }

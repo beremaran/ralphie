@@ -1,5 +1,6 @@
 import type { GitHubIssue } from "../github/issues.ts";
 import type { ReviewDecision } from "../issues/decisions.ts";
+import type { VerificationEvidence } from "../issues/verification.ts";
 
 export type GroundingPromptInput = ComplexityPromptInput;
 
@@ -15,6 +16,8 @@ export type ResolutionVerificationPromptInput = ComplexityPromptInput;
 
 export type DiffPromptInput = ComplexityPromptInput & {
     readonly stagedDiff: string;
+    readonly verification?: VerificationEvidence;
+    readonly previousReviews?: ReadonlyArray<ReviewDecision>;
 };
 
 export type ReviewFixPromptInput = DiffPromptInput & {
@@ -86,6 +89,11 @@ const originalIssueBlock = (issue: GitHubIssue): string =>
 
 const stagedDiffBlock = (diff: string): string =>
     `<staged-diff>\n${diffForPrompt(diff)}\n</staged-diff>`;
+
+const verificationBlock = (verification?: VerificationEvidence): string =>
+    verification === undefined
+        ? "<trusted-verification-evidence>Not supplied.</trusted-verification-evidence>"
+        : `<trusted-verification-evidence>\n${JSON.stringify(verification, null, 2)}\n</trusted-verification-evidence>`;
 
 const complexityRubric = [
     "0: No code change or a trivial one-line correction with no meaningful risk.",
@@ -192,6 +200,8 @@ export const buildReviewPrompt = ({
     repositoryPath,
     targetBranch,
     stagedDiff,
+    verification,
+    previousReviews = [],
 }: DiffPromptInput): string => `Review the staged implementation for the GitHub issue below.
 
 Base your review only on the issue and the staged diff included below. Do not
@@ -206,12 +216,22 @@ state the overall review conclusion. Non-blocking observations may accompany
 either verdict, but "changes_requested" must contain at least one blocking
 finding and "approved" must contain none.
 
+The trusted verification evidence below was produced deterministically for the
+exact staged tree. Never approve when verification failed or when its staged
+tree does not match the reviewed change.
+
 This is a read-only review. Do not edit files, stage or unstage changes, run
 Git commands that mutate state, create commits, push, switch branches, create
 worktrees, or modify GitHub.
 
 ${checkoutContext({ repositoryPath, targetBranch })}
 ${issueBlock(issue)}
+
+${verificationBlock(verification)}
+
+Previously resolved/rejected review decisions (do not repeat a finding unless
+the current staged diff still proves it):
+<previous-reviews>${JSON.stringify(previousReviews, null, 2)}</previous-reviews>
 
 Staged diff:
 ${stagedDiffBlock(stagedDiff)}`;
@@ -222,6 +242,7 @@ export const buildReviewFixPrompt = ({
     targetBranch,
     stagedDiff,
     review,
+    verification,
 }: ReviewFixPromptInput): string => `Address the blocking findings from the review of this GitHub issue.
 
 You are starting with fresh context. Use the issue, current staged diff, and
@@ -238,6 +259,8 @@ unrelated existing work.
 ${checkoutContext({ repositoryPath, targetBranch })}
 ${issueBlock(issue)}
 
+${verificationBlock(verification)}
+
 Current staged diff:
 ${stagedDiffBlock(stagedDiff)}
 
@@ -251,6 +274,7 @@ export const buildCommitMessagePrompt = ({
     repositoryPath,
     targetBranch,
     stagedDiff,
+    verification,
 }: CommitMessagePromptInput): string => `Generate a concise commit message for the completed GitHub issue.
 
 Base the message only on the issue and final staged diff below. The subject
@@ -264,6 +288,8 @@ modify GitHub.
 
 ${checkoutContext({ repositoryPath, targetBranch })}
 ${issueBlock(issue)}
+
+${verificationBlock(verification)}
 
 Final staged diff:
 ${stagedDiffBlock(stagedDiff)}`;

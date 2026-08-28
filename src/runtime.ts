@@ -62,6 +62,7 @@ import {
     makeImplementationExecutorService,
     type ImplementationExecutorService,
 } from "./issues/implementation-executor.ts";
+import { makeIssueVerificationService } from "./issues/verification.ts";
 import {
     makeIssueExecutorService,
     type IssueExecutorService,
@@ -141,6 +142,7 @@ export const makeLiveRuntime = ({
         gitIssueCheckpoint,
         progress,
     );
+    const issueVerification = makeIssueVerificationService(commandRunner);
     const complexityAssessment = makeComplexityAssessmentService(progress);
     const groundingAssessment = makeGroundingAssessmentService(progress);
     const decompositionExecutor = makeDecompositionExecutorService(
@@ -154,6 +156,7 @@ export const makeLiveRuntime = ({
         gitRemoteSafety,
         issueRecovery,
         progress,
+        issueVerification,
     );
     const dryRunIssueExecutor = makeDryRunIssueExecutorService(
         issueArtifactStore,

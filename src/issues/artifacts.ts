@@ -28,6 +28,7 @@ import {
 } from "./pull-request-review.ts";
 import type { ReviewAttempt } from "./recovery.ts";
 import { REVIEW_ITERATION_LIMIT } from "./stage.ts";
+import { verificationEvidenceSchema } from "./verification.ts";
 
 export enum IssueArtifactKind {
     ComplexityDecision = "complexity-decision",
@@ -143,6 +144,11 @@ const validCreatedIssueNumberMapping = (
 const reviewAttemptSchema = z.object({
     attempt: z.number().int().positive(),
     sessionID: z.string().min(1),
+    stagedTreeSha: z
+        .string()
+        .regex(/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/i)
+        .optional(),
+    verification: verificationEvidenceSchema.optional(),
     decision: reviewDecisionSchema,
 });
 

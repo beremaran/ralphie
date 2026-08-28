@@ -19,10 +19,15 @@ import {
     type IssueWorkflowKind,
     REVIEW_ITERATION_LIMIT,
 } from "./stage.ts";
+import type { VerificationEvidence } from "./verification.ts";
 
 export type ReviewAttempt = {
     readonly attempt: number;
     readonly sessionID: string;
+    /** Exact staged tree reviewed; absent only in legacy persisted attempts. */
+    readonly stagedTreeSha?: string;
+    /** Deterministic gate output trusted by the reviewer; absent in legacy attempts. */
+    readonly verification?: VerificationEvidence;
     readonly decision: ReviewDecision;
 };
 

@@ -5,6 +5,7 @@ import type { PiModel, PiSelection } from "./agent/model.ts";
 import { type GitHubIssueCloseReason } from "./github/issue-mutations.ts";
 import type { GitHubIssue, IssueFilters } from "./github/issues.ts";
 import {
+    type IssueExecutionContext,
     type IssueCompletionKind,
     IssueExecutionOutcomeKind,
     type IssueExecutionOutcome,
@@ -285,6 +286,8 @@ export type WorkflowOptions = {
     readonly agent: string;
     readonly model?: PiModel;
     readonly modelVariant?: string;
+    readonly piStageVariants?: IssueExecutionContext["piStageVariants"];
+    readonly verificationCommands?: ReadonlyArray<string>;
     readonly workspace: string;
     readonly cleanup: boolean;
     readonly startClean: boolean;
@@ -305,6 +308,8 @@ type WorkflowConfiguration = {
     readonly agent: string;
     readonly model?: PiModel;
     readonly modelVariant?: string;
+    readonly piStageVariants?: IssueExecutionContext["piStageVariants"];
+    readonly verificationCommands: ReadonlyArray<string>;
     readonly workspace: string;
     readonly cleanup: boolean;
     readonly startClean: boolean;
@@ -340,6 +345,8 @@ const makeWorkflowConfiguration = (
         agent,
         model,
         modelVariant,
+        piStageVariants,
+        verificationCommands = [],
         workspace,
         cleanup,
         startClean,
@@ -372,6 +379,8 @@ const makeWorkflowConfiguration = (
         agent,
         model,
         modelVariant,
+        piStageVariants,
+        verificationCommands,
         workspace,
         cleanup,
         startClean,
@@ -870,8 +879,10 @@ export const workflow = async (
                         octokit,
                         pi: server.client,
                         piSelection: selection,
+                        piStageVariants: config.piStageVariants,
                         piDiagnostics: diagnostics,
                         repositoryInvariant: invariantService,
+                        verificationCommands: config.verificationCommands,
                         signal,
                     }),
                 (result) => outcomeMessage(issueContext.issue.number, result),

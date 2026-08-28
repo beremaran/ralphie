@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { Octokit } from "octokit";
 
-import { makeGitHubClientService } from "../../src/github/client.ts";
+import {
+    GITHUB_REST_API_VERSION,
+    makeGitHubClientService,
+} from "../../src/github/client.ts";
 import type { CommandResult } from "../../src/process/command-runner.ts";
 
 const testService = (calls: string[], results: CommandResult[]) =>
@@ -27,6 +30,7 @@ describe("GitHub client", () => {
         ]).initialize();
 
         expect(client).toBeInstanceOf(Octokit);
+        expect(GITHUB_REST_API_VERSION).toBe("2026-03-10");
         expect(calls).toEqual(["gh auth status", "gh auth token"]);
     });
 

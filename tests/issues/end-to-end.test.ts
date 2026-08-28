@@ -287,14 +287,19 @@ describe("mocked end-to-end issue workflows", () => {
     });
 
     test("hands five-review exhaustion from implementation to decomposition without commit or push", async () => {
-        const review = {
-            verdict: "changes_requested",
-            summary: "Blocker remains.",
-            findings: [{ severity: "blocking", description: "Fix it." }],
-        };
         const outputs: unknown[] = [];
-        for (let index = 0; index < 5; index += 1)
-            outputs.push(undefined, review);
+        for (let index = 0; index < 5; index += 1) {
+            outputs.push(undefined, {
+                verdict: "changes_requested",
+                summary: "Blocker remains.",
+                findings: [
+                    {
+                        severity: "blocking",
+                        description: `Fix blocker ${index + 1}.`,
+                    },
+                ],
+            });
+        }
         const client = clientFor(outputs);
         const artifacts = await makeIssueArtifactStore(42);
         let decompositionCalls = 0;

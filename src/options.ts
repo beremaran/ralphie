@@ -78,10 +78,15 @@ export type RalphieCliOptions = {
     readonly issueLabels?: ReadonlyArray<string>;
     readonly issueSort?: IssueSort;
     readonly issueOrder?: IssueOrder;
+    readonly verificationCommands?: ReadonlyArray<string>;
     readonly maxAttempts?: number;
     readonly pipelineTimeout?: PipelineTimeout;
     readonly model?: PiModel;
     readonly thinking?: string;
+    readonly groundingThinking?: string;
+    readonly complexityThinking?: string;
+    readonly reviewThinking?: string;
+    readonly commitThinking?: string;
     readonly piDir?: string;
     readonly workspace?: string;
     readonly clean?: CleanWhen;
@@ -97,6 +102,10 @@ type SharedRalphieConfig = {
     readonly branch?: string;
     readonly model?: PiModel;
     readonly thinking?: string;
+    readonly groundingThinking?: string;
+    readonly complexityThinking?: string;
+    readonly reviewThinking?: string;
+    readonly commitThinking?: string;
     readonly piDir?: string;
     readonly modelBaseUrl?: string;
     readonly modelApiKey?: string;
@@ -118,6 +127,7 @@ export type IssueRalphieConfig = SharedRalphieConfig & {
     readonly issueLabels: ReadonlyArray<string>;
     readonly issueSort: IssueSort;
     readonly issueOrder: IssueOrder;
+    readonly verificationCommands?: ReadonlyArray<string>;
 };
 
 export type GetPipelinesGreenRalphieConfig = SharedRalphieConfig & {
@@ -216,6 +226,10 @@ const commonResolvedConfig = (
     ...optionalProperty("branch", options.branch),
     ...optionalProperty("model", options.model),
     ...optionalProperty("thinking", options.thinking),
+    ...optionalProperty("groundingThinking", options.groundingThinking),
+    ...optionalProperty("complexityThinking", options.complexityThinking),
+    ...optionalProperty("reviewThinking", options.reviewThinking),
+    ...optionalProperty("commitThinking", options.commitThinking),
     ...optionalProperty("piDir", options.piDir),
     ...optionalProperty("modelBaseUrl", process.env[MODEL_BASE_URL_ENV]),
     ...optionalProperty("modelApiKey", process.env[MODEL_API_KEY_ENV]),
@@ -253,6 +267,7 @@ const buildResolvedConfig = (
         issueLabels: [...(options.issueLabels ?? [])],
         issueSort: options.issueSort ?? IssueSort.Created,
         issueOrder: options.issueOrder ?? IssueOrder.Ascending,
+        verificationCommands: [...(options.verificationCommands ?? [])],
     };
 };
 

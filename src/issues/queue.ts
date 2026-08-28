@@ -115,10 +115,36 @@ export const toQueuedIssues = (
     issues: ReadonlyArray<GitHubIssue>,
 ): ReadonlyArray<QueuedIssue> => {
     const openIssueNumbers = new Set(issues.map(({ number }) => number));
+    const openDescendants = new Map<number, number[]>();
+    for (const issue of issues) {
+        const lineage =
+            /<!--\s*ralphie:decomposition\b[^>]*\broot=(\d+)\b[^>]*\bparent=(\d+)\b/i.exec(
+                issue.body ?? "",
+            );
+        if (lineage?.[1] === undefined || lineage[2] === undefined) continue;
+        for (const ancestor of new Set([
+            Number(lineage[1]),
+            Number(lineage[2]),
+        ])) {
+            const descendants = openDescendants.get(ancestor) ?? [];
+            descendants.push(issue.number);
+            openDescendants.set(ancestor, descendants);
+        }
+    }
+
+    const expandOpenDependency = (dependency: number): number[] => {
+        if (openIssueNumbers.has(dependency)) return [dependency];
+        return [...(openDescendants.get(dependency) ?? [])];
+    };
+
     return issues.map((issue) => ({
         issue,
-        dependsOn: parseGeneratedIssueDependencies(issue).filter((number) =>
-            openIssueNumbers.has(number),
-        ),
+        dependsOn: [
+            ...new Set(
+                parseGeneratedIssueDependencies(issue).flatMap(
+                    expandOpenDependency,
+                ),
+            ),
+        ],
     }));
 };

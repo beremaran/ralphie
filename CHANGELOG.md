@@ -7,6 +7,11 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Added
 
+- Staged-tree-bound deterministic verification before review, after review
+  fixes, and before commit, with persisted command evidence and repeatable
+  `--verify-command` overrides.
+- Stage-specific thinking controls for grounding, complexity routing, review,
+  and commit-message generation.
 - Discriminated top-level CLI configuration for issue and
   `get-pipelines-green` modes, including bounded attempts and strict pipeline
   timeout values.
@@ -22,6 +27,9 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Changed
 
+- Resolve dependencies on decomposed closed issues to their open descendants,
+  stop repeated identical review findings early, permit safe compound shell
+  inspection commands, and use GitHub REST API version `2026-03-10`.
 - Polish human-readable Pi streaming with grouped session blocks, readable tool
   calls, indented de-duplicated tool output, bounded previews, and safe handling
   of terminal control sequences while preserving the lossless JSON event stream.

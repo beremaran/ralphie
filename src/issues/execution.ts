@@ -98,7 +98,14 @@ export type IssueExecutionContext = {
     readonly octokit: Octokit;
     readonly pi: PiClient;
     readonly piSelection: PiSelection;
+    readonly piStageVariants?: {
+        readonly grounding?: string;
+        readonly complexity?: string;
+        readonly review?: string;
+        readonly commitMessage?: string;
+    };
     readonly piDiagnostics: PiSessionDiagnostics;
     readonly repositoryInvariant: GitRepositoryInvariantService;
+    readonly verificationCommands?: ReadonlyArray<string>;
     readonly signal?: AbortSignal;
 };
