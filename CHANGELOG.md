@@ -27,6 +27,10 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Changed
 
+- Stage and smoke-test immutable `linux/amd64` and `linux/arm64` container
+  candidates from the validated release ref, including per-platform OCI
+  archives, image digests, and promotion metadata; defer registry publication
+  to the protected publisher.
 - Enforce a validated release tag/version/ref context, immutable protected
   release tags, protected publisher environment, least-privilege workflow
   permissions, and safe manual dry runs.

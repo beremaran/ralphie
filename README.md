@@ -664,10 +664,17 @@ workflow requires the triggering ref to report as protected before it builds;
 this protection, rather than a non-atomic API recheck, closes the check/use
 race between validation and publication.
 
-Manual dispatches default to `dry_run: true`. A dry run validates the context
-and builds staged binary artifacts but skips GitHub Release and GHCR
-publication. A normal tag push is not a dry run. Non-dry publication runs in
-the protected GitHub `release` environment. Repository administrators must
-configure that environment in **Settings → Environments → release** with the
-required reviewer(s); approval is required before the final publisher can
-write release assets or packages.
+Manual dispatches default to `dry_run: true`. Every validated release run
+builds and smoke-tests `linux/amd64` and `linux/arm64` container candidates
+without logging into GHCR or pushing public tags. Each platform is staged as
+an immutable `actions/upload-artifact@v4` artifact named
+`ralphie-container-candidate-<version>-<arch>`. Its
+`ralphie-container-<arch>.metadata.json` uses the
+`ralphie.container-candidate.v1` contract and records the validated
+`source_ref`, platform, OCI archive name and SHA-256, and BuildKit image
+manifest `digest`; the final publisher must verify those fields before
+promotion. A dry run skips GitHub Release publication. A normal tag push is
+not a dry run and runs release publication in the protected GitHub `release`
+environment. Repository administrators must configure that environment in
+**Settings → Environments → release** with the required reviewer(s); approval
+is required before the final publisher can write release assets or packages.
