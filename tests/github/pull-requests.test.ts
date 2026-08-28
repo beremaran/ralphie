@@ -17,9 +17,10 @@ const pullRequest = (
 ) => ({
     number,
     html_url: `https://github.com/owner/repository/pull/${number}`,
-    head: { ref: head },
+    head: { ref: head, sha: `${head}-sha` },
     base: { ref: base },
     state: merged ? "closed" : "open",
+    mergeable: true,
     merged,
     merged_at: merged ? "2026-08-25T00:00:00Z" : null,
 });
@@ -82,6 +83,7 @@ describe("GitHub pull requests", () => {
             number: 42,
             url: "https://github.com/owner/repository/pull/42",
             merged: false,
+            headSha: "feature-sha",
         });
     });
 
@@ -158,8 +160,8 @@ describe("GitHub pull requests", () => {
         expect(created[0]?.body).toContain('"verdict": "approved"');
     });
 
-    test("merges only when necessary and verifies the merged state", async () => {
-        let mergeCalls = 0;
+    test("passes the expected SHA and verifies authoritative merged state", async () => {
+        const mergeRequests: Record<string, unknown>[] = [];
         let reads = 0;
         const client = {
             rest: {
@@ -173,21 +175,201 @@ describe("GitHub pull requests", () => {
                                     : pullRequest(44, "feature", "main", true),
                         };
                     },
-                    merge: async () => {
-                        mergeCalls += 1;
+                    merge: async (parameters: Record<string, unknown>) => {
+                        mergeRequests.push(parameters);
                         return { data: { merged: true } };
                     },
                 },
             },
         } as unknown as Octokit;
 
-        const result = await service.merge(client, "owner/repository", 44);
-        expect(mergeCalls).toBe(1);
+        const result = await service.merge(
+            client,
+            "owner/repository",
+            44,
+            "feature-sha",
+        );
+        expect(mergeRequests).toEqual([
+            {
+                owner: "owner",
+                repo: "repository",
+                pull_number: 44,
+                sha: "feature-sha",
+            },
+        ]);
+        expect(reads).toBe(2);
         expect(result).toEqual({
             number: 44,
             url: "https://github.com/owner/repository/pull/44",
             merged: true,
+            headSha: "feature-sha",
         });
+    });
+
+    test("does not merge a closed pull request", async () => {
+        let mergeCalls = 0;
+        const closed = {
+            ...pullRequest(45, "feature", "main"),
+            state: "closed",
+        };
+        const client = {
+            rest: {
+                pulls: {
+                    get: async () => ({ data: closed }),
+                    merge: async () => {
+                        mergeCalls += 1;
+                    },
+                },
+            },
+        } as unknown as Octokit;
+
+        await expect(
+            service.merge(client, "owner/repository", 45, "feature-sha"),
+        ).rejects.toThrow("closed but not merged");
+        expect(mergeCalls).toBe(0);
+    });
+
+    test.each([
+        { mergeable: false, description: "unmergeable" },
+        { mergeable: null, description: "unknown mergeability" },
+    ])("does not merge an $description pull request", async ({ mergeable }) => {
+        let mergeCalls = 0;
+        const current = {
+            ...pullRequest(46, "feature", "main"),
+            mergeable,
+        };
+        const client = {
+            rest: {
+                pulls: {
+                    get: async () => ({ data: current }),
+                    merge: async () => {
+                        mergeCalls += 1;
+                    },
+                },
+            },
+        } as unknown as Octokit;
+
+        await expect(
+            service.merge(client, "owner/repository", 46, "feature-sha"),
+        ).rejects.toThrow("not definitively mergeable");
+        expect(mergeCalls).toBe(0);
+    });
+
+    test("does not merge when the head SHA changed", async () => {
+        let mergeCalls = 0;
+        const client = {
+            rest: {
+                pulls: {
+                    get: async () => ({
+                        data: pullRequest(47, "updated-feature", "main"),
+                    }),
+                    merge: async () => {
+                        mergeCalls += 1;
+                    },
+                },
+            },
+        } as unknown as Octokit;
+
+        await expect(
+            service.merge(client, "owner/repository", 47, "feature-sha"),
+        ).rejects.toThrow(
+            "head changed from feature-sha to updated-feature-sha",
+        );
+        expect(mergeCalls).toBe(0);
+    });
+
+    test("reconciles a lost merge response with an authoritative read", async () => {
+        let reads = 0;
+        const client = {
+            rest: {
+                pulls: {
+                    get: async () => {
+                        reads += 1;
+                        return {
+                            data: pullRequest(48, "feature", "main", reads > 1),
+                        };
+                    },
+                    merge: async () => {
+                        throw new Error("response lost");
+                    },
+                },
+            },
+        } as unknown as Octokit;
+
+        const result = await service.merge(
+            client,
+            "owner/repository",
+            48,
+            "feature-sha",
+        );
+        expect(reads).toBe(2);
+        expect(result.merged).toBeTrue();
+    });
+
+    test.each([
+        { lostResponse: true, description: "lost-response reconciliation" },
+        { lostResponse: false, description: "post-merge verification" },
+    ])(
+        "returns the authoritative changed head during $description",
+        async ({ lostResponse }) => {
+            let reads = 0;
+            const client = {
+                rest: {
+                    pulls: {
+                        get: async () => {
+                            reads += 1;
+                            return {
+                                data: pullRequest(
+                                    49,
+                                    reads === 1 ? "feature" : "updated-feature",
+                                    "main",
+                                    reads > 1,
+                                ),
+                            };
+                        },
+                        merge: async () => {
+                            if (lostResponse) throw new Error("response lost");
+                            return { data: { merged: true } };
+                        },
+                    },
+                },
+            } as unknown as Octokit;
+
+            const result = await service.merge(
+                client,
+                "owner/repository",
+                49,
+                "feature-sha",
+            );
+            expect(result.merged).toBeTrue();
+            expect(result.headSha).toBe("updated-feature-sha");
+        },
+    );
+
+    test("returns an already-merged pull request without merging again", async () => {
+        let mergeCalls = 0;
+        const client = {
+            rest: {
+                pulls: {
+                    get: async () => ({
+                        data: pullRequest(49, "updated-feature", "main", true),
+                    }),
+                    merge: async () => {
+                        mergeCalls += 1;
+                    },
+                },
+            },
+        } as unknown as Octokit;
+
+        const result = await service.merge(
+            client,
+            "owner/repository",
+            49,
+            "feature-sha",
+        );
+        expect(result.merged).toBeTrue();
+        expect(result.headSha).toBe("updated-feature-sha");
+        expect(mergeCalls).toBe(0);
     });
 
     test("returns an error when GitHub does not confirm a merge", async () => {
@@ -203,7 +385,7 @@ describe("GitHub pull requests", () => {
         } as unknown as Octokit;
 
         await expect(
-            service.merge(client, "owner/repository", 45),
+            service.merge(client, "owner/repository", 45, "feature-sha"),
         ).rejects.toThrow("did not reach the merged state");
     });
 });

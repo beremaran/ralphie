@@ -918,7 +918,12 @@ export const workflow = async (
                 pullRequest.number,
                 reviews,
             );
-            await githubPullRequests.merge(octokit, repo, pullRequest.number);
+            await githubPullRequests.merge(
+                octokit,
+                repo,
+                pullRequest.number,
+                pullRequest.headSha,
+            );
             await issueOperations.restoreBaseCheckout(
                 issueRepository.repositoryPath,
                 branch,

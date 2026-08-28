@@ -169,17 +169,22 @@ const testRuntime = (
                 number: 1,
                 url: "https://github.com/owner/repo/pull/1",
                 merged: false,
+                headSha: "feature-head-sha",
             };
+        },
+        read: async () => {
+            throw new RalphieError({ message: "unused" });
         },
         publishReviewAttempts: async (_client, repo, number) => {
             calls.push(`publishReviews:${repo}:${number}`);
         },
-        merge: async (_client, repo, number) => {
-            calls.push(`mergePullRequest:${repo}:${number}`);
+        merge: async (_client, repo, number, expectedHeadSha) => {
+            calls.push(`mergePullRequest:${repo}:${number}:${expectedHeadSha}`);
             return {
                 number: 1,
                 url: "https://github.com/owner/repo/pull/1",
                 merged: true,
+                headSha: "feature-head-sha",
             };
         },
     };
@@ -371,7 +376,9 @@ describe("workflow", () => {
             "createPullRequest:owner/repo:ralphie/issue-42:develop",
         );
         expect(calls).toContain("publishReviews:owner/repo:1");
-        expect(calls).toContain("mergePullRequest:owner/repo:1");
+        expect(calls).toContain(
+            "mergePullRequest:owner/repo:1:feature-head-sha",
+        );
         expect(calls).toContain("restoreBase:develop");
         expect(calls).not.toContain("closeIssue:42");
     });

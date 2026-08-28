@@ -19,6 +19,7 @@ export type GitHubPullRequest = {
     readonly number: number;
     readonly url: string;
     readonly merged: boolean;
+    readonly headSha: string;
 };
 
 export type GitHubPullRequestService = {
@@ -27,6 +28,12 @@ export type GitHubPullRequestService = {
         client: Octokit,
         repository: string,
         input: CreateGitHubPullRequestInput,
+    ) => Promise<GitHubPullRequest>;
+    /** Read the authoritative state of a pull request. */
+    readonly read: (
+        client: Octokit,
+        repository: string,
+        pullRequestNumber: number,
     ) => Promise<GitHubPullRequest>;
     /** Publish each review attempt at most once using its deterministic marker. */
     readonly publishReviewAttempts: (
@@ -40,6 +47,7 @@ export type GitHubPullRequestService = {
         client: Octokit,
         repository: string,
         pullRequestNumber: number,
+        expectedHeadSha: string,
     ) => Promise<GitHubPullRequest>;
 };
 
@@ -58,16 +66,36 @@ const isMerged = (pullRequest: {
     readonly merged_at?: string | null;
 }): boolean => pullRequest.merged === true || pullRequest.merged_at != null;
 
-const mapPullRequest = (pullRequest: {
+type PullRequestResponse = {
     readonly number: number;
     readonly html_url: string;
     readonly merged?: boolean | null;
     readonly merged_at?: string | null;
-}): GitHubPullRequest => ({
-    number: pullRequest.number,
-    url: pullRequest.html_url,
-    merged: isMerged(pullRequest),
-});
+    readonly head?: { readonly sha?: string | null } | null;
+};
+
+const mapPullRequest = (
+    pullRequest: PullRequestResponse,
+): GitHubPullRequest | undefined => {
+    const headSha = pullRequest.head?.sha?.trim();
+    if (!headSha) return undefined;
+    return {
+        number: pullRequest.number,
+        url: pullRequest.html_url,
+        merged: isMerged(pullRequest),
+        headSha,
+    };
+};
+
+const requireMappedPullRequest = (
+    pullRequest: PullRequestResponse,
+): GitHubPullRequest => {
+    const mapped = mapPullRequest(pullRequest);
+    if (mapped) return mapped;
+    throw new RalphieError({
+        message: `Pull request #${pullRequest.number} has no unambiguous head SHA.`,
+    });
+};
 
 const issueReference = (input: CreateGitHubPullRequestInput): string => {
     const issue = input.issueRepository
@@ -105,7 +133,10 @@ const findMatchingPullRequest = (
         readonly html_url: string;
         readonly merged?: boolean | null;
         readonly merged_at?: string | null;
-        readonly head?: { readonly ref?: string | null } | null;
+        readonly head?: {
+            readonly ref?: string | null;
+            readonly sha?: string | null;
+        } | null;
         readonly base?: { readonly ref?: string | null } | null;
     }>,
     input: CreateGitHubPullRequestInput,
@@ -155,24 +186,50 @@ type PullRequestParameters = ReturnType<typeof repositoryParameters> & {
     readonly pull_number: number;
 };
 
+const requireExpectedHead = (
+    pullRequest: PullRequestResponse,
+    expectedHeadSha: string,
+): GitHubPullRequest => {
+    const mapped = requireMappedPullRequest(pullRequest);
+    if (mapped.headSha !== expectedHeadSha) {
+        throw new RalphieError({
+            message: `Pull request #${mapped.number} head changed from ${expectedHeadSha} to ${mapped.headSha}.`,
+        });
+    }
+    return mapped;
+};
+
 const mergePullRequest = async (
     client: Octokit,
     parameters: PullRequestParameters,
     pullRequestNumber: number,
+    expectedHeadSha: string,
 ): Promise<GitHubPullRequest> => {
+    if (!expectedHeadSha.trim()) {
+        throw new RalphieError({
+            message: `Pull request #${pullRequestNumber} cannot be merged without an expected head SHA.`,
+        });
+    }
     const current = await client.rest.pulls.get(parameters);
-    if (isMerged(current.data)) return mapPullRequest(current.data);
+    if (isMerged(current.data)) return requireMappedPullRequest(current.data);
     if (current.data.state !== "open") {
         throw new RalphieError({
             message: `Pull request #${pullRequestNumber} is closed but not merged.`,
         });
     }
+    requireExpectedHead(current.data, expectedHeadSha);
+    if (current.data.mergeable !== true) {
+        throw new RalphieError({
+            message: `Pull request #${pullRequestNumber} is not definitively mergeable.`,
+        });
+    }
 
     try {
-        await client.rest.pulls.merge(parameters);
+        await client.rest.pulls.merge({ ...parameters, sha: expectedHeadSha });
     } catch (cause) {
         const reconciled = await client.rest.pulls.get(parameters);
-        if (isMerged(reconciled.data)) return mapPullRequest(reconciled.data);
+        if (isMerged(reconciled.data))
+            return requireMappedPullRequest(reconciled.data);
         throw cause;
     }
 
@@ -182,7 +239,7 @@ const mergePullRequest = async (
             message: `Pull request #${pullRequestNumber} did not reach the merged state.`,
         });
     }
-    return mapPullRequest(merged.data);
+    return requireMappedPullRequest(merged.data);
 };
 
 export const makeGitHubPullRequestService = (): GitHubPullRequestService => ({
@@ -203,8 +260,20 @@ export const makeGitHubPullRequestService = (): GitHubPullRequestService => ({
                 return findMatchingPullRequest(pullRequests, input);
             };
 
+            const readByNumber = async (pullRequestNumber: number) =>
+                requireMappedPullRequest(
+                    (
+                        await client.rest.pulls.get({
+                            ...parameters,
+                            pull_number: pullRequestNumber,
+                        })
+                    ).data,
+                );
+            const resolvePullRequest = (pullRequest: PullRequestResponse) =>
+                mapPullRequest(pullRequest) ?? readByNumber(pullRequest.number);
+
             const matching = await listMatching();
-            if (matching) return mapPullRequest(matching);
+            if (matching) return resolvePullRequest(matching);
 
             try {
                 const created = await client.rest.pulls.create({
@@ -214,15 +283,30 @@ export const makeGitHubPullRequestService = (): GitHubPullRequestService => ({
                     head: input.head,
                     base: input.base,
                 });
-                return mapPullRequest(created.data);
+                return resolvePullRequest(created.data);
             } catch (cause) {
                 const reconciled = await listMatching();
-                if (reconciled) return mapPullRequest(reconciled);
+                if (reconciled) return resolvePullRequest(reconciled);
                 throw cause;
             }
         } catch (cause) {
             throw mutationError(
                 `Failed to create or find a pull request in ${repository}.`,
+                cause,
+            );
+        }
+    },
+
+    read: async (client, repository, pullRequestNumber) => {
+        try {
+            const response = await client.rest.pulls.get({
+                ...repositoryParameters(repository),
+                pull_number: pullRequestNumber,
+            });
+            return requireMappedPullRequest(response.data);
+        } catch (cause) {
+            throw mutationError(
+                `Failed to read pull request #${pullRequestNumber} in ${repository}.`,
                 cause,
             );
         }
@@ -267,7 +351,7 @@ export const makeGitHubPullRequestService = (): GitHubPullRequestService => ({
         }
     },
 
-    merge: async (client, repository, pullRequestNumber) => {
+    merge: async (client, repository, pullRequestNumber, expectedHeadSha) => {
         try {
             const parameters = {
                 ...repositoryParameters(repository),
@@ -277,6 +361,7 @@ export const makeGitHubPullRequestService = (): GitHubPullRequestService => ({
                 client,
                 parameters,
                 pullRequestNumber,
+                expectedHeadSha,
             );
         } catch (cause) {
             throw mutationError(
