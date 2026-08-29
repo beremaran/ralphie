@@ -213,7 +213,13 @@ describe("deterministic Git issue operations", () => {
                 "origin",
                 "main",
             ]);
-            await runGit(otherRepositoryPath, ["clone", remotePath, "."]);
+            await runGit(otherRepositoryPath, [
+                "clone",
+                "--branch",
+                "main",
+                remotePath,
+                ".",
+            ]);
             await runGit(otherRepositoryPath, [
                 "config",
                 "user.email",
