@@ -142,7 +142,12 @@ const isObject = (value: unknown): value is JsonObject =>
 const ownValue = (value: JsonObject, key: string): JsonValue | undefined =>
     hasOwn(value, key) ? value[key] : undefined;
 
-const nestedObjects = (value: JsonObject): ReadonlyArray<JsonObject> => {
+const nestedObjects = (
+    value: JsonObject,
+    seen: Set<JsonObject> = new Set(),
+): ReadonlyArray<JsonObject> => {
+    if (seen.has(value)) return [];
+    seen.add(value);
     const result: JsonObject[] = [value];
     for (const key of [
         "scope",
@@ -161,7 +166,7 @@ const nestedObjects = (value: JsonObject): ReadonlyArray<JsonObject> => {
         "app",
     ]) {
         const nested = ownValue(value, key);
-        if (isObject(nested)) result.push(nested);
+        if (isObject(nested)) result.push(...nestedObjects(nested, seen));
     }
     return result;
 };
@@ -432,8 +437,8 @@ const nestedIdentifierFrom = (
     value: JsonObject,
     keys: ReadonlyArray<string>,
 ): PipelineIdentifier | undefined =>
-    keys
-        .map((key) => ownValue(value, key))
+    nestedObjects(value)
+        .flatMap((record) => keys.map((key) => ownValue(record, key)))
         .filter(isObject)
         .map((nested) => identifierFrom(nested, ["id"]))
         .find((value): value is PipelineIdentifier => value !== undefined);
@@ -1259,3 +1264,18 @@ export function normalizePipelineSnapshot(
 export const normalizePipelineObservations = normalizePipelineSnapshot;
 export const isGreenCandidate = isPipelineGreenCandidate;
 export const normalizePipelineStatus = classifyPipelineStatus;
+
+export {
+    collectPipelineSnapshot,
+    GitHubPipelineSnapshotLive,
+    makeGitHubPipelineSnapshotService,
+    makePipelineSnapshotCollector,
+    makePipelineSnapshotCollectorService,
+    makePipelineSnapshotService,
+    PipelineSnapshotCollectorLive,
+} from "./pipeline-snapshot-collector.ts";
+export type {
+    GitHubPipelineSnapshotService,
+    PipelineSnapshotCollectorOperation,
+    PipelineSnapshotCollectorService,
+} from "./pipeline-snapshot-collector.ts";
