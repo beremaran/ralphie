@@ -61,11 +61,8 @@ export const makeGroundingAssessmentService = (
                     context.piSelection.variant,
                 runId: context.runId,
                 diagnostics: context.piDiagnostics,
-                verifyAfter: () =>
-                    context.repositoryInvariant.verify(
-                        context.repositoryPath,
-                        checkpoint,
-                    ),
+                repositoryInvariant: checkpoint,
+                verifyRepositoryInvariant: context.repositoryInvariant.verify,
                 progress,
                 progressStage: "issue-grounding",
                 progressIssue: issue,

@@ -2,6 +2,7 @@ import { type IssueStageKind } from "../issues/stage.ts";
 
 export type StructuredOutputName =
     | "grounding-decision"
+    | "issue-resolution-decision"
     | "complexity-decision"
     | "review-decision"
     | "commit-message-decision"
@@ -12,6 +13,7 @@ export type PiSessionPurpose =
     | "address-review"
     | "assess-complexity"
     | "assess-grounding"
+    | "verify-resolution"
     | "review-diff"
     | "generate-commit-message"
     | "decompose-issue";
@@ -35,6 +37,7 @@ export type PiSessionStage =
           readonly purpose:
               | "assess-complexity"
               | "assess-grounding"
+              | "verify-resolution"
               | "review-diff"
               | "generate-commit-message"
               | "decompose-issue";

@@ -10,7 +10,6 @@ import {
 import {
     buildCommitMessagePrompt,
     buildImplementationPrompt,
-    buildResolutionVerificationPrompt,
     buildReviewFixPrompt,
     buildReviewPrompt,
 } from "../agent/prompts.ts";
@@ -46,6 +45,10 @@ import type {
     IssueVerificationService,
     VerificationEvidence,
 } from "./verification.ts";
+import {
+    makeResolutionVerificationService,
+    type ResolutionVerificationService,
+} from "./resolution-verification.ts";
 
 /** The implementation workflow for issues with complexity 0 through 3. */
 export type ImplementationExecutorService = {
@@ -165,6 +168,9 @@ export const makeImplementationExecutorService = (
             ],
         }),
     },
+    resolutionVerification: ResolutionVerificationService = makeResolutionVerificationService(
+        progress,
+    ),
 ): ImplementationExecutorService => {
     const resolutionOutcome = (
         resolution: IssueResolutionDecision,
@@ -304,47 +310,14 @@ export const makeImplementationExecutorService = (
 
     const verifyNoChangeResolution = async (
         input: WorkflowExecutorInput,
-        invariant: { readonly branch: string; readonly head: string },
     ): Promise<WorkflowExecutorResult> => {
         const { context, artifacts } = input;
-        const resolution = await stage(
-            progress,
-            input,
-            "resolution-verification",
-            "Verifying whether the issue is already resolved...",
-            () =>
-                requestStructuredOutput(context.pi, {
-                    directory: context.repositoryPath,
-                    title: `Verify resolution of issue #${context.issue.number}`,
-                    prompt: buildResolutionVerificationPrompt({
-                        issue: context.issue,
-                        repositoryPath: context.repositoryPath,
-                        targetBranch: context.targetBranch,
-                    }),
-                    schema: issueResolutionDecisionSchema,
-                    agent: context.piSelection.agent,
-                    model: context.piSelection.model,
-                    variant: context.piSelection.variant,
-                    runId: context.runId,
-                    diagnostics: context.piDiagnostics,
-                    repositoryInvariant: invariant,
-                    verifyRepositoryInvariant:
-                        context.repositoryInvariant.verify,
-                    progress,
-                    progressStage: "resolution-verification",
-                    progressIssue: issueProgress(input).issue,
-                    signal: context.signal,
-                }),
-            ({ output }) =>
-                output.status === IssueResolutionStatus.Resolved
-                    ? "Issue is already resolved in the current checkout."
-                    : "Issue remains unresolved in the current checkout.",
-        );
+        const resolution = await resolutionVerification.verify(context);
         await artifacts.write(
             IssueArtifactKind.IssueResolutionDecision,
-            resolution.output,
+            resolution.decision,
         );
-        const outcome = resolutionOutcome(resolution.output);
+        const outcome = resolutionOutcome(resolution.decision);
         return outcome.kind === IssueExecutionOutcomeKind.Failed
             ? {
                   ...outcome,
@@ -737,7 +710,7 @@ export const makeImplementationExecutorService = (
             "Implementation changes staged.",
         );
         if (!(await operations.hasStagedChanges(context.repositoryPath))) {
-            return await verifyNoChangeResolution(input, invariant);
+            return await verifyNoChangeResolution(input);
         }
         await verifyStagedChanges(input);
         return await runReviewLoop(input, checkpoint, invariant);

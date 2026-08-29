@@ -64,6 +64,10 @@ import {
 } from "./issues/implementation-executor.ts";
 import { makeIssueVerificationService } from "./issues/verification.ts";
 import {
+    makeResolutionVerificationService,
+    type ResolutionVerificationService,
+} from "./issues/resolution-verification.ts";
+import {
     makeIssueExecutorService,
     type IssueExecutorService,
 } from "./issues/executor.ts";
@@ -96,6 +100,8 @@ export type RalphieRuntime = {
     readonly issueArtifactStore: IssueArtifactStoreService;
     readonly complexityAssessment: ComplexityAssessmentService;
     readonly groundingAssessment: GroundingAssessmentService;
+    /** Shared fresh, read-only resolution verifier for issue routes. */
+    readonly resolutionVerification?: ResolutionVerificationService;
     readonly decompositionExecutor: DecompositionExecutorService;
     readonly implementationExecutor: ImplementationExecutorService;
     readonly dryRunIssueExecutor: DryRunIssueExecutorService;
@@ -145,6 +151,7 @@ export const makeLiveRuntime = ({
     const issueVerification = makeIssueVerificationService(commandRunner);
     const complexityAssessment = makeComplexityAssessmentService(progress);
     const groundingAssessment = makeGroundingAssessmentService(progress);
+    const resolutionVerification = makeResolutionVerificationService(progress);
     const decompositionExecutor = makeDecompositionExecutorService(
         githubIssueMutations,
         githubIssues,
@@ -157,6 +164,7 @@ export const makeLiveRuntime = ({
         issueRecovery,
         progress,
         issueVerification,
+        resolutionVerification,
     );
     const dryRunIssueExecutor = makeDryRunIssueExecutorService(
         issueArtifactStore,
@@ -185,6 +193,7 @@ export const makeLiveRuntime = ({
         issueArtifactStore,
         complexityAssessment,
         groundingAssessment,
+        resolutionVerification,
         decompositionExecutor,
         implementationExecutor,
         dryRunIssueExecutor,

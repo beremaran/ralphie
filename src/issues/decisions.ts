@@ -97,21 +97,26 @@ export const reviewDecisionSchema = z
 
 export type ReviewDecision = z.infer<typeof reviewDecisionSchema>;
 
-export const issueResolutionDecisionSchema = z.object({
-    status: z.enum(IssueResolutionStatus),
-    summary: z.string().min(1),
-    evidence: z.array(z.string().min(1)).min(1),
-});
-
-export type IssueResolutionDecision = z.infer<
-    typeof issueResolutionDecisionSchema
->;
-
 export const nonBlankStringSchema = z
     .string()
     .refine((value) => value.trim().length > 0, {
         message: "Expected a non-blank string.",
     });
+
+export const issueResolutionDecisionSchema = z.object({
+    status: z.enum(IssueResolutionStatus),
+    summary: nonBlankStringSchema,
+    evidence: z.array(nonBlankStringSchema).min(1),
+});
+
+/** Shared contract for every fresh, read-only resolution verification. */
+export const resolutionVerificationDecisionSchema =
+    issueResolutionDecisionSchema;
+
+export type IssueResolutionDecision = z.infer<
+    typeof issueResolutionDecisionSchema
+>;
+export type ResolutionVerificationDecision = IssueResolutionDecision;
 
 const groundingActionableDecisionSchema = z
     .object({
