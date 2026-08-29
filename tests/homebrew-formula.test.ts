@@ -28,6 +28,9 @@ describe("Homebrew formula checksum validation", () => {
         const mappings = parseHomebrewFormula(formula, version);
 
         expect(mappings.size).toBe(4);
+        expect(formula).toContain(
+            'bin.install Dir["ralphie-*"].first => "ralphie"',
+        );
         expect(
             new Set([...mappings.values()].map((mapping) => mapping.sha256))
                 .size,

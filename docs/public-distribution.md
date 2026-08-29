@@ -16,6 +16,7 @@ distribution metadata:
 - Git clone URL: <https://github.com/beremaran/ralphie.git>;
 - releases and native assets: <https://github.com/beremaran/ralphie/releases>;
 - raw installer: <https://raw.githubusercontent.com/beremaran/ralphie/main/scripts/install.sh>;
+- Homebrew custom tap: `brew tap beremaran/ralphie https://github.com/beremaran/ralphie`;
 - Homebrew formula source: <https://raw.githubusercontent.com/beremaran/ralphie/main/Formula/ralphie.rb>;
 - OCI image: `ghcr.io/beremaran/ralphie`; and
 - npm package: <https://www.npmjs.com/package/@beremaran/ralphie>.

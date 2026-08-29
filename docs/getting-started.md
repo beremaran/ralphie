@@ -103,6 +103,21 @@ checksum check leave an existing installation untouched. See the [release
 trust policy](releases.md#release-checksum-trust-policy) for the complete
 verification contract.
 
+### Homebrew
+
+The canonical repository is also a public custom tap. Add it explicitly, then
+install the formula without GitHub credentials:
+
+```bash
+brew tap beremaran/ralphie https://github.com/beremaran/ralphie
+brew install beremaran/ralphie/ralphie
+ralphie --version
+```
+
+The formula selects the matching macOS or Linux, arm64 or x64 release asset,
+verifies its release checksum, and installs it under the executable name
+`ralphie`.
+
 ### Published package
 
 Use Bun's package runner to run the latest published version without a global

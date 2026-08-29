@@ -53,6 +53,9 @@ All notable changes to Ralphie are documented here. The project follows
 - Use the supported Sigstore GitHub verification selectors in the standalone
   installer and release documentation, preserving the exact workflow, event,
   commit, and protected tag constraints.
+- Expose the canonical repository as an explicit public Homebrew custom tap and
+  install the selected release asset under the expected `ralphie` executable
+  name.
 - Document the cross-mode display contract: interactive sticky footer and
   contextual Pi session output, periodic and lifecycle breadcrumbs, the
   `LIVE_OUTPUT_LIMIT` character threshold and human-preview defaults, active

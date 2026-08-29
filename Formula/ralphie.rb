@@ -26,7 +26,7 @@ class Ralphie < Formula
 
   def install
     # The downloaded asset is named ralphie-<os>-<arch>; install it as `ralphie`.
-    bin.install Dir["ralphie-*"].first
+    bin.install Dir["ralphie-*"].first => "ralphie"
   end
 
   test do
