@@ -44,6 +44,20 @@ Public topology does not by itself assert that every channel already contains a
 published artifact. Native release asset implementation is tracked by #72, and
 installer, Homebrew, and OCI distribution work is tracked by #73.
 
+## License boundary
+
+The maintainer-approved project license is MIT. The canonical license text and
+copyright notice are in the root [`LICENSE`](../LICENSE) file; `package.json`,
+the Homebrew formula, and the OCI image use the matching `MIT` SPDX identifier.
+There is no separate public distribution copy to synchronize because the
+canonical repository directly supplies every distribution channel listed
+above.
+
+The MIT license covers Ralphie's project source and the distributions built
+from it. Third-party dependencies remain under their respective licenses, and
+Ralphie's license does not change the terms or visibility of user-owned data,
+credentials, or target repositories.
+
 ## Privacy boundary
 
 No Ralphie source or distribution component is intentionally private. In

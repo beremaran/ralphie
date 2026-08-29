@@ -12,6 +12,7 @@ describe("release container metadata contract", () => {
 
         expect(dockerfile).toContain("ARG RALPHIE_VERSION=local");
         expect(dockerfile).toContain("ARG RALPHIE_COMMIT_SHA=local");
+        expect(dockerfile).toContain('org.opencontainers.image.licenses="MIT"');
         expect(dockerfile).toContain(
             'org.opencontainers.image.version="$RALPHIE_VERSION"',
         );
@@ -47,6 +48,7 @@ describe("release container metadata contract", () => {
         expect(workflow).toContain(
             "RALPHIE_COMMIT_SHA=${{ needs.validate.outputs.source_ref }}",
         );
+        expect(workflow).toContain("org.opencontainers.image.licenses=MIT");
         expect(workflow).toContain(
             "org.opencontainers.image.version=${{ needs.validate.outputs.version }}",
         );
@@ -89,6 +91,7 @@ describe("release container metadata contract", () => {
             "name: Inspect OCI metadata before promotion",
         );
         expect(pushJob).toContain('test "$actual_sha256" = "$expected_sha256"');
+        expect(pushJob).toContain('test "$license_label" = "MIT"');
         expect(
             pushJob.indexOf("name: Inspect OCI metadata before promotion"),
         ).toBeLessThan(

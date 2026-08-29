@@ -43,6 +43,7 @@ type DockerConfig = {
     readonly User?: string;
     readonly WorkingDir?: string;
     readonly Env?: ReadonlyArray<string>;
+    readonly Labels?: Readonly<Record<string, string>>;
 };
 
 const inspectConfig = (image: string): DockerConfig =>
@@ -84,6 +85,9 @@ describe("Docker image runtime contract", () => {
                 expect(config.User).toBe("65532:65532");
                 expect(config.WorkingDir).toBe("/home/nonroot");
                 expect(config.Env).toContain("HOME=/home/nonroot");
+                expect(
+                    config.Labels?.["org.opencontainers.image.licenses"],
+                ).toBe("MIT");
 
                 runDocker(["run", "--rm", image, "--version"]);
                 runDocker([

@@ -42,6 +42,7 @@ USER 65532:65532
 LABEL org.opencontainers.image.title="ralphie" \
       org.opencontainers.image.description="Turn a GitHub issue queue into reviewed commits with Pi." \
       org.opencontainers.image.source="https://github.com/beremaran/ralphie" \
+      org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.version="$RALPHIE_VERSION" \
       org.opencontainers.image.revision="$RALPHIE_COMMIT_SHA"
 COPY --from=build /src/dist/cli /usr/local/bin/ralphie
