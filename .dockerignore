@@ -1,6 +1,66 @@
-.git
-node_modules
-dist
+# Keep the Docker context limited to the inputs consumed by Dockerfile.
+# This is intentionally deny-by-default: update this allowlist when the build
+# starts requiring another file. Dockerfile and .dockerignore are supplied to
+# the builder automatically and are not copied into the image.
+*
+!package.json
+!bun.lock
+!index.ts
+!src/
+!src/**
+!scripts/
+scripts/*
+!scripts/build.ts
+
+# Keep local, generated, and secret material excluded even under an allowed
+# source directory. These rules must remain after the allowlist above.
+**/node_modules
+**/node_modules/**
+**/dist
+**/dist/**
+**/.git
+**/.git/**
+**/.ralphie
+**/.ralphie/**
+workspace/**
+state/**
+.ralphie-workspace/**
+.ralphie-state/**
+tests/**
+
+# Credentials, dotenv files, and private keys/certificates.
 .env
 .env.*
+**/.env
+**/.env.*
+**/.npmrc
+**/*credentials*
+**/*secret*
+**/*.pem
+**/*.key
+**/*.crt
+**/*.cer
+**/*.der
+**/*.p12
+**/*.pfx
+**/*.jks
+**/*.keystore
+**/id_rsa*
+**/id_ed25519*
+
+# Logs, editor metadata, coverage, and test output.
 *.log
+**/*.log
+**/logs/**
+**/.idea/**
+**/.vscode/**
+**/.DS_Store
+**/*~
+**/*.swp
+**/*.swo
+**/coverage
+**/coverage/**
+**/*.lcov
+**/.nyc_output/**
+**/test-results/**
+**/playwright-report/**
