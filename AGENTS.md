@@ -28,5 +28,5 @@ Bun + TypeScript CLI (strict mode, `@types/bun`). Entry point: `index.ts`. Servi
 
 ## Docs and release
 
-- README.md is the source of truth for the CLI surface; `docs/end-to-end-execution.md` has the trigger-to-exit execution trace; update README + `CHANGELOG.md` when the command surface or recovery contract changes.
+- The documentation pages under `docs/` are the source of truth for the CLI surface, workflows, safety, recovery, architecture, development, and releases; `docs/end-to-end-execution.md` has the trigger-to-exit execution trace. Keep the root README as the landing page, update the appropriate docs page when its contract changes, and update `CHANGELOG.md` when the command surface or recovery contract changes.
 - Releases are tag-triggered: pushing a `v*` tag runs `release.yml`, which builds per-platform binaries (darwin/linux × arm64/x64) and publishes the Docker image to `ghcr.io/beremaran/ralphie`. Don't push version tags casually.

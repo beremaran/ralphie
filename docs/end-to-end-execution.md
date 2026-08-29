@@ -1,5 +1,10 @@
 # Ralphie end-to-end execution trace
 
+This is the detailed source-level trace for a command-triggered run. It is for
+contributors and maintainers validating sequencing and recovery boundaries.
+Return to the [documentation index](README.md), or read the [workflow
+overview](workflows.md) and [architecture](architecture.md) first.
+
 This is the source-level trace for a command-triggered run. Ralphie is not
 triggered by a GitHub webhook; the trigger is the public CLI invocation:
 
