@@ -44,6 +44,8 @@ export type GitRemoteSafetyInput = {
     readonly intendedBaseSha: string;
     /** When supplied, HEAD must be this commit and exactly one commit ahead. */
     readonly expectedCommitSha?: string;
+    /** Allow a new PR feature branch to be absent before its first push. */
+    readonly allowMissingRemoteBranch?: boolean;
     readonly pushMode?: GitPushMode;
 };
 
@@ -181,6 +183,12 @@ const verifyRemoteBase = (
     const remoteIsExpectedCommit =
         input.expectedCommitSha !== undefined &&
         normalizedRemoteSha === input.expectedCommitSha.toLowerCase();
+    if (
+        normalizedRemoteSha.length === 0 &&
+        input.allowMissingRemoteBranch === true
+    ) {
+        return;
+    }
     if (!remoteIsIntendedBase && !remoteIsExpectedCommit) {
         fail(
             "diverged-base",

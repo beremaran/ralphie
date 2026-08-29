@@ -46,6 +46,12 @@ import type { RalphieRuntime } from "./runtime.ts";
 const errorMessage = (error: unknown): string =>
     error instanceof Error ? error.message : String(error);
 
+const unreachableOutcome = (outcome: never): never => {
+    throw new RalphieError({
+        message: `Unsupported issue execution outcome: ${String(outcome)}.`,
+    });
+};
+
 const checkCancellation = (signal: AbortSignal | undefined): void => {
     try {
         signal?.throwIfAborted();
@@ -88,7 +94,12 @@ const copyOutcome = (
     switch (outcome.kind) {
         case IssueExecutionOutcomeKind.Completed:
             return outcome.completion === "already-resolved"
-                ? { ...outcome, evidence: [...outcome.evidence] }
+                ? {
+                      kind: outcome.kind,
+                      completion: outcome.completion,
+                      resolutionSummary: outcome.resolutionSummary,
+                      evidence: [...outcome.evidence],
+                  }
                 : {
                       kind: outcome.kind,
                       completion: outcome.completion,
@@ -99,15 +110,21 @@ const copyOutcome = (
                   };
         case IssueExecutionOutcomeKind.Decomposed:
             return {
-                ...outcome,
+                kind: outcome.kind,
                 childIssueNumbers: [...outcome.childIssueNumbers],
             };
-        case IssueExecutionOutcomeKind.NeedsAttention:
-            return {
-                ...outcome,
+        case IssueExecutionOutcomeKind.NeedsAttention: {
+            const details = {
+                kind: outcome.kind,
+                reason: outcome.reason,
+                summary: outcome.summary,
                 evidence: [...outcome.evidence],
                 questions: [...outcome.questions],
             };
+            return outcome.artifactPath !== undefined
+                ? { ...details, artifactPath: outcome.artifactPath }
+                : { ...details, diagnosticsPath: outcome.diagnosticsPath };
+        }
         case IssueExecutionOutcomeKind.Escalated:
             return {
                 kind: outcome.kind,
@@ -117,9 +134,18 @@ const copyOutcome = (
                     ? {}
                     : { childIssueNumbers: [...outcome.childIssueNumbers] }),
             };
-        default:
-            return { ...outcome };
+        case IssueExecutionOutcomeKind.Skipped:
+            return {
+                kind: outcome.kind,
+                reason: outcome.reason,
+            };
+        case IssueExecutionOutcomeKind.Failed:
+            return {
+                kind: outcome.kind,
+                message: outcome.message,
+            };
     }
+    return unreachableOutcome(outcome);
 };
 
 type ProgressContext = Omit<ProgressUpdate, "stage" | "status" | "message">;
@@ -808,7 +834,7 @@ export const workflow = async (
             diagnostics,
         } = await prepareWorkflow();
 
-        const pushIssueBranch = async (
+        const prepareIssueBranch = async (
             issueRepositories: ReadonlyArray<RepositoryCheckout>,
             featureBranch: string,
             issueBaseCheckout: WorkflowCheckout,
@@ -822,20 +848,38 @@ export const workflow = async (
                 return;
             }
             await Promise.all(
-                issueRepositories.map(async (issueRepository) => {
-                    const preparedBranch =
-                        await issueOperations.createOrCheckoutFeatureBranch(
-                            issueRepository.repositoryPath,
-                            featureBranch,
-                            issueRepository.branch,
-                            issueBaseCheckout.head,
-                        );
-                    await issueOperations.push(
+                issueRepositories.map((issueRepository) =>
+                    issueOperations.createOrCheckoutFeatureBranch(
                         issueRepository.repositoryPath,
                         featureBranch,
-                        preparedBranch.headSha,
-                    );
-                }),
+                        issueRepository.branch,
+                        issueBaseCheckout.head,
+                    ),
+                ),
+            );
+        };
+
+        const deliverIssueBranch = async (
+            issueContext: WorkflowIssueContext,
+            outcome: IssueExecutionOutcome,
+        ): Promise<void> => {
+            if (
+                !usesPullRequests ||
+                effectiveDryRun ||
+                issueContext.resumedClosureOutcome !== undefined ||
+                outcome.kind !== IssueExecutionOutcomeKind.Completed ||
+                outcome.completion !== "pushed-commit"
+            ) {
+                return;
+            }
+            await Promise.all(
+                issueContext.issueRepositories.map((issueRepository) =>
+                    issueOperations.push(
+                        issueRepository.repositoryPath,
+                        issueContext.featureBranch,
+                        outcome.commitSha,
+                    ),
+                ),
             );
         };
 
@@ -851,6 +895,26 @@ export const workflow = async (
                     ),
                 );
             };
+
+        const captureNeedsAttentionCheckout = async (
+            issueContext: WorkflowIssueContext,
+        ): Promise<WorkflowCheckout> => {
+            if (
+                usesPullRequests &&
+                !effectiveDryRun &&
+                issueContext.resumedClosureOutcome === undefined
+            ) {
+                await Promise.all(
+                    issueContext.issueRepositories.map((issueRepository) =>
+                        issueOperations.restoreBaseCheckout(
+                            issueRepository.repositoryPath,
+                            issueRepository.branch,
+                        ),
+                    ),
+                );
+            }
+            return await captureCheckout();
+        };
 
         const prepareIssue = async (
             issue: GitHubIssue,
@@ -875,7 +939,7 @@ export const workflow = async (
             const issueBaseCheckout = { ...checkout };
             const featureBranch = issueFeatureBranch(issue.number);
             const issueRepositories = repositoryCheckouts;
-            await pushIssueBranch(
+            await prepareIssueBranch(
                 issueRepositories,
                 featureBranch,
                 issueBaseCheckout,
@@ -920,6 +984,8 @@ export const workflow = async (
                             usesPullRequests && !effectiveDryRun
                                 ? issueContext.featureBranch
                                 : branch,
+                        allowMissingRemoteBranch:
+                            usesPullRequests && !effectiveDryRun,
                         workspace,
                         runId: actualRunId,
                         octokit,
@@ -1039,6 +1105,7 @@ export const workflow = async (
         ): Promise<void> => {
             if (outcome.kind !== IssueExecutionOutcomeKind.Completed) return;
             checkout = await captureCheckout();
+            await deliverIssueBranch(issueContext, outcome);
             activeIssue = {
                 issueNumber: issueContext.issue.number,
                 stage: "issue-closure",
@@ -1086,8 +1153,8 @@ export const workflow = async (
                 { readonly kind: IssueExecutionOutcomeKind.NeedsAttention }
             >,
         ): Promise<void> => {
+            checkout = await captureNeedsAttentionCheckout(issueContext);
             if (onNeedsAttention !== NeedsAttentionPolicy.Halt) return;
-            checkout = await captureCheckout();
             await persistState(RunStateStatus.Active, {
                 issueNumber: issueContext.issue.number,
                 stage: "issue-execution",
@@ -1145,15 +1212,17 @@ export const workflow = async (
                     outcome,
                 });
             }
-            await completeIssue(issueContext, outcome);
-            completeQueueItem(issueContext.issue.number, outcome);
             if (outcome.kind === IssueExecutionOutcomeKind.Failed) {
                 await handleFailedIssue(issueContext, outcome);
                 return;
             }
             if (outcome.kind === IssueExecutionOutcomeKind.NeedsAttention) {
                 await handleNeedsAttentionIssue(issueContext, outcome);
+                await finishSuccessfulIssue(issueContext, outcome);
+                return;
             }
+            await completeIssue(issueContext, outcome);
+            completeQueueItem(issueContext.issue.number, outcome);
             await finishSuccessfulIssue(issueContext, outcome);
             await refreshAfterDecomposition(outcome);
         };

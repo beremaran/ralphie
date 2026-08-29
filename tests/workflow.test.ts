@@ -509,6 +509,35 @@ describe("workflow", () => {
         expect(calls).not.toContain("closeIssue:42");
     });
 
+    test("does not deliver a PR branch for a needs-attention outcome", async () => {
+        const calls: string[] = [];
+        const states: RunState[] = [];
+        await workflow(
+            {
+                ...baseOptions,
+                workflow: WorkflowMode.Pr,
+                onNeedsAttention: NeedsAttentionPolicy.Continue,
+            },
+            testRuntime(calls, states, {
+                outcomes: [
+                    {
+                        kind: IssueExecutionOutcomeKind.NeedsAttention,
+                        reason: NeedsAttentionReason.ExternalDependency,
+                        summary: "A prerequisite is still open.",
+                        evidence: ["The prerequisite is unresolved."],
+                        questions: ["When will it be available?"],
+                        artifactPath: "/tmp/needs-attention.json",
+                    },
+                ],
+            }),
+        );
+        expect(calls).not.toContain("pushBranch:ralphie/issue-42");
+        expect(calls).not.toContain("createPullRequest:owner/repo");
+        expect(calls).not.toContain("mergePullRequest:owner/repo:1");
+        expect(calls).not.toContain("closeIssue:42");
+        expect(states.at(-1)?.queue.processedCount).toBe(1);
+    });
+
     test("refreshes issue freshness metadata before active resume", async () => {
         const initialIssue = {
             ...firstIssue,
