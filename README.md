@@ -601,10 +601,13 @@ Ralphie adapts its progress renderer to its environment:
 - CI and redirected output receive durable, append-only lines;
 - `--output verbose` adds operational details;
 - `--output json` writes progress and `pi_event` objects one per line to stdout; and
-- `--output quiet` suppresses everything except failures.
+- `--output quiet` suppresses routine progress but retains failures, needs-attention decisions, and handled stops.
 
 JSON events use a stable operational vocabulary and include `runId`,
-`timestamp`, `stage`, `status`, and `message`. Depending on the event, they may
+`timestamp`, `stage`, `status`, and `message`. Grounding events identify whether
+agent work was skipped. A `needs-attention` event includes its reason, summary,
+evidence, questions, diagnostic or artifact path, and selected policy; verbose
+and JSON output retain those complete details. Depending on the event, they may
 also include the repository, issue position, review attempt, session ID, commit
 SHA, created issue numbers, or diagnostic paths. Credentials and sensitive
 environment values are redacted at the reporting boundary.

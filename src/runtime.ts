@@ -178,6 +178,7 @@ export const makeLiveRuntime = ({
         implementationExecutor,
         decompositionExecutor,
         groundingAssessment,
+        progress,
     );
     return {
         commandRunner,

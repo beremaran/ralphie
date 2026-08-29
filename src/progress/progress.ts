@@ -21,6 +21,7 @@ export type ProgressStage =
     | "issue-planning"
     | "issue-execution"
     | "issue-queue"
+    | "grounding"
     | "issue-grounding"
     | "complexity-assessment"
     | "implementation"
@@ -43,6 +44,7 @@ export type ProgressStatus =
     | "succeeded"
     | "failed"
     | "skipped"
+    | "needs-attention"
     | "info";
 
 export type ProgressRenderMode = "interactive" | "plain" | "json" | "quiet";
@@ -116,6 +118,8 @@ const statusSymbol = (status: ProgressStatus, colors: boolean): string => {
                 return "−";
             case "started":
                 return "◐";
+            case "needs-attention":
+                return "⚠";
             case "info":
                 return "•";
         }
@@ -129,6 +133,8 @@ const statusSymbol = (status: ProgressStatus, colors: boolean): string => {
             return dim("−");
         case "started":
             return yellow("◐");
+        case "needs-attention":
+            return yellow("⚠");
         case "info":
             return cyan("•");
     }
@@ -340,11 +346,14 @@ export const makeProgressReporter = ({
 
         const terminalRunEvent =
             event.stage === "run" &&
-            (event.status === "succeeded" || event.status === "failed");
+            (event.status === "succeeded" ||
+                event.status === "failed" ||
+                event.status === "needs-attention");
         const settled =
             event.status === "succeeded" ||
             event.status === "failed" ||
-            event.status === "skipped";
+            event.status === "skipped" ||
+            event.status === "needs-attention";
         const active = settled
             ? removeActive(progressIdentity(event))
             : undefined;
@@ -377,7 +386,11 @@ export const makeProgressReporter = ({
                 output.writeLine(JSON.stringify(event));
                 return;
             }
-            if (mode === "quiet" && event.status !== "failed") {
+            if (
+                mode === "quiet" &&
+                event.status !== "failed" &&
+                event.status !== "needs-attention"
+            ) {
                 return;
             }
 

@@ -313,6 +313,9 @@ export const reportPiFailure = async (
                               ? {}
                               : { retries: assistantError.retries }),
                       }),
+                ...(request.progressStage === "grounding"
+                    ? { agentWorkSkipped: false }
+                    : {}),
             },
         });
     } catch {

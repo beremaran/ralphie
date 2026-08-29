@@ -45,16 +45,37 @@ describe("display state", () => {
 
     test("provides a label for every progress stage", () => {
         const stages = Object.keys(PROGRESS_STAGE_LABELS) as ProgressStage[];
-        expect(stages).toHaveLength(29);
+        expect(stages).toHaveLength(30);
         for (const stage of stages) {
             expect(PROGRESS_STAGE_LABELS[stage]).not.toBe("");
         }
+        expect(PROGRESS_STAGE_LABELS.grounding).toBe(
+            "Checking issue readiness",
+        );
         expect(PROGRESS_STAGE_LABELS["complexity-assessment"]).toBe(
             "Assessing complexity",
         );
         expect(PROGRESS_STAGE_LABELS["resolution-verification"]).toBe(
             "Verifying resolution",
         );
+    });
+
+    test("reduces the grounding needs-attention stage to waiting activity", () => {
+        const state = reduceProgressUpdate(undefined, {
+            stage: "grounding",
+            status: "needs-attention",
+            message: "Issue needs attention.",
+            issue: { number: 13, title: "Display state" },
+            current: 1,
+            total: 3,
+        });
+
+        expect(state).toMatchObject({
+            stage: "grounding",
+            activity: "waiting",
+            activityLabel: "Waiting",
+            issue: { current: 1, total: 3, number: 13 },
+        });
     });
 
     test("does not invent or overwrite a global step total", () => {

@@ -32,9 +32,10 @@ export const makeGroundingAssessmentService = (
         };
         await progress.emit({
             issue,
-            stage: "issue-grounding",
+            stage: "grounding",
             status: "started",
             message: `Checking whether #${context.issue.number} is actionable...`,
+            details: { agentWorkSkipped: false },
         });
         try {
             const checkpoint = await context.repositoryInvariant.capture(
@@ -64,24 +65,29 @@ export const makeGroundingAssessmentService = (
                 repositoryInvariant: checkpoint,
                 verifyRepositoryInvariant: context.repositoryInvariant.verify,
                 progress,
-                progressStage: "issue-grounding",
+                progressStage: "grounding",
                 progressIssue: issue,
                 signal: context.signal,
             });
             await progress.emit({
                 issue,
-                stage: "issue-grounding",
+                stage: "grounding",
                 status: "succeeded",
                 message: `Issue #${context.issue.number} is ${result.output.disposition.replaceAll("_", " ")}.`,
-                details: { disposition: result.output.disposition },
+                details: {
+                    disposition: result.output.disposition,
+                    sessionID: result.sessionID,
+                    agentWorkSkipped: false,
+                },
             });
             return { decision: result.output, sessionID: result.sessionID };
         } catch (error) {
             await progress.emit({
                 issue,
-                stage: "issue-grounding",
+                stage: "grounding",
                 status: "failed",
                 message: `Issue grounding failed: ${messageOf(error)}`,
+                details: { agentWorkSkipped: false },
             });
             throw error;
         }

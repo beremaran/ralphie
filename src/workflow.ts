@@ -458,6 +458,16 @@ const makeWorkflowConfiguration = (
     };
 };
 
+const summaryMessage = (
+    prefix: string,
+    counts: Readonly<Record<IssueExecutionOutcomeKind, number>>,
+): string =>
+    `${prefix}: ${counts.completed} completed, ` +
+    `${counts.decomposed} decomposed, ` +
+    `${counts.escalated} escalated, ` +
+    `${counts[IssueExecutionOutcomeKind.NeedsAttention]} needs-attention, ` +
+    `${counts.skipped} skipped, ${counts.failed} failed.`;
+
 const emitRunStarted = async (
     progress: ProgressReporterService,
     config: WorkflowConfiguration,
@@ -477,10 +487,18 @@ const emitRunStarted = async (
                 : "Pi default",
             variant: config.modelVariant ?? "Pi default",
             agent: config.agent,
-            issueLimit: config.maxIssues ?? "unlimited",
+            issueLimit:
+                config.resumeState?.maxIssues ??
+                config.maxIssues ??
+                "unlimited",
+            budget:
+                config.resumeState?.maxIssues ??
+                config.maxIssues ??
+                "unlimited",
             runId: config.actualRunId,
             dryRun: config.effectiveDryRun,
             workflow: config.workflowMode,
+            policy: config.onNeedsAttention,
             onNeedsAttention: config.onNeedsAttention,
             ...(config.resumeState === undefined
                 ? {}
@@ -497,15 +515,16 @@ const emitRunSucceeded = async (
     await progress.emit({
         stage: "run",
         status: "succeeded",
-        message:
-            `Run completed: ${summary.counts.completed} completed, ` +
-            `${summary.counts.decomposed} decomposed, ${summary.counts.escalated} escalated, ` +
-            `${summary.counts[IssueExecutionOutcomeKind.NeedsAttention]} deferred, ` +
-            `${summary.counts.skipped} skipped, ${summary.counts.failed} failed.`,
+        message: summaryMessage("Run completed", summary.counts),
         details: {
             runId: summary.runId,
             counts: summary.counts,
             statePath: config.statePath,
+            policy: config.onNeedsAttention,
+            budget:
+                config.resumeState?.maxIssues ??
+                config.maxIssues ??
+                "unlimited",
         },
     });
 };
@@ -933,7 +952,7 @@ export const workflow = async (
                 issueNumber: issue.number,
                 stage:
                     resumedClosureOutcome === undefined
-                        ? "complexity-assessment"
+                        ? "grounding"
                         : "issue-closure",
             };
             const issueBaseCheckout = { ...checkout };
@@ -1127,6 +1146,66 @@ export const workflow = async (
             }
         };
 
+        const emitNeedsAttentionEvent = async (
+            issueContext: WorkflowIssueContext,
+            outcome: Extract<
+                IssueExecutionOutcome,
+                { readonly kind: IssueExecutionOutcomeKind.NeedsAttention }
+            >,
+        ): Promise<void> => {
+            const artifact =
+                outcome.artifactPath === undefined
+                    ? { diagnosticsPath: outcome.diagnosticsPath }
+                    : { artifactPath: outcome.artifactPath };
+            const budget = resumeState?.maxIssues ?? maxIssues;
+            await progress.emit({
+                issue: {
+                    number: issueContext.issue.number,
+                    title: issueContext.issue.title,
+                },
+                current: issueContext.current,
+                total: issueContext.total,
+                stage: "grounding",
+                status: "needs-attention",
+                message:
+                    `Issue #${issueContext.issue.number} needs attention ` +
+                    `(${outcome.reason}): ${outcome.summary}`,
+                details: {
+                    reason: outcome.reason,
+                    summary: outcome.summary,
+                    evidence: [...outcome.evidence],
+                    questions: [...outcome.questions],
+                    ...artifact,
+                    policy: onNeedsAttention,
+                    queuePosition: issueContext.current,
+                    budget: budget ?? "unlimited",
+                },
+            });
+        };
+
+        const emitHandledNeedsAttention = async (
+            issueNumber: number,
+        ): Promise<void> => {
+            const summary = summarize(actualRunId, outcomes);
+            await progress.emit({
+                stage: "run",
+                status: "needs-attention",
+                message: summaryMessage(
+                    `Run halted after issue #${issueNumber} needs attention`,
+                    summary.counts,
+                ),
+                details: {
+                    runId: summary.runId,
+                    counts: summary.counts,
+                    statePath,
+                    issueNumber,
+                    policy: onNeedsAttention,
+                    budget: resumeState?.maxIssues ?? maxIssues ?? "unlimited",
+                    handled: true,
+                },
+            });
+        };
+
         const handleFailedIssue = async (
             issueContext: WorkflowIssueContext,
             outcome: Extract<
@@ -1154,11 +1233,13 @@ export const workflow = async (
             >,
         ): Promise<void> => {
             checkout = await captureNeedsAttentionCheckout(issueContext);
+            await emitNeedsAttentionEvent(issueContext, outcome);
             if (onNeedsAttention !== NeedsAttentionPolicy.Halt) return;
             await persistState(RunStateStatus.Active, {
                 issueNumber: issueContext.issue.number,
-                stage: "issue-execution",
+                stage: "grounding",
             });
+            await emitHandledNeedsAttention(issueContext.issue.number);
             throw new NeedsAttentionStop({
                 issueNumber: issueContext.issue.number,
                 summary: outcome.summary,

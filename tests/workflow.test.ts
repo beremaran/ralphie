@@ -440,31 +440,66 @@ describe("workflow", () => {
     test("defers an issue needing attention and continues with the queue", async () => {
         const calls: string[] = [];
         const states: RunState[] = [];
+        const events: ProgressUpdate[] = [];
         const summary = await workflow(
             { ...baseOptions, maxIssues: 2 },
-            testRuntime(calls, states, {
-                issueLists: [[firstIssue, secondIssue]],
-                outcomes: [
-                    {
-                        kind: IssueExecutionOutcomeKind.NeedsAttention,
-                        reason: NeedsAttentionReason.ExternalDependency,
-                        summary: "A prerequisite is still open.",
-                        evidence: ["Issue body links the prerequisite."],
-                        questions: ["Complete the prerequisite, then retry."],
-                        artifactPath: "/tmp/needs-attention.json",
-                    },
-                    {
-                        kind: IssueExecutionOutcomeKind.Completed,
-                        completion: "pushed-commit",
-                        commitSha: "second-sha",
-                    },
-                ],
-            }),
+            testRuntime(
+                calls,
+                states,
+                {
+                    issueLists: [[firstIssue, secondIssue]],
+                    outcomes: [
+                        {
+                            kind: IssueExecutionOutcomeKind.NeedsAttention,
+                            reason: NeedsAttentionReason.ExternalDependency,
+                            summary: "A prerequisite is still open.",
+                            evidence: ["Issue body links the prerequisite."],
+                            questions: [
+                                "Complete the prerequisite, then retry.",
+                            ],
+                            artifactPath: "/tmp/needs-attention.json",
+                        },
+                        {
+                            kind: IssueExecutionOutcomeKind.Completed,
+                            completion: "pushed-commit",
+                            commitSha: "second-sha",
+                        },
+                    ],
+                },
+                events,
+            ),
         );
 
         expect(summary.outcomes.map(({ issueNumber }) => issueNumber)).toEqual([
             42, 43,
         ]);
+        expect(events[0]).toMatchObject({
+            stage: "run",
+            status: "info",
+            details: {
+                policy: NeedsAttentionPolicy.Continue,
+                onNeedsAttention: NeedsAttentionPolicy.Continue,
+                budget: 2,
+            },
+        });
+        const needsAttention = events.find(
+            ({ status }) => status === "needs-attention",
+        );
+        expect(needsAttention).toMatchObject({
+            stage: "grounding",
+            current: 1,
+            total: 2,
+            details: {
+                reason: NeedsAttentionReason.ExternalDependency,
+                summary: "A prerequisite is still open.",
+                evidence: ["Issue body links the prerequisite."],
+                questions: ["Complete the prerequisite, then retry."],
+                artifactPath: "/tmp/needs-attention.json",
+                policy: NeedsAttentionPolicy.Continue,
+                queuePosition: 1,
+                budget: 2,
+            },
+        });
         expect(summary.counts[IssueExecutionOutcomeKind.NeedsAttention]).toBe(
             1,
         );
@@ -506,6 +541,39 @@ describe("workflow", () => {
         expect(states.at(-1)?.onNeedsAttention).toBe(NeedsAttentionPolicy.Halt);
         expect(states.at(-1)?.activeIssue?.issueNumber).toBe(42);
         expect(events.some(({ status }) => status === "failed")).toBe(false);
+        expect(events).toContainEqual(
+            expect.objectContaining({
+                stage: "grounding",
+                status: "needs-attention",
+                details: expect.objectContaining({
+                    reason: NeedsAttentionReason.ExternalDependency,
+                    summary: "A prerequisite is still open.",
+                    evidence: ["The prerequisite is unresolved."],
+                    questions: ["When will it be available?"],
+                    artifactPath: "/tmp/needs-attention.json",
+                    policy: NeedsAttentionPolicy.Halt,
+                }),
+            }),
+        );
+        expect(events).toContainEqual(
+            expect.objectContaining({
+                stage: "run",
+                status: "needs-attention",
+                message: expect.stringContaining("needs-attention"),
+                details: expect.objectContaining({
+                    handled: true,
+                    policy: NeedsAttentionPolicy.Halt,
+                    counts: {
+                        completed: 0,
+                        decomposed: 0,
+                        escalated: 0,
+                        "needs-attention": 1,
+                        skipped: 0,
+                        failed: 0,
+                    },
+                }),
+            }),
+        );
         expect(calls).not.toContain("closeIssue:42");
     });
 

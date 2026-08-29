@@ -75,8 +75,9 @@ order:
 | 7 | Resume reconciliation | On resume, compare saved repository, branch, checkout HEAD, and pending issues with live Git/GitHub state. |
 | 8 | Run state | Build the refreshable queue and atomically persist an `active` state before Pi starts. |
 
-Every tracked stage emits started, succeeded, or failed progress. The
-repository path is normally `<workspace>/<owner>/<repository>`.
+Every tracked stage emits started, succeeded, or failed progress; grounding
+may also emit a skipped or needs-attention terminal status. The repository path
+is normally `<workspace>/<owner>/<repository>`.
 
 Existing checkout preparation deliberately has one destructive behavior: a
 dirty reused checkout is aligned with the selected remote branch using the
@@ -181,7 +182,10 @@ grounding session. It returns one of three dispositions:
 
 An unfinished prerequisite uses the `external_dependency` reason. A deferred
 outcome advances the current queue, while an ordinary failed outcome still
-halts the run. A new run discovers the still-open issue and assesses it again.
+halts the run. Progress emits the grounding decision with its policy and
+complete evidence, questions, and artifact path; a matching persisted decision
+is reported as reused with agent work skipped. A new run discovers the
+still-open issue and assesses it again.
 
 `IssueExecutor` first reuses a persisted complexity decision when one exists.
 Otherwise `ComplexityAssessment`:
@@ -385,9 +389,11 @@ indented, de-duplicated, and bounded. Use `--output verbose` for a larger
 tool-output preview. Terminal control sequences are sanitized and sensitive
 values are redacted before terminal rendering. JSON mode emits redacted
 progress and `pi_event` JSON Lines to stdout; normal modes render to stderr,
-and quiet mode renders failures only. Event details can include issue
-positions, review attempts, session ids, commit SHAs, created issue numbers,
-and diagnostic paths without exposing credentials.
+and quiet mode renders failures, needs-attention decisions, and handled stops.
+Grounding events identify skipped agent work, while needs-attention details
+retain the reason, summary, evidence, questions, path, and policy. Event
+details can include issue positions, review attempts, session ids, commit SHAs,
+created issue numbers, and diagnostic paths without exposing credentials.
 
 ## 9. Completion, failure, and cancellation
 
@@ -408,9 +414,10 @@ stateDiagram-v2
 - One issue failure uses the current halt policy: Ralphie persists the active
   issue, releases Pi, retains artifacts, and stops before later issues.
 - A needs-attention outcome uses `--on-needs-attention halt` by default. Ralphie
-  persists the active run, releases Pi, and handles the stop with exit code `2`
-  rather than reporting an ordinary issue failure. `continue` drains the queue;
-  a drained run completes with exit code `0`.
+  persists the active run, emits a handled-stop summary with all outcome counts,
+  releases Pi, and handles the stop with exit code `2` rather than reporting an
+  ordinary issue failure. `continue` drains the queue; a drained run completes
+  with exit code `0`.
 - Pi is closed on success, failure, cancellation, and scoped defects. Ordinary
   failures set process exit code `1`.
 - Cancellation is checked before long-running boundaries and passed into Pi.

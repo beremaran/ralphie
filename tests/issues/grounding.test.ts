@@ -82,8 +82,15 @@ describe("issue grounding", () => {
         expect(result).toEqual({ sessionID: "session-1", decision });
         expect(verified).toBe(true);
         expect(events.map(({ stage, status }) => ({ stage, status }))).toEqual([
-            { stage: "issue-grounding", status: "started" },
-            { stage: "issue-grounding", status: "succeeded" },
+            { stage: "grounding", status: "started" },
+            { stage: "grounding", status: "succeeded" },
         ]);
+        expect(events[0]?.details).toMatchObject({
+            agentWorkSkipped: false,
+        });
+        expect(events[1]?.details).toMatchObject({
+            agentWorkSkipped: false,
+            sessionID: "session-1",
+        });
     });
 });

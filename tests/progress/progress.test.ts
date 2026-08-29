@@ -71,6 +71,72 @@ describe("progress reporting", () => {
         );
     });
 
+    test("renders needs-attention reason in default output and details in verbose output", async () => {
+        let defaultOutput = "";
+        const defaultProgress = makeProgressReporter({
+            mode: "plain",
+            verbose: false,
+            colors: false,
+            write: (text) => {
+                defaultOutput += text;
+            },
+        });
+        const update = {
+            stage: "grounding" as const,
+            status: "needs-attention" as const,
+            message:
+                "Issue #42 needs attention (missing_information): clarify the target.",
+            issue: { number: 42, title: "Fix issue" },
+            current: 1,
+            total: 2,
+            details: {
+                reason: "missing_information",
+                summary: "clarify the target.",
+                evidence: ["The target is absent."],
+                questions: ["Which target should be used?"],
+                artifactPath: "/tmp/artifacts.json",
+                policy: "halt",
+            },
+        };
+        await defaultProgress.emit(update);
+        expect(defaultOutput).toBe(
+            "⚠ [1/2] #42 Issue #42 needs attention (missing_information): clarify the target.\n",
+        );
+
+        let verboseOutput = "";
+        const verboseProgress = makeProgressReporter({
+            mode: "plain",
+            verbose: true,
+            colors: false,
+            write: (text) => {
+                verboseOutput += text;
+            },
+        });
+        await verboseProgress.emit(update);
+        expect(verboseOutput).toContain('"evidence":["The target is absent."]');
+        expect(verboseOutput).toContain(
+            '"questions":["Which target should be used?"]',
+        );
+        expect(verboseOutput).toContain('"artifactPath":"/tmp/artifacts.json"');
+        expect(verboseOutput).toContain('"policy":"halt"');
+
+        let jsonOutput = "";
+        const jsonProgress = makeProgressReporter({
+            mode: "json",
+            verbose: false,
+            write: (text) => {
+                jsonOutput += text;
+            },
+            runId: "run-needs-attention",
+        });
+        await jsonProgress.emit(update);
+        expect(JSON.parse(jsonOutput)).toMatchObject({
+            stage: "grounding",
+            status: "needs-attention",
+            details: update.details,
+        });
+    });
+
     test("renders nested interactive stages on one live line", async () => {
         let output = "";
         let second = 0;
@@ -149,6 +215,37 @@ describe("progress reporting", () => {
         expect(output).not.toContain("\x1b[?25l");
     });
 
+    test("settles an interactive grounding line for needs attention", async () => {
+        let output = "";
+        let seconds = 0;
+        const progress = makeProgressReporter({
+            mode: "interactive",
+            verbose: false,
+            colors: false,
+            write: (text) => {
+                output += text;
+            },
+            now: () => new Date(2026, 0, 1, 0, 0, seconds++),
+            runId: "run-1",
+        });
+        await progress.emit({
+            stage: "grounding",
+            status: "started",
+            message: "Checking issue readiness...",
+            issue: { number: 42, title: "Fix issue" },
+        });
+        await progress.emit({
+            stage: "grounding",
+            status: "needs-attention",
+            message: "Issue #42 needs attention: clarify the target.",
+            issue: { number: 42, title: "Fix issue" },
+        });
+
+        expect(output).toBe(
+            "◐ #42 Checking issue readiness...\r\x1b[2K⚠ #42 Issue #42 needs attention: clarify the target. (1.0s)\n",
+        );
+    });
+
     test("clips an interactive live line before it can wrap", async () => {
         let output = "";
         const progress = makeProgressReporter({
@@ -222,11 +319,16 @@ describe("progress reporting", () => {
             message: "Done.",
         });
         await progress.emit({
+            stage: "grounding",
+            status: "needs-attention",
+            message: "Needs attention.",
+        });
+        await progress.emit({
             stage: "run",
             status: "failed",
             message: "Failed.",
         });
-        expect(output).toBe("✗ Failed.\n");
+        expect(output).toBe("⚠ Needs attention.\n✗ Failed.\n");
     });
 
     test("redacts credentials from messages and nested JSON details", async () => {

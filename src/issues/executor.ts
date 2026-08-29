@@ -1,3 +1,4 @@
+import { type ProgressReporterService } from "../progress/progress.ts";
 import { RalphieError } from "../shared/error.ts";
 import {
     IssueArtifactKind,
@@ -34,6 +35,7 @@ export const makeIssueExecutorService = (
     implementationExecutor: ImplementationExecutorService,
     decompositionExecutor: DecompositionExecutorService,
     groundingAssessment?: GroundingAssessmentService,
+    progress?: ProgressReporterService,
 ): IssueExecutorService => {
     const freshnessFingerprint = (
         context: IssueExecutionContext,
@@ -67,6 +69,16 @@ export const makeIssueExecutorService = (
         const fingerprint = freshnessFingerprint(context);
         await artifacts.invalidateStaleNeedsAttentionDecision(fingerprint);
         if (artifacts.has(IssueArtifactKind.NeedsAttentionDecision)) {
+            await progress?.emit({
+                issue: {
+                    number: context.issue.number,
+                    title: context.issue.title,
+                },
+                stage: "grounding",
+                status: "skipped",
+                message: `Reusing the previous grounding decision for #${context.issue.number}; agent grounding was skipped.`,
+                details: { agentWorkSkipped: true },
+            });
             const { decision } = await artifacts.read(
                 IssueArtifactKind.NeedsAttentionDecision,
             );

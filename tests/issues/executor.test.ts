@@ -22,6 +22,10 @@ import {
 import { makeIssueExecutorService } from "../../src/issues/executor.ts";
 import type { ImplementationExecutorService } from "../../src/issues/implementation-executor.ts";
 import { RalphieError } from "../../src/shared/error.ts";
+import {
+    makeProgressRecorder,
+    type ProgressUpdate,
+} from "../../src/progress/progress.ts";
 
 const context = (number: number): IssueExecutionContext =>
     ({ issue: { number } }) as IssueExecutionContext;
@@ -31,6 +35,7 @@ describe("IssueExecutor", () => {
         const workspace = await mkdtemp(join(tmpdir(), "ralphie-grounding-"));
         try {
             let groundingCalls = 0;
+            const events: ProgressUpdate[] = [];
             const grounding = {
                 assess: async () => {
                     groundingCalls += 1;
@@ -65,6 +70,7 @@ describe("IssueExecutor", () => {
                         },
                     },
                     grounding,
+                    makeProgressRecorder(events),
                 );
             const input = {
                 ...context(42),
@@ -94,6 +100,13 @@ describe("IssueExecutor", () => {
                 evidence: ["The target is unspecified."],
                 questions: ["Which target should be supported?"],
             });
+            expect(events).toContainEqual(
+                expect.objectContaining({
+                    stage: "grounding",
+                    status: "skipped",
+                    details: { agentWorkSkipped: true },
+                }),
+            );
         } finally {
             await rm(workspace, { recursive: true, force: true });
         }
