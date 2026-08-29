@@ -41,8 +41,9 @@ non-fast-forward updates, has no bypass actors, and supplies the protected-tag
 binding required by the release workflow.
 
 Public topology does not by itself assert that every channel already contains a
-published artifact. Native release asset implementation is tracked by #72, and
-installer, Homebrew, and OCI distribution work is tracked by #73.
+published artifact. The native release workflow owns the four platform assets
+and their public release records; installer, Homebrew, and OCI distribution
+work is tracked by #73.
 
 ## License boundary
 

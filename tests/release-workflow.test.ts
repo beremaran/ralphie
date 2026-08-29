@@ -57,6 +57,30 @@ describe("release container metadata contract", () => {
         );
     });
 
+    test("builds each native asset on a matching host architecture", async () => {
+        const workflow = await readRepositoryFile(
+            ".github/workflows/release.yml",
+        );
+        const buildJob = workflow.slice(
+            workflow.indexOf("  build-binaries:"),
+            workflow.indexOf(
+                "  # This job deliberately has no registry credentials",
+            ),
+        );
+
+        expect(buildJob).toContain("Verify native target architecture");
+        expect(buildJob).toContain("bun run build -- --commit-sha");
+        for (const [target, runner] of [
+            ["darwin-arm64", "macos-14"],
+            ["darwin-x64", "macos-13"],
+            ["linux-arm64", "ubuntu-24.04-arm"],
+            ["linux-x64", "ubuntu-24.04"],
+        ]) {
+            expect(buildJob).toContain(`target: ${target}`);
+            expect(buildJob).toContain(`runner: ${runner}`);
+        }
+    });
+
     test("publishes only explicit normalized-version tags and safe aliases", async () => {
         const workflow = await readRepositoryFile(
             ".github/workflows/release.yml",
@@ -120,6 +144,18 @@ describe("release container metadata contract", () => {
         expect(publishJob).toContain("merge-multiple: false");
         expect(collectStep).toContain("scripts/create-sha256sums.ts");
         expect(collectStep).toContain('test "$TAG" = "v$VERSION"');
+        expect(releaseStep).toContain("GH_REPO: ${{ github.repository }}");
+        expect(releaseStep).toContain('gh release view "$TAG"');
+        expect(releaseStep).toContain(
+            'gh release upload "$TAG" "${assets[@]}"',
+        );
+        expect(releaseStep).toContain("--clobber");
+        expect(releaseStep).toContain('gh release edit "$TAG"');
+        expect(releaseStep).toContain("--draft=false");
+        expect(
+            releaseStep.indexOf('gh release upload "$TAG" "${assets[@]}"'),
+        ).toBeLessThan(releaseStep.indexOf('gh release edit "$TAG"'));
+        expect(releaseStep).not.toContain("github.event.repo.upload_url");
         for (const target of [
             "darwin-arm64",
             "darwin-x64",

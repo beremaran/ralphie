@@ -153,6 +153,25 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Verify native target architecture
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          case "$TARGET" in
+            darwin-arm64) expected_os=Darwin; expected_arch=arm64 ;;
+            darwin-x64) expected_os=Darwin; expected_arch=x86_64 ;;
+            linux-arm64) expected_os=Linux; expected_arch=aarch64 ;;
+            linux-x64) expected_os=Linux; expected_arch=x86_64 ;;
+            *) echo "Unsupported native target: $TARGET" >&2; exit 1 ;;
+          esac
+          actual_os="$(uname -s)"
+          actual_arch="$(uname -m)"
+          if [[ "$actual_os" != "$expected_os" || "$actual_arch" != "$expected_arch" ]]; then
+            echo "Runner $actual_os/$actual_arch does not match native target $TARGET" >&2
+            exit 1
+          fi
+
       - name: Build native binary
         run: bun run build -- --commit-sha "${{ needs.validate.outputs.source_ref }}"
 
@@ -541,6 +560,7 @@ jobs:
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.validate.outputs.tag }}
         run: |
           set -euo pipefail
@@ -555,7 +575,38 @@ jobs:
           for asset in "${assets[@]}"; do
             test -f "$asset"
           done
-          gh release create "$TAG" "${assets[@]}" \
+
+          # gh resolves the release's upload URL itself. Reusing an existing
+          # release makes reruns safe and --clobber replaces any partial asset
+          # set left by an interrupted publication.
+          upload_and_publish() {
+            gh release upload "$TAG" "${assets[@]}" \
+              --repo "$GH_REPO" \
+              --clobber
+
+            # A rerun may find a draft release. Publish it after repairing the
+            # asset set so its downloads are available without credentials.
+            gh release edit "$TAG" \
+              --repo "$GH_REPO" \
+              --draft=false
+          }
+
+          if gh release view "$TAG" --repo "$GH_REPO" --json tagName >/dev/null 2>&1; then
+            upload_and_publish
+            exit 0
+          fi
+
+          # Include the assets on first creation so the release and its
+          # downloads are published by the same authenticated CLI operation.
+          # Creation can race with another retry, so a failed create is
+          # followed by a lookup and idempotent upload rather than abandoned.
+          if gh release create "$TAG" "${assets[@]}" \
+            --repo "$GH_REPO" \
             --verify-tag \
             --generate-notes \
-            --title "$TAG"
+            --title "$TAG"; then
+            exit 0
+          fi
+
+          gh release view "$TAG" --repo "$GH_REPO" --json tagName >/dev/null
+          upload_and_publish

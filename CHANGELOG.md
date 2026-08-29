@@ -90,6 +90,9 @@ All notable changes to Ralphie are documented here. The project follows
 - Enforce a validated release tag/version/ref context, immutable protected
   release tags, protected publisher environment, least-privilege workflow
   permissions, and safe manual dry runs.
+- Make native release publication idempotent by explicitly targeting the
+  canonical repository, reusing an existing tag release, and repairing partial
+  asset uploads on retries.
 - Document the published scoped Bun package and use
   `bunx @beremaran/ralphie` for installation, version verification, dry-run,
   and workflow examples; the scope distinguishes this CLI from the unrelated
