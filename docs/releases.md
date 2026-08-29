@@ -157,3 +157,6 @@ protected-tag context binds the signing run to `source_ref`.
 See [Getting started](getting-started.md) for the installer and [Development](development.md)
 for the local release gate. The root [README](../README.md) retains a compact
 verification command for discoverability, but this page owns the policy.
+For a no-credentials check of the published repository and every distribution
+channel, run the [public distribution verification](public-distribution.md#unauthenticated-verification)
+command after the release is available.

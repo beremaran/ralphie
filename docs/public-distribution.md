@@ -35,16 +35,27 @@ workflow token permission remains read-only; publication jobs in
 `.github/workflows/release.yml` request only their explicit `contents: write`,
 `packages: write`, or `id-token: write` permissions.
 
+The public repository metadata is part of the same canonical identity:
+
+- description: `Turn a GitHub issue queue into reviewed commits with Pi.`;
+- homepage: <https://github.com/beremaran/ralphie#readme>; and
+- topics: `ai`, `automation`, `bun`, `cli`, `github`, `github-actions`,
+  `github-issues`, `homebrew`, `oci`, and `pi`.
+
+The unauthenticated distribution check verifies these fields through the public
+GitHub API. Keep the list aligned with the repository settings when the product
+or its supported channels change.
+
 Publishing jobs use the protected `release` environment, with the `beremaran`
 maintainer configured as its required reviewer. The active `Protect release
 tags` repository ruleset covers `refs/tags/v*`, blocks deletion and
 non-fast-forward updates, has no bypass actors, and supplies the protected-tag
 binding required by the release workflow.
 
-Public topology does not by itself assert that every channel already contains a
-published artifact. The native release workflow owns the four platform assets
-and their public release records; installer, Homebrew, and OCI distribution
-work is tracked by #73.
+The native release workflow owns the four platform assets and their public
+release records. The installer, Homebrew, and OCI channels were published and
+verified as part of #73; this page records their stable ownership for future
+releases.
 
 ## License boundary
 
@@ -59,6 +70,32 @@ The MIT license covers Ralphie's project source and the distributions built
 from it. Third-party dependencies remain under their respective licenses, and
 Ralphie's license does not change the terms or visibility of user-owned data,
 credentials, or target repositories.
+
+## Unauthenticated verification
+
+Run the public distribution check from a clean checkout with `GH_TOKEN` and
+`GITHUB_TOKEN` unset:
+
+```bash
+env -u GH_TOKEN -u GITHUB_TOKEN bun run verify:public-distribution
+```
+
+The check reads this topology document and the local README, then uses only
+anonymous HTTP requests to verify the repository metadata, latest stable
+release, every release asset, checksum and Sigstore bundle, raw installer,
+Homebrew formula and its four download URLs, GitHub license metadata, and the
+current-release/`latest` OCI manifests and MIT labels. It installs the fetched
+installer into a temporary directory and checks its version; the temporary
+directory is removed on completion. The installer verification requires the
+`sigstore` CLI and a SHA-256 utility on `PATH`.
+
+The same command runs in
+`.github/workflows/public-distribution.yml` on pushes to `main`, on a daily
+schedule, and when manually dispatched. The workflow disables checkout
+credential persistence and explicitly removes both GitHub token variables, so
+it cannot accidentally pass using repository credentials. The release version
+is discovered from the public `releases/latest` endpoint; no future release
+URL or repository name needs to be guessed in the workflow.
 
 ## Privacy boundary
 

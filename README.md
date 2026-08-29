@@ -69,6 +69,25 @@ Dry-run still performs preflight, issue discovery, read-only grounding, and
 may prepare or reset the local workspace. Read the [safety model](./docs/safety.md)
 before using mutation-enabled commands.
 
+## Public distribution
+
+The [latest release](https://github.com/beremaran/ralphie/releases/latest) and
+its [release assets](https://github.com/beremaran/ralphie/releases) are public.
+The supported standalone installer is
+[install.sh](https://raw.githubusercontent.com/beremaran/ralphie/main/scripts/install.sh);
+it supports macOS and Linux on `arm64` and `x64`. Release tags use the strict
+`v<major>.<minor>.<patch>` form; the installer accepts either that tag or the
+version without `v`.
+
+Other canonical channels are the [Homebrew tap](https://github.com/beremaran/ralphie)
+and [formula source](https://raw.githubusercontent.com/beremaran/ralphie/main/Formula/ralphie.rb),
+the [OCI image](https://ghcr.io/beremaran/ralphie), the
+[published npm package](https://www.npmjs.com/package/@beremaran/ralphie), and
+the [MIT license](https://github.com/beremaran/ralphie/blob/main/LICENSE).
+Public artifacts do not require GitHub credentials. Operating on a private target
+repository still requires `GH_TOKEN` (preferred) or `GITHUB_TOKEN`; Pi model
+credentials are also required when Ralphie asks Pi to make a decision.
+
 ## Output contract
 
 `--output` selects `default`, `verbose`, `quiet`, or `json`. In an interactive,

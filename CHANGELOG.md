@@ -17,6 +17,9 @@ All notable changes to Ralphie are documented here. The project follows
 - An isolated package smoke check that inspects the tarball allowlist, installs
   production dependencies in a fresh project, and verifies scoped identity and
   manifest-backed `--version` output.
+- An anonymous public-distribution verification command and scheduled workflow
+  that check canonical links, release assets, the temporary installer,
+  Homebrew, GHCR, and license metadata without GitHub credentials.
 - Staged-tree-bound deterministic verification before review, after review
   fixes, and before commit, with persisted command evidence and repeatable
   `--verify-command` overrides.

@@ -31,6 +31,7 @@ Useful individual commands:
 | `bun run build:package` | Build the publishable package bundle at `dist/ralphie.js`. |
 | `bun run package:check` | Pack, inspect, install, and run the local package in isolated temporary directories. |
 | `bun run package:inspect` | Inspect the local `npm pack --dry-run` file list without installing it. |
+| `env -u GH_TOKEN -u GITHUB_TOKEN bun run verify:public-distribution` | Verify the public repository, release assets, installer, formula, OCI image, and license anonymously (requires `sigstore`). |
 | `bun run probe:structured-output` | Exercise a real schema-validated Pi decision. |
 
 The package check builds an actual tarball, verifies its allowlist, installs it
