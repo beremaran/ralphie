@@ -48,6 +48,11 @@ describe("release container metadata contract", () => {
         expect(workflow).toContain(
             "RALPHIE_COMMIT_SHA=${{ needs.validate.outputs.source_ref }}",
         );
+        expect(workflow).toContain("id: build");
+        expect(workflow).toContain(
+            "BUILD_DIGEST: ${{ steps.build.outputs.digest }}",
+        );
+        expect(workflow).not.toContain("metadata-file:");
         expect(workflow).toContain("org.opencontainers.image.licenses=MIT");
         expect(workflow).toContain(
             "org.opencontainers.image.version=${{ needs.validate.outputs.version }}",

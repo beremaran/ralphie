@@ -1,6 +1,6 @@
 {
   "name": "@beremaran/ralphie",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Turn a GitHub issue queue into reviewed commits with Pi.",
   "module": "./dist/ralphie.js",
   "main": "./dist/ralphie.js",

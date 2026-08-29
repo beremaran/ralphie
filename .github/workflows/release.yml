@@ -233,6 +233,7 @@ jobs:
       # Both exporters consume this one BuildKit result. The Docker archive is
       # loaded for the smoke test; the OCI archive is the promotion input.
       - name: Build non-publishing container candidate
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -249,7 +250,6 @@ jobs:
           outputs: |
             type=docker,dest=/tmp/ralphie-container-${{ matrix.arch }}.docker.tar
             type=oci,dest=ralphie-container-${{ matrix.arch }}.oci.tar
-          metadata-file: buildx-metadata-${{ matrix.arch }}.json
 
       - name: Smoke-test entrypoint and inspect release metadata
         env:
@@ -307,12 +307,14 @@ jobs:
       # before promoting the archive. A failed build, smoke test, or metadata
       # check never reaches this step or the immutable artifact upload.
       - name: Write candidate digest and platform contract
+        env:
+          BUILD_DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           set -euo pipefail
           archive="ralphie-container-${ARCH}.oci.tar"
           contract="ralphie-container-${ARCH}.metadata.json"
           test -s "$archive"
-          digest="$(jq -er '."containerimage.digest" | select(type == "string" and test("^sha256:[0-9a-f]{64}$"))' "buildx-metadata-${ARCH}.json")"
+          digest="$(printf '%s\n' "$BUILD_DIGEST" | grep -E '^sha256:[0-9a-f]{64}$')"
           archive_sha256="$(sha256sum "$archive" | cut -d ' ' -f1)"
           artifact="ralphie-container-candidate-${VERSION}-${ARCH}"
           image_license="$(docker image inspect "$IMAGE" --format '{{ index .Config.Labels "org.opencontainers.image.licenses" }}')"

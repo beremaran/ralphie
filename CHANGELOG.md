@@ -46,6 +46,9 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Changed
 
+- Read container candidate digests from the supported Buildx action output so
+  release staging fails closed without relying on the removed `metadata-file`
+  input.
 - Document the cross-mode display contract: interactive sticky footer and
   contextual Pi session output, periodic and lifecycle breadcrumbs, the
   `LIVE_OUTPUT_LIMIT` character threshold and human-preview defaults, active
