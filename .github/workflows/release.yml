@@ -361,6 +361,164 @@ jobs:
           overwrite: false
           retention-days: 90
 
+  publish-npm:
+    name: Publish npm package
+    needs:
+      - validate
+    # The validation job also rejects unqualified manual dispatches. Keep the
+    # ref guard here so this publisher can never run from a branch, even if a
+    # future change weakens another job's condition.
+    if: needs.validate.outputs.dry_run == 'false' && github.ref_type == 'tag' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    # One-time npm setup: in the package's npmjs.com settings, add the GitHub
+    # Actions trusted publisher for owner beremaran, repository ralphie,
+    # workflow release.yml, and environment release. This job intentionally
+    # uses only GitHub's short-lived OIDC exchange and no registry secret.
+    environment:
+      name: release
+      url: https://www.npmjs.com/package/@beremaran/ralphie
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out validated source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.source_ref }}
+          persist-credentials: false
+
+      - name: Verify scoped package and release tag version
+        id: npm-context
+        env:
+          TAG: ${{ needs.validate.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$GITHUB_REF_TYPE" != tag || "$GITHUB_REF" != refs/tags/v* ]]; then
+            echo "Refusing npm publication: the workflow must run from a v* tag (got $GITHUB_REF)" >&2
+            exit 1
+          fi
+          if [[ "$TAG" != v* ]]; then
+            echo "Malformed npm release tag '$TAG': expected a tag beginning with v" >&2
+            exit 1
+          fi
+
+          TAG_VERSION="${TAG#v}"
+          # SemVer 2.0.0: numeric prerelease identifiers cannot have leading
+          # zeroes, and every dot-separated identifier must be non-empty.
+          SEMVER_REGEX='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*)|([0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))(\.((0|[1-9][0-9]*)|([0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)))*)?(\+([0-9A-Za-z-]+)(\.[0-9A-Za-z-]+)*)?$'
+          if [[ -z "$TAG_VERSION" || ! "$TAG_VERSION" =~ $SEMVER_REGEX ]]; then
+            echo "Malformed npm release tag '$TAG': expected a valid SemVer v<major>.<minor>.<patch> with optional prerelease/build metadata" >&2
+            exit 1
+          fi
+
+          PACKAGE_NAME="$(jq -er '.name | select(type == "string")' package.json)"
+          PACKAGE_VERSION="$(jq -er '.version | select(type == "string")' package.json)"
+          if [[ "$PACKAGE_NAME" != @beremaran/ralphie ]]; then
+            echo "Refusing npm publication for unscoped package $PACKAGE_NAME" >&2
+            exit 1
+          fi
+          if [[ "$TAG_VERSION" != "$PACKAGE_VERSION" ]]; then
+            echo "npm release tag $TAG resolves to $TAG_VERSION, but package.json declares $PACKAGE_VERSION; normal and prerelease versions must match exactly" >&2
+            exit 1
+          fi
+
+          echo "version=$TAG_VERSION" >> "$GITHUB_OUTPUT"
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      # npm trusted publishing requires a recent npm CLI and Node runtime.
+      # Do not configure setup-node with a registry or auth file: npm obtains
+      # publish authorization from the GitHub OIDC token instead of a long-lived token.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.14.0
+
+      - name: Install npm trusted-publishing client
+        run: |
+          set -euo pipefail
+          npm install --global npm@11.5.1 --no-audit --no-fund
+          test "$(npm --version)" = 11.5.1
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build and smoke-test packed package
+        run: bun run package:check
+
+      - name: Publish scoped package with npm provenance
+        run: npm publish --provenance --access public
+
+      - name: Verify exact package from npm registry
+        env:
+          VERSION: ${{ steps.npm-context.outputs.version }}
+        run: |
+          set -euo pipefail
+          PACKAGE_SPEC="@beremaran/ralphie@$VERSION"
+          METADATA_FILE="$RUNNER_TEMP/ralphie-npm-metadata.json"
+          METADATA_ERROR="$RUNNER_TEMP/ralphie-npm-metadata.error"
+          MAX_ATTEMPTS=6
+
+          for ((attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1)); do
+            smoke_status=0
+            bun run package:check -- --registry --package-spec "$PACKAGE_SPEC" || smoke_status=$?
+
+            if (( smoke_status == 0 )); then
+              if ! npm view "$PACKAGE_SPEC" name version --json > "$METADATA_FILE" 2> "$METADATA_ERROR"; then
+                if ! grep -Eq 'E404|404 Not Found' "$METADATA_FILE" "$METADATA_ERROR"; then
+                  echo "npm registry lookup failed for $PACKAGE_SPEC; not treating it as propagation" >&2
+                  cat "$METADATA_ERROR" >&2 || true
+                  exit 1
+                fi
+                if (( attempt == MAX_ATTEMPTS )); then
+                  echo "npm registry metadata did not propagate for $PACKAGE_SPEC" >&2
+                  cat "$METADATA_ERROR" >&2 || true
+                  exit 1
+                fi
+                echo "npm registry metadata is still propagating; retrying registry smoke (attempt $((attempt + 1))/$MAX_ATTEMPTS)" >&2
+                sleep 10
+                continue
+              fi
+              if ! jq -e --arg name @beremaran/ralphie --arg version "$VERSION" \
+                '.name == $name and .version == $version' "$METADATA_FILE" > /dev/null; then
+                echo "npm registry returned unexpected metadata for $PACKAGE_SPEC" >&2
+                cat "$METADATA_FILE" >&2
+                exit 1
+              fi
+              exit 0
+            fi
+
+            # A failed exact lookup is the only retryable condition: npm's
+            # package metadata/tarball may still be propagating. Once exact
+            # metadata exists, a smoke failure is a package defect and must
+            # fail the release rather than retrying or accepting another name.
+            if npm view "$PACKAGE_SPEC" name version --json > "$METADATA_FILE" 2> "$METADATA_ERROR"; then
+              if ! jq -e --arg name @beremaran/ralphie --arg version "$VERSION" \
+                '.name == $name and .version == $version' "$METADATA_FILE" > /dev/null; then
+                echo "npm registry returned unexpected metadata for $PACKAGE_SPEC" >&2
+                cat "$METADATA_FILE" >&2
+                exit 1
+              fi
+              echo "Registry metadata exists for $PACKAGE_SPEC, but the package smoke check failed; refusing to retry" >&2
+              exit "$smoke_status"
+            fi
+            if ! grep -Eq 'E404|404 Not Found' "$METADATA_FILE" "$METADATA_ERROR"; then
+              echo "npm registry lookup failed for $PACKAGE_SPEC; not treating it as propagation" >&2
+              cat "$METADATA_ERROR" >&2 || true
+              exit "$smoke_status"
+            fi
+
+            if (( attempt == MAX_ATTEMPTS )); then
+              echo "npm registry package $PACKAGE_SPEC did not propagate after $MAX_ATTEMPTS attempts" >&2
+              cat "$METADATA_ERROR" >&2 || true
+              exit "$smoke_status"
+            fi
+            echo "npm registry package $PACKAGE_SPEC is still propagating; retrying registry smoke (attempt $((attempt + 1))/$MAX_ATTEMPTS)" >&2
+            sleep 10
+          done
+
   push-container:
     name: Push container image
     needs:

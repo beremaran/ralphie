@@ -52,6 +52,24 @@ Repository administrators must configure that environment in **Settings →
 Environments → release** with the required reviewer(s); approval is required
 before the final publisher can write release assets or packages.
 
+The dedicated `publish-npm` job is also limited to a validated `v*` tag and a
+non-dry-run release. It rechecks that removing the leading `v` from the tag
+produces the exact `package.json` version, then installs dependencies and runs
+`bun run package:check` before `npm publish --provenance --access public`.
+Publishing uses npm trusted publishing through the job's GitHub OIDC
+permission; no long-lived npm credential is configured or required. Afterward,
+the job runs the registry form of the package smoke check for the exact scoped
+package/version and fails on any metadata or executable-version mismatch. It
+retries only while that exact npm version is unavailable during registry
+propagation.
+
+Before the first npm release, configure the package's npmjs.com **Trusted
+Publishers** setting with GitHub Actions owner `beremaran`, repository
+`ralphie`, workflow filename `release.yml`, and environment `release`. The
+workflow comments and this paragraph intentionally make that one-time binding
+explicit; changing the workflow filename or environment requires updating the
+npm publisher configuration too.
+
 Before staging a release, run the local package smoke check from the checkout:
 
 ```bash

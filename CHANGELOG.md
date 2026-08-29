@@ -106,6 +106,9 @@ All notable changes to Ralphie are documented here. The project follows
 - Make native release publication idempotent by explicitly targeting the
   canonical repository, reusing an existing tag release, and repairing partial
   asset uploads on retries.
+- Publish the scoped npm package only from a validated release tag with npm
+  trusted publishing, provenance, and exact post-publication registry smoke
+  verification.
 - Document the published scoped Bun package and use
   `bunx @beremaran/ralphie` for installation, version verification, dry-run,
   and workflow examples; the scope distinguishes this CLI from the unrelated

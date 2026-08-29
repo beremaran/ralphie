@@ -6,6 +6,111 @@ const repositoryRoot = resolve(import.meta.dir, "..");
 const readRepositoryFile = (path: string): Promise<string> =>
     Bun.file(resolve(repositoryRoot, path)).text();
 
+describe("npm release publication contract", () => {
+    test("guards the scoped tag/version and uses trusted publishing only", async () => {
+        const workflow = await readRepositoryFile(
+            ".github/workflows/release.yml",
+        );
+        const npmJobStart = workflow.indexOf("  publish-npm:");
+        const npmJobEnd = workflow.indexOf("  push-container:", npmJobStart);
+        const npmJob = workflow.slice(npmJobStart, npmJobEnd);
+        const publishStep = npmJob.indexOf(
+            "name: Publish scoped package with npm provenance",
+        );
+        const localSmokeStep = npmJob.indexOf("run: bun run package:check");
+        const registrySmokeStep = npmJob.indexOf(
+            "name: Verify exact package from npm registry",
+        );
+
+        expect(npmJob).toContain(
+            "if: needs.validate.outputs.dry_run == 'false' && github.ref_type == 'tag' && startsWith(github.ref, 'refs/tags/v')",
+        );
+        expect(npmJob).toContain('TAG_VERSION="${TAG#v}"');
+        expect(npmJob).toContain("Malformed npm release tag");
+        expect(npmJob).toContain("optional prerelease/build metadata");
+        expect(npmJob).toContain('PACKAGE_NAME="$(jq -er');
+        expect(npmJob).toContain('PACKAGE_VERSION="$(jq -er');
+        expect(npmJob).toContain(
+            'if [[ "$TAG_VERSION" != "$PACKAGE_VERSION" ]]; then',
+        );
+        expect(npmJob).toContain("contents: read");
+        expect(npmJob).toContain("id-token: write");
+        expect(npmJob).not.toContain("contents: write");
+        expect(npmJob).not.toContain("packages: write");
+        expect(npmJob).toContain("npm publish --provenance --access public");
+        expect(npmJob).not.toContain("NPM_TOKEN");
+        expect(npmJob).not.toContain("NODE_AUTH_TOKEN");
+        expect(npmJob).not.toContain("registry-url");
+        expect(localSmokeStep).toBeGreaterThan(-1);
+        expect(publishStep).toBeGreaterThan(localSmokeStep);
+        expect(registrySmokeStep).toBeGreaterThan(publishStep);
+        expect(npmJob).toContain('PACKAGE_SPEC="@beremaran/ralphie@$VERSION"');
+        expect(npmJob).toContain(
+            'bun run package:check -- --registry --package-spec "$PACKAGE_SPEC"',
+        );
+        expect(npmJob).toContain(
+            'npm view "$PACKAGE_SPEC" name version --json',
+        );
+        expect(npmJob).toContain("sleep 10");
+        expect(npmJob).toContain("E404");
+        expect(npmJob).not.toContain("continue-on-error");
+
+        const smokeScript = await readRepositoryFile(
+            "scripts/package-smoke.ts",
+        );
+        expect(smokeScript).toContain('[installed.executable, "--version"]');
+        expect(smokeScript).toContain("mkdtemp(join(tmpdir(),");
+        expect(smokeScript).toContain('cache: join(root, "npm-cache")');
+        expect(smokeScript).toContain("expectedOutput");
+    });
+
+    test("accepts normal and prerelease versions but rejects malformed tags", async () => {
+        const workflow = await readRepositoryFile(
+            ".github/workflows/release.yml",
+        );
+        const npmJobStart = workflow.indexOf("  publish-npm:");
+        const npmJobEnd = workflow.indexOf("  push-container:", npmJobStart);
+        const npmJob = workflow.slice(npmJobStart, npmJobEnd);
+        const semverRegex = npmJob.match(/SEMVER_REGEX='([^']+)'/)?.[1];
+        if (semverRegex === undefined) {
+            throw new Error("npm release SemVer regex is missing");
+        }
+
+        const acceptsVersion = (version: string): boolean =>
+            Bun.spawnSync(["bash", "-c", '[[ "$VERSION" =~ $SEMVER_REGEX ]]'], {
+                env: {
+                    PATH: process.env.PATH ?? "/usr/bin:/bin",
+                    SEMVER_REGEX: semverRegex,
+                    VERSION: version,
+                },
+                stderr: "pipe",
+                stdout: "pipe",
+            }).exitCode === 0;
+
+        expect(acceptsVersion("1.2.3")).toBe(true);
+        expect(acceptsVersion("1.2.3-rc.1")).toBe(true);
+        expect(acceptsVersion("1.2.3+build.7")).toBe(true);
+        for (const malformedVersion of [
+            "1.2.3-01",
+            "1.2.3-foo..bar",
+            "1.2.3-",
+            "1.2.3-rc.",
+            "01.2.3",
+        ]) {
+            expect(acceptsVersion(malformedVersion)).toBe(false);
+        }
+    });
+
+    test("documents the one-time npm trusted publisher binding", async () => {
+        const releases = await readRepositoryFile("docs/releases.md");
+
+        expect(releases).toContain("Trusted\nPublishers");
+        expect(releases).toContain("workflow filename `release.yml`");
+        expect(releases).toContain("environment `release`");
+        expect(releases).toContain("npm publish --provenance --access public");
+    });
+});
+
 describe("release container metadata contract", () => {
     test("Dockerfile declares and applies explicit release inputs", async () => {
         const dockerfile = await readRepositoryFile("Dockerfile");
