@@ -9,7 +9,7 @@ import {
 } from "../scripts/validate-homebrew-formula.ts";
 
 const repositoryRoot = resolve(import.meta.dir, "..");
-const version = "0.1.1";
+const version = "0.1.2";
 
 const readFormula = (): Promise<string> =>
     readFile(resolve(repositoryRoot, "Formula/ralphie.rb"), "utf8");

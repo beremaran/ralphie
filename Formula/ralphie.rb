@@ -2,7 +2,7 @@ class Ralphie < Formula
   desc "Turn a GitHub issue queue into reviewed commits with Pi"
   homepage "https://github.com/beremaran/ralphie"
   license "MIT"
-  version "0.1.1"
+  version "0.1.2"
 
   on_macos do
     if Hardware::CPU.arm?

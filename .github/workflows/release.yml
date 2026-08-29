@@ -137,7 +137,7 @@ jobs:
       matrix:
         include:
           - { target: darwin-arm64, runner: macos-14 }
-          - { target: darwin-x64, runner: macos-13 }
+          - { target: darwin-x64, runner: macos-15-intel }
           - { target: linux-arm64, runner: ubuntu-24.04-arm }
           - { target: linux-x64, runner: ubuntu-24.04 }
     steps:
@@ -333,7 +333,20 @@ jobs:
             --arg image_license "$image_license" \
             --arg image_version "$image_version" \
             --arg image_revision "$image_revision" \
-            '{schema, artifact, version, source_ref, platform, digest, format, archive, archive_sha256, image_license, image_version, image_revision}' \
+            '{
+              schema: $schema,
+              artifact: $artifact,
+              version: $version,
+              source_ref: $source_ref,
+              platform: $platform,
+              digest: $digest,
+              format: $format,
+              archive: $archive,
+              archive_sha256: $archive_sha256,
+              image_license: $image_license,
+              image_version: $image_version,
+              image_revision: $image_revision
+            }' \
             > "$contract"
 
       # v4 artifact names are immutable. The final publisher downloads the two

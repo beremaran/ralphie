@@ -53,6 +53,22 @@ describe("release container metadata contract", () => {
             "BUILD_DIGEST: ${{ steps.build.outputs.digest }}",
         );
         expect(workflow).not.toContain("metadata-file:");
+        for (const field of [
+            "schema",
+            "artifact",
+            "version",
+            "source_ref",
+            "platform",
+            "digest",
+            "format",
+            "archive",
+            "archive_sha256",
+            "image_license",
+            "image_version",
+            "image_revision",
+        ]) {
+            expect(workflow).toContain(`${field}: $${field}`);
+        }
         expect(workflow).toContain("org.opencontainers.image.licenses=MIT");
         expect(workflow).toContain(
             "org.opencontainers.image.version=${{ needs.validate.outputs.version }}",
@@ -77,7 +93,7 @@ describe("release container metadata contract", () => {
         expect(buildJob).toContain("bun run build -- --commit-sha");
         for (const [target, runner] of [
             ["darwin-arm64", "macos-14"],
-            ["darwin-x64", "macos-13"],
+            ["darwin-x64", "macos-15-intel"],
             ["linux-arm64", "ubuntu-24.04-arm"],
             ["linux-x64", "ubuntu-24.04"],
         ]) {
