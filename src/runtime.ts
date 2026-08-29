@@ -147,6 +147,7 @@ export const makeLiveRuntime = ({
     const issueRecovery = makeIssueRecoveryService(
         gitIssueCheckpoint,
         progress,
+        gitRepositoryInvariant,
     );
     const issueVerification = makeIssueVerificationService(commandRunner);
     const complexityAssessment = makeComplexityAssessmentService(progress);

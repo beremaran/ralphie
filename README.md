@@ -634,9 +634,12 @@ continue on questionable state.
 
 A validated needs-attention decision is not a failure. Ralphie preserves its
 summary, evidence, questions, and issue freshness metadata in the run artifacts,
-leaves the issue open, and advances to later work. A later run evaluates the
-issue again, so completing its dependency makes it eligible without editing the
-queue manually.
+leaves the issue open, and advances to later work. When a mutating agent's
+needs-attention request is confirmed by grounding, recovery first writes a
+bounded binary-safe patch and decision diagnostic, then restores and verifies
+the exact clean checkpoint; any capture, write, restore, or verification failure
+halts as recoverable failure. A later run evaluates the issue again, so
+completing its dependency makes it eligible without editing the queue manually.
 
 ```mermaid
 stateDiagram-v2
@@ -661,6 +664,11 @@ On resume, Ralphie compares persisted intent with both local Git and live GitHub
 state before returning to `Active`. It can reconcile partially created child
 issues, a commit created immediately before interruption, and an issue closure
 whose response was lost without repeating the corresponding agent work.
+
+Needs-attention recovery diagnostics use the same issue directory and contain
+`changes.patch` plus `metadata.json` under `needs-attention/`. The patch includes
+tracked staged and unstaged changes as well as untracked files. Diagnostics are
+published atomically before the exact checkpoint is restored and verified.
 
 `--clean end` removes the entire workspace after success, including completed
 state, events, diagnostics, and the repository checkout. Cleanup is skipped on

@@ -164,6 +164,11 @@ const services = (options: ServiceOptions = {}) => {
             resume: IssueQueueResumeStrategy,
         }),
         ...options.recovery,
+        handleNeedsAttention:
+            options.recovery?.handleNeedsAttention ??
+            (async () => ({
+                diagnosticsPath: "/workspace/needs-attention",
+            })),
     };
     const remoteSafety: GitRemoteSafetyService = {
         verifyDirectPush: async (input) => {

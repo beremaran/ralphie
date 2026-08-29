@@ -1,10 +1,13 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+import { mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 
 import {
     type GitIssueCheckpointService,
     type IssueCheckpoint,
 } from "../git/issue-checkpoint.ts";
+import type { GitRepositoryInvariantService } from "../git/repository-invariant.ts";
+import type { PiNeedsAttentionRequest } from "../agent/task-session.ts";
 import type { GitHubIssue } from "../github/issues.ts";
 import {
     type ProgressStage,
@@ -12,8 +15,13 @@ import {
     type ProgressReporterService,
 } from "../progress/progress.ts";
 import { RalphieError } from "../shared/error.ts";
+import {
+    needsAttentionDecisionSchema,
+    type NeedsAttentionDecision,
+    type ReviewDecision,
+    ReviewVerdict,
+} from "./decisions.ts";
 import { resolveWorkspacePath } from "../workspace/workspace.ts";
-import { type ReviewDecision, ReviewVerdict } from "./decisions.ts";
 import {
     IssueQueueResumeStrategy,
     type IssueWorkflowKind,
@@ -50,6 +58,27 @@ export type ReviewExhaustionResult = {
     readonly resume: IssueQueueResumeStrategy;
 };
 
+export type NeedsAttentionRecoveryInput = {
+    readonly runId: string;
+    readonly repository?: string;
+    readonly workspace: string;
+    readonly repositoryPath: string;
+    readonly issue: GitHubIssue;
+    readonly checkpoint: IssueCheckpoint;
+    /** The grounding decision that confirmed the agent's request. */
+    readonly decision: NeedsAttentionDecision;
+    /** The original bounded request from the mutating agent, when available. */
+    readonly request?: PiNeedsAttentionRequest;
+    /** Compatibility name for callers that retain the agent terminology. */
+    readonly agentRequest?: PiNeedsAttentionRequest;
+    /** May be supplied by callers when the service was assembled without one. */
+    readonly repositoryInvariant?: GitRepositoryInvariantService;
+};
+
+export type NeedsAttentionRecoveryResult = {
+    readonly diagnosticsPath: string;
+};
+
 export const REVIEW_DIAGNOSTIC_PATCH_LIMIT_BYTES = 10 * 1024 * 1024;
 export const REVIEW_DIAGNOSTIC_METADATA_LIMIT_BYTES = 2 * 1024 * 1024;
 
@@ -57,14 +86,84 @@ export type IssueRecoveryService = {
     readonly handleReviewExhaustion: (
         input: ReviewExhaustionInput,
     ) => Promise<ReviewExhaustionResult>;
+    readonly handleNeedsAttention: (
+        input: NeedsAttentionRecoveryInput,
+    ) => Promise<NeedsAttentionRecoveryResult>;
 };
 
 const safeRunId = (runId: string): string =>
     runId.replace(/[^a-zA-Z0-9_-]/g, "_") || "run";
 
+const recoverableError = (message: string, cause: unknown): RalphieError =>
+    cause instanceof RalphieError
+        ? cause
+        : new RalphieError({ message, cause });
+
+const diagnosticPath = (
+    input: Pick<ReviewExhaustionInput, "workspace" | "runId" | "issue">,
+    name: string,
+): string =>
+    join(
+        resolveWorkspacePath(input.workspace),
+        ".ralphie",
+        "runs",
+        safeRunId(input.runId),
+        "issues",
+        String(input.issue.number),
+        name,
+    );
+
+const persistDiagnostic = async (input: {
+    readonly diagnosticsPath: string;
+    readonly patch: string;
+    readonly metadata: string;
+    readonly description: string;
+}): Promise<void> => {
+    if (
+        Buffer.byteLength(input.patch, "utf8") >
+        REVIEW_DIAGNOSTIC_PATCH_LIMIT_BYTES
+    ) {
+        throw new RalphieError({
+            message: `${input.description} patch exceeds ${REVIEW_DIAGNOSTIC_PATCH_LIMIT_BYTES} bytes. Checkout was not restored.`,
+        });
+    }
+    if (
+        Buffer.byteLength(input.metadata, "utf8") >
+        REVIEW_DIAGNOSTIC_METADATA_LIMIT_BYTES
+    ) {
+        throw new RalphieError({
+            message: `${input.description} metadata exceeds ${REVIEW_DIAGNOSTIC_METADATA_LIMIT_BYTES} bytes. Checkout was not restored.`,
+        });
+    }
+
+    const temporaryPath = `${input.diagnosticsPath}.${randomUUID()}.tmp`;
+    try {
+        await mkdir(dirname(input.diagnosticsPath), { recursive: true });
+        await mkdir(temporaryPath);
+        await writeFile(join(temporaryPath, "changes.patch"), input.patch, {
+            encoding: "utf8",
+            flag: "wx",
+        });
+        await writeFile(join(temporaryPath, "metadata.json"), input.metadata, {
+            encoding: "utf8",
+            flag: "wx",
+        });
+        await rename(temporaryPath, input.diagnosticsPath);
+    } catch (cause) {
+        await rm(temporaryPath, { recursive: true, force: true }).catch(
+            () => undefined,
+        );
+        throw new RalphieError({
+            message: `Failed to preserve ${input.description.toLowerCase()} at ${input.diagnosticsPath}. Checkout was not restored.`,
+            cause,
+        });
+    }
+};
+
 export const makeIssueRecoveryService = (
     git: GitIssueCheckpointService,
     progress: ProgressReporterService,
+    repositoryInvariant?: GitRepositoryInvariantService,
 ): IssueRecoveryService => {
     const validateReviewExhaustion = (input: ReviewExhaustionInput): void => {
         const attemptsAreComplete = input.reviews.every(
@@ -86,11 +185,7 @@ export const makeIssueRecoveryService = (
         input: ReviewExhaustionInput,
         patch: string,
     ): Promise<string> => {
-        if (Buffer.byteLength(patch) > REVIEW_DIAGNOSTIC_PATCH_LIMIT_BYTES) {
-            throw new RalphieError({
-                message: `Review diagnostic patch exceeds ${REVIEW_DIAGNOSTIC_PATCH_LIMIT_BYTES} bytes. Checkout was not restored.`,
-            });
-        }
+        const diagnosticsPath = diagnosticPath(input, "review-exhaustion");
         const metadata = `${JSON.stringify(
             {
                 ...(input.repository === undefined
@@ -104,34 +199,12 @@ export const makeIssueRecoveryService = (
             null,
             2,
         )}\n`;
-        if (
-            Buffer.byteLength(metadata) > REVIEW_DIAGNOSTIC_METADATA_LIMIT_BYTES
-        ) {
-            throw new RalphieError({
-                message: `Review diagnostic metadata exceeds ${REVIEW_DIAGNOSTIC_METADATA_LIMIT_BYTES} bytes. Checkout was not restored.`,
-            });
-        }
-        const diagnosticsPath = join(
-            resolveWorkspacePath(input.workspace),
-            ".ralphie",
-            "runs",
-            safeRunId(input.runId),
-            "issues",
-            String(input.issue.number),
-            "review-exhaustion",
-        );
-        try {
-            await mkdir(diagnosticsPath, { recursive: true });
-            await Promise.all([
-                writeFile(join(diagnosticsPath, "changes.patch"), patch),
-                writeFile(join(diagnosticsPath, "metadata.json"), metadata),
-            ]);
-        } catch (cause) {
-            throw new RalphieError({
-                message: `Failed to preserve review diagnostics at ${diagnosticsPath}. Checkout was not restored.`,
-                cause,
-            });
-        }
+        await persistDiagnostic({
+            diagnosticsPath,
+            patch,
+            metadata,
+            description: "Review diagnostics",
+        });
         return diagnosticsPath;
     };
 
@@ -176,6 +249,103 @@ export const makeIssueRecoveryService = (
         });
     };
 
+    const writeNeedsAttentionDiagnostics = async (
+        input: NeedsAttentionRecoveryInput,
+        patch: string,
+    ): Promise<string> => {
+        const diagnosticsPath = diagnosticPath(input, "needs-attention");
+        const request = input.request ?? input.agentRequest;
+        let metadata: string;
+        try {
+            metadata = `${JSON.stringify(
+                {
+                    ...(input.repository === undefined
+                        ? {}
+                        : { repository: input.repository }),
+                    issue: input.issue,
+                    checkpoint: input.checkpoint,
+                    decision: input.decision,
+                    ...(request === undefined ? {} : { request }),
+                    createdAt: new Date().toISOString(),
+                },
+                null,
+                2,
+            )}\n`;
+        } catch (cause) {
+            throw recoverableError(
+                `Failed to preserve needs-attention diagnostics at ${diagnosticsPath}. Checkout was not restored.`,
+                cause,
+            );
+        }
+        await persistDiagnostic({
+            diagnosticsPath,
+            patch,
+            metadata,
+            description: "Needs-attention diagnostics",
+        });
+        return diagnosticsPath;
+    };
+
+    const restoreNeedsAttentionCheckout = async (
+        input: NeedsAttentionRecoveryInput,
+        diagnosticsPath: string,
+        invariant: GitRepositoryInvariantService,
+    ): Promise<void> => {
+        const issueContext = {
+            issue: {
+                number: input.issue.number,
+                title: input.issue.title,
+            },
+        };
+        await progress.emit({
+            ...issueContext,
+            stage: "checkout-restore",
+            status: "started",
+            message: `Restoring ${input.checkpoint.branch} to ${input.checkpoint.sha}...`,
+            details: { diagnosticsPath },
+        });
+        try {
+            await git.restore(input.repositoryPath, input.checkpoint);
+            await invariant.verify(input.repositoryPath, {
+                branch: input.checkpoint.branch,
+                head: input.checkpoint.sha,
+            });
+        } catch (cause) {
+            await progress.emit({
+                ...issueContext,
+                stage: "checkout-restore",
+                status: "failed",
+                message: `Needs-attention checkout recovery failed: ${cause instanceof Error ? cause.message : String(cause)}`,
+                details: { diagnosticsPath },
+            });
+            throw recoverableError(
+                `Failed to restore the clean checkout for needs-attention recovery at ${diagnosticsPath}.`,
+                cause,
+            );
+        }
+        await progress.emit({
+            ...issueContext,
+            stage: "checkout-restore",
+            status: "succeeded",
+            message: `Restored ${input.checkpoint.branch} to the clean issue base.`,
+            details: { diagnosticsPath },
+        });
+    };
+
+    const validateNeedsAttention = (
+        input: NeedsAttentionRecoveryInput,
+    ): void => {
+        try {
+            needsAttentionDecisionSchema.parse(input.decision);
+        } catch (cause) {
+            throw new RalphieError({
+                message:
+                    "Needs-attention recovery requires a confirmed grounding decision.",
+                cause,
+            });
+        }
+    };
+
     return {
         handleReviewExhaustion: async (input) => {
             validateReviewExhaustion(input);
@@ -204,6 +374,37 @@ export const makeIssueRecoveryService = (
                 nextWorkflow: "decomposition",
                 resume: IssueQueueResumeStrategy,
             };
+        },
+
+        handleNeedsAttention: async (input) => {
+            validateNeedsAttention(input);
+            const invariant = input.repositoryInvariant ?? repositoryInvariant;
+            if (invariant === undefined) {
+                throw new RalphieError({
+                    message:
+                        "Needs-attention recovery requires a repository invariant service.",
+                });
+            }
+
+            let patch: string;
+            try {
+                patch = await git.createPatch(input.repositoryPath);
+            } catch (cause) {
+                throw recoverableError(
+                    "Failed to capture needs-attention diagnostics. Checkout was not restored.",
+                    cause,
+                );
+            }
+            const diagnosticsPath = await writeNeedsAttentionDiagnostics(
+                input,
+                patch,
+            );
+            await restoreNeedsAttentionCheckout(
+                input,
+                diagnosticsPath,
+                invariant,
+            );
+            return { diagnosticsPath };
         },
     };
 };

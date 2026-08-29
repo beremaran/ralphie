@@ -12,8 +12,11 @@ import {
     type ProgressStatus,
 } from "../../src/progress/progress.ts";
 import {
+    GroundingDisposition,
+    NeedsAttentionReason,
     ReviewFindingSeverity,
     ReviewVerdict,
+    type NeedsAttentionDecision,
 } from "../../src/issues/decisions.ts";
 import {
     makeIssueRecoveryService,
@@ -51,6 +54,14 @@ const reviews = Array.from({ length: REVIEW_ITERATION_LIMIT }, (_, index) => ({
         ],
     },
 }));
+
+const groundingDecision: NeedsAttentionDecision = {
+    disposition: GroundingDisposition.NeedsAttention,
+    reason: NeedsAttentionReason.ExternalDependency,
+    summary: "The required dependency is unavailable.",
+    evidence: ["The repository does not contain the required dependency."],
+    questions: ["Can the dependency be provided before retrying?"],
+};
 
 const recovery = (
     calls: string[],
@@ -190,5 +201,201 @@ describe("review exhaustion recovery", () => {
             }),
         ).rejects.toThrow("exceeds");
         expect(calls).toEqual(["createPatch"]);
+    });
+
+    test("captures needs-attention diagnostics before restoring and verifying the checkpoint", async () => {
+        const workspace = await mkdtemp(join(tmpdir(), "ralphie-recovery-"));
+        const calls: string[] = [];
+        const progressEvents: ProgressUpdate[] = [];
+        try {
+            const result = await recovery(
+                calls,
+                progressEvents,
+            ).handleNeedsAttention({
+                runId: "run-1",
+                repository: "owner/repo",
+                workspace,
+                repositoryPath: `${workspace}/repo`,
+                issue,
+                checkpoint,
+                decision: groundingDecision,
+                request: {
+                    reason: "external_dependency",
+                    message: "The dependency is unavailable in the checkout.",
+                },
+                repositoryInvariant: {
+                    capture: async () => ({
+                        branch: checkpoint.branch,
+                        head: checkpoint.sha,
+                    }),
+                    verify: async (_path, expected) => {
+                        calls.push(
+                            `verify:${expected.branch}:${expected.head}`,
+                        );
+                    },
+                },
+            });
+            expect(result.diagnosticsPath).toBe(
+                join(
+                    workspace,
+                    ".ralphie/runs/run-1/issues/42/needs-attention",
+                ),
+            );
+            expect(calls).toEqual([
+                "createPatch",
+                `restore:${checkpoint.sha}`,
+                `verify:${checkpoint.branch}:${checkpoint.sha}`,
+            ]);
+            expect(
+                await readFile(
+                    join(result.diagnosticsPath, "changes.patch"),
+                    "utf8",
+                ),
+            ).toBe("diff --git a/file b/file\n");
+            const metadata = JSON.parse(
+                await readFile(
+                    join(result.diagnosticsPath, "metadata.json"),
+                    "utf8",
+                ),
+            );
+            expect(metadata.issue).toEqual(issue);
+            expect(metadata.checkpoint).toEqual(checkpoint);
+            expect(metadata.decision).toEqual(groundingDecision);
+            expect(metadata.request.reason).toBe("external_dependency");
+        } finally {
+            await rm(workspace, { recursive: true, force: true });
+        }
+    });
+
+    test("does not restore when needs-attention patch capture fails", async () => {
+        const calls: string[] = [];
+        const service = makeIssueRecoveryService(
+            {
+                capture: async () => checkpoint,
+                createPatch: async () => {
+                    calls.push("createPatch");
+                    throw new Error("patch capture failed");
+                },
+                restore: async () => {
+                    calls.push("restore");
+                },
+            },
+            makeProgressRecorder([]),
+        );
+        await expect(
+            service.handleNeedsAttention({
+                runId: "run-1",
+                workspace: "/workspace",
+                repositoryPath: "/workspace/repo",
+                issue,
+                checkpoint,
+                decision: groundingDecision,
+                repositoryInvariant: {
+                    capture: async () => ({
+                        branch: checkpoint.branch,
+                        head: checkpoint.sha,
+                    }),
+                    verify: async () => {},
+                },
+            }),
+        ).rejects.toThrow("Failed to capture needs-attention diagnostics");
+        expect(calls).toEqual(["createPatch"]);
+    });
+
+    test("does not restore when needs-attention diagnostics cannot be written", async () => {
+        const workspace = await mkdtemp(join(tmpdir(), "ralphie-recovery-"));
+        const calls: string[] = [];
+        try {
+            await writeFile(join(workspace, ".ralphie"), "not a directory");
+            const service = makeIssueRecoveryService(
+                {
+                    capture: async () => checkpoint,
+                    createPatch: async () => {
+                        calls.push("createPatch");
+                        return "patch";
+                    },
+                    restore: async () => {
+                        calls.push("restore");
+                    },
+                },
+                makeProgressRecorder([]),
+            );
+            await expect(
+                service.handleNeedsAttention({
+                    runId: "run-1",
+                    workspace,
+                    repositoryPath: `${workspace}/repo`,
+                    issue,
+                    checkpoint,
+                    decision: groundingDecision,
+                    repositoryInvariant: {
+                        capture: async () => ({
+                            branch: checkpoint.branch,
+                            head: checkpoint.sha,
+                        }),
+                        verify: async () => {},
+                    },
+                }),
+            ).rejects.toThrow("Failed to preserve needs-attention diagnostics");
+            expect(calls).toEqual(["createPatch"]);
+        } finally {
+            await rm(workspace, { recursive: true, force: true });
+        }
+    });
+
+    test("does not return success when restore or invariant verification fails", async () => {
+        for (const failure of ["restore", "invariant"] as const) {
+            const workspace = await mkdtemp(
+                join(tmpdir(), "ralphie-recovery-"),
+            );
+            const calls: string[] = [];
+            try {
+                const service = makeIssueRecoveryService(
+                    {
+                        capture: async () => checkpoint,
+                        createPatch: async () => {
+                            calls.push("createPatch");
+                            return "patch";
+                        },
+                        restore: async () => {
+                            calls.push("restore");
+                            if (failure === "restore") {
+                                throw new Error("restore failed");
+                            }
+                        },
+                    },
+                    makeProgressRecorder([]),
+                );
+                await expect(
+                    service.handleNeedsAttention({
+                        runId: `run-${failure}`,
+                        workspace,
+                        repositoryPath: `${workspace}/repo`,
+                        issue,
+                        checkpoint,
+                        decision: groundingDecision,
+                        repositoryInvariant: {
+                            capture: async () => ({
+                                branch: checkpoint.branch,
+                                head: checkpoint.sha,
+                            }),
+                            verify: async () => {
+                                calls.push("verify");
+                                if (failure === "invariant") {
+                                    throw new Error("invariant failed");
+                                }
+                            },
+                        },
+                    }),
+                ).rejects.toThrow(failure);
+                expect(calls).toEqual(
+                    failure === "restore"
+                        ? ["createPatch", "restore"]
+                        : ["createPatch", "restore", "verify"],
+                );
+            } finally {
+                await rm(workspace, { recursive: true, force: true });
+            }
+        }
     });
 });

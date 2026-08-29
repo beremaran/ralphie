@@ -15,6 +15,7 @@ export type GitIssueCheckpointService = {
         repositoryPath: string,
         branch: string,
     ) => Promise<IssueCheckpoint>;
+    /** Capture tracked and untracked changes without changing the checkout. */
     readonly createPatch: (repositoryPath: string) => Promise<string>;
     readonly restore: (
         repositoryPath: string,
@@ -42,6 +43,67 @@ export const makeGitIssueCheckpointService = (
             ["status", "--porcelain=v1"],
             "Failed to inspect the repository status",
         );
+
+    const untrackedFiles = (repositoryPath: string) =>
+        runGit(
+            runner,
+            repositoryPath,
+            ["ls-files", "--others", "--exclude-standard", "-z"],
+            "Failed to list untracked issue changes",
+            false,
+        );
+
+    const untrackedPatch = async (
+        repositoryPath: string,
+        path: string,
+    ): Promise<string> => {
+        const result = await runner.run(
+            "git",
+            [
+                "-C",
+                repositoryPath,
+                "diff",
+                "--no-index",
+                "--binary",
+                "--no-ext-diff",
+                "--",
+                "/dev/null",
+                path,
+            ],
+            { trimStdout: false },
+        );
+        if (result.exitCode === 0 || result.exitCode === 1) {
+            return result.stdout;
+        }
+        const detail = result.stderr ? ` ${result.stderr}` : "";
+        throw new RalphieError({
+            message: `Failed to capture the untracked issue change ${path}.${detail}`,
+        });
+    };
+
+    const createPatch = async (repositoryPath: string): Promise<string> => {
+        const staged = await runGit(
+            runner,
+            repositoryPath,
+            ["diff", "--cached", "--binary", "--no-ext-diff"],
+            "Failed to preserve the staged issue changes",
+            false,
+        );
+        const unstaged = await runGit(
+            runner,
+            repositoryPath,
+            ["diff", "--binary", "--no-ext-diff"],
+            "Failed to preserve the unstaged issue changes",
+            false,
+        );
+        const paths = (await untrackedFiles(repositoryPath))
+            .split("\0")
+            .filter((path) => path.length > 0);
+        const untracked = await Promise.all(
+            paths.map((path) => untrackedPatch(repositoryPath, path)),
+        );
+        return staged + unstaged + untracked.join("");
+    };
 
     return {
         capture: async (repositoryPath, branch) => {
@@ -71,14 +133,7 @@ export const makeGitIssueCheckpointService = (
             return { branch, sha };
         },
 
-        createPatch: (repositoryPath) =>
-            runGit(
-                runner,
-                repositoryPath,
-                ["diff", "--cached", "--binary"],
-                "Failed to preserve the unsuccessful implementation patch",
-                false,
-            ),
+        createPatch,
 
         restore: async (repositoryPath, checkpoint) => {
             if (!validGitSha.test(checkpoint.sha)) {

@@ -165,6 +165,9 @@ const implementationDependencies = (
             nextWorkflow: "decomposition",
             resume: IssueQueueResumeStrategy,
         }),
+        handleNeedsAttention: async () => ({
+            diagnosticsPath: "/workspace/needs-attention",
+        }),
     };
     return makeImplementationExecutorService(
         preparation,

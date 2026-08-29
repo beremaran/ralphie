@@ -19,6 +19,9 @@ All notable changes to Ralphie are documented here. The project follows
   handling policy, bounded attempts, and strict pipeline timeout values.
 - Read-only issue grounding with a persisted needs-attention escape hatch, so
   dependency-blocked issues remain open while later queue items continue.
+- Confirmed needs-attention recovery that atomically preserves bounded,
+  binary-safe worktree diagnostics before restoring and verifying the exact
+  clean issue checkpoint.
 - Native Bun CLI foundation with GitHub, Git, workspace, and Pi domain
   services.
 - Resumable issue execution with complexity routing, bounded review loops,
