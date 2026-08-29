@@ -278,9 +278,9 @@ For a source-level trigger-to-exit trace, see the
 Before normal execution, every matching open issue is checked by a read-only,
 schema-validated grounding session. Actionable issues then receive a complexity
 score from 0 through 5. An issue whose prerequisite is still open, or which
-otherwise needs human attention, is deferred for the current run without being
-closed or marked complete; Ralphie records the reason and continues with the
-next queue item.
+otherwise needs human attention, is left open and recorded with its reason.
+The `halt` policy stops at that handled boundary by default; `continue` advances
+with the next queue item without closing or marking the issue complete.
 
 ### Issue routing
 
@@ -553,6 +553,7 @@ HTTPS/SSH clone URL.
 | --- | --- | --- |
 | `--mode <mode>` | `issues` | Select `issues`, `maintain-issues`, or `get-pipelines-green`. |
 | `--workflow <mode>` | `lgtm` | Select direct-push `lgtm` or automatically merged `pr` delivery in issue mode. |
+| `--on-needs-attention <policy>` | `halt` | Halt with exit status `2`, or `continue` through the remaining queue, when an issue needs attention. |
 | `--duplicate-action <action>` | `link` | In maintenance mode, link duplicates or close them. |
 | `-b, --branch <name>` | `main`, otherwise `master` | Base branch; `lgtm` pushes it directly, while PR workflows open against it. |
 | `--max-issues <count>` | unlimited | Positive maximum number of issues charged to this run. |
@@ -626,15 +627,19 @@ State is versioned, validated, and written atomically. Failed and interrupted
 runs retain their state and diagnostics for inspection and `--resume`. On
 cancellation, Ralphie restores the active issue's clean checkout when possible,
 saves resumable state, closes the Pi runtime, and exits with status 130.
-Ordinary failures exit with status 1.
+Ordinary failures exit with status 1. A needs-attention stop is handled
+separately and exits with status 2.
 
 One issue failure currently halts the run. This preserves the checkout and
 diagnostics at the first uncertain boundary instead of allowing later issues to
 continue on questionable state.
 
-A validated needs-attention decision is not a failure. Ralphie preserves its
-summary, evidence, questions, and issue freshness metadata in the run artifacts,
-leaves the issue open, and advances to later work. When a mutating agent's
+A validated needs-attention decision is not an ordinary failure. Ralphie
+persists its explicit policy plus the summary, evidence, questions, and issue
+freshness metadata in the run artifacts. With the default `halt` policy, the
+handled stop leaves the issue open and the run resumable with exit status 2.
+With `--on-needs-attention continue`, the issue remains open while later work is
+drained; a drained run completes with exit status 0. When a mutating agent's
 needs-attention request is confirmed by grounding, recovery first writes a
 bounded binary-safe patch and decision diagnostic, then restores and verifies
 the exact clean checkpoint; any capture, write, restore, or verification failure

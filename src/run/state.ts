@@ -11,9 +11,13 @@ import {
     nonBlankStringSchema,
 } from "../issues/decisions.ts";
 import { RalphieError } from "../shared/error.ts";
-import { WorkflowMode } from "../options.ts";
+import {
+    DEFAULT_NEEDS_ATTENTION_POLICY,
+    NeedsAttentionPolicy,
+    WorkflowMode,
+} from "../options.ts";
 
-export const RUN_STATE_VERSION = 3 as const;
+export const RUN_STATE_VERSION = 4 as const;
 
 export enum RunStateStatus {
     Active = "active",
@@ -122,6 +126,7 @@ const runStateFields = {
     repository: z.string().min(1),
     branch: z.string().min(1),
     workflow: z.enum(WorkflowMode).optional(),
+    onNeedsAttention: z.enum(NeedsAttentionPolicy),
     dryRun: z.boolean().optional(),
     selection: z.object({
         agent: z.string().min(1),
@@ -166,8 +171,9 @@ export const runStateSchema = z.object({
 });
 
 const legacyRunStateSchema = z.object({
-    version: z.literal(2),
+    version: z.union([z.literal(2), z.literal(3)]),
     ...runStateFields,
+    onNeedsAttention: z.enum(NeedsAttentionPolicy).optional(),
 });
 
 export type RunState = z.infer<typeof runStateSchema>;
@@ -182,13 +188,15 @@ const migrateRunState = (value: unknown): LoadedRunState => {
         typeof value === "object" &&
         value !== null &&
         "version" in value &&
-        value.version === 2
+        (value.version === 2 || value.version === 3)
     ) {
         const legacy = legacyRunStateSchema.parse(value);
         return {
             state: runStateSchema.parse({
                 ...legacy,
                 version: RUN_STATE_VERSION,
+                onNeedsAttention:
+                    legacy.onNeedsAttention ?? DEFAULT_NEEDS_ATTENTION_POLICY,
             }),
             migrated: true,
         };

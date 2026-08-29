@@ -29,9 +29,18 @@ import {
     type RunState,
     RunStateStatus,
 } from "./run/state.ts";
+import {
+    isNeedsAttentionStop,
+    NeedsAttentionStop,
+} from "./process/exit-code.ts";
 import { RalphieError } from "./shared/error.ts";
 import { resolveWorkspacePath } from "./workspace/workspace.ts";
-import { DEFAULT_WORKFLOW_MODE, WorkflowMode } from "./options.ts";
+import {
+    DEFAULT_NEEDS_ATTENTION_POLICY,
+    DEFAULT_WORKFLOW_MODE,
+    NeedsAttentionPolicy,
+    WorkflowMode,
+} from "./options.ts";
 import type { RalphieRuntime } from "./runtime.ts";
 
 const errorMessage = (error: unknown): string =>
@@ -187,6 +196,7 @@ type PersistWorkflowStateInput = {
     readonly repository: string;
     readonly branch: string;
     readonly workflowMode: WorkflowMode;
+    readonly onNeedsAttention: NeedsAttentionPolicy;
     readonly dryRun: boolean;
     readonly selection: PiSelection;
     readonly issueLimit?: number;
@@ -240,6 +250,7 @@ const persistWorkflowState = async (
         repository: input.repository,
         branch: input.branch,
         workflow: input.workflowMode,
+        onNeedsAttention: input.onNeedsAttention,
         dryRun: input.dryRun,
         selection: input.selection,
         ...(input.issueLimit === undefined
@@ -313,6 +324,7 @@ export type WorkflowOptions = {
     readonly resumeState?: RunState;
     readonly resumePath?: string;
     readonly issueFailurePolicy?: IssueFailurePolicy;
+    readonly onNeedsAttention?: NeedsAttentionPolicy;
     readonly dryRun?: boolean;
 };
 
@@ -335,6 +347,7 @@ type WorkflowConfiguration = {
     readonly resumeState?: RunState;
     readonly resumePath?: string;
     readonly issueFailurePolicy: IssueFailurePolicy;
+    readonly onNeedsAttention: NeedsAttentionPolicy;
     readonly dryRun: boolean;
     readonly actualRunId: string;
     readonly effectiveDryRun: boolean;
@@ -372,9 +385,12 @@ const makeWorkflowConfiguration = (
         resumeState,
         resumePath,
         issueFailurePolicy = IssueFailurePolicy,
+        onNeedsAttention = DEFAULT_NEEDS_ATTENTION_POLICY,
         dryRun = false,
     } = options;
     const actualRunId = resumeState?.runId ?? runId;
+    const effectiveOnNeedsAttention =
+        resumeState?.onNeedsAttention ?? onNeedsAttention;
     const effectiveDryRun = resumeState?.dryRun ?? dryRun;
     const workflowMode = resumeState?.workflow ?? requestedWorkflow;
     const usesPullRequests = workflowMode === WorkflowMode.Pr;
@@ -406,6 +422,7 @@ const makeWorkflowConfiguration = (
         resumeState,
         resumePath,
         issueFailurePolicy,
+        onNeedsAttention: effectiveOnNeedsAttention,
         dryRun,
         actualRunId,
         effectiveDryRun,
@@ -438,6 +455,7 @@ const emitRunStarted = async (
             runId: config.actualRunId,
             dryRun: config.effectiveDryRun,
             workflow: config.workflowMode,
+            onNeedsAttention: config.onNeedsAttention,
             ...(config.resumeState === undefined
                 ? {}
                 : { resumed: true, statePath: config.statePath }),
@@ -531,6 +549,7 @@ export const workflow = async (
         resumeState,
         resumePath,
         issueFailurePolicy,
+        onNeedsAttention,
         dryRun,
         actualRunId,
         effectiveDryRun,
@@ -733,6 +752,7 @@ export const workflow = async (
                         repository: repo,
                         branch,
                         workflowMode,
+                        onNeedsAttention,
                         dryRun: effectiveDryRun,
                         selection,
                         issueLimit: resumeState?.maxIssues ?? maxIssues,
@@ -1050,6 +1070,25 @@ export const workflow = async (
             }
         };
 
+        const handleNeedsAttentionIssue = async (
+            issueContext: WorkflowIssueContext,
+            outcome: Extract<
+                IssueExecutionOutcome,
+                { readonly kind: IssueExecutionOutcomeKind.NeedsAttention }
+            >,
+        ): Promise<void> => {
+            if (onNeedsAttention !== NeedsAttentionPolicy.Halt) return;
+            checkout = await captureCheckout();
+            await persistState(RunStateStatus.Active, {
+                issueNumber: issueContext.issue.number,
+                stage: "issue-execution",
+            });
+            throw new NeedsAttentionStop({
+                issueNumber: issueContext.issue.number,
+                summary: outcome.summary,
+            });
+        };
+
         const finishSuccessfulIssue = async (
             issueContext: WorkflowIssueContext,
             outcome: IssueExecutionOutcome,
@@ -1102,6 +1141,9 @@ export const workflow = async (
             if (outcome.kind === IssueExecutionOutcomeKind.Failed) {
                 await handleFailedIssue(issueContext, outcome);
                 return;
+            }
+            if (outcome.kind === IssueExecutionOutcomeKind.NeedsAttention) {
+                await handleNeedsAttentionIssue(issueContext, outcome);
             }
             await finishSuccessfulIssue(issueContext, outcome);
             await refreshAfterDecomposition(outcome);
@@ -1199,7 +1241,9 @@ export const workflow = async (
             persistCancellationState,
             restoreCancellationCheckout,
         });
-        await emitRunFailed(progress, config, finalError);
+        if (!isNeedsAttentionStop(finalError)) {
+            await emitRunFailed(progress, config, finalError);
+        }
         throw finalError;
     }
 };

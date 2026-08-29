@@ -19,6 +19,8 @@ All notable changes to Ralphie are documented here. The project follows
   handling policy, bounded attempts, and strict pipeline timeout values.
 - Read-only issue grounding with a persisted needs-attention escape hatch, so
   dependency-blocked issues remain open while later queue items continue.
+- An explicit `halt`/`continue` needs-attention policy, versioned run-state
+  migration, resume conflict protection, and handled exit status `2` for stops.
 - Confirmed needs-attention recovery that atomically preserves bounded,
   binary-safe worktree diagnostics before restoring and verifying the exact
   clean issue checkpoint.

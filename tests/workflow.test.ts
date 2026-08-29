@@ -37,7 +37,7 @@ import {
 } from "../src/run/state.ts";
 import type { WorkspaceService } from "../src/workspace/workspace.ts";
 import { workflow } from "../src/workflow.ts";
-import { WorkflowMode } from "../src/options.ts";
+import { NeedsAttentionPolicy, WorkflowMode } from "../src/options.ts";
 import { IssueOrder, IssueSort } from "../src/github/issues.ts";
 import type { RalphieRuntime } from "../src/runtime.ts";
 import { RalphieError } from "../src/shared/error.ts";
@@ -346,6 +346,7 @@ const baseOptions = {
     cleanup: false,
     startClean: false,
     runId: "test-run",
+    onNeedsAttention: NeedsAttentionPolicy.Continue,
 } as const;
 
 describe("workflow", () => {
@@ -366,6 +367,9 @@ describe("workflow", () => {
         );
         expect(summary.counts.completed).toBe(1);
         expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
+        expect(states.at(-1)?.onNeedsAttention).toBe(
+            NeedsAttentionPolicy.Continue,
+        );
         expect(states.at(-1)?.queue.completedIssueNumbers).toEqual([42]);
         expect(calls).toEqual([
             "removeWorkspace:/tmp/ralphie",
@@ -467,6 +471,42 @@ describe("workflow", () => {
         expect(states.at(-1)?.queue.completedIssueNumbers).toEqual([43]);
         expect(calls).not.toContain("closeIssue:42");
         expect(calls).toContain("closeIssue:43");
+    });
+
+    test("halts with a handled stop without reporting an ordinary failure", async () => {
+        const calls: string[] = [];
+        const states: RunState[] = [];
+        const events: ProgressUpdate[] = [];
+        await expect(
+            workflow(
+                {
+                    ...baseOptions,
+                    onNeedsAttention: NeedsAttentionPolicy.Halt,
+                },
+                testRuntime(
+                    calls,
+                    states,
+                    {
+                        outcomes: [
+                            {
+                                kind: IssueExecutionOutcomeKind.NeedsAttention,
+                                reason: NeedsAttentionReason.ExternalDependency,
+                                summary: "A prerequisite is still open.",
+                                evidence: ["The prerequisite is unresolved."],
+                                questions: ["When will it be available?"],
+                                artifactPath: "/tmp/needs-attention.json",
+                            },
+                        ],
+                    },
+                    events,
+                ),
+            ),
+        ).rejects.toMatchObject({ _tag: "NeedsAttentionStop" });
+        expect(states.at(-1)?.status).toBe(RunStateStatus.Active);
+        expect(states.at(-1)?.onNeedsAttention).toBe(NeedsAttentionPolicy.Halt);
+        expect(states.at(-1)?.activeIssue?.issueNumber).toBe(42);
+        expect(events.some(({ status }) => status === "failed")).toBe(false);
+        expect(calls).not.toContain("closeIssue:42");
     });
 
     test.each([
@@ -596,7 +636,11 @@ describe("workflow", () => {
         const calls: string[] = [];
         const resumedStates: RunState[] = [];
         const summary = await workflow(
-            { ...baseOptions, resumeState },
+            {
+                ...baseOptions,
+                onNeedsAttention: NeedsAttentionPolicy.Halt,
+                resumeState,
+            },
             testRuntime(calls, resumedStates, {
                 issueLists: [[]],
                 captureStart: 1,
@@ -608,6 +652,9 @@ describe("workflow", () => {
         );
         expect(summary.counts.completed).toBe(1);
         expect(resumedStates.at(-1)?.status).toBe(RunStateStatus.Complete);
+        expect(resumedStates.at(-1)?.onNeedsAttention).toBe(
+            NeedsAttentionPolicy.Continue,
+        );
     });
 
     test("refreshes the queue after decomposition and runs a new child within budget", async () => {

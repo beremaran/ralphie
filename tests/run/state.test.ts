@@ -8,6 +8,7 @@ import {
     IssueExecutionOutcomeKind,
 } from "../../src/issues/execution.ts";
 import { NeedsAttentionReason } from "../../src/issues/decisions.ts";
+import { NeedsAttentionPolicy } from "../../src/options.ts";
 import {
     RUN_STATE_VERSION,
     RunStateStatus,
@@ -21,6 +22,7 @@ const state: RunState = {
     runId: "run-1",
     repository: "owner/repo",
     branch: "main",
+    onNeedsAttention: NeedsAttentionPolicy.Halt,
     selection: { agent: "build" },
     maxIssues: 3,
     queue: {
@@ -68,6 +70,10 @@ describe("run state store", () => {
         ["corrupted JSON", "not-json"],
         ["incompatible version", JSON.stringify({ ...state, version: 1 })],
         ["missing queue state", JSON.stringify({ ...state, queue: undefined })],
+        [
+            "missing current policy",
+            JSON.stringify({ ...state, onNeedsAttention: undefined }),
+        ],
     ])("rejects %s", async (_label, content) => {
         const directory = await mkdtemp(join(tmpdir(), "ralphie-state-"));
         const path = join(directory, "state.json");
@@ -133,6 +139,25 @@ describe("run state store", () => {
             expect(JSON.parse(await readFile(path, "utf8")).version).toBe(
                 RUN_STATE_VERSION,
             );
+        } finally {
+            await rm(directory, { recursive: true, force: true });
+        }
+    });
+
+    test("migrates version 3 state without a policy to halt", async () => {
+        const directory = await mkdtemp(
+            join(tmpdir(), "ralphie-state-legacy-"),
+        );
+        const path = join(directory, "state.json");
+        try {
+            const legacy = { ...state, version: 3 };
+            const { onNeedsAttention: _policy, ...withoutPolicy } = legacy;
+            await writeFile(path, JSON.stringify(withoutPolicy));
+            const loaded = await RunStateStoreLive.load(path);
+            expect(loaded.onNeedsAttention).toBe(NeedsAttentionPolicy.Halt);
+            expect(
+                JSON.parse(await readFile(path, "utf8")).onNeedsAttention,
+            ).toBe(NeedsAttentionPolicy.Halt);
         } finally {
             await rm(directory, { recursive: true, force: true });
         }

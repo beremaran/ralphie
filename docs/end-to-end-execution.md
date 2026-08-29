@@ -122,7 +122,9 @@ flowchart TD
     J -->|completed| K["Issue closure / PR delivery"]
     J -->|decomposed or escalated| L["Mark complete; refresh open issue queue"]
     J -->|skipped| M["Record skip; continue until budget/queue ends"]
-    J -->|needs attention| P["Record deferral; leave open; continue queue"]
+    J -->|needs attention| Q{"onNeedsAttention policy"}
+    Q -->|continue| P["Record deferral; leave open; continue queue"]
+    Q -->|halt| N["Persist active issue; handled stop"]
     J -->|failed| N["Persist active issue; halt"]
     K --> O["Persist checkout and queue progress"]
     L --> O
@@ -345,11 +347,11 @@ stored in this tree):
 ```
 
 `state.json` is versioned, schema-validated, and atomically replaced. It
-contains the repository/branch/workflow, Pi selection, budget, pending and
-completed queue numbers, processed count, outcomes, active issue/stage,
-checkout invariant, and update time. State is saved before the queue starts,
-when an issue becomes active, after outcomes and queue refreshes, and at final
-completion.
+contains the repository/branch/workflow, selected `onNeedsAttention` policy,
+Pi selection, budget, pending and completed queue numbers, processed count,
+outcomes, active issue/stage, checkout invariant, and update time. State is
+saved before the queue starts, when an issue becomes active, after outcomes and
+queue refreshes, and at final completion.
 
 On `--resume`:
 
@@ -402,6 +404,10 @@ stateDiagram-v2
 
 - One issue failure uses the current halt policy: Ralphie persists the active
   issue, releases Pi, retains artifacts, and stops before later issues.
+- A needs-attention outcome uses `--on-needs-attention halt` by default. Ralphie
+  persists the active run, releases Pi, and handles the stop with exit code `2`
+  rather than reporting an ordinary issue failure. `continue` drains the queue;
+  a drained run completes with exit code `0`.
 - Pi is closed on success, failure, cancellation, and scoped defects. Ordinary
   failures set process exit code `1`.
 - Cancellation is checked before long-running boundaries and passed into Pi.

@@ -6,6 +6,8 @@ import {
     DEFAULT_DUPLICATE_ACTION,
     DEFAULT_EXECUTION_MODE,
     DEFAULT_WORKFLOW_MODE,
+    DEFAULT_NEEDS_ATTENTION_POLICY,
+    NeedsAttentionPolicy,
     DuplicateAction,
     ExecutionMode,
     parsePipelineTimeout,
@@ -29,6 +31,7 @@ describe("CLI configuration", () => {
             repo: "owner/repo",
             mode: DEFAULT_EXECUTION_MODE,
             workflow: DEFAULT_WORKFLOW_MODE,
+            onNeedsAttention: DEFAULT_NEEDS_ATTENTION_POLICY,
             issueLabels: [],
             issueSort: IssueSort.Created,
             issueOrder: IssueOrder.Ascending,
@@ -66,6 +69,7 @@ describe("CLI configuration", () => {
                 resume: "/tmp/state.json",
                 verbose: true,
                 json: true,
+                onNeedsAttention: NeedsAttentionPolicy.Continue,
             }),
         ).toMatchObject({
             repo: "Owner/Repo",
@@ -89,6 +93,7 @@ describe("CLI configuration", () => {
             verbose: true,
             json: true,
             quiet: false,
+            onNeedsAttention: NeedsAttentionPolicy.Continue,
         });
     });
 

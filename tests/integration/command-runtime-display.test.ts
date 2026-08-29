@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import packageJson from "../../package.json";
+import { NeedsAttentionStop } from "../../src/process/exit-code.ts";
 import { makeCommandRuntimeHarness } from "./command-runtime-harness.ts";
 
 describe("command/runtime display harness", () => {
@@ -75,6 +76,28 @@ describe("command/runtime display harness", () => {
         });
         expect(jsonHarness.stderr).toEqual([]);
         expect(jsonHarness.lifecycle).toEqual([]);
+    });
+
+    test("handles a needs-attention stop with its distinct exit code", async () => {
+        const previousExitCode = process.exitCode;
+        try {
+            const harness = makeCommandRuntimeHarness();
+            harness.failWith(
+                new NeedsAttentionStop({
+                    issueNumber: 42,
+                    summary: "missing prerequisite",
+                }),
+            );
+
+            await harness.run();
+
+            expect(process.exitCode).toBe(2);
+            expect(harness.stderr.join(" ")).not.toContain("failed");
+            expect(harness.lifecycle).toContain("runtime.dispose");
+            expect(harness.lifecycle).toContain("coordinator.dispose");
+        } finally {
+            process.exitCode = previousExitCode ?? 0;
+        }
     });
 
     test("captures deterministic abort and failure triggers", async () => {

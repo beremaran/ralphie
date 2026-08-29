@@ -13,6 +13,14 @@ export enum WorkflowMode {
 
 export const DEFAULT_WORKFLOW_MODE = WorkflowMode.Lgtm;
 
+/** Policy used when an issue executor reports that an issue needs attention. */
+export enum NeedsAttentionPolicy {
+    Halt = "halt",
+    Continue = "continue",
+}
+
+export const DEFAULT_NEEDS_ATTENTION_POLICY = NeedsAttentionPolicy.Halt;
+
 /** The top-level command mode, separate from the issue delivery workflow. */
 export enum ExecutionMode {
     Issues = "issues",
@@ -85,6 +93,7 @@ export type RalphieCliOptions = {
     readonly repo?: string;
     readonly mode?: ExecutionMode;
     readonly workflow?: WorkflowMode;
+    readonly onNeedsAttention?: NeedsAttentionPolicy;
     readonly branch?: string;
     readonly maxIssues?: number;
     readonly issueLabels?: ReadonlyArray<string>;
@@ -140,6 +149,7 @@ export type IssueRalphieConfig = SharedRalphieConfig &
     SharedIssueSelection & {
         readonly mode: ExecutionMode.Issues;
         readonly workflow: WorkflowMode;
+        readonly onNeedsAttention: NeedsAttentionPolicy;
         readonly groundingThinking?: string;
         readonly complexityThinking?: string;
         readonly reviewThinking?: string;
@@ -211,6 +221,11 @@ const modeOptionRules: ReadonlyArray<ModeOptionRule> = [
     {
         option: "--workflow",
         field: "workflow",
+        modes: [ExecutionMode.Issues],
+    },
+    {
+        option: "--on-needs-attention",
+        field: "onNeedsAttention",
         modes: [ExecutionMode.Issues],
     },
     {
@@ -379,6 +394,10 @@ const buildResolvedConfig = (
         ...issueSelectionConfig(options),
         mode: ExecutionMode.Issues,
         workflow: withDefault(options.workflow, DEFAULT_WORKFLOW_MODE),
+        onNeedsAttention: withDefault(
+            options.onNeedsAttention,
+            DEFAULT_NEEDS_ATTENTION_POLICY,
+        ),
         ...optionalProperty("groundingThinking", options.groundingThinking),
         ...optionalProperty("complexityThinking", options.complexityThinking),
         ...optionalProperty("reviewThinking", options.reviewThinking),

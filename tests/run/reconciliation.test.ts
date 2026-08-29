@@ -10,6 +10,7 @@ import {
     planRunStateCleanup,
     reconcileRunState,
 } from "../../src/run/reconciliation.ts";
+import { NeedsAttentionPolicy } from "../../src/options.ts";
 import {
     RUN_STATE_VERSION,
     RunStateStatus,
@@ -23,6 +24,7 @@ const state: RunState = {
     runId: "run-1",
     repository: "owner/repo",
     branch: "main",
+    onNeedsAttention: NeedsAttentionPolicy.Halt,
     selection: {
         agent: "build",
     },

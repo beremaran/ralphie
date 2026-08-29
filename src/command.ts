@@ -7,6 +7,7 @@ import {
     DEFAULT_EXECUTION_MODE,
     DuplicateAction,
     ExecutionMode,
+    NeedsAttentionPolicy,
     parsePipelineTimeout,
     type ResolvedRalphieConfig,
     resolveRalphieConfig,
@@ -29,7 +30,11 @@ import { makePiService } from "./pi/server.ts";
 import { makeLiveRuntime, type RalphieRuntime } from "./runtime.ts";
 import type { PiService } from "./pi/server.ts";
 import type { PiEventListener } from "./pi/client.ts";
-import { exitCodeForFailure } from "./process/exit-code.ts";
+import {
+    exitCodeForError,
+    isNeedsAttentionStop,
+    RalphieExitCode,
+} from "./process/exit-code.ts";
 import { workflow } from "./workflow.ts";
 import {
     maintainIssues,
@@ -40,11 +45,13 @@ import { BUILD_INFO } from "./build-info.ts";
 import { type RunState, RunStateStoreLive } from "./run/state.ts";
 import { reconcileRunState } from "./run/reconciliation.ts";
 import { resolveWorkspacePath } from "./workspace/workspace.ts";
+import { RalphieError } from "./shared/error.ts";
 
 const cliOptions = {
     mode: { type: "string" },
     branch: { type: "string", short: "b" },
     workflow: { type: "string" },
+    "on-needs-attention": { type: "string" },
     "duplicate-action": { type: "string" },
     "max-issues": { type: "string" },
     "issue-label": { type: "string", multiple: true },
@@ -117,6 +124,15 @@ const parseThinking = (
     return value === undefined ? undefined : piModelVariantSchema.parse(value);
 };
 
+const parseNeedsAttentionPolicy = (
+    values: Record<string, unknown>,
+): NeedsAttentionPolicy | undefined => {
+    const value = asNonEmptyString(values, "on-needs-attention");
+    return value === undefined
+        ? undefined
+        : z.enum(NeedsAttentionPolicy).parse(value);
+};
+
 const cleanWhenSchema = z.enum(["start", "end", "both"]);
 const outputModeSchema = z.enum(["default", "verbose", "quiet", "json"]);
 
@@ -179,6 +195,7 @@ const parseCliOptions = (
     validateExplicitRalphieCliOptions(values, mode);
 
     const modelValue = asString(values, "model");
+    const onNeedsAttention = parseNeedsAttentionPolicy(values);
     const duplicateActionValue = asNonEmptyString(values, "duplicate-action");
     const duplicateAction =
         duplicateActionValue === undefined
@@ -202,6 +219,7 @@ const parseCliOptions = (
             asString(values, "workflow") === undefined
                 ? undefined
                 : z.enum(WorkflowMode).parse(asString(values, "workflow")),
+        onNeedsAttention,
         ...(duplicateAction === undefined ? {} : { duplicateAction }),
         maxIssues: asNumber(values, "max-issues"),
         issueLabels: parseIssueLabels(values),
@@ -301,6 +319,8 @@ Options:
   -b, --branch <name>          Branch to operate on
       --mode <mode>            issues (default), maintain-issues, or get-pipelines-green
       --workflow <mode>        Issue workflow: lgtm or pr (issues mode only)
+      --on-needs-attention <halt|continue>
+                               Needs-attention policy (default halt; issues mode only)
       --duplicate-action <link|close>
                                Duplicate handling in maintain-issues mode (default link)
       --max-issues <n>         Maximum issues to process
@@ -383,10 +403,21 @@ const resolveCommandFactories = (
 
 const loadResumeState = async (
     config: ResolvedRalphieConfig,
+    explicitPolicy?: NeedsAttentionPolicy,
 ): Promise<RunState | undefined> => {
     if (config.resume === undefined) return undefined;
 
     const resumeState = await RunStateStoreLive.load(config.resume);
+    if (
+        explicitPolicy !== undefined &&
+        explicitPolicy !== resumeState.onNeedsAttention
+    ) {
+        throw new RalphieError({
+            message:
+                `Cannot resume run ${resumeState.runId}: saved on-needs-attention policy is ` +
+                `${resumeState.onNeedsAttention}, but requested policy is ${explicitPolicy}.`,
+        });
+    }
     if (config.branch === undefined) return resumeState;
 
     const reconciliation = reconcileRunState(resumeState, {
@@ -434,9 +465,10 @@ const makeCommandCoordinator = (
 
 const resumeStateForConfig = async (
     config: ResolvedRalphieConfig,
+    explicitPolicy?: NeedsAttentionPolicy,
 ): Promise<RunState | undefined> =>
     config.mode === ExecutionMode.Issues
-        ? await loadResumeState(config)
+        ? await loadResumeState(config, explicitPolicy)
         : undefined;
 
 const workflowOptionsFor = (
@@ -472,6 +504,7 @@ const workflowOptionsFor = (
     resumeState,
     resumePath: config.resume,
     dryRun: config.dryRun,
+    onNeedsAttention: resumeState?.onNeedsAttention ?? config.onNeedsAttention,
 });
 
 /** Execute one Ralphie command. */
@@ -498,6 +531,24 @@ const dispatchCommand = async (
         } satisfies MaintainIssuesOptions,
         runtime,
     );
+};
+
+const commandErrorFor = (
+    error: unknown,
+    signal: AbortSignal,
+): Error | undefined => {
+    if (isNeedsAttentionStop(error)) {
+        process.exitCode = signal.aborted
+            ? RalphieExitCode.Cancelled
+            : RalphieExitCode.NeedsAttention;
+        return undefined;
+    }
+    const message =
+        error instanceof Error
+            ? redactSensitiveText(error.message)
+            : String(error);
+    process.exitCode = exitCodeForError(error, signal);
+    return new Error(message, { cause: error });
 };
 
 const disposeCommandResources = async (
@@ -546,7 +597,10 @@ export const runCommand = async (
             "The get-pipelines-green execution mode is not implemented yet.",
         );
     }
-    const resumeState = await resumeStateForConfig(config);
+    const resumeState = await resumeStateForConfig(
+        config,
+        parsed.options.onNeedsAttention,
+    );
 
     const terminal = input.terminal ?? terminalInfo();
     const runId = resumeState?.runId ?? crypto.randomUUID();
@@ -579,16 +633,15 @@ export const runCommand = async (
             runtime,
             factories,
         );
+        process.exitCode = RalphieExitCode.Success;
     } catch (error) {
-        const message =
-            error instanceof Error
-                ? redactSensitiveText(error.message)
-                : String(error);
-        process.exitCode = exitCodeForFailure(
+        const commandFailure = commandErrorFor(
+            error,
             input.signal ?? new AbortController().signal,
         );
-        commandError = new Error(message, { cause: error });
-        throw commandError;
+        if (commandFailure === undefined) return;
+        commandError = commandFailure;
+        throw commandFailure;
     } finally {
         await disposeCommandResources(runtime, coordinator, commandError);
     }
