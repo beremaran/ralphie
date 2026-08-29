@@ -41,6 +41,12 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Changed
 
+- Document the cross-mode display contract: interactive sticky footer and
+  contextual Pi session output, periodic and lifecycle breadcrumbs, the
+  `LIVE_OUTPUT_LIMIT` character threshold and human-preview defaults, active
+  leaf-stage status, append-only plain/CI output, failures-only quiet output,
+  lossless JSON Lines without human breadcrumb records, and the independent
+  durable progress-event log, including redaction and cleanup behavior.
 - Expose grounding and needs-attention decisions consistently across default,
   interactive, verbose, quiet, and JSON Lines output, including complete
   evidence, questions, artifact paths, policy, and final outcome counts.

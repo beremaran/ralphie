@@ -352,6 +352,75 @@ reconcile a commit that may already have reached the remote.
 
 ## 8. State, progress, and resume
 
+### Cross-mode display contract
+
+The command resolves `--output default` to `interactive` only when both stdin
+and stderr are TTYs and `CI` is not set. Otherwise it uses append-only `plain`
+output. `--output verbose` keeps the same mode selection while increasing
+human-readable tool previews.
+
+Interactive output has two coordinated surfaces: Pi transcript rows remain in
+scrollback, and a single sticky footer supplies periodic progress breadcrumbs
+for the active leaf stage. Footer refreshes are coalesced at roughly 100–125 ms,
+so activity updates do not create rows. A representative footer is:
+
+```text
+◐ [owner/repo] [2/4] #56 Context Review 1/3 › Reviewing changes › Using bash · 3s
+```
+
+The footer's stage is the current leaf operation (`Reviewing changes` in this
+example), not a global workflow step count. The `[2/4]` value is the issue's
+queue position and `Review 1/3` is the review-attempt context. Each Pi session
+opens with the same contextual snapshot, for example:
+
+```text
+╭─ Pi · Task · session-1 · owner/repo · issue 2/4 · #56 · Reviewing changes · attempt 1/3
+```
+
+Human transcript output also emits lifecycle breadcrumbs, such as:
+
+```text
+│  ↻ compacting context · threshold
+│  ↻ retrying Pi request · attempt 1/3
+│  • thinking level · high
+```
+
+The human renderer bounds tool output to keep terminals usable. The named
+`LIVE_OUTPUT_LIMIT` threshold is measured in characters and defaults to 2,400
+characters per tool call for incremental output. Final previews use the
+source-level `maxLines`/`maxCharacters` limits of 12 lines/2,400 characters by
+default, or 40 lines/8,000 characters with `--output verbose`. These bounds
+apply to human rendering only; the structured Pi records remain complete
+(subject to reporting-boundary redaction).
+
+The cross-mode guarantees are:
+
+| Mode or sink | Contract |
+| --- | --- |
+| Interactive | Pi transcript scrollback plus one periodically refreshed sticky footer; completed milestones and lifecycle breadcrumbs remain durable rows. |
+| Plain and CI | Append-only human-readable lines. No ANSI cursor controls are emitted, so logs do not require terminal repainting. |
+| `--output quiet` | Failures only; routine progress and Pi transcript rows are suppressed. |
+| `--output json` | One parseable JSON object per line on stdout: progress records and lossless `pi_event` records (apart from credential redaction). Human headers, footers, and breadcrumb lines are not emitted. |
+| Durable event log | Redacted progress events are written independently to `events.jsonl` in the run directory, regardless of the renderer. |
+
+For example, a JSON Lines consumer sees structured records rather than the
+human footer or `↻` lines:
+
+```jsonl
+{"runId":"run-1","timestamp":"2026-08-24T01:02:03.000Z","stage":"review","status":"succeeded","message":"Review approved."}
+{"type":"pi_event","sessionID":"session-1","directory":"/workspace/repository","event":{"type":"turn_start"}}
+```
+
+Progress and Pi records are redacted before reporting; sensitive environment
+values, credentials, terminal controls in human text, and unsafe display text
+are not allowed to leak into human output. JSON and the durable log preserve
+structured fields and raw Pi event shape, but credential redaction still
+applies. The durable log is at
+`<workspace>/.ralphie/runs/<run-id>/events.jsonl` for new runs; a resumed run
+uses the directory containing its supplied state file. `--clean end` removes
+the successful run's workspace, including this log, while failed runs skip
+cleanup so their state and diagnostics remain available.
+
 A successful or interrupted run uses this layout (Pi configuration is not
 stored in this tree):
 
@@ -406,7 +475,7 @@ indented, de-duplicated, and bounded. Use `--output verbose` for a larger
 tool-output preview. Terminal control sequences are sanitized and sensitive
 values are redacted before terminal rendering. JSON mode emits redacted
 progress and `pi_event` JSON Lines to stdout; normal modes render to stderr,
-and quiet mode renders failures, needs-attention decisions, and handled stops.
+and quiet mode renders failures only.
 Grounding events identify skipped agent work, while needs-attention details
 retain the reason, summary, evidence, questions, path, and policy. Event
 details can include issue positions, review attempts, session ids, commit SHAs,

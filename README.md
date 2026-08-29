@@ -69,6 +69,38 @@ Dry-run still performs preflight, issue discovery, read-only grounding, and
 may prepare or reset the local workspace. Read the [safety model](./docs/safety.md)
 before using mutation-enabled commands.
 
+## Output contract
+
+`--output` selects `default`, `verbose`, `quiet`, or `json`. In an interactive,
+non-CI terminal, the default is a Pi transcript with an in-place sticky footer.
+The footer is refreshed periodically and describes the active leaf stage and
+activity—for example, `› Reviewing changes › Using bash`—rather than a global
+step count. Completed progress milestones remain in scrollback. Pi sessions
+start with contextual headers such as:
+
+```text
+╭─ Pi · Task · session-1 · owner/repo · issue 2/4 · #56 · Reviewing changes · attempt 1/3
+```
+
+Human-readable output also records lifecycle breadcrumbs for events such as
+context compaction and Pi retries. Tool output is bounded for terminal use:
+`LIVE_OUTPUT_LIMIT` is the rendered-output threshold, measured in characters,
+with a default of `2,400` per tool call. Final human previews use the `maxLines`/`maxCharacters` limits of 12
+lines/2,400 characters by default, or 40 lines/8,000 characters with
+`--output verbose`; these are not limits on the structured stream.
+
+Outside an interactive terminal—including CI—plain output is append-only and
+uses no ANSI cursor controls. Quiet output reports failures only. JSON output is
+JSON Lines on stdout: each line is a parseable progress record or a lossless
+`pi_event` record, without
+human breadcrumb lines. The redacted durable progress-event log remains at
+`<workspace>/.ralphie/runs/<run-id>/events.jsonl` independently of the selected
+renderer. Credentials, sensitive environment values, terminal controls, and
+other unsafe display text are redacted or sanitized at the reporting boundary.
+See [Operations and recovery](./docs/operations-and-recovery.md) for output,
+resume, and cleanup details; successful `--clean end` removes the workspace
+and its log, while failed runs retain diagnostics for recovery.
+
 ## How issue routing works
 
 Every matching open issue first receives a read-only readiness decision. Issues
