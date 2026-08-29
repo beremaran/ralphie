@@ -80,6 +80,10 @@ describe("Pi prompts", () => {
         expect(prompt).toContain(
             "Leave all resulting changes in the working tree",
         );
+        expect(prompt).toContain("request_needs_attention tool");
+        expect(prompt).toContain(
+            "not use it for work that is merely hard,\nlarge, slow, or uncertain",
+        );
         expect(prompt).toContain('Issue title: "Add validation"');
     });
 
@@ -146,6 +150,8 @@ describe("Pi prompts", () => {
         expect(prompt).toContain('Issue title: "Fix parser edge case"');
         expect(prompt).toContain("diff --git a/src/parser.ts b/src/parser.ts");
         expect(prompt).toContain("Do not edit files, stage or unstage changes");
+        expect(prompt).toContain("request_needs_attention tool");
+        expect(prompt).toContain("not the final");
         expect(prompt).toContain("create commits, push, switch branches");
     });
 
@@ -181,6 +187,8 @@ describe("Pi prompts", () => {
         expect(prompt).toContain(
             "leave the resulting changes in the working tree",
         );
+        expect(prompt).toContain("request_needs_attention tool");
+        expect(prompt).toContain("external_dependency");
         expect(prompt).toContain("must not create commits, push");
         expect(prompt).toContain('Issue body: ""');
     });

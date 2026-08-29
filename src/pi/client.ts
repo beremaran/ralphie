@@ -10,6 +10,11 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { randomUUID } from "node:crypto";
 
+import {
+    PI_NEEDS_ATTENTION_MESSAGE_LIMIT,
+    PI_NEEDS_ATTENTION_REASONS,
+} from "../agent/task-session.ts";
+
 export type PiModel = {
     readonly providerID: string;
     readonly modelID: string;
@@ -116,6 +121,8 @@ export type PiClient = {
             ApiResult<{
                 readonly info: PiAssistantMessage;
                 readonly parts: ReadonlyArray<PiPart>;
+                /** Structured side-channel data captured from Pi tools. */
+                readonly needsAttention?: unknown;
             }>
         >;
     };
@@ -303,6 +310,55 @@ const modelFor = (
 type PromptFormat = NonNullable<PromptInput["format"]>;
 type PiSession = Awaited<ReturnType<typeof createAgentSession>>["session"];
 
+const needsAttentionToolParameters = {
+    type: "object",
+    properties: {
+        reason: {
+            type: "string",
+            enum: PI_NEEDS_ATTENTION_REASONS,
+            description: "The repository-backed reason work cannot proceed.",
+        },
+        message: {
+            type: "string",
+            minLength: 1,
+            maxLength: PI_NEEDS_ATTENTION_MESSAGE_LIMIT,
+            description: "A concise explanation grounded in repository facts.",
+        },
+    },
+    required: ["reason"],
+    additionalProperties: false,
+} as const;
+
+const makeNeedsAttentionTool = (
+    setNeedsAttention: (value: unknown) => void,
+): AnyToolDefinition =>
+    ({
+        name: "request_needs_attention",
+        label: "Request needs attention",
+        description:
+            "Request operator attention when a repository-backed blocker prevents safe progress. This is a side-channel request, not the final task or review result.",
+        promptSnippet:
+            "Request needs attention for a repository-backed blocker",
+        promptGuidelines: [
+            "Use request_needs_attention only for an outdated premise, conflicting requirements, missing information, external dependency, or a problem that cannot be reproduced.",
+            "Do not use request_needs_attention for work that is merely hard, large, slow, or uncertain.",
+        ],
+        parameters: needsAttentionToolParameters as never,
+        executionMode: "sequential",
+        execute: async (_toolCallId, params) => {
+            setNeedsAttention(params);
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: "Needs-attention request recorded.",
+                    },
+                ],
+                details: {},
+            };
+        },
+    }) as AnyToolDefinition;
+
 const makeStructuredResultTool = (
     format: PromptFormat,
     setStructured: (value: unknown) => void,
@@ -392,6 +448,7 @@ const makePromptTools = (
     input: PromptInput,
     created: PendingSession,
     setStructured: (value: unknown) => void,
+    setNeedsAttention: (value: unknown) => void,
 ): PromptTools => {
     const readOnly =
         created.permission?.some(
@@ -403,6 +460,8 @@ const makePromptTools = (
     const activeTools = readOnly
         ? ["read", "grep", "find", "ls"]
         : ["read", "bash", "edit", "write"];
+    customTools.push(makeNeedsAttentionTool(setNeedsAttention));
+    activeTools.push("request_needs_attention");
     if (input.format !== undefined) {
         customTools.push(makeStructuredResultTool(input.format, setStructured));
         activeTools.push("submit_result");
@@ -445,6 +504,7 @@ const makePromptResponse = (
     input: PromptInput,
     assistant: ReturnType<typeof finalAssistant>,
     structured: unknown,
+    needsAttention: unknown,
 ): {
     readonly data: {
         readonly info: PiAssistantMessage;
@@ -466,6 +526,7 @@ const makePromptResponse = (
                 ...(structured === undefined ? {} : { structured }),
             },
             parts: assistantParts(assistant),
+            ...(needsAttention === undefined ? {} : { needsAttention }),
         },
     };
 };
@@ -503,9 +564,17 @@ export const makePiClient = (
                 }
 
                 let structured: unknown;
-                const tools = makePromptTools(input, created, (value) => {
-                    structured = value;
-                });
+                let needsAttention: unknown;
+                const tools = makePromptTools(
+                    input,
+                    created,
+                    (value) => {
+                        structured = value;
+                    },
+                    (value) => {
+                        needsAttention ??= value;
+                    },
+                );
                 const session = await createPromptSession(
                     modelRuntime,
                     input,
@@ -539,7 +608,12 @@ export const makePiClient = (
                         prompt,
                         () => structured,
                     );
-                    return makePromptResponse(input, assistant, structured);
+                    return makePromptResponse(
+                        input,
+                        assistant,
+                        structured,
+                        needsAttention,
+                    );
                 } finally {
                     unsubscribe?.();
                     options?.signal?.removeEventListener("abort", abort);

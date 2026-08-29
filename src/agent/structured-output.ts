@@ -7,8 +7,10 @@ import {
     PI_DECISION_PERMISSION_POLICY,
     type PiRepositoryInvariant,
     type PiSessionDiagnostics,
+    parsePiNeedsAttentionRequest,
     reportPiFailure,
     toPiAssistantError,
+    type PiNeedsAttentionRequest,
 } from "./task-session.ts";
 import {
     type ProgressStage,
@@ -42,6 +44,7 @@ export type StructuredOutputRequest<Output> = {
 export type StructuredOutputResult<Output> = {
     readonly sessionID: string;
     readonly output: Output;
+    readonly needsAttention?: PiNeedsAttentionRequest;
 };
 
 const describeApiError = (error: unknown): string => {
@@ -165,7 +168,14 @@ const promptForStructuredOutput = async <Output>(
     }
 
     await verifyStructuredOutputRequest(request);
-    return { sessionID, output: parsed.data };
+    const needsAttention = parsePiNeedsAttentionRequest(
+        response.data.needsAttention,
+    );
+    return {
+        sessionID,
+        output: parsed.data,
+        ...(needsAttention === undefined ? {} : { needsAttention }),
+    };
 };
 
 export const requestStructuredOutput = async <Output>(

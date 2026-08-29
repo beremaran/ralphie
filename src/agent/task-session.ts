@@ -4,6 +4,7 @@ import type {
     PiPart,
     PiPermissionRuleset,
 } from "../pi/client.ts";
+import { z } from "zod";
 
 import {
     type ProgressStage,
@@ -39,10 +40,53 @@ export type PiTaskRequest = PiTaskSessionRequest & {
     readonly progressIssue?: ProgressIssue;
 };
 
+export const PI_NEEDS_ATTENTION_REASONS = [
+    "outdated_premise",
+    "conflicting_requirements",
+    "missing_information",
+    "external_dependency",
+    "cannot_reproduce",
+] as const;
+
+export type PiNeedsAttentionReason =
+    (typeof PI_NEEDS_ATTENTION_REASONS)[number];
+
+export const PI_NEEDS_ATTENTION_MESSAGE_LIMIT = 2_000;
+
+/** A bounded request to defer work; this is not a final workflow decision. */
+export const piNeedsAttentionRequestSchema = z
+    .object({
+        reason: z.enum(PI_NEEDS_ATTENTION_REASONS),
+        message: z
+            .string()
+            .min(1)
+            .max(PI_NEEDS_ATTENTION_MESSAGE_LIMIT)
+            .refine((value) => value.trim().length > 0, {
+                message: "Expected a non-blank message.",
+            })
+            .optional(),
+    })
+    .strict();
+
+export type PiNeedsAttentionRequest = z.infer<
+    typeof piNeedsAttentionRequestSchema
+>;
+
+export type NeedsAttentionRequest = PiNeedsAttentionRequest;
+
+/** Parse only the structured Pi side channel; invalid values are ignored. */
+export const parsePiNeedsAttentionRequest = (
+    value: unknown,
+): PiNeedsAttentionRequest | undefined => {
+    const parsed = piNeedsAttentionRequestSchema.safeParse(value);
+    return parsed.success ? parsed.data : undefined;
+};
+
 export type PiTaskResult = {
     readonly session: PiTaskSession;
     readonly response: PiAssistantMessage;
     readonly parts: ReadonlyArray<PiPart>;
+    readonly needsAttention?: PiNeedsAttentionRequest;
 };
 
 export type PiAssistantErrorKind =
@@ -319,10 +363,14 @@ const promptPiTask = async (
     }
 
     await verifyPiTaskRequest(request);
+    const needsAttention = parsePiNeedsAttentionRequest(
+        response.data.needsAttention,
+    );
     return {
         session,
         response: response.data.info,
         parts: response.data.parts,
+        ...(needsAttention === undefined ? {} : { needsAttention }),
     };
 };
 

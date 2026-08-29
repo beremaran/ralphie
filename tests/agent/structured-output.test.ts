@@ -170,6 +170,89 @@ describe("Pi structured output", () => {
         });
     });
 
+    test("returns a valid needs-attention request beside the structured result", async () => {
+        const needsAttention = {
+            reason: "external_dependency",
+            message: "The required service is not available in this checkout.",
+        } as const;
+        const output = {
+            decision: ProbeDecision.Stop,
+            confidence: 1,
+            reason: "The dependency is unavailable.",
+        };
+        const client = {
+            session: {
+                create: async () => ({ data: { id: "session-1" } }),
+                prompt: async () => ({
+                    data: {
+                        info: assistantInfo(output),
+                        parts: [],
+                        needsAttention,
+                    },
+                }),
+            },
+        } as unknown as PiClient;
+
+        const result = await requestStructuredOutput(client, {
+            directory: "/workspace",
+            title: "Test decision",
+            prompt: "Make a decision.",
+            schema: decisionSchema,
+        });
+
+        expect(result).toEqual({
+            sessionID: "session-1",
+            output,
+            needsAttention,
+        });
+    });
+
+    test("does not expose malformed or oversized needs-attention requests", async () => {
+        const invalidRequests: ReadonlyArray<unknown> = [
+            { reason: "unknown" },
+            { reason: "cannot_reproduce", message: "\t" },
+            { reason: "cannot_reproduce", message: "x".repeat(2_001) },
+            {
+                reason: "cannot_reproduce",
+                message: "valid",
+                summary: "not part of a request",
+            },
+        ];
+
+        for (const needsAttention of invalidRequests) {
+            const client = {
+                session: {
+                    create: async () => ({ data: { id: "session-1" } }),
+                    prompt: async () => ({
+                        data: {
+                            info: assistantInfo({
+                                decision: ProbeDecision.Proceed,
+                                confidence: 1,
+                                reason: "The condition is true.",
+                            }),
+                            parts: [
+                                {
+                                    type: "text",
+                                    text: "Free-form prose must not signal attention.",
+                                },
+                            ],
+                            needsAttention,
+                        },
+                    }),
+                },
+            } as unknown as PiClient;
+
+            const result = await requestStructuredOutput(client, {
+                directory: "/workspace",
+                title: "Test decision",
+                prompt: "Make a decision.",
+                schema: decisionSchema,
+            });
+
+            expect(result).not.toHaveProperty("needsAttention");
+        }
+    });
+
     test("records the session and verifies repository invariants", async () => {
         const diagnostics = makePiSessionDiagnostics(
             () => "2026-08-24T00:00:00.000Z",

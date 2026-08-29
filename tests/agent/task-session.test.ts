@@ -261,6 +261,78 @@ describe("Pi task sessions", () => {
         });
     });
 
+    test("returns a valid needs-attention request separately from the task result", async () => {
+        const needsAttention = {
+            reason: "missing_information",
+            message: "The target runtime is not specified.",
+        } as const;
+        const client = {
+            session: {
+                create: async () => ({ data: { id: "session-1" } }),
+                prompt: async () => ({
+                    data: {
+                        info: assistantResponse(),
+                        parts: responseParts,
+                        needsAttention,
+                    },
+                }),
+            },
+        } as unknown as PiClient;
+
+        const result = await runPiTask(client, {
+            directory: "/workspace/repository",
+            title: "Implement issue #42",
+            prompt: "Implement the issue.",
+            selection: { agent: "build" },
+        });
+
+        expect(result.needsAttention).toEqual(needsAttention);
+        expect(result.response).toEqual(assistantResponse());
+    });
+
+    test("ignores malformed or oversized needs-attention requests", async () => {
+        const invalidRequests: ReadonlyArray<unknown> = [
+            { reason: "not-a-repository-blocker" },
+            {
+                reason: "missing_information",
+                message: " ",
+            },
+            {
+                reason: "missing_information",
+                message: "x".repeat(2_001),
+            },
+            {
+                reason: "missing_information",
+                message: "valid message",
+                disposition: "needs_attention",
+            },
+        ];
+
+        for (const needsAttention of invalidRequests) {
+            const client = {
+                session: {
+                    create: async () => ({ data: { id: "session-1" } }),
+                    prompt: async () => ({
+                        data: {
+                            info: assistantResponse(),
+                            parts: responseParts,
+                            needsAttention,
+                        },
+                    }),
+                },
+            } as unknown as PiClient;
+
+            const result = await runPiTask(client, {
+                directory: "/workspace/repository",
+                title: "Implement issue #42",
+                prompt: "Implement the issue.",
+                selection: { agent: "build" },
+            });
+
+            expect(result).not.toHaveProperty("needsAttention");
+        }
+    });
+
     test("verifies branch and HEAD after the agent session completes", async () => {
         let verified: unknown;
         const client = {
