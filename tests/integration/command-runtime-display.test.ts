@@ -4,6 +4,22 @@ import packageJson from "../../package.json";
 import { makeCommandRuntimeHarness } from "./command-runtime-harness.ts";
 
 describe("command/runtime display harness", () => {
+    test("routes maintenance mode to its guarded entry point", async () => {
+        const previousExitCode = process.exitCode;
+        try {
+            const harness = makeCommandRuntimeHarness();
+
+            await expect(
+                harness.run(["owner/repository", "--mode", "maintain-issues"]),
+            ).rejects.toThrow(
+                "The maintain-issues execution mode is not implemented yet.",
+            );
+            expect(harness.lifecycle).not.toContain("workflow");
+        } finally {
+            process.exitCode = previousExitCode ?? 0;
+        }
+    });
+
     test("routes fake progress and Pi events through the command coordinator", async () => {
         const harness = makeCommandRuntimeHarness();
 

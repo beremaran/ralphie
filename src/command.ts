@@ -5,11 +5,14 @@ import { z } from "zod";
 import {
     type CleanWhen,
     DEFAULT_EXECUTION_MODE,
+    DuplicateAction,
     ExecutionMode,
     parsePipelineTimeout,
     type ResolvedRalphieConfig,
     resolveRalphieConfig,
     type IssueRalphieConfig,
+    type MaintainIssuesRalphieConfig,
+    validateExplicitRalphieCliOptions,
     validateRalphieCliOptions,
     WorkflowMode,
 } from "./options.ts";
@@ -28,6 +31,10 @@ import type { PiService } from "./pi/server.ts";
 import type { PiEventListener } from "./pi/client.ts";
 import { exitCodeForFailure } from "./process/exit-code.ts";
 import { workflow } from "./workflow.ts";
+import {
+    maintainIssues,
+    type MaintainIssuesOptions,
+} from "./maintain-issues.ts";
 import { redactSensitiveText } from "./shared/redaction.ts";
 import { BUILD_INFO } from "./build-info.ts";
 import { type RunState, RunStateStoreLive } from "./run/state.ts";
@@ -38,6 +45,7 @@ const cliOptions = {
     mode: { type: "string" },
     branch: { type: "string", short: "b" },
     workflow: { type: "string" },
+    "duplicate-action": { type: "string" },
     "max-issues": { type: "string" },
     "issue-label": { type: "string", multiple: true },
     "issue-sort": { type: "string" },
@@ -159,35 +167,6 @@ const parseRepeatedStrings = (
     );
 };
 
-const validateExplicitModeOptions = (
-    values: Record<string, unknown>,
-    mode: ExecutionMode,
-): void => {
-    if (mode === ExecutionMode.GetPipelinesGreen) {
-        validateRalphieCliOptions({
-            mode,
-            maxIssues: values["max-issues"] === undefined ? undefined : 1,
-            issueLabels: values["issue-label"] === undefined ? undefined : [],
-            issueSort:
-                values["issue-sort"] === undefined
-                    ? undefined
-                    : IssueSort.Created,
-            workflow:
-                values.workflow === undefined ? undefined : WorkflowMode.Lgtm,
-        });
-        return;
-    }
-
-    validateRalphieCliOptions({
-        mode,
-        maxAttempts: values["max-attempts"] === undefined ? undefined : 1,
-        pipelineTimeout:
-            values["pipeline-timeout"] === undefined
-                ? undefined
-                : { value: 1, unit: "seconds" },
-    });
-};
-
 const parseCliOptions = (
     values: Record<string, unknown>,
     repo: string | undefined,
@@ -197,9 +176,16 @@ const parseCliOptions = (
         modeValue === undefined
             ? DEFAULT_EXECUTION_MODE
             : z.enum(ExecutionMode).parse(modeValue);
-    validateExplicitModeOptions(values, mode);
+    validateExplicitRalphieCliOptions(values, mode);
 
     const modelValue = asString(values, "model");
+    const duplicateActionValue = asNonEmptyString(values, "duplicate-action");
+    const duplicateAction =
+        duplicateActionValue === undefined
+            ? mode === ExecutionMode.MaintainIssues
+                ? DuplicateAction.Link
+                : undefined
+            : z.enum(DuplicateAction).parse(duplicateActionValue);
     const issueSortValue = asNonEmptyString(values, "issue-sort");
     const thinkingValue = asNonEmptyString(values, "thinking");
     const pipelineTimeoutValue = asString(values, "pipeline-timeout");
@@ -216,6 +202,7 @@ const parseCliOptions = (
             asString(values, "workflow") === undefined
                 ? undefined
                 : z.enum(WorkflowMode).parse(asString(values, "workflow")),
+        ...(duplicateAction === undefined ? {} : { duplicateAction }),
         maxIssues: asNumber(values, "max-issues"),
         issueLabels: parseIssueLabels(values),
         verificationCommands: parseRepeatedStrings(values, "verify-command"),
@@ -308,12 +295,14 @@ const resolveProgressMode = (
 
 export const HELP_TEXT = `Usage: ralphie <owner/repository> [options]
 
-Run an issue queue or get-pipelines-green through Pi.
+Run an issue queue, maintain issues, or get-pipelines-green through Pi.
 
 Options:
   -b, --branch <name>          Branch to operate on
-      --mode <mode>            issues (default) or get-pipelines-green
-      --workflow <mode>        Issue workflow: lgtm or pr
+      --mode <mode>            issues (default), maintain-issues, or get-pipelines-green
+      --workflow <mode>        Issue workflow: lgtm or pr (issues mode only)
+      --duplicate-action <link|close>
+                               Duplicate handling in maintain-issues mode (default link)
       --max-issues <n>         Maximum issues to process
       --issue-label <label>    Include only issues with this label (repeatable)
       --issue-sort <sort>      created, updated, or comments, optionally :asc or :desc
@@ -360,6 +349,7 @@ export type CommandFactories = {
         readonly progress: ProgressCoordinator["progress"];
     }) => CommandRuntime;
     readonly runWorkflow?: typeof workflow;
+    readonly runMaintenance?: typeof maintainIssues;
 };
 
 export type CommandOutput = {
@@ -388,6 +378,7 @@ const resolveCommandFactories = (
     makePi: factories.makePi ?? makePiService,
     makeRuntime: factories.makeRuntime ?? makeLiveRuntime,
     runWorkflow: factories.runWorkflow ?? workflow,
+    runMaintenance: factories.runMaintenance ?? maintainIssues,
 });
 
 const loadResumeState = async (
@@ -441,6 +432,13 @@ const makeCommandCoordinator = (
         eventLogPath: eventLogPathFor(config, runId),
     });
 
+const resumeStateForConfig = async (
+    config: ResolvedRalphieConfig,
+): Promise<RunState | undefined> =>
+    config.mode === ExecutionMode.Issues
+        ? await loadResumeState(config)
+        : undefined;
+
 const workflowOptionsFor = (
     config: IssueRalphieConfig,
     input: RunCommandInput,
@@ -477,6 +475,31 @@ const workflowOptionsFor = (
 });
 
 /** Execute one Ralphie command. */
+const dispatchCommand = async (
+    config: IssueRalphieConfig | MaintainIssuesRalphieConfig,
+    input: RunCommandInput,
+    runId: string,
+    resumeState: RunState | undefined,
+    runtime: CommandRuntime,
+    factories: Required<CommandFactories>,
+): Promise<void> => {
+    if (config.mode === ExecutionMode.Issues) {
+        await factories.runWorkflow(
+            workflowOptionsFor(config, input, runId, resumeState),
+            runtime,
+        );
+        return;
+    }
+    await factories.runMaintenance(
+        {
+            config,
+            runId,
+            signal: input.signal,
+        } satisfies MaintainIssuesOptions,
+        runtime,
+    );
+};
+
 const disposeCommandResources = async (
     runtime: CommandRuntime | undefined,
     coordinator: ProgressCoordinator | undefined,
@@ -523,8 +546,7 @@ export const runCommand = async (
             "The get-pipelines-green execution mode is not implemented yet.",
         );
     }
-    const issueConfig: IssueRalphieConfig = config;
-    const resumeState = await loadResumeState(issueConfig);
+    const resumeState = await resumeStateForConfig(config);
 
     const terminal = input.terminal ?? terminalInfo();
     const runId = resumeState?.runId ?? crypto.randomUUID();
@@ -535,23 +557,27 @@ export const runCommand = async (
     try {
         const factories = resolveCommandFactories(input.factories);
         coordinator = makeCommandCoordinator(
-            issueConfig,
+            config,
             terminal,
             runId,
             factories.makeCoordinator,
             output,
         );
         const pi = factories.makePi(
-            resolvePiConfig(issueConfig),
+            resolvePiConfig(config),
             coordinator.piListener,
         );
         runtime = factories.makeRuntime({
             pi,
             progress: coordinator.progress,
         });
-        await factories.runWorkflow(
-            workflowOptionsFor(issueConfig, input, runId, resumeState),
+        await dispatchCommand(
+            config,
+            input,
+            runId,
+            resumeState,
             runtime,
+            factories,
         );
     } catch (error) {
         const message =

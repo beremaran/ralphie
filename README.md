@@ -250,7 +250,14 @@ bunx @beremaran/ralphie owner/repository --mode get-pipelines-green \
 ```
 
 `--pipeline-timeout` accepts a positive integer followed by `s`, `m`, or `h`.
-Issue-only options and pipeline-only options cannot be mixed between modes.
+Mode-specific implementation and pipeline options cannot be mixed between modes.
+
+The `maintain-issues` mode is reserved for deterministic issue maintenance. It
+accepts the shared issue selection options and uses `--duplicate-action link`
+by default; `close` is also accepted. Its maintenance executor is intentionally
+not wired yet, so selecting this mode fails closed rather than running the issue
+implementation pipeline. Issue workflow and implementation-only options are
+rejected in this mode.
 
 The default `lgtm` workflow commits and pushes directly to the selected branch.
 The `pr` workflow creates and pushes a feature branch, opens or reuses a matching
@@ -544,7 +551,9 @@ HTTPS/SSH clone URL.
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `--workflow <mode>` | `lgtm` | Select direct-push `lgtm` or automatically merged `pr` delivery. |
+| `--mode <mode>` | `issues` | Select `issues`, `maintain-issues`, or `get-pipelines-green`. |
+| `--workflow <mode>` | `lgtm` | Select direct-push `lgtm` or automatically merged `pr` delivery in issue mode. |
+| `--duplicate-action <action>` | `link` | In maintenance mode, link duplicates or close them. |
 | `-b, --branch <name>` | `main`, otherwise `master` | Base branch; `lgtm` pushes it directly, while PR workflows open against it. |
 | `--max-issues <count>` | unlimited | Positive maximum number of issues charged to this run. |
 | `--issue-label <label>` | none | Require a label; repeat the flag to require multiple labels. |

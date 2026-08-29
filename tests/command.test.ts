@@ -1,10 +1,20 @@
 import { describe, expect, test } from "bun:test";
 
-import { parseCliArgs } from "../src/command.ts";
-import { ExecutionMode, WorkflowMode } from "../src/options.ts";
+import { HELP_TEXT, parseCliArgs } from "../src/command.ts";
+import {
+    DuplicateAction,
+    ExecutionMode,
+    WorkflowMode,
+} from "../src/options.ts";
 import { IssueOrder, IssueSort } from "../src/github/issues.ts";
 
 describe("native CLI parser", () => {
+    test("documents maintenance mode and duplicate policy in help", () => {
+        expect(HELP_TEXT).toContain("maintain-issues");
+        expect(HELP_TEXT).toContain("--duplicate-action");
+        expect(HELP_TEXT).toContain("default link");
+    });
+
     test("parses positional repository, repeatable labels, flags, and values", () => {
         const parsed = parseCliArgs([
             "owner/repository",
@@ -28,6 +38,47 @@ describe("native CLI parser", () => {
             maxIssues: 3,
             dryRun: true,
         });
+    });
+
+    test("parses maintenance mode and duplicate policy", () => {
+        expect(
+            parseCliArgs(["owner/repository", "--mode", "maintain-issues"])
+                .options,
+        ).toMatchObject({
+            mode: ExecutionMode.MaintainIssues,
+            duplicateAction: DuplicateAction.Link,
+        });
+        expect(
+            parseCliArgs([
+                "owner/repository",
+                "--mode",
+                "maintain-issues",
+                "--duplicate-action",
+                "close",
+            ]).options,
+        ).toMatchObject({
+            mode: ExecutionMode.MaintainIssues,
+            duplicateAction: DuplicateAction.Close,
+        });
+    });
+
+    test("rejects duplicate policy in issue mode and workflow in maintenance mode", () => {
+        expect(() =>
+            parseCliArgs(["owner/repository", "--duplicate-action", "close"]),
+        ).toThrow(
+            "Option --duplicate-action is only available in maintain-issues mode and cannot be used with --mode issues.",
+        );
+        expect(() =>
+            parseCliArgs([
+                "owner/repository",
+                "--mode",
+                "maintain-issues",
+                "--workflow",
+                "pr",
+            ]),
+        ).toThrow(
+            "Option --workflow is only available in issues mode and cannot be used with --mode maintain-issues.",
+        );
     });
 
     test("parses pipeline mode and its options", () => {

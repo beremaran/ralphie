@@ -16,10 +16,22 @@ export const DEFAULT_WORKFLOW_MODE = WorkflowMode.Lgtm;
 /** The top-level command mode, separate from the issue delivery workflow. */
 export enum ExecutionMode {
     Issues = "issues",
+    MaintainIssues = "maintain-issues",
     GetPipelinesGreen = "get-pipelines-green",
 }
 
+/** Policy used when maintenance finds an issue that duplicates another issue. */
+export enum DuplicateAction {
+    Link = "link",
+    Close = "close",
+}
+
+/** Alias for callers that refer to the duplicate action as a policy. */
+export const DuplicatePolicy = DuplicateAction;
+export type DuplicatePolicy = DuplicateAction;
+
 export const DEFAULT_EXECUTION_MODE = ExecutionMode.Issues;
+export const DEFAULT_DUPLICATE_ACTION = DuplicateAction.Link;
 export const DEFAULT_MAX_ATTEMPTS = 3;
 
 export type CleanWhen = "start" | "end" | "both";
@@ -81,6 +93,7 @@ export type RalphieCliOptions = {
     readonly verificationCommands?: ReadonlyArray<string>;
     readonly maxAttempts?: number;
     readonly pipelineTimeout?: PipelineTimeout;
+    readonly duplicateAction?: DuplicateAction;
     readonly model?: PiModel;
     readonly thinking?: string;
     readonly groundingThinking?: string;
@@ -102,10 +115,6 @@ type SharedRalphieConfig = {
     readonly branch?: string;
     readonly model?: PiModel;
     readonly thinking?: string;
-    readonly groundingThinking?: string;
-    readonly complexityThinking?: string;
-    readonly reviewThinking?: string;
-    readonly commitThinking?: string;
     readonly piDir?: string;
     readonly modelBaseUrl?: string;
     readonly modelApiKey?: string;
@@ -120,15 +129,29 @@ type SharedRalphieConfig = {
     readonly quiet: boolean;
 };
 
-export type IssueRalphieConfig = SharedRalphieConfig & {
-    readonly mode: ExecutionMode.Issues;
-    readonly workflow: WorkflowMode;
+type SharedIssueSelection = {
     readonly maxIssues?: number;
     readonly issueLabels: ReadonlyArray<string>;
     readonly issueSort: IssueSort;
     readonly issueOrder: IssueOrder;
-    readonly verificationCommands?: ReadonlyArray<string>;
 };
+
+export type IssueRalphieConfig = SharedRalphieConfig &
+    SharedIssueSelection & {
+        readonly mode: ExecutionMode.Issues;
+        readonly workflow: WorkflowMode;
+        readonly groundingThinking?: string;
+        readonly complexityThinking?: string;
+        readonly reviewThinking?: string;
+        readonly commitThinking?: string;
+        readonly verificationCommands?: ReadonlyArray<string>;
+    };
+
+export type MaintainIssuesRalphieConfig = SharedRalphieConfig &
+    SharedIssueSelection & {
+        readonly mode: ExecutionMode.MaintainIssues;
+        readonly duplicateAction: DuplicateAction;
+    };
 
 export type GetPipelinesGreenRalphieConfig = SharedRalphieConfig & {
     readonly mode: ExecutionMode.GetPipelinesGreen;
@@ -138,6 +161,7 @@ export type GetPipelinesGreenRalphieConfig = SharedRalphieConfig & {
 
 export type ResolvedRalphieConfig =
     | IssueRalphieConfig
+    | MaintainIssuesRalphieConfig
     | GetPipelinesGreenRalphieConfig;
 
 const optionalProperty = <Key extends string, Value>(
@@ -151,48 +175,128 @@ const optionalProperty = <Key extends string, Value>(
 const withDefault = <Value>(value: Value | undefined, fallback: Value): Value =>
     value ?? fallback;
 
-const issueOnlyOptions = [
-    "--max-issues",
-    "--issue-label",
-    "--issue-sort",
-    "--workflow",
-] as const;
+type ModeOptionRule = {
+    readonly option: string;
+    readonly field: keyof RalphieCliOptions;
+    readonly modes: ReadonlyArray<ExecutionMode>;
+    /** Keep the established issue-mode diagnostic for shared issue filters. */
+    readonly diagnosticModes?: ReadonlyArray<ExecutionMode>;
+};
 
-const pipelineOnlyOptions = ["--max-attempts", "--pipeline-timeout"] as const;
+const modeOptionRules: ReadonlyArray<ModeOptionRule> = [
+    {
+        option: "--max-issues",
+        field: "maxIssues",
+        modes: [ExecutionMode.Issues, ExecutionMode.MaintainIssues],
+        diagnosticModes: [ExecutionMode.Issues],
+    },
+    {
+        option: "--issue-label",
+        field: "issueLabels",
+        modes: [ExecutionMode.Issues, ExecutionMode.MaintainIssues],
+        diagnosticModes: [ExecutionMode.Issues],
+    },
+    {
+        option: "--issue-sort",
+        field: "issueSort",
+        modes: [ExecutionMode.Issues, ExecutionMode.MaintainIssues],
+        diagnosticModes: [ExecutionMode.Issues],
+    },
+    {
+        option: "--issue-sort",
+        field: "issueOrder",
+        modes: [ExecutionMode.Issues, ExecutionMode.MaintainIssues],
+        diagnosticModes: [ExecutionMode.Issues],
+    },
+    {
+        option: "--workflow",
+        field: "workflow",
+        modes: [ExecutionMode.Issues],
+    },
+    {
+        option: "--verify-command",
+        field: "verificationCommands",
+        modes: [ExecutionMode.Issues],
+    },
+    {
+        option: "--grounding-thinking",
+        field: "groundingThinking",
+        modes: [ExecutionMode.Issues],
+    },
+    {
+        option: "--complexity-thinking",
+        field: "complexityThinking",
+        modes: [ExecutionMode.Issues],
+    },
+    {
+        option: "--review-thinking",
+        field: "reviewThinking",
+        modes: [ExecutionMode.Issues],
+    },
+    {
+        option: "--commit-thinking",
+        field: "commitThinking",
+        modes: [ExecutionMode.Issues],
+    },
+    {
+        option: "--max-attempts",
+        field: "maxAttempts",
+        modes: [ExecutionMode.GetPipelinesGreen],
+    },
+    {
+        option: "--pipeline-timeout",
+        field: "pipelineTimeout",
+        modes: [ExecutionMode.GetPipelinesGreen],
+    },
+    {
+        option: "--duplicate-action",
+        field: "duplicateAction",
+        modes: [ExecutionMode.MaintainIssues],
+    },
+];
+
+const modeLabel = (modes: ReadonlyArray<ExecutionMode>): string =>
+    modes.join(" or ");
 
 const incompatibleOptionError = (
     option: string,
     mode: ExecutionMode,
+    modes: ReadonlyArray<ExecutionMode>,
 ): RalphieError =>
     new RalphieError({
-        message:
-            mode === ExecutionMode.GetPipelinesGreen
-                ? `Option ${option} is only available in issues mode and cannot be used with --mode ${mode}.`
-                : `Option ${option} is only available in get-pipelines-green mode and cannot be used with --mode ${mode}.`,
+        message: `Option ${option} is only available in ${modeLabel(modes)} mode and cannot be used with --mode ${mode}.`,
     });
 
-const validateIssueOptions = (
+const validateModeOptions = (
     options: RalphieCliOptions,
     mode: ExecutionMode,
 ): void => {
-    if (options.maxIssues !== undefined)
-        throw incompatibleOptionError(issueOnlyOptions[0], mode);
-    if (options.issueLabels !== undefined)
-        throw incompatibleOptionError(issueOnlyOptions[1], mode);
-    if (options.issueSort !== undefined || options.issueOrder !== undefined)
-        throw incompatibleOptionError(issueOnlyOptions[2], mode);
-    if (options.workflow !== undefined)
-        throw incompatibleOptionError(issueOnlyOptions[3], mode);
+    for (const rule of modeOptionRules) {
+        if (options[rule.field] !== undefined && !rule.modes.includes(mode)) {
+            throw incompatibleOptionError(
+                rule.option,
+                mode,
+                rule.diagnosticModes ?? rule.modes,
+            );
+        }
+    }
 };
 
-const validatePipelineOptions = (
-    options: RalphieCliOptions,
+/** Reject explicitly supplied mode-specific flags before value parsing. */
+export const validateExplicitRalphieCliOptions = (
+    values: Readonly<Record<string, unknown>>,
     mode: ExecutionMode,
 ): void => {
-    if (options.maxAttempts !== undefined)
-        throw incompatibleOptionError(pipelineOnlyOptions[0], mode);
-    if (options.pipelineTimeout !== undefined)
-        throw incompatibleOptionError(pipelineOnlyOptions[1], mode);
+    for (const rule of modeOptionRules) {
+        const optionName = rule.option.slice(2);
+        if (values[optionName] !== undefined && !rule.modes.includes(mode)) {
+            throw incompatibleOptionError(
+                rule.option,
+                mode,
+                rule.diagnosticModes ?? rule.modes,
+            );
+        }
+    }
 };
 
 const validateMaxAttempts = (options: RalphieCliOptions): void => {
@@ -206,14 +310,10 @@ const validateMaxAttempts = (options: RalphieCliOptions): void => {
     }
 };
 
-/** Reject explicitly supplied flags that belong to the other top-level mode. */
+/** Reject explicitly supplied flags that belong to another top-level mode. */
 export const validateRalphieCliOptions = (options: RalphieCliOptions): void => {
     const mode = options.mode ?? DEFAULT_EXECUTION_MODE;
-    if (mode === ExecutionMode.GetPipelinesGreen) {
-        validateIssueOptions(options, mode);
-    } else {
-        validatePipelineOptions(options, mode);
-    }
+    validateModeOptions(options, mode);
     validateMaxAttempts(options);
 };
 
@@ -226,10 +326,6 @@ const commonResolvedConfig = (
     ...optionalProperty("branch", options.branch),
     ...optionalProperty("model", options.model),
     ...optionalProperty("thinking", options.thinking),
-    ...optionalProperty("groundingThinking", options.groundingThinking),
-    ...optionalProperty("complexityThinking", options.complexityThinking),
-    ...optionalProperty("reviewThinking", options.reviewThinking),
-    ...optionalProperty("commitThinking", options.commitThinking),
     ...optionalProperty("piDir", options.piDir),
     ...optionalProperty("modelBaseUrl", process.env[MODEL_BASE_URL_ENV]),
     ...optionalProperty("modelApiKey", process.env[MODEL_API_KEY_ENV]),
@@ -244,13 +340,23 @@ const commonResolvedConfig = (
     quiet,
 });
 
+const issueSelectionConfig = (
+    options: RalphieCliOptions,
+): SharedIssueSelection => ({
+    ...optionalProperty("maxIssues", options.maxIssues),
+    issueLabels: [...(options.issueLabels ?? [])],
+    issueSort: options.issueSort ?? IssueSort.Created,
+    issueOrder: options.issueOrder ?? IssueOrder.Ascending,
+});
+
 const buildResolvedConfig = (
     options: RalphieCliOptions,
     json: boolean,
     quiet: boolean,
 ): ResolvedRalphieConfig => {
     const common = commonResolvedConfig(options, json, quiet);
-    if (options.mode === ExecutionMode.GetPipelinesGreen) {
+    const mode = options.mode ?? DEFAULT_EXECUTION_MODE;
+    if (mode === ExecutionMode.GetPipelinesGreen) {
         return {
             ...common,
             mode: ExecutionMode.GetPipelinesGreen,
@@ -258,15 +364,25 @@ const buildResolvedConfig = (
             ...optionalProperty("pipelineTimeout", options.pipelineTimeout),
         };
     }
+    if (mode === ExecutionMode.MaintainIssues) {
+        return {
+            ...common,
+            ...issueSelectionConfig(options),
+            mode: ExecutionMode.MaintainIssues,
+            duplicateAction:
+                options.duplicateAction ?? DEFAULT_DUPLICATE_ACTION,
+        };
+    }
 
     return {
         ...common,
+        ...issueSelectionConfig(options),
         mode: ExecutionMode.Issues,
         workflow: withDefault(options.workflow, DEFAULT_WORKFLOW_MODE),
-        ...optionalProperty("maxIssues", options.maxIssues),
-        issueLabels: [...(options.issueLabels ?? [])],
-        issueSort: options.issueSort ?? IssueSort.Created,
-        issueOrder: options.issueOrder ?? IssueOrder.Ascending,
+        ...optionalProperty("groundingThinking", options.groundingThinking),
+        ...optionalProperty("complexityThinking", options.complexityThinking),
+        ...optionalProperty("reviewThinking", options.reviewThinking),
+        ...optionalProperty("commitThinking", options.commitThinking),
         verificationCommands: [...(options.verificationCommands ?? [])],
     };
 };
