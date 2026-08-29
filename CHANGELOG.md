@@ -50,6 +50,9 @@ All notable changes to Ralphie are documented here. The project follows
   serialize every candidate contract field explicitly, and use the supported
   Intel macOS runner so release staging fails closed without hanging or writing
   null promotion metadata.
+- Use the supported Sigstore GitHub verification selectors in the standalone
+  installer and release documentation, preserving the exact workflow, event,
+  commit, and protected tag constraints.
 - Document the cross-mode display contract: interactive sticky footer and
   contextual Pi session output, periodic and lifecycle breadcrumbs, the
   `LIVE_OUTPUT_LIMIT` character threshold and human-preview defaults, active

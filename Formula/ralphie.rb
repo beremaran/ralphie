@@ -7,20 +7,20 @@ class Ralphie < Formula
   on_macos do
     if Hardware::CPU.arm?
       url "https://github.com/beremaran/ralphie/releases/download/v#{version}/ralphie-darwin-arm64"
-      sha256 "cf08e4f99392f08d712a02a02eef743078ff9c5ca8be802b66895dcfd72167aa"
+      sha256 "30be72de92306adb5609a6e8bc2ddb9e9cc29d671e8e0dd87c1921f11aaaf5c5"
     else
       url "https://github.com/beremaran/ralphie/releases/download/v#{version}/ralphie-darwin-x64"
-      sha256 "fa0b3928ef2aa24847e200ca27153e0965f36a932e3aa1eb2326319264c149ae"
+      sha256 "c08317b2f19011970d7a1579422d9c634cb756eaefafb147704ef8bbf1605ac8"
     end
   end
 
   on_linux do
     if Hardware::CPU.arm?
       url "https://github.com/beremaran/ralphie/releases/download/v#{version}/ralphie-linux-arm64"
-      sha256 "6bdfae15d4c09f7e1d69e31169165a30feedc5d83683e2b14d20ee972b4b9f8f"
+      sha256 "c23f670a69c60c8770bb4958e91ae3007804bab889b55ee8807f2fffd04295f5"
     else
       url "https://github.com/beremaran/ralphie/releases/download/v#{version}/ralphie-linux-x64"
-      sha256 "46be1e5f11dc83f89374c834f24cf8f83e4f66e8e44965f9367145caef3ddf2b"
+      sha256 "c0d8b5ff1b24e554121bf879fb68380038ca7fbe27a63fd5857d6a1b27d2b300"
     end
   end
 

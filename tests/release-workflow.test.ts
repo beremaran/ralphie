@@ -231,14 +231,12 @@ describe("release container metadata contract", () => {
         );
         const command = readme.slice(commandStart, commandEnd);
 
-        expect(command).toContain("--workflow release.yml");
-        expect(command).toContain('--source-sha "$SOURCE_REF"');
-        expect(command).toContain('--source-tag "$TAG"');
-        expect(command).toContain(
-            "--cert-oidc-issuer https://token.actions.githubusercontent.com",
-        );
-        expect(command).toContain("--source-event push");
-        expect(command).not.toContain("--trigger");
-        expect(command).not.toMatch(/--(?:name|sha|ref)(?:\s|=)/);
+        expect(command).toContain("--name Release");
+        expect(command).toContain('--sha "$SOURCE_REF"');
+        expect(command).toContain('--ref "refs/tags/$TAG"');
+        expect(command).toContain("--trigger push");
+        expect(command).not.toContain("--workflow release.yml");
+        expect(command).not.toContain("--cert-oidc-issuer");
+        expect(command).not.toMatch(/--source-(?:event|sha|tag)(?:\s|=)/);
     });
 });

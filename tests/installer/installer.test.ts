@@ -377,22 +377,18 @@ describe("standalone installer", () => {
                 expect(verifierArgs).toContain("github");
                 expect(verifierArgs).toContain("--repository");
                 expect(verifierArgs).toContain("beremaran/ralphie");
-                expect(verifierArgs).toContain("--workflow");
-                expect(verifierArgs).toContain("release.yml");
+                expect(verifierArgs).toContain("--name");
+                expect(verifierArgs).toContain("Release");
                 expect(verifierArgs).toContain("--cert-identity");
                 expect(verifierArgs).toContain(
                     "https://github.com/beremaran/ralphie/.github/workflows/release.yml@refs/tags/v0.1.0",
                 );
-                expect(verifierArgs).toContain("--cert-oidc-issuer");
-                expect(verifierArgs).toContain(
-                    "https://token.actions.githubusercontent.com",
-                );
-                expect(verifierArgs).toContain("--source-event");
+                expect(verifierArgs).toContain("--trigger");
                 expect(verifierArgs).toContain("push");
-                expect(verifierArgs).toContain("--source-sha");
+                expect(verifierArgs).toContain("--sha");
                 expect(verifierArgs).toContain(sourceSha);
-                expect(verifierArgs).toContain("--source-tag");
-                expect(verifierArgs).toContain("v0.1.0");
+                expect(verifierArgs).toContain("--ref");
+                expect(verifierArgs).toContain("refs/tags/v0.1.0");
             },
         );
     });

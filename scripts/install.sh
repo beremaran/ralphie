@@ -287,12 +287,11 @@ verify_manifest() {
   sigstore verify github "$CHECKSUMS_FILE" \
     --bundle "$BUNDLE_FILE" \
     --repository beremaran/ralphie \
-    --workflow release.yml \
+    --name Release \
     --cert-identity "$CERT_IDENTITY" \
-    --cert-oidc-issuer https://token.actions.githubusercontent.com \
-    --source-event "$source_event" \
-    --source-sha "$SOURCE_REF" \
-    --source-tag "$RELEASE_TAG"
+    --trigger "$source_event" \
+    --sha "$SOURCE_REF" \
+    --ref "refs/tags/$RELEASE_TAG"
 }
 
 if ! verify_manifest push && ! verify_manifest workflow_dispatch; then

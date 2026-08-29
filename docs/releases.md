@@ -92,7 +92,7 @@ verifies against all of these constraints:
 - workflow commit: the exact commit targeted by that protected tag.
 
 After downloading both `SHA256SUMS` and `SHA256SUMS.sigstore.json` from the same
-release, verify the signature before using the checksums (`--source-event
+release, verify the signature before using the checksums (`--trigger
 workflow_dispatch` is used instead for a manually published release):
 
 ```bash
@@ -101,12 +101,11 @@ SOURCE_REF=<40-character commit SHA targeted by $TAG>
 sigstore verify github SHA256SUMS \
   --bundle SHA256SUMS.sigstore.json \
   --repository beremaran/ralphie \
-  --workflow release.yml \
+  --name Release \
   --cert-identity "https://github.com/beremaran/ralphie/.github/workflows/release.yml@refs/tags/$TAG" \
-  --cert-oidc-issuer https://token.actions.githubusercontent.com \
-  --source-event push \
-  --source-sha "$SOURCE_REF" \
-  --source-tag "$TAG"
+  --trigger push \
+  --sha "$SOURCE_REF" \
+  --ref "refs/tags/$TAG"
 sha256sum --check SHA256SUMS
 ```
 
