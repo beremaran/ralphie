@@ -3,7 +3,9 @@
 This page is for release maintainers and downstream consumers. It is the
 authoritative contract for version compatibility, release validation, native
 and container artifacts, Homebrew updates, and checksum trust. Return to the
-[documentation index](README.md) for other task paths.
+[documentation index](README.md) for other task paths. The [public distribution
+topology](public-distribution.md) defines the canonical repository and endpoint
+ownership used by this process.
 
 Ralphie follows [Semantic Versioning](https://semver.org/). Until 1.0, minor
 releases may change the CLI or persisted state schema; patch releases should

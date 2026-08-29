@@ -135,6 +135,8 @@ The main references are:
   component map.
 - [Development](./docs/development.md) — local setup, tests, and contribution
   expectations.
+- [Public distribution topology](./docs/public-distribution.md) — canonical
+  repository, public endpoints, publication setup, and privacy boundaries.
 - [Releases](./docs/releases.md) — compatibility, publishing, and release
   verification.
 - [End-to-end execution trace](./docs/end-to-end-execution.md) — the detailed

@@ -42,10 +42,12 @@ buried in a landing page.
 
 ### Release maintainer
 
-1. [Development](development.md) — the local release validation gate.
-2. [Releases](releases.md) — version compatibility, protected tags, artifacts,
+1. [Public distribution topology](public-distribution.md) — canonical repository,
+   public endpoints, publication permissions, and privacy boundaries.
+2. [Development](development.md) — the local release validation gate.
+3. [Releases](releases.md) — version compatibility, protected tags, artifacts,
    containers, and checksum trust.
-3. [Operations and recovery](operations-and-recovery.md) — operational state and
+4. [Operations and recovery](operations-and-recovery.md) — operational state and
    cleanup behavior.
 
 ## Page map
@@ -59,6 +61,7 @@ buried in a landing page.
 | [Operations and recovery](operations-and-recovery.md) | Document progress, artifacts, state, resume, cancellation, failure, and cleanup. |
 | [Architecture](architecture.md) | Map runtime, orchestrator, domain services, and source locations. |
 | [Development](development.md) | Explain local development, test commands, network smoke tests, and contribution rules. |
+| [Public distribution topology](public-distribution.md) | Record the canonical public repository, distribution endpoints, publication setup, and privacy boundary. |
 | [Releases](releases.md) | Define release compatibility, workflow, Homebrew, containers, and checksum verification. |
 | [End-to-end execution trace](end-to-end-execution.md) | Preserve the detailed source-level trigger-to-exit trace. |
 

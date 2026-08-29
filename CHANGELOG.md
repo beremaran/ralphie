@@ -7,6 +7,9 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Added
 
+- A maintainer-approved public source and distribution topology, with one
+  canonical repository, endpoint inventory, publication setup, and explicit
+  privacy boundaries.
 - A single package-version authority with build-time commit metadata and plain
   or JSON `--version` output that works without repository or Pi configuration.
 - Staged-tree-bound deterministic verification before review, after review
