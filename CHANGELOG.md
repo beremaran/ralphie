@@ -34,6 +34,9 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Changed
 
+- Refresh live issue and comment metadata when resuming pending work, and reuse
+  needs-attention grounding only while its freshness fingerprint matches;
+  changed or invalid artifacts are atomically invalidated before regrounding.
 - Keep Pi configuration separate from persistent workspace state: explicit
   `--pi-dir` directories remain operator-owned, while environment-generated
   configuration uses a private temporary directory with secure permissions and

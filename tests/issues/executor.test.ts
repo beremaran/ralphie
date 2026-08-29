@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
     IssueArtifactKind,
@@ -24,6 +27,148 @@ const context = (number: number): IssueExecutionContext =>
     ({ issue: { number } }) as IssueExecutionContext;
 
 describe("IssueExecutor", () => {
+    test("reuses matching grounding across a durable resumed run", async () => {
+        const workspace = await mkdtemp(join(tmpdir(), "ralphie-grounding-"));
+        try {
+            let groundingCalls = 0;
+            const grounding = {
+                assess: async () => {
+                    groundingCalls += 1;
+                    return {
+                        sessionID: `grounding-${groundingCalls}`,
+                        decision: {
+                            disposition: GroundingDisposition.NeedsAttention,
+                            reason: NeedsAttentionReason.MissingInformation,
+                            summary: "The issue needs clarification.",
+                            evidence: ["The target is unspecified."],
+                            questions: ["Which target should be supported?"],
+                        },
+                    };
+                },
+            };
+            const makeExecutor = () =>
+                makeIssueExecutorService(
+                    makeIssueArtifactStoreService(),
+                    {
+                        assess: async () => {
+                            throw new Error("unused");
+                        },
+                    },
+                    {
+                        execute: async () => {
+                            throw new Error("unused");
+                        },
+                    },
+                    {
+                        execute: async () => {
+                            throw new Error("unused");
+                        },
+                    },
+                    grounding,
+                );
+            const input = {
+                ...context(42),
+                issue: {
+                    number: 42,
+                    title: "Needs clarification",
+                    url: "issue/42",
+                    body: "Clarify the target.",
+                    labels: [],
+                    updatedAt: "2026-08-28T00:00:00.000Z",
+                    commentCount: 1,
+                },
+                repository: "owner/repo",
+                workspace,
+                runId: "resume-run",
+            } as IssueExecutionContext;
+
+            const first = await makeExecutor().execute(input);
+            const resumed = await makeExecutor().execute(input);
+
+            expect(resumed).toEqual(first);
+            expect(groundingCalls).toBe(1);
+            expect(resumed).toMatchObject({
+                kind: IssueExecutionOutcomeKind.NeedsAttention,
+                reason: NeedsAttentionReason.MissingInformation,
+                summary: "The issue needs clarification.",
+                evidence: ["The target is unspecified."],
+                questions: ["Which target should be supported?"],
+            });
+        } finally {
+            await rm(workspace, { recursive: true, force: true });
+        }
+    });
+
+    test.each([
+        ["updatedAt", { updatedAt: "2026-08-29T00:00:00.000Z" }],
+        ["commentCount", { commentCount: 2 }],
+        ["commentVersion", { commentVersion: "2026-08-29T00:00:00.000Z" }],
+    ] as const)("regrounds when %s changes", async (_field, change) => {
+        let groundingCalls = 0;
+        const stores = makeIssueArtifactStoreService();
+        const executor = makeIssueExecutorService(
+            stores,
+            {
+                assess: async () => {
+                    throw new Error("unused");
+                },
+            },
+            {
+                execute: async () => {
+                    throw new Error("unused");
+                },
+            },
+            {
+                execute: async () => {
+                    throw new Error("unused");
+                },
+            },
+            {
+                assess: async () => {
+                    groundingCalls += 1;
+                    return {
+                        sessionID: `grounding-${groundingCalls}`,
+                        decision: {
+                            disposition: GroundingDisposition.NeedsAttention,
+                            reason: NeedsAttentionReason.MissingInformation,
+                            summary: `Grounding ${groundingCalls}`,
+                            evidence: ["The target is unspecified."],
+                            questions: ["Which target should be supported?"],
+                        },
+                    };
+                },
+            },
+        );
+        const base = {
+            ...context(42),
+            issue: {
+                number: 42,
+                title: "Needs clarification",
+                url: "issue/42",
+                body: "Clarify the target.",
+                labels: [],
+                updatedAt: "2026-08-28T00:00:00.000Z",
+                commentCount: 1,
+                commentVersion: "2026-08-28T00:00:00.000Z",
+            },
+            repository: "owner/repo",
+            workspace: "/tmp/ralphie-grounding",
+            runId: "run-1",
+        } as IssueExecutionContext;
+
+        await executor.execute(base);
+        const result = await executor.execute({
+            ...base,
+            issue: { ...base.issue, ...change },
+        });
+
+        expect(groundingCalls).toBe(2);
+        expect(result).toMatchObject({
+            kind: IssueExecutionOutcomeKind.NeedsAttention,
+            summary: "Grounding 2",
+        });
+    });
+
     test("defers a dependency-blocked issue before complexity or implementation", async () => {
         let routed = false;
         const stores = makeIssueArtifactStoreService();

@@ -509,6 +509,62 @@ describe("workflow", () => {
         expect(calls).not.toContain("closeIssue:42");
     });
 
+    test("refreshes issue freshness metadata before active resume", async () => {
+        const initialIssue = {
+            ...firstIssue,
+            updatedAt: "2026-08-28T00:00:00.000Z",
+            commentCount: 1,
+            commentVersion: "2026-08-28T00:00:00.000Z",
+        };
+        const needsAttention: IssueExecutionOutcome = {
+            kind: IssueExecutionOutcomeKind.NeedsAttention,
+            reason: NeedsAttentionReason.ExternalDependency,
+            summary: "A prerequisite is still open.",
+            evidence: ["The prerequisite is unresolved."],
+            questions: ["When will it be available?"],
+            artifactPath: "/tmp/needs-attention.json",
+        };
+        const firstCalls: string[] = [];
+        const firstStates: RunState[] = [];
+        await expect(
+            workflow(
+                { ...baseOptions, onNeedsAttention: NeedsAttentionPolicy.Halt },
+                testRuntime(firstCalls, firstStates, {
+                    issueLists: [[initialIssue]],
+                    outcomes: [needsAttention],
+                }),
+            ),
+        ).rejects.toMatchObject({ _tag: "NeedsAttentionStop" });
+        const resumeState = firstStates.at(-1);
+        if (resumeState === undefined)
+            throw new Error("Missing resumable state");
+
+        const currentIssue = {
+            ...initialIssue,
+            updatedAt: "2026-08-29T00:00:00.000Z",
+            commentCount: 2,
+            commentVersion: "2026-08-29T00:00:00.000Z",
+        };
+        const contexts: IssueExecutionContext[] = [];
+        await expect(
+            workflow(
+                {
+                    ...baseOptions,
+                    onNeedsAttention: NeedsAttentionPolicy.Halt,
+                    resumeState,
+                },
+                testRuntime([], [], {
+                    issueLists: [[currentIssue]],
+                    outcomes: [needsAttention],
+                    executionContexts: contexts,
+                    captureStart: 1,
+                }),
+            ),
+        ).rejects.toMatchObject({ _tag: "NeedsAttentionStop" });
+
+        expect(contexts[0]?.issue).toEqual(currentIssue);
+    });
+
     test.each([
         {
             kind: IssueExecutionOutcomeKind.Completed,

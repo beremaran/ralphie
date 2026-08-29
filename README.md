@@ -645,6 +645,9 @@ bounded binary-safe patch and decision diagnostic, then restores and verifies
 the exact clean checkpoint; any capture, write, restore, or verification failure
 halts as recoverable failure. A later run evaluates the issue again, so
 completing its dependency makes it eligible without editing the queue manually.
+The saved needs-attention grounding is reused only when live `updatedAt` and
+comment freshness metadata exactly match; a changed or invalid fingerprint is
+removed atomically before grounding runs again.
 
 ```mermaid
 stateDiagram-v2
@@ -666,9 +669,11 @@ stateDiagram-v2
 ```
 
 On resume, Ralphie compares persisted intent with both local Git and live GitHub
-state before returning to `Active`. It can reconcile partially created child
-issues, a commit created immediately before interruption, and an issue closure
-whose response was lost without repeating the corresponding agent work.
+state before returning to `Active`. Pending issues use the freshly discovered
+GitHub snapshots, including issue update and comment freshness metadata. It can
+reconcile partially created child issues, a commit created immediately before
+interruption, and an issue closure whose response was lost without repeating the
+corresponding agent work.
 
 Needs-attention recovery diagnostics use the same issue directory and contain
 `changes.patch` plus `metadata.json` under `needs-attention/`. The patch includes

@@ -2,7 +2,9 @@ import { RalphieError } from "../shared/error.ts";
 import {
     IssueArtifactKind,
     issueArtifactPath,
+    issueFreshnessFingerprintSchema,
     type IssueArtifactStoreService,
+    type IssueFreshnessFingerprint,
 } from "./artifacts.ts";
 import type { ComplexityAssessmentService } from "./complexity.ts";
 import {
@@ -33,13 +35,29 @@ export const makeIssueExecutorService = (
     decompositionExecutor: DecompositionExecutorService,
     groundingAssessment?: GroundingAssessmentService,
 ): IssueExecutorService => {
-    const freshnessFingerprint = (context: IssueExecutionContext) => ({
-        updatedAt: context.issue.updatedAt ?? "1970-01-01T00:00:00.000Z",
-        commentCount: context.issue.commentCount ?? 0,
-        ...(context.issue.commentVersion === undefined
-            ? {}
-            : { commentVersion: context.issue.commentVersion }),
-    });
+    const freshnessFingerprint = (
+        context: IssueExecutionContext,
+    ): IssueFreshnessFingerprint => {
+        const candidate = {
+            ...(context.issue.updatedAt === undefined
+                ? {}
+                : { updatedAt: context.issue.updatedAt }),
+            ...(context.issue.commentCount === undefined
+                ? {}
+                : { commentCount: context.issue.commentCount }),
+            ...(context.issue.commentVersion === undefined
+                ? {}
+                : { commentVersion: context.issue.commentVersion }),
+        };
+        const parsed = issueFreshnessFingerprintSchema.safeParse(candidate);
+        if (parsed.success) return parsed.data as IssueFreshnessFingerprint;
+        throw new RalphieError({
+            message:
+                `Issue #${context.issue.number} does not have a valid freshness fingerprint; ` +
+                "grounding requires updatedAt and a comment count or comment version.",
+            cause: parsed.error,
+        });
+    };
 
     const assessGrounding = async (
         context: IssueExecutionContext,

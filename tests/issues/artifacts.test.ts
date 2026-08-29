@@ -407,6 +407,70 @@ describe("per-issue artifact store", () => {
         }
     });
 
+    test("atomically removes an invalid needs-attention fingerprint on load", async () => {
+        const workspace = await mkdtemp(join(tmpdir(), "ralphie-artifacts-"));
+        try {
+            const path = join(
+                workspace,
+                ".ralphie",
+                "runs",
+                "run-invalid-freshness",
+                "issues",
+                "42",
+                "artifacts.json",
+            );
+            await mkdir(join(path, ".."), { recursive: true });
+            await writeFile(
+                path,
+                JSON.stringify({
+                    version: 3,
+                    issueNumber: 42,
+                    artifacts: {
+                        [IssueArtifactKind.ComplexityDecision]: {
+                            complexity: ComplexityLevel.Level1,
+                            rationale: "Keep this artifact.",
+                        },
+                        [IssueArtifactKind.NeedsAttentionDecision]: {
+                            decision: {
+                                disposition:
+                                    GroundingDisposition.NeedsAttention,
+                                reason: NeedsAttentionReason.MissingInformation,
+                                summary: "The issue needs clarification.",
+                                evidence: ["The target is unspecified."],
+                                questions: [
+                                    "Which target should be supported?",
+                                ],
+                            },
+                            fingerprint: {
+                                updatedAt: "2026-08-28T00:00:00.000Z",
+                            },
+                        },
+                    },
+                }),
+            );
+
+            const store = await makeDurableIssueArtifactStore(42, {
+                workspace,
+                runId: "run-invalid-freshness",
+            });
+
+            expect(store.has(IssueArtifactKind.NeedsAttentionDecision)).toBe(
+                false,
+            );
+            expect(
+                await store.read(IssueArtifactKind.ComplexityDecision),
+            ).toEqual({
+                complexity: ComplexityLevel.Level1,
+                rationale: "Keep this artifact.",
+            });
+            expect((await Bun.file(path).json()).artifacts).not.toHaveProperty(
+                IssueArtifactKind.NeedsAttentionDecision,
+            );
+        } finally {
+            await rm(workspace, { recursive: true, force: true });
+        }
+    });
+
     test("migrates version 2 durable artifacts without losing old values", async () => {
         const workspace = await mkdtemp(join(tmpdir(), "ralphie-artifacts-"));
         try {

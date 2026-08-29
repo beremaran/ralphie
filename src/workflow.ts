@@ -699,6 +699,18 @@ export const workflow = async (
                       },
             );
 
+        const refreshedResumeIssues = (
+            discoveredIssues: ReadonlyArray<GitHubIssue>,
+        ): ReadonlyArray<GitHubIssue> => {
+            if (resumeState === undefined) return discoveredIssues;
+            const liveIssues = new Map(
+                discoveredIssues.map((issue) => [issue.number, issue]),
+            );
+            return resumeState.queue.pending.map(
+                (savedIssue) => liveIssues.get(savedIssue.number) ?? savedIssue,
+            );
+        };
+
         const prepareRunState = async (input: {
             readonly prepared: Awaited<ReturnType<typeof repository.prepare>>;
             readonly branch: string;
@@ -716,10 +728,7 @@ export const workflow = async (
                 invariantService.capture(prepared.path);
             checkout = await captureCheckout();
             verifyResumeState(branch, checkout, discoveredIssues);
-            const initialIssues =
-                resumeState === undefined
-                    ? discoveredIssues
-                    : resumeState.queue.pending;
+            const initialIssues = refreshedResumeIssues(discoveredIssues);
             const queue = makeQueue(initialIssues);
             return { repositoryCheckouts, captureCheckout, queue };
         };

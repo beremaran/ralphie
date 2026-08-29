@@ -83,8 +83,9 @@ dirty reused checkout is aligned with the selected remote branch using the
 equivalent of `git reset --hard` and `git clean -fd`. Ralphie expects the
 workspace to be dedicated to it.
 
-The queue is built from the discovered issues (or `state.queue.pending` on a
-resume). Generated child bodies contribute open issue-number dependencies.
+The queue is built from the discovered issues (or the pending issue snapshots
+from `state.queue.pending`, replaced with fresh live snapshots on resume).
+Generated child bodies contribute open issue-number dependencies.
 `--max-issues` is charged when an issue is dequeued, not when it succeeds. A
 refresh after decomposition adds newly discovered issues without duplicating
 known or completed numbers.
@@ -174,7 +175,9 @@ grounding session. It returns one of three dispositions:
   path; or
 - `needs_attention`: persist a summary, evidence, questions, and issue freshness
   fingerprint, then defer the issue without closing it or marking its dependency
-  complete.
+  complete. A matching durable fingerprint is reused without agent work; a
+  changed or invalid fingerprint is atomically invalidated before grounding is
+  rerun.
 
 An unfinished prerequisite uses the `external_dependency` reason. A deferred
 outcome advances the current queue, while an ordinary failed outcome still

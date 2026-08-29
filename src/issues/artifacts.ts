@@ -286,6 +286,16 @@ const persistedArtifactsSchema = persistedArtifactsV2BaseSchema
     .strict()
     .superRefine(validatePullRequestApproval);
 
+// Keep the needs-attention artifact unparsed while loading so a malformed
+// freshness record can be removed without discarding the other artifacts for
+// the issue. Writes still use persistedArtifactsSchema, so invalid values can
+// never be produced by this store.
+const persistedArtifactsLoadSchema = persistedArtifactsV2BaseSchema
+    .extend({
+        [IssueArtifactKind.NeedsAttentionDecision]: z.unknown().optional(),
+    })
+    .strict();
+
 export const ISSUE_ARTIFACT_VERSION = 3 as const;
 
 const persistedArtifactStateSchema = z
@@ -294,6 +304,15 @@ const persistedArtifactStateSchema = z
         issueNumber: z.number().int().positive(),
         repository: z.string().min(1).optional(),
         artifacts: persistedArtifactsSchema,
+    })
+    .strict();
+
+const persistedArtifactStateLoadSchema = z
+    .object({
+        version: z.literal(ISSUE_ARTIFACT_VERSION),
+        issueNumber: z.number().int().positive(),
+        repository: z.string().min(1).optional(),
+        artifacts: persistedArtifactsLoadSchema,
     })
     .strict();
 
@@ -373,6 +392,35 @@ const persistAtomically = async (
 type LoadedArtifactState = {
     readonly state: PersistedArtifactState;
     readonly migrated: boolean;
+    readonly needsAttentionInvalidated: boolean;
+};
+
+const loadCurrentArtifactState = (value: unknown): LoadedArtifactState => {
+    const loaded = persistedArtifactStateLoadSchema.parse(value);
+    const rawDecision =
+        loaded.artifacts[IssueArtifactKind.NeedsAttentionDecision];
+    if (
+        rawDecision !== undefined &&
+        !needsAttentionDecisionArtifactSchema.safeParse(rawDecision).success
+    ) {
+        const {
+            [IssueArtifactKind.NeedsAttentionDecision]: _stale,
+            ...remainingArtifacts
+        } = loaded.artifacts;
+        return {
+            state: persistedArtifactStateSchema.parse({
+                ...loaded,
+                artifacts: remainingArtifacts,
+            }),
+            migrated: false,
+            needsAttentionInvalidated: true,
+        };
+    }
+    return {
+        state: persistedArtifactStateSchema.parse(loaded),
+        migrated: false,
+        needsAttentionInvalidated: false,
+    };
 };
 
 const migrateArtifactState = (
@@ -392,6 +440,7 @@ const migrateArtifactState = (
                 version: ISSUE_ARTIFACT_VERSION,
             }),
             migrated: true,
+            needsAttentionInvalidated: false,
         };
     }
     if (
@@ -404,10 +453,7 @@ const migrateArtifactState = (
             message: `Persisted artifacts at ${filePath} use unsupported version ${String(value.version)}; expected version ${ISSUE_ARTIFACT_VERSION}.`,
         });
     }
-    return {
-        state: persistedArtifactStateSchema.parse(value),
-        migrated: false,
-    };
+    return loadCurrentArtifactState(value);
 };
 
 const loadPersistedState = async (
@@ -723,7 +769,12 @@ export const makeDurableIssueArtifactStore = async (
     }
     const filePath = issueArtifactPath(scope, issueNumber);
     const loaded = await loadPersistedState(filePath, issueNumber, scope);
-    if (loaded?.migrated) await persistAtomically(filePath, loaded.state);
+    if (
+        loaded?.migrated === true ||
+        loaded?.needsAttentionInvalidated === true
+    ) {
+        await persistAtomically(filePath, loaded.state);
+    }
     const values = new Map<IssueArtifactKind, unknown>();
     if (loaded !== undefined) {
         for (const kind of Object.values(IssueArtifactKind)) {
