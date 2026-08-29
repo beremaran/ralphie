@@ -94,6 +94,8 @@ export type RalphieCliOptions = {
     readonly mode?: ExecutionMode;
     readonly workflow?: WorkflowMode;
     readonly onNeedsAttention?: NeedsAttentionPolicy;
+    readonly notifyNeedsAttention?: boolean;
+    readonly needsAttentionLabel?: string;
     readonly branch?: string;
     readonly maxIssues?: number;
     readonly issueLabels?: ReadonlyArray<string>;
@@ -150,6 +152,8 @@ export type IssueRalphieConfig = SharedRalphieConfig &
         readonly mode: ExecutionMode.Issues;
         readonly workflow: WorkflowMode;
         readonly onNeedsAttention: NeedsAttentionPolicy;
+        readonly notificationsEnabled: boolean;
+        readonly needsAttentionLabel?: string;
         readonly groundingThinking?: string;
         readonly complexityThinking?: string;
         readonly reviewThinking?: string;
@@ -226,6 +230,16 @@ const modeOptionRules: ReadonlyArray<ModeOptionRule> = [
     {
         option: "--on-needs-attention",
         field: "onNeedsAttention",
+        modes: [ExecutionMode.Issues],
+    },
+    {
+        option: "--notify-needs-attention",
+        field: "notifyNeedsAttention",
+        modes: [ExecutionMode.Issues],
+    },
+    {
+        option: "--needs-attention-label",
+        field: "needsAttentionLabel",
         modes: [ExecutionMode.Issues],
     },
     {
@@ -329,6 +343,25 @@ const validateMaxAttempts = (options: RalphieCliOptions): void => {
 export const validateRalphieCliOptions = (options: RalphieCliOptions): void => {
     const mode = options.mode ?? DEFAULT_EXECUTION_MODE;
     validateModeOptions(options, mode);
+    const needsAttentionLabel = options.needsAttentionLabel?.trim();
+    if (
+        options.needsAttentionLabel !== undefined &&
+        needsAttentionLabel?.length === 0
+    ) {
+        throw new RalphieError({
+            message:
+                "Option --needs-attention-label requires a non-empty value.",
+        });
+    }
+    if (
+        needsAttentionLabel !== undefined &&
+        options.notifyNeedsAttention !== true
+    ) {
+        throw new RalphieError({
+            message:
+                "Option --needs-attention-label requires --notify-needs-attention.",
+        });
+    }
     validateMaxAttempts(options);
 };
 
@@ -397,6 +430,11 @@ const buildResolvedConfig = (
         onNeedsAttention: withDefault(
             options.onNeedsAttention,
             DEFAULT_NEEDS_ATTENTION_POLICY,
+        ),
+        notificationsEnabled: options.notifyNeedsAttention ?? false,
+        ...optionalProperty(
+            "needsAttentionLabel",
+            options.needsAttentionLabel?.trim(),
         ),
         ...optionalProperty("groundingThinking", options.groundingThinking),
         ...optionalProperty("complexityThinking", options.complexityThinking),

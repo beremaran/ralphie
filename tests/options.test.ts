@@ -32,6 +32,7 @@ describe("CLI configuration", () => {
             mode: DEFAULT_EXECUTION_MODE,
             workflow: DEFAULT_WORKFLOW_MODE,
             onNeedsAttention: DEFAULT_NEEDS_ATTENTION_POLICY,
+            notificationsEnabled: false,
             issueLabels: [],
             issueSort: IssueSort.Created,
             issueOrder: IssueOrder.Ascending,
@@ -70,6 +71,8 @@ describe("CLI configuration", () => {
                 verbose: true,
                 json: true,
                 onNeedsAttention: NeedsAttentionPolicy.Continue,
+                notifyNeedsAttention: true,
+                needsAttentionLabel: "  needs-attention  ",
             }),
         ).toMatchObject({
             repo: "Owner/Repo",
@@ -94,7 +97,20 @@ describe("CLI configuration", () => {
             json: true,
             quiet: false,
             onNeedsAttention: NeedsAttentionPolicy.Continue,
+            notificationsEnabled: true,
+            needsAttentionLabel: "needs-attention",
         });
+    });
+
+    test("rejects a notification label without explicit notification opt-in", () => {
+        expect(() =>
+            resolveRalphieConfig({
+                repo: "owner/repo",
+                needsAttentionLabel: "needs-attention",
+            }),
+        ).toThrow(
+            "Option --needs-attention-label requires --notify-needs-attention.",
+        );
     });
 
     test("maps clean to start, end, or both removal", () => {

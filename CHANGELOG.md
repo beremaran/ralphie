@@ -27,6 +27,10 @@ All notable changes to Ralphie are documented here. The project follows
 - Durable needs-attention notification recovery: structured outcomes and label
   intent are saved before GitHub mutation, and resume retries the stable marker
   without rerunning agent work.
+- An explicit, disabled-by-default `--notify-needs-attention` CLI opt-in with a
+  trimmed `--needs-attention-label`; label-only usage is rejected, dry runs
+  never notify, and failed notifications retain their intent for safe resume
+  and retry.
 - Native Bun CLI foundation with GitHub, Git, workspace, and Pi domain
   services.
 - Resumable issue execution with complexity routing, bounded review loops,

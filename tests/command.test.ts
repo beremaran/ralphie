@@ -12,12 +12,15 @@ import {
 } from "../src/options.ts";
 import { IssueOrder, IssueSort } from "../src/github/issues.ts";
 import { RUN_STATE_VERSION, RunStateStatus } from "../src/run/state.ts";
+import { makeProgressRecorder } from "../src/progress/progress.ts";
 
 describe("native CLI parser", () => {
     test("documents maintenance mode and duplicate policy in help", () => {
         expect(HELP_TEXT).toContain("maintain-issues");
         expect(HELP_TEXT).toContain("--duplicate-action");
         expect(HELP_TEXT).toContain("--on-needs-attention <halt|continue>");
+        expect(HELP_TEXT).toContain("--notify-needs-attention");
+        expect(HELP_TEXT).toContain("--needs-attention-label <name>");
         expect(HELP_TEXT).toContain("default halt");
         expect(HELP_TEXT).toContain("default link");
     });
@@ -61,6 +64,30 @@ describe("native CLI parser", () => {
         expect(() =>
             parseCliArgs(["owner/repository", "--on-needs-attention", "retry"]),
         ).toThrow();
+    });
+
+    test("parses the opt-in notification flag and trims its label", () => {
+        const options = parseCliArgs([
+            "owner/repository",
+            "--notify-needs-attention",
+            "--needs-attention-label",
+            "  blocked  ",
+        ]).options;
+
+        expect(options.notifyNeedsAttention).toBeTrue();
+        expect(options.needsAttentionLabel).toBe("blocked");
+    });
+
+    test("rejects a needs-attention label without notification opt-in", () => {
+        expect(() =>
+            parseCliArgs([
+                "owner/repository",
+                "--needs-attention-label",
+                "blocked",
+            ]),
+        ).toThrow(
+            "Option --needs-attention-label requires --notify-needs-attention.",
+        );
     });
 
     test("rejects a conflicting resume policy before creating runtime resources", async () => {
@@ -107,6 +134,61 @@ describe("native CLI parser", () => {
                 ),
             ).rejects.toThrow("saved on-needs-attention policy is continue");
             expect(sideEffects).toEqual([]);
+        } finally {
+            await rm(directory, { recursive: true, force: true });
+        }
+    });
+
+    test("passes saved notification intent and label through resume", async () => {
+        const directory = await mkdtemp(join(tmpdir(), "ralphie-command-"));
+        const path = join(directory, "state.json");
+        let workflowOptions: Record<string, unknown> | undefined;
+        try {
+            await writeFile(
+                path,
+                JSON.stringify({
+                    version: RUN_STATE_VERSION,
+                    status: RunStateStatus.Active,
+                    runId: "run-notification-resume",
+                    repository: "owner/repository",
+                    branch: "main",
+                    onNeedsAttention: NeedsAttentionPolicy.Halt,
+                    notificationsEnabled: true,
+                    needsAttentionLabel: "saved-label",
+                    selection: { agent: "build" },
+                    queue: {
+                        pending: [],
+                        completedIssueNumbers: [],
+                        processedCount: 0,
+                    },
+                    outcomes: [],
+                    updatedAt: "2026-08-24T00:00:00.000Z",
+                }),
+            );
+
+            await runCommand(["owner/repository", "--resume", path], {
+                factories: {
+                    makeCoordinator: () => ({
+                        progress: makeProgressRecorder([]),
+                        piListener: () => {},
+                        listener: () => {},
+                        piEventListener: () => {},
+                        getDisplayState: () => ({}) as never,
+                        dispose: async () => {},
+                    }),
+                    makePi: () => ({ start: async () => undefined as never }),
+                    makeRuntime: () => ({}) as never,
+                    runWorkflow: async (options) => {
+                        workflowOptions = options as Record<string, unknown>;
+                        return undefined as never;
+                    },
+                },
+            });
+
+            expect(workflowOptions).toMatchObject({
+                notificationsEnabled: true,
+                needsAttentionLabel: "saved-label",
+            });
         } finally {
             await rm(directory, { recursive: true, force: true });
         }

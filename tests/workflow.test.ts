@@ -404,6 +404,29 @@ describe("workflow", () => {
         );
     });
 
+    test("keeps completed issue closure unchanged when notifications are enabled", async () => {
+        const calls: string[] = [];
+        let notified = false;
+        const summary = await workflow(
+            {
+                ...baseOptions,
+                notificationsEnabled: true,
+            },
+            testRuntime(calls, [], {
+                needsAttentionNotification: {
+                    notify: async () => {
+                        notified = true;
+                        return { comment: "created", label: "applied" };
+                    },
+                },
+            }),
+        );
+
+        expect(summary.counts.completed).toBe(1);
+        expect(notified).toBeFalse();
+        expect(calls).toContain("closeIssue:42");
+    });
+
     test("uses an issue branch and merged pull request without closing the issue directly", async () => {
         const calls: string[] = [];
         const states: RunState[] = [];

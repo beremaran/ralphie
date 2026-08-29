@@ -559,6 +559,8 @@ HTTPS/SSH clone URL.
 | `--mode <mode>` | `issues` | Select `issues`, `maintain-issues`, or `get-pipelines-green`. |
 | `--workflow <mode>` | `lgtm` | Select direct-push `lgtm` or automatically merged `pr` delivery in issue mode. |
 | `--on-needs-attention <policy>` | `halt` | Halt with exit status `2`, or `continue` through the remaining queue, when an issue needs attention. |
+| `--notify-needs-attention` | off | Opt in to publishing needs-attention outcomes as an idempotent GitHub comment and optional label. Notifications are never enabled implicitly. |
+| `--needs-attention-label <name>` | none | Add a trimmed, non-empty label to needs-attention notifications; requires `--notify-needs-attention`. |
 | `--duplicate-action <action>` | `link` | In maintenance mode, link duplicates or close them. |
 | `-b, --branch <name>` | `main`, otherwise `master` | Base branch; `lgtm` pushes it directly, while PR workflows open against it. |
 | `--max-issues <count>` | unlimited | Positive maximum number of issues charged to this run. |
@@ -647,12 +649,15 @@ A validated needs-attention decision is not an ordinary failure. Ralphie
 persists its explicit policy plus the summary, evidence, questions, and issue
 freshness metadata in the run artifacts. With the default `halt` policy, the
 handled stop leaves the issue open and the run resumable with exit status 2.
-When needs-attention notifications are enabled by the workflow, Ralphie first
-persists the structured outcome and notification label intent, then publishes
-through the GitHub notification service. A failed or uncertain notification
-remains at an explicit notification-recovery boundary; resume reconciles the
-stable marker and retries without rerunning agent work or closing the issue.
-With `--on-needs-attention continue`, the issue remains open while later work is
+Notifications are disabled unless `--notify-needs-attention` is supplied; a
+label by itself is rejected. When opted in, Ralphie first persists the
+structured outcome and notification label intent, then publishes through the
+GitHub notification service. A failed or uncertain notification remains at an
+explicit notification-recovery boundary; resume preserves the saved
+notification intent and label, reconciles the stable marker, and retries
+without rerunning agent work or closing the issue. Dry runs report
+needs-attention outcomes but never publish notifications. With
+`--on-needs-attention continue`, the issue remains open while later work is
 drained; a drained run completes with exit status 0. When a mutating agent's
 needs-attention request is confirmed by grounding, recovery first writes a
 bounded binary-safe patch and decision diagnostic, then restores and verifies

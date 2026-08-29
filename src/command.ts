@@ -52,6 +52,8 @@ const cliOptions = {
     branch: { type: "string", short: "b" },
     workflow: { type: "string" },
     "on-needs-attention": { type: "string" },
+    "notify-needs-attention": { type: "boolean" },
+    "needs-attention-label": { type: "string" },
     "duplicate-action": { type: "string" },
     "max-issues": { type: "string" },
     "issue-label": { type: "string", multiple: true },
@@ -183,6 +185,15 @@ const parseRepeatedStrings = (
     );
 };
 
+const parseNotificationOptions = (values: Record<string, unknown>) => ({
+    ...(values["notify-needs-attention"] === undefined
+        ? {}
+        : {
+              notifyNeedsAttention: asBoolean(values, "notify-needs-attention"),
+          }),
+    needsAttentionLabel: asNonEmptyString(values, "needs-attention-label"),
+});
+
 const parseCliOptions = (
     values: Record<string, unknown>,
     repo: string | undefined,
@@ -196,6 +207,7 @@ const parseCliOptions = (
 
     const modelValue = asString(values, "model");
     const onNeedsAttention = parseNeedsAttentionPolicy(values);
+    const notificationOptions = parseNotificationOptions(values);
     const duplicateActionValue = asNonEmptyString(values, "duplicate-action");
     const duplicateAction =
         duplicateActionValue === undefined
@@ -220,6 +232,7 @@ const parseCliOptions = (
                 ? undefined
                 : z.enum(WorkflowMode).parse(asString(values, "workflow")),
         onNeedsAttention,
+        ...notificationOptions,
         ...(duplicateAction === undefined ? {} : { duplicateAction }),
         maxIssues: asNumber(values, "max-issues"),
         issueLabels: parseIssueLabels(values),
@@ -321,6 +334,9 @@ Options:
       --workflow <mode>        Issue workflow: lgtm or pr (issues mode only)
       --on-needs-attention <halt|continue>
                                Needs-attention policy (default halt; issues mode only)
+      --notify-needs-attention Enable needs-attention GitHub notifications (default disabled)
+      --needs-attention-label <name>
+                               Add this label to notifications (requires the opt-in flag)
       --duplicate-action <link|close>
                                Duplicate handling in maintain-issues mode (default link)
       --max-issues <n>         Maximum issues to process
@@ -505,6 +521,10 @@ const workflowOptionsFor = (
     resumePath: config.resume,
     dryRun: config.dryRun,
     onNeedsAttention: resumeState?.onNeedsAttention ?? config.onNeedsAttention,
+    notificationsEnabled:
+        resumeState?.notificationsEnabled ?? config.notificationsEnabled,
+    needsAttentionLabel:
+        resumeState?.needsAttentionLabel ?? config.needsAttentionLabel,
 });
 
 /** Execute one Ralphie command. */

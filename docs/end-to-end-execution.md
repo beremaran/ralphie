@@ -428,7 +428,9 @@ stateDiagram-v2
 - A needs-attention outcome uses `--on-needs-attention halt` by default. Ralphie
   persists the active run, emits a handled-stop summary with all outcome counts,
   releases Pi, and handles the stop with exit code `2` rather than reporting an
-  ordinary issue failure. When notification is enabled, the outcome and label
+  ordinary issue failure. Notifications require the explicit
+  `--notify-needs-attention` opt-in; `--needs-attention-label` is rejected
+  without it, and dry runs never notify. When enabled, the outcome and label
   intent are persisted before GitHub mutation; a failed notification stops at
   `notification-recovery` and retains the original needs-attention outcome for
   resume. `continue` drains the queue; a drained run completes with exit code
