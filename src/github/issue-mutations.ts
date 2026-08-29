@@ -1,7 +1,7 @@
 import type { Octokit } from "octokit";
 
 import { RalphieError } from "../shared/error.ts";
-import type { GitHubIssue } from "./issues.ts";
+import { mapGitHubIssue, type GitHubIssue } from "./issues.ts";
 import { parseRepositorySlug } from "./repository.ts";
 
 /** Reasons accepted by GitHub when closing an issue. */
@@ -58,29 +58,6 @@ export type GitHubIssueMutationService = {
     ) => Promise<GitHubIssue>;
 };
 
-const mapIssue = (issue: {
-    readonly number: number;
-    readonly title: string;
-    readonly html_url: string;
-    readonly body?: string | null;
-    readonly labels?: ReadonlyArray<
-        | string
-        | {
-              readonly name?: string | null;
-          }
-    >;
-}): GitHubIssue => ({
-    number: issue.number,
-    title: issue.title,
-    url: issue.html_url,
-    body: issue.body ?? null,
-    labels:
-        issue.labels?.flatMap((label) => {
-            if (typeof label === "string") return [label];
-            return label.name ? [label.name] : [];
-        }) ?? [],
-});
-
 const repositoryParameters = (repository: string) => {
     const { slug } = parseRepositorySlug(repository);
     const [owner, repo] = slug.split("/") as [string, string];
@@ -105,7 +82,7 @@ const updateAndReconcileClose = async (
             state: "closed",
             state_reason: reason,
         });
-        return mapIssue(response.data);
+        return mapGitHubIssue(response.data);
     } catch (cause) {
         // The update may have reached GitHub even when its response was lost.
         const reconciled = await client.rest.issues.get(parameters);
@@ -113,7 +90,7 @@ const updateAndReconcileClose = async (
             reconciled.data.state === "closed" &&
             reconciled.data.state_reason === reason
         ) {
-            return mapIssue(reconciled.data);
+            return mapGitHubIssue(reconciled.data);
         }
         throw cause;
     }
@@ -136,7 +113,7 @@ const closeIssue = async (
                 message: `Issue #${issueNumber} is already closed with reason ${current.data.state_reason ?? "unknown"}, not ${reason}.`,
             });
         }
-        return mapIssue(current.data);
+        return mapGitHubIssue(current.data);
     }
     return updateAndReconcileClose(client, parameters, reason);
 };
@@ -150,7 +127,7 @@ export const makeGitHubIssueMutationsService =
                     title: input.title,
                     body: input.body,
                 });
-                return mapIssue(response.data);
+                return mapGitHubIssue(response.data);
             } catch (cause) {
                 throw mutationError(
                     `Failed to create an issue in ${repository}.`,
@@ -175,7 +152,7 @@ export const makeGitHubIssueMutationsService =
                         : { title: input.title }),
                     ...(input.body === undefined ? {} : { body: input.body }),
                 });
-                return mapIssue(response.data);
+                return mapGitHubIssue(response.data);
             } catch (cause) {
                 throw mutationError(
                     `Failed to update issue #${issueNumber} in ${repository}.`,

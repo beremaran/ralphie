@@ -36,6 +36,9 @@ export const makeIssueExecutorService = (
     const freshnessFingerprint = (context: IssueExecutionContext) => ({
         updatedAt: context.issue.updatedAt ?? "1970-01-01T00:00:00.000Z",
         commentCount: context.issue.commentCount ?? 0,
+        ...(context.issue.commentVersion === undefined
+            ? {}
+            : { commentVersion: context.issue.commentVersion }),
     });
 
     const assessGrounding = async (

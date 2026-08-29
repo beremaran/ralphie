@@ -135,6 +135,7 @@ const testRuntime = (
     };
     const githubIssues: GitHubIssuesService = {
         listDecompositionChildren: async () => [],
+        refresh: async () => firstIssue,
         listOpen: async (_client, repo, filters) => {
             calls.push(
                 `listIssues:${repo}:${filters.labels.join(",")}:${filters.sort}:${filters.order}`,

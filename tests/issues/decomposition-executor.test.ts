@@ -59,6 +59,8 @@ const issueResponse = (
         body,
         labels: [],
         state,
+        updated_at: "2026-08-28T00:00:00.000Z",
+        comments: 0,
         state_reason: stateReason,
     },
 });
@@ -107,6 +109,7 @@ const run = async (
 ) => {
     const issues: GitHubIssuesService = {
         listOpen: async () => [],
+        refresh: async () => discoveredChildren[0]!,
         listDecompositionChildren: async () => discoveredChildren,
     };
     const executor = makeDecompositionExecutorService(

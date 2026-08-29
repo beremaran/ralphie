@@ -101,6 +101,13 @@ export const createIssueQueue = (
                 issue: {
                     ...entry.issue,
                     labels: [...entry.issue.labels],
+                    ...(entry.issue.comments === undefined
+                        ? {}
+                        : {
+                              comments: entry.issue.comments.map((comment) => ({
+                                  ...comment,
+                              })),
+                          }),
                 },
                 dependsOn: [...(entry.dependsOn ?? [])],
             })),

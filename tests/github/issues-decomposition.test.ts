@@ -20,6 +20,9 @@ describe("GitHub decomposition issue discovery", () => {
                         html_url:
                             "https://github.com/owner/repository/issues/101",
                         body: '<!-- ralphie:decomposition root=42 parent=42 key="storage" depth=1 -->\nBody',
+                        state: "closed",
+                        updated_at: "2026-08-28T00:00:00.000Z",
+                        comments: 2,
                         labels: [{ name: "generated" }],
                     },
                     {
@@ -63,6 +66,11 @@ describe("GitHub decomposition issue discovery", () => {
                 url: "https://github.com/owner/repository/issues/101",
                 body: '<!-- ralphie:decomposition root=42 parent=42 key="storage" depth=1 -->\nBody',
                 labels: ["generated"],
+                state: "closed",
+                updatedAt: "2026-08-28T00:00:00.000Z",
+                comments: [],
+                commentCount: 2,
+                commentVersion: "2026-08-28T00:00:00.000Z",
                 decompositionKey: "storage",
             },
         ]);

@@ -26,8 +26,20 @@ const issueSchema = z.object({
     url: z.string(),
     body: z.string().nullable(),
     labels: z.array(z.string()),
+    state: z.enum(["open", "closed"]).optional(),
     updatedAt: z.string().datetime().optional(),
+    comments: z
+        .array(
+            z.object({
+                id: z.number().int().positive(),
+                body: z.string(),
+                updatedAt: z.string().datetime(),
+            }),
+        )
+        .readonly()
+        .optional(),
     commentCount: z.number().int().nonnegative().optional(),
+    commentVersion: z.string().min(1).optional(),
 });
 
 const currentOutcomeSchema = z.union([

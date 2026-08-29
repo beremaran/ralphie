@@ -22,6 +22,8 @@ const issueResponse = (
         body,
         labels: [{ name: "bug" }],
         state,
+        updated_at: "2026-08-28T00:00:00.000Z",
+        comments: 0,
         state_reason: stateReason,
     },
 });
@@ -60,6 +62,11 @@ describe("GitHub issue mutations", () => {
             url: "https://github.com/owner/repository/issues/31",
             body: "Child body",
             labels: ["bug"],
+            state: "open",
+            updatedAt: "2026-08-28T00:00:00.000Z",
+            comments: [],
+            commentCount: 0,
+            commentVersion: "2026-08-28T00:00:00.000Z",
         });
     });
 

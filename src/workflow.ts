@@ -203,10 +203,27 @@ const persistWorkflowState = async (
     const pending = snapshot.pending.map(({ issue }) => ({
         ...issue,
         labels: [...issue.labels],
+        ...(issue.comments === undefined
+            ? {}
+            : {
+                  comments: issue.comments.map((comment) => ({
+                      ...comment,
+                  })),
+              }),
     }));
     for (const issue of input.activeQueueIssues.values()) {
         if (!pending.some(({ number }) => number === issue.number)) {
-            pending.unshift({ ...issue, labels: [...issue.labels] });
+            pending.unshift({
+                ...issue,
+                labels: [...issue.labels],
+                ...(issue.comments === undefined
+                    ? {}
+                    : {
+                          comments: issue.comments.map((comment) => ({
+                              ...comment,
+                          })),
+                      }),
+            });
         }
     }
     const processedCount =

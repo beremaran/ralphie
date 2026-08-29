@@ -50,6 +50,8 @@ type StoredIssue = {
     body: string;
     state: "open" | "closed";
     state_reason?: string;
+    updated_at: string;
+    comments: number;
     html_url: string;
     labels: ReadonlyArray<string>;
 };
@@ -63,6 +65,8 @@ const makeOctokit = () => {
                 title: "Modernize persistence",
                 body: "Preserve this original issue content.",
                 state: "open",
+                updated_at: "2026-08-28T00:00:00.000Z",
+                comments: 0,
                 html_url: "https://github.com/owner/repository/issues/42",
                 labels: ["architecture"],
             },
@@ -96,6 +100,8 @@ const makeOctokit = () => {
                         title: String(parameters.title),
                         body: String(parameters.body ?? ""),
                         state: "open",
+                        updated_at: "2026-08-28T00:00:00.000Z",
+                        comments: 0,
                         html_url: `https://github.com/owner/repository/issues/${number}`,
                         labels: [],
                     };

@@ -202,6 +202,7 @@ const decompositionService = (state: {
     };
     const issues: GitHubIssuesService = {
         listOpen: async () => [],
+        refresh: async () => issue(42, "Issue body"),
         listDecompositionChildren: async () => [],
     };
     return makeDecompositionExecutorService(
