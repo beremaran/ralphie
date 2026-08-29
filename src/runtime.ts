@@ -43,6 +43,10 @@ import {
     type GitHubPullRequestService,
 } from "./github/pull-requests.ts";
 import {
+    makeGitHubNeedsAttentionNotificationService,
+    type GitHubNeedsAttentionNotificationService,
+} from "./github/needs-attention.ts";
+import {
     makeIssueArtifactStoreService,
     type IssueArtifactStoreService,
 } from "./issues/artifacts.ts";
@@ -91,6 +95,8 @@ export type RalphieRuntime = {
     readonly githubIssues: GitHubIssuesService;
     readonly githubIssueMutations: GitHubIssueMutationService;
     readonly githubPullRequests: GitHubPullRequestService;
+    /** Publishes structured needs-attention outcomes outside issue execution. */
+    readonly githubNeedsAttentionNotification: GitHubNeedsAttentionNotificationService;
     readonly gitRepository: GitRepositoryService;
     readonly gitRepositoryInvariant: GitRepositoryInvariantService;
     readonly gitIssueCheckpoint: GitIssueCheckpointService;
@@ -133,6 +139,8 @@ export const makeLiveRuntime = ({
     const githubIssues = makeGitHubIssuesService();
     const githubIssueMutations = makeGitHubIssueMutationsService();
     const githubPullRequests = makeGitHubPullRequestService();
+    const githubNeedsAttentionNotification =
+        makeGitHubNeedsAttentionNotificationService();
     const gitRepository = makeGitRepositoryService(commandRunner);
     const gitRepositoryInvariant =
         makeGitRepositoryInvariantService(commandRunner);
@@ -187,6 +195,7 @@ export const makeLiveRuntime = ({
         githubIssues,
         githubIssueMutations,
         githubPullRequests,
+        githubNeedsAttentionNotification,
         gitRepository,
         gitRepositoryInvariant,
         gitIssueCheckpoint,

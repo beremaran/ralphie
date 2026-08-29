@@ -10,6 +10,7 @@ import type { GitIssueOperationsService } from "../src/git/issue-operations.ts";
 import type { GitHubClientService } from "../src/github/client.ts";
 import type { GitHubPullRequestService } from "../src/github/pull-requests.ts";
 import type { GitHubIssueMutationService } from "../src/github/issue-mutations.ts";
+import type { GitHubNeedsAttentionNotificationService } from "../src/github/needs-attention.ts";
 import type { GitHubIssue, GitHubIssuesService } from "../src/github/issues.ts";
 import {
     type IssueCompletionKind,
@@ -72,6 +73,9 @@ type TestRuntimeOptions = {
     readonly failPiReadyProgress?: boolean;
     readonly executionContexts?: IssueExecutionContext[];
     readonly executeGate?: (context: IssueExecutionContext) => Promise<void>;
+    readonly needsAttentionNotification?: GitHubNeedsAttentionNotificationService;
+    readonly dryRunOutcome?: IssueExecutionOutcome;
+    readonly onStateSave?: (state: RunState) => void;
 };
 
 const testRuntime = (
@@ -253,11 +257,13 @@ const testRuntime = (
     const dryRunIssueExecutor: DryRunIssueExecutorService = {
         execute: async ({ issue }) => {
             calls.push(`dryRunIssue:${issue.number}`);
-            return {
-                kind: IssueExecutionOutcomeKind.Skipped,
-                route: "implementation",
-                reason: "dry run",
-            };
+            return (
+                options.dryRunOutcome ?? {
+                    kind: IssueExecutionOutcomeKind.Skipped,
+                    route: "implementation",
+                    reason: "dry run",
+                }
+            );
         },
     };
     const pi: PiService = {
@@ -279,7 +285,9 @@ const testRuntime = (
             throw new RalphieError({ message: "unused" });
         },
         save: async (_path, state) => {
-            savedStates.push(structuredClone(state));
+            const saved = structuredClone(state);
+            savedStates.push(saved);
+            options.onStateSave?.(saved);
         },
     };
     const workspace: WorkspaceService = {
@@ -312,6 +320,12 @@ const testRuntime = (
         githubIssues,
         githubIssueMutations: mutations,
         githubPullRequests: pullRequests,
+        githubNeedsAttentionNotification:
+            options.needsAttentionNotification ?? {
+                notify: async () => {
+                    throw new Error("unused");
+                },
+            },
         gitRepository: repository,
         gitRepositoryInvariant: invariant,
         gitIssueCheckpoint: checkpoint,
@@ -627,6 +641,303 @@ describe("workflow", () => {
             }),
         );
         expect(calls).not.toContain("closeIssue:42");
+    });
+
+    test("persists the needs-attention outcome before notification and clears the intent after success", async () => {
+        const calls: string[] = [];
+        const states: RunState[] = [];
+        const saveSequence: string[] = [];
+        let received:
+            | {
+                  readonly repository: string;
+                  readonly issueNumber: number;
+                  readonly reason: NeedsAttentionReason;
+                  readonly labelName?: string;
+              }
+            | undefined;
+        const notification: GitHubNeedsAttentionNotificationService = {
+            notify: async (
+                _client,
+                repository,
+                issueNumber,
+                input,
+                labelName,
+            ) => {
+                saveSequence.push("notify");
+                received = {
+                    repository,
+                    issueNumber,
+                    reason: input.reason,
+                    ...(labelName === undefined ? {} : { labelName }),
+                };
+                return { comment: "created", label: "applied" };
+            },
+        };
+        await workflow(
+            {
+                ...baseOptions,
+                notificationsEnabled: true,
+                needsAttentionLabel: "needs-attention",
+            },
+            testRuntime(calls, states, {
+                needsAttentionNotification: notification,
+                outcomes: [
+                    {
+                        kind: IssueExecutionOutcomeKind.NeedsAttention,
+                        reason: NeedsAttentionReason.ExternalDependency,
+                        summary: "A prerequisite is still open.",
+                        evidence: ["The prerequisite is unresolved."],
+                        questions: ["When will it be available?"],
+                        artifactPath: "/tmp/needs-attention.json",
+                    },
+                ],
+                onStateSave: (state) =>
+                    saveSequence.push(
+                        state.pendingNotification === undefined
+                            ? "save"
+                            : "save-pending",
+                    ),
+            }),
+        );
+
+        expect(received).toEqual({
+            repository: "owner/repo",
+            issueNumber: 42,
+            reason: NeedsAttentionReason.ExternalDependency,
+            labelName: "needs-attention",
+        });
+        expect(saveSequence.indexOf("save-pending")).toBeGreaterThanOrEqual(0);
+        expect(saveSequence.indexOf("notify")).toBeGreaterThan(
+            saveSequence.indexOf("save-pending"),
+        );
+        expect(
+            states.some(({ pendingNotification }) => pendingNotification),
+        ).toBeTrue();
+        expect(states.at(-1)?.pendingNotification).toBeUndefined();
+        expect(states.at(-1)?.outcomes[0]?.outcome.kind).toBe(
+            IssueExecutionOutcomeKind.NeedsAttention,
+        );
+    });
+
+    test("retains a halted open issue after a successful notification", async () => {
+        const states: RunState[] = [];
+        const notification: GitHubNeedsAttentionNotificationService = {
+            notify: async () => ({
+                comment: "created",
+                label: "not-configured",
+            }),
+        };
+
+        await expect(
+            workflow(
+                {
+                    ...baseOptions,
+                    onNeedsAttention: NeedsAttentionPolicy.Halt,
+                    notificationsEnabled: true,
+                },
+                testRuntime([], states, {
+                    needsAttentionNotification: notification,
+                    outcomes: [
+                        {
+                            kind: IssueExecutionOutcomeKind.NeedsAttention,
+                            reason: NeedsAttentionReason.ExternalDependency,
+                            summary: "A prerequisite is still open.",
+                            evidence: ["The prerequisite is unresolved."],
+                            questions: ["When will it be available?"],
+                            artifactPath: "/tmp/needs-attention.json",
+                        },
+                    ],
+                }),
+            ),
+        ).rejects.toMatchObject({ _tag: "NeedsAttentionStop" });
+
+        const state = states.at(-1);
+        if (state === undefined) throw new Error("Missing halted state");
+        expect(state.pendingNotification).toBeUndefined();
+        expect(state.queue.pending.map(({ number }) => number)).toContain(42);
+        expect(state.queue.completedIssueNumbers).not.toContain(42);
+        expect(state.activeIssue).toEqual({
+            issueNumber: 42,
+            stage: "grounding",
+        });
+    });
+
+    test("keeps notification recovery distinct and retries the saved outcome without Pi work", async () => {
+        const firstStates: RunState[] = [];
+        let attempts = 0;
+        const notification: GitHubNeedsAttentionNotificationService = {
+            notify: async () => {
+                attempts += 1;
+                if (attempts === 1) throw new Error("GitHub unavailable");
+                return { comment: "unchanged", label: "not-configured" };
+            },
+        };
+        const outcome: IssueExecutionOutcome = {
+            kind: IssueExecutionOutcomeKind.NeedsAttention,
+            reason: NeedsAttentionReason.ExternalDependency,
+            summary: "A prerequisite is still open.",
+            evidence: ["The prerequisite is unresolved."],
+            questions: ["When will it be available?"],
+            artifactPath: "/tmp/needs-attention.json",
+        };
+        await expect(
+            workflow(
+                {
+                    ...baseOptions,
+                    notificationsEnabled: true,
+                },
+                testRuntime([], firstStates, {
+                    needsAttentionNotification: notification,
+                    outcomes: [outcome],
+                }),
+            ),
+        ).rejects.toMatchObject({
+            _tag: "NeedsAttentionNotificationRecoveryBoundaryError",
+        });
+
+        const failedState = firstStates.at(-1);
+        if (failedState === undefined)
+            throw new Error("Missing pending notification state");
+        expect(
+            failedState.outcomes.find(({ issueNumber }) => issueNumber === 42)
+                ?.outcome,
+        ).toEqual(failedState.pendingNotification?.outcome);
+
+        const resumedStates: RunState[] = [];
+        const resumedCalls: string[] = [];
+        const summary = await workflow(
+            {
+                ...baseOptions,
+                resumeState: failedState,
+            },
+            testRuntime(resumedCalls, resumedStates, {
+                needsAttentionNotification: notification,
+                outcomes: [outcome],
+                captureStart: 1,
+            }),
+        );
+        expect(summary.counts[IssueExecutionOutcomeKind.NeedsAttention]).toBe(
+            1,
+        );
+        expect(attempts).toBe(2);
+        expect(
+            resumedCalls.some((call) => call.startsWith("executeIssue:")),
+        ).toBeFalse();
+        expect(resumedStates.at(-1)?.status).toBe(RunStateStatus.Complete);
+        expect(resumedStates.at(-1)?.pendingNotification).toBeUndefined();
+    });
+
+    test("fails closed when a disabled resumed run contains pending notification intent", async () => {
+        const calls: string[] = [];
+        let notified = false;
+        const outcome = {
+            kind: IssueExecutionOutcomeKind.NeedsAttention as const,
+            reason: NeedsAttentionReason.ExternalDependency,
+            summary: "A prerequisite is still open.",
+            evidence: ["The prerequisite is unresolved."],
+            questions: ["When will it be available?"],
+            artifactPath: "/tmp/needs-attention.json",
+        };
+        const state: RunState = {
+            version: 5,
+            status: RunStateStatus.Active,
+            runId: "disabled-notification-resume",
+            repository: baseOptions.repo,
+            branch: "develop",
+            workflow: WorkflowMode.Lgtm,
+            onNeedsAttention: NeedsAttentionPolicy.Continue,
+            dryRun: false,
+            notificationsEnabled: false,
+            selection: { agent: DEFAULT_PI_AGENT },
+            maxIssues: 1,
+            queue: {
+                pending: [{ ...firstIssue, labels: [...firstIssue.labels] }],
+                completedIssueNumbers: [],
+                processedCount: 0,
+            },
+            outcomes: [{ issueNumber: 42, outcome }],
+            activeIssue: { issueNumber: 42, stage: "notification-recovery" },
+            pendingNotification: { issueNumber: 42, outcome },
+            checkout: { branch: "develop", head: "head-0" },
+            updatedAt: "2026-08-28T00:00:00.000Z",
+        };
+        const notification: GitHubNeedsAttentionNotificationService = {
+            notify: async () => {
+                notified = true;
+                return { comment: "created", label: "applied" };
+            },
+        };
+
+        await expect(
+            workflow(
+                { ...baseOptions, resumeState: state },
+                testRuntime(calls, [], {
+                    needsAttentionNotification: notification,
+                }),
+            ),
+        ).rejects.toMatchObject({
+            _tag: "NeedsAttentionNotificationRecoveryBoundaryError",
+        });
+        expect(notified).toBeFalse();
+        expect(calls).not.toContain("startServer");
+    });
+
+    test("does not notify when needs-attention notifications are disabled", async () => {
+        const states: RunState[] = [];
+        let notified = false;
+        const notification: GitHubNeedsAttentionNotificationService = {
+            notify: async () => {
+                notified = true;
+                return { comment: "created", label: "not-configured" };
+            },
+        };
+        await workflow(
+            { ...baseOptions, notificationsEnabled: false },
+            testRuntime([], states, {
+                needsAttentionNotification: notification,
+                outcomes: [
+                    {
+                        kind: IssueExecutionOutcomeKind.NeedsAttention,
+                        reason: NeedsAttentionReason.ExternalDependency,
+                        summary: "A prerequisite is still open.",
+                        evidence: ["The prerequisite is unresolved."],
+                        questions: ["When will it be available?"],
+                        artifactPath: "/tmp/needs-attention.json",
+                    },
+                ],
+            }),
+        );
+        expect(notified).toBeFalse();
+        expect(states.at(-1)?.pendingNotification).toBeUndefined();
+    });
+
+    test("does not notify during a dry run", async () => {
+        let notified = false;
+        const notification: GitHubNeedsAttentionNotificationService = {
+            notify: async () => {
+                notified = true;
+                return { comment: "created", label: "not-configured" };
+            },
+        };
+        await workflow(
+            {
+                ...baseOptions,
+                dryRun: true,
+                notificationsEnabled: true,
+            },
+            testRuntime([], [], {
+                needsAttentionNotification: notification,
+                dryRunOutcome: {
+                    kind: IssueExecutionOutcomeKind.NeedsAttention,
+                    reason: NeedsAttentionReason.ExternalDependency,
+                    summary: "A prerequisite is still open.",
+                    evidence: ["The prerequisite is unresolved."],
+                    questions: ["When will it be available?"],
+                    route: "needs-attention",
+                },
+            }),
+        );
+        expect(notified).toBeFalse();
     });
 
     test("does not deliver a PR branch for a needs-attention outcome", async () => {

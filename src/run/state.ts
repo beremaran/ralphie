@@ -18,7 +18,7 @@ import {
     WorkflowMode,
 } from "../options.ts";
 
-export const RUN_STATE_VERSION = 4 as const;
+export const RUN_STATE_VERSION = 5 as const;
 
 const dryRunRouteSchema = z.enum(DRY_RUN_ROUTES);
 
@@ -49,6 +49,44 @@ const issueSchema = z.object({
     commentVersion: z.string().min(1).optional(),
 });
 
+const needsAttentionOutcomeSchema = z.union([
+    z
+        .object({
+            kind: z.literal(IssueExecutionOutcomeKind.NeedsAttention),
+            reason: z.enum(NeedsAttentionReason),
+            summary: nonBlankStringSchema,
+            evidence: z.array(nonBlankStringSchema).min(1),
+            questions: z.array(nonBlankStringSchema).min(1),
+            artifactPath: z.string().min(1),
+            route: z.literal("needs-attention").optional(),
+            policy: z.enum(NeedsAttentionPolicy).optional(),
+        })
+        .strict(),
+    z
+        .object({
+            kind: z.literal(IssueExecutionOutcomeKind.NeedsAttention),
+            reason: z.enum(NeedsAttentionReason),
+            summary: nonBlankStringSchema,
+            evidence: z.array(nonBlankStringSchema).min(1),
+            questions: z.array(nonBlankStringSchema).min(1),
+            diagnosticsPath: z.string().min(1),
+            route: z.literal("needs-attention").optional(),
+            policy: z.enum(NeedsAttentionPolicy).optional(),
+        })
+        .strict(),
+    z
+        .object({
+            kind: z.literal(IssueExecutionOutcomeKind.NeedsAttention),
+            reason: z.enum(NeedsAttentionReason),
+            summary: nonBlankStringSchema,
+            evidence: z.array(nonBlankStringSchema).min(1),
+            questions: z.array(nonBlankStringSchema).min(1),
+            route: z.literal("needs-attention"),
+            policy: z.enum(NeedsAttentionPolicy).optional(),
+        })
+        .strict(),
+]);
+
 const currentOutcomeSchema = z.union([
     z.object({
         kind: z.literal(IssueExecutionOutcomeKind.Completed),
@@ -72,43 +110,7 @@ const currentOutcomeSchema = z.union([
         reason: z.string().min(1),
         childIssueNumbers: z.array(z.number().int().positive()).optional(),
     }),
-    z.union([
-        z
-            .object({
-                kind: z.literal(IssueExecutionOutcomeKind.NeedsAttention),
-                reason: z.enum(NeedsAttentionReason),
-                summary: nonBlankStringSchema,
-                evidence: z.array(nonBlankStringSchema).min(1),
-                questions: z.array(nonBlankStringSchema).min(1),
-                artifactPath: z.string().min(1),
-                route: z.literal("needs-attention").optional(),
-                policy: z.enum(NeedsAttentionPolicy).optional(),
-            })
-            .strict(),
-        z
-            .object({
-                kind: z.literal(IssueExecutionOutcomeKind.NeedsAttention),
-                reason: z.enum(NeedsAttentionReason),
-                summary: nonBlankStringSchema,
-                evidence: z.array(nonBlankStringSchema).min(1),
-                questions: z.array(nonBlankStringSchema).min(1),
-                diagnosticsPath: z.string().min(1),
-                route: z.literal("needs-attention").optional(),
-                policy: z.enum(NeedsAttentionPolicy).optional(),
-            })
-            .strict(),
-        z
-            .object({
-                kind: z.literal(IssueExecutionOutcomeKind.NeedsAttention),
-                reason: z.enum(NeedsAttentionReason),
-                summary: nonBlankStringSchema,
-                evidence: z.array(nonBlankStringSchema).min(1),
-                questions: z.array(nonBlankStringSchema).min(1),
-                route: z.literal("needs-attention"),
-                policy: z.enum(NeedsAttentionPolicy).optional(),
-            })
-            .strict(),
-    ]),
+    needsAttentionOutcomeSchema,
     z
         .object({
             kind: z.literal(IssueExecutionOutcomeKind.Skipped),
@@ -149,6 +151,17 @@ const runStateFields = {
     workflow: z.enum(WorkflowMode).optional(),
     onNeedsAttention: z.enum(NeedsAttentionPolicy),
     dryRun: z.boolean().optional(),
+    /** Whether needs-attention outcomes should be published to GitHub. */
+    notificationsEnabled: z.boolean().optional(),
+    needsAttentionLabel: z.string().trim().min(1).optional(),
+    pendingNotification: z
+        .object({
+            issueNumber: z.number().int().positive(),
+            outcome: needsAttentionOutcomeSchema,
+            labelName: z.string().trim().min(1).optional(),
+        })
+        .strict()
+        .optional(),
     selection: z.object({
         agent: z.string().min(1),
         model: z
@@ -192,12 +205,15 @@ export const runStateSchema = z.object({
 });
 
 const legacyRunStateSchema = z.object({
-    version: z.union([z.literal(2), z.literal(3)]),
+    version: z.union([z.literal(2), z.literal(3), z.literal(4)]),
     ...runStateFields,
     onNeedsAttention: z.enum(NeedsAttentionPolicy).optional(),
 });
 
-export type RunState = z.infer<typeof runStateSchema>;
+// Keep version 4 resumable as an in-memory input while all newly persisted
+// state is validated as version 5 by runStateSchema.
+type RunStateFields = z.infer<z.ZodObject<typeof runStateFields>>;
+export type RunState = RunStateFields & { readonly version: 4 | 5 };
 
 type LoadedRunState = {
     readonly state: RunState;
@@ -209,7 +225,7 @@ const migrateRunState = (value: unknown): LoadedRunState => {
         typeof value === "object" &&
         value !== null &&
         "version" in value &&
-        (value.version === 2 || value.version === 3)
+        (value.version === 2 || value.version === 3 || value.version === 4)
     ) {
         const legacy = legacyRunStateSchema.parse(value);
         return {
@@ -218,6 +234,7 @@ const migrateRunState = (value: unknown): LoadedRunState => {
                 version: RUN_STATE_VERSION,
                 onNeedsAttention:
                     legacy.onNeedsAttention ?? DEFAULT_NEEDS_ATTENTION_POLICY,
+                notificationsEnabled: legacy.notificationsEnabled ?? false,
             }),
             migrated: true,
         };

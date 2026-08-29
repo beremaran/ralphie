@@ -364,8 +364,9 @@ stored in this tree):
 
 `state.json` is versioned, schema-validated, and atomically replaced. It
 contains the repository/branch/workflow, selected `onNeedsAttention` policy,
-Pi selection, budget, pending and completed queue numbers, processed count,
-outcomes, active issue/stage, checkout invariant, and update time. State is
+notification settings and any pending notification intent, Pi selection, budget,
+pending and completed queue numbers, processed count, outcomes, active
+issue/stage, checkout invariant, and update time. State is
 saved before the queue starts, when an issue becomes active, after outcomes and
 queue refreshes, and at final completion.
 
@@ -385,7 +386,9 @@ Examples of resumable boundaries:
 - a checkpoint plus created commit can finish a push without rerunning the
   implementation/review loop;
 - an active `issue-closure` with a completed outcome resumes closure without
-  rerunning implementation; and
+  rerunning implementation;
+- an active `notification-recovery` retries the saved structured outcome and
+  stable GitHub marker without rerunning agent work; and
 - a partially created decomposition reuses marker-discovered children and the
   saved key mapping.
 
@@ -425,8 +428,11 @@ stateDiagram-v2
 - A needs-attention outcome uses `--on-needs-attention halt` by default. Ralphie
   persists the active run, emits a handled-stop summary with all outcome counts,
   releases Pi, and handles the stop with exit code `2` rather than reporting an
-  ordinary issue failure. `continue` drains the queue; a drained run completes
-  with exit code `0`.
+  ordinary issue failure. When notification is enabled, the outcome and label
+  intent are persisted before GitHub mutation; a failed notification stops at
+  `notification-recovery` and retains the original needs-attention outcome for
+  resume. `continue` drains the queue; a drained run completes with exit code
+  `0`.
 - Pi is closed on success, failure, cancellation, and scoped defects. Ordinary
   failures set process exit code `1`.
 - Cancellation is checked before long-running boundaries and passed into Pi.

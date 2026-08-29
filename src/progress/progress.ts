@@ -37,7 +37,8 @@ export type ProgressStage =
     | "push"
     | "decomposition"
     | "issue-creation"
-    | "issue-closure";
+    | "issue-closure"
+    | "notification-recovery";
 
 export type ProgressStatus =
     | "started"

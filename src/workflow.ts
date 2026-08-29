@@ -3,6 +3,10 @@ import { join } from "node:path";
 import { makePiSessionDiagnostics } from "./agent/task-session.ts";
 import type { PiModel, PiSelection } from "./agent/model.ts";
 import { type GitHubIssueCloseReason } from "./github/issue-mutations.ts";
+import {
+    GitHubNeedsAttentionNotificationRecoveryError,
+    type NeedsAttentionNotificationInput,
+} from "./github/needs-attention.ts";
 import type { GitHubIssue, IssueFilters } from "./github/issues.ts";
 import {
     type IssueExecutionContext,
@@ -45,6 +49,25 @@ import type { RalphieRuntime } from "./runtime.ts";
 
 const errorMessage = (error: unknown): string =>
     error instanceof Error ? error.message : String(error);
+
+/** Durable boundary reached after core needs-attention work was saved. */
+export class NeedsAttentionNotificationRecoveryBoundaryError extends RalphieError {
+    override readonly _tag =
+        "NeedsAttentionNotificationRecoveryBoundaryError" as const;
+    readonly issueNumber: number;
+
+    constructor(input: {
+        readonly issueNumber: number;
+        readonly cause: unknown;
+    }) {
+        super({
+            message: `Needs-attention notification recovery is required for issue #${input.issueNumber}.`,
+            cause: input.cause,
+        });
+        this.name = "NeedsAttentionNotificationRecoveryBoundaryError";
+        this.issueNumber = input.issueNumber;
+    }
+}
 
 const unreachableOutcome = (outcome: never): never => {
     throw new RalphieError({
@@ -89,10 +112,14 @@ const outcomeMessage = (
 };
 
 type RunStateOutcome = RunState["outcomes"][number]["outcome"];
+type RunStateNeedsAttentionOutcome = Extract<
+    RunStateOutcome,
+    { readonly kind: IssueExecutionOutcomeKind.NeedsAttention }
+>;
 
 const copyNeedsAttentionOutcome = (
     outcome: NeedsAttentionOutcome,
-): RunStateOutcome => {
+): RunStateNeedsAttentionOutcome => {
     const details = {
         kind: outcome.kind,
         reason: outcome.reason,
@@ -182,6 +209,15 @@ type NeedsAttentionOutcome = Extract<
     readonly artifactPath?: string;
     readonly diagnosticsPath?: string;
 };
+
+const needsAttentionNotificationInput = (
+    outcome: NeedsAttentionOutcome,
+): NeedsAttentionNotificationInput => ({
+    reason: outcome.reason,
+    summary: outcome.summary,
+    evidence: [...outcome.evidence],
+    questions: [...outcome.questions],
+});
 
 const needsAttentionArtifactDetails = (
     outcome: NeedsAttentionOutcome,
@@ -315,6 +351,9 @@ type PersistWorkflowStateInput = {
     readonly workflowMode: WorkflowMode;
     readonly onNeedsAttention: NeedsAttentionPolicy;
     readonly dryRun: boolean;
+    readonly notificationsEnabled: boolean;
+    readonly needsAttentionLabel?: string;
+    readonly pendingNotification?: RunState["pendingNotification"];
     readonly selection: PiSelection;
     readonly issueLimit?: number;
     readonly outcomes: ReadonlyArray<WorkflowOutcomeEntry>;
@@ -369,6 +408,13 @@ const persistWorkflowState = async (
         workflow: input.workflowMode,
         onNeedsAttention: input.onNeedsAttention,
         dryRun: input.dryRun,
+        notificationsEnabled: input.notificationsEnabled,
+        ...(input.needsAttentionLabel === undefined
+            ? {}
+            : { needsAttentionLabel: input.needsAttentionLabel }),
+        ...(input.pendingNotification === undefined
+            ? {}
+            : { pendingNotification: input.pendingNotification }),
         selection: input.selection,
         ...(input.issueLimit === undefined
             ? {}
@@ -442,6 +488,10 @@ export type WorkflowOptions = {
     readonly resumePath?: string;
     readonly issueFailurePolicy?: IssueFailurePolicy;
     readonly onNeedsAttention?: NeedsAttentionPolicy;
+    /** Publish needs-attention outcomes through the runtime notifier. */
+    readonly notificationsEnabled?: boolean;
+    /** Optional additive label applied with a needs-attention notification. */
+    readonly needsAttentionLabel?: string;
     readonly dryRun?: boolean;
 };
 
@@ -465,6 +515,8 @@ type WorkflowConfiguration = {
     readonly resumePath?: string;
     readonly issueFailurePolicy: IssueFailurePolicy;
     readonly onNeedsAttention: NeedsAttentionPolicy;
+    readonly notificationsEnabled: boolean;
+    readonly needsAttentionLabel?: string;
     readonly dryRun: boolean;
     readonly actualRunId: string;
     readonly effectiveDryRun: boolean;
@@ -503,11 +555,17 @@ const makeWorkflowConfiguration = (
         resumePath,
         issueFailurePolicy = IssueFailurePolicy,
         onNeedsAttention = DEFAULT_NEEDS_ATTENTION_POLICY,
+        notificationsEnabled = false,
+        needsAttentionLabel,
         dryRun = false,
     } = options;
     const actualRunId = resumeState?.runId ?? runId;
     const effectiveOnNeedsAttention =
         resumeState?.onNeedsAttention ?? onNeedsAttention;
+    const effectiveNotificationsEnabled =
+        resumeState?.notificationsEnabled ?? notificationsEnabled;
+    const effectiveNeedsAttentionLabel =
+        resumeState?.needsAttentionLabel ?? needsAttentionLabel;
     const effectiveDryRun = resumeState?.dryRun ?? dryRun;
     const workflowMode = resumeState?.workflow ?? requestedWorkflow;
     const usesPullRequests = workflowMode === WorkflowMode.Pr;
@@ -540,6 +598,10 @@ const makeWorkflowConfiguration = (
         resumePath,
         issueFailurePolicy,
         onNeedsAttention: effectiveOnNeedsAttention,
+        notificationsEnabled: effectiveNotificationsEnabled,
+        ...(effectiveNeedsAttentionLabel === undefined
+            ? {}
+            : { needsAttentionLabel: effectiveNeedsAttentionLabel }),
         dryRun,
         actualRunId,
         effectiveDryRun,
@@ -589,6 +651,10 @@ const emitRunStarted = async (
             runId: config.actualRunId,
             dryRun: config.effectiveDryRun,
             workflow: config.workflowMode,
+            notificationsEnabled: config.notificationsEnabled,
+            ...(config.needsAttentionLabel === undefined
+                ? {}
+                : { needsAttentionLabel: config.needsAttentionLabel }),
             policy: config.onNeedsAttention,
             onNeedsAttention: config.onNeedsAttention,
             ...(config.resumeState === undefined
@@ -687,6 +753,8 @@ export const workflow = async (
         resumePath,
         issueFailurePolicy,
         onNeedsAttention,
+        notificationsEnabled,
+        needsAttentionLabel,
         dryRun,
         actualRunId,
         effectiveDryRun,
@@ -702,6 +770,7 @@ export const workflow = async (
         githubIssues,
         githubIssueMutations: issueMutations,
         githubPullRequests,
+        githubNeedsAttentionNotification: needsAttentionNotification,
         gitRepository: repository,
         gitRepositoryInvariant: invariantService,
         gitIssueCheckpoint: checkpoints,
@@ -715,6 +784,8 @@ export const workflow = async (
     await emitRunStarted(progress, config);
 
     let activeIssue: RunState["activeIssue"] | undefined;
+    let pendingNotification: RunState["pendingNotification"] =
+        resumeState?.pendingNotification;
     const activeQueueIssues = new Map<number, GitHubIssue>();
     let persistCancellationState: (() => Promise<void>) | undefined;
     let restoreCancellationCheckout: (() => Promise<void>) | undefined;
@@ -900,6 +971,9 @@ export const workflow = async (
                         workflowMode,
                         onNeedsAttention,
                         dryRun: effectiveDryRun,
+                        notificationsEnabled,
+                        needsAttentionLabel,
+                        pendingNotification,
                         selection,
                         issueLimit: resumeState?.maxIssues ?? maxIssues,
                         outcomes,
@@ -1293,6 +1367,103 @@ export const workflow = async (
             });
         };
 
+        const publishNeedsAttentionNotification = async (
+            issueNumber: number,
+            outcome: NeedsAttentionOutcome,
+            labelName: string | undefined,
+            force = false,
+        ): Promise<void> => {
+            if ((!notificationsEnabled && !force) || effectiveDryRun) return;
+            if (needsAttentionNotification === undefined) {
+                throw new NeedsAttentionNotificationRecoveryBoundaryError({
+                    issueNumber,
+                    cause: new RalphieError({
+                        message:
+                            "Needs-attention notifications are enabled, but no notification service is available.",
+                    }),
+                });
+            }
+            await track(
+                progress,
+                "notification-recovery",
+                `Publishing needs-attention notification for issue #${issueNumber}...`,
+                () =>
+                    needsAttentionNotification.notify(
+                        octokit,
+                        repo,
+                        issueNumber,
+                        needsAttentionNotificationInput(outcome),
+                        labelName,
+                    ),
+                (result) =>
+                    `Needs-attention notification published for issue #${issueNumber} (${result.comment} comment, ${result.label} label).`,
+                { issue: { number: issueNumber, title: "Needs attention" } },
+            );
+        };
+
+        const savePendingNotification = async (
+            issueNumber: number,
+            outcome: NeedsAttentionOutcome,
+        ): Promise<NonNullable<RunState["pendingNotification"]>> => {
+            const intent: NonNullable<RunState["pendingNotification"]> = {
+                issueNumber,
+                outcome: copyNeedsAttentionOutcome(outcome),
+                ...(needsAttentionLabel === undefined
+                    ? {}
+                    : { labelName: needsAttentionLabel }),
+            };
+            pendingNotification = intent;
+            activeIssue = {
+                issueNumber,
+                stage: "notification-recovery",
+            };
+            // The outcome and its notification intent are durable before any
+            // GitHub comment or label mutation is attempted.
+            await persistState(RunStateStatus.Active, activeIssue);
+            return intent;
+        };
+
+        const publishPendingNotification = async (
+            issueNumber: number,
+            intent: NonNullable<RunState["pendingNotification"]>,
+        ): Promise<void> => {
+            try {
+                await publishNeedsAttentionNotification(
+                    issueNumber,
+                    intent.outcome as NeedsAttentionOutcome,
+                    intent.labelName,
+                    true,
+                );
+            } catch (cause) {
+                if (
+                    cause instanceof
+                        NeedsAttentionNotificationRecoveryBoundaryError ||
+                    cause instanceof
+                        GitHubNeedsAttentionNotificationRecoveryError
+                ) {
+                    throw cause;
+                }
+                throw new NeedsAttentionNotificationRecoveryBoundaryError({
+                    issueNumber,
+                    cause,
+                });
+            }
+            pendingNotification = undefined;
+        };
+
+        const clearHaltedNeedsAttention = async (
+            issueNumber: number,
+        ): Promise<void> => {
+            // Clear only the notification intent. Keep the open issue in the
+            // persisted queue without marking it completed, so resume can
+            // retry the issue after its needs-attention condition changes.
+            activeIssue = {
+                issueNumber,
+                stage: "grounding",
+            };
+            await persistState(RunStateStatus.Active, activeIssue);
+        };
+
         const handleFailedIssue = async (
             issueContext: WorkflowIssueContext,
             outcome: Extract<
@@ -1321,11 +1492,27 @@ export const workflow = async (
         ): Promise<void> => {
             checkout = await captureNeedsAttentionCheckout(issueContext);
             await emitNeedsAttentionEvent(issueContext, outcome);
+            const notificationEnabled =
+                notificationsEnabled && !effectiveDryRun;
+            if (notificationEnabled) {
+                const intent = await savePendingNotification(
+                    issueContext.issue.number,
+                    outcome,
+                );
+                await publishPendingNotification(
+                    issueContext.issue.number,
+                    intent,
+                );
+            }
             if (onNeedsAttention !== NeedsAttentionPolicy.Halt) return;
-            await persistState(RunStateStatus.Active, {
-                issueNumber: issueContext.issue.number,
-                stage: "grounding",
-            });
+            if (notificationEnabled) {
+                await clearHaltedNeedsAttention(issueContext.issue.number);
+            } else {
+                await persistState(RunStateStatus.Active, {
+                    issueNumber: issueContext.issue.number,
+                    stage: "grounding",
+                });
+            }
             await emitHandledNeedsAttention(issueContext.issue.number);
             throw new NeedsAttentionStop({
                 issueNumber: issueContext.issue.number,
@@ -1395,6 +1582,78 @@ export const workflow = async (
             await refreshAfterDecomposition(outcome);
         };
 
+        const throwPendingNotificationBoundary = (
+            issueNumber: number,
+            message: string,
+        ): never => {
+            throw new NeedsAttentionNotificationRecoveryBoundaryError({
+                issueNumber,
+                cause: new RalphieError({ message }),
+            });
+        };
+
+        const selectPendingNotificationIssue = (
+            pending: NonNullable<RunState["pendingNotification"]>,
+        ): GitHubIssue => {
+            const savedIssue = queue
+                .snapshot()
+                .pending.find(
+                    ({ issue }) => issue.number === pending.issueNumber,
+                )?.issue;
+            if (savedIssue === undefined) {
+                return throwPendingNotificationBoundary(
+                    pending.issueNumber,
+                    "The issue for the pending needs-attention notification is not in the saved queue.",
+                );
+            }
+            const issue = queue.next();
+            if (issue?.number !== pending.issueNumber) {
+                return throwPendingNotificationBoundary(
+                    pending.issueNumber,
+                    "The pending needs-attention issue could not be selected without changing queue order.",
+                );
+            }
+            return issue;
+        };
+
+        const recoverPendingNotification = async (): Promise<void> => {
+            const pending = pendingNotification;
+            if (pending === undefined) return;
+            if (!notificationsEnabled) {
+                return throwPendingNotificationBoundary(
+                    pending.issueNumber,
+                    "A pending needs-attention notification cannot be reconciled when notifications are disabled.",
+                );
+            }
+            if (effectiveDryRun) {
+                return throwPendingNotificationBoundary(
+                    pending.issueNumber,
+                    "A pending needs-attention notification cannot be reconciled during a dry run.",
+                );
+            }
+            const issue = selectPendingNotificationIssue(pending);
+            activeQueueIssues.set(issue.number, issue);
+            activeIssue = {
+                issueNumber: issue.number,
+                stage: "notification-recovery",
+            };
+            await persistState(RunStateStatus.Active, activeIssue);
+            await publishPendingNotification(issue.number, pending);
+            if (onNeedsAttention === NeedsAttentionPolicy.Halt) {
+                await clearHaltedNeedsAttention(issue.number);
+                await emitHandledNeedsAttention(issue.number);
+                throw new NeedsAttentionStop({
+                    issueNumber: issue.number,
+                    summary: pending.outcome.summary,
+                });
+            }
+            activeQueueIssues.delete(issue.number);
+            activeIssue = undefined;
+            restoreCancellationCheckout = undefined;
+            checkout = await captureCheckout();
+            await persistState(RunStateStatus.Active);
+        };
+
         const processNextIssue = async (
             server: PiRuntime,
         ): Promise<boolean> => {
@@ -1416,6 +1675,8 @@ export const workflow = async (
             };
             await worker();
         };
+
+        await recoverPendingNotification();
 
         let server: PiRuntime | undefined;
         try {
@@ -1487,7 +1748,15 @@ export const workflow = async (
             persistCancellationState,
             restoreCancellationCheckout,
         });
-        if (!isNeedsAttentionStop(finalError)) {
+        if (
+            !isNeedsAttentionStop(finalError) &&
+            !(
+                finalError instanceof
+                    NeedsAttentionNotificationRecoveryBoundaryError ||
+                finalError instanceof
+                    GitHubNeedsAttentionNotificationRecoveryError
+            )
+        ) {
             await emitRunFailed(progress, config, finalError);
         }
         throw finalError;

@@ -632,8 +632,9 @@ Run artifacts live under:
 ```
 
 State is versioned, validated, and written atomically. Failed and interrupted
-runs retain their state and diagnostics for inspection and `--resume`. On
-cancellation, Ralphie restores the active issue's clean checkout when possible,
+runs retain their state and diagnostics for inspection and `--resume`. Notification
+intent and pending notification recovery are included in the validated run state.
+On cancellation, Ralphie restores the active issue's clean checkout when possible,
 saves resumable state, closes the Pi runtime, and exits with status 130.
 Ordinary failures exit with status 1. A needs-attention stop is handled
 separately and exits with status 2.
@@ -646,6 +647,11 @@ A validated needs-attention decision is not an ordinary failure. Ralphie
 persists its explicit policy plus the summary, evidence, questions, and issue
 freshness metadata in the run artifacts. With the default `halt` policy, the
 handled stop leaves the issue open and the run resumable with exit status 2.
+When needs-attention notifications are enabled by the workflow, Ralphie first
+persists the structured outcome and notification label intent, then publishes
+through the GitHub notification service. A failed or uncertain notification
+remains at an explicit notification-recovery boundary; resume reconciles the
+stable marker and retries without rerunning agent work or closing the issue.
 With `--on-needs-attention continue`, the issue remains open while later work is
 drained; a drained run completes with exit status 0. When a mutating agent's
 needs-attention request is confirmed by grounding, recovery first writes a
@@ -680,7 +686,8 @@ On resume, Ralphie compares persisted intent with both local Git and live GitHub
 state before returning to `Active`. Pending issues use the freshly discovered
 GitHub snapshots, including issue update and comment freshness metadata. It can
 reconcile partially created child issues, a commit created immediately before
-interruption, and an issue closure whose response was lost without repeating the
+interruption, an issue closure whose response was lost, and a needs-attention
+notification whose response or label mutation was uncertain without repeating the
 corresponding agent work.
 
 Needs-attention recovery diagnostics use the same issue directory and contain

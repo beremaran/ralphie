@@ -163,6 +163,25 @@ describe("run state store", () => {
         }
     });
 
+    test("migrates version 4 state to the notification-aware state contract", async () => {
+        const directory = await mkdtemp(
+            join(tmpdir(), "ralphie-state-legacy-"),
+        );
+        const path = join(directory, "state.json");
+        try {
+            const legacy = { ...state, version: 4 };
+            await writeFile(path, JSON.stringify(legacy));
+            const loaded = await RunStateStoreLive.load(path);
+            expect(loaded.version).toBe(RUN_STATE_VERSION);
+            expect(loaded.notificationsEnabled).toBeFalse();
+            expect(JSON.parse(await readFile(path, "utf8")).version).toBe(
+                RUN_STATE_VERSION,
+            );
+        } finally {
+            await rm(directory, { recursive: true, force: true });
+        }
+    });
+
     test("migrates legacy completed outcomes to pushed-commit completions", async () => {
         const directory = await mkdtemp(
             join(tmpdir(), "ralphie-state-legacy-"),
@@ -212,6 +231,34 @@ describe("run state store", () => {
             expect(await RunStateStoreLive.load(path)).toEqual(
                 needsAttentionState,
             );
+        } finally {
+            await rm(directory, { recursive: true, force: true });
+        }
+    });
+
+    test("persists a pending needs-attention notification with its label intent", async () => {
+        const directory = await mkdtemp(join(tmpdir(), "ralphie-state-"));
+        const path = join(directory, "state.json");
+        try {
+            const pendingState: RunState = {
+                ...state,
+                notificationsEnabled: true,
+                needsAttentionLabel: "needs-attention",
+                pendingNotification: {
+                    issueNumber: 2,
+                    outcome: {
+                        kind: IssueExecutionOutcomeKind.NeedsAttention,
+                        reason: NeedsAttentionReason.ExternalDependency,
+                        summary: "The dependency is unavailable.",
+                        evidence: ["The dependency service is offline."],
+                        questions: ["When will it be available?"],
+                        artifactPath: "/tmp/needs-attention/artifacts.json",
+                    },
+                    labelName: "needs-attention",
+                },
+            };
+            await RunStateStoreLive.save(path, pendingState);
+            expect(await RunStateStoreLive.load(path)).toEqual(pendingState);
         } finally {
             await rm(directory, { recursive: true, force: true });
         }

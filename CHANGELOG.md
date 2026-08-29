@@ -24,6 +24,9 @@ All notable changes to Ralphie are documented here. The project follows
 - Confirmed needs-attention recovery that atomically preserves bounded,
   binary-safe worktree diagnostics before restoring and verifying the exact
   clean issue checkpoint.
+- Durable needs-attention notification recovery: structured outcomes and label
+  intent are saved before GitHub mutation, and resume retries the stable marker
+  without rerunning agent work.
 - Native Bun CLI foundation with GitHub, Git, workspace, and Pi domain
   services.
 - Resumable issue execution with complexity routing, bounded review loops,

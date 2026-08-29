@@ -77,6 +77,7 @@ export const PROGRESS_STAGE_LABELS: Readonly<Record<ProgressStage, string>> = {
     decomposition: "Decomposing issue",
     "issue-creation": "Creating issues",
     "issue-closure": "Closing issue",
+    "notification-recovery": "Publishing needs-attention notification",
 };
 
 /** Stable labels for activities that do not carry a dynamic name. */
