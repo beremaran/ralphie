@@ -171,6 +171,7 @@ export const makeLiveRuntime = ({
         issueArtifactStore,
         complexityAssessment,
         progress,
+        groundingAssessment,
     );
     const issueExecutor = makeIssueExecutorService(
         issueArtifactStore,

@@ -37,6 +37,9 @@ All notable changes to Ralphie are documented here. The project follows
 - Expose grounding and needs-attention decisions consistently across default,
   interactive, verbose, quiet, and JSON Lines output, including complete
   evidence, questions, artifact paths, policy, and final outcome counts.
+- Make dry-run grounding and routing strictly read-only: report all routes,
+  reuse persisted decisions without rewriting issue artifacts, and keep resumed
+  dry runs away from implementation, delivery, and Git/GitHub mutations.
 - Refresh live issue and comment metadata when resuming pending work, and reuse
   needs-attention grounding only while its freshness fingerprint matches;
   changed or invalid artifacts are atomically invalidated before regrounding.

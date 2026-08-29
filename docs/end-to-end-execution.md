@@ -155,6 +155,10 @@ events, and recovery artifacts only. Pi configuration is kept in the default
 or explicitly supplied `--pi-dir`, or in a private temporary credential
 directory outside the workspace.
 
+Dry-run issue execution uses a read-only view of existing per-issue artifacts.
+New complexity and needs-attention decisions remain in memory; the dry-run
+path never writes an issue artifact or changes the issue checkout.
+
 A normal issue execution obtains a durable per-issue artifact store at:
 
 ```text
@@ -169,7 +173,9 @@ mappings.
 ## 4. Readiness, complexity assessment, and routing
 
 Before complexity routing, `IssueExecutor` starts a read-only structured
-grounding session. It returns one of three dispositions:
+grounding session. In dry-run mode, `DryRunIssueExecutor` uses the same
+read-only grounding contract and stops after reporting its route. It returns
+one of three dispositions:
 
 - `actionable`: proceed normally;
 - `already_resolved`: proceed to the existing implementation/no-change proof
@@ -198,7 +204,10 @@ Otherwise `ComplexityAssessment`:
 5. verifies that branch and `HEAD` did not change, records the session id, and
    persists the decision.
 
-The result selects the workflow:
+The result selects the workflow for a normal run. In dry-run mode, the
+selected workflow is reported but never invoked; implementation, decomposition,
+delivery, issue closure, and all per-issue Git/GitHub mutations remain
+unreachable:
 
 ```mermaid
 flowchart LR
@@ -330,7 +339,7 @@ the queue.
 | --- | --- | --- | --- |
 | `lgtm` | Selected base branch | Commit and non-force push directly to that branch; verify remote SHA and clean checkout | Close directly as `completed` after verified delivery. |
 | `pr` | `ralphie/issue-<number>` in the main checkout | Push feature branch, create/find matching PR, publish stored review attempts as marked comments, merge, and verify merged state | PR body contains `Closes #<issue>`; GitHub closes the issue on merge. The serial run restores the base checkout afterward. |
-| `--dry-run` | Prepared normal checkout | Assess complexity and report the route only; no implementation, decomposition, commit, push, issue mutation, or PR mutation | No issue is closed. The result is `skipped`. |
+| `--dry-run` | Prepared normal checkout | Ground the issue, then assess complexity and report implementation or decomposition when actionable; report already-resolved and needs-attention routes otherwise. No implementation, decomposition, delivery, commit, push, checkout, issue, or PR mutation | No issue is closed. The result is `skipped` except needs-attention, which remains a needs-attention outcome. |
 
 The direct-push path never uses force. A push rejection is authoritative: the
 created commit and artifacts are retained, the run halts, and resume can

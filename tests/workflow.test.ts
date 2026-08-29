@@ -255,6 +255,7 @@ const testRuntime = (
             calls.push(`dryRunIssue:${issue.number}`);
             return {
                 kind: IssueExecutionOutcomeKind.Skipped,
+                route: "implementation",
                 reason: "dry run",
             };
         },
@@ -417,15 +418,17 @@ describe("workflow", () => {
     test("dry-run assesses through the queue without invoking mutation execution", async () => {
         const calls: string[] = [];
         const states: RunState[] = [];
+        const events: ProgressUpdate[] = [];
         const summary = await workflow(
             { ...baseOptions, dryRun: true },
-            testRuntime(calls, states),
+            testRuntime(calls, states, {}, events),
         );
         expect(summary.outcomes).toEqual([
             {
                 issueNumber: 42,
                 outcome: {
                     kind: IssueExecutionOutcomeKind.Skipped,
+                    route: "implementation",
                     reason: "dry run",
                 },
             },
@@ -435,6 +438,55 @@ describe("workflow", () => {
             "executeIssue:42:/tmp/ralphie/repo:develop:build",
         );
         expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
+        expect(events).toContainEqual(
+            expect.objectContaining({
+                stage: "run",
+                status: "succeeded",
+                details: expect.objectContaining({
+                    routes: [{ issueNumber: 42, route: "implementation" }],
+                }),
+            }),
+        );
+    });
+
+    test("keeps a resumed dry run on the dry-run executor", async () => {
+        const calls: string[] = [];
+        const states: RunState[] = [];
+        const summary = await workflow(
+            {
+                ...baseOptions,
+                dryRun: false,
+                resumeState: {
+                    version: 4,
+                    status: RunStateStatus.Active,
+                    runId: "resumed-dry-run",
+                    repository: baseOptions.repo,
+                    branch: "develop",
+                    workflow: WorkflowMode.Lgtm,
+                    onNeedsAttention: NeedsAttentionPolicy.Continue,
+                    dryRun: true,
+                    selection: { agent: DEFAULT_PI_AGENT },
+                    maxIssues: 1,
+                    queue: {
+                        pending: [
+                            { ...firstIssue, labels: [...firstIssue.labels] },
+                        ],
+                        completedIssueNumbers: [],
+                        processedCount: 0,
+                    },
+                    outcomes: [],
+                    checkout: { branch: "develop", head: "head-0" },
+                    updatedAt: "2026-08-28T00:00:00.000Z",
+                },
+            },
+            testRuntime(calls, states),
+        );
+
+        expect(summary.counts.skipped).toBe(1);
+        expect(calls).toContain("dryRunIssue:42");
+        expect(calls).not.toContain(
+            "executeIssue:42:/tmp/ralphie/repo:develop:build",
+        );
     });
 
     test("defers an issue needing attention and continues with the queue", async () => {

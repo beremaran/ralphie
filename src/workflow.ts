@@ -88,9 +88,47 @@ const outcomeMessage = (
     }
 };
 
-const copyOutcome = (
-    outcome: IssueExecutionOutcome,
-): RunState["outcomes"][number]["outcome"] => {
+type RunStateOutcome = RunState["outcomes"][number]["outcome"];
+
+const copyNeedsAttentionOutcome = (
+    outcome: NeedsAttentionOutcome,
+): RunStateOutcome => {
+    const details = {
+        kind: outcome.kind,
+        reason: outcome.reason,
+        summary: outcome.summary,
+        evidence: [...outcome.evidence],
+        questions: [...outcome.questions],
+        ...(outcome.route === undefined ? {} : { route: outcome.route }),
+        ...(outcome.policy === undefined ? {} : { policy: outcome.policy }),
+    };
+    if (outcome.artifactPath !== undefined) {
+        return { ...details, artifactPath: outcome.artifactPath };
+    }
+    if (outcome.diagnosticsPath !== undefined) {
+        return { ...details, diagnosticsPath: outcome.diagnosticsPath };
+    }
+    if (outcome.route !== "needs-attention") {
+        throw new RalphieError({
+            message:
+                "Needs-attention outcome is missing its persisted location.",
+        });
+    }
+    return { ...details, route: outcome.route };
+};
+
+const copySkippedOutcome = (
+    outcome: Extract<
+        IssueExecutionOutcome,
+        { readonly kind: IssueExecutionOutcomeKind.Skipped }
+    >,
+): RunStateOutcome => ({
+    kind: outcome.kind,
+    reason: outcome.reason,
+    ...(outcome.route === undefined ? {} : { route: outcome.route }),
+});
+
+const copyOutcome = (outcome: IssueExecutionOutcome): RunStateOutcome => {
     switch (outcome.kind) {
         case IssueExecutionOutcomeKind.Completed:
             return outcome.completion === "already-resolved"
@@ -113,18 +151,8 @@ const copyOutcome = (
                 kind: outcome.kind,
                 childIssueNumbers: [...outcome.childIssueNumbers],
             };
-        case IssueExecutionOutcomeKind.NeedsAttention: {
-            const details = {
-                kind: outcome.kind,
-                reason: outcome.reason,
-                summary: outcome.summary,
-                evidence: [...outcome.evidence],
-                questions: [...outcome.questions],
-            };
-            return outcome.artifactPath !== undefined
-                ? { ...details, artifactPath: outcome.artifactPath }
-                : { ...details, diagnosticsPath: outcome.diagnosticsPath };
-        }
+        case IssueExecutionOutcomeKind.NeedsAttention:
+            return copyNeedsAttentionOutcome(outcome);
         case IssueExecutionOutcomeKind.Escalated:
             return {
                 kind: outcome.kind,
@@ -135,10 +163,7 @@ const copyOutcome = (
                     : { childIssueNumbers: [...outcome.childIssueNumbers] }),
             };
         case IssueExecutionOutcomeKind.Skipped:
-            return {
-                kind: outcome.kind,
-                reason: outcome.reason,
-            };
+            return copySkippedOutcome(outcome);
         case IssueExecutionOutcomeKind.Failed:
             return {
                 kind: outcome.kind,
@@ -147,6 +172,59 @@ const copyOutcome = (
     }
     return unreachableOutcome(outcome);
 };
+
+type NeedsAttentionOutcome = Extract<
+    IssueExecutionOutcome,
+    { readonly kind: IssueExecutionOutcomeKind.NeedsAttention }
+> & {
+    readonly route?: "needs-attention";
+    readonly policy?: NeedsAttentionPolicy;
+    readonly artifactPath?: string;
+    readonly diagnosticsPath?: string;
+};
+
+const needsAttentionArtifactDetails = (
+    outcome: NeedsAttentionOutcome,
+): Readonly<Record<string, unknown>> =>
+    outcome.artifactPath === undefined
+        ? outcome.diagnosticsPath === undefined
+            ? {}
+            : { diagnosticsPath: outcome.diagnosticsPath }
+        : { artifactPath: outcome.artifactPath };
+
+const needsAttentionProgressMessage = (
+    issueNumber: number,
+    outcome: NeedsAttentionOutcome,
+    dryRun: boolean,
+): string =>
+    dryRun
+        ? `Dry run would route #${issueNumber} to needs-attention ` +
+          `(${outcome.reason}): ${outcome.summary}`
+        : `Issue #${issueNumber} needs attention ` +
+          `(${outcome.reason}): ${outcome.summary}`;
+
+const needsAttentionProgressDetails = (input: {
+    readonly outcome: NeedsAttentionOutcome;
+    readonly policy: NeedsAttentionPolicy;
+    readonly dryRun: boolean;
+    readonly current: number;
+    readonly budget?: number;
+}): Readonly<Record<string, unknown>> => ({
+    reason: input.outcome.reason,
+    summary: input.outcome.summary,
+    evidence: [...input.outcome.evidence],
+    questions: [...input.outcome.questions],
+    ...(input.outcome.route === undefined
+        ? input.dryRun
+            ? { route: "needs-attention" }
+            : {}
+        : { route: input.outcome.route }),
+    ...needsAttentionArtifactDetails(input.outcome),
+    policy: input.policy,
+    dryRun: input.dryRun,
+    queuePosition: input.current,
+    budget: input.budget ?? "unlimited",
+});
 
 type ProgressContext = Omit<ProgressUpdate, "stage" | "status" | "message">;
 
@@ -209,6 +287,19 @@ const summarize = (
     for (const { outcome } of outcomes) counts[outcome.kind] += 1;
     return { runId, outcomes, counts };
 };
+
+const routeSummary = (
+    outcomes: WorkflowSummary["outcomes"],
+): ReadonlyArray<{ readonly issueNumber: number; readonly route: string }> =>
+    outcomes.flatMap(({ issueNumber, outcome }) => {
+        const route =
+            outcome.kind === IssueExecutionOutcomeKind.NeedsAttention
+                ? "needs-attention"
+                : outcome.kind === IssueExecutionOutcomeKind.Skipped
+                  ? outcome.route
+                  : undefined;
+        return route === undefined ? [] : [{ issueNumber, route }];
+    });
 
 type WorkflowCheckout = NonNullable<RunState["checkout"]>;
 type WorkflowOutcomeEntry = WorkflowSummary["outcomes"][number];
@@ -519,6 +610,7 @@ const emitRunSucceeded = async (
         details: {
             runId: summary.runId,
             counts: summary.counts,
+            routes: routeSummary(summary.outcomes),
             statePath: config.statePath,
             policy: config.onNeedsAttention,
             budget:
@@ -964,8 +1056,9 @@ export const workflow = async (
                 issueBaseCheckout,
                 resumedClosureOutcome,
             );
-            restoreCancellationCheckout =
-                restoreIssueCheckout(issueBaseCheckout);
+            restoreCancellationCheckout = effectiveDryRun
+                ? undefined
+                : restoreIssueCheckout(issueBaseCheckout);
             await persistState(RunStateStatus.Active, activeIssue);
             return {
                 issue,
@@ -1015,6 +1108,7 @@ export const workflow = async (
                         repositoryInvariant: invariantService,
                         verificationCommands: config.verificationCommands,
                         signal,
+                        needsAttentionPolicy: onNeedsAttention,
                     }),
                 (result) => outcomeMessage(issueContext.issue.number, result),
                 {
@@ -1079,6 +1173,7 @@ export const workflow = async (
                 { readonly kind: IssueExecutionOutcomeKind.Completed }
             >,
         ): Promise<void> => {
+            if (effectiveDryRun) return;
             if (usesPullRequests && outcome.completion === "pushed-commit") {
                 await track(
                     progress,
@@ -1148,16 +1243,8 @@ export const workflow = async (
 
         const emitNeedsAttentionEvent = async (
             issueContext: WorkflowIssueContext,
-            outcome: Extract<
-                IssueExecutionOutcome,
-                { readonly kind: IssueExecutionOutcomeKind.NeedsAttention }
-            >,
+            outcome: NeedsAttentionOutcome,
         ): Promise<void> => {
-            const artifact =
-                outcome.artifactPath === undefined
-                    ? { diagnosticsPath: outcome.diagnosticsPath }
-                    : { artifactPath: outcome.artifactPath };
-            const budget = resumeState?.maxIssues ?? maxIssues;
             await progress.emit({
                 issue: {
                     number: issueContext.issue.number,
@@ -1167,19 +1254,18 @@ export const workflow = async (
                 total: issueContext.total,
                 stage: "grounding",
                 status: "needs-attention",
-                message:
-                    `Issue #${issueContext.issue.number} needs attention ` +
-                    `(${outcome.reason}): ${outcome.summary}`,
-                details: {
-                    reason: outcome.reason,
-                    summary: outcome.summary,
-                    evidence: [...outcome.evidence],
-                    questions: [...outcome.questions],
-                    ...artifact,
+                message: needsAttentionProgressMessage(
+                    issueContext.issue.number,
+                    outcome,
+                    effectiveDryRun,
+                ),
+                details: needsAttentionProgressDetails({
+                    outcome,
                     policy: onNeedsAttention,
-                    queuePosition: issueContext.current,
-                    budget: budget ?? "unlimited",
-                },
+                    dryRun: effectiveDryRun,
+                    current: issueContext.current,
+                    budget: resumeState?.maxIssues ?? maxIssues,
+                }),
             });
         };
 
@@ -1197,6 +1283,7 @@ export const workflow = async (
                 details: {
                     runId: summary.runId,
                     counts: summary.counts,
+                    routes: routeSummary(summary.outcomes),
                     statePath,
                     issueNumber,
                     policy: onNeedsAttention,

@@ -124,6 +124,11 @@ export type IssueArtifactStoreService = {
         issueNumber: number,
         scope?: IssueArtifactScope,
     ) => Promise<IssueArtifactStore>;
+    /** Load artifacts without migration or mutation persistence. */
+    readonly forIssueReadOnly?: (
+        issueNumber: number,
+        scope?: IssueArtifactScope,
+    ) => Promise<IssueArtifactStore>;
 };
 
 const validIssueNumber = (issueNumber: number): boolean =>
@@ -505,7 +510,7 @@ const loadPersistedState = async (
     }
 };
 
-const sameFreshnessFingerprint = (
+export const sameIssueFreshnessFingerprint = (
     left: IssueFreshnessFingerprint,
     right: IssueFreshnessFingerprint,
 ): boolean =>
@@ -570,7 +575,7 @@ const makeStore = (
         const existing = values.get(IssueArtifactKind.NeedsAttentionDecision);
         if (existing === undefined) return false;
         const artifact = existing as NeedsAttentionDecisionArtifact;
-        if (sameFreshnessFingerprint(artifact.fingerprint, fingerprint)) {
+        if (sameIssueFreshnessFingerprint(artifact.fingerprint, fingerprint)) {
             return false;
         }
         const nextValues = new Map(values);
@@ -758,6 +763,18 @@ export const makeIssueArtifactStore = async (
     return makeStore(issueNumber);
 };
 
+const valuesFromLoadedState = (
+    loaded: LoadedArtifactState | undefined,
+): Map<IssueArtifactKind, unknown> => {
+    const values = new Map<IssueArtifactKind, unknown>();
+    if (loaded === undefined) return values;
+    for (const kind of Object.values(IssueArtifactKind)) {
+        const value = loaded.state.artifacts[kind];
+        if (value !== undefined) values.set(kind, value);
+    }
+    return values;
+};
+
 export const makeDurableIssueArtifactStore = async (
     issueNumber: number,
     scope: IssueArtifactScope,
@@ -775,23 +792,39 @@ export const makeDurableIssueArtifactStore = async (
     ) {
         await persistAtomically(filePath, loaded.state);
     }
-    const values = new Map<IssueArtifactKind, unknown>();
-    if (loaded !== undefined) {
-        for (const kind of Object.values(IssueArtifactKind)) {
-            const value = loaded.state.artifacts[kind];
-            if (value !== undefined) values.set(kind, value);
-        }
-    }
     return makeStore(
         issueNumber,
-        values,
+        valuesFromLoadedState(loaded),
         (nextState) => persistAtomically(filePath, nextState),
         scope,
     );
 };
 
+/**
+ * Read a durable issue record while keeping all subsequent writes in memory.
+ * Dry runs use this variant so loading a legacy or stale record cannot rewrite
+ * the per-issue artifact file.
+ */
+export const makeReadOnlyDurableIssueArtifactStore = async (
+    issueNumber: number,
+    scope: IssueArtifactScope,
+): Promise<IssueArtifactStore> => {
+    if (!validIssueNumber(issueNumber)) {
+        throw new RalphieError({
+            message: `Cannot create an artifact store for issue ${issueNumber}.`,
+        });
+    }
+    const loaded = await loadPersistedState(
+        issueArtifactPath(scope, issueNumber),
+        issueNumber,
+        scope,
+    );
+    return makeStore(issueNumber, valuesFromLoadedState(loaded));
+};
+
 export const makeIssueArtifactStoreService = (): IssueArtifactStoreService => {
     const stores = new Map<string, IssueArtifactStore>();
+    const readOnlyStores = new Map<string, IssueArtifactStore>();
 
     return {
         forIssue: async (issueNumber, scope) => {
@@ -805,6 +838,22 @@ export const makeIssueArtifactStoreService = (): IssueArtifactStoreService => {
                 ? await makeDurableIssueArtifactStore(issueNumber, scope)
                 : await makeIssueArtifactStore(issueNumber);
             stores.set(key, store);
+            return store;
+        },
+        forIssueReadOnly: async (issueNumber, scope) => {
+            const key = scope
+                ? `${resolveWorkspacePath(scope.workspace)}\u0000${safeRunId(scope.runId)}\u0000${issueNumber}`
+                : `memory\u0000${issueNumber}`;
+            const existing = readOnlyStores.get(key);
+            if (existing !== undefined) return existing;
+
+            const store = scope
+                ? await makeReadOnlyDurableIssueArtifactStore(
+                      issueNumber,
+                      scope,
+                  )
+                : await makeIssueArtifactStore(issueNumber);
+            readOnlyStores.set(key, store);
             return store;
         },
     };

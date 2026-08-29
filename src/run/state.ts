@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import { z } from "zod";
 
 import {
+    DRY_RUN_ROUTES,
     type IssueCompletionKind,
     IssueExecutionOutcomeKind,
 } from "../issues/execution.ts";
@@ -18,6 +19,8 @@ import {
 } from "../options.ts";
 
 export const RUN_STATE_VERSION = 4 as const;
+
+const dryRunRouteSchema = z.enum(DRY_RUN_ROUTES);
 
 export enum RunStateStatus {
     Active = "active",
@@ -78,6 +81,8 @@ const currentOutcomeSchema = z.union([
                 evidence: z.array(nonBlankStringSchema).min(1),
                 questions: z.array(nonBlankStringSchema).min(1),
                 artifactPath: z.string().min(1),
+                route: z.literal("needs-attention").optional(),
+                policy: z.enum(NeedsAttentionPolicy).optional(),
             })
             .strict(),
         z
@@ -88,13 +93,29 @@ const currentOutcomeSchema = z.union([
                 evidence: z.array(nonBlankStringSchema).min(1),
                 questions: z.array(nonBlankStringSchema).min(1),
                 diagnosticsPath: z.string().min(1),
+                route: z.literal("needs-attention").optional(),
+                policy: z.enum(NeedsAttentionPolicy).optional(),
+            })
+            .strict(),
+        z
+            .object({
+                kind: z.literal(IssueExecutionOutcomeKind.NeedsAttention),
+                reason: z.enum(NeedsAttentionReason),
+                summary: nonBlankStringSchema,
+                evidence: z.array(nonBlankStringSchema).min(1),
+                questions: z.array(nonBlankStringSchema).min(1),
+                route: z.literal("needs-attention"),
+                policy: z.enum(NeedsAttentionPolicy).optional(),
             })
             .strict(),
     ]),
-    z.object({
-        kind: z.literal(IssueExecutionOutcomeKind.Skipped),
-        reason: z.string().min(1),
-    }),
+    z
+        .object({
+            kind: z.literal(IssueExecutionOutcomeKind.Skipped),
+            reason: z.string().min(1),
+            route: dryRunRouteSchema.optional(),
+        })
+        .strict(),
     z.object({
         kind: z.literal(IssueExecutionOutcomeKind.Failed),
         message: z.string().min(1),

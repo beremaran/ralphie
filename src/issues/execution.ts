@@ -6,6 +6,16 @@ import type { NeedsAttentionReason } from "./decisions.ts";
 import type { PiSelection } from "../agent/model.ts";
 import type { PiSessionDiagnostics } from "../agent/task-session.ts";
 import type { GitRepositoryInvariantService } from "../git/repository-invariant.ts";
+import type { NeedsAttentionPolicy } from "../options.ts";
+
+export const DRY_RUN_ROUTES = [
+    "implementation",
+    "decomposition",
+    "already-resolved",
+    "needs-attention",
+] as const;
+
+export type DryRunRoute = (typeof DRY_RUN_ROUTES)[number];
 
 /**
  * The terminal state reported by an issue executor.
@@ -55,11 +65,22 @@ export type IssueExecutionOutcome =
                 /** Where the validated needs-attention artifact was written. */
                 readonly artifactPath: string;
                 readonly diagnosticsPath?: never;
+                readonly route?: "needs-attention";
+                readonly policy?: NeedsAttentionPolicy;
             }
           | {
                 /** Alternate name used when the local record is diagnostic output. */
                 readonly artifactPath?: never;
                 readonly diagnosticsPath: string;
+                readonly route?: "needs-attention";
+                readonly policy?: NeedsAttentionPolicy;
+            }
+          | {
+                /** Dry-run route; no per-issue artifact is written. */
+                readonly route: "needs-attention";
+                readonly policy?: NeedsAttentionPolicy;
+                readonly artifactPath?: never;
+                readonly diagnosticsPath?: never;
             }
       ))
     | {
@@ -73,6 +94,8 @@ export type IssueExecutionOutcome =
     | {
           readonly kind: IssueExecutionOutcomeKind.Skipped;
           readonly reason: string;
+          /** Dry-run routing result; ordinary skips leave this unset. */
+          readonly route?: DryRunRoute;
       }
     | {
           readonly kind: IssueExecutionOutcomeKind.Failed;
@@ -82,8 +105,9 @@ export type IssueExecutionOutcome =
 /**
  * Shared inputs available to all per-issue workflow executors.
  *
- * The repository path is the concrete checkout being mutated; workspace is
- * retained separately because it owns run artifacts and cleanup. The clients
+ * The repository path is the concrete checkout used by the issue workflow;
+ * dry-run decision services inspect it without mutation. Workspace is retained
+ * separately because it owns run artifacts and cleanup. The clients
  * are passed in from the workflow runtime so an issue executor does not need
  * to perform authentication or start another Pi runtime.
  */
@@ -110,4 +134,6 @@ export type IssueExecutionContext = {
     readonly repositoryInvariant: GitRepositoryInvariantService;
     readonly verificationCommands?: ReadonlyArray<string>;
     readonly signal?: AbortSignal;
+    /** The policy selected for this run, used by dry-run reporting. */
+    readonly needsAttentionPolicy?: NeedsAttentionPolicy;
 };

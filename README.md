@@ -447,11 +447,16 @@ For a delivery-mutation-free validation, use:
 bunx @beremaran/ralphie owner/repository --dry-run --max-issues 1
 ```
 
-Dry-run mode still performs real preflight, cloning, issue discovery, and
-Pi complexity assessment. It can change the local workspace during preparation
-and saves state and complexity artifacts, but it cannot invoke implementation,
-decomposition, commits, pushes, or GitHub mutations. A resumed dry run remains
-a dry run.
+Dry-run mode performs real preflight, cloning, issue discovery, and read-only
+issue grounding. For actionable issues it performs a read-only complexity
+assessment and reports the implementation or decomposition route; it also
+reports already-resolved and needs-attention routes with the selected policy
+and blocker details. It may change the local workspace during preparation and
+persists only run-level state and progress. It reuses matching persisted
+routing decisions when available but never writes per-issue complexity or
+needs-attention artifacts, and it cannot invoke implementation, decomposition,
+delivery, commits, pushes, checkout mutation, or GitHub mutations. A resumed
+dry run remains a dry run.
 
 ## Common recipes
 
