@@ -52,6 +52,26 @@ Repository administrators must configure that environment in **Settings →
 Environments → release** with the required reviewer(s); approval is required
 before the final publisher can write release assets or packages.
 
+Before staging a release, run the local package smoke check from the checkout:
+
+```bash
+bun run package:check
+```
+
+It creates and inspects a real tarball, installs it with production dependencies
+in a fresh temporary project, and runs the installed executable with Bun. To
+inspect only the `npm pack --dry-run` file list, use
+`bun run package:inspect`. Registry verification is deliberately opt-in and
+uses an isolated npm cache and working directory:
+
+```bash
+bun run package:check -- \
+  --registry --package-spec @beremaran/ralphie@<release-version>
+```
+
+The check does not publish anything. Run the registry form only after the
+release version is available from npm.
+
 Each release also contains `SHA256SUMS.sigstore.json`, a canonical Sigstore
 bundle for the exact bytes of `SHA256SUMS`. The release publisher uses keyless
 Sigstore signing with the GitHub Actions OIDC issuer; no signing key or OIDC

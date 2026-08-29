@@ -29,7 +29,21 @@ Useful individual commands:
 | `bun run build` | Build the standalone executable at `dist/cli` (local builds use the `local` commit sentinel). |
 | `bun run build -- --commit-sha <sha>` | Build with an explicit release commit SHA. |
 | `bun run build:package` | Build the publishable package bundle at `dist/ralphie.js`. |
+| `bun run package:check` | Pack, inspect, install, and run the local package in isolated temporary directories. |
+| `bun run package:inspect` | Inspect the local `npm pack --dry-run` file list without installing it. |
 | `bun run probe:structured-output` | Exercise a real schema-validated Pi decision. |
+
+The package check builds an actual tarball, verifies its allowlist, installs it
+with `npm install --omit=dev` in a fresh project, and invokes the installed bin
+with Bun. Its isolated install does not use the checkout's lockfile or `node_modules`;
+all temporary pack, install, cache, and home directories are created outside the
+checkout.
+For an explicitly opt-in registry check, pass a package spec:
+
+```bash
+bun run package:check -- \
+  --registry --package-spec @beremaran/ralphie@<release-version>
+```
 
 The project is a Bun + TypeScript CLI in strict mode. The entry point is
 `index.ts`; services are assembled as an explicit dependency object in

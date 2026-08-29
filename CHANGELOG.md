@@ -14,6 +14,9 @@ All notable changes to Ralphie are documented here. The project follows
   metadata, including license inspection before container publication.
 - A single package-version authority with build-time commit metadata and plain
   or JSON `--version` output that works without repository or Pi configuration.
+- An isolated package smoke check that inspects the tarball allowlist, installs
+  production dependencies in a fresh project, and verifies scoped identity and
+  manifest-backed `--version` output.
 - Staged-tree-bound deterministic verification before review, after review
   fixes, and before commit, with persisted command evidence and repeatable
   `--verify-command` overrides.
