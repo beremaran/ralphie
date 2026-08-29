@@ -317,6 +317,7 @@ const testRuntime = (
     return {
         commandRunner: CommandRunnerLive,
         githubClient,
+        pipelineSnapshot: {} as never,
         githubIssues,
         githubIssueMutations: mutations,
         githubPullRequests: pullRequests,

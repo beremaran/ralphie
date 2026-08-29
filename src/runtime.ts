@@ -43,6 +43,10 @@ import {
     type GitHubPullRequestService,
 } from "./github/pull-requests.ts";
 import {
+    makePipelineSnapshotCollectorService,
+    type PipelineSnapshotCollectorService,
+} from "./github/pipeline-snapshot-collector.ts";
+import {
     makeGitHubNeedsAttentionNotificationService,
     type GitHubNeedsAttentionNotificationService,
 } from "./github/needs-attention.ts";
@@ -92,6 +96,7 @@ import { WorkspaceLive, type WorkspaceService } from "./workspace/workspace.ts";
 export type RalphieRuntime = {
     readonly commandRunner: CommandRunnerService;
     readonly githubClient: GitHubClientService;
+    readonly pipelineSnapshot: PipelineSnapshotCollectorService;
     readonly githubIssues: GitHubIssuesService;
     readonly githubIssueMutations: GitHubIssueMutationService;
     readonly githubPullRequests: GitHubPullRequestService;
@@ -136,6 +141,7 @@ export const makeLiveRuntime = ({
     workspace = WorkspaceLive,
 }: RuntimeOverrides): RalphieRuntime => {
     const githubClient = makeGitHubClientService(commandRunner);
+    const pipelineSnapshot = makePipelineSnapshotCollectorService();
     const githubIssues = makeGitHubIssuesService();
     const githubIssueMutations = makeGitHubIssueMutationsService();
     const githubPullRequests = makeGitHubPullRequestService();
@@ -192,6 +198,7 @@ export const makeLiveRuntime = ({
     return {
         commandRunner,
         githubClient,
+        pipelineSnapshot,
         githubIssues,
         githubIssueMutations,
         githubPullRequests,

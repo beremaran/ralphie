@@ -74,6 +74,7 @@ export const makeCommandRuntimeHarness = () => {
             const serviceNames = [
                 "commandRunner",
                 "githubClient",
+                "pipelineSnapshot",
                 "githubIssues",
                 "githubIssueMutations",
                 "githubPullRequests",
