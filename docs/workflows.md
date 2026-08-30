@@ -182,6 +182,28 @@ A direct complexity 4–5 route returns `decomposed`. Review exhaustion returns 
 successful decomposition, the created child numbers. Both transitions refresh
 the queue.
 
+### Platform support for native sub-issues and dependencies
+
+Native sub-issues and `blocked_by` dependencies are GitHub REST features that
+require a compatible host: `github.com`, or GitHub Enterprise Server versions
+that ship the sub-issues and issue-dependencies endpoints. Ralphie treats them
+as required for decomposition:
+
+- Creating, recovering, or linking children fails with an actionable error
+  naming the missing platform capability when an endpoint is unavailable or the
+  token lacks issue write permission. There is **no body-link fallback**: Ralphie
+  never silently degrades to body-only hierarchy semantics.
+- The compatibility check is implicit and per-operation: the first relationship
+  read or write against an unsupported server surfaces the error, so a dry run
+  or a run on an unsupported host fails at decomposition instead of producing a
+  different, undocumented hierarchy.
+- Recovery metadata (stable markers and the persisted key/dependency mappings)
+  remains the idempotency record regardless of platform support, so a run
+  resumed on a compatible host reconciles correctly.
+- To verify host support before a run: `gh api repos/{owner}/{repo}/issues/1/sub_issues`
+  and `gh api repos/{owner}/{repo}/issues/1/dependencies/blocked_by` should
+  return `200` (an empty list) rather than `404`.
+
 ## Delivery modes
 
 | Mode | Issue checkout | Delivery | Source issue closure |

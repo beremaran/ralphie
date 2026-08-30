@@ -215,6 +215,12 @@ Examples of resumable boundaries:
   native relationship that disagrees with a child's marker halts with a
   recovery diagnostic instead of silently reparenting or duplicating issues.
 
+Native sub-issue and dependency endpoints require a compatible GitHub host. On
+unsupported servers (for example older GitHub Enterprise Server versions) or
+with a token lacking issue write permission, decomposition fails with an
+actionable error naming the missing capability; there is no body-link fallback.
+See [Workflows](workflows.md#platform-support-for-native-sub-issues-and-dependencies).
+
 One issue failure currently halts the run. This preserves the checkout and
 diagnostics at the first uncertain boundary instead of allowing later issues to
 continue on questionable state.
