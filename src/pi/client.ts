@@ -336,12 +336,13 @@ const makeNeedsAttentionTool = (
         name: "request_needs_attention",
         label: "Request needs attention",
         description:
-            "Request operator attention when a repository-backed blocker prevents safe progress. This is a side-channel request, not the final task or review result.",
+            "Request operator attention when a repository-backed blocker prevents safe progress. This unattended session has no operator who can answer questions during the turn, so use this tool instead of asking in prose. This is a side-channel request, not the final task or review result.",
         promptSnippet:
             "Request needs attention for a repository-backed blocker",
         promptGuidelines: [
             "Use request_needs_attention only for an outdated premise, conflicting requirements, missing information, external dependency, or a problem that cannot be reproduced.",
             "Do not use request_needs_attention for work that is merely hard, large, slow, or uncertain.",
+            "Never ask the user or operator a question in prose or wait for a reply; this session is unattended.",
         ],
         parameters: needsAttentionToolParameters as never,
         executionMode: "sequential",
@@ -399,17 +400,32 @@ const makeStructuredResultTool = (
         },
     }) as AnyToolDefinition;
 
+const unattendedSessionContract = `UNATTENDED EXECUTION CONTRACT:
+- You are running autonomously in a non-interactive harness. No user or operator can answer during this turn.
+- Do not ask questions in prose, request confirmation, offer choices, pause for input, or wait for a reply.
+- Inspect the available repository context, make reasonable decisions, and complete as much of the task as is safely possible.
+- If a repository-backed blocker genuinely prevents safe progress, call request_needs_attention instead of asking a question. Then continue to satisfy any final response contract.
+- If a completion or result tool is provided, you must call it as instructed before ending the turn. Do not merely describe the intended result or proposed next steps.`;
+
+export const buildPiAttemptPrompt = (
+    prompt: string,
+    structured: boolean,
+    retry: boolean,
+): string => {
+    if (retry) {
+        return `${unattendedSessionContract}\n\nRESPONSE CONTRACT VIOLATION: your previous response ended without a valid submit_result call. Call submit_result now with the complete schema-valid result. Do not provide more analysis, prose, Markdown, printed JSON, or questions. If validation reports errors, correct them and call the tool again.`;
+    }
+    const withSessionContract = `${prompt}\n\n${unattendedSessionContract}`;
+    if (!structured) return withSessionContract;
+    return `${withSessionContract}\n\nMANDATORY RESPONSE CONTRACT:\n- Complete the analysis before submitting.\n- Your final action must be exactly one call to the submit_result tool.\n- Supply every required field and obey all field relationships in the schema.\n- Do not return prose, Markdown, a code fence, printed JSON, or a question as the final answer.\n- Do not end the turn without a successful submit_result call.\n- If the tool reports validation errors, correct all errors and call it again.`;
+};
+
 const promptForAttempt = (
     input: PromptInput,
     prompt: string,
     attempt: number,
-): string => {
-    if (attempt !== 0) {
-        return "RESPONSE CONTRACT VIOLATION: your previous response ended without a valid submit_result call. Call submit_result now with the complete schema-valid result. Do not provide more analysis, prose, Markdown, or printed JSON. If validation reports errors, correct them and call the tool again.";
-    }
-    if (input.format === undefined) return prompt;
-    return `${prompt}\n\nMANDATORY RESPONSE CONTRACT:\n- Complete the analysis before submitting.\n- Your final action must be exactly one call to the submit_result tool.\n- Supply every required field and obey all field relationships in the schema.\n- Do not return prose, Markdown, a code fence, or printed JSON as the final answer.\n- Do not end the turn without a successful submit_result call.\n- If the tool reports validation errors, correct all errors and call it again.`;
-};
+): string =>
+    buildPiAttemptPrompt(prompt, input.format !== undefined, attempt !== 0);
 
 const runPromptAttempts = async (
     session: PiSession,

@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 
-import { isPiTaskCommandAllowed } from "../../src/pi/client.ts";
+import {
+    buildPiAttemptPrompt,
+    isPiTaskCommandAllowed,
+} from "../../src/pi/client.ts";
 
 describe("Pi task shell policy", () => {
     test("allows ordinary inspection and verification commands", () => {
@@ -38,5 +41,43 @@ describe("Pi task shell policy", () => {
         ]) {
             expect(isPiTaskCommandAllowed(command)).toBe(false);
         }
+    });
+});
+
+describe("Pi prompt contract", () => {
+    test("marks ordinary tasks as unattended and non-interactive", () => {
+        const prompt = buildPiAttemptPrompt(
+            "Implement the issue.",
+            false,
+            false,
+        );
+
+        expect(prompt).toContain("Implement the issue.");
+        expect(prompt).toContain("UNATTENDED EXECUTION CONTRACT");
+        expect(prompt).toContain("No user or operator can answer");
+        expect(prompt).toContain("Do not ask questions in prose");
+        expect(prompt).toContain("call request_needs_attention");
+        expect(prompt).toContain("completion or result tool");
+        expect(prompt).not.toContain("MANDATORY RESPONSE CONTRACT");
+    });
+
+    test("requires structured tasks to finish through submit_result", () => {
+        const prompt = buildPiAttemptPrompt("Review the change.", true, false);
+
+        expect(prompt).toContain("UNATTENDED EXECUTION CONTRACT");
+        expect(prompt).toContain("MANDATORY RESPONSE CONTRACT");
+        expect(prompt).toContain(
+            "final action must be exactly one call to the submit_result tool",
+        );
+        expect(prompt).toContain("printed JSON, or a question");
+    });
+
+    test("repeats unattended and tool requirements after a contract violation", () => {
+        const prompt = buildPiAttemptPrompt("ignored", true, true);
+
+        expect(prompt).toContain("UNATTENDED EXECUTION CONTRACT");
+        expect(prompt).toContain("RESPONSE CONTRACT VIOLATION");
+        expect(prompt).toContain("Call submit_result now");
+        expect(prompt).toContain("prose, Markdown, printed JSON, or questions");
     });
 });
