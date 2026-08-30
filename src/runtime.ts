@@ -39,6 +39,10 @@ import {
     type GitHubIssueRelationshipService,
 } from "./github/issue-relationships.ts";
 import {
+    makeParentCompletionService,
+    type ParentCompletionService,
+} from "./github/parent-completion.ts";
+import {
     makeGitHubIssuesService,
     type GitHubIssuesService,
 } from "./github/issues.ts";
@@ -112,6 +116,7 @@ export type RalphieRuntime = {
     readonly githubIssues: GitHubIssuesService;
     readonly githubIssueMutations: GitHubIssueMutationService;
     readonly githubIssueRelationships: GitHubIssueRelationshipService;
+    readonly parentCompletion: ParentCompletionService;
     readonly githubPullRequests: GitHubPullRequestService;
     /** Publishes structured needs-attention outcomes outside issue execution. */
     readonly githubNeedsAttentionNotification: GitHubNeedsAttentionNotificationService;
@@ -159,6 +164,11 @@ export const makeLiveRuntime = ({
     const githubIssues = makeGitHubIssuesService();
     const githubIssueMutations = makeGitHubIssueMutationsService();
     const githubIssueRelationships = makeGitHubIssueRelationshipService();
+    const parentCompletion = makeParentCompletionService({
+        issues: githubIssues,
+        relationships: githubIssueRelationships,
+        mutations: githubIssueMutations,
+    });
     const githubPullRequests = makeGitHubPullRequestService();
     const githubNeedsAttentionNotification =
         makeGitHubNeedsAttentionNotificationService();
@@ -228,6 +238,7 @@ export const makeLiveRuntime = ({
         githubIssues,
         githubIssueMutations,
         githubIssueRelationships,
+        parentCompletion,
         githubPullRequests,
         githubNeedsAttentionNotification,
         gitRepository,

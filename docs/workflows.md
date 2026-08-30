@@ -172,7 +172,10 @@ reparenting or duplicating issues.
 
 The decomposed parent remains open as the native tracking issue and exposes
 GitHub's completion progress for its sub-issues. It is not queued again, and it
-is closed as `completed` only when its child work is finished. The open-issue
+is closed as `completed` only when its child work is finished: completing the
+final child reconciles its parent immediately, and every non-dry-run run also
+reconciles decomposed parents it discovers or refreshes, so a parent whose
+final child closed in a previous run is completed on a later run. The open-issue
 queue is refreshed after decomposition; newly eligible children can run during
 the same invocation. If dependencies remain open after the queue is exhausted,
 the run persists active state and fails instead of processing blocked work.

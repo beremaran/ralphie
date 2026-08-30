@@ -364,10 +364,14 @@ from the persisted mapping halts with a recovery diagnostic.
 
 The decomposed parent remains open as the native tracking issue and exposes
 GitHub completion progress for its sub-issues; it is never closed as a
-duplicate merely because it was decomposed, and it is not queued again. The
-open-issue queue is then refreshed; newly eligible children can run during the
-same invocation. If dependencies remain open after the queue is exhausted, the
-run persists active state and fails instead of processing blocked work.
+duplicate merely because it was decomposed, and it is not queued again. Parent
+completion is reconciled deterministically: finishing the final child checks
+its tracking parent, and every non-dry-run run reconciles discovered or
+refreshed decomposed parents, closing one as `completed` only when all of its
+native sub-issues are closed. The open-issue queue is then refreshed; newly
+eligible children can run during the same invocation. If dependencies remain
+open after the queue is exhausted, the run persists active state and fails
+instead of processing blocked work.
 
 A direct complexity 4–5 route returns `decomposed`. Review exhaustion returns an
 `escalated` outcome containing the recovery diagnostic path and, after

@@ -22,6 +22,12 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Added
 
+- Deterministic decomposed-parent completion: finishing the final child
+  reconciles its tracking parent immediately, and every non-dry-run run
+  reconciles discovered decomposed parents, closing a parent as `completed`
+  only when every native sub-issue is closed. Parents awaiting sub-issue
+  attachment recovery, non-Ralphie parents, and already-closed parents are
+  left untouched.
 - Dry-run decomposition reporting: a complexity 4–5 dry run performs the
   read-only breakdown session and reports the intended native sub-issue
   hierarchy — children to create or reuse, sub-issue attachments, dependency

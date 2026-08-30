@@ -12,6 +12,7 @@ import {
     type GitHubIssue,
     type IssueFilters,
 } from "./github/issues.ts";
+import { isDecomposedParent } from "./github/decomposition-markdown.ts";
 import {
     type IssueExecutionContext,
     type IssueCompletionKind,
@@ -779,6 +780,7 @@ export const workflow = async (
         gitRepositoryInvariant: invariantService,
         gitIssueCheckpoint: checkpoints,
         gitIssueOperations: issueOperations,
+        parentCompletion,
         issueArtifactStore: artifactStores,
         issueExecutor: normalIssueExecutor,
         dryRunIssueExecutor,
@@ -1006,6 +1008,7 @@ export const workflow = async (
                 persistState,
                 issueExecutor,
                 diagnostics,
+                discoveredIssues: preparedInput.discoveredIssues,
             };
         };
 
@@ -1021,6 +1024,7 @@ export const workflow = async (
             persistState,
             issueExecutor,
             diagnostics,
+            discoveredIssues,
         } = await prepareWorkflow();
 
         const prepareIssueBranch = async (
@@ -1084,6 +1088,72 @@ export const workflow = async (
                     ),
                 );
             };
+
+        /**
+         * Complete any decomposed tracking parent whose sub-issues are all
+         * closed. Runs against issues the run already discovered or
+         * refreshed, so a parent whose final child closed in a previous run
+         * is completed on the next run without extra discovery reads.
+         */
+        const reconcileDiscoveredParents = async (
+            issues: ReadonlyArray<GitHubIssue>,
+        ): Promise<void> => {
+            if (effectiveDryRun) return;
+            for (const parent of issues.filter(isDecomposedParent)) {
+                await track(
+                    progress,
+                    "issue-closure",
+                    `Checking whether parent issue #${parent.number} is complete...`,
+                    () =>
+                        parentCompletion.reconcileParent(
+                            octokit,
+                            repo,
+                            parent.number,
+                        ),
+                    (completed) =>
+                        completed
+                            ? `Parent issue #${parent.number} completed; every sub-issue is closed.`
+                            : `Parent issue #${parent.number} stays open; some sub-issues are not closed yet.`,
+                    {
+                        issue: {
+                            number: parent.number,
+                            title: parent.title,
+                        },
+                    },
+                );
+            }
+        };
+
+        /** Reconcile the tracking parent of a just-completed child issue. */
+        const reconcileParentOfCompletedChild = async (
+            issueContext: WorkflowIssueContext,
+        ): Promise<void> => {
+            if (effectiveDryRun) return;
+            await track(
+                progress,
+                "issue-closure",
+                `Checking whether the parent of #${issueContext.issue.number} is complete...`,
+                () =>
+                    parentCompletion.reconcileAfterChildCompletion(
+                        octokit,
+                        repo,
+                        issueContext.issue.number,
+                        issueContext.issue.body,
+                    ),
+                (completed) =>
+                    completed
+                        ? `Parent of #${issueContext.issue.number} completed; every sub-issue is closed.`
+                        : `Parent of #${issueContext.issue.number} remains open.`,
+                {
+                    issue: {
+                        number: issueContext.issue.number,
+                        title: issueContext.issue.title,
+                    },
+                },
+            );
+        };
+
+        await reconcileDiscoveredParents(discoveredIssues);
 
         const captureNeedsAttentionCheckout = async (
             issueContext: WorkflowIssueContext,
@@ -1305,6 +1375,7 @@ export const workflow = async (
             };
             await persistState(RunStateStatus.Active, activeIssue);
             await closeCompletedIssue(issueContext, outcome);
+            await reconcileParentOfCompletedChild(issueContext);
         };
 
         const completeQueueItem = (
@@ -1559,6 +1630,7 @@ export const workflow = async (
                 message: `Issue queue refreshed; added ${added} new issues.`,
                 details: { added, pending: queue.pendingCount() },
             });
+            await reconcileDiscoveredParents(refreshed);
             await persistState(RunStateStatus.Active);
         };
 

@@ -10,6 +10,7 @@ import type { GitIssueOperationsService } from "../src/git/issue-operations.ts";
 import type { GitHubClientService } from "../src/github/client.ts";
 import type { GitHubPullRequestService } from "../src/github/pull-requests.ts";
 import type { GitHubIssueMutationService } from "../src/github/issue-mutations.ts";
+import { makeParentCompletionService } from "../src/github/parent-completion.ts";
 import type { GitHubNeedsAttentionNotificationService } from "../src/github/needs-attention.ts";
 import type { GitHubIssue, GitHubIssuesService } from "../src/github/issues.ts";
 import {
@@ -84,6 +85,8 @@ type TestRuntimeOptions = {
     readonly needsAttentionNotification?: GitHubNeedsAttentionNotificationService;
     readonly dryRunOutcome?: IssueExecutionOutcome;
     readonly onStateSave?: (state: RunState) => void;
+    /** Native sub-issues reported for every parent during reconciliation. */
+    readonly parentSubIssues?: ReadonlyArray<GitHubIssue>;
 };
 
 const testRuntime = (
@@ -349,12 +352,23 @@ const testRuntime = (
         githubIssues,
         githubIssueMutations: mutations,
         githubIssueRelationships: {
-            listSubIssues: async () => [],
+            listSubIssues: async () => options.parentSubIssues ?? [],
             parentOf: async () => undefined,
             attachSubIssue: async () => {},
             listBlockedBy: async () => [],
             addBlockedBy: async () => {},
         },
+        parentCompletion: makeParentCompletionService({
+            issues: githubIssues,
+            relationships: {
+                listSubIssues: async () => options.parentSubIssues ?? [],
+                parentOf: async () => undefined,
+                attachSubIssue: async () => {},
+                listBlockedBy: async () => [],
+                addBlockedBy: async () => {},
+            },
+            mutations,
+        }),
         githubPullRequests: pullRequests,
         githubNeedsAttentionNotification:
             options.needsAttentionNotification ?? {
@@ -1547,5 +1561,86 @@ describe("workflow", () => {
         expect(states.at(-1)?.outcomes[0]?.outcome.kind).toBe(
             IssueExecutionOutcomeKind.Skipped,
         );
+    });
+
+    test("completes a decomposed parent whose sub-issues all closed earlier", async () => {
+        const calls: string[] = [];
+        const states: RunState[] = [];
+        const decomposedParent: GitHubIssue = {
+            ...firstIssue,
+            number: 43,
+            title: "Decomposed parent",
+            body: "<!-- ralphie:decomposition original=43 depth=1 -->\n\nDecomposed work.",
+        };
+        const closedChild: GitHubIssue = {
+            ...secondIssue,
+            number: 101,
+            state: "closed",
+            body: '<!-- ralphie:decomposition root=43 parent=43 key="storage" depth=1 -->',
+        };
+        const summary = await workflow(
+            { ...baseOptions },
+            testRuntime(calls, states, {
+                issueLists: [[decomposedParent]],
+                parentSubIssues: [closedChild],
+            }),
+        );
+        expect(summary.outcomes).toEqual([]);
+        expect(calls).toContain("closeIssue:43");
+        expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
+    });
+
+    test("keeps a decomposed parent open while its sub-issues are open", async () => {
+        const calls: string[] = [];
+        const states: RunState[] = [];
+        const decomposedParent: GitHubIssue = {
+            ...firstIssue,
+            number: 43,
+            title: "Decomposed parent",
+            body: "<!-- ralphie:decomposition original=43 depth=1 -->\n\nDecomposed work.",
+        };
+        const openChild: GitHubIssue = {
+            ...secondIssue,
+            number: 101,
+            body: '<!-- ralphie:decomposition root=43 parent=43 key="storage" depth=1 -->',
+        };
+        await workflow(
+            { ...baseOptions },
+            testRuntime(calls, states, {
+                issueLists: [[decomposedParent]],
+                parentSubIssues: [openChild],
+            }),
+        );
+        expect(calls).not.toContain("closeIssue:43");
+    });
+
+    test("never reconciles parents during a dry run", async () => {
+        const calls: string[] = [];
+        const states: RunState[] = [];
+        const decomposedParent: GitHubIssue = {
+            ...firstIssue,
+            number: 43,
+            title: "Decomposed parent",
+            body: "<!-- ralphie:decomposition original=43 depth=1 -->\n\nDecomposed work.",
+        };
+        const closedChild: GitHubIssue = {
+            ...secondIssue,
+            number: 101,
+            state: "closed",
+            body: '<!-- ralphie:decomposition root=43 parent=43 key="storage" depth=1 -->',
+        };
+        await workflow(
+            { ...baseOptions, dryRun: true },
+            testRuntime(calls, states, {
+                issueLists: [[decomposedParent]],
+                parentSubIssues: [closedChild],
+                dryRunOutcome: {
+                    kind: IssueExecutionOutcomeKind.Skipped,
+                    route: "decomposition",
+                    reason: "dry run",
+                },
+            }),
+        );
+        expect(calls).not.toContain("closeIssue:43");
     });
 });
