@@ -11,10 +11,12 @@ import {
     type ComplexityDecision,
 } from "./decisions.ts";
 import type { IssueExecutionContext } from "./execution.ts";
+import type { PiNeedsAttentionRequest } from "../agent/task-session.ts";
 
 export type ComplexityAssessmentResult = {
     readonly decision: ComplexityDecision;
     readonly sessionID: string;
+    readonly needsAttention?: PiNeedsAttentionRequest;
 };
 
 export type ComplexityAssessmentService = {
@@ -82,6 +84,9 @@ export const makeComplexityAssessmentService = (
             const assessed = {
                 decision: result.output,
                 sessionID: result.sessionID,
+                ...(result.needsAttention === undefined
+                    ? {}
+                    : { needsAttention: result.needsAttention }),
             };
             await progress.emit({
                 ...issueProgress,

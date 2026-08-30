@@ -87,6 +87,10 @@ import {
     makeGroundingAssessmentService,
     type GroundingAssessmentService,
 } from "./issues/grounding.ts";
+import {
+    makeNeedsAttentionRouterService,
+    type NeedsAttentionRouterService,
+} from "./issues/needs-attention.ts";
 import { makePiService, type PiService } from "./pi/server.ts";
 import { type ProgressReporterService } from "./progress/progress.ts";
 import { RunStateStoreLive, type RunStateStoreService } from "./run/state.ts";
@@ -118,6 +122,7 @@ export type RalphieRuntime = {
     readonly dryRunIssueExecutor: DryRunIssueExecutorService;
     readonly issueExecutor: IssueExecutorService;
     readonly issueRecovery: IssueRecoveryService;
+    readonly needsAttentionRouter: NeedsAttentionRouterService;
     readonly pi: PiService;
     readonly progress: ProgressReporterService;
     readonly runStateStore: RunStateStoreService;
@@ -163,6 +168,7 @@ export const makeLiveRuntime = ({
         progress,
         gitRepositoryInvariant,
     );
+    const needsAttentionRouter = makeNeedsAttentionRouterService(issueRecovery);
     const issueVerification = makeIssueVerificationService(commandRunner);
     const complexityAssessment = makeComplexityAssessmentService(progress);
     const groundingAssessment = makeGroundingAssessmentService(progress);
@@ -171,6 +177,7 @@ export const makeLiveRuntime = ({
         githubIssueMutations,
         githubIssues,
         progress,
+        needsAttentionRouter,
     );
     const implementationExecutor = makeImplementationExecutorService(
         actualGitIssuePreparation,
@@ -180,6 +187,7 @@ export const makeLiveRuntime = ({
         progress,
         issueVerification,
         resolutionVerification,
+        needsAttentionRouter,
     );
     const dryRunIssueExecutor = makeDryRunIssueExecutorService(
         issueArtifactStore,
@@ -195,6 +203,7 @@ export const makeLiveRuntime = ({
         groundingAssessment,
         resolutionVerification,
         progress,
+        needsAttentionRouter,
     );
     return {
         commandRunner,
@@ -219,6 +228,7 @@ export const makeLiveRuntime = ({
         dryRunIssueExecutor,
         issueExecutor,
         issueRecovery,
+        needsAttentionRouter,
         pi,
         progress,
         runStateStore,

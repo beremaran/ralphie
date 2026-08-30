@@ -387,6 +387,14 @@ describe("per-issue artifact store", () => {
                 IssueArtifactKind.NeedsAttentionDecision,
                 artifact,
             );
+            await first.write(IssueArtifactKind.NeedsAttentionHandoff, {
+                request: {
+                    reason: "missing_information",
+                    message: "The target runtime is unspecified.",
+                },
+                fingerprint,
+                checkpoint: { branch: "main", sha: "abc123" },
+            });
 
             const reloaded = await makeDurableIssueArtifactStore(42, scope);
             expect(
@@ -406,6 +414,9 @@ describe("per-issue artifact store", () => {
             expect(reloaded.has(IssueArtifactKind.NeedsAttentionDecision)).toBe(
                 false,
             );
+            expect(reloaded.has(IssueArtifactKind.NeedsAttentionHandoff)).toBe(
+                false,
+            );
             const persisted = await Bun.file(
                 join(
                     workspace,
@@ -420,6 +431,9 @@ describe("per-issue artifact store", () => {
             expect(persisted.version).toBe(4);
             expect(persisted.artifacts).not.toHaveProperty(
                 IssueArtifactKind.NeedsAttentionDecision,
+            );
+            expect(persisted.artifacts).not.toHaveProperty(
+                IssueArtifactKind.NeedsAttentionHandoff,
             );
         } finally {
             await rm(workspace, { recursive: true, force: true });

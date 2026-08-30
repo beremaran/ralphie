@@ -62,6 +62,10 @@ const groundingDecision: NeedsAttentionDecision = {
     evidence: ["The repository does not contain the required dependency."],
     questions: ["Can the dependency be provided before retrying?"],
 };
+const fingerprint = {
+    updatedAt: "2026-08-28T00:00:00.000Z",
+    commentCount: 0,
+} as const;
 
 const recovery = (
     calls: string[],
@@ -218,6 +222,7 @@ describe("review exhaustion recovery", () => {
                 repositoryPath: `${workspace}/repo`,
                 issue,
                 checkpoint,
+                fingerprint,
                 decision: groundingDecision,
                 request: {
                     reason: "external_dependency",
@@ -235,12 +240,14 @@ describe("review exhaustion recovery", () => {
                     },
                 },
             });
-            expect(result.diagnosticsPath).toBe(
-                join(
-                    workspace,
-                    ".ralphie/runs/run-1/issues/42/needs-attention",
+            expect(
+                result.diagnosticsPath.startsWith(
+                    join(
+                        workspace,
+                        ".ralphie/runs/run-1/issues/42/needs-attention-",
+                    ),
                 ),
-            );
+            ).toBe(true);
             expect(calls).toEqual([
                 "createPatch",
                 `restore:${checkpoint.sha}`,
@@ -262,6 +269,88 @@ describe("review exhaustion recovery", () => {
             expect(metadata.checkpoint).toEqual(checkpoint);
             expect(metadata.decision).toEqual(groundingDecision);
             expect(metadata.request.reason).toBe("external_dependency");
+        } finally {
+            await rm(workspace, { recursive: true, force: true });
+        }
+    });
+
+    test("reuses matching diagnostics and separates a fresh fingerprint", async () => {
+        const workspace = await mkdtemp(join(tmpdir(), "ralphie-recovery-"));
+        const calls: string[] = [];
+        const service = recovery(calls, []);
+        const input = {
+            runId: "run-retry",
+            workspace,
+            repositoryPath: `${workspace}/repo`,
+            issue,
+            checkpoint,
+            fingerprint,
+            decision: groundingDecision,
+            repositoryInvariant: {
+                capture: async () => ({
+                    branch: checkpoint.branch,
+                    head: checkpoint.sha,
+                }),
+                verify: async () => {
+                    calls.push("verify");
+                },
+            },
+        };
+        try {
+            const first = await service.handleNeedsAttention(input);
+            const resumed = await service.handleNeedsAttention(input);
+            const fresh = await service.handleNeedsAttention({
+                ...input,
+                fingerprint: {
+                    updatedAt: "2026-08-29T00:00:00.000Z",
+                    commentCount: 0,
+                },
+            });
+
+            expect(resumed.diagnosticsPath).toBe(first.diagnosticsPath);
+            expect(fresh.diagnosticsPath).not.toBe(first.diagnosticsPath);
+            expect(
+                calls.filter((call) => call.startsWith("restore:")),
+            ).toHaveLength(3);
+        } finally {
+            await rm(workspace, { recursive: true, force: true });
+        }
+    });
+
+    test("rejects a diagnostic directory bound to different metadata", async () => {
+        const workspace = await mkdtemp(join(tmpdir(), "ralphie-recovery-"));
+        const service = recovery([], []);
+        const input = {
+            runId: "run-collision",
+            workspace,
+            repositoryPath: `${workspace}/repo`,
+            issue,
+            checkpoint,
+            fingerprint,
+            decision: groundingDecision,
+            repositoryInvariant: {
+                capture: async () => ({
+                    branch: checkpoint.branch,
+                    head: checkpoint.sha,
+                }),
+                verify: async () => {},
+            },
+        };
+        try {
+            const first = await service.handleNeedsAttention(input);
+            const metadataPath = join(first.diagnosticsPath, "metadata.json");
+            const metadata = JSON.parse(await readFile(metadataPath, "utf8"));
+            await writeFile(
+                metadataPath,
+                JSON.stringify({
+                    ...metadata,
+                    decision: { ...groundingDecision, summary: "Other" },
+                }),
+            );
+
+            await expect(service.handleNeedsAttention(input)).rejects.toThrow(
+                "do not match the confirmed decision",
+            );
         } finally {
             await rm(workspace, { recursive: true, force: true });
         }
@@ -289,6 +378,7 @@ describe("review exhaustion recovery", () => {
                 repositoryPath: "/workspace/repo",
                 issue,
                 checkpoint,
+                fingerprint,
                 decision: groundingDecision,
                 repositoryInvariant: {
                     capture: async () => ({
@@ -327,6 +417,7 @@ describe("review exhaustion recovery", () => {
                     repositoryPath: `${workspace}/repo`,
                     issue,
                     checkpoint,
+                    fingerprint,
                     decision: groundingDecision,
                     repositoryInvariant: {
                         capture: async () => ({
@@ -373,6 +464,7 @@ describe("review exhaustion recovery", () => {
                         repositoryPath: `${workspace}/repo`,
                         issue,
                         checkpoint,
+                        fingerprint,
                         decision: groundingDecision,
                         repositoryInvariant: {
                             capture: async () => ({

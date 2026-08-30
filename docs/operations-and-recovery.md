@@ -135,14 +135,18 @@ needs-attention outcomes but never publish notifications. With
 `--on-needs-attention continue`, the issue remains open while later work is
 drained; a drained run completes with exit status 0.
 
-When a mutating agent's needs-attention request is confirmed by grounding,
-recovery first writes a bounded binary-safe patch and decision diagnostic, then
-restores and verifies the exact clean checkpoint; any capture, write, restore,
-or verification failure halts as recoverable failure. A later run evaluates the
-issue again, so completing its dependency makes it eligible without editing the
-queue manually. The saved needs-attention grounding is reused only when live
-`updatedAt` and comment freshness metadata exactly match; a changed or invalid
-fingerprint is removed atomically before grounding runs again.
+When any executor session requests needs attention, Ralphie first persists the
+bounded request, clean checkpoint, and issue freshness fingerprint. Exactly one
+fresh read-only grounding session verifies that request before the next artifact,
+Git, or GitHub mutation. Only a `needs_attention` verifier disposition confirms
+it; actionable and already-resolved dispositions continue the original flow.
+The confirmed decision is persisted before recovery writes a bounded binary-safe
+patch and decision diagnostic, then restores and verifies the exact clean
+checkpoint. A verifier or recovery interruption retains the handoff so resume
+can retry verification or recovery without rerunning completed agent work.
+The saved decision and handoff are reused only when live `updatedAt` and comment
+freshness metadata exactly match; a changed or invalid fingerprint removes both
+atomically before routing continues.
 
 ```mermaid
 stateDiagram-v2
@@ -164,9 +168,11 @@ stateDiagram-v2
 ```
 
 Needs-attention recovery diagnostics use the same issue directory and contain
-`changes.patch` plus `metadata.json` under `needs-attention/`. The patch includes
-tracked staged and unstaged changes as well as untracked files. Diagnostics are
-published atomically before the exact checkpoint is restored and verified.
+`changes.patch` plus `metadata.json` under a fingerprint-bound
+`needs-attention-<id>/` directory. The patch includes tracked staged and unstaged
+changes as well as untracked files. Matching diagnostics are reused on resume;
+a fresh fingerprint receives a distinct directory. Diagnostics are published
+atomically before the exact checkpoint is restored and verified.
 
 ## Resume and reconciliation
 

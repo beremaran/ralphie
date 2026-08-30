@@ -23,6 +23,7 @@ import type { DecompositionExecutorService } from "./decomposition-executor.ts";
 import type { ImplementationExecutorService } from "./implementation-executor.ts";
 import type { GroundingAssessmentService } from "./grounding.ts";
 import type { ResolutionVerificationService } from "./resolution-verification.ts";
+import { type NeedsAttentionRouterService } from "./needs-attention.ts";
 
 export type IssueExecutorService = {
     readonly execute: (
@@ -39,6 +40,7 @@ export const makeIssueExecutorService = (
     groundingAssessment: GroundingAssessmentService,
     resolutionVerification: ResolutionVerificationService,
     progress?: ProgressReporterService,
+    needsAttentionRouter?: NeedsAttentionRouterService,
 ): IssueExecutorService => {
     const verifyAlreadyResolved = async (
         context: IssueExecutionContext,
@@ -46,6 +48,14 @@ export const makeIssueExecutorService = (
     ): Promise<IssueExecutionOutcome> => {
         try {
             const result = await resolutionVerification.verify(context);
+            if (result.needsAttention !== undefined) {
+                const routed = await routeSignal(
+                    context,
+                    artifacts,
+                    result.needsAttention,
+                );
+                if (routed !== undefined) return routed;
+            }
             const parsed = resolutionVerificationDecisionSchema.safeParse(
                 result.decision,
             );
@@ -60,7 +70,10 @@ export const makeIssueExecutorService = (
             if (!artifacts.has(IssueArtifactKind.IssueResolutionDecision)) {
                 await artifacts.write(
                     IssueArtifactKind.IssueResolutionDecision,
-                    decision,
+                    {
+                        decision,
+                        fingerprint: issueFreshnessFingerprint(context.issue),
+                    },
                 );
             }
             return decision.status === IssueResolutionStatus.Resolved
@@ -80,6 +93,36 @@ export const makeIssueExecutorService = (
                 message: `Fresh resolution verification failed: ${error instanceof Error ? error.message : String(error)}`,
             };
         }
+    };
+
+    const checkpoint = async (context: IssueExecutionContext) => {
+        const captured = await context.repositoryInvariant.capture(
+            context.repositoryPath,
+        );
+        return { branch: captured.branch, sha: captured.head };
+    };
+
+    const routeSignal = async (
+        context: IssueExecutionContext,
+        artifacts: Awaited<ReturnType<IssueArtifactStoreService["forIssue"]>>,
+        request: NonNullable<
+            Awaited<
+                ReturnType<GroundingAssessmentService["assess"]>
+            >["needsAttention"]
+        >,
+    ) => {
+        if (needsAttentionRouter === undefined) {
+            throw new RalphieError({
+                message:
+                    "A needs-attention signal requires the verifier/router service.",
+            });
+        }
+        return await needsAttentionRouter.route({
+            context,
+            artifacts,
+            request,
+            checkpoint: await checkpoint(context),
+        });
     };
 
     const assessGrounding = async (
@@ -115,7 +158,15 @@ export const makeIssueExecutorService = (
                 ),
             };
         }
-        const { decision } = await groundingAssessment.assess(context);
+        const grounding = await groundingAssessment.assess(context);
+        const { decision } = grounding;
+        if (grounding.needsAttention !== undefined) {
+            return await routeSignal(
+                context,
+                artifacts,
+                grounding.needsAttention,
+            );
+        }
         if (decision.disposition === GroundingDisposition.Actionable) {
             return undefined;
         }
@@ -144,17 +195,42 @@ export const makeIssueExecutorService = (
     const assessOrReadDecision = async (
         context: IssueExecutionContext,
         artifacts: Awaited<ReturnType<IssueArtifactStoreService["forIssue"]>>,
-    ): Promise<ComplexityDecision> => {
+    ): Promise<ComplexityDecision | IssueExecutionOutcome> => {
         if (artifacts.has(IssueArtifactKind.ComplexityDecision)) {
             return (await artifacts.read(IssueArtifactKind.ComplexityDecision))
                 .decision;
         }
-        const { decision } = await complexityAssessment.assess(context);
+        const assessed = await complexityAssessment.assess(context);
+        if (assessed.needsAttention !== undefined) {
+            const routed = await routeSignal(
+                context,
+                artifacts,
+                assessed.needsAttention,
+            );
+            if (routed !== undefined) return routed;
+        }
+        const { decision } = assessed;
         await artifacts.write(IssueArtifactKind.ComplexityDecision, {
             decision,
             fingerprint: issueFreshnessFingerprint(context.issue),
         });
         return decision;
+    };
+
+    const resumeNeedsAttention = async (
+        context: IssueExecutionContext,
+        artifacts: Awaited<ReturnType<IssueArtifactStoreService["forIssue"]>>,
+    ): Promise<IssueExecutionOutcome | undefined> => {
+        if (!artifacts.has(IssueArtifactKind.NeedsAttentionHandoff)) {
+            return undefined;
+        }
+        if (needsAttentionRouter === undefined) {
+            throw new RalphieError({
+                message:
+                    "A pending needs-attention handoff requires the verifier/router service.",
+            });
+        }
+        return await needsAttentionRouter.route({ context, artifacts });
     };
 
     const executeIssue = async (
@@ -164,9 +240,13 @@ export const makeIssueExecutorService = (
         await artifacts.invalidateStaleIssueDecisions(
             issueFreshnessFingerprint(context.issue),
         );
+        const resumed = await resumeNeedsAttention(context, artifacts);
+        if (resumed !== undefined) return resumed;
         const deferred = await assessGrounding(context, artifacts);
         if (deferred !== undefined) return deferred;
-        const decision = await assessOrReadDecision(context, artifacts);
+        const assessed = await assessOrReadDecision(context, artifacts);
+        if (!("complexity" in assessed)) return assessed;
+        const decision = assessed;
         const input = { context, artifacts };
         if (decision.complexity >= ComplexityLevel.Level4) {
             return await decompositionExecutor.execute(input);

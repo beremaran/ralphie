@@ -19,6 +19,7 @@ import { makeComplexityAssessmentService } from "../../src/issues/complexity.ts"
 import {
     ComplexityLevel,
     GroundingDisposition,
+    NeedsAttentionReason,
     ReviewVerdict,
 } from "../../src/issues/decisions.ts";
 import type { DecompositionExecutorService } from "../../src/issues/decomposition-executor.ts";
@@ -30,6 +31,7 @@ import {
 import { makeIssueExecutorService } from "../../src/issues/executor.ts";
 import { makeImplementationExecutorService } from "../../src/issues/implementation-executor.ts";
 import { makeIssueRecoveryService } from "../../src/issues/recovery.ts";
+import { makeNeedsAttentionRouterService } from "../../src/issues/needs-attention.ts";
 import { makePiSessionDiagnostics } from "../../src/agent/task-session.ts";
 import {
     makeProgressRecorder,
@@ -295,6 +297,174 @@ describe("local implementation end-to-end", () => {
             expect(safetyInputs[1]?.expectedCommitSha).toBe(outcome.commitSha);
             expect(decompositionCalls).toBe(0);
             expect(progressEvents.length).toBeGreaterThan(0);
+        } finally {
+            await rm(root, { recursive: true, force: true });
+        }
+    });
+
+    test("verifies an implementation signal and restores before any Git mutation", async () => {
+        const root = await mkdtemp(join(tmpdir(), "ralphie-local-attention-"));
+        const repositoryPath = join(root, "repository");
+        const workspace = join(root, "workspace");
+        await mkdir(repositoryPath, { recursive: true });
+        try {
+            run("git", ["init", "-b", "main"], repositoryPath);
+            git(repositoryPath, ["config", "user.name", "Ralphie Test"]);
+            git(repositoryPath, [
+                "config",
+                "user.email",
+                "ralphie@example.test",
+            ]);
+            await writeFile(join(repositoryPath, "README.md"), "initial\n");
+            git(repositoryPath, ["add", "--all"]);
+            git(repositoryPath, ["commit", "-m", "initial commit"]);
+            const initialSha = git(repositoryPath, ["rev-parse", "HEAD"]);
+            let prompt = 0;
+            const sessions: string[] = [];
+            const pi = {
+                session: {
+                    create: async () => {
+                        const id = `attention-session-${sessions.length + 1}`;
+                        sessions.push(id);
+                        return { data: { id } };
+                    },
+                    prompt: async (parameters: { format?: unknown }) => {
+                        prompt += 1;
+                        if (prompt === 1) {
+                            return {
+                                data: {
+                                    info: {
+                                        structured: {
+                                            complexity: ComplexityLevel.Level2,
+                                            rationale: "Small implementation.",
+                                        },
+                                    },
+                                    parts: [],
+                                },
+                            };
+                        }
+                        if (parameters.format === undefined) {
+                            await writeFile(
+                                join(repositoryPath, "partial.txt"),
+                                "partial\n",
+                            );
+                            return {
+                                data: {
+                                    info: {},
+                                    parts: [],
+                                    needsAttention: {
+                                        reason: "external_dependency",
+                                        message:
+                                            "A generated fixture is missing.",
+                                    },
+                                },
+                            };
+                        }
+                        return {
+                            data: {
+                                info: {
+                                    structured: {
+                                        disposition:
+                                            GroundingDisposition.NeedsAttention,
+                                        reason: NeedsAttentionReason.ExternalDependency,
+                                        summary:
+                                            "The generated fixture is required.",
+                                        evidence: [
+                                            "README.md does not provide the generated fixture.",
+                                        ],
+                                        questions: [
+                                            "Can the generated fixture be supplied?",
+                                        ],
+                                    },
+                                },
+                                parts: [],
+                            },
+                        };
+                    },
+                },
+            } as unknown as PiClient;
+            const runner = CommandRunnerLive;
+            const gitCheckpoint = makeGitIssueCheckpointService(runner);
+            const artifacts = makeIssueArtifactStoreService();
+            const preparation = makeGitIssuePreparationService(
+                gitCheckpoint,
+                artifacts,
+            );
+            const operations = makeGitIssueOperationsService(runner);
+            const invariant = makeGitRepositoryInvariantService(runner);
+            const progress = makeProgressRecorder([]);
+            const recovery = makeIssueRecoveryService(
+                gitCheckpoint,
+                progress,
+                invariant,
+            );
+            const router = makeNeedsAttentionRouterService(recovery);
+            const safety: GitRemoteSafetyService = {
+                verifyDirectPush: async (input) => ({
+                    repository: input.repository,
+                    branch: input.branch,
+                    origin: "local",
+                    commitsBehindBase: 0,
+                    commitsAheadBase: 0,
+                    pushMode: "non-force",
+                }),
+            };
+            const implementation = makeImplementationExecutorService(
+                preparation,
+                operations,
+                safety,
+                recovery,
+                progress,
+                undefined,
+                undefined,
+                router,
+            );
+            const executor = makeIssueExecutorService(
+                artifacts,
+                makeComplexityAssessmentService(progress),
+                implementation,
+                {
+                    execute: async () => {
+                        throw new Error("decomposition must not run");
+                    },
+                },
+                {
+                    assess: async () => ({
+                        sessionID: "grounding-session",
+                        decision: {
+                            disposition: GroundingDisposition.Actionable,
+                        },
+                    }),
+                },
+                {
+                    verify: async () => {
+                        throw new Error("resolution verification must not run");
+                    },
+                },
+                progress,
+                router,
+            );
+
+            const outcome = await executor.execute(
+                makeContext(
+                    repositoryPath,
+                    pi,
+                    workspace,
+                    "local-needs-attention-e2e",
+                    invariant,
+                ),
+            );
+
+            expect(outcome).toMatchObject({
+                kind: IssueExecutionOutcomeKind.NeedsAttention,
+                summary: "The generated fixture is required.",
+            });
+            expect(sessions).toHaveLength(3);
+            expect(git(repositoryPath, ["rev-parse", "HEAD"])).toBe(initialSha);
+            expect(git(repositoryPath, ["status", "--porcelain=v1"])).toBe("");
+            expect(
+                await Bun.file(join(repositoryPath, "partial.txt")).exists(),
+            ).toBe(false);
         } finally {
             await rm(root, { recursive: true, force: true });
         }

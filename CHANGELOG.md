@@ -42,6 +42,9 @@ All notable changes to Ralphie are documented here. The project follows
 - Confirmed needs-attention recovery that atomically preserves bounded,
   binary-safe worktree diagnostics before restoring and verifying the exact
   clean issue checkpoint.
+- Resumable needs-attention handoffs with one fresh read-only verifier for every
+  executor signal, immutable confirmation before recovery, and idempotent,
+  freshness-bound diagnostics across interruptions.
 - Durable needs-attention notification recovery: structured outcomes and label
   intent are saved before GitHub mutation, and resume retries the stable marker
   without rerunning agent work.

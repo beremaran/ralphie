@@ -5,6 +5,10 @@ import { z } from "zod";
 
 import type { IssueCheckpoint } from "../git/issue-checkpoint.ts";
 import type { GitHubIssue } from "../github/issues.ts";
+import {
+    piNeedsAttentionRequestSchema,
+    type PiNeedsAttentionRequest,
+} from "../agent/task-session.ts";
 import { RalphieError } from "../shared/error.ts";
 import { resolveWorkspacePath } from "../workspace/workspace.ts";
 import {
@@ -41,6 +45,7 @@ export enum IssueArtifactKind {
     CreatedCommit = "created-commit",
     IssueResolutionDecision = "issue-resolution-decision",
     NeedsAttentionDecision = "needs-attention-decision",
+    NeedsAttentionHandoff = "needs-attention-handoff",
     IssueBreakdownDecision = "issue-breakdown-decision",
     CreatedIssueNumbers = "created-issue-numbers",
 }
@@ -78,6 +83,12 @@ export type IssueResolutionDecisionArtifact = {
 
 export type NeedsAttentionArtifact = NeedsAttentionDecisionArtifact;
 
+export type NeedsAttentionHandoffArtifact = {
+    readonly request: PiNeedsAttentionRequest;
+    readonly fingerprint: IssueFreshnessFingerprint;
+    readonly checkpoint: IssueCheckpoint;
+};
+
 export type IssueArtifactValues = {
     readonly [IssueArtifactKind.ComplexityDecision]: ComplexityDecisionArtifact;
     readonly [IssueArtifactKind.IssueCheckpoint]: IssueCheckpoint;
@@ -91,6 +102,7 @@ export type IssueArtifactValues = {
     };
     readonly [IssueArtifactKind.IssueResolutionDecision]: IssueResolutionDecisionArtifact;
     readonly [IssueArtifactKind.NeedsAttentionDecision]: NeedsAttentionDecisionArtifact;
+    readonly [IssueArtifactKind.NeedsAttentionHandoff]: NeedsAttentionHandoffArtifact;
     readonly [IssueArtifactKind.IssueBreakdownDecision]: IssueBreakdownDecision;
     readonly [IssueArtifactKind.CreatedIssueNumbers]: CreatedIssueNumberMapping;
 };
@@ -126,6 +138,7 @@ export type IssueArtifactStore = {
     readonly invalidateNeedsAttentionDecision: (
         fingerprint: IssueFreshnessFingerprint,
     ) => Promise<boolean>;
+    readonly clearNeedsAttentionHandoff: () => Promise<void>;
 };
 
 export type IssueArtifactScope = {
@@ -217,6 +230,14 @@ export const issueResolutionDecisionArtifactSchema = z
     .object({
         decision: issueResolutionDecisionSchema,
         fingerprint: issueFreshnessFingerprintSchema,
+    })
+    .strict();
+
+export const needsAttentionHandoffArtifactSchema = z
+    .object({
+        request: piNeedsAttentionRequestSchema,
+        fingerprint: issueFreshnessFingerprintSchema,
+        checkpoint: issueCheckpointSchema,
     })
     .strict();
 
@@ -324,6 +345,8 @@ const persistedArtifactsSchema = persistedArtifactsV2BaseSchema
             issueResolutionDecisionArtifactSchema.optional(),
         [IssueArtifactKind.NeedsAttentionDecision]:
             needsAttentionDecisionArtifactSchema.optional(),
+        [IssueArtifactKind.NeedsAttentionHandoff]:
+            needsAttentionHandoffArtifactSchema.optional(),
     })
     .strict()
     .superRefine(validatePullRequestApproval);
@@ -341,6 +364,7 @@ const persistedArtifactsLoadSchema = persistedArtifactsV2BaseSchema
         [IssueArtifactKind.ComplexityDecision]: z.unknown().optional(),
         [IssueArtifactKind.IssueResolutionDecision]: z.unknown().optional(),
         [IssueArtifactKind.NeedsAttentionDecision]: z.unknown().optional(),
+        [IssueArtifactKind.NeedsAttentionHandoff]: z.unknown().optional(),
     })
     .strict();
 
@@ -461,6 +485,8 @@ const loadCurrentArtifactState = (value: unknown): LoadedArtifactState => {
             issueResolutionDecisionArtifactSchema,
         [IssueArtifactKind.NeedsAttentionDecision]:
             needsAttentionDecisionArtifactSchema,
+        [IssueArtifactKind.NeedsAttentionHandoff]:
+            needsAttentionHandoffArtifactSchema,
     } as const;
     const stale = Object.entries(schemas).filter(([kind, schema]) => {
         const artifact = loaded.artifacts[kind as keyof typeof schemas];
@@ -634,7 +660,9 @@ const validateArtifactValue = (
                 ? issueResolutionDecisionArtifactSchema
                 : kind === IssueArtifactKind.ApprovedPullRequestReviewEvidence
                   ? approvedPullRequestReviewEvidenceSchema
-                  : undefined;
+                  : kind === IssueArtifactKind.NeedsAttentionHandoff
+                    ? needsAttentionHandoffArtifactSchema
+                    : undefined;
     if (!schema) return;
     try {
         schema.parse(value);
@@ -679,13 +707,24 @@ const makeStore = (
             });
         }
         const existing = values.get(IssueArtifactKind.NeedsAttentionDecision);
-        if (existing === undefined) return false;
-        const artifact = existing as NeedsAttentionDecisionArtifact;
-        if (sameIssueFreshnessFingerprint(artifact.fingerprint, fingerprint)) {
+        const handoff = values.get(IssueArtifactKind.NeedsAttentionHandoff) as
+            | NeedsAttentionHandoffArtifact
+            | undefined;
+        const decisionMatches =
+            existing === undefined ||
+            sameIssueFreshnessFingerprint(
+                (existing as NeedsAttentionDecisionArtifact).fingerprint,
+                fingerprint,
+            );
+        const handoffMatches =
+            handoff === undefined ||
+            sameIssueFreshnessFingerprint(handoff.fingerprint, fingerprint);
+        if (decisionMatches && handoffMatches) {
             return false;
         }
         const nextValues = new Map(values);
         nextValues.delete(IssueArtifactKind.NeedsAttentionDecision);
+        nextValues.delete(IssueArtifactKind.NeedsAttentionHandoff);
         await save(nextValues);
         return true;
     };
@@ -884,6 +923,12 @@ const makeStore = (
         invalidateStaleIssueDecisions,
         invalidateStaleNeedsAttentionDecision,
         invalidateNeedsAttentionDecision: invalidateStaleNeedsAttentionDecision,
+        clearNeedsAttentionHandoff: async () => {
+            if (!values.has(IssueArtifactKind.NeedsAttentionHandoff)) return;
+            const nextValues = new Map(values);
+            nextValues.delete(IssueArtifactKind.NeedsAttentionHandoff);
+            await save(nextValues);
+        },
     };
 };
 

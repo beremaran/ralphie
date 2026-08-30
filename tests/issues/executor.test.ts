@@ -439,6 +439,8 @@ describe("IssueExecutor", () => {
                     childIssueNumbers: [],
                 }),
             },
+            actionableGrounding,
+            unusedResolutionVerification,
         );
         const initial = context(42);
 
@@ -449,6 +451,76 @@ describe("IssueExecutor", () => {
         });
 
         expect(assessmentCalls).toBe(2);
+    });
+
+    test("routes a pending handoff before a cached complexity decision", async () => {
+        const stores = makeIssueArtifactStoreService();
+        const artifacts = await stores.forIssue(42);
+        await artifacts.write(IssueArtifactKind.ComplexityDecision, {
+            decision: {
+                complexity: ComplexityLevel.Level2,
+                rationale: "Cached decision.",
+            },
+            fingerprint: {
+                updatedAt: "2026-08-28T00:00:00.000Z",
+                commentCount: 0,
+            },
+        });
+        await artifacts.write(IssueArtifactKind.NeedsAttentionHandoff, {
+            request: { reason: "external_dependency" },
+            checkpoint: { branch: "main", sha: "abc123" },
+            fingerprint: {
+                updatedAt: "2026-08-28T00:00:00.000Z",
+                commentCount: 0,
+            },
+        });
+        let implementationCalls = 0;
+        const outcome = await makeIssueExecutorService(
+            stores,
+            {
+                assess: async () => {
+                    throw new Error("complexity must remain cached");
+                },
+            },
+            {
+                execute: async () => {
+                    implementationCalls += 1;
+                    throw new Error("implementation must not run");
+                },
+            },
+            {
+                execute: async () => {
+                    throw new Error("decomposition must not run");
+                },
+            },
+            actionableGrounding,
+            unusedResolutionVerification,
+            undefined,
+            {
+                route: async () => ({
+                    kind: IssueExecutionOutcomeKind.NeedsAttention,
+                    reason: NeedsAttentionReason.ExternalDependency,
+                    summary: "Dependency unavailable.",
+                    evidence: ["The generated dependency is absent."],
+                    questions: ["Can the dependency be supplied?"],
+                    diagnosticsPath: "/workspace/diagnostics",
+                }),
+            },
+        ).execute({
+            ...context(42),
+            issue: {
+                number: 42,
+                title: "Pending issue",
+                url: "issue/42",
+                body: "Pending",
+                labels: [],
+                updatedAt: "2026-08-28T00:00:00.000Z",
+                commentCount: 0,
+            },
+        } as IssueExecutionContext);
+
+        expect(outcome.kind).toBe(IssueExecutionOutcomeKind.NeedsAttention);
+        expect(implementationCalls).toBe(0);
     });
 
     test("turns a missing complexity decision into a failed outcome", async () => {

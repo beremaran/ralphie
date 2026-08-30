@@ -34,6 +34,7 @@ import type {
     WorkflowExecutorInput,
     WorkflowExecutorResult,
 } from "./workflow-executor-input.ts";
+import type { NeedsAttentionRouterService } from "./needs-attention.ts";
 
 export type DecompositionExecutorService = {
     readonly execute: (
@@ -59,6 +60,7 @@ export const makeDecompositionExecutorService = (
     mutations: GitHubIssueMutationService,
     issues: GitHubIssuesService,
     progress: ProgressReporterService,
+    needsAttentionRouter?: NeedsAttentionRouterService,
 ): DecompositionExecutorService => {
     const recoverableMutation = async <Output>(
         operation: string,
@@ -189,6 +191,24 @@ export const makeDecompositionExecutorService = (
             progressIssue: issueContext(input).issue,
             signal: context.signal,
         });
+        if (result.needsAttention !== undefined) {
+            if (needsAttentionRouter === undefined) {
+                throw new RalphieError({
+                    message:
+                        "A needs-attention signal requires the verifier/router service.",
+                });
+            }
+            const routed = await needsAttentionRouter.route({
+                context,
+                artifacts,
+                request: result.needsAttention,
+                checkpoint: {
+                    branch: invariant.branch,
+                    sha: invariant.head,
+                },
+            });
+            if (routed !== undefined) throw new RoutedNeedsAttention(routed);
+        }
         await artifacts.write(
             IssueArtifactKind.IssueBreakdownDecision,
             result.output,
@@ -398,8 +418,23 @@ export const makeDecompositionExecutorService = (
     };
 
     return {
-        execute: executeDecomposition,
+        execute: async (input) => {
+            try {
+                return await executeDecomposition(input);
+            } catch (error) {
+                if (error instanceof RoutedNeedsAttention) {
+                    return error.outcome;
+                }
+                throw error;
+            }
+        },
     };
 };
+
+class RoutedNeedsAttention extends Error {
+    constructor(readonly outcome: WorkflowExecutorResult) {
+        super("Needs attention");
+    }
+}
 
 export const DecompositionExecutorLive = makeDecompositionExecutorService;

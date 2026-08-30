@@ -1,5 +1,5 @@
-import { randomUUID } from "node:crypto";
-import { mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import {
@@ -28,6 +28,7 @@ import {
     REVIEW_ITERATION_LIMIT,
 } from "./stage.ts";
 import type { VerificationEvidence } from "./verification.ts";
+import type { IssueFreshnessFingerprint } from "./artifacts.ts";
 
 export type ReviewAttempt = {
     readonly attempt: number;
@@ -65,6 +66,7 @@ export type NeedsAttentionRecoveryInput = {
     readonly repositoryPath: string;
     readonly issue: GitHubIssue;
     readonly checkpoint: IssueCheckpoint;
+    readonly fingerprint: IssueFreshnessFingerprint;
     /** The grounding decision that confirmed the agent's request. */
     readonly decision: NeedsAttentionDecision;
     /** The original bounded request from the mutating agent, when available. */
@@ -113,6 +115,14 @@ const diagnosticPath = (
         name,
     );
 
+const needsAttentionDiagnosticName = (
+    fingerprint: IssueFreshnessFingerprint,
+): string =>
+    `needs-attention-${createHash("sha256")
+        .update(JSON.stringify(fingerprint))
+        .digest("hex")
+        .slice(0, 16)}`;
+
 const persistDiagnostic = async (input: {
     readonly diagnosticsPath: string;
     readonly patch: string;
@@ -157,6 +167,64 @@ const persistDiagnostic = async (input: {
             message: `Failed to preserve ${input.description.toLowerCase()} at ${input.diagnosticsPath}. Checkout was not restored.`,
             cause,
         });
+    }
+};
+
+const needsAttentionMetadata = (
+    input: NeedsAttentionRecoveryInput,
+    diagnosticsPath: string,
+): string => {
+    const request = input.request ?? input.agentRequest;
+    try {
+        return `${JSON.stringify(
+            {
+                ...(input.repository === undefined
+                    ? {}
+                    : { repository: input.repository }),
+                issue: input.issue,
+                checkpoint: input.checkpoint,
+                fingerprint: input.fingerprint,
+                decision: input.decision,
+                ...(request === undefined ? {} : { request }),
+                createdAt: new Date().toISOString(),
+            },
+            null,
+            2,
+        )}\n`;
+    } catch (cause) {
+        throw recoverableError(
+            `Failed to preserve needs-attention diagnostics at ${diagnosticsPath}. Checkout was not restored.`,
+            cause,
+        );
+    }
+};
+
+const matchingDiagnostic = async (
+    diagnosticsPath: string,
+    metadata: string,
+): Promise<boolean> => {
+    try {
+        const existing = JSON.parse(
+            await readFile(join(diagnosticsPath, "metadata.json"), "utf8"),
+        ) as Record<string, unknown>;
+        const expected = JSON.parse(metadata) as Record<string, unknown>;
+        const { createdAt: _existingCreatedAt, ...existingBinding } = existing;
+        const { createdAt: _expectedCreatedAt, ...expectedBinding } = expected;
+        if (
+            JSON.stringify(existingBinding) !== JSON.stringify(expectedBinding)
+        ) {
+            throw new RalphieError({
+                message: `Needs-attention diagnostics at ${diagnosticsPath} do not match the confirmed decision.`,
+            });
+        }
+        return true;
+    } catch (cause) {
+        const code = (cause as NodeJS.ErrnoException).code;
+        if (code === "ENOENT" || code === "ENOTDIR") return false;
+        throw recoverableError(
+            `Failed to validate needs-attention diagnostics at ${diagnosticsPath}. Checkout was not restored.`,
+            cause,
+        );
     }
 };
 
@@ -251,39 +319,26 @@ export const makeIssueRecoveryService = (
 
     const writeNeedsAttentionDiagnostics = async (
         input: NeedsAttentionRecoveryInput,
-        patch: string,
-    ): Promise<string> => {
-        const diagnosticsPath = diagnosticPath(input, "needs-attention");
-        const request = input.request ?? input.agentRequest;
-        let metadata: string;
-        try {
-            metadata = `${JSON.stringify(
-                {
-                    ...(input.repository === undefined
-                        ? {}
-                        : { repository: input.repository }),
-                    issue: input.issue,
-                    checkpoint: input.checkpoint,
-                    decision: input.decision,
-                    ...(request === undefined ? {} : { request }),
-                    createdAt: new Date().toISOString(),
-                },
-                null,
-                2,
-            )}\n`;
-        } catch (cause) {
-            throw recoverableError(
-                `Failed to preserve needs-attention diagnostics at ${diagnosticsPath}. Checkout was not restored.`,
-                cause,
-            );
+        patch?: string,
+    ): Promise<
+        { readonly path: string; readonly reused: boolean } | undefined
+    > => {
+        const diagnosticsPath = diagnosticPath(
+            input,
+            needsAttentionDiagnosticName(input.fingerprint),
+        );
+        const metadata = needsAttentionMetadata(input, diagnosticsPath);
+        if (await matchingDiagnostic(diagnosticsPath, metadata)) {
+            return { path: diagnosticsPath, reused: true };
         }
+        if (patch === undefined) return undefined;
         await persistDiagnostic({
             diagnosticsPath,
             patch,
             metadata,
             description: "Needs-attention diagnostics",
         });
-        return diagnosticsPath;
+        return { path: diagnosticsPath, reused: false };
     };
 
     const restoreNeedsAttentionCheckout = async (
@@ -386,6 +441,16 @@ export const makeIssueRecoveryService = (
                 });
             }
 
+            const existing = await writeNeedsAttentionDiagnostics(input);
+            if (existing !== undefined) {
+                await restoreNeedsAttentionCheckout(
+                    input,
+                    existing.path,
+                    invariant,
+                );
+                return { diagnosticsPath: existing.path };
+            }
+
             let patch: string;
             try {
                 patch = await git.createPatch(input.repositoryPath);
@@ -395,16 +460,21 @@ export const makeIssueRecoveryService = (
                     cause,
                 );
             }
-            const diagnosticsPath = await writeNeedsAttentionDiagnostics(
+            const diagnostic = await writeNeedsAttentionDiagnostics(
                 input,
                 patch,
             );
+            if (diagnostic === undefined) {
+                throw new RalphieError({
+                    message: "Needs-attention diagnostics were not persisted.",
+                });
+            }
             await restoreNeedsAttentionCheckout(
                 input,
-                diagnosticsPath,
+                diagnostic.path,
                 invariant,
             );
-            return { diagnosticsPath };
+            return { diagnosticsPath: diagnostic.path };
         },
     };
 };

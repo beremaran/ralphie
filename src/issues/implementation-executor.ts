@@ -14,7 +14,10 @@ import {
     buildReviewPrompt,
 } from "../agent/prompts.ts";
 import { requestStructuredOutput } from "../agent/structured-output.ts";
-import { runPiTask } from "../agent/task-session.ts";
+import {
+    runPiTask,
+    type PiNeedsAttentionRequest,
+} from "../agent/task-session.ts";
 import {
     type ProgressStage,
     type ProgressStatus,
@@ -49,6 +52,7 @@ import {
     makeResolutionVerificationService,
     type ResolutionVerificationService,
 } from "./resolution-verification.ts";
+import type { NeedsAttentionRouterService } from "./needs-attention.ts";
 
 /** The implementation workflow for issues with complexity 0 through 3. */
 export type ImplementationExecutorService = {
@@ -171,7 +175,26 @@ export const makeImplementationExecutorService = (
     resolutionVerification: ResolutionVerificationService = makeResolutionVerificationService(
         progress,
     ),
+    needsAttentionRouter?: NeedsAttentionRouterService,
 ): ImplementationExecutorService => {
+    const routeSignal = async (
+        input: WorkflowExecutorInput,
+        request: PiNeedsAttentionRequest | undefined,
+        checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
+    ): Promise<WorkflowExecutorResult | undefined> => {
+        if (request === undefined) return undefined;
+        if (needsAttentionRouter === undefined) {
+            throw new RalphieError({
+                message:
+                    "A needs-attention signal requires the verifier/router service.",
+            });
+        }
+        return await needsAttentionRouter.route({
+            ...input,
+            request,
+            checkpoint,
+        });
+    };
     const resolutionOutcome = (
         resolution: IssueResolutionDecision,
     ): WorkflowExecutorResult =>
@@ -279,9 +302,10 @@ export const makeImplementationExecutorService = (
     const runImplementation = async (
         input: WorkflowExecutorInput,
         invariant: { readonly branch: string; readonly head: string },
-    ): Promise<void> => {
+        checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
+    ): Promise<WorkflowExecutorResult | undefined> => {
         const { context } = input;
-        await stage(
+        const result = await stage(
             progress,
             input,
             "implementation",
@@ -308,13 +332,21 @@ export const makeImplementationExecutorService = (
                 }),
             "Implementation completed.",
         );
+        return await routeSignal(input, result.needsAttention, checkpoint);
     };
 
     const verifyNoChangeResolution = async (
         input: WorkflowExecutorInput,
+        checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
     ): Promise<WorkflowExecutorResult> => {
         const { context, artifacts } = input;
         const resolution = await resolutionVerification.verify(context);
+        const routed = await routeSignal(
+            input,
+            resolution.needsAttention,
+            checkpoint,
+        );
+        if (routed !== undefined) return routed;
         await artifacts.write(IssueArtifactKind.IssueResolutionDecision, {
             decision: resolution.decision,
             fingerprint: issueFreshnessFingerprint(context.issue),
@@ -354,7 +386,8 @@ export const makeImplementationExecutorService = (
         invariant: { readonly branch: string; readonly head: string },
         attempt: number,
         previousReviews: ReadonlyArray<ReviewAttempt>,
-    ): Promise<ReviewAttempt> => {
+        checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
+    ): Promise<ReviewAttempt | WorkflowExecutorResult> => {
         const { context } = input;
         const verificationEvidence = await verifyStagedChanges(input);
         const stagedDiff = await operations.readStagedBinaryDiff(
@@ -400,6 +433,12 @@ export const makeImplementationExecutorService = (
             undefined,
             attempt,
         );
+        const routed = await routeSignal(
+            input,
+            reviewResult.needsAttention,
+            checkpoint,
+        );
+        if (routed !== undefined) return routed;
         return {
             attempt,
             sessionID: reviewResult.sessionID,
@@ -464,6 +503,12 @@ export const makeImplementationExecutorService = (
                 }),
             "Commit message generated.",
         );
+        const routed = await routeSignal(
+            input,
+            commitMessage.needsAttention,
+            checkpoint,
+        );
+        if (routed !== undefined) return routed;
         await artifacts.write(
             IssueArtifactKind.CommitMessageDecision,
             commitMessage.output,
@@ -529,7 +574,7 @@ export const makeImplementationExecutorService = (
         const currentDiff = await operations.readStagedBinaryDiff(
             context.repositoryPath,
         );
-        await stage(
+        const result = await stage(
             progress,
             input,
             "review-fix",
@@ -561,6 +606,11 @@ export const makeImplementationExecutorService = (
             undefined,
             attempt,
         );
+        const routed = await routeSignal(input, result.needsAttention, {
+            branch: invariant.branch,
+            sha: invariant.head,
+        });
+        if (routed !== undefined) return routed;
         checkSignal(context.signal);
         await stage(
             progress,
@@ -666,7 +716,9 @@ export const makeImplementationExecutorService = (
                 invariant,
                 attempt,
                 reviews,
+                checkpoint,
             );
+            if ("kind" in review) return review;
             const isRepeated = sameBlockingFindings(reviews.at(-1), review);
             reviews.push(review);
             await artifacts.appendReview(review);
@@ -702,7 +754,12 @@ export const makeImplementationExecutorService = (
         if (recovered !== undefined) return recovered;
 
         const { checkpoint, invariant } = await prepareAttempt(input);
-        await runImplementation(input, invariant);
+        const implementation = await runImplementation(
+            input,
+            invariant,
+            checkpoint,
+        );
+        if (implementation !== undefined) return implementation;
         checkSignal(context.signal);
         await stage(
             progress,
@@ -713,7 +770,7 @@ export const makeImplementationExecutorService = (
             "Implementation changes staged.",
         );
         if (!(await operations.hasStagedChanges(context.repositoryPath))) {
-            return await verifyNoChangeResolution(input);
+            return await verifyNoChangeResolution(input, checkpoint);
         }
         await verifyStagedChanges(input);
         return await runReviewLoop(input, checkpoint, invariant);

@@ -370,6 +370,7 @@ const testRuntime = (
         dryRunIssueExecutor,
         issueExecutor,
         issueRecovery: {} as never,
+        needsAttentionRouter: {} as never,
         pi,
         progress,
         runStateStore: stateStore,

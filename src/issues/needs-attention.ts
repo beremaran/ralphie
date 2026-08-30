@@ -1,0 +1,194 @@
+import type { IssueCheckpoint } from "../git/issue-checkpoint.ts";
+import { buildGroundingPrompt } from "../agent/prompts.ts";
+import { requestStructuredOutput } from "../agent/structured-output.ts";
+import type { PiNeedsAttentionRequest } from "../agent/task-session.ts";
+import { RalphieError } from "../shared/error.ts";
+import {
+    IssueArtifactKind,
+    issueFreshnessFingerprintSchema,
+    type IssueArtifactStore,
+    type IssueFreshnessFingerprint,
+    type NeedsAttentionHandoffArtifact,
+} from "./artifacts.ts";
+import {
+    GroundingDisposition,
+    groundingDecisionSchema,
+    type NeedsAttentionDecision,
+} from "./decisions.ts";
+import {
+    IssueExecutionOutcomeKind,
+    type IssueExecutionContext,
+    type IssueExecutionOutcome,
+} from "./execution.ts";
+import type { IssueRecoveryService } from "./recovery.ts";
+
+export type NeedsAttentionRouteInput = {
+    readonly context: IssueExecutionContext;
+    readonly artifacts: IssueArtifactStore;
+    readonly request?: PiNeedsAttentionRequest;
+    readonly checkpoint?: IssueCheckpoint;
+};
+
+export type NeedsAttentionRouterService = {
+    readonly route: (
+        input: NeedsAttentionRouteInput,
+    ) => Promise<IssueExecutionOutcome | undefined>;
+};
+
+export const issueFreshnessFingerprint = (
+    context: IssueExecutionContext,
+): IssueFreshnessFingerprint => {
+    const parsed = issueFreshnessFingerprintSchema.safeParse({
+        ...(context.issue.updatedAt === undefined
+            ? {}
+            : { updatedAt: context.issue.updatedAt }),
+        ...(context.issue.commentCount === undefined
+            ? {}
+            : { commentCount: context.issue.commentCount }),
+        ...(context.issue.commentVersion === undefined
+            ? {}
+            : { commentVersion: context.issue.commentVersion }),
+    });
+    if (parsed.success) return parsed.data as IssueFreshnessFingerprint;
+    throw new RalphieError({
+        message: `Issue #${context.issue.number} does not have a valid freshness fingerprint; needs-attention verification requires updatedAt and a comment count or comment version.`,
+        cause: parsed.error,
+    });
+};
+
+const verificationPrompt = (
+    context: IssueExecutionContext,
+    request: PiNeedsAttentionRequest,
+): string => `${buildGroundingPrompt({
+    issue: context.issue,
+    repositoryPath: context.repositoryPath,
+    targetBranch: context.targetBranch,
+})}
+
+An earlier agent made this bounded needs-attention request:
+<needs-attention-request>${JSON.stringify(request)}</needs-attention-request>
+Independently verify the request. Do not use the request_needs_attention tool;
+return the grounding disposition only.`;
+
+const outcome = (
+    decision: NeedsAttentionDecision,
+    diagnosticsPath: string,
+): IssueExecutionOutcome => {
+    const { disposition: _disposition, ...details } = decision;
+    return {
+        kind: IssueExecutionOutcomeKind.NeedsAttention,
+        ...details,
+        diagnosticsPath,
+    };
+};
+
+const loadHandoff = async (
+    input: NeedsAttentionRouteInput,
+    fingerprint: IssueFreshnessFingerprint,
+): Promise<NeedsAttentionHandoffArtifact | undefined> => {
+    const { artifacts, request, checkpoint } = input;
+    await artifacts.invalidateStaleNeedsAttentionDecision(fingerprint);
+    if (
+        !artifacts.has(IssueArtifactKind.NeedsAttentionHandoff) &&
+        request === undefined
+    ) {
+        return undefined;
+    }
+    if (!artifacts.has(IssueArtifactKind.NeedsAttentionHandoff)) {
+        if (checkpoint === undefined) {
+            throw new RalphieError({
+                message:
+                    "Needs-attention routing requires the original request and clean checkpoint.",
+            });
+        }
+        await artifacts.write(IssueArtifactKind.NeedsAttentionHandoff, {
+            request: request!,
+            checkpoint,
+            fingerprint,
+        });
+    }
+    return await artifacts.read(IssueArtifactKind.NeedsAttentionHandoff);
+};
+
+const verifyHandoff = async (
+    input: NeedsAttentionRouteInput,
+    handoff: NeedsAttentionHandoffArtifact,
+): Promise<NeedsAttentionDecision | undefined> => {
+    const { context, artifacts } = input;
+    if (artifacts.has(IssueArtifactKind.NeedsAttentionDecision)) {
+        return (await artifacts.read(IssueArtifactKind.NeedsAttentionDecision))
+            .decision;
+    }
+    const verified = await requestStructuredOutput(context.pi, {
+        directory: context.repositoryPath,
+        title: `Verify needs-attention request for issue #${context.issue.number}`,
+        prompt: verificationPrompt(context, handoff.request),
+        schema: groundingDecisionSchema,
+        agent: context.piSelection.agent,
+        model: context.piSelection.model,
+        variant:
+            context.piStageVariants?.grounding ?? context.piSelection.variant,
+        runId: context.runId,
+        diagnostics: context.piDiagnostics,
+        repositoryInvariant: {
+            branch: handoff.checkpoint.branch,
+            head: handoff.checkpoint.sha,
+        },
+        verifyRepositoryInvariant: context.repositoryInvariant.verify,
+        signal: context.signal,
+    });
+    if (verified.output.disposition !== GroundingDisposition.NeedsAttention) {
+        await artifacts.clearNeedsAttentionHandoff();
+        return undefined;
+    }
+    await artifacts.write(IssueArtifactKind.NeedsAttentionDecision, {
+        decision: verified.output,
+        fingerprint: handoff.fingerprint,
+    });
+    return verified.output;
+};
+
+const recoverHandoff = async (
+    input: NeedsAttentionRouteInput,
+    handoff: NeedsAttentionHandoffArtifact,
+    decision: NeedsAttentionDecision,
+    recovery: IssueRecoveryService,
+): Promise<IssueExecutionOutcome> => {
+    const { context, artifacts } = input;
+    const recovered = await recovery.handleNeedsAttention({
+        runId: context.runId,
+        repository: context.repository,
+        workspace: context.workspace,
+        repositoryPath: context.repositoryPath,
+        issue: context.issue,
+        checkpoint: handoff.checkpoint,
+        fingerprint: handoff.fingerprint,
+        decision,
+        request: handoff.request,
+        repositoryInvariant: context.repositoryInvariant,
+    });
+    await artifacts.clearNeedsAttentionHandoff();
+    return outcome(decision, recovered.diagnosticsPath);
+};
+
+export const makeNeedsAttentionRouterService = (
+    recovery: IssueRecoveryService,
+): NeedsAttentionRouterService => ({
+    route: async ({ context, artifacts, request, checkpoint }) => {
+        if (
+            request === undefined &&
+            !artifacts.has(IssueArtifactKind.NeedsAttentionHandoff)
+        ) {
+            return undefined;
+        }
+        const fingerprint = issueFreshnessFingerprint(context);
+        const input = { context, artifacts, request, checkpoint };
+        const handoff = await loadHandoff(input, fingerprint);
+        if (handoff === undefined) return undefined;
+        const decision = await verifyHandoff(input, handoff);
+        if (decision === undefined) return undefined;
+        return await recoverHandoff(input, handoff, decision, recovery);
+    },
+});
+
+export const NeedsAttentionRouterLive = makeNeedsAttentionRouterService;
