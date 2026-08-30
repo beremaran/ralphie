@@ -18,7 +18,25 @@ import {
     WorkflowMode,
 } from "../options.ts";
 
-export const RUN_STATE_VERSION = 5 as const;
+export const RUN_STATE_VERSION = 6 as const;
+
+/** Terminal and transitional states of an active PR delivery gate. */
+export const PR_CLOSURE_GATE_STATUSES = [
+    "pending",
+    "green",
+    "failed",
+    "cancelled",
+    "unknown",
+    "no-pipelines",
+    "timeout",
+    "aborted",
+    "stale",
+    "unmergeable",
+    "closed",
+    "merged",
+] as const;
+
+export type PrClosureGateStatus = (typeof PR_CLOSURE_GATE_STATUSES)[number];
 
 const dryRunRouteSchema = z.enum(DRY_RUN_ROUTES);
 
@@ -143,6 +161,54 @@ const outcomeSchema = z.preprocess((value) => {
 
 export const runStateOutcomeSchema = outcomeSchema;
 
+const pipelineSnapshotSchema = z
+    .object({
+        repository: z.string().min(1),
+        branch: z.string().min(1),
+        commitSha: z.string().min(1),
+        state: z.enum(["empty", "non-empty"]),
+        items: z.array(z.record(z.string(), z.unknown())).readonly(),
+        sourceErrors: z.array(z.record(z.string(), z.unknown())).readonly(),
+        completenessErrors: z.array(z.string()).readonly(),
+        diagnostics: z.array(z.record(z.string(), z.unknown())).readonly(),
+        reason: z.enum([
+            "success",
+            "pending",
+            "failure",
+            "no-checks",
+            "timeout",
+            "unknown",
+            "cancelled",
+            "error",
+        ]),
+        greenCandidate: z.boolean(),
+        fingerprint: z.string().min(1),
+    })
+    .strict();
+
+/**
+ * Durable state of an active PR closure gate. The snapshot and status are
+ * updated atomically whenever polling changes them; the record is kept in
+ * run state so a resumed run can continue polling or re-evaluate a saved
+ * decision without re-creating the PR.
+ */
+const prClosureSchema = z
+    .object({
+        pullRequestNumber: z.number().int().positive(),
+        observedHeadSha: z.string().min(1),
+        /** Latest normalized check snapshot observed by the gate. */
+        snapshot: pipelineSnapshotSchema.optional(),
+        /** Observation start timestamp, kept across resume. */
+        startedAt: z.string().datetime(),
+        /** Timestamp of the last atomic state update. */
+        updatedAt: z.string().datetime(),
+        gate: z.enum(PR_CLOSURE_GATE_STATUSES),
+        /** Details when the gate reached a terminal non-merged state. */
+        terminalReason: z.string().min(1).optional(),
+    })
+    .strict()
+    .optional();
+
 const runStateFields = {
     status: z.enum(RunStateStatus),
     runId: z.string().min(1),
@@ -190,6 +256,8 @@ const runStateFields = {
             stage: z.string().min(1),
         })
         .optional(),
+    /** Active PR closure gate state for the current issue (pr workflow). */
+    prClosure: prClosureSchema,
     checkout: z
         .object({
             branch: z.string().min(1),
@@ -205,15 +273,15 @@ export const runStateSchema = z.object({
 });
 
 const legacyRunStateSchema = z.object({
-    version: z.union([z.literal(2), z.literal(3), z.literal(4)]),
+    version: z.union([z.literal(2), z.literal(3), z.literal(4), z.literal(5)]),
     ...runStateFields,
     onNeedsAttention: z.enum(NeedsAttentionPolicy).optional(),
 });
 
-// Keep version 4 resumable as an in-memory input while all newly persisted
-// state is validated as version 5 by runStateSchema.
+// Keep versions 4 and 5 resumable as in-memory inputs while all newly
+// persisted state is validated as version 6 by runStateSchema.
 type RunStateFields = z.infer<z.ZodObject<typeof runStateFields>>;
-export type RunState = RunStateFields & { readonly version: 4 | 5 };
+export type RunState = RunStateFields & { readonly version: 4 | 5 | 6 };
 
 type LoadedRunState = {
     readonly state: RunState;
@@ -225,7 +293,10 @@ const migrateRunState = (value: unknown): LoadedRunState => {
         typeof value === "object" &&
         value !== null &&
         "version" in value &&
-        (value.version === 2 || value.version === 3 || value.version === 4)
+        (value.version === 2 ||
+            value.version === 3 ||
+            value.version === 4 ||
+            value.version === 5)
     ) {
         const legacy = legacyRunStateSchema.parse(value);
         return {

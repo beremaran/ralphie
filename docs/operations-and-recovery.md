@@ -83,9 +83,11 @@ configuration is not stored in this tree):
 contains the repository/branch/workflow, selected `onNeedsAttention` policy,
 notification settings and any pending notification intent, Pi selection,
 budget, pending and completed queue numbers, processed count, outcomes, active
-issue/stage, checkout invariant, and update time. State is saved before the
-queue starts, when an issue becomes active, after outcomes and queue refreshes,
-and at final completion.
+issue/stage, checkout invariant, update time, and, for an active `pr`
+closure, the pull request number, observed head SHA, latest normalized check
+snapshot, gate status, and terminal reason. State is saved before the queue
+starts, when an issue becomes active, after outcomes and queue refreshes, at
+each PR gate transition, and at final completion.
 
 ## Failure, cancellation, and exit status
 
@@ -105,6 +107,16 @@ stateDiagram-v2
 
 - One issue failure uses the current halt policy: Ralphie persists the active
   issue, releases Pi, retains artifacts, and stops before later issues.
+- A `pr` gate that is failed, cancelled, timed out, absent, unknown, closed,
+  or unmergeable never merges and never closes the source issue: Ralphie
+  retains the feature branch and pull request, persists the active
+  recoverable closure gate (PR number, observed head SHA, latest normalized
+  check snapshot, observation and last-update timestamps, gate status, and
+  terminal reason), and stops before merging. Resuming locates the existing
+  matching pull request, continues polling pending gates, re-verifies saved
+  green evidence against the current head, re-observes failed gates on a
+  later rerun, and reconciles an already-merged PR without another merge
+  call.
 - Pi is closed on success, failure, cancellation, and scoped defects. Ordinary
   failures set process exit code `1`.
 - Cancellation is checked before long-running boundaries and passed into Pi.

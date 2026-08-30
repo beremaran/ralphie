@@ -206,10 +206,14 @@ bunx @beremaran/ralphie owner/repository --max-issues 5
 
 The default `lgtm` workflow commits and pushes directly to the selected branch.
 The `pr` workflow creates and pushes a feature branch, opens or reuses a
-matching pull request, publishes the automated review attempts, and merges it.
-It is not a wait-for-human-review mode. The pull request body links the source
-issue with `Closes #<issue>` so GitHub closes the issue automatically when the
-pull request is merged:
+matching pull request, publishes the automated review attempts, waits for
+every check on the exact head SHA to pass, and then merges only while the
+head is unchanged. It is not a wait-for-human-review mode. A gate that
+fails, times out, sees no pipelines, or finds the head changed retains the
+feature branch and pull request and persists resumable state instead of
+merging or closing. The pull request body links the source issue with
+`Closes #<issue>` so GitHub closes the issue automatically when the pull
+request is merged:
 
 ```bash
 bunx @beremaran/ralphie owner/repository --workflow pr

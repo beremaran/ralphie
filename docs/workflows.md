@@ -61,8 +61,9 @@ flowchart TD
 8. In `lgtm` mode, recheck the remote and push the commit without force, then
    close the source issue after the push is verified. In `pr` mode, create a
    feature branch, push it, open a pull request linked with `Closes #<issue>`,
-   publish the review results, and merge it automatically so GitHub closes the
-   issue.
+   publish the review results, wait for every check on the exact head SHA to
+   pass, re-read the pull request, and merge it only while the head is
+   unchanged so GitHub closes the issue.
 
 When implementation produces no changes, a fresh read-only session must prove
 that the current checkout already resolves the issue and return concrete
@@ -108,8 +109,9 @@ sequenceDiagram
         else Review approved: pr mode
             R->>O: Generate structured commit message
             R->>G: Commit exact staged tree on feature branch
-            R->>GH: Open pull request with Closes #issue
-            R->>GH: Publish review comments and merge PR
+            R->>GH: Open matching PR with Closes #issue; persist head SHA
+            R->>GH: Publish review comments
+            R->>GH: Wait for checks on head SHA, re-read, then merge
             GH-->>R: Confirm merge; GitHub closes linked issue
         else Review budget exhausted
             R->>G: Preserve patch and restore checkpoint
@@ -212,12 +214,25 @@ as required for decomposition:
 | Mode | Issue checkout | Delivery | Source issue closure |
 | --- | --- | --- | --- |
 | `lgtm` | Selected base branch | Commit and non-force push directly to that branch; verify remote SHA and clean checkout | Close directly as `completed` after verified delivery. |
-| `pr` | `ralphie/issue-<number>` in the main checkout | Push feature branch, create/find matching PR, publish stored review attempts as marked comments, merge, and verify merged state | PR body contains `Closes #<issue>`; GitHub closes the issue on merge. The serial run restores the base checkout afterward. |
+| `pr` | `ralphie/issue-<number>` in the main checkout | Push feature branch, create/find matching PR, persist its number and head SHA, publish stored review attempts as marked comments, wait for checks on the exact head SHA to pass, re-read the PR, and invoke the expected-head merge only when the head is unchanged | PR body contains `Closes #<issue>`; GitHub closes the issue on merge. A failed, cancelled, timed-out, absent, unknown, changed-head, closed, or unmergeable gate retains the feature branch and PR, leaves the issue open, and persists recoverable run state. The serial run restores the base checkout afterward. |
 | `--dry-run` | Prepared normal checkout | Ground the issue, then assess complexity and report implementation or decomposition when actionable; report already-resolved and needs-attention routes otherwise. A decomposition dry run also performs the read-only breakdown session and reports the intended native sub-issue hierarchy, children to create or reuse, and dependency edges. No implementation, decomposition, delivery, commit, push, checkout, issue, or PR mutation | No issue is closed. The result is `skipped` except needs-attention, which remains a needs-attention outcome. |
 
 The direct-push path never uses force. A push rejection is authoritative: the
 created commit and artifacts are retained, the run halts, and resume can
 reconcile a commit that may already have reached the remote.
+
+The `pr` delivery is gated: once the matching pull request is created or
+found, its number and head SHA are persisted, review attempts are published
+idempotently, and the read-only check observer polls checks for that exact SHA
+until it reaches its documented green state. The PR is re-read immediately
+before merging — a changed head discards the saved decision. Failed,
+cancelled, timed-out, no-pipelines, unknown, changed-head, closed, or
+unmergeable gates never merge and never close the source issue; the feature
+branch and PR are retained with an active, recoverable closure gate in run
+state. Resuming such a run locates the existing matching PR, continues
+polling, re-verifies saved green evidence against the current head,
+re-observes failed gates on rerun, and reconciles an already-merged PR without
+another merge call.
 
 ## Modes and queue behavior
 

@@ -26,6 +26,11 @@ import {
     toQueuedIssues,
 } from "./issues/queue.ts";
 import type { PiRuntime } from "./pi/server.ts";
+import type { GitHubPullRequest } from "./github/pull-requests.ts";
+import type {
+    PipelineObservationResult,
+    PipelineSnapshot,
+} from "./github/pipeline-observation.ts";
 import {
     type ProgressReporterService,
     type ProgressStage,
@@ -37,6 +42,7 @@ import {
     RUN_STATE_VERSION,
     type RunState,
     RunStateStatus,
+    type PrClosureGateStatus,
 } from "./run/state.ts";
 import {
     isNeedsAttentionStop,
@@ -54,6 +60,18 @@ import type { RalphieRuntime } from "./runtime.ts";
 
 const errorMessage = (error: unknown): string =>
     error instanceof Error ? error.message : String(error);
+
+/** Bounds and confirmation policy for the PR delivery check gate. */
+const PR_GATE_OBSERVATION_OPTIONS = {
+    registrationGraceMs: 30_000,
+    deadlineMs: 30 * 60_000,
+    initialBackoffMs: 5_000,
+    maxBackoffMs: 60_000,
+    backoffFactor: 2,
+    rateLimitRetries: 3,
+    maxRateLimitDelayMs: 30_000,
+    stableTerminalConfirmations: 2,
+} as const;
 
 /** Durable boundary reached after core needs-attention work was saved. */
 export class NeedsAttentionNotificationRecoveryBoundaryError extends RalphieError {
@@ -359,6 +377,7 @@ type PersistWorkflowStateInput = {
     readonly notificationsEnabled: boolean;
     readonly needsAttentionLabel?: string;
     readonly pendingNotification?: RunState["pendingNotification"];
+    readonly prClosure?: RunState["prClosure"];
     readonly selection: PiSelection;
     readonly issueLimit?: number;
     readonly outcomes: ReadonlyArray<WorkflowOutcomeEntry>;
@@ -420,6 +439,9 @@ const persistWorkflowState = async (
         ...(input.pendingNotification === undefined
             ? {}
             : { pendingNotification: input.pendingNotification }),
+        ...(input.prClosure === undefined
+            ? {}
+            : { prClosure: input.prClosure }),
         selection: input.selection,
         ...(input.issueLimit === undefined
             ? {}
@@ -782,6 +804,7 @@ export const workflow = async (
         gitIssueOperations: issueOperations,
         parentCompletion,
         issueArtifactStore: artifactStores,
+        pipelineObservation,
         issueExecutor: normalIssueExecutor,
         dryRunIssueExecutor,
         pi,
@@ -792,6 +815,7 @@ export const workflow = async (
     let activeIssue: RunState["activeIssue"] | undefined;
     let pendingNotification: RunState["pendingNotification"] =
         resumeState?.pendingNotification;
+    let prClosure: RunState["prClosure"] = resumeState?.prClosure;
     const activeQueueIssues = new Map<number, GitHubIssue>();
     let persistCancellationState: (() => Promise<void>) | undefined;
     let restoreCancellationCheckout: (() => Promise<void>) | undefined;
@@ -980,6 +1004,7 @@ export const workflow = async (
                         notificationsEnabled,
                         needsAttentionLabel,
                         pendingNotification,
+                        prClosure,
                         selection,
                         issueLimit: resumeState?.maxIssues ?? maxIssues,
                         outcomes,
@@ -1271,44 +1296,437 @@ export const workflow = async (
             );
         };
 
-        const deliverPullRequest = async (
+        type WorkflowPrClosure = NonNullable<RunState["prClosure"]>;
+
+        const nowIso = (): string => new Date().toISOString();
+
+        /** Atomically replace the persisted PR closure gate for the issue. */
+        const setPrClosure = async (
             issueContext: WorkflowIssueContext,
+            update: {
+                readonly pullRequestNumber: number;
+                readonly observedHeadSha: string;
+                readonly gate: PrClosureGateStatus;
+                readonly snapshot?: WorkflowPrClosure["snapshot"];
+                readonly terminalReason?: string;
+            },
         ): Promise<void> => {
-            const artifacts = await artifactStores.forIssue(
-                issueContext.issue.number,
-                {
-                    workspace,
-                    runId: actualRunId,
+            prClosure = {
+                startedAt: prClosure?.startedAt ?? nowIso(),
+                ...update,
+                updatedAt: nowIso(),
+            };
+            await persistState(RunStateStatus.Active, {
+                issueNumber: issueContext.issue.number,
+                stage: "issue-closure",
+            });
+        };
+
+        const recordMergedPrClosure = async (
+            issueContext: WorkflowIssueContext,
+            pullRequest: GitHubPullRequest,
+            terminalReason?: string,
+        ): Promise<void> =>
+            setPrClosure(issueContext, {
+                pullRequestNumber: pullRequest.number,
+                observedHeadSha: pullRequest.headSha,
+                gate: "merged",
+                ...(terminalReason === undefined ? {} : { terminalReason }),
+            });
+
+        const recordClosedPrClosure = async (
+            issueContext: WorkflowIssueContext,
+            pullRequest: GitHubPullRequest,
+            terminalReason: string,
+        ): Promise<void> =>
+            setPrClosure(issueContext, {
+                pullRequestNumber: pullRequest.number,
+                observedHeadSha: pullRequest.headSha,
+                gate: "closed",
+                terminalReason,
+            });
+
+        const recordStalePrClosure = async (
+            issueContext: WorkflowIssueContext,
+            pullRequest: GitHubPullRequest,
+            terminalReason: string,
+        ): Promise<void> =>
+            setPrClosure(issueContext, {
+                pullRequestNumber: pullRequest.number,
+                observedHeadSha: pullRequest.headSha,
+                gate: "stale",
+                terminalReason,
+            });
+
+        const observePullRequestGate = async (
+            issueContext: WorkflowIssueContext,
+            pullRequest: GitHubPullRequest,
+        ): Promise<PipelineObservationResult> => {
+            return await pipelineObservation.observe({
+                client: octokit,
+                request: {
                     repository: repo,
+                    branch: issueContext.featureBranch,
+                    commitSha: pullRequest.headSha,
                 },
-            );
-            const reviews = artifacts.has(IssueArtifactKind.ReviewAttempts)
-                ? await artifacts.read(IssueArtifactKind.ReviewAttempts)
-                : [];
-            const issueRepository = issueContext.issueRepositories[0]!;
-            const pullRequest = await githubPullRequests.createOrFind(
-                octokit,
-                repo,
-                {
+                options: PR_GATE_OBSERVATION_OPTIONS,
+                signal,
+            });
+        };
+
+        const gateStatusForObservation = (
+            outcome: PipelineObservationResult["outcome"],
+        ): PrClosureGateStatus => {
+            switch (outcome.kind) {
+                case "green":
+                    return "green";
+                case "no-pipelines-discovered":
+                    return "no-pipelines";
+                case "timeout":
+                    return "timeout";
+                case "aborted":
+                    return "aborted";
+                case "stale":
+                    return "stale";
+                case "failed":
+                    if (outcome.reason === "cancelled") return "cancelled";
+                    if (outcome.reason === "failing") return "failed";
+                    return "unknown";
+            }
+        };
+
+        const snapshotForObservation = (
+            outcome: PipelineObservationResult["outcome"],
+        ): PipelineSnapshot | undefined => {
+            switch (outcome.kind) {
+                case "green":
+                    return outcome.snapshot;
+                case "failed":
+                    return outcome.snapshot;
+                case "stale":
+                    return outcome.snapshot;
+                case "timeout":
+                    return outcome.lastSnapshot;
+                default:
+                    return undefined;
+            }
+        };
+
+        const failedObservationReason = (
+            outcome: Extract<
+                PipelineObservationResult["outcome"],
+                { readonly kind: "failed" }
+            >,
+        ): string => {
+            if (outcome.reason === "failing")
+                return `Checks are failing for ${outcome.observedSha}.`;
+            if (outcome.reason === "cancelled")
+                return `Checks were cancelled for ${outcome.observedSha}.`;
+            return `Check observation failed for ${outcome.observedSha}: ${outcome.message ?? "no message"}.`;
+        };
+
+        const terminalReasonForObservation = (
+            outcome: PipelineObservationResult["outcome"],
+        ): string => {
+            switch (outcome.kind) {
+                case "green":
+                    return `Checks passed for ${outcome.observedSha} in ${outcome.elapsedMs}ms (${outcome.polls} polls).`;
+                case "failed":
+                    return failedObservationReason(outcome);
+                case "no-pipelines-discovered":
+                    return `No pipelines were discovered for ${outcome.observedSha} within ${outcome.elapsedMs}ms.`;
+                case "timeout":
+                    return `Observation timed out for ${outcome.observedSha} after ${outcome.elapsedMs}ms.`;
+                case "aborted":
+                    return `Observation aborted for ${outcome.observedSha} (${String(outcome.reason ?? "caller cancelled")}).`;
+                case "stale":
+                    return `Branch head advanced from ${outcome.headBefore} to ${outcome.headAfter} while observing ${outcome.observedSha}.`;
+            }
+        };
+
+        /** Snapshot plus terminal reason persisted with an observation result. */
+        const observationEvidence = (
+            outcome: PipelineObservationResult["outcome"],
+            status: PrClosureGateStatus,
+        ): {
+            readonly snapshot?: WorkflowPrClosure["snapshot"];
+            readonly terminalReason?: string;
+        } => {
+            const snapshot = snapshotForObservation(outcome);
+            return {
+                ...(snapshot === undefined ? {} : { snapshot }),
+                ...(status === "green"
+                    ? {}
+                    : {
+                          terminalReason: terminalReasonForObservation(outcome),
+                      }),
+            };
+        };
+
+        const applyPrGateObservation = async (
+            issueContext: WorkflowIssueContext,
+            pullRequest: GitHubPullRequest,
+            result: PipelineObservationResult,
+        ): Promise<void> => {
+            const outcome = result.outcome;
+            const status = gateStatusForObservation(outcome);
+            await setPrClosure(issueContext, {
+                pullRequestNumber: pullRequest.number,
+                observedHeadSha: pullRequest.headSha,
+                gate: status,
+                ...observationEvidence(outcome, status),
+            });
+            if (status === "green") return;
+            if (status === "aborted" && signal?.aborted === true) {
+                checkCancellation(signal);
+            }
+            throw new RalphieError({
+                message: `PR gate did not pass for issue #${issueContext.issue.number} on ${pullRequest.headSha}: ${terminalReasonForObservation(outcome)}.`,
+            });
+        };
+
+        const resolvePullRequestForGate = async (
+            issueContext: WorkflowIssueContext,
+        ): Promise<GitHubPullRequest> => {
+            try {
+                if (prClosure !== undefined) {
+                    return await githubPullRequests.read(
+                        octokit,
+                        repo,
+                        prClosure.pullRequestNumber,
+                    );
+                }
+                return await githubPullRequests.createOrFind(octokit, repo, {
                     title: `Fix #${issueContext.issue.number}: ${issueContext.issue.title}`,
                     issueNumber: issueContext.issue.number,
                     closesIssue: true,
                     head: issueContext.featureBranch,
                     base: branch,
-                },
+                });
+            } catch (cause) {
+                if (prClosure !== undefined) {
+                    await setPrClosure(issueContext, {
+                        pullRequestNumber: prClosure.pullRequestNumber,
+                        observedHeadSha: prClosure.observedHeadSha,
+                        gate: "unknown",
+                        terminalReason: `Pull request #${prClosure.pullRequestNumber} could not be re-read: ${errorMessage(cause)}.`,
+                    });
+                }
+                throw new RalphieError({
+                    message: `Failed to locate the pull request for issue #${issueContext.issue.number}: ${errorMessage(cause)}.`,
+                    cause,
+                });
+            }
+        };
+
+        /**
+         * Persist the pending gate and publish review evidence, returning
+         * whether the exact-head observer must run. A matching saved green gate
+         * skips the observation but is re-verified by the merge re-read.
+         */
+        const preparePrGateObservation = async (
+            issueContext: WorkflowIssueContext,
+            pullRequest: GitHubPullRequest,
+        ): Promise<boolean> => {
+            const headChanged =
+                prClosure === undefined ||
+                prClosure.observedHeadSha !== pullRequest.headSha;
+            if (headChanged) {
+                await setPrClosure(issueContext, {
+                    pullRequestNumber: pullRequest.number,
+                    observedHeadSha: pullRequest.headSha,
+                    gate: "pending",
+                });
+            }
+            const artifacts = await artifactStores.forIssue(
+                issueContext.issue.number,
+                { workspace, runId: actualRunId, repository: repo },
             );
+            const reviews = artifacts.has(IssueArtifactKind.ReviewAttempts)
+                ? await artifacts.read(IssueArtifactKind.ReviewAttempts)
+                : [];
             await githubPullRequests.publishReviewAttempts(
                 octokit,
                 repo,
                 pullRequest.number,
                 reviews,
             );
-            await githubPullRequests.merge(
+            const gate = headChanged
+                ? "pending"
+                : (prClosure?.gate ?? "pending");
+            return gate !== "green";
+        };
+
+        /**
+         * Gate a PR for delivery: persist its number and head SHA, publish the
+         * review evidence, then wait for the exact-head check observer to reach
+         * its green state. A failed, cancelled, timed-out, absent, unknown,
+         * closed, or already-merged gate never merges or closes the issue.
+         */
+        const gatePullRequest = async (
+            issueContext: WorkflowIssueContext,
+            pullRequest: GitHubPullRequest,
+        ): Promise<"reconciled" | undefined> => {
+            if (pullRequest.merged) {
+                await recordMergedPrClosure(
+                    issueContext,
+                    pullRequest,
+                    "Pull request was already merged; no merge call was made.",
+                );
+                return "reconciled";
+            }
+            if (pullRequest.state === "closed") {
+                await recordClosedPrClosure(
+                    issueContext,
+                    pullRequest,
+                    "Pull request is closed without merging.",
+                );
+                throw new RalphieError({
+                    message: `Pull request #${pullRequest.number} is closed without merging for issue #${issueContext.issue.number}.`,
+                });
+            }
+            const needsObservation = await preparePrGateObservation(
+                issueContext,
+                pullRequest,
+            );
+            if (!needsObservation) return undefined;
+            const result = await observePullRequestGate(
+                issueContext,
+                pullRequest,
+            );
+            await applyPrGateObservation(issueContext, pullRequest, result);
+            return undefined;
+        };
+
+        const mergeFailureGate = (
+            current: GitHubPullRequest,
+            observedHeadSha: string,
+            cause: unknown,
+        ): PrClosureGateStatus => {
+            if (current.headSha !== observedHeadSha) return "stale";
+            if (current.state === "closed") return "closed";
+            if (errorMessage(cause).includes("not definitively mergeable")) {
+                return "unmergeable";
+            }
+            return "unknown";
+        };
+
+        const resolveMergeFailure = async (
+            issueContext: WorkflowIssueContext,
+            current: GitHubPullRequest,
+            observedHeadSha: string,
+            cause: unknown,
+        ): Promise<GitHubPullRequest> => {
+            const reconciled = await githubPullRequests.read(
+                octokit,
+                repo,
+                current.number,
+            );
+            if (reconciled.merged) {
+                await recordMergedPrClosure(
+                    issueContext,
+                    reconciled,
+                    `Merge response was lost but pull request #${reconciled.number} is merged.`,
+                );
+                return reconciled;
+            }
+            const gate = mergeFailureGate(reconciled, observedHeadSha, cause);
+            await setPrClosure(issueContext, {
+                pullRequestNumber: reconciled.number,
+                observedHeadSha:
+                    gate === "stale" ? reconciled.headSha : observedHeadSha,
+                gate,
+                terminalReason: `Merge rejected: ${errorMessage(cause)}.`,
+            });
+            throw new RalphieError({
+                message: `Failed to merge pull request #${current.number} for issue #${issueContext.issue.number}: ${errorMessage(cause)}.`,
+                cause,
+            });
+        };
+
+        /** Expected-head merge with authoritative merged-state reconciliation. */
+        const attemptPrMerge = async (
+            issueContext: WorkflowIssueContext,
+            current: GitHubPullRequest,
+            observedHeadSha: string,
+        ): Promise<GitHubPullRequest> => {
+            try {
+                return await githubPullRequests.merge(
+                    octokit,
+                    repo,
+                    current.number,
+                    observedHeadSha,
+                );
+            } catch (cause) {
+                return await resolveMergeFailure(
+                    issueContext,
+                    current,
+                    observedHeadSha,
+                    cause,
+                );
+            }
+        };
+
+        /**
+         * Re-read the PR immediately before merging. A moved head invalidates
+         * the saved green decision; a merged or closed PR is reconciled.
+         */
+        const mergeGatedPullRequest = async (
+            issueContext: WorkflowIssueContext,
+            pullRequest: GitHubPullRequest,
+        ): Promise<void> => {
+            const current = await githubPullRequests.read(
                 octokit,
                 repo,
                 pullRequest.number,
-                pullRequest.headSha,
             );
+            if (current.merged) {
+                await recordMergedPrClosure(
+                    issueContext,
+                    current,
+                    "Pull request was already merged; no merge call was made.",
+                );
+                return;
+            }
+            if (current.state === "closed") {
+                await recordClosedPrClosure(
+                    issueContext,
+                    current,
+                    "Pull request closed without merging before the gate could merge it.",
+                );
+                throw new RalphieError({
+                    message: `Pull request #${current.number} closed without merging for issue #${issueContext.issue.number}.`,
+                });
+            }
+            const observedHeadSha =
+                prClosure?.observedHeadSha ?? pullRequest.headSha;
+            if (current.headSha !== observedHeadSha) {
+                await recordStalePrClosure(
+                    issueContext,
+                    current,
+                    `Pull request head changed from ${observedHeadSha} to ${current.headSha} after a green observation; the saved decision was discarded.`,
+                );
+                throw new RalphieError({
+                    message: `Pull request #${current.number} head changed from ${observedHeadSha} to ${current.headSha} for issue #${issueContext.issue.number}; not merging.`,
+                });
+            }
+            const merged = await attemptPrMerge(
+                issueContext,
+                current,
+                observedHeadSha,
+            );
+            await recordMergedPrClosure(issueContext, merged);
+        };
+
+        const deliverPullRequest = async (
+            issueContext: WorkflowIssueContext,
+        ): Promise<void> => {
+            const pullRequest = await resolvePullRequestForGate(issueContext);
+            const reconciled = await gatePullRequest(issueContext, pullRequest);
+            if (reconciled !== "reconciled") {
+                await mergeGatedPullRequest(issueContext, pullRequest);
+            }
+            const issueRepository = issueContext.issueRepositories[0]!;
             await issueOperations.restoreBaseCheckout(
                 issueRepository.repositoryPath,
                 branch,
@@ -1327,7 +1745,7 @@ export const workflow = async (
                 await track(
                     progress,
                     "issue-closure",
-                    `Opening and merging pull request for issue #${issueContext.issue.number}...`,
+                    `Gating pull request delivery for issue #${issueContext.issue.number}...`,
                     () => deliverPullRequest(issueContext),
                     "Pull request merged; GitHub will close the issue.",
                     {
@@ -1602,6 +2020,7 @@ export const workflow = async (
         ): Promise<void> => {
             activeIssue = undefined;
             activeQueueIssues.delete(issueContext.issue.number);
+            prClosure = undefined;
             restoreCancellationCheckout = undefined;
             checkout = await captureCheckout();
             await persistState(RunStateStatus.Active);
@@ -1755,6 +2174,7 @@ export const workflow = async (
                 queue.skip(issue.number);
                 activeQueueIssues.delete(issue.number);
                 activeIssue = undefined;
+                prClosure = undefined;
                 restoreCancellationCheckout = undefined;
                 await persistState(RunStateStatus.Active);
                 return true;

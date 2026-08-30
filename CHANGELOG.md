@@ -19,6 +19,23 @@ All notable changes to Ralphie are documented here. The project follows
   label-ineligible issues are durably skipped without mutations, and cached
   grounding, complexity, and resolution decisions now require matching live
   issue freshness metadata.
+- The `pr` workflow now gates merged delivery: after creating or finding the
+  matching feature-branch pull request it persists the PR number and head SHA,
+  publishes review attempts, waits for the exact-SHA check observer to reach
+  its documented green state, re-reads the PR immediately before merging, and
+  invokes the expected-head merge only while the head is unchanged. A failed,
+  cancelled, timed-out, absent, unknown, changed-head, closed, or unmergeable
+  gate retains the feature branch and PR, persists an active recoverable
+  closure gate, and never merges or closes the source issue; resume locates
+  the existing PR instead of duplicating it, continues polling pending gates,
+  invalidates saved green evidence on a changed head, re-observes failed
+  gates on a later rerun, and reconciles an already-merged PR without another
+  merge call. Run state version 6 records the PR number, observed head SHA,
+  latest normalized check snapshot, observation start/last-update timestamps,
+  gate status, and terminal reason for an active PR closure, with migration
+  coverage for versions 2–5. The `lgtm` workflow and dry-run paths are
+  unchanged, and GitHub mutations remain in the deterministic `src/github/`
+  services.
 
 ### Added
 

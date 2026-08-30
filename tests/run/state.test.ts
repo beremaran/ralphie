@@ -309,4 +309,73 @@ describe("run state store", () => {
             await rm(directory, { recursive: true, force: true });
         }
     });
+
+    test("persists an active PR closure gate with its normalized check snapshot", async () => {
+        const directory = await mkdtemp(join(tmpdir(), "ralphie-state-gate-"));
+        const path = join(directory, "state.json");
+        try {
+            const gated = {
+                ...structuredClone(state),
+                version: RUN_STATE_VERSION,
+                activeIssue: { issueNumber: 2, stage: "issue-closure" },
+                prClosure: {
+                    pullRequestNumber: 7,
+                    observedHeadSha: "a".repeat(40),
+                    snapshot: {
+                        repository: "owner/repo",
+                        branch: "ralphie/issue-2",
+                        commitSha: "a".repeat(40),
+                        state: "non-empty",
+                        items: [],
+                        sourceErrors: [],
+                        completenessErrors: [],
+                        diagnostics: [],
+                        reason: "success",
+                        greenCandidate: true,
+                        fingerprint: "success-a".repeat(4),
+                    },
+                    startedAt: "2026-08-28T00:00:00.000Z",
+                    updatedAt: "2026-08-28T00:00:00.000Z",
+                    gate: "green",
+                },
+            } satisfies RunState;
+            await RunStateStoreLive.save(path, gated);
+            const loaded = await RunStateStoreLive.load(path);
+            expect(loaded.version).toBe(RUN_STATE_VERSION);
+            expect(loaded.prClosure).toEqual(gated.prClosure);
+        } finally {
+            await rm(directory, { recursive: true, force: true });
+        }
+    });
+
+    test("migrates version 5 state and preserves the PR closure gate", async () => {
+        const directory = await mkdtemp(join(tmpdir(), "ralphie-state-v5-"));
+        const path = join(directory, "state.json");
+        try {
+            const legacy = {
+                ...structuredClone(state),
+                version: 5,
+                activeIssue: { issueNumber: 2, stage: "issue-closure" },
+                prClosure: {
+                    pullRequestNumber: 9,
+                    observedHeadSha: "b".repeat(40),
+                    startedAt: "2026-08-28T00:00:00.000Z",
+                    updatedAt: "2026-08-28T00:00:00.000Z",
+                    gate: "pending",
+                },
+            };
+            await writeFile(path, JSON.stringify(legacy));
+            const loaded = await RunStateStoreLive.load(path);
+            expect(loaded.version).toBe(RUN_STATE_VERSION);
+            expect(loaded.prClosure).toMatchObject({
+                pullRequestNumber: 9,
+                gate: "pending",
+            });
+            expect(JSON.parse(await readFile(path, "utf8")).version).toBe(
+                RUN_STATE_VERSION,
+            );
+        } finally {
+            await rm(directory, { recursive: true, force: true });
+        }
+    });
 });

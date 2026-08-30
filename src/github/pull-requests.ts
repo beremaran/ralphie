@@ -32,6 +32,8 @@ export type GitHubPullRequest = {
     readonly url: string;
     readonly merged: boolean;
     readonly headSha: string;
+    /** Present when the authoritative response surfaced the PR state. */
+    readonly state?: "open" | "closed";
 };
 
 export type GitHubPullRequestService = {
@@ -98,6 +100,7 @@ const isMerged = (pullRequest: {
 type PullRequestResponse = {
     readonly number: number;
     readonly html_url: string;
+    readonly state?: "open" | "closed" | null;
     readonly base?: {
         readonly ref?: string | null;
         readonly sha?: string | null;
@@ -117,6 +120,7 @@ const mapPullRequest = (
         url: pullRequest.html_url,
         merged: isMerged(pullRequest),
         headSha,
+        state: pullRequest.state === "closed" ? "closed" : "open",
     };
 };
 

@@ -98,6 +98,7 @@ describe("GitHub pull requests", () => {
             url: "https://github.com/owner/repository/pull/42",
             merged: false,
             headSha: "feature-sha",
+            state: "open",
         });
     });
 
@@ -331,6 +332,7 @@ describe("GitHub pull requests", () => {
             url: "https://github.com/owner/repository/pull/44",
             merged: true,
             headSha: "feature-sha",
+            state: "closed",
         });
     });
 

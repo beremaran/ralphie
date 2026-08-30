@@ -383,7 +383,7 @@ the queue.
 | Mode | Issue checkout | Delivery | Source issue closure |
 | --- | --- | --- | --- |
 | `lgtm` | Selected base branch | Commit and non-force push directly to that branch; verify remote SHA and clean checkout | Close directly as `completed` after verified delivery. |
-| `pr` | `ralphie/issue-<number>` in the main checkout | Push feature branch, create/find matching PR, publish stored review attempts as marked comments, merge, and verify merged state | PR body contains `Closes #<issue>`; GitHub closes the issue on merge. The serial run restores the base checkout afterward. |
+| `pr` | `ralphie/issue-<number>` in the main checkout | Push feature branch, create/find matching PR, persist its number and head SHA, publish stored review attempts as marked comments, wait for checks on the exact head SHA to pass, re-read the PR, and invoke the expected-head merge only when the head is unchanged | PR body contains `Closes #<issue>`; GitHub closes the issue on merge. A failed, cancelled, timed-out, absent, unknown, changed-head, closed, or unmergeable gate retains the feature branch and PR, leaves the issue open, and persists recoverable run state. The serial run restores the base checkout afterward. |
 | `--dry-run` | Prepared normal checkout | Ground the issue, then assess complexity and report implementation or decomposition when actionable; report already-resolved and needs-attention routes otherwise. A decomposition dry run also performs the read-only breakdown session and reports the intended native sub-issue hierarchy, children to create or reuse, and dependency edges. No implementation, decomposition, delivery, commit, push, checkout, issue, or PR mutation | No issue is closed. The result is `skipped` except needs-attention, which remains a needs-attention outcome. |
 
 Only a `completed` outcome enters delivery or source-issue closure. A
@@ -393,6 +393,20 @@ branch, create or review a pull request, merge, or close it. The base checkout
 is restored before the queue continues. A verifier-proven `already-resolved`
 completion may close directly in either delivery mode because it has no commit
 to deliver.
+
+In `pr` mode the merged delivery is gated: after the feature branch is pushed
+and the matching pull request is created or found, its number and head SHA are
+persisted, review attempts are published idempotently, and the read-only
+observer polls checks for that exact SHA until it reaches its documented green
+state. The PR is re-read immediately before merging; a green decision is only
+acted on when the head is unchanged. Failed, cancelled, timed-out,
+no-pipelines, unknown, changed-head, closed, or unmergeable gates never merge
+and never close the source issue: the feature branch and PR are retained and
+an active, recoverable closure gate is persisted. On resume the existing
+matching PR is located instead of duplicated, pending gates continue polling,
+saved green evidence is re-verified against the current head (a changed head
+invalidates it), failed gates can be re-observed on a later rerun, and an
+already-merged PR is reconciled without another merge call.
 
 The direct-push path never uses force. A push rejection is authoritative: the
 created commit and artifacts are retained, the run halts, and resume can
