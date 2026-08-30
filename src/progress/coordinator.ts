@@ -4,6 +4,11 @@ import type {
     PiSessionEvent,
 } from "../pi/client.ts";
 import {
+    prepareBreadcrumbCandidate,
+    type BreadcrumbLabelCandidate,
+    type SanitizedBreadcrumb,
+} from "./breadcrumb-label.ts";
+import {
     createDisplayState,
     reducePiSessionEvent,
     reduceProgressUpdate,
@@ -44,6 +49,10 @@ export type ProgressCoordinator = {
     readonly listener: PiEventListener;
     /** Explicit event-listener alias for dependency wiring. */
     readonly piEventListener: PiEventListener;
+    /** Insert an approved breadcrumb through the transcript boundary. */
+    readonly insertBreadcrumb?: (
+        candidate: BreadcrumbLabelCandidate,
+    ) => SanitizedBreadcrumb;
     readonly getDisplayState: () => DisplayState;
     readonly dispose: () => Promise<void>;
 };
@@ -67,7 +76,7 @@ const transcriptFor = (
 /** Construct the ordered progress and Pi presentation services for a run. */
 export const makeProgressCoordinator = (
     options: ProgressCoordinatorOptions,
-): ProgressCoordinator => {
+) => {
     const output = makeProgressOutput({
         mode: options.mode,
         write: options.write,
@@ -97,11 +106,20 @@ export const makeProgressCoordinator = (
         stopPersisting: progressRenderer.stopPersisting,
     };
 
+    const insertBreadcrumb = (
+        candidate: BreadcrumbLabelCandidate,
+    ): SanitizedBreadcrumb => {
+        const prepared = prepareBreadcrumbCandidate(candidate);
+        if (disposed) return prepared;
+        return transcript?.insertBreadcrumb(candidate) ?? prepared;
+    };
+
     return {
         progress,
         piListener,
         listener: piListener,
         piEventListener: piListener,
+        insertBreadcrumb,
         getDisplayState: () => state,
         dispose: async () => {
             if (disposed) return;

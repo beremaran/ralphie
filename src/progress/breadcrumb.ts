@@ -1,28 +1,37 @@
-import { redactSensitiveText } from "../shared/redaction.ts";
+import { canonicalBreadcrumbKey } from "./breadcrumb-label.ts";
+
+export {
+    breadcrumbCandidateFor,
+    breadcrumbCandidateFromDisplayState,
+    breadcrumbForDisplayState,
+    breadcrumbLabelFor,
+    breadcrumbLabelForDisplayState,
+    canonicalBreadcrumbKey,
+    createBreadcrumbCandidate,
+    createBreadcrumbLabel,
+    displayContextBreadcrumbLabel,
+    makeBreadcrumbCandidate,
+    makeBreadcrumbLabel,
+    prepareBreadcrumbCandidate,
+    prepareBreadcrumbLabel,
+    renderBreadcrumb,
+    renderBreadcrumbCandidate,
+    renderBreadcrumbLabel,
+    renderBreadcrumbLine,
+    sanitizeBreadcrumbKey,
+    sanitizeBreadcrumbLabel,
+} from "./breadcrumb-label.ts";
+export type {
+    ApprovedBreadcrumbCandidate,
+    BreadcrumbLabel,
+    BreadcrumbLabelCandidate,
+    BreadcrumbRenderOptions,
+    BreadcrumbRenderResult,
+    SanitizedBreadcrumb,
+} from "./breadcrumb-label.ts";
 
 /** Default number of visible rendered rows between breadcrumb opportunities. */
 export const DEFAULT_BREADCRUMB_THRESHOLD = 30;
-
-const ANSI_ESCAPE =
-    /\u001b(?:\](?:[^\u0007]*\u0007|[^\u001b]*\u001b\\)|\[[0-?]*[ -/]*[@-~])/g;
-
-/**
- * Normalize a candidate before it participates in adjacent de-duplication.
- * This deliberately shares the transcript redaction boundary without knowing
- * anything about how a candidate will eventually be rendered.
- */
-export const canonicalBreadcrumbKey = (value: string): string =>
-    redactSensitiveText(
-        (typeof value === "string" ? value : "")
-            .replace(ANSI_ESCAPE, "")
-            .replace(/\r\n?/g, "\n")
-            .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "")
-            .replace(/\s+/g, " ")
-            .trim(),
-    );
-
-/** Alias that makes the sanitization boundary explicit to callers. */
-export const sanitizeBreadcrumbKey = canonicalBreadcrumbKey;
 
 export type BreadcrumbPolicyState = {
     /** Visible rendered rows at the last emitted breadcrumb. */
@@ -47,6 +56,7 @@ export type BreadcrumbCandidateInput =
           readonly linePosition?: number;
           readonly visibleLineCount?: number;
           readonly key?: string;
+          readonly label?: string;
           readonly canonicalKey?: string;
       };
 
@@ -136,8 +146,11 @@ const positionFor = (candidate: BreadcrumbCandidateInput): number => {
 
 const keyFor = (candidate: BreadcrumbCandidateInput): string =>
     canonicalBreadcrumbKey(
-        candidate.key ??
-            ("canonicalKey" in candidate ? candidate.canonicalKey : "") ??
+        ("label" in candidate ? candidate.label : undefined) ??
+            candidate.key ??
+            ("canonicalKey" in candidate
+                ? candidate.canonicalKey
+                : undefined) ??
             "",
     );
 

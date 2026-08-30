@@ -8,6 +8,12 @@ import {
     redactSensitiveValue,
 } from "../shared/redaction.ts";
 import { cyan, dim, green, red, yellow } from "./colors.ts";
+import {
+    prepareBreadcrumbCandidate,
+    renderBreadcrumbLabel,
+    type BreadcrumbLabelCandidate,
+    type SanitizedBreadcrumb,
+} from "./breadcrumb-label.ts";
 import { progressStageLabel, type DisplayState } from "./display-state.ts";
 
 export type PiTranscriptRendererOptions = {
@@ -20,9 +26,14 @@ export type PiTranscriptRendererOptions = {
     readonly getDisplayState?: () => DisplayState;
 };
 
-/** A transcript listener with a coordinator-facing line interruption hook. */
+/** A transcript listener with coordinator-facing stream-boundary hooks. */
 export type PiTranscriptRenderer = PiEventListener & {
+    /** Finish the current visible line without dropping the active stream key. */
     readonly interruptLine: () => void;
+    /** Insert a sanitized breadcrumb and safely resume any interrupted stream. */
+    readonly insertBreadcrumb: (
+        candidate: BreadcrumbLabelCandidate,
+    ) => SanitizedBreadcrumb;
     /** Visible terminal rows written during the current Pi session. */
     readonly getVisibleLineCount: () => number;
 };
@@ -288,6 +299,12 @@ const makeTranscriptWriter = (
     readonly endStream: (key: StreamKey) => void;
     /** Finish an external interruption while retaining the active stream key. */
     readonly interruptLine: () => void;
+    /** Insert a complete line while retaining the active stream for resumption. */
+    readonly insertLine: (
+        text: string,
+        options?: { readonly blankBefore?: boolean; readonly key?: StreamKey },
+    ) => void;
+    readonly insertBreadcrumb: (label: string) => void;
     readonly line: (
         text: string,
         options?: { readonly blankBefore?: boolean; readonly key?: StreamKey },
@@ -387,7 +404,7 @@ const makeTranscriptWriter = (
         finishStream();
     };
 
-    const line = (
+    const insertLine = (
         text: string,
         options: {
             readonly blankBefore?: boolean;
@@ -400,6 +417,20 @@ const makeTranscriptWriter = (
         hasBlock = true;
         if (options.key !== undefined) activeKey = options.key;
         lineOpen = false;
+    };
+
+    const insertBreadcrumb = (label: string): void => {
+        insertLine(label, { blankBefore: false });
+    };
+
+    const line = (
+        text: string,
+        options: {
+            readonly blankBefore?: boolean;
+            readonly key?: StreamKey;
+        } = {},
+    ): void => {
+        insertLine(text, options);
     };
 
     const finishSession = (label: string): void => {
@@ -417,6 +448,8 @@ const makeTranscriptWriter = (
         writeStream,
         endStream,
         interruptLine,
+        insertLine,
+        insertBreadcrumb,
         line,
         finishSession,
     };
@@ -853,8 +886,20 @@ export const makePiTranscriptRenderer = ({
             width,
         );
     };
+    const insertBreadcrumb = (
+        candidate: BreadcrumbLabelCandidate,
+    ): SanitizedBreadcrumb => {
+        const prepared = prepareBreadcrumbCandidate(candidate);
+        if (!json && prepared.label !== "") {
+            writer.insertBreadcrumb(
+                renderBreadcrumbLabel(candidate, { style: styles.event }),
+            );
+        }
+        return prepared;
+    };
     return Object.assign(render, {
         interruptLine: writer.interruptLine,
+        insertBreadcrumb,
         getVisibleLineCount: lineMeter.getVisibleLineCount,
     });
 };
