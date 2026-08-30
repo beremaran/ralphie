@@ -22,6 +22,10 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Added
 
+- An opt-in `RALPHIE_RUN_GITHUB_SUB_ISSUES_SMOKE` integration test that
+  exercises the real native sub-issue and dependency API in a configured
+  sandbox repository: attachment and dependency idempotency, reads, live
+  parent-completion reconciliation, and cleanup.
 - Deterministic decomposed-parent completion: finishing the final child
   reconciles its tracking parent immediately, and every non-dry-run run
   reconciles discovered decomposed parents, closing a parent as `completed`

@@ -12,7 +12,7 @@ Bun + TypeScript CLI (strict mode, `@types/bun`). Entry point: `index.ts`. Servi
 ## Tests
 
 - `bun run test` runs everything under `tests/`, including local e2e tests that build temporary git repos with a stubbed Pi client — no network or credentials required, safe to run.
-- Real-network tests in `tests/integration/network-smoke.test.ts` are opt-in and self-skip: `RALPHIE_RUN_PI_COMPLEXITY_SMOKE=1`, `RALPHIE_RUN_PI_IMPLEMENTATION_SMOKE=1`, `RALPHIE_RUN_GITHUB_INTEGRATION=1` (the GitHub one additionally requires `RALPHIE_GITHUB_TEST_REPOSITORY` pointing at a repo whose name matches test/sandbox/fixture/integration/smoke, or it refuses to run). Model selection via `RALPHIE_PI_SMOKE_MODEL` / `RALPHIE_PI_SMOKE_AGENT` / `RALPHIE_PI_SMOKE_VARIANT`.
+- Real-network tests in `tests/integration/network-smoke.test.ts` are opt-in and self-skip: `RALPHIE_RUN_PI_COMPLEXITY_SMOKE=1`, `RALPHIE_RUN_PI_IMPLEMENTATION_SMOKE=1`, `RALPHIE_RUN_GITHUB_INTEGRATION=1`, `RALPHIE_RUN_GITHUB_SUB_ISSUES_SMOKE=1` (the GitHub ones additionally require `RALPHIE_GITHUB_TEST_REPOSITORY` pointing at a repo whose name matches test/sandbox/fixture/integration/smoke, or they refuse to run; the sub-issues one is mutating in that sandbox). Model selection via `RALPHIE_PI_SMOKE_MODEL` / `RALPHIE_PI_SMOKE_AGENT` / `RALPHIE_PI_SMOKE_VARIANT`.
 
 ## Conventions
 

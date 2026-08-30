@@ -67,12 +67,23 @@ RALPHIE_RUN_PI_IMPLEMENTATION_SMOKE=1 \
 RALPHIE_RUN_GITHUB_INTEGRATION=1 \
 RALPHIE_GITHUB_TEST_REPOSITORY=owner/ralphie-smoke-test \
   bun test tests/integration/network-smoke.test.ts
+
+RALPHIE_RUN_GITHUB_SUB_ISSUES_SMOKE=1 \
+RALPHIE_GITHUB_TEST_REPOSITORY=owner/ralphie-smoke-test \
+  bun test tests/integration/network-smoke.test.ts
 ```
 
 The GitHub smoke test is read-only and refuses repository names that do not look
 like dedicated test, sandbox, fixture, integration, or smoke repositories.
 Model selection can be supplied with `RALPHIE_PI_SMOKE_MODEL`,
 `RALPHIE_PI_SMOKE_AGENT`, and `RALPHIE_PI_SMOKE_VARIANT`.
+
+The sub-issues smoke test is **mutating** in the configured sandbox repository:
+it creates three scratch issues, attaches native sub-issues, adds a
+`blocked_by` dependency, verifies idempotency, closes the children, reconciles
+the tracking parent as `completed`, and cleans up after itself. It requires a
+host with the native sub-issues and dependencies endpoints and a token with
+issue write permission.
 
 The normal `bun run test` suite includes local end-to-end tests that build
 temporary Git repositories with a stubbed Pi client; they do not need network
