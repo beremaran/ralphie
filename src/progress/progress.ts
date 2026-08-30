@@ -467,6 +467,16 @@ export type {
     FooterViewOptions,
 } from "./footer.ts";
 export {
+    makeDefaultTerminalOutputStrategy,
+    makeTerminalOutputController,
+} from "./terminal-controller.ts";
+export type {
+    TerminalFooterOptions,
+    TerminalOutputController,
+    TerminalOutputControllerOptions,
+    TerminalOutputStrategy,
+} from "./terminal-controller.ts";
+export {
     DEFAULT_BREADCRUMB_THRESHOLD,
     arbitrateBreadcrumbCandidates,
     breadcrumbCandidateFor,

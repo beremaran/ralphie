@@ -91,6 +91,22 @@ All notable changes to Ralphie are documented here. The project follows
   (`src/github/issue-relationships.ts`) that lists, attaches, and validates
   native sub-issues and dependencies with idempotent, response-loss-safe
   mutations and actionable unsupported-endpoint errors.
+- A terminal output controller (`src/progress/terminal-controller.ts`) that
+  wraps the footer view scheduler and the shared `ProgressOutput` primitives
+  and arbitrates every transcript/raw write with the terminal stream boundary
+  tracker: an active footer is cleared before transcript or durable progress
+  output, token deltas are forwarded immediately, and the footer is restored
+  only at safe line boundaries. Durable progress lines are deferred while a
+  transcript fragment is open mid-line so progress never merges with,
+  overwrites, or falsely closes the fragment; footer bytes are emitted only
+  through the strategy's footer surface and never enter transcript/control
+  payload or durable scrollback; every replacement repaint clears a visible
+  footer before drawing the new one; durable transcript breadcrumbs remain
+  the safe default fallback with cursor-reserved-row behavior disabled by
+  default. Coverage exercises partial transcript lines, progress
+  interleaving, immediate token forwarding, split ANSI/control strings,
+  footer suppression while unsafe, restoration after a safe boundary, and
+  strict clear-before-draw ordering through fake sinks and fake strategies.
 - A persisted `created-issue-dependencies` artifact that records each child's
   dependency issue numbers so queue eligibility never depends on live GitHub
   state alone.
