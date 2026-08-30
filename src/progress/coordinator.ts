@@ -119,23 +119,34 @@ const policyCandidateFor = (
 const considerBreadcrumbEvent = (input: {
     readonly policy: BreadcrumbPolicy;
     readonly transcript: PiTranscriptRenderer;
+    /** Candidate describing the state after the lifecycle event. */
     readonly candidate: BreadcrumbLabelCandidate;
+    /** Candidate pending from the state before the lifecycle event. */
+    readonly periodicCandidate: BreadcrumbLabelCandidate;
     readonly visibleLinePosition: number;
     readonly lifecycle: boolean;
 }): void => {
-    const policyCandidate = policyCandidateFor(
+    const lifecycleCandidate = policyCandidateFor(
         input.candidate,
+        input.visibleLinePosition,
+    );
+    const periodicCandidate = policyCandidateFor(
+        input.periodicCandidate,
         input.visibleLinePosition,
     );
     const candidates: BreadcrumbArbitrationCandidate[] = [
         ...(input.lifecycle
-            ? [{ kind: "lifecycle" as const, candidate: policyCandidate }]
+            ? [{ kind: "lifecycle" as const, candidate: lifecycleCandidate }]
             : []),
-        { kind: "periodic", candidate: policyCandidate },
+        { kind: "periodic", candidate: periodicCandidate },
     ];
     const result = arbitrateBreadcrumbCandidates(input.policy, candidates);
     if (result.emitted === undefined) return;
-    input.transcript.insertBreadcrumb(input.candidate);
+    const emittedCandidate =
+        result.emitted.kind === "lifecycle"
+            ? input.candidate
+            : input.periodicCandidate;
+    input.transcript.insertBreadcrumb(emittedCandidate);
     input.policy.rebase(input.transcript.getVisibleLineCount());
 };
 
@@ -143,6 +154,7 @@ const considerClosingBreadcrumb = (input: {
     readonly policy: BreadcrumbPolicy;
     readonly transcript: PiTranscriptRenderer | undefined;
     readonly candidate: BreadcrumbLabelCandidate | undefined;
+    readonly periodicCandidate: BreadcrumbLabelCandidate | undefined;
     readonly before: number;
     readonly closesSession: boolean;
     readonly lifecycle: boolean;
@@ -150,6 +162,7 @@ const considerClosingBreadcrumb = (input: {
     if (
         input.transcript === undefined ||
         input.candidate === undefined ||
+        input.periodicCandidate === undefined ||
         !input.closesSession ||
         !input.lifecycle
     ) {
@@ -159,6 +172,7 @@ const considerClosingBreadcrumb = (input: {
         policy: input.policy,
         transcript: input.transcript,
         candidate: input.candidate,
+        periodicCandidate: input.periodicCandidate,
         visibleLinePosition: input.before,
         lifecycle: input.lifecycle,
     });
@@ -168,6 +182,7 @@ const considerRenderedBreadcrumb = (input: {
     readonly policy: BreadcrumbPolicy;
     readonly transcript: PiTranscriptRenderer | undefined;
     readonly candidate: BreadcrumbLabelCandidate | undefined;
+    readonly periodicCandidate: BreadcrumbLabelCandidate | undefined;
     readonly eventOutputBaseline: number;
     readonly closesSession: boolean;
     readonly lifecycle: boolean;
@@ -175,6 +190,7 @@ const considerRenderedBreadcrumb = (input: {
     if (
         input.transcript === undefined ||
         input.candidate === undefined ||
+        input.periodicCandidate === undefined ||
         input.closesSession
     ) {
         return;
@@ -185,6 +201,7 @@ const considerRenderedBreadcrumb = (input: {
         policy: input.policy,
         transcript: input.transcript,
         candidate: input.candidate,
+        periodicCandidate: input.periodicCandidate,
         visibleLinePosition: after,
         lifecycle: input.lifecycle,
     });
@@ -229,17 +246,25 @@ export const makeProgressCoordinator = (
         if (disposed) return;
         const before = transcript?.getVisibleLineCount() ?? 0;
         eventOutputBaseline = before;
+        const lifecycle = lifecycleBreadcrumbEvent(event);
+        const periodicCandidate =
+            transcript === undefined
+                ? undefined
+                : breadcrumbCandidateFor(state);
         state = reducePiSessionEvent(state, event, context, now);
         const candidate =
             transcript === undefined
                 ? undefined
                 : breadcrumbCandidateFor(state);
-        const lifecycle = lifecycleBreadcrumbEvent(event);
+        const pendingPeriodicCandidate = lifecycle
+            ? periodicCandidate
+            : candidate;
         const closesSession = closesTranscriptSession(event);
         considerClosingBreadcrumb({
             policy: breadcrumbPolicy,
             transcript,
             candidate,
+            periodicCandidate: pendingPeriodicCandidate,
             before,
             closesSession,
             lifecycle,
@@ -249,6 +274,7 @@ export const makeProgressCoordinator = (
             policy: breadcrumbPolicy,
             transcript,
             candidate,
+            periodicCandidate: pendingPeriodicCandidate,
             eventOutputBaseline,
             closesSession,
             lifecycle,

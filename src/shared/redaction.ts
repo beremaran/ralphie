@@ -6,9 +6,12 @@ export const redactSensitiveText = (value: string): string => {
     let redacted = value
         .replace(/\bgithub_pat_[A-Za-z0-9_]+\b/g, REDACTED)
         .replace(/\bgh[pousr]_[A-Za-z0-9]+\b/g, REDACTED)
-        .replace(/\b(Bearer\s+)\S+/gi, `$1${REDACTED}`)
         .replace(
-            /([?&](?:token|access_token|api_key)=)[^&\s]+/gi,
+            /\b(Bearer\s+)(?!\[REDACTED\](?=$|[\]\s]))\S+/gi,
+            `$1${REDACTED}`,
+        )
+        .replace(
+            /([?&](?:token|access_token|api_key)=)(?!\[REDACTED\](?=$|[\]\s&]))[^&\s]+/gi,
             `$1${REDACTED}`,
         )
         .replace(/(https?:\/\/[^\s/:@]+:)[^\s@]+@/gi, `$1${REDACTED}@`);
