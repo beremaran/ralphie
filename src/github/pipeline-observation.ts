@@ -264,35 +264,29 @@ const resolveObservationOptions = (
     };
 };
 
-const itemKey = (provider: string, name: string): string =>
-    `${provider}\u0000${name}`;
+const itemKey = (source: string, provider: string, name: string): string =>
+    `${source}\u0000${provider}\u0000${name}`;
 
 type ObservationSetState = {
     readonly empty: boolean;
     readonly items: ReadonlyMap<string, PipelineItemStatus>;
-    readonly hasErrors: boolean;
+    readonly reason: PipelineSnapshot["reason"];
+    readonly fingerprint: string;
 };
 
 const stateForSnapshot = (snapshot: PipelineSnapshot): ObservationSetState => {
     const items = new Map<string, PipelineItemStatus>();
     for (const item of snapshot.items)
-        items.set(itemKey(item.provider, item.name), item.status);
+        items.set(itemKey(item.source, item.provider, item.name), item.status);
     return {
         empty: snapshot.items.length === 0,
         items,
-        hasErrors:
-            snapshot.sourceErrors.length > 0 ||
-            snapshot.completenessErrors.length > 0,
+        reason: snapshot.reason,
+        fingerprint: snapshot.fingerprint,
     };
 };
 
-const signatureFor = (state: ObservationSetState): string =>
-    JSON.stringify([
-        [...state.items.entries()].sort((left, right) =>
-            left[0] === right[0] ? 0 : left[0] > right[0] ? 1 : -1,
-        ),
-        state.hasErrors,
-    ]);
+const signatureFor = (state: ObservationSetState): string => state.fingerprint;
 
 const diffTransitions = (
     previous: ObservationSetState,
@@ -334,27 +328,18 @@ const transitionsFor = (
     return diffTransitions(previous, current);
 };
 
-const hasPending = (state: ObservationSetState): boolean =>
-    [...state.items.values()].some((status) => status === "pending");
-
-const resolvableGreen = (state: ObservationSetState): boolean => {
-    if (state.empty || state.hasErrors) return false;
-    for (const status of state.items.values())
-        if (status !== "passing" && status !== "acceptable") return false;
-    return true;
-};
+const resolvableGreen = (state: ObservationSetState): boolean =>
+    state.reason === "success";
 
 const verdictFor = (
     state: ObservationSetState,
 ): PipelineFailureReason | "green" => {
-    if (state.hasErrors) return "invalid";
-    for (const status of state.items.values()) {
-        if (status === "failing") return "failing";
-        if (status === "cancelled") return "cancelled";
-        if (status === "unknown") return "unknown";
-        if (status === "pending") return "unknown";
-    }
-    return "green";
+    if (state.reason === "success") return "green";
+    if (state.reason === "failure") return "failing";
+    if (state.reason === "cancelled") return "cancelled";
+    if (state.reason === "unknown" || state.reason === "pending")
+        return "unknown";
+    return "invalid";
 };
 
 const backoffDelayFor = (
@@ -595,7 +580,7 @@ const handlePoll = async (
         st.stableSinceMs = at;
     }
 
-    if (state.empty) {
+    if (state.empty && state.reason === "no-checks") {
         const graceRemaining =
             ctx.options.registrationGraceMs - (at - ctx.startedAtMs);
         if (graceRemaining <= 0) return noPipelinesOutcome(ctx, st, at);
@@ -609,7 +594,7 @@ const handlePoll = async (
         return undefined;
     }
 
-    if (hasPending(state)) {
+    if (state.reason === "pending") {
         await continueAfter(ctx, st, read, at, ctx.deadlineAtMs - at);
         return undefined;
     }

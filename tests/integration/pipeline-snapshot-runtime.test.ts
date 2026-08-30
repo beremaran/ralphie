@@ -130,7 +130,7 @@ const completeResponses = (): FakeOctokitInput => ({
                 head_sha: sha,
                 head_branch: "main",
                 status: "completed",
-                conclusion: "neutral",
+                conclusion: "success",
             },
         ],
     },
@@ -152,7 +152,7 @@ const completeResponses = (): FakeOctokitInput => ({
                 head_sha: sha,
                 head_branch: "main",
                 status: "completed",
-                conclusion: "skipped",
+                conclusion: "success",
                 workflow_id: 7,
                 run_number: 502,
                 run_attempt: 2,
@@ -226,6 +226,7 @@ describe("pipeline snapshot runtime acceptance", () => {
         expect(snapshot.sourceErrors).toEqual([]);
         expect(snapshot.completenessErrors).toEqual([]);
         expect(snapshot.greenCandidate).toBe(true);
+        expect(snapshot.reason).toBe("success");
         expect(
             new Set(
                 snapshot.items.map(
@@ -264,7 +265,7 @@ describe("pipeline snapshot runtime acceptance", () => {
         expect(workflow?.diagnostic.runId).toBe(502);
         expect(workflow?.diagnostic.workflowId).toBe(7);
         expect(workflow?.diagnostic.runNumber).toBe(502);
-        expect(workflow?.status).toBe("acceptable");
+        expect(workflow?.status).toBe("passing");
         expect(requests.map(({ source }) => source)).toEqual(
             expect.arrayContaining([
                 "checks",
@@ -325,6 +326,7 @@ describe("pipeline snapshot runtime acceptance", () => {
             }),
         );
         expect(snapshot.greenCandidate).toBe(false);
+        expect(snapshot.reason).toBe("error");
         expect(snapshot.items.map(({ name }) => name)).toContain("legacy");
     });
 
@@ -339,6 +341,7 @@ describe("pipeline snapshot runtime acceptance", () => {
         expect(snapshot.sourceErrors).toEqual([]);
         expect(snapshot.completenessErrors).toEqual([]);
         expect(snapshot.greenCandidate).toBe(false);
+        expect(snapshot.reason).toBe("no-checks");
     });
 
     test("fails closed independently for pending, failing, and cancelled checks", async () => {

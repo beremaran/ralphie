@@ -32,6 +32,16 @@ export type PipelineItemStatus =
     | "unknown";
 export type PipelineStatus = PipelineItemStatus;
 
+export type PipelineSnapshotReason =
+    | "success"
+    | "pending"
+    | "failure"
+    | "no-checks"
+    | "timeout"
+    | "unknown"
+    | "cancelled"
+    | "error";
+
 export type PipelineProviderNameIdentity = {
     readonly provider: string;
     readonly name: string;
@@ -73,14 +83,20 @@ export type PipelineDiagnostic = {
     readonly jobId?: PipelineIdentifier;
     readonly workflowId?: PipelineIdentifier;
     readonly runNumber?: PipelineIdentifier;
+    readonly statusId?: PipelineIdentifier;
+    readonly createdAt?: string;
+    readonly updatedAt?: string;
     readonly rawState: PipelineRawState;
     readonly rawValues: JsonObject;
     readonly errors: ReadonlyArray<string>;
 };
 
 export type PipelineNormalizedItem = PipelineProviderNameIdentity & {
+    readonly source: PipelineObservationKind;
     readonly status: PipelineItemStatus;
     readonly rawState: PipelineRawState;
+    readonly createdAt?: string;
+    readonly updatedAt?: string;
     readonly diagnostic: PipelineDiagnostic;
 };
 
@@ -92,7 +108,9 @@ export type PipelineSnapshot = PipelineSnapshotRequest & {
     readonly sourceErrors: ReadonlyArray<PipelineSourceError>;
     readonly completenessErrors: ReadonlyArray<string>;
     readonly diagnostics: ReadonlyArray<PipelineDiagnostic>;
+    readonly reason: PipelineSnapshotReason;
     readonly greenCandidate: boolean;
+    readonly fingerprint: string;
 };
 
 export type PipelineSourceErrorInput =
@@ -512,6 +530,7 @@ const metadataAliases = {
     jobId: ["jobId", "job_id"],
     workflowId: ["workflowId", "workflow_id"],
     runNumber: ["runNumber", "run_number"],
+    statusId: ["statusId", "status_id"],
 } as const;
 
 type CandidateMetadata = {
@@ -522,6 +541,7 @@ type CandidateMetadata = {
     readonly jobId?: PipelineIdentifier;
     readonly workflowId?: PipelineIdentifier;
     readonly runNumber?: PipelineIdentifier;
+    readonly statusId?: PipelineIdentifier;
     readonly createdAt?: string;
     readonly updatedAt?: string;
 };
@@ -559,6 +579,11 @@ const metadataForRecord = (
             identifierFrom(value, metadataAliases.workflowId) ??
             nestedIdentifierFrom(value, ["workflow"]),
         runNumber: identifierFrom(value, metadataAliases.runNumber),
+        statusId:
+            identifierFrom(value, metadataAliases.statusId) ??
+            (kind === "status-context"
+                ? identifierFrom(value, ["id"])
+                : undefined),
         createdAt: timeValue(firstValue(value, ["createdAt", "created_at"])),
         updatedAt: timeValue(
             firstValue(value, ["updatedAt", "updated_at", "completedAt"]),
@@ -589,6 +614,7 @@ const mergeMetadata = (
         jobId: first("jobId"),
         workflowId: first("workflowId"),
         runNumber: first("runNumber"),
+        statusId: first("statusId"),
         createdAt: first("createdAt"),
         updatedAt: first("updatedAt"),
     };
@@ -785,10 +811,14 @@ const scopeDisposition = (
 
 const numericIdentifier = (
     value: PipelineIdentifier | undefined,
-): number | undefined => {
+): bigint | undefined => {
     if (value === undefined) return undefined;
-    const number = typeof value === "number" ? value : Number(value);
-    return Number.isFinite(number) ? number : undefined;
+    if (typeof value === "number")
+        return Number.isFinite(value) && Number.isInteger(value)
+            ? BigInt(value)
+            : undefined;
+    const text = value.trim();
+    return /^\d+$/.test(text) ? BigInt(text) : undefined;
 };
 
 const compareOptionalNumbers = (
@@ -875,11 +905,16 @@ const compareCandidateTie = (left: Candidate, right: Candidate): number => {
         right.metadata.updatedAt,
     );
     if (updated !== 0) return updated;
-    const checkRuns = compareText(
+    const checkRuns = compareIdentifiers(
         left.metadata.checkRunId,
         right.metadata.checkRunId,
     );
     if (checkRuns !== 0) return checkRuns;
+    const statuses = compareIdentifiers(
+        left.metadata.statusId,
+        right.metadata.statusId,
+    );
+    if (statuses !== 0) return statuses;
     const raw = compareText(
         JSON.stringify(serializedObject(left.value)),
         JSON.stringify(serializedObject(right.value)),
@@ -957,6 +992,15 @@ const diagnosticFor = (input: {
         ...(metadata.runNumber === undefined
             ? {}
             : { runNumber: metadata.runNumber }),
+        ...(metadata.statusId === undefined
+            ? {}
+            : { statusId: metadata.statusId }),
+        ...(metadata.createdAt === undefined
+            ? {}
+            : { createdAt: metadata.createdAt }),
+        ...(metadata.updatedAt === undefined
+            ? {}
+            : { updatedAt: metadata.updatedAt }),
         rawState: rawStateFor(input.candidate.value),
         rawValues: serializedObject(input.candidate.value),
         errors: input.errors,
@@ -1134,7 +1178,11 @@ const scopedGroupsFor = (
             completenessErrors.push(...scope.reasons);
             continue;
         }
-        const key = JSON.stringify([candidate.provider, candidate.name]);
+        const key = JSON.stringify([
+            candidate.kind,
+            candidate.provider,
+            candidate.name,
+        ]);
         const group = grouped.get(key) ?? [];
         group.push(candidate);
         grouped.set(key, group);
@@ -1165,17 +1213,24 @@ const itemsForGroups = (
             candidates,
         });
         items.push({
+            source: candidate.kind,
             provider: candidate.provider,
             name: candidate.name,
             status,
             rawState: diagnostic.rawState,
+            ...(diagnostic.createdAt === undefined
+                ? {}
+                : { createdAt: diagnostic.createdAt }),
+            ...(diagnostic.updatedAt === undefined
+                ? {}
+                : { updatedAt: diagnostic.updatedAt }),
             diagnostic,
         });
         diagnostics.push(diagnostic);
     }
     items.sort((left, right) =>
-        `${left.provider}\u0000${left.name}`.localeCompare(
-            `${right.provider}\u0000${right.name}`,
+        `${left.source}\u0000${left.provider}\u0000${left.name}`.localeCompare(
+            `${right.source}\u0000${right.provider}\u0000${right.name}`,
         ),
     );
     return { items, diagnostics };
@@ -1207,9 +1262,101 @@ export const isPipelineGreenCandidate = (
     snapshot.items.length > 0 &&
     snapshot.sourceErrors.length === 0 &&
     snapshot.completenessErrors.length === 0 &&
-    snapshot.items.every(
-        (item) => item.status === "passing" || item.status === "acceptable",
+    snapshot.items.every((item) => item.status === "passing");
+
+const rawTokensFor = (item: PipelineNormalizedItem): ReadonlyArray<string> =>
+    [item.rawState.status, item.rawState.state, item.rawState.conclusion]
+        .map(normalizeToken)
+        .filter((value): value is string => value !== undefined);
+
+const hasRawToken = (
+    items: ReadonlyArray<PipelineNormalizedItem>,
+    token: string,
+): boolean => items.some((item) => rawTokensFor(item).includes(token));
+
+/**
+ * Reduce every effective context. Known terminal non-success results outrank
+ * pending work. Neutral and skipped are deliberately classified as failure:
+ * they are terminal but do not prove that the requested SHA passed.
+ */
+export const pipelineSnapshotReason = (
+    snapshot: Pick<
+        PipelineSnapshot,
+        "items" | "sourceErrors" | "completenessErrors"
+    >,
+): PipelineSnapshotReason => {
+    if (snapshot.sourceErrors.length > 0)
+        return snapshot.sourceErrors.every(({ message }) =>
+            /time(?:d)?[ -]?out/i.test(message),
+        )
+            ? "timeout"
+            : "error";
+    if (snapshot.completenessErrors.length > 0) return "unknown";
+    if (snapshot.items.length === 0) return "no-checks";
+    if (snapshot.items.some(({ status }) => status === "unknown"))
+        return "unknown";
+    if (hasRawToken(snapshot.items, "error")) return "error";
+    if (hasRawToken(snapshot.items, "timed_out")) return "timeout";
+    if (snapshot.items.some(({ status }) => status === "failing"))
+        return "failure";
+    if (snapshot.items.some(({ status }) => status === "cancelled"))
+        return "cancelled";
+    if (snapshot.items.some(({ status }) => status === "acceptable"))
+        return "failure";
+    if (snapshot.items.some(({ status }) => status === "pending"))
+        return "pending";
+    return "success";
+};
+
+const canonicalJson = (value: JsonValue): string => {
+    if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+    if (isObject(value))
+        return `{${Object.keys(value)
+            .sort()
+            .map(
+                (key) => `${JSON.stringify(key)}:${canonicalJson(value[key]!)}`,
+            )
+            .join(",")}}`;
+    return JSON.stringify(value);
+};
+
+type PipelineFingerprintInput = Pick<
+    PipelineSnapshot,
+    | "repository"
+    | "branch"
+    | "commitSha"
+    | "state"
+    | "items"
+    | "sourceErrors"
+    | "completenessErrors"
+    | "reason"
+>;
+
+/** A canonical, order-independent identity for stable-snapshot confirmation. */
+export const pipelineSnapshotFingerprint = (
+    snapshot: PipelineFingerprintInput,
+): string =>
+    canonicalJson(
+        serializeJson({
+            repository: snapshot.repository,
+            branch: snapshot.branch,
+            commitSha: snapshot.commitSha,
+            state: snapshot.state,
+            reason: snapshot.reason,
+            items: [...snapshot.items],
+            sourceErrors: [...snapshot.sourceErrors].sort((left, right) =>
+                canonicalJson(serializeJson(left)).localeCompare(
+                    canonicalJson(serializeJson(right)),
+                ),
+            ),
+            completenessErrors: [...snapshot.completenessErrors].sort(),
+        }),
     );
+
+export const haveSamePipelineSnapshot = (
+    left: Pick<PipelineSnapshot, "fingerprint">,
+    right: Pick<PipelineSnapshot, "fingerprint">,
+): boolean => left.fingerprint === right.fingerprint;
 
 export function normalizePipelineSnapshot(
     input: PipelineSnapshotNormalizationInput,
@@ -1244,7 +1391,7 @@ export function normalizePipelineSnapshot(
     const normalizedSourceErrors = (input.sourceErrors ?? sourceErrors).map(
         sourceErrorFor,
     );
-    const snapshot = {
+    const snapshotBase = {
         ...request,
         state:
             normalized.items.length === 0
@@ -1254,11 +1401,14 @@ export function normalizePipelineSnapshot(
         sourceErrors: normalizedSourceErrors,
         completenessErrors,
         diagnostics,
-        greenCandidate: false,
-    } satisfies Omit<PipelineSnapshot, "greenCandidate"> & {
-        readonly greenCandidate: boolean;
     };
-    return { ...snapshot, greenCandidate: isPipelineGreenCandidate(snapshot) };
+    const reason = pipelineSnapshotReason(snapshotBase);
+    const withReason = { ...snapshotBase, reason };
+    return {
+        ...withReason,
+        greenCandidate: reason === "success",
+        fingerprint: pipelineSnapshotFingerprint(withReason),
+    };
 }
 
 export const normalizePipelineObservations = normalizePipelineSnapshot;

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
     classifyPipelineState,
     classifyPipelineStatus,
+    haveSamePipelineSnapshot,
     isPipelineGreenCandidate,
     normalizePipelineSnapshot,
     PIPELINE_CHECK_SUITE_FALLBACK_NAME,
@@ -67,6 +68,12 @@ describe("pipeline snapshot normalization", () => {
         expect(
             classifyPipelineState({
                 status: "in_progress",
+                conclusion: "success",
+            }),
+        ).toBe("unknown");
+        expect(
+            classifyPipelineState({
+                status: "future_status",
                 conclusion: "success",
             }),
         ).toBe("unknown");
@@ -187,6 +194,82 @@ describe("pipeline snapshot normalization", () => {
         expect(new Set(snapshot.items.map(({ status }) => status))).toEqual(
             new Set(["passing", "acceptable"]),
         );
+        expect(snapshot.reason).toBe("failure");
+        expect(snapshot.greenCandidate).toBe(false);
+    });
+
+    test("keeps Check Runs and legacy statuses distinct even with one provider and name", () => {
+        const snapshot = normalizePipelineSnapshot({
+            ...request,
+            observations: [
+                checkRun({ provider: "ci", name: "build", checkRunId: 1 }),
+                {
+                    kind: "status-context",
+                    provider: "ci",
+                    context: "build",
+                    id: 2,
+                    sha,
+                    branch: "main",
+                    state: "failure",
+                },
+            ],
+        });
+
+        expect(snapshot.items).toHaveLength(2);
+        expect(snapshot.items.map(({ source }) => source)).toEqual([
+            "check-run",
+            "status-context",
+        ]);
+        expect(snapshot.reason).toBe("failure");
+    });
+
+    test("gives terminal failure precedence over pending independent of input order", () => {
+        const observations = [
+            checkRun({ name: "pending", status: "queued", conclusion: null }),
+            checkRun({ name: "failed", conclusion: "failure" }),
+        ];
+        const forward = normalizePipelineSnapshot({
+            ...request,
+            observations,
+        });
+        const reverse = normalizePipelineSnapshot({
+            ...request,
+            observations: [...observations].reverse(),
+        });
+
+        expect(forward.reason).toBe("failure");
+        expect(reverse.reason).toBe("failure");
+        expect(haveSamePipelineSnapshot(forward, reverse)).toBe(true);
+    });
+
+    test("deduplicates legacy contexts using timestamp then numeric status ID", () => {
+        const legacy = (id: number, state: string, createdAt: string) => ({
+            kind: "status-context" as const,
+            provider: "legacy-ci",
+            context: "build",
+            id,
+            sha,
+            branch: "main",
+            state,
+            createdAt,
+        });
+        const snapshot = normalizePipelineSnapshot({
+            ...request,
+            observations: [
+                legacy(8, "failure", "2024-01-01T00:00:00Z"),
+                legacy(9, "pending", "2024-02-01T00:00:00Z"),
+                legacy(10, "success", "2024-02-01T00:00:00Z"),
+            ],
+        });
+
+        expect(snapshot.items).toHaveLength(1);
+        expect(snapshot.items[0]).toMatchObject({
+            source: "status-context",
+            status: "passing",
+            createdAt: "2024-02-01T00:00:00Z",
+            diagnostic: { statusId: 10 },
+        });
+        expect(snapshot.reason).toBe("success");
     });
 
     test("orders distinct workflow runs before same-run attempts", () => {
@@ -248,6 +331,33 @@ describe("pipeline snapshot normalization", () => {
         expect(snapshot.items[0]?.diagnostic.checkRunId).toBe(2);
     });
 
+    test("uses numeric Check Run IDs when timestamps are identical", () => {
+        const snapshot = normalizePipelineSnapshot({
+            ...request,
+            observations: [
+                checkRun({
+                    checkRunId: 9,
+                    createdAt: "2024-02-01T00:00:00Z",
+                    updatedAt: "2024-02-01T01:00:00Z",
+                    conclusion: "failure",
+                }),
+                checkRun({
+                    checkRunId: 10,
+                    createdAt: "2024-02-01T00:00:00Z",
+                    updatedAt: "2024-02-01T01:00:00Z",
+                    conclusion: "success",
+                }),
+            ],
+        });
+
+        expect(snapshot.items[0]).toMatchObject({
+            status: "passing",
+            createdAt: "2024-02-01T00:00:00Z",
+            updatedAt: "2024-02-01T01:00:00Z",
+            diagnostic: { checkRunId: 10 },
+        });
+    });
+
     test("keeps workflow-run and check-suite IDs in separate namespaces", () => {
         const snapshot = normalizePipelineSnapshot({
             ...request,
@@ -274,10 +384,14 @@ describe("pipeline snapshot normalization", () => {
             ],
         });
 
-        expect(snapshot.items[0]?.status).toBe("acceptable");
-        expect(snapshot.items[0]?.diagnostic.suiteId).toBe(42);
-        expect(snapshot.items[0]?.diagnostic.runId).toBeUndefined();
-        expect(snapshot.items[0]?.diagnostic.checkRunId).toBeUndefined();
+        expect(snapshot.items).toHaveLength(2);
+        const suite = snapshot.items.find(
+            ({ source }) => source === "check-suite",
+        );
+        expect(suite?.status).toBe("acceptable");
+        expect(suite?.diagnostic.suiteId).toBe(42);
+        expect(suite?.diagnostic.runId).toBeUndefined();
+        expect(suite?.diagnostic.checkRunId).toBeUndefined();
     });
 
     test("classifies only the selected observation's own state fields", () => {
@@ -344,6 +458,7 @@ describe("pipeline snapshot normalization", () => {
     test("makes empty and incomplete snapshots explicitly non-green", () => {
         const empty = normalizePipelineSnapshot(request, []);
         expect(empty.state).toBe("empty");
+        expect(empty.reason).toBe("no-checks");
         expect(empty.greenCandidate).toBe(false);
 
         const incomplete = normalizePipelineSnapshot({
@@ -352,24 +467,29 @@ describe("pipeline snapshot normalization", () => {
         });
         expect(incomplete.state).toBe("empty");
         expect(incomplete.completenessErrors).toContain("missing branch");
+        expect(incomplete.reason).toBe("unknown");
         expect(incomplete.greenCandidate).toBe(false);
     });
 
-    test("requires non-empty complete passing or acceptable items for green", () => {
+    test("requires every item to pass and maps terminal outcomes to audit reasons", () => {
         const passing = normalizePipelineSnapshot({
             ...request,
             observations: [checkRun()],
         });
         expect(passing.greenCandidate).toBe(true);
+        expect(passing.reason).toBe("success");
         expect(isPipelineGreenCandidate(passing)).toBe(true);
 
-        for (const conclusion of [
-            "neutral",
-            "pending",
-            "failure",
-            "cancelled",
-            "future",
-        ]) {
+        for (const { conclusion, reason } of [
+            { conclusion: "neutral", reason: "failure" },
+            { conclusion: "skipped", reason: "failure" },
+            { conclusion: "pending", reason: "pending" },
+            { conclusion: "failure", reason: "failure" },
+            { conclusion: "timed_out", reason: "timeout" },
+            { conclusion: "error", reason: "error" },
+            { conclusion: "cancelled", reason: "cancelled" },
+            { conclusion: "future", reason: "unknown" },
+        ] as const) {
             const candidate = normalizePipelineSnapshot({
                 ...request,
                 observations: [
@@ -381,7 +501,8 @@ describe("pipeline snapshot normalization", () => {
                     }),
                 ],
             });
-            expect(candidate.greenCandidate).toBe(conclusion === "neutral");
+            expect(candidate.greenCandidate).toBe(false);
+            expect(candidate.reason).toBe(reason);
         }
 
         const withSourceError = normalizePipelineSnapshot({
@@ -390,5 +511,6 @@ describe("pipeline snapshot normalization", () => {
             sourceErrors: [{ source: "checks", message: "timed out" }],
         });
         expect(withSourceError.greenCandidate).toBe(false);
+        expect(withSourceError.reason).toBe("timeout");
     });
 });

@@ -13,6 +13,8 @@ import {
 } from "../../src/github/pipeline-observation.ts";
 import {
     isPipelineGreenCandidate,
+    pipelineSnapshotFingerprint,
+    pipelineSnapshotReason,
     type ExactCommitSha,
     type PipelineItemStatus,
     type PipelineSnapshot,
@@ -66,6 +68,7 @@ const makeSnapshot = (
         ...request,
         state: items.length === 0 ? ("empty" as const) : ("non-empty" as const),
         items: items.map(({ provider, name, status }) => ({
+            source: "check-run" as const,
             provider,
             name,
             status,
@@ -86,11 +89,13 @@ const makeSnapshot = (
         })),
         completenessErrors: [],
         diagnostics: [],
-        greenCandidate: false,
     };
+    const reason = pipelineSnapshotReason(snapshot);
+    const withReason = { ...snapshot, reason };
     return {
-        ...snapshot,
+        ...withReason,
         greenCandidate: isPipelineGreenCandidate(snapshot),
+        fingerprint: pipelineSnapshotFingerprint(withReason),
     };
 };
 
@@ -118,6 +123,9 @@ const cancelled = (): PipelineObservationRead =>
 
 const unknown = (): PipelineObservationRead =>
     read(makeSnapshot([item("build", "unknown")]));
+
+const acceptable = (): PipelineObservationRead =>
+    read(makeSnapshot([item("build", "acceptable")]));
 
 const invalid = (): PipelineObservationRead =>
     read(makeSnapshot([item("build", "passing")], 1));
@@ -247,7 +255,7 @@ describe("pipeline observation", () => {
         expect(green.snapshot.items).toHaveLength(2);
         expect(transitions).toContainEqual({
             kind: "checked-in",
-            items: ["provider-b\u0000lint"],
+            items: ["check-run\u0000provider-b\u0000lint"],
         });
     });
 
@@ -264,7 +272,7 @@ describe("pipeline observation", () => {
             { kind: "registered", itemCount: 1 },
             {
                 kind: "disappeared",
-                items: ["github-actions\u0000build"],
+                items: ["check-run\u0000github-actions\u0000build"],
             },
             { kind: "registered", itemCount: 1 },
         ]);
@@ -291,7 +299,7 @@ describe("pipeline observation", () => {
             { kind: "registered", itemCount: 1 },
             {
                 kind: "status-changed",
-                item: "github-actions\u0000build",
+                item: "check-run\u0000github-actions\u0000build",
                 from: "pending",
                 to: "passing",
             },
@@ -384,8 +392,9 @@ describe("pipeline observation", () => {
         expect(Math.max(...sleeps)).toBeLessThanOrEqual(3000);
     });
 
-    test("fails closed on failing, cancelled, unknown, and invalid terminal states", async () => {
+    test("fails closed on acceptable, failing, cancelled, unknown, and invalid terminal states", async () => {
         for (const scenario of [
+            { fetcher: acceptable, reason: "failing" },
             { fetcher: failing, reason: "failing" },
             { fetcher: cancelled, reason: "cancelled" },
             { fetcher: unknown, reason: "unknown" },
@@ -509,7 +518,7 @@ describe("pipeline observation", () => {
         expect(outcome.kind).toBe("no-pipelines-discovered");
         expect(transitions).toContainEqual({
             kind: "disappeared",
-            items: ["github-actions\u0000build"],
+            items: ["check-run\u0000github-actions\u0000build"],
         });
     });
 });
