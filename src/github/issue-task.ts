@@ -3,10 +3,11 @@ import { type StructuredOutputName } from "../agent/session.ts";
 
 export type GitHubIssueAction =
     | "create-breakdown-issues"
-    | "rewrite-original-as-duplicate"
-    | "close-original-as-duplicate";
+    | "attach-native-sub-issues"
+    | "create-native-dependencies"
+    | "rewrite-original";
 
-export const IssueLinkStrategy = "original-and-siblings" as const;
+export const IssueLinkStrategy = "native-sub-issues" as const;
 export type IssueLinkStrategy = typeof IssueLinkStrategy;
 
 export type GitHubIssueStage =
@@ -19,10 +20,15 @@ export type GitHubIssueStage =
       }
     | {
           readonly kind: "github-task";
-          readonly action: "rewrite-original-as-duplicate";
+          readonly action: "attach-native-sub-issues";
+      }
+    | {
+          readonly kind: "github-task";
+          readonly action: "create-native-dependencies";
           readonly input: "issue-breakdown-decision";
       }
     | {
           readonly kind: "github-task";
-          readonly action: "close-original-as-duplicate";
+          readonly action: "rewrite-original";
+          readonly input: "issue-breakdown-decision";
       };

@@ -182,6 +182,24 @@ describe("refreshable issue queue", () => {
         ]);
     });
 
+    test("never queues a decomposed parent kept open as a native tracking issue", () => {
+        const parent = {
+            ...issue(42),
+            body: "<!-- ralphie:decomposition original=42 depth=1 -->\n\nDecomposed stack.",
+        };
+        const child = {
+            ...issue(101),
+            body: '<!-- ralphie:decomposition root=42 parent=42 key="storage" depth=1 -->',
+        };
+
+        expect(toQueuedIssues([parent, child])).toEqual([
+            {
+                issue: child,
+                dependsOn: [],
+            },
+        ]);
+    });
+
     test("expands a closed decomposed dependency to its open children", () => {
         const child = {
             ...issue(160),

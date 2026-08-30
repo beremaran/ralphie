@@ -29,6 +29,7 @@ import {
 } from "../../src/git/remote-safety.ts";
 import type { GitHubIssueMutationService } from "../../src/github/issue-mutations.ts";
 import type { GitHubIssuesService } from "../../src/github/issues.ts";
+import type { GitHubIssueRelationshipService } from "../../src/github/issue-relationships.ts";
 import { makePiSessionDiagnostics } from "../../src/agent/task-session.ts";
 import {
     makeProgressRecorder,
@@ -214,9 +215,17 @@ const decompositionService = (state: {
         refresh: async () => issue(42, "Issue body"),
         listDecompositionChildren: async () => [],
     };
+    const relationships: GitHubIssueRelationshipService = {
+        listSubIssues: async () => [],
+        parentOf: async () => undefined,
+        attachSubIssue: async () => {},
+        listBlockedBy: async () => [],
+        addBlockedBy: async () => {},
+    };
     return makeDecompositionExecutorService(
         mutations,
         issues,
+        relationships,
         makeProgressRecorder([]),
     );
 };
@@ -259,7 +268,7 @@ describe("mocked end-to-end issue workflows", () => {
             kind: IssueExecutionOutcomeKind.Decomposed,
             childIssueNumbers: [101, 102],
         });
-        expect(state.closeCount.value).toBe(1);
+        expect(state.closeCount.value).toBe(0);
         const childBodies = state.updates
             .filter(
                 ({ issueNumber }) => issueNumber === 101 || issueNumber === 102,
@@ -293,7 +302,7 @@ describe("mocked end-to-end issue workflows", () => {
         expect(state.created).toEqual([101, 102]);
         await executor.execute({ context: context(client), artifacts });
         expect(state.created).toEqual([101, 102]);
-        expect(state.closeCount.value).toBe(1);
+        expect(state.closeCount.value).toBe(0);
     });
 
     test("hands five-review exhaustion from implementation to decomposition without commit or push", async () => {

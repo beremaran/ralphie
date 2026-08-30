@@ -348,6 +348,13 @@ const testRuntime = (
         pipelineSnapshot: {} as never,
         githubIssues,
         githubIssueMutations: mutations,
+        githubIssueRelationships: {
+            listSubIssues: async () => [],
+            parentOf: async () => undefined,
+            attachSubIssue: async () => {},
+            listBlockedBy: async () => [],
+            addBlockedBy: async () => {},
+        },
         githubPullRequests: pullRequests,
         githubNeedsAttentionNotification:
             options.needsAttentionNotification ?? {

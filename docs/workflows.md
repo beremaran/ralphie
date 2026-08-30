@@ -128,14 +128,19 @@ sequenceDiagram
 
 1. Ask Pi to split the issue into the next set of independently actionable
    tasks and declare their dependencies.
-2. Create child issues in deterministic order.
-3. Add parent, sibling, dependency, and full-lineage links.
-4. Rewrite the original issue with the complete issue stack.
-5. Close the original as a duplicate and refresh the open-issue queue.
+2. Create child issues in deterministic order with their stable markers.
+3. Attach each created or recovered child to the original issue as a **native
+   GitHub sub-issue**, reconciling against GitHub's reported hierarchy.
+4. Represent each declared `dependsOn` edge as a **native GitHub
+   `blocked_by` dependency** and persist the dependency mapping artifact.
+5. Rewrite the original issue as the tracking parent and **keep it open**;
+   it is never closed as a duplicate merely because it was decomposed.
 
 Stable markers and persisted child mappings make the workflow retry-safe: a
-resumed run discovers previously created children instead of duplicating them.
-Eligible children can enter the main implementation loop during the same run.
+resumed run discovers previously created children instead of duplicating them,
+and native relationships are reconciled idempotently. Eligible children can
+enter the main implementation loop during the same run; the decomposed parent
+stays out of the queue because it is a tracking issue, not executable work.
 
 ```mermaid
 flowchart LR
@@ -143,10 +148,10 @@ flowchart LR
     B --> C{Existing child marker?}
     C -->|Yes| D[Reuse child issue]
     C -->|No| E[Create child issue]
-    D --> F[Link parent, siblings, dependencies, and lineage]
+    D --> F[Reconcile native sub-issues]
     E --> F
-    F --> G[Rewrite original with complete stack]
-    G --> H[Close original as duplicate]
+    F --> G[Create native blocked_by dependencies]
+    G --> H[Rewrite parent and keep it open]
     H --> I[Refresh open-issue queue]
 ```
 
@@ -159,14 +164,18 @@ Each child receives a stable marker containing root, parent, key, and depth.
 Ralphie discovers those markers and reconciles them with the persisted mapping
 before creating anything. Thus a lost create response, a restart, or a partial
 linking failure can resume without blindly duplicating children. Creation,
-number recording, linking, original rewrite, and closure are separate
-recoverable mutations.
+number recording, linking, native sub-issue attachment, dependency creation,
+and the parent rewrite are separate recoverable mutations; a child already
+attached to the wrong parent, or a native relationship that disagrees with a
+child's marker, halts with a recovery diagnostic instead of silently
+reparenting or duplicating issues.
 
-The original is closed with GitHub's `duplicate` reason only after all children
-are created and linked. The open-issue queue is then refreshed; newly eligible
-children can run during the same invocation. If dependencies remain open after
-the queue is exhausted, the run persists active state and fails instead of
-processing blocked work.
+The decomposed parent remains open as the native tracking issue and exposes
+GitHub's completion progress for its sub-issues. It is not queued again, and it
+is closed as `completed` only when its child work is finished. The open-issue
+queue is refreshed after decomposition; newly eligible children can run during
+the same invocation. If dependencies remain open after the queue is exhausted,
+the run persists active state and fails instead of processing blocked work.
 
 A direct complexity 4–5 route returns `decomposed`. Review exhaustion returns an
 `escalated` outcome containing the recovery diagnostic path and, after

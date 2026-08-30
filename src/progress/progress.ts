@@ -37,6 +37,7 @@ export type ProgressStage =
     | "push"
     | "decomposition"
     | "issue-creation"
+    | "issue-relationships"
     | "issue-closure"
     | "notification-recovery";
 

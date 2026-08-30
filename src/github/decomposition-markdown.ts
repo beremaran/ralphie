@@ -33,21 +33,53 @@ export const decompositionMarker = (
     return `<!-- ${RALPHIE_DECOMPOSITION_MARKER} root=${lineage.rootIssueNumber} parent=${lineage.parentIssueNumber} key=${JSON.stringify(key)} depth=${lineage.depth} -->`;
 };
 
+const MARKER_PATTERN =
+    /<!-- ralphie:decomposition root=(\d+) parent=(\d+) key=("(?:\\.|[^"\\])*") depth=(\d+) -->/;
+
+export type ParsedDecompositionMarker = {
+    readonly rootIssueNumber: number;
+    readonly parentIssueNumber: number;
+    readonly key: string;
+    readonly depth: number;
+};
+
+/** Parse the stable Ralphie decomposition marker, if any. */
+export const parseDecompositionMarker = (
+    body: string | null,
+): ParsedDecompositionMarker | undefined => {
+    if (body === null) return undefined;
+    const marker = body.match(MARKER_PATTERN);
+    if (marker === null) return undefined;
+    let key: string;
+    try {
+        const parsed = JSON.parse(marker[3]!);
+        if (typeof parsed !== "string" || parsed.length === 0) return undefined;
+        key = parsed;
+    } catch {
+        return undefined;
+    }
+    return {
+        rootIssueNumber: Number(marker[1]),
+        parentIssueNumber: Number(marker[2]),
+        key,
+        depth: Number(marker[4]),
+    };
+};
+
+/** True when an issue is a decomposed parent that GitHub tracks via sub-issues. */
+export const isDecomposedParent = (issue: GitHubIssue): boolean =>
+    issue.body?.includes(`<!-- ${RALPHIE_DECOMPOSITION_MARKER} original=`) ===
+    true;
+
 /** Derive lineage for the children of an issue, including recursively generated children. */
 export const nextDecompositionLineage = (
     issue: GitHubIssue,
 ): DecompositionLineage => {
-    const marker = issue.body?.match(
-        /<!-- ralphie:decomposition root=(\d+) parent=(\d+) key="[^"]+" depth=(\d+) -->/,
-    );
-    const previousRoot =
-        marker?.[1] === undefined ? undefined : Number(marker[1]);
-    const previousDepth =
-        marker?.[3] === undefined ? undefined : Number(marker[3]);
-    const depth = previousDepth === undefined ? 1 : previousDepth + 1;
+    const marker = parseDecompositionMarker(issue.body);
+    const depth = marker === undefined ? 1 : marker.depth + 1;
     validateDepth(depth);
     return {
-        rootIssueNumber: previousRoot ?? issue.number,
+        rootIssueNumber: marker?.rootIssueNumber ?? issue.number,
         parentIssueNumber: issue.number,
         depth,
     };
@@ -74,7 +106,6 @@ export const renderChildIssueBody = (input: {
     readonly issueNumbers: Readonly<Record<string, number>>;
 }): string => {
     const { child, lineage, issueNumbers } = input;
-    const siblingEntries = Object.entries(issueNumbers);
     const dependencies = child.dependsOn.map((key) => {
         const number = issueNumbers[key];
         if (number === undefined) {
@@ -85,19 +116,12 @@ export const renderChildIssueBody = (input: {
         return `- ${issueLink(number)} (${key})`;
     });
 
+    // Native sub-issues replace the body-level parent/sibling/lineage lists.
+    // The stable marker remains as private recovery metadata and the
+    // dependency section remains the queue's deterministic source of edges.
     return `${decompositionMarker(lineage, child.key)}
 
 ${child.body}
-
-## Decomposition lineage
-
-- Root: ${issueLink(lineage.rootIssueNumber)}
-- Parent: ${issueLink(lineage.parentIssueNumber)}
-- Depth: ${lineage.depth}/${MAX_DECOMPOSITION_DEPTH}
-
-## Related child issues
-
-${siblingEntries.map(([key, number]) => `- ${issueLink(number)} (${key})`).join("\n")}
 
 ## Dependencies
 

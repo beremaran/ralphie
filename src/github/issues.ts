@@ -104,7 +104,7 @@ const issueLabels = (
         typeof label === "string" ? [label] : label.name ? [label.name] : [],
     );
 
-type GitHubIssueRecord = {
+export type GitHubIssueRecord = {
     readonly number: number;
     readonly title: string;
     readonly html_url: string;

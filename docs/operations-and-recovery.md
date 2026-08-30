@@ -182,9 +182,7 @@ GitHub snapshots, including issue update and comment freshness metadata. It can
 reconcile partially created child issues, a commit created immediately before
 interruption, an issue closure whose response was lost, and a needs-attention
 notification whose response or label mutation was uncertain without repeating
-the corresponding agent work.
-
-To resume an interrupted run, provide its saved state file:
+the corresponding agent work.To resume an interrupted run, provide its saved state file:
 
 ```bash
 bunx @beremaran/ralphie owner/repository \
@@ -212,7 +210,10 @@ Examples of resumable boundaries:
 - an active `notification-recovery` retries the saved structured outcome and
   stable GitHub marker without rerunning agent work; and
 - a partially created decomposition reuses marker-discovered children and the
-  saved key mapping.
+  saved key mapping; native sub-issue attachments and `blocked_by` dependencies
+  are reconciled idempotently, and a child attached to the wrong parent or a
+  native relationship that disagrees with a child's marker halts with a
+  recovery diagnostic instead of silently reparenting or duplicating issues.
 
 One issue failure currently halts the run. This preserves the checkout and
 diagnostics at the first uncertain boundary instead of allowing later issues to

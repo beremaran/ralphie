@@ -1,5 +1,8 @@
 import type { GitHubIssue } from "../github/issues.ts";
-import { parseGeneratedIssueDependencies } from "../github/decomposition-markdown.ts";
+import {
+    isDecomposedParent,
+    parseGeneratedIssueDependencies,
+} from "../github/decomposition-markdown.ts";
 
 export type QueuedIssue = {
     readonly issue: GitHubIssue;
@@ -123,7 +126,11 @@ export const createIssueQueue = (
     };
 };
 
-/** Preserve GitHub ordering while attaching dependencies that are still open. */
+/**
+ * Preserve GitHub ordering while attaching dependencies that are still open.
+ * Decomposed parents are tracking issues kept open for native sub-issue
+ * progress and are never queued for execution; only their children are.
+ */
 export const toQueuedIssues = (
     issues: ReadonlyArray<GitHubIssue>,
 ): ReadonlyArray<QueuedIssue> => {
@@ -150,14 +157,16 @@ export const toQueuedIssues = (
         return [...(openDescendants.get(dependency) ?? [])];
     };
 
-    return issues.map((issue) => ({
-        issue,
-        dependsOn: [
-            ...new Set(
-                parseGeneratedIssueDependencies(issue).flatMap(
-                    expandOpenDependency,
+    return issues
+        .filter((issue) => !isDecomposedParent(issue))
+        .map((issue) => ({
+            issue,
+            dependsOn: [
+                ...new Set(
+                    parseGeneratedIssueDependencies(issue).flatMap(
+                        expandOpenDependency,
+                    ),
                 ),
-            ),
-        ],
-    }));
+            ],
+        }));
 };

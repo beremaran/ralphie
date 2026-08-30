@@ -39,7 +39,7 @@ effects and validate their invariants at the boundary.
 
 | Area | Responsibility |
 | --- | --- |
-| `src/github/` | GitHub CLI authentication, Octokit, issue discovery, mutations, and decomposition links. |
+| `src/github/` | GitHub CLI authentication, Octokit, issue discovery, mutations, native sub-issues/dependencies, and decomposition links. |
 | `src/git/` | Checkout preparation, checkpoints, deterministic issue operations, invariants, and remote safety. |
 | `src/issues/` | Queueing, complexity routing, implementation, review, recovery, and decomposition. |
 | `src/agent/` | Ralphie's session, prompt, schema, diagnostics, and structured-output boundary. |
@@ -78,7 +78,7 @@ and [Safety](safety.md). For state transitions and reconciliation, see
 | Run orchestration, queue, state transitions | `src/workflow.ts`, `src/issues/queue.ts` |
 | Complexity routing | `src/issues/executor.ts`, `src/issues/complexity.ts` |
 | Implementation/review/delivery | `src/issues/implementation-executor.ts` |
-| Decomposition and GitHub mutations | `src/issues/decomposition-executor.ts`, `src/github/` |
+| Decomposition and GitHub mutations | `src/issues/decomposition-executor.ts`, `src/github/issue-mutations.ts`, `src/github/issue-relationships.ts` |
 | Pi sessions and structured results | `src/agent/`, `src/pi/` |
 | Git checkpoints, safety, and branches | `src/git/` |
 | Durable state and reconciliation | `src/run/`, `src/issues/artifacts.ts` |

@@ -48,9 +48,19 @@ export enum IssueArtifactKind {
     NeedsAttentionHandoff = "needs-attention-handoff",
     IssueBreakdownDecision = "issue-breakdown-decision",
     CreatedIssueNumbers = "created-issue-numbers",
+    CreatedIssueDependencies = "created-issue-dependencies",
 }
 
 export type CreatedIssueNumberMapping = Readonly<Record<string, number>>;
+
+/**
+ * Persisted native dependency edges derived from a breakdown: child key to
+ * the created issue numbers it depends on. Kept regardless of native GitHub
+ * dependency availability so recovery never depends on live API state.
+ */
+export type CreatedIssueDependencyMapping = Readonly<
+    Record<string, ReadonlyArray<number>>
+>;
 
 export type IssueFreshnessFingerprint =
     | {
@@ -105,6 +115,7 @@ export type IssueArtifactValues = {
     readonly [IssueArtifactKind.NeedsAttentionHandoff]: NeedsAttentionHandoffArtifact;
     readonly [IssueArtifactKind.IssueBreakdownDecision]: IssueBreakdownDecision;
     readonly [IssueArtifactKind.CreatedIssueNumbers]: CreatedIssueNumberMapping;
+    readonly [IssueArtifactKind.CreatedIssueDependencies]: CreatedIssueDependencyMapping;
 };
 
 export type IssueArtifactStore = {
@@ -339,6 +350,9 @@ const persistedArtifactsV2BaseSchema = z
             issueBreakdownDecisionSchema.optional(),
         [IssueArtifactKind.CreatedIssueNumbers]: z
             .record(z.string(), z.number().int().positive())
+            .optional(),
+        [IssueArtifactKind.CreatedIssueDependencies]: z
+            .record(z.string(), z.array(z.number().int().positive()).optional())
             .optional(),
     })
     .strict();

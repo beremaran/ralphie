@@ -338,11 +338,12 @@ flowchart TD
     E -->|no| F["Create child issue with stable marker"]
     F --> G["Persist returned issue number immediately"]
     E -->|yes| G
-    G --> H["Update every child with parent, siblings, lineage, and dependencies"]
-    H --> I["Rewrite original with complete child stack and preserved content"]
-    I --> J["Close original as duplicate"]
-    J --> K["Return decomposed outcome"]
-    K --> L["Refetch open issues and refresh dependency-aware queue"]
+    G --> H["Update every child with marker and dependencies"]
+    H --> I["Attach each child as a native GitHub sub-issue"]
+    I --> J["Create native blocked_by dependencies; persist mapping"]
+    J --> K["Rewrite parent as tracking issue and keep it open"]
+    K --> L["Return decomposed outcome"]
+    L --> M["Refetch open issues and refresh dependency-aware queue"]
 ```
 
 The decomposition Pi session is read-only and returns an
@@ -354,14 +355,19 @@ Each child receives a stable marker containing root, parent, key, and depth.
 Ralphie discovers those markers and reconciles them with the persisted mapping
 before creating anything. Thus a lost create response, a restart, or a partial
 linking failure can resume without blindly duplicating children. Creation,
-number recording, linking, original rewrite, and closure are separate
-recoverable mutations.
+number recording, linking, native sub-issue attachment, dependency creation,
+and the parent rewrite are separate recoverable mutations. Native relationships
+are reconciled with GitHub's reported hierarchy on every run: a child already
+attached to the intended parent is left alone, a child attached to a different
+parent fails closed, and a marker-matched child attached natively but absent
+from the persisted mapping halts with a recovery diagnostic.
 
-The original is closed with GitHub's `duplicate` reason only after all children
-are created and linked. The open-issue queue is then refreshed; newly eligible
-children can run during the same invocation. If dependencies remain open after
-the queue is exhausted, the run persists active state and fails instead of
-processing blocked work.
+The decomposed parent remains open as the native tracking issue and exposes
+GitHub completion progress for its sub-issues; it is never closed as a
+duplicate merely because it was decomposed, and it is not queued again. The
+open-issue queue is then refreshed; newly eligible children can run during the
+same invocation. If dependencies remain open after the queue is exhausted, the
+run persists active state and fails instead of processing blocked work.
 
 A direct complexity 4–5 route returns `decomposed`. Review exhaustion returns an
 `escalated` outcome containing the recovery diagnostic path and, after

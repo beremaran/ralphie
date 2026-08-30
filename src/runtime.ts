@@ -35,6 +35,10 @@ import {
     type GitHubIssueMutationService,
 } from "./github/issue-mutations.ts";
 import {
+    makeGitHubIssueRelationshipService,
+    type GitHubIssueRelationshipService,
+} from "./github/issue-relationships.ts";
+import {
     makeGitHubIssuesService,
     type GitHubIssuesService,
 } from "./github/issues.ts";
@@ -103,6 +107,7 @@ export type RalphieRuntime = {
     readonly pipelineSnapshot: PipelineSnapshotCollectorService;
     readonly githubIssues: GitHubIssuesService;
     readonly githubIssueMutations: GitHubIssueMutationService;
+    readonly githubIssueRelationships: GitHubIssueRelationshipService;
     readonly githubPullRequests: GitHubPullRequestService;
     /** Publishes structured needs-attention outcomes outside issue execution. */
     readonly githubNeedsAttentionNotification: GitHubNeedsAttentionNotificationService;
@@ -149,6 +154,7 @@ export const makeLiveRuntime = ({
     const pipelineSnapshot = makePipelineSnapshotCollectorService();
     const githubIssues = makeGitHubIssuesService();
     const githubIssueMutations = makeGitHubIssueMutationsService();
+    const githubIssueRelationships = makeGitHubIssueRelationshipService();
     const githubPullRequests = makeGitHubPullRequestService();
     const githubNeedsAttentionNotification =
         makeGitHubNeedsAttentionNotificationService();
@@ -176,6 +182,7 @@ export const makeLiveRuntime = ({
     const decompositionExecutor = makeDecompositionExecutorService(
         githubIssueMutations,
         githubIssues,
+        githubIssueRelationships,
         progress,
         needsAttentionRouter,
     );
@@ -211,6 +218,7 @@ export const makeLiveRuntime = ({
         pipelineSnapshot,
         githubIssues,
         githubIssueMutations,
+        githubIssueRelationships,
         githubPullRequests,
         githubNeedsAttentionNotification,
         gitRepository,

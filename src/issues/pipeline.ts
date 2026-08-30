@@ -167,12 +167,17 @@ const decompositionWorkflow: IssueWorkflow = {
         },
         {
             kind: "github-task",
-            action: "rewrite-original-as-duplicate",
+            action: "attach-native-sub-issues",
+        },
+        {
+            kind: "github-task",
+            action: "create-native-dependencies",
             input: "issue-breakdown-decision",
         },
         {
             kind: "github-task",
-            action: "close-original-as-duplicate",
+            action: "rewrite-original",
+            input: "issue-breakdown-decision",
         },
     ],
 };

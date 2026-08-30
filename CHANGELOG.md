@@ -7,12 +7,28 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Changed
 
+- Decomposition now uses native GitHub sub-issues and dependencies: every
+  created or recovered child is attached to the original issue as a native
+  sub-issue, declared `dependsOn` edges become native `blocked_by`
+  relationships, and the decomposed parent stays open as a tracking issue
+  instead of being closed as a duplicate. Child bodies keep only the stable
+  recovery marker and dependency list, and decomposed parents are never
+  re-queued for execution. Native relationships are reconciled idempotently on
+  resume; conflicting hierarchy or markers halt with a recovery diagnostic.
 - Dequeued issues are refreshed from GitHub before branch or Pi work; closed or
   label-ineligible issues are durably skipped without mutations, and cached
   grounding, complexity, and resolution decisions now require matching live
   issue freshness metadata.
 
 ### Added
+
+- A deterministic GitHub issue-relationship domain service
+  (`src/github/issue-relationships.ts`) that lists, attaches, and validates
+  native sub-issues and dependencies with idempotent, response-loss-safe
+  mutations and actionable unsupported-endpoint errors.
+- A persisted `created-issue-dependencies` artifact that records each child's
+  dependency issue numbers so queue eligibility never depends on live GitHub
+  state alone.
 
 - A maintainer-approved public source and distribution topology, with one
   canonical repository, endpoint inventory, publication setup, and explicit

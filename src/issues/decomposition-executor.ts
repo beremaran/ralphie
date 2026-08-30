@@ -1,6 +1,7 @@
 import {
     decompositionMarker,
     nextDecompositionLineage,
+    parseDecompositionMarker,
     renderChildIssueBody,
     renderDecomposedOriginalBody,
     type DecompositionLineage,
@@ -8,10 +9,10 @@ import {
 import {
     GitHubMutationRecoveryError,
     GitHubMutationRecoveryOutcome,
-    type GitHubIssueCloseReason,
     type GitHubIssueMutationService,
 } from "../github/issue-mutations.ts";
-import type { GitHubIssuesService } from "../github/issues.ts";
+import type { GitHubIssue, GitHubIssuesService } from "../github/issues.ts";
+import type { GitHubIssueRelationshipService } from "../github/issue-relationships.ts";
 import { buildDecompositionPrompt } from "../agent/prompts.ts";
 import { requestStructuredOutput } from "../agent/structured-output.ts";
 import {
@@ -22,6 +23,7 @@ import type { ProgressReporterService } from "../progress/progress.ts";
 import { RalphieError } from "../shared/error.ts";
 import {
     IssueArtifactKind,
+    type CreatedIssueDependencyMapping,
     type CreatedIssueNumberMapping,
 } from "./artifacts.ts";
 import {
@@ -59,6 +61,7 @@ const issueContext = (input: WorkflowExecutorInput) => ({
 export const makeDecompositionExecutorService = (
     mutations: GitHubIssueMutationService,
     issues: GitHubIssuesService,
+    relationships: GitHubIssueRelationshipService,
     progress: ProgressReporterService,
     needsAttentionRouter?: NeedsAttentionRouterService,
 ): DecompositionExecutorService => {
@@ -69,7 +72,11 @@ export const makeDecompositionExecutorService = (
     ): Promise<Output> => {
         const context = issueContext(input);
         const stage =
-            operation === "close-original" ? "issue-closure" : "issue-creation";
+            operation.startsWith("attach-child-") ||
+            operation.startsWith("add-dependency-") ||
+            operation === "persist-dependencies"
+                ? "issue-relationships"
+                : "issue-creation";
         await progress.emit({
             ...context,
             stage,
@@ -353,6 +360,262 @@ export const makeDecompositionExecutorService = (
         }
     };
 
+    /**
+     * Attach every created or recovered child to the original issue as a
+     * native sub-issue, reconciling against what GitHub already reports so a
+     * restart cannot duplicate relationships. Conflicting native hierarchy or
+     * marker lineage halts with a recovery diagnostic instead of silently
+     * reparenting or rewriting issues.
+     */
+    /** True when an attached child's marker disagrees with the intended parent. */
+    const markerLineageConflict = (
+        body: string | null,
+        parentNumber: number,
+        lineage: DecompositionLineage,
+    ): boolean => {
+        const marker = parseDecompositionMarker(body);
+        return (
+            marker !== undefined &&
+            (marker.parentIssueNumber !== parentNumber ||
+                marker.rootIssueNumber !== lineage.rootIssueNumber)
+        );
+    };
+
+    /** True when a foreign sub-issue is marker-matched to this decomposition. */
+    const markerMatchesParent = (
+        body: string | null,
+        parentNumber: number,
+        lineage: DecompositionLineage,
+    ): boolean => {
+        const marker = parseDecompositionMarker(body);
+        return (
+            marker !== undefined &&
+            marker.parentIssueNumber === parentNumber &&
+            marker.rootIssueNumber === lineage.rootIssueNumber
+        );
+    };
+
+    /** Attach the expected children, skipping those already attached natively. */
+    const attachExpectedChildren = async (
+        input: WorkflowExecutorInput,
+        breakdown: IssueBreakdownDecision,
+        mapping: CreatedIssueNumberMapping,
+        nativeByNumber: ReadonlyMap<number, GitHubIssue>,
+        parentNumber: number,
+        lineage: DecompositionLineage,
+    ): Promise<void> => {
+        const { context } = input;
+        for (const child of breakdown.issues) {
+            const childNumber = mapping[child.key];
+            if (childNumber === undefined) {
+                throw new RalphieError({
+                    message: `Missing created issue for ${child.key}.`,
+                });
+            }
+            const attached = nativeByNumber.get(childNumber);
+            if (attached !== undefined) {
+                if (
+                    markerLineageConflict(attached.body, parentNumber, lineage)
+                ) {
+                    await ambiguous(
+                        input,
+                        `Native sub-issue #${childNumber} is attached to #${parentNumber} but its marker names a different parent or root.`,
+                        {
+                            issueNumber: childNumber,
+                            expectedParent: parentNumber,
+                            expectedRoot: lineage.rootIssueNumber,
+                        },
+                    );
+                }
+                continue;
+            }
+            await recoverableMutation(
+                `attach-child-${child.key}`,
+                () =>
+                    relationships.attachSubIssue(
+                        context.octokit,
+                        context.repository,
+                        parentNumber,
+                        childNumber,
+                    ),
+                input,
+            );
+        }
+    };
+
+    /** Halt on marker-matched children attached natively but unmapped. */
+    const rejectUnexpectedNativeChildren = async (
+        input: WorkflowExecutorInput,
+        mapping: CreatedIssueNumberMapping,
+        nativeByNumber: ReadonlyMap<number, GitHubIssue>,
+        parentNumber: number,
+        lineage: DecompositionLineage,
+    ): Promise<void> => {
+        const expectedNumbers = new Set(Object.values(mapping));
+        for (const [issueNumber, attached] of nativeByNumber) {
+            if (expectedNumbers.has(issueNumber)) continue;
+            if (markerMatchesParent(attached.body, parentNumber, lineage)) {
+                await ambiguous(
+                    input,
+                    `Native sub-issue #${issueNumber} matches this decomposition but is absent from the persisted key mapping.`,
+                    { issueNumber, expectedParent: parentNumber },
+                );
+            }
+        }
+    };
+
+    /**
+     * Attach every created or recovered child to the original issue as a
+     * native sub-issue, reconciling against what GitHub already reports so a
+     * restart cannot duplicate relationships. Conflicting native hierarchy or
+     * marker lineage halts with a recovery diagnostic instead of silently
+     * reparenting or rewriting issues.
+     */
+    const attachChildrenToParent = async (
+        input: WorkflowExecutorInput,
+        breakdown: IssueBreakdownDecision,
+        lineage: DecompositionLineage,
+        mapping: CreatedIssueNumberMapping,
+    ): Promise<void> => {
+        const { context } = input;
+        const parentNumber = context.issue.number;
+        const nativeByNumber = new Map(
+            (
+                await relationships.listSubIssues(
+                    context.octokit,
+                    context.repository,
+                    parentNumber,
+                )
+            ).map((issue) => [issue.number, issue]),
+        );
+
+        await attachExpectedChildren(
+            input,
+            breakdown,
+            mapping,
+            nativeByNumber,
+            parentNumber,
+            lineage,
+        );
+        await rejectUnexpectedNativeChildren(
+            input,
+            mapping,
+            nativeByNumber,
+            parentNumber,
+            lineage,
+        );
+    };
+
+    const dependencyMappingFor = (
+        breakdown: IssueBreakdownDecision,
+        mapping: CreatedIssueNumberMapping,
+    ): CreatedIssueDependencyMapping =>
+        Object.fromEntries(
+            breakdown.issues.map((child) => [
+                child.key,
+                child.dependsOn
+                    .map((key) => mapping[key])
+                    .filter((value): value is number => value !== undefined),
+            ]),
+        );
+
+    const createChildDependencies = async (
+        input: WorkflowExecutorInput,
+        childNumber: number,
+        blockers: ReadonlyArray<number>,
+    ): Promise<void> => {
+        const { context } = input;
+        const existingNumbers = new Set(
+            (
+                await relationships.listBlockedBy(
+                    context.octokit,
+                    context.repository,
+                    childNumber,
+                )
+            ).map((issue) => issue.number),
+        );
+        for (const blockerNumber of blockers) {
+            if (existingNumbers.has(blockerNumber)) continue;
+            await recoverableMutation(
+                `add-dependency-${childNumber}-on-${blockerNumber}`,
+                () =>
+                    relationships.addBlockedBy(
+                        context.octokit,
+                        context.repository,
+                        childNumber,
+                        blockerNumber,
+                    ),
+                input,
+            );
+        }
+    };
+
+    const createMissingDependencies = async (
+        input: WorkflowExecutorInput,
+        breakdown: IssueBreakdownDecision,
+        mapping: CreatedIssueNumberMapping,
+        dependencyMapping: CreatedIssueDependencyMapping,
+    ): Promise<void> => {
+        for (const child of breakdown.issues) {
+            const childNumber = mapping[child.key];
+            if (childNumber === undefined) {
+                throw new RalphieError({
+                    message: `Missing created issue for ${child.key}.`,
+                });
+            }
+            await createChildDependencies(
+                input,
+                childNumber,
+                dependencyMapping[child.key] ?? [],
+            );
+        }
+    };
+
+    /**
+     * Reconcile every declared dependsOn edge as a native blocked_by
+     * relationship and persist the dependency mapping artifact so queue
+     * eligibility never depends on live GitHub state alone. Each edge is an
+     * independently recoverable mutation.
+     */
+    const reconcileNativeDependencies = async (
+        input: WorkflowExecutorInput,
+        breakdown: IssueBreakdownDecision,
+        mapping: CreatedIssueNumberMapping,
+    ): Promise<void> => {
+        const dependencyMapping = dependencyMappingFor(breakdown, mapping);
+        await createMissingDependencies(
+            input,
+            breakdown,
+            mapping,
+            dependencyMapping,
+        );
+
+        if (input.artifacts.has(IssueArtifactKind.CreatedIssueDependencies)) {
+            const persisted = await input.artifacts.read(
+                IssueArtifactKind.CreatedIssueDependencies,
+            );
+            if (
+                JSON.stringify(persisted) !== JSON.stringify(dependencyMapping)
+            ) {
+                await ambiguous(
+                    input,
+                    "The persisted dependency mapping disagrees with the current breakdown.",
+                    { persisted, expected: dependencyMapping },
+                );
+            }
+            return;
+        }
+        await recoverableMutation(
+            "persist-dependencies",
+            () =>
+                input.artifacts.write(
+                    IssueArtifactKind.CreatedIssueDependencies,
+                    dependencyMapping,
+                ),
+            input,
+        );
+    };
+
     const executeDecomposition = async (
         input: WorkflowExecutorInput,
     ): Promise<WorkflowExecutorResult> => {
@@ -378,6 +641,8 @@ export const makeDecompositionExecutorService = (
             mapping,
         );
         await linkChildren(input, breakdown, lineage, mapping);
+        await attachChildrenToParent(input, breakdown, lineage, mapping);
+        await reconcileNativeDependencies(input, breakdown, mapping);
 
         await recoverableMutation(
             "rewrite-original",
@@ -397,18 +662,10 @@ export const makeDecompositionExecutorService = (
                 ),
             input,
         );
-        await recoverableMutation(
-            "close-original",
-            () =>
-                mutations.close(
-                    context.octokit,
-                    context.repository,
-                    context.issue.number,
-                    "duplicate",
-                ),
-            input,
-        );
 
+        // The decomposed parent stays open as the native tracking issue for
+        // its sub-issues; it is never closed as a duplicate merely because it
+        // was decomposed.
         return {
             kind: IssueExecutionOutcomeKind.Decomposed,
             childIssueNumbers: breakdown.issues.map(

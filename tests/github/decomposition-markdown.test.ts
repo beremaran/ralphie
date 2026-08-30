@@ -8,7 +8,9 @@ import type { GitHubIssue } from "../../src/github/issues.ts";
 import {
     MAX_DECOMPOSITION_DEPTH,
     RALPHIE_DECOMPOSITION_MARKER,
+    isDecomposedParent,
     nextDecompositionLineage,
+    parseDecompositionMarker,
     parseGeneratedIssueDependencies,
     renderChildIssueBody,
     renderDecomposedOriginalBody,
@@ -53,7 +55,7 @@ const issueNumbers = {
 };
 
 describe("decomposition Markdown", () => {
-    test("links child issues to their parent, siblings, dependencies, and lineage", () => {
+    test("keeps the stable marker and dependencies without redundant lineage lists", () => {
         const body = renderChildIssueBody({
             child: breakdown.issues[1]!,
             lineage,
@@ -62,10 +64,10 @@ describe("decomposition Markdown", () => {
 
         expect(body).toContain(RALPHIE_DECOMPOSITION_MARKER);
         expect(body).toContain("root=10 parent=10");
-        expect(body).toContain("- Parent: #10");
-        expect(body).toContain("- #11 (storage)");
-        expect(body).toContain("- #12 (api)");
         expect(body).toContain("## Dependencies\n\n- #11 (storage)");
+        expect(body).not.toContain("## Decomposition lineage");
+        expect(body).not.toContain("## Related child issues");
+        expect(body).not.toContain("- Parent: #10");
     });
 
     test("rewrites the original while preserving its content and complete stack", () => {
@@ -137,5 +139,34 @@ describe("decomposition Markdown", () => {
             }),
         ).toEqual([11]);
         expect(parseGeneratedIssueDependencies(original)).toEqual([]);
+    });
+
+    test("parses the stable marker and detects decomposed parents", () => {
+        const childBody = renderChildIssueBody({
+            child: breakdown.issues[1]!,
+            lineage,
+            issueNumbers,
+        });
+        expect(parseDecompositionMarker(childBody)).toEqual({
+            rootIssueNumber: 10,
+            parentIssueNumber: 10,
+            key: "api",
+            depth: 1,
+        });
+        expect(parseDecompositionMarker(original.body)).toBeUndefined();
+        expect(parseDecompositionMarker(null)).toBeUndefined();
+
+        const parent = {
+            ...original,
+            body: renderDecomposedOriginalBody({
+                original,
+                breakdown,
+                issueNumbers,
+                lineage,
+            }),
+        };
+        expect(isDecomposedParent(parent)).toBe(true);
+        expect(isDecomposedParent(original)).toBe(false);
+        expect(isDecomposedParent({ ...original, body: null })).toBe(false);
     });
 });
