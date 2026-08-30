@@ -454,6 +454,29 @@ export type {
     FooterViewOptions,
 } from "./footer.ts";
 export {
+    DEFAULT_BREADCRUMB_THRESHOLD,
+    canonicalBreadcrumbKey,
+    createBreadcrumbPolicy,
+    createBreadcrumbPolicyState,
+    evaluateBreadcrumbCandidate,
+    initialBreadcrumbPolicyState,
+    makeBreadcrumbCadencePolicy,
+    makeBreadcrumbPolicy,
+    makeBreadcrumbPolicyEngine,
+    reduceBreadcrumbPolicy,
+    sanitizeBreadcrumbKey,
+} from "./breadcrumb.ts";
+export type {
+    BreadcrumbCandidate,
+    BreadcrumbCandidateInput,
+    BreadcrumbPolicy,
+    BreadcrumbPolicyConfiguration,
+    BreadcrumbPolicyDecision,
+    BreadcrumbPolicyOptions,
+    BreadcrumbPolicyResult,
+    BreadcrumbPolicyState,
+} from "./breadcrumb.ts";
+export {
     makeDisplayCoordinator,
     makeProgressCoordinator,
 } from "./coordinator.ts";
