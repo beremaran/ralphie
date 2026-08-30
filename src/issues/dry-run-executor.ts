@@ -12,6 +12,7 @@ import type { ComplexityAssessmentService } from "./complexity.ts";
 import {
     ComplexityLevel,
     GroundingDisposition,
+    NeedsAttentionReason,
     type ComplexityDecision,
     type GroundingDecision,
 } from "./decisions.ts";
@@ -22,6 +23,9 @@ import type {
 } from "./execution.ts";
 import type { GroundingAssessmentService } from "./grounding.ts";
 import type { ProgressReporterService } from "../progress/progress.ts";
+import type { PiNeedsAttentionRequest } from "../agent/task-session.ts";
+import type { DecompositionPlannerService } from "./decomposition-planner.ts";
+import type { DecompositionOperationPlan } from "./decomposition-plan.ts";
 
 export type DryRunIssueExecutorService = {
     readonly execute: (
@@ -268,12 +272,161 @@ const needsAttentionOutcome = (
         : outcome;
 };
 
+const PI_REASON_TO_NEEDS_ATTENTION: Readonly<
+    Record<string, NeedsAttentionReason>
+> = Object.fromEntries(
+    Object.values(NeedsAttentionReason).map((reason) => [reason, reason]),
+);
+
+/** Pi signal reasons and decision reasons share the same value set. */
+const needsAttentionReasonFor = (reason: string): NeedsAttentionReason =>
+    PI_REASON_TO_NEEDS_ATTENTION[reason] ??
+    NeedsAttentionReason.MissingInformation;
+
+/**
+ * Report an unverified needs-attention signal from the read-only planning
+ * session. Dry runs never invoke recovery, so the signal is reported as the
+ * route a real run would take after read-only verification.
+ */
+const decompositionSignalOutcome = (
+    context: IssueExecutionContext,
+    request: PiNeedsAttentionRequest,
+): IssueExecutionOutcome => {
+    const summary =
+        request.message ?? "The decomposition session requested attention.";
+    return {
+        kind: IssueExecutionOutcomeKind.NeedsAttention,
+        route: "needs-attention",
+        reason: needsAttentionReasonFor(request.reason),
+        summary,
+        evidence: [summary],
+        questions: [
+            "A real run would verify this signal with the read-only needs-attention verifier before routing.",
+        ],
+        ...(context.needsAttentionPolicy === undefined
+            ? {}
+            : { policy: context.needsAttentionPolicy }),
+    };
+};
+
+const reportDecompositionSignal = async (
+    context: IssueExecutionContext,
+    progress: ProgressReporterService,
+    request: PiNeedsAttentionRequest,
+): Promise<void> => {
+    await progress.emit({
+        issue: {
+            number: context.issue.number,
+            title: context.issue.title,
+        },
+        stage: "issue-planning",
+        status: "info",
+        message: `Dry run: the decomposition session for #${context.issue.number} requested attention (${request.reason})${request.message === undefined ? "." : `: ${request.message}`}`,
+        details: {
+            dryRun: true,
+            route: "needs-attention",
+            reason: request.reason,
+            ...(request.message === undefined
+                ? {}
+                : { summary: request.message }),
+            ...(context.needsAttentionPolicy === undefined
+                ? {}
+                : { policy: context.needsAttentionPolicy }),
+        },
+    });
+};
+
+const plannedDecompositionDetails = (
+    context: IssueExecutionContext,
+    grounding: GroundingDecision | undefined,
+    complexity: ComplexityLevel,
+    plan: DecompositionOperationPlan,
+): Readonly<Record<string, unknown>> => ({
+    dryRun: true,
+    route: "decomposition",
+    ...(grounding === undefined ? {} : { grounding: grounding.disposition }),
+    complexity,
+    ...(context.needsAttentionPolicy === undefined
+        ? {}
+        : { policy: context.needsAttentionPolicy }),
+    operations: {
+        createChildren: plan.counts.create,
+        reuseChildren: plan.counts.reuse,
+        attachSubIssues: plan.counts.attachSubIssues,
+        dependencyEdges: plan.counts.dependencies,
+        parentStaysOpen: plan.parentStaysOpen,
+    },
+    lineage: plan.lineage,
+    children: plan.children,
+    dependencies: plan.dependencyEdges,
+});
+
+const reportPlannedDecomposition = async (
+    context: IssueExecutionContext,
+    progress: ProgressReporterService,
+    grounding: GroundingDecision | undefined,
+    complexity: ComplexityLevel,
+    plan: DecompositionOperationPlan,
+): Promise<void> => {
+    const { counts } = plan;
+    await progress.emit({
+        issue: {
+            number: context.issue.number,
+            title: context.issue.title,
+        },
+        stage: "issue-planning",
+        status: "info",
+        message:
+            `Dry run would decompose #${context.issue.number} into ` +
+            `${counts.create} new and ${counts.reuse} reused child issues, ` +
+            `attach ${counts.attachSubIssues} native sub-issues, and create ` +
+            `${counts.dependencies} dependency edges; the parent would stay open.`,
+        details: plannedDecompositionDetails(
+            context,
+            grounding,
+            complexity,
+            plan,
+        ),
+    });
+};
+
+const plannedDecompositionOutcome = async (
+    context: IssueExecutionContext,
+    progress: ProgressReporterService,
+    planner: DecompositionPlannerService,
+    grounding: GroundingDecision | undefined,
+    complexity: ComplexityLevel,
+): Promise<IssueExecutionOutcome> => {
+    const planned = await planner.plan(context);
+    if (planned.kind === "needs-attention") {
+        await reportDecompositionSignal(context, progress, planned.request);
+        return decompositionSignalOutcome(context, planned.request);
+    }
+    await reportPlannedDecomposition(
+        context,
+        progress,
+        grounding,
+        complexity,
+        planned.operations,
+    );
+    const { counts } = planned.operations;
+    return {
+        kind: IssueExecutionOutcomeKind.Skipped,
+        route: "decomposition",
+        reason:
+            `Dry run: complexity ${complexity}/5 would use the decomposition workflow ` +
+            `(create ${counts.create}, reuse ${counts.reuse}, ` +
+            `${counts.dependencies} dependency edges); no mutation was performed.`,
+    };
+};
+
 const executeDryRun = async (
     context: IssueExecutionContext,
     artifacts: DryRunArtifactAccess,
     assessment: ComplexityAssessmentService,
     groundingAssessment: GroundingAssessmentService | undefined,
     progress: ProgressReporterService,
+    planner?: DecompositionPlannerService,
 ): Promise<IssueExecutionOutcome> => {
     const grounding = await groundingFor(
         context,
@@ -321,6 +474,15 @@ const executeDryRun = async (
         progress,
     );
     const route = routeForComplexity(decision.complexity);
+    if (route === "decomposition" && planner !== undefined) {
+        return await plannedDecompositionOutcome(
+            context,
+            progress,
+            planner,
+            groundingDecision,
+            decision.complexity,
+        );
+    }
     await reportRoute(
         context,
         progress,
@@ -340,18 +502,21 @@ export function makeDryRunIssueExecutorService(
     assessment: ComplexityAssessmentService,
     progress: ProgressReporterService,
     groundingAssessment?: GroundingAssessmentService,
+    planner?: DecompositionPlannerService,
 ): DryRunIssueExecutorService;
 export function makeDryRunIssueExecutorService(
     artifactStores: IssueArtifactStoreService,
     groundingAssessment: GroundingAssessmentService,
     assessment: ComplexityAssessmentService,
     progress: ProgressReporterService,
+    planner?: DecompositionPlannerService,
 ): DryRunIssueExecutorService;
 export function makeDryRunIssueExecutorService(
     artifactStores: IssueArtifactStoreService,
     second: DryRunFactorySecondArgument,
     third: DryRunFactoryThirdArgument,
     fourth?: DryRunFactoryFourthArgument,
+    planner?: DecompositionPlannerService,
 ): DryRunIssueExecutorService {
     const usingCurrentOrder = fourth === undefined || isProgressReporter(third);
     const assessment = (
@@ -376,6 +541,7 @@ export function makeDryRunIssueExecutorService(
                 assessment,
                 groundingAssessment,
                 progress,
+                planner,
             );
         },
     };

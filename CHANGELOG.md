@@ -22,6 +22,12 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Added
 
+- Dry-run decomposition reporting: a complexity 4–5 dry run performs the
+  read-only breakdown session and reports the intended native sub-issue
+  hierarchy — children to create or reuse, sub-issue attachments, dependency
+  edges, and the open tracking parent — without mutating GitHub or writing
+  artifacts. An unverified needs-attention signal from the planning session is
+  reported as a needs-attention route without invoking recovery.
 - A deterministic GitHub issue-relationship domain service
   (`src/github/issue-relationships.ts`) that lists, attaches, and validates
   native sub-issues and dependencies with idempotent, response-loss-safe

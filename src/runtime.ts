@@ -67,6 +67,10 @@ import {
     type DecompositionExecutorService,
 } from "./issues/decomposition-executor.ts";
 import {
+    makeDecompositionPlannerService,
+    type DecompositionPlannerService,
+} from "./issues/decomposition-planner.ts";
+import {
     makeDryRunIssueExecutorService,
     type DryRunIssueExecutorService,
 } from "./issues/dry-run-executor.ts";
@@ -179,6 +183,10 @@ export const makeLiveRuntime = ({
     const complexityAssessment = makeComplexityAssessmentService(progress);
     const groundingAssessment = makeGroundingAssessmentService(progress);
     const resolutionVerification = makeResolutionVerificationService(progress);
+    const decompositionPlanner = makeDecompositionPlannerService(
+        githubIssues,
+        progress,
+    );
     const decompositionExecutor = makeDecompositionExecutorService(
         githubIssueMutations,
         githubIssues,
@@ -201,6 +209,7 @@ export const makeLiveRuntime = ({
         complexityAssessment,
         progress,
         groundingAssessment,
+        decompositionPlanner,
     );
     const issueExecutor = makeIssueExecutorService(
         issueArtifactStore,

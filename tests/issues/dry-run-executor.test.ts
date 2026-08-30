@@ -21,6 +21,10 @@ import {
 import { NeedsAttentionPolicy } from "../../src/options.ts";
 import { makeDryRunIssueExecutorService } from "../../src/issues/dry-run-executor.ts";
 import type { GroundingAssessmentService } from "../../src/issues/grounding.ts";
+import type {
+    DecompositionPlanResult,
+    DecompositionPlannerService,
+} from "../../src/issues/decomposition-planner.ts";
 import {
     IssueExecutionOutcomeKind,
     type IssueExecutionContext,
@@ -98,6 +102,64 @@ const spyStore = async (): Promise<{
         writes: () => writeCount,
     };
 };
+
+const plannerStub = (
+    result: DecompositionPlanResult,
+    calls: { count: number },
+): DecompositionPlannerService => ({
+    plan: async () => {
+        calls.count += 1;
+        return result;
+    },
+});
+
+const plannerBreakdown = (): Extract<
+    DecompositionPlanResult,
+    { kind: "breakdown" }
+> => ({
+    kind: "breakdown",
+    breakdown: {
+        rationale: "Split storage from API work.",
+        issues: [
+            {
+                key: "storage",
+                title: "Migrate storage",
+                body: "Move persistence behind the interface.",
+                estimatedComplexity: 2,
+                dependsOn: [],
+            },
+            {
+                key: "api",
+                title: "Adopt storage API",
+                body: "Update consumers.",
+                estimatedComplexity: 1,
+                dependsOn: ["storage"],
+            },
+        ],
+    } as never,
+    lineage: { rootIssueNumber: 42, parentIssueNumber: 42, depth: 1 },
+    operations: {
+        lineage: { rootIssueNumber: 42, parentIssueNumber: 42, depth: 1 },
+        children: [
+            {
+                key: "storage",
+                title: "Migrate storage",
+                estimatedComplexity: 2,
+                disposition: "create",
+            },
+            {
+                key: "api",
+                title: "Adopt storage API",
+                estimatedComplexity: 1,
+                disposition: "reuse",
+                issueNumber: 102,
+            },
+        ],
+        dependencyEdges: [{ from: "api", to: "storage", resolved: true }],
+        counts: { create: 1, reuse: 1, attachSubIssues: 2, dependencies: 1 },
+        parentStaysOpen: true,
+    },
+});
 
 describe("dry-run issue executor", () => {
     test.each([ComplexityLevel.Level2, ComplexityLevel.Level4])(
@@ -396,5 +458,132 @@ describe("dry-run issue executor", () => {
         } finally {
             await rm(workspace, { recursive: true, force: true });
         }
+    });
+
+    test("reports the intended decomposition hierarchy without mutations", async () => {
+        const events: ProgressUpdate[] = [];
+        const tracked = await spyStore();
+        const calls = { count: 0 };
+        const signal = plannerBreakdown();
+        const executor = makeDryRunIssueExecutorService(
+            { forIssue: async () => tracked.store },
+            {
+                assess: async () => ({
+                    sessionID: "complexity",
+                    decision: {
+                        complexity: ComplexityLevel.Level4,
+                        rationale: "Large.",
+                    },
+                }),
+            },
+            makeProgressRecorder(events),
+            {
+                assess: async () => ({
+                    sessionID: "grounding",
+                    decision: {
+                        disposition: GroundingDisposition.Actionable,
+                    },
+                }),
+            },
+            plannerStub(signal, calls),
+        );
+
+        const result = await executor.execute(groundedContext(42));
+
+        expect(calls.count).toBe(1);
+        expect(result).toMatchObject({
+            kind: IssueExecutionOutcomeKind.Skipped,
+            route: "decomposition",
+        });
+        if (result.kind === IssueExecutionOutcomeKind.Skipped) {
+            expect(result.reason).toContain("create 1");
+            expect(result.reason).toContain("reuse 1");
+            expect(result.reason).toContain("1 dependency edges");
+        }
+        expect(tracked.writes()).toBe(0);
+        const report = events.at(-1)!;
+        expect(report.message).toContain("would decompose #42");
+        expect(report.details?.operations).toEqual({
+            createChildren: 1,
+            reuseChildren: 1,
+            attachSubIssues: 2,
+            dependencyEdges: 1,
+            parentStaysOpen: true,
+        });
+        expect(report.details?.children).toHaveLength(2);
+        expect(report.details?.dependencies).toEqual([
+            { from: "api", to: "storage", resolved: true },
+        ]);
+        expect(report.details?.grounding).toBe("actionable");
+    });
+
+    test("does not invoke the planner on the implementation route", async () => {
+        const calls = { count: 0 };
+        const executor = makeDryRunIssueExecutorService(
+            { forIssue: async () => makeIssueArtifactStore(42) },
+            {
+                assess: async () => ({
+                    sessionID: "complexity",
+                    decision: {
+                        complexity: ComplexityLevel.Level2,
+                        rationale: "Small.",
+                    },
+                }),
+            },
+            makeProgressRecorder([]),
+            undefined,
+            plannerStub(plannerBreakdown(), calls),
+        );
+
+        const result = await executor.execute(context(42));
+
+        expect(calls.count).toBe(0);
+        expect(result).toMatchObject({ route: "implementation" });
+    });
+
+    test("reports a decomposition needs-attention signal without invoking recovery", async () => {
+        const events: ProgressUpdate[] = [];
+        const tracked = await spyStore();
+        const signal: Extract<
+            DecompositionPlanResult,
+            { kind: "needs-attention" }
+        > = {
+            kind: "needs-attention",
+            request: { reason: "external_dependency", message: "#41 is open." },
+        };
+        const executor = makeDryRunIssueExecutorService(
+            { forIssue: async () => tracked.store },
+            {
+                assess: async () => ({
+                    sessionID: "complexity",
+                    decision: {
+                        complexity: ComplexityLevel.Level4,
+                        rationale: "Large.",
+                    },
+                }),
+            },
+            makeProgressRecorder(events),
+            {
+                assess: async () => ({
+                    sessionID: "grounding",
+                    decision: {
+                        disposition: GroundingDisposition.Actionable,
+                    },
+                }),
+            },
+            plannerStub(signal, { count: 0 }),
+        );
+
+        const result = await executor.execute(groundedContext(42));
+
+        expect(result).toMatchObject({
+            kind: IssueExecutionOutcomeKind.NeedsAttention,
+            route: "needs-attention",
+            reason: "external_dependency",
+            summary: "#41 is open.",
+        });
+        expect(result).not.toHaveProperty("artifactPath");
+        expect(tracked.writes()).toBe(0);
+        expect(events.at(-1)?.message).toContain("requested attention");
     });
 });
