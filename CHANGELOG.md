@@ -26,13 +26,15 @@ All notable changes to Ralphie are documented here. The project follows
   (`src/github/pipeline-observation.ts`) that polls normalized pipeline
   snapshots for one exact SHA: it tolerates an initial registration grace
   period while no checks are visible, keeps polling while any item is pending,
-  requires a configurable quiescence window over the normalized set and
-  terminal states, fails closed on unknown, cancelled, failing, and empty
-  terminal results, uses bounded exponential backoff with GitHub rate-limit
-  and retry hints without sleeping past an absolute deadline, honors
-  `AbortSignal`, emits only meaningful state transitions, and finishes with a
-  race-safe remote-HEAD check that reports a stale result when the branch
-  advances so callers can follow a newly advanced HEAD.
+  requires configurable stable terminal confirmations, fails closed on
+  unknown, cancelled, failing, and empty terminal results, collects every
+  page from Check Runs and legacy commit statuses, uses bounded exponential
+  backoff and bounded rate-limit retries with delta-seconds, HTTP-date, and
+  reset metadata without retrying before server hints or sleeping past an
+  absolute deadline, honors caller cancellation reasons, emits only
+  meaningful state transitions, and finishes with a race-safe remote-HEAD
+  check that reports a stale result when the branch advances so callers can
+  follow a newly advanced HEAD.
 - An opt-in `RALPHIE_RUN_GITHUB_SUB_ISSUES_SMOKE` integration test that
   exercises the real native sub-issue and dependency API in a configured
   sandbox repository: attachment and dependency idempotency, reads, live

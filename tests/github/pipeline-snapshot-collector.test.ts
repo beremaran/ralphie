@@ -51,7 +51,7 @@ const fakeClient = (input: FakeInput) => {
                 listSuitesForRef: endpoint("suites", input.suites),
             },
             repos: {
-                getCombinedStatusForRef: endpoint("statuses", input.statuses),
+                listCommitStatusesForRef: endpoint("statuses", input.statuses),
             },
             actions: {
                 listWorkflowRunsForRepo: endpoint("workflows", input.workflows),
@@ -244,7 +244,7 @@ describe("pipeline snapshot collector", () => {
         expect(selectedCheck?.diagnostic.checkRunId).toBe(12);
     });
 
-    test("fails closed for a malformed empty combined-status envelope", async () => {
+    test("fails closed for a malformed commit-status response", async () => {
         const { client } = fakeClient({
             checks: [
                 { check_runs: [scoped({ name: "check" })] },
@@ -254,10 +254,7 @@ describe("pipeline snapshot collector", () => {
                 { check_suites: [scoped({ name: "suite" })] },
                 { check_suites: [] },
             ],
-            statuses: [
-                { sha: "b".repeat(40), statuses: [] },
-                { sha, statuses: [] },
-            ],
+            statuses: [{ statuses: "malformed" }, { statuses: [] }],
             workflows: [
                 { workflow_runs: [scoped({ name: "workflow" })] },
                 { workflow_runs: [] },
@@ -271,12 +268,10 @@ describe("pipeline snapshot collector", () => {
 
         expect(snapshot.sourceErrors).toContainEqual({
             source: "statuses",
-            message:
-                "statuses envelope SHA does not match the requested exact SHA.",
+            message: "statuses response did not contain statuses.",
             rawValues: {
                 name: "Error",
-                message:
-                    "statuses envelope SHA does not match the requested exact SHA.",
+                message: "statuses response did not contain statuses.",
             },
         });
         expect(snapshot.items.map(({ name }) => name)).toEqual([

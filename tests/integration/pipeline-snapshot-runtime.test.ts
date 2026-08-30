@@ -46,7 +46,7 @@ const fakeAuthenticatedOctokit = (
                 listSuitesForRef: endpoint("suites", input.suites),
             },
             repos: {
-                getCombinedStatusForRef: endpoint("statuses", input.statuses),
+                listCommitStatusesForRef: endpoint("statuses", input.statuses),
             },
             actions: {
                 listWorkflowRunsForRepo: endpoint("workflows", input.workflows),

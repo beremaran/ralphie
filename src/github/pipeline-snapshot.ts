@@ -1,3 +1,5 @@
+import type { RateLimitMetadata } from "./rate-limit.ts";
+
 /** JSON values are the boundary type for data returned by GitHub. */
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonObject | ReadonlyArray<JsonValue>;
@@ -58,6 +60,7 @@ export type PipelineSourceError = {
     readonly source: string;
     readonly message: string;
     readonly rawValues?: JsonValue;
+    readonly rateLimit?: RateLimitMetadata;
 };
 
 export type PipelineDiagnosticDisposition =
@@ -1007,6 +1010,45 @@ const diagnosticFor = (input: {
     };
 };
 
+const finiteNumber = (value: JsonValue | undefined): value is number =>
+    typeof value === "number" && Number.isFinite(value);
+
+const numericRateLimitField = <Key extends string>(
+    value: JsonObject,
+    key: Key,
+): Record<Key, number> | Record<never, never> => {
+    const field = ownValue(value, key);
+    return finiteNumber(field) ? ({ [key]: field } as Record<Key, number>) : {};
+};
+
+const textNumberRateLimitField = <Key extends string>(
+    value: JsonObject,
+    key: Key,
+): Record<Key, string | number> | Record<never, never> => {
+    const field = ownValue(value, key);
+    return typeof field === "string" || typeof field === "number"
+        ? ({ [key]: field } as Record<Key, string | number>)
+        : {};
+};
+
+const rateLimitFor = (
+    value: JsonValue | undefined,
+): RateLimitMetadata | undefined => {
+    if (!isObject(value)) return undefined;
+    const metadata = {
+        ...numericRateLimitField(value, "resetAtMs"),
+        ...numericRateLimitField(value, "retryAfterMs"),
+        ...textNumberRateLimitField(value, "retryAfter"),
+        ...textNumberRateLimitField(value, "resetAt"),
+        ...(() => {
+            const headers = ownValue(value, "headers");
+            return isObject(headers) ? { headers } : {};
+        })(),
+        ...numericRateLimitField(value, "remaining"),
+    };
+    return Object.keys(metadata).length === 0 ? undefined : metadata;
+};
+
 const sourceErrorFor = (
     value: PipelineSourceErrorInput,
 ): PipelineSourceError => {
@@ -1022,12 +1064,14 @@ const sourceErrorFor = (
     const message =
         textValue(ownValue(value, "message")) ?? "Unspecified source error.";
     const rawValues = ownValue(value, "rawValues") ?? ownValue(value, "raw");
+    const rateLimit = rateLimitFor(ownValue(value, "rateLimit"));
     return {
         source,
         message,
         ...(rawValues === undefined
             ? {}
             : { rawValues: serializeJson(rawValues) }),
+        ...(rateLimit === undefined ? {} : { rateLimit }),
     };
 };
 
@@ -1416,9 +1460,13 @@ export const isGreenCandidate = isPipelineGreenCandidate;
 export const normalizePipelineStatus = classifyPipelineStatus;
 
 export {
+    collectPipelineChecksSnapshot,
     collectPipelineSnapshot,
     GitHubPipelineSnapshotLive,
+    makeGitHubChecksSnapshotService,
     makeGitHubPipelineSnapshotService,
+    makePipelineCheckSnapshotService,
+    makePipelineChecksSnapshotCollectorService,
     makePipelineSnapshotCollector,
     makePipelineSnapshotCollectorService,
     makePipelineSnapshotService,
@@ -1426,6 +1474,9 @@ export {
 } from "./pipeline-snapshot-collector.ts";
 export type {
     GitHubPipelineSnapshotService,
+    PipelineChecksSnapshotCollectorService,
+    PipelineSnapshotCollectorDependencies,
     PipelineSnapshotCollectorOperation,
     PipelineSnapshotCollectorService,
+    PipelineSnapshotRequestExecutor,
 } from "./pipeline-snapshot-collector.ts";

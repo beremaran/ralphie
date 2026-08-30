@@ -11,18 +11,15 @@ import {
     type PipelineSnapshotRequest,
     type PipelineSourceError,
 } from "./pipeline-snapshot.ts";
+import { rateLimitFromUnknown } from "./rate-limit.ts";
 import { parseRepositorySlug } from "./repository.ts";
 
 const PAGE_SIZE = 100;
 
 type Endpoint = (parameters: Record<string, unknown>) => Promise<unknown>;
 
-type PageResponse = {
-    readonly data?: unknown;
-};
-
 type PageMapper = (
-    response: PageResponse,
+    response: unknown,
     done?: () => void,
 ) => ReadonlyArray<JsonValue>;
 
@@ -32,17 +29,42 @@ type Paginate = (
     map: PageMapper,
 ) => Promise<ReadonlyArray<JsonValue>>;
 
+/** Injectable transport used by collectors and deadline-aware observers. */
+export type PipelineSnapshotRequestExecutor = (
+    endpoint: Endpoint,
+    parameters: Record<string, unknown>,
+    signal?: AbortSignal,
+) => Promise<unknown>;
+
+export type PipelineSnapshotCollectorDependencies = {
+    readonly request?: PipelineSnapshotRequestExecutor;
+};
+
+const requestDirectly: PipelineSnapshotRequestExecutor = async (
+    endpoint,
+    parameters,
+    signal,
+) =>
+    endpoint({
+        ...parameters,
+        ...(signal === undefined ? {} : { request: { signal } }),
+    });
+
 type SourceDefinition = {
     readonly source: string;
     readonly request: PipelineSnapshotRequest;
     readonly kind: PipelineObservationKind;
     readonly responseKey: string;
     readonly namespace: "checks" | "repos" | "actions";
-    readonly endpointName:
+    readonly endpointNames: ReadonlyArray<
         | "listForRef"
         | "listSuitesForRef"
+        | "listCommitStatusesForRef"
         | "getCombinedStatusForRef"
-        | "listWorkflowRunsForRepo";
+        | "listWorkflowRunsForRepo"
+    >;
+    /** Combined status responses carry scope; list-status responses do not. */
+    readonly requiresStatusEnvelope?: boolean;
     readonly parameters: Record<string, unknown>;
 };
 
@@ -116,7 +138,8 @@ const statusEnvelopeIssue = (
     envelope: JsonObject,
     source: SourceDefinition,
 ): string | undefined => {
-    if (source.kind !== "status-context") return undefined;
+    if (source.kind !== "status-context" || !source.requiresStatusEnvelope)
+        return undefined;
     if (!hasOwn(envelope, "sha"))
         return `${source.source} response is missing its envelope SHA.`;
     if (typeof envelope.sha !== "string" || envelope.sha.trim().length === 0)
@@ -153,35 +176,55 @@ const statusEnvelopeIssue = (
 
 const observationFor = (
     value: unknown,
-    kind: PipelineObservationKind,
+    source: SourceDefinition,
     envelope: JsonObject | undefined,
 ): JsonValue => {
     if (!isRecord(value)) return serializeJson(value);
     const record = serializedRecord(value);
-    if (kind !== "status-context" || envelope === undefined)
-        return { ...record, kind };
+    if (source.kind !== "status-context")
+        return { ...record, kind: source.kind };
+    const hasScopeEnvelope =
+        envelope !== undefined &&
+        (source.requiresStatusEnvelope === true ||
+            hasOwn(envelope, "sha") ||
+            ["branch", "branchName", "headBranch", "head_branch"].some((key) =>
+                hasOwn(envelope, key),
+            ));
+    if (!hasScopeEnvelope)
+        return {
+            ...record,
+            kind: source.kind,
+            sha: record.sha ?? source.request.commitSha,
+            ...(hasOwn(record, "branch")
+                ? {}
+                : { branch: source.request.branch }),
+        };
 
     return {
         ...record,
-        kind,
+        kind: source.kind,
         sha: statusShaFor(record, envelope),
-        ...(hasOwn(record, "branch") || !hasOwn(envelope, "branch")
+        ...(hasOwn(record, "branch")
             ? {}
-            : { branch: serializeJson(envelope.branch) }),
+            : {
+                  branch: hasOwn(envelope, "branch")
+                      ? serializeJson(envelope.branch)
+                      : source.request.branch,
+              }),
     };
 };
 
 const mapPage = (response: unknown, source: SourceDefinition): MappedPage => {
     const data = responseData(response);
     if (Array.isArray(data)) {
-        return source.kind === "status-context"
+        return source.kind === "status-context" && source.requiresStatusEnvelope
             ? {
                   observations: [],
                   issue: `${source.source} response did not contain a combined-status envelope.`,
               }
             : {
                   observations: data.map((value) =>
-                      observationFor(value, source.kind, undefined),
+                      observationFor(value, source, undefined),
                   ),
               };
     }
@@ -205,20 +248,40 @@ const mapPage = (response: unknown, source: SourceDefinition): MappedPage => {
     }
     return {
         observations: values.map((value) =>
-            observationFor(value, source.kind, envelope),
+            observationFor(value, source, envelope),
         ),
     };
 };
 
-const endpointFor = (client: Octokit, source: SourceDefinition): unknown => {
+type EndpointSelection = {
+    readonly endpoint: unknown;
+    readonly source: SourceDefinition;
+};
+
+const endpointFor = (
+    client: Octokit,
+    source: SourceDefinition,
+): EndpointSelection => {
     const rest = (client as unknown as { readonly rest?: unknown }).rest;
     const namespace = isRecord(rest) ? rest[source.namespace] : undefined;
-    const endpoint = isRecord(namespace)
-        ? namespace[source.endpointName]
+    const selected = isRecord(namespace)
+        ? source.endpointNames
+              .map((name) => ({ name, endpoint: namespace[name] }))
+              .find(
+                  ({ endpoint }) => endpoint !== undefined && endpoint !== null,
+              )
         : undefined;
-    if (endpoint === undefined || endpoint === null)
+    if (selected === undefined)
         throw new Error(`${source.source} endpoint is unavailable.`);
-    return endpoint;
+    return {
+        endpoint: selected.endpoint,
+        source: {
+            ...source,
+            requiresStatusEnvelope:
+                source.kind === "status-context" &&
+                selected.name === "getCombinedStatusForRef",
+        },
+    };
 };
 
 const totalCountFor = (response: unknown): number | undefined => {
@@ -230,61 +293,95 @@ const totalCountFor = (response: unknown): number | undefined => {
         : undefined;
 };
 
+const nextLinkFor = (response: unknown): boolean | undefined => {
+    if (!isRecord(response)) return undefined;
+    const headers = response.headers;
+    if (headers === undefined || headers === null) return undefined;
+    const link =
+        typeof (headers as { get?: unknown }).get === "function"
+            ? (headers as { get: (name: string) => unknown }).get("link")
+            : isRecord(headers)
+              ? Object.entries(headers).find(
+                    ([key]) => key.toLowerCase() === "link",
+                )?.[1]
+              : undefined;
+    if (typeof link !== "string") return undefined;
+    return /rel=[\"']next[\"']/i.test(link);
+};
+
 const hasNextPage = (
     page: number,
     count: number,
     response: unknown,
 ): boolean => {
+    const nextLink = nextLinkFor(response);
+    if (nextLink !== undefined) return nextLink;
     const totalCount = totalCountFor(response);
     if (totalCount !== undefined) return page * PAGE_SIZE < totalCount;
     return count === PAGE_SIZE;
+};
+
+const pageCountFor = (response: unknown, source: SourceDefinition): number => {
+    const data = responseData(response);
+    if (Array.isArray(data)) return data.length;
+    if (!isRecord(data)) return 0;
+    const values = data[source.responseKey];
+    return Array.isArray(values) ? values.length : 0;
 };
 
 const paginateDirect = async (
     endpoint: Endpoint,
     parameters: Record<string, unknown>,
     source: SourceDefinition,
+    request: PipelineSnapshotRequestExecutor,
+    signal?: AbortSignal,
 ): Promise<ReadonlyArray<JsonValue>> => {
     const observations: JsonValue[] = [];
     for (let page = 1; page <= 10_000; page += 1) {
-        const response = await endpoint({ ...parameters, page });
+        const response = await request(
+            endpoint,
+            { ...parameters, page },
+            signal,
+        );
         const mapped = mapPage(response, source);
         if (mapped.issue !== undefined) throw new Error(mapped.issue);
         observations.push(...mapped.observations);
-        if (!hasNextPage(page, mapped.observations.length, response))
+        if (!hasNextPage(page, pageCountFor(response, source), response))
             return observations;
     }
     throw new Error(`${source.source} pagination exceeded the safety limit.`);
 };
-
-const isOctokitEndpoint = (value: unknown): value is Endpoint =>
-    typeof value === "function" &&
-    typeof (value as { readonly defaults?: unknown }).defaults === "function";
 
 const paginateSource = async (
     client: Octokit,
     endpoint: unknown,
     parameters: Record<string, unknown>,
     source: SourceDefinition,
+    request: PipelineSnapshotRequestExecutor,
+    signal?: AbortSignal,
 ): Promise<ReadonlyArray<JsonValue>> => {
-    // Calling the real REST method directly keeps Octokit's original envelope.
-    // Its paginate plugin normalizes object envelopes before map callbacks run,
-    // which would discard the combined-status envelope SHA. Lightweight fakes
-    // commonly expose only an endpoint token, so those use paginate below.
-    if (isOctokitEndpoint(endpoint))
-        return paginateDirect(endpoint, parameters, source);
-    if (typeof client.paginate !== "function") {
-        if (typeof endpoint === "function")
-            return paginateDirect(endpoint as Endpoint, parameters, source);
+    // Real Octokit endpoints are callable. Calling them directly keeps the
+    // original response envelope, including the combined-status scope fields.
+    if (typeof endpoint === "function")
+        return paginateDirect(
+            endpoint as Endpoint,
+            parameters,
+            source,
+            request,
+            signal,
+        );
+    if (typeof client.paginate !== "function")
         throw new Error(`${source.source} endpoint is not callable.`);
-    }
 
     const pageIssues: string[] = [];
     let mapperCalls = 0;
     const paginate = client.paginate as unknown as Paginate;
     const returned = await paginate(
         endpoint as Endpoint,
-        parameters,
+        {
+            ...parameters,
+            ...(signal === undefined ? {} : { request: { signal } }),
+        },
         (response) => {
             mapperCalls += 1;
             const mapped = mapPage(response, source);
@@ -304,7 +401,7 @@ const paginateSource = async (
             return [...mapped.observations];
         }
         return mapperCalls === 0
-            ? [observationFor(value, source.kind, undefined)]
+            ? [observationFor(value, source, undefined)]
             : [value];
     });
 
@@ -316,32 +413,63 @@ const paginateSource = async (
 const errorMessage = (cause: unknown): string =>
     cause instanceof Error ? cause.message : String(cause);
 
-const sourceError = (source: string, cause: unknown): PipelineSourceError => ({
-    source,
-    message: errorMessage(cause),
-    rawValues: serializeJson(
-        cause instanceof Error
-            ? { name: cause.name, message: cause.message }
-            : cause,
-    ),
-});
+const errorValues = (cause: unknown): unknown => {
+    if (!(cause instanceof Error)) return cause;
+    const response = (cause as Error & { readonly response?: unknown })
+        .response;
+    return response === undefined
+        ? { name: cause.name, message: cause.message }
+        : { name: cause.name, message: cause.message, response };
+};
+
+const headersForCause = (
+    cause: unknown,
+): Readonly<Record<string, unknown>> | undefined => {
+    if (!isRecord(cause)) return undefined;
+    const responseHeaders = isRecord(cause.response)
+        ? cause.response.headers
+        : undefined;
+    const headers = responseHeaders ?? cause.headers;
+    return isRecord(headers) ? headers : undefined;
+};
+
+const sourceError = (source: string, cause: unknown): PipelineSourceError => {
+    const headers = headersForCause(cause);
+    const headerRateLimit =
+        headers === undefined ? undefined : rateLimitFromUnknown({ headers });
+    const rateLimit =
+        headerRateLimit === undefined
+            ? rateLimitFromUnknown(cause)
+            : { headers };
+    return {
+        source,
+        message: errorMessage(cause),
+        rawValues: serializeJson(errorValues(cause)),
+        ...(rateLimit === undefined ? {} : { rateLimit }),
+    };
+};
 
 const collectSource = async (
     client: Octokit,
     source: SourceDefinition,
+    request: PipelineSnapshotRequestExecutor,
+    signal?: AbortSignal,
 ): Promise<SourceResult> => {
     try {
-        const endpoint = endpointFor(client, source);
+        const selection = endpointFor(client, source);
         return {
             observations: await paginateSource(
                 client,
-                endpoint,
-                source.parameters,
-                source,
+                selection.endpoint,
+                selection.source.parameters,
+                selection.source,
+                request,
+                signal,
             ),
             errors: [],
         };
     } catch (cause) {
+        if (signal?.aborted === true) throw cause;
         return {
             observations: [],
             errors: [sourceError(source.source, cause)],
@@ -360,7 +488,7 @@ const sourceDefinitions = (
         kind: "check-run",
         responseKey: "check_runs",
         namespace: "checks",
-        endpointName: "listForRef",
+        endpointNames: ["listForRef"],
         parameters: {
             owner,
             repo,
@@ -375,7 +503,7 @@ const sourceDefinitions = (
         kind: "check-suite",
         responseKey: "check_suites",
         namespace: "checks",
-        endpointName: "listSuitesForRef",
+        endpointNames: ["listSuitesForRef"],
         parameters: {
             owner,
             repo,
@@ -389,7 +517,7 @@ const sourceDefinitions = (
         kind: "status-context",
         responseKey: "statuses",
         namespace: "repos",
-        endpointName: "getCombinedStatusForRef",
+        endpointNames: ["listCommitStatusesForRef"],
         parameters: {
             owner,
             repo,
@@ -403,7 +531,7 @@ const sourceDefinitions = (
         kind: "workflow-run",
         responseKey: "workflow_runs",
         namespace: "actions",
-        endpointName: "listWorkflowRunsForRepo",
+        endpointNames: ["listWorkflowRunsForRepo"],
         parameters: {
             owner,
             repo,
@@ -417,11 +545,21 @@ const sourceDefinitions = (
 const collectSnapshot = async (
     client: Octokit,
     request: PipelineSnapshotRequest,
+    signal: AbortSignal | undefined,
+    requestExecutor: PipelineSnapshotRequestExecutor,
+    checksOnly: boolean,
 ): Promise<PipelineSnapshot> => {
     const { owner, name } = parseRepositorySlug(request.repository);
-    const sources = sourceDefinitions(owner, name, request);
+    const allSources = sourceDefinitions(owner, name, request);
+    const sources = checksOnly
+        ? allSources.filter(
+              ({ source }) => source === "checks" || source === "statuses",
+          )
+        : allSources;
     const results = await Promise.all(
-        sources.map((source) => collectSource(client, source)),
+        sources.map((source) =>
+            collectSource(client, source, requestExecutor, signal),
+        ),
     );
     return normalizePipelineSnapshot({
         ...request,
@@ -443,38 +581,84 @@ const requestForArguments = (
           }
         : requestOrRepository;
 
+const isAbortSignal = (value: unknown): value is AbortSignal =>
+    isRecord(value) && typeof value.aborted === "boolean";
+
+const collectOperation = (
+    requestExecutor: PipelineSnapshotRequestExecutor,
+    checksOnly: boolean,
+): PipelineSnapshotCollectorOperation => {
+    const collect = (
+        client: Octokit,
+        requestOrRepository: PipelineSnapshotRequest | string,
+        branchOrSignal?: string | AbortSignal,
+        commitSha?: ExactCommitSha,
+        signal?: AbortSignal,
+    ): Promise<PipelineSnapshot> => {
+        const objectSignal =
+            typeof requestOrRepository !== "string" &&
+            isAbortSignal(branchOrSignal)
+                ? branchOrSignal
+                : signal;
+        const branch =
+            typeof branchOrSignal === "string" ? branchOrSignal : undefined;
+        return collectSnapshot(
+            client,
+            requestForArguments(requestOrRepository, branch, commitSha),
+            objectSignal,
+            requestExecutor,
+            checksOnly,
+        );
+    };
+    return collect;
+};
+
 export type PipelineSnapshotCollectorOperation = {
     (
         client: Octokit,
         request: PipelineSnapshotRequest,
+        signal?: AbortSignal,
     ): Promise<PipelineSnapshot>;
     (
         client: Octokit,
         repository: string,
         branch: string,
         commitSha: ExactCommitSha,
+        signal?: AbortSignal,
     ): Promise<PipelineSnapshot>;
 };
 
 export function collectPipelineSnapshot(
     client: Octokit,
     request: PipelineSnapshotRequest,
+    signal?: AbortSignal,
 ): Promise<PipelineSnapshot>;
 export function collectPipelineSnapshot(
     client: Octokit,
     repository: string,
     branch: string,
     commitSha: ExactCommitSha,
+    signal?: AbortSignal,
 ): Promise<PipelineSnapshot>;
 export function collectPipelineSnapshot(
     client: Octokit,
     requestOrRepository: PipelineSnapshotRequest | string,
-    branch?: string,
+    branchOrSignal?: string | AbortSignal,
     commitSha?: ExactCommitSha,
+    signal?: AbortSignal,
 ): Promise<PipelineSnapshot> {
+    const objectSignal =
+        typeof requestOrRepository !== "string" && isAbortSignal(branchOrSignal)
+            ? branchOrSignal
+            : signal;
+    const branch =
+        typeof branchOrSignal === "string" ? branchOrSignal : undefined;
     return collectSnapshot(
         client,
         requestForArguments(requestOrRepository, branch, commitSha),
+        objectSignal,
+        requestDirectly,
+        false,
     );
 }
 
@@ -485,17 +669,39 @@ export type PipelineSnapshotCollectorService = {
 
 export type GitHubPipelineSnapshotService = PipelineSnapshotCollectorService;
 
-export const makePipelineSnapshotCollectorService =
-    (): PipelineSnapshotCollectorService => ({
-        collect: collectPipelineSnapshot,
-        read: collectPipelineSnapshot,
-    });
+export type PipelineChecksSnapshotCollectorService = {
+    readonly collect: PipelineSnapshotCollectorOperation;
+    readonly read: PipelineSnapshotCollectorOperation;
+};
+
+export const makePipelineSnapshotCollectorService = (
+    dependencies: PipelineSnapshotCollectorDependencies = {},
+): PipelineSnapshotCollectorService => {
+    const request = dependencies.request ?? requestDirectly;
+    const collect = collectOperation(request, false);
+    return { collect, read: collect };
+};
+
+export const makePipelineChecksSnapshotCollectorService = (
+    dependencies: PipelineSnapshotCollectorDependencies = {},
+): PipelineChecksSnapshotCollectorService => {
+    const request = dependencies.request ?? requestDirectly;
+    const collect = collectOperation(request, true);
+    return { collect, read: collect };
+};
+
+export const collectPipelineChecksSnapshot: PipelineSnapshotCollectorOperation =
+    collectOperation(requestDirectly, true);
 
 export const makeGitHubPipelineSnapshotService =
     makePipelineSnapshotCollectorService;
 export const makePipelineSnapshotService = makePipelineSnapshotCollectorService;
 export const makePipelineSnapshotCollector =
     makePipelineSnapshotCollectorService;
+export const makeGitHubChecksSnapshotService =
+    makePipelineChecksSnapshotCollectorService;
+export const makePipelineCheckSnapshotService =
+    makePipelineChecksSnapshotCollectorService;
 export const GitHubPipelineSnapshotLive = makePipelineSnapshotCollectorService;
 export const PipelineSnapshotCollectorLive =
     makePipelineSnapshotCollectorService;
