@@ -1317,4 +1317,11 @@ export {
     rateLimitFromHeaders,
     rateLimitFromUnknown,
 } from "./rate-limit.ts";
+export type { PipelineSnapshotRequestExecutor } from "./pipeline-snapshot-collector.ts";
+export type {
+    ExactCommitSha,
+    PipelineItemStatus,
+    PipelineSnapshot,
+    PipelineSnapshotRequest,
+} from "./pipeline-snapshot.ts";
 export type { RateLimitMetadata } from "./rate-limit.ts";

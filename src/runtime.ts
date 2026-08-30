@@ -57,6 +57,7 @@ import {
 import {
     makePipelineObservationService,
     type PipelineObservationService,
+    type PipelineObservationServiceDependencies,
 } from "./github/pipeline-observation.ts";
 import {
     makeGitHubNeedsAttentionNotificationService,
@@ -152,6 +153,8 @@ export type RalphieRuntime = {
 export type RuntimeOverrides = {
     readonly pi: PiService;
     readonly progress: ProgressReporterService;
+    /** Optional deterministic seams for the read-only pipeline observer. */
+    readonly pipelineObservationDependencies?: PipelineObservationServiceDependencies;
     readonly commandRunner?: CommandRunnerService;
     readonly runStateStore?: RunStateStoreService;
     readonly workspace?: WorkspaceService;
@@ -164,10 +167,13 @@ export const makeLiveRuntime = ({
     commandRunner = CommandRunnerLive,
     runStateStore = RunStateStoreLive,
     workspace = WorkspaceLive,
+    pipelineObservationDependencies,
 }: RuntimeOverrides): RalphieRuntime => {
     const githubClient = makeGitHubClientService(commandRunner);
     const pipelineSnapshot = makePipelineSnapshotCollectorService();
-    const pipelineObservation = makePipelineObservationService();
+    const pipelineObservation = makePipelineObservationService(
+        pipelineObservationDependencies,
+    );
     const githubIssues = makeGitHubIssuesService();
     const githubIssueMutations = makeGitHubIssueMutationsService();
     const githubIssueRelationships = makeGitHubIssueRelationshipService();

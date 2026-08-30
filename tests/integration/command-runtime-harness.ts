@@ -75,6 +75,7 @@ export const makeCommandRuntimeHarness = () => {
                 "commandRunner",
                 "githubClient",
                 "pipelineSnapshot",
+                "pipelineObservation",
                 "githubIssues",
                 "githubIssueMutations",
                 "githubPullRequests",

@@ -52,6 +52,41 @@ effects and validate their invariants at the boundary.
 `src/workflow.ts` orchestrates the domain services. `src/runtime.ts` assembles
 their live implementations into one explicit runtime object.
 
+## Read-only pipeline observation contract
+
+The live runtime exposes `runtime.pipelineObservation.observe(...)` for a later
+workflow gate. It observes one immutable 40- or 64-character commit SHA and is
+read-only: with an Octokit client it uses paginated Check Run and legacy commit
+status reads plus `repos.getBranch` for the final HEAD race check. Tests and
+other read-only callers may provide `fetchSnapshot`, `readHead`, and injected
+clock/sleep/request dependencies without importing the collector internals.
+
+The canonical settings and defaults are:
+
+| Setting | Default | Policy |
+| --- | ---: | --- |
+| `registrationGraceMs` | `0` | Keep polling an empty `no-checks` snapshot until grace expires, then return `no-pipelines-discovered`. |
+| `quiescenceMs` | `0` | Require the terminal normalized set to remain unchanged for this window. |
+| `deadlineMs` | `30,000` | Absolute bound from `observe` start; timeout wins over a late read or sleep. |
+| `initialBackoffMs` / `maxBackoffMs` | `1,000` / `30,000` | Exponential polling backoff, capped at the maximum and remaining deadline. |
+| `backoffFactor` | `2` | Multiplier for ordinary polling delays. |
+| `rateLimitRetries` | `3` | Maximum retries per poll when a usable server hint is available. |
+| `maxRateLimitDelayMs` | `30,000` | A larger `Retry-After` or reset delay fails closed instead of being silently capped. |
+| `stableTerminalConfirmations` | `1` | Number of identical green terminal snapshots required. |
+
+A green result requires at least one complete item, every item to be `passing`,
+no source or completeness errors, the configured stability checks, and a final
+branch HEAD equal to the observed SHA. Pending items continue polling until the
+absolute deadline. Failing or cancelled items fail closed; neutral and skipped
+items are retained as `acceptable` but are not green. Unknown API values,
+malformed records, missing scope, collection failures, and no checks after grace
+are non-green outcomes. Rate-limit hints are honored exactly only when the
+hint fits both the configured cap and remaining deadline. Every request and
+sleep receives an abortable derived signal; caller cancellation returns an
+`aborted` outcome with its original reason, distinct from timeout or read
+failure. Normalized items retain source/producer identity and raw diagnostic
+fields for audit consumers.
+
 ## Dependency and side-effect rules
 
 Agents own reasoning and edits within their permitted tool boundary. They do not
