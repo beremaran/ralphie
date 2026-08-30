@@ -55,6 +55,10 @@ import {
     type PipelineSnapshotCollectorService,
 } from "./github/pipeline-snapshot-collector.ts";
 import {
+    makePipelineObservationService,
+    type PipelineObservationService,
+} from "./github/pipeline-observation.ts";
+import {
     makeGitHubNeedsAttentionNotificationService,
     type GitHubNeedsAttentionNotificationService,
 } from "./github/needs-attention.ts";
@@ -113,6 +117,8 @@ export type RalphieRuntime = {
     readonly commandRunner: CommandRunnerService;
     readonly githubClient: GitHubClientService;
     readonly pipelineSnapshot: PipelineSnapshotCollectorService;
+    /** Bounded, read-only pipeline observer for one exact commit SHA. */
+    readonly pipelineObservation: PipelineObservationService;
     readonly githubIssues: GitHubIssuesService;
     readonly githubIssueMutations: GitHubIssueMutationService;
     readonly githubIssueRelationships: GitHubIssueRelationshipService;
@@ -161,6 +167,7 @@ export const makeLiveRuntime = ({
 }: RuntimeOverrides): RalphieRuntime => {
     const githubClient = makeGitHubClientService(commandRunner);
     const pipelineSnapshot = makePipelineSnapshotCollectorService();
+    const pipelineObservation = makePipelineObservationService();
     const githubIssues = makeGitHubIssuesService();
     const githubIssueMutations = makeGitHubIssueMutationsService();
     const githubIssueRelationships = makeGitHubIssueRelationshipService();
@@ -235,6 +242,7 @@ export const makeLiveRuntime = ({
         commandRunner,
         githubClient,
         pipelineSnapshot,
+        pipelineObservation,
         githubIssues,
         githubIssueMutations,
         githubIssueRelationships,

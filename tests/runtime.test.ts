@@ -21,5 +21,7 @@ describe("runtime factory", () => {
         expect(runtime.pipelineSnapshot.read).toBe(
             runtime.pipelineSnapshot.collect,
         );
+        expect(runtime.pipelineObservation).toBeDefined();
+        expect(runtime.pipelineObservation.observe).toBeFunction();
     });
 });

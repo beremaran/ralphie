@@ -39,7 +39,7 @@ effects and validate their invariants at the boundary.
 
 | Area | Responsibility |
 | --- | --- |
-| `src/github/` | GitHub CLI authentication, Octokit, issue discovery, mutations, native sub-issues/dependencies, and decomposition links. |
+| `src/github/` | GitHub CLI authentication, Octokit, issue discovery, mutations, native sub-issues/dependencies, decomposition links, pipeline snapshot collection, and bounded pipeline observation. |
 | `src/git/` | Checkout preparation, checkpoints, deterministic issue operations, invariants, and remote safety. |
 | `src/issues/` | Queueing, complexity routing, implementation, review, recovery, and decomposition. |
 | `src/agent/` | Ralphie's session, prompt, schema, diagnostics, and structured-output boundary. |
@@ -76,6 +76,8 @@ and [Safety](safety.md). For state transitions and reconciliation, see
 | Public trigger and flags | `index.ts`, `src/cli.ts`, `src/command.ts`, `src/options.ts` |
 | Runtime dependency assembly | `src/runtime.ts` |
 | Run orchestration, queue, state transitions | `src/workflow.ts`, `src/issues/queue.ts` |
+| Pipeline snapshot normalization and collection | `src/github/pipeline-snapshot.ts`, `src/github/pipeline-snapshot-collector.ts` |
+| Bounded pipeline observation and final HEAD check | `src/github/pipeline-observation.ts` |
 | Complexity routing | `src/issues/executor.ts`, `src/issues/complexity.ts` |
 | Implementation/review/delivery | `src/issues/implementation-executor.ts` |
 | Decomposition and GitHub mutations | `src/issues/decomposition-executor.ts`, `src/github/issue-mutations.ts`, `src/github/issue-relationships.ts` |
