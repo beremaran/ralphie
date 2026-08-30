@@ -28,7 +28,17 @@ import {
 } from "../../src/progress/progress.ts";
 
 const context = (number: number): IssueExecutionContext =>
-    ({ issue: { number } }) as IssueExecutionContext;
+    ({
+        issue: {
+            number,
+            title: `Issue ${number}`,
+            url: `issue/${number}`,
+            body: "Test issue.",
+            labels: [],
+            updatedAt: "2026-08-28T00:00:00.000Z",
+            commentCount: 0,
+        },
+    }) as unknown as IssueExecutionContext;
 
 describe("IssueExecutor", () => {
     test("reuses matching grounding across a durable resumed run", async () => {
@@ -312,7 +322,7 @@ describe("IssueExecutor", () => {
                 IssueArtifactKind.ComplexityDecision,
             );
 
-            expect(decision.complexity).toBe(complexity);
+            expect(decision.decision.complexity).toBe(complexity);
             if (complexity <= ComplexityLevel.Level3) {
                 expect(result.kind).toBe(IssueExecutionOutcomeKind.Completed);
                 expect(implementationCalls).toBe(1);
@@ -363,6 +373,47 @@ describe("IssueExecutor", () => {
         await executor.execute(context(42));
         expect(assessmentCalls).toBe(1);
         expect(implementationCalls).toBe(2);
+    });
+
+    test.each([
+        { updatedAt: "2026-08-29T00:00:00.000Z" },
+        { commentCount: 1 },
+        { commentVersion: "2026-08-29T00:00:00.000Z" },
+    ])("reassesses complexity when freshness changes: %o", async (change) => {
+        let assessmentCalls = 0;
+        const executor = makeIssueExecutorService(
+            makeIssueArtifactStoreService(),
+            {
+                assess: async () => ({
+                    decision: {
+                        complexity: ComplexityLevel.Level2,
+                        rationale: `Assessment ${++assessmentCalls}.`,
+                    },
+                    sessionID: `complexity-${assessmentCalls}`,
+                }),
+            },
+            {
+                execute: async () => ({
+                    kind: IssueExecutionOutcomeKind.Skipped,
+                    reason: "test",
+                }),
+            },
+            {
+                execute: async () => ({
+                    kind: IssueExecutionOutcomeKind.Decomposed,
+                    childIssueNumbers: [],
+                }),
+            },
+        );
+        const initial = context(42);
+
+        await executor.execute(initial);
+        await executor.execute({
+            ...initial,
+            issue: { ...initial.issue, ...change },
+        });
+
+        expect(assessmentCalls).toBe(2);
     });
 
     test("turns a missing complexity decision into a failed outcome", async () => {

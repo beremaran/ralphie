@@ -25,7 +25,7 @@ import type {
     WorkflowExecutorInput,
     WorkflowExecutorResult,
 } from "./workflow-executor-input.ts";
-import { IssueArtifactKind } from "./artifacts.ts";
+import { IssueArtifactKind, issueFreshnessFingerprint } from "./artifacts.ts";
 import {
     commitMessageDecisionSchema,
     issueResolutionDecisionSchema,
@@ -315,10 +315,10 @@ export const makeImplementationExecutorService = (
     ): Promise<WorkflowExecutorResult> => {
         const { context, artifacts } = input;
         const resolution = await resolutionVerification.verify(context);
-        await artifacts.write(
-            IssueArtifactKind.IssueResolutionDecision,
-            resolution.decision,
-        );
+        await artifacts.write(IssueArtifactKind.IssueResolutionDecision, {
+            decision: resolution.decision,
+            fingerprint: issueFreshnessFingerprint(context.issue),
+        });
         const outcome = resolutionOutcome(resolution.decision);
         return outcome.kind === IssueExecutionOutcomeKind.Failed
             ? {
@@ -695,7 +695,7 @@ export const makeImplementationExecutorService = (
             const resolution = await artifacts.read(
                 IssueArtifactKind.IssueResolutionDecision,
             );
-            return resolutionOutcome(resolution);
+            return resolutionOutcome(resolution.decision);
         }
 
         const recovered = await recoverCommittedAttempt(input);
@@ -722,6 +722,9 @@ export const makeImplementationExecutorService = (
     return {
         execute: async (input) => {
             try {
+                await input.artifacts.invalidateStaleIssueDecisions(
+                    issueFreshnessFingerprint(input.context.issue),
+                );
                 return await executeImplementation(input);
             } catch (error) {
                 throw asRalphieError(

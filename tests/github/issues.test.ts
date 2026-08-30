@@ -3,6 +3,7 @@ import type { Octokit } from "octokit";
 
 import {
     makeGitHubIssuesService,
+    isIssueEligible,
     MAX_ISSUE_COMMENT_BODY_LENGTH,
     MAX_ISSUE_COMMENTS,
     IssueOrder,
@@ -17,6 +18,33 @@ const listOpen = (client: Octokit, labels: ReadonlyArray<string> = []) =>
     });
 
 describe("GitHub issues", () => {
+    test("requires an open issue with every configured label", () => {
+        const issue = {
+            number: 42,
+            title: "Issue",
+            url: "issue/42",
+            body: null,
+            labels: ["Bug", "Ready"],
+            state: "open" as const,
+        };
+        const filters = {
+            labels: ["bug", "READY"],
+            sort: IssueSort.Created,
+            order: IssueOrder.Ascending,
+        };
+
+        expect(isIssueEligible(issue, filters)).toBe(true);
+        expect(isIssueEligible({ ...issue, state: "closed" }, filters)).toBe(
+            false,
+        );
+        expect(isIssueEligible({ ...issue, labels: ["bug"] }, filters)).toBe(
+            false,
+        );
+        expect(isIssueEligible({ ...issue, state: undefined }, filters)).toBe(
+            false,
+        );
+    });
+
     test("paginates, applies filters, and excludes pull requests", async () => {
         let request: Record<string, unknown> | undefined;
         let commentRequest: Record<string, unknown> | undefined;

@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { z } from "zod";
 
 import type { IssueCheckpoint } from "../git/issue-checkpoint.ts";
+import type { GitHubIssue } from "../github/issues.ts";
 import { RalphieError } from "../shared/error.ts";
 import { resolveWorkspacePath } from "../workspace/workspace.ts";
 import {
@@ -65,10 +66,20 @@ export type NeedsAttentionDecisionArtifact = {
     readonly fingerprint: IssueFreshnessFingerprint;
 };
 
+export type ComplexityDecisionArtifact = {
+    readonly decision: ComplexityDecision;
+    readonly fingerprint: IssueFreshnessFingerprint;
+};
+
+export type IssueResolutionDecisionArtifact = {
+    readonly decision: IssueResolutionDecision;
+    readonly fingerprint: IssueFreshnessFingerprint;
+};
+
 export type NeedsAttentionArtifact = NeedsAttentionDecisionArtifact;
 
 export type IssueArtifactValues = {
-    readonly [IssueArtifactKind.ComplexityDecision]: ComplexityDecision;
+    readonly [IssueArtifactKind.ComplexityDecision]: ComplexityDecisionArtifact;
     readonly [IssueArtifactKind.IssueCheckpoint]: IssueCheckpoint;
     readonly [IssueArtifactKind.ReviewAttempts]: ReadonlyArray<ReviewAttempt>;
     readonly [IssueArtifactKind.PullRequestReviewAttempts]: ReadonlyArray<PullRequestReviewAttempt>;
@@ -78,7 +89,7 @@ export type IssueArtifactValues = {
         readonly sha: string;
         readonly treeSha: string;
     };
-    readonly [IssueArtifactKind.IssueResolutionDecision]: IssueResolutionDecision;
+    readonly [IssueArtifactKind.IssueResolutionDecision]: IssueResolutionDecisionArtifact;
     readonly [IssueArtifactKind.NeedsAttentionDecision]: NeedsAttentionDecisionArtifact;
     readonly [IssueArtifactKind.IssueBreakdownDecision]: IssueBreakdownDecision;
     readonly [IssueArtifactKind.CreatedIssueNumbers]: CreatedIssueNumberMapping;
@@ -104,6 +115,10 @@ export type IssueArtifactStore = {
     ) => Promise<void>;
     /** Drop artifacts from an interrupted implementation attempt after checkout restore. */
     readonly resetImplementationAttempt: () => Promise<void>;
+    /** Remove issue-derived decisions only when the live issue has changed. */
+    readonly invalidateStaleIssueDecisions: (
+        fingerprint: IssueFreshnessFingerprint,
+    ) => Promise<boolean>;
     /** Remove a needs-attention decision only when the issue has changed. */
     readonly invalidateStaleNeedsAttentionDecision: (
         fingerprint: IssueFreshnessFingerprint,
@@ -187,6 +202,20 @@ export const issueFreshnessFingerprintSchema = z
 export const needsAttentionDecisionArtifactSchema = z
     .object({
         decision: needsAttentionDecisionSchema,
+        fingerprint: issueFreshnessFingerprintSchema,
+    })
+    .strict();
+
+export const complexityDecisionArtifactSchema = z
+    .object({
+        decision: complexityDecisionSchema,
+        fingerprint: issueFreshnessFingerprintSchema,
+    })
+    .strict();
+
+export const issueResolutionDecisionArtifactSchema = z
+    .object({
+        decision: issueResolutionDecisionSchema,
         fingerprint: issueFreshnessFingerprintSchema,
     })
     .strict();
@@ -284,7 +313,15 @@ const persistedArtifactsV2Schema = persistedArtifactsV2BaseSchema.superRefine(
 );
 
 const persistedArtifactsSchema = persistedArtifactsV2BaseSchema
+    .omit({
+        [IssueArtifactKind.ComplexityDecision]: true,
+        [IssueArtifactKind.IssueResolutionDecision]: true,
+    })
     .extend({
+        [IssueArtifactKind.ComplexityDecision]:
+            complexityDecisionArtifactSchema.optional(),
+        [IssueArtifactKind.IssueResolutionDecision]:
+            issueResolutionDecisionArtifactSchema.optional(),
         [IssueArtifactKind.NeedsAttentionDecision]:
             needsAttentionDecisionArtifactSchema.optional(),
     })
@@ -296,12 +333,18 @@ const persistedArtifactsSchema = persistedArtifactsV2BaseSchema
 // the issue. Writes still use persistedArtifactsSchema, so invalid values can
 // never be produced by this store.
 const persistedArtifactsLoadSchema = persistedArtifactsV2BaseSchema
+    .omit({
+        [IssueArtifactKind.ComplexityDecision]: true,
+        [IssueArtifactKind.IssueResolutionDecision]: true,
+    })
     .extend({
+        [IssueArtifactKind.ComplexityDecision]: z.unknown().optional(),
+        [IssueArtifactKind.IssueResolutionDecision]: z.unknown().optional(),
         [IssueArtifactKind.NeedsAttentionDecision]: z.unknown().optional(),
     })
     .strict();
 
-export const ISSUE_ARTIFACT_VERSION = 3 as const;
+export const ISSUE_ARTIFACT_VERSION = 4 as const;
 
 const persistedArtifactStateSchema = z
     .object({
@@ -327,6 +370,15 @@ const legacyPersistedArtifactStateSchema = z
         issueNumber: z.number().int().positive(),
         repository: z.string().min(1).optional(),
         artifacts: persistedArtifactsV2Schema,
+    })
+    .strict();
+
+const legacyV3PersistedArtifactStateSchema = z
+    .object({
+        version: z.literal(3),
+        issueNumber: z.number().int().positive(),
+        repository: z.string().min(1).optional(),
+        artifacts: persistedArtifactsLoadSchema,
     })
     .strict();
 
@@ -397,34 +449,41 @@ const persistAtomically = async (
 type LoadedArtifactState = {
     readonly state: PersistedArtifactState;
     readonly migrated: boolean;
-    readonly needsAttentionInvalidated: boolean;
+    readonly decisionsInvalidated: boolean;
 };
 
 const loadCurrentArtifactState = (value: unknown): LoadedArtifactState => {
     const loaded = persistedArtifactStateLoadSchema.parse(value);
-    const rawDecision =
-        loaded.artifacts[IssueArtifactKind.NeedsAttentionDecision];
-    if (
-        rawDecision !== undefined &&
-        !needsAttentionDecisionArtifactSchema.safeParse(rawDecision).success
-    ) {
-        const {
-            [IssueArtifactKind.NeedsAttentionDecision]: _stale,
-            ...remainingArtifacts
-        } = loaded.artifacts;
+    const schemas = {
+        [IssueArtifactKind.ComplexityDecision]:
+            complexityDecisionArtifactSchema,
+        [IssueArtifactKind.IssueResolutionDecision]:
+            issueResolutionDecisionArtifactSchema,
+        [IssueArtifactKind.NeedsAttentionDecision]:
+            needsAttentionDecisionArtifactSchema,
+    } as const;
+    const stale = Object.entries(schemas).filter(([kind, schema]) => {
+        const artifact = loaded.artifacts[kind as keyof typeof schemas];
+        return artifact !== undefined && !schema.safeParse(artifact).success;
+    });
+    if (stale.length > 0) {
+        const remainingArtifacts = { ...loaded.artifacts };
+        for (const [kind] of stale) {
+            delete remainingArtifacts[kind as keyof typeof remainingArtifacts];
+        }
         return {
             state: persistedArtifactStateSchema.parse({
                 ...loaded,
                 artifacts: remainingArtifacts,
             }),
             migrated: false,
-            needsAttentionInvalidated: true,
+            decisionsInvalidated: true,
         };
     }
     return {
         state: persistedArtifactStateSchema.parse(loaded),
         migrated: false,
-        needsAttentionInvalidated: false,
+        decisionsInvalidated: false,
     };
 };
 
@@ -443,10 +502,30 @@ const migrateArtifactState = (
             state: persistedArtifactStateSchema.parse({
                 ...legacy,
                 version: ISSUE_ARTIFACT_VERSION,
+                artifacts: Object.fromEntries(
+                    Object.entries(legacy.artifacts).filter(
+                        ([kind]) =>
+                            kind !== IssueArtifactKind.ComplexityDecision &&
+                            kind !== IssueArtifactKind.IssueResolutionDecision,
+                    ),
+                ),
             }),
             migrated: true,
-            needsAttentionInvalidated: false,
+            decisionsInvalidated: true,
         };
+    }
+    if (
+        typeof value === "object" &&
+        value !== null &&
+        "version" in value &&
+        value.version === 3
+    ) {
+        const legacy = legacyV3PersistedArtifactStateSchema.parse(value);
+        const loaded = loadCurrentArtifactState({
+            ...legacy,
+            version: ISSUE_ARTIFACT_VERSION,
+        });
+        return { ...loaded, migrated: true };
     }
     if (
         typeof value === "object" &&
@@ -518,6 +597,29 @@ export const sameIssueFreshnessFingerprint = (
     left.commentCount === right.commentCount &&
     left.commentVersion === right.commentVersion;
 
+export const issueFreshnessFingerprint = (
+    issue: GitHubIssue,
+): IssueFreshnessFingerprint => {
+    const parsed = issueFreshnessFingerprintSchema.safeParse({
+        ...(issue.updatedAt === undefined
+            ? {}
+            : { updatedAt: issue.updatedAt }),
+        ...(issue.commentCount === undefined
+            ? {}
+            : { commentCount: issue.commentCount }),
+        ...(issue.commentVersion === undefined
+            ? {}
+            : { commentVersion: issue.commentVersion }),
+    });
+    if (parsed.success) return parsed.data as IssueFreshnessFingerprint;
+    throw new RalphieError({
+        message:
+            `Issue #${issue.number} does not have a valid freshness fingerprint; ` +
+            "live decisions require updatedAt and a comment count or comment version.",
+        cause: parsed.error,
+    });
+};
+
 const validateArtifactValue = (
     issueNumber: number,
     kind: IssueArtifactKind,
@@ -526,9 +628,13 @@ const validateArtifactValue = (
     const schema =
         kind === IssueArtifactKind.NeedsAttentionDecision
             ? needsAttentionDecisionArtifactSchema
-            : kind === IssueArtifactKind.ApprovedPullRequestReviewEvidence
-              ? approvedPullRequestReviewEvidenceSchema
-              : undefined;
+            : kind === IssueArtifactKind.ComplexityDecision
+              ? complexityDecisionArtifactSchema
+              : kind === IssueArtifactKind.IssueResolutionDecision
+                ? issueResolutionDecisionArtifactSchema
+                : kind === IssueArtifactKind.ApprovedPullRequestReviewEvidence
+                  ? approvedPullRequestReviewEvidenceSchema
+                  : undefined;
     if (!schema) return;
     try {
         schema.parse(value);
@@ -580,6 +686,34 @@ const makeStore = (
         }
         const nextValues = new Map(values);
         nextValues.delete(IssueArtifactKind.NeedsAttentionDecision);
+        await save(nextValues);
+        return true;
+    };
+
+    const invalidateStaleIssueDecisions = async (
+        fingerprint: IssueFreshnessFingerprint,
+    ): Promise<boolean> => {
+        issueFreshnessFingerprintSchema.parse(fingerprint);
+        const kinds = [
+            IssueArtifactKind.ComplexityDecision,
+            IssueArtifactKind.IssueResolutionDecision,
+            IssueArtifactKind.NeedsAttentionDecision,
+        ] as const;
+        const stale = kinds.filter((kind) => {
+            const artifact = values.get(kind) as
+                | { readonly fingerprint: IssueFreshnessFingerprint }
+                | undefined;
+            return (
+                artifact !== undefined &&
+                !sameIssueFreshnessFingerprint(
+                    artifact.fingerprint,
+                    fingerprint,
+                )
+            );
+        });
+        if (stale.length === 0) return false;
+        const nextValues = new Map(values);
+        for (const kind of stale) nextValues.delete(kind);
         await save(nextValues);
         return true;
     };
@@ -747,6 +881,7 @@ const makeStore = (
             await save(nextValues);
         },
 
+        invalidateStaleIssueDecisions,
         invalidateStaleNeedsAttentionDecision,
         invalidateNeedsAttentionDecision: invalidateStaleNeedsAttentionDecision,
     };
@@ -786,10 +921,7 @@ export const makeDurableIssueArtifactStore = async (
     }
     const filePath = issueArtifactPath(scope, issueNumber);
     const loaded = await loadPersistedState(filePath, issueNumber, scope);
-    if (
-        loaded?.migrated === true ||
-        loaded?.needsAttentionInvalidated === true
-    ) {
+    if (loaded?.migrated === true || loaded?.decisionsInvalidated === true) {
         await persistAtomically(filePath, loaded.state);
     }
     return makeStore(

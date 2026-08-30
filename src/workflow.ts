@@ -7,7 +7,11 @@ import {
     GitHubNeedsAttentionNotificationRecoveryError,
     type NeedsAttentionNotificationInput,
 } from "./github/needs-attention.ts";
-import type { GitHubIssue, IssueFilters } from "./github/issues.ts";
+import {
+    isIssueEligible,
+    type GitHubIssue,
+    type IssueFilters,
+} from "./github/issues.ts";
 import {
     type IssueExecutionContext,
     type IssueCompletionKind,
@@ -1658,8 +1662,30 @@ export const workflow = async (
             server: PiRuntime,
         ): Promise<boolean> => {
             checkCancellation(signal);
-            const issue = queue.next();
-            if (issue === undefined) return false;
+            const queuedIssue = queue.next();
+            if (queuedIssue === undefined) return false;
+            const issue = await githubIssues.refresh(
+                octokit,
+                repo,
+                queuedIssue.number,
+            );
+            if (!isIssueEligible(issue, issueFilters)) {
+                const reason =
+                    issue.state !== "open"
+                        ? "Live reconciliation found that the issue is no longer open."
+                        : "Live reconciliation found that the issue no longer has every required label.";
+                const outcome = {
+                    kind: IssueExecutionOutcomeKind.Skipped,
+                    reason,
+                } as const;
+                outcomes.push({ issueNumber: issue.number, outcome });
+                queue.skip(issue.number);
+                activeQueueIssues.delete(issue.number);
+                activeIssue = undefined;
+                restoreCancellationCheckout = undefined;
+                await persistState(RunStateStatus.Active);
+                return true;
+            }
             activeQueueIssues.set(issue.number, issue);
             const issueContext = await prepareIssue(issue);
             const outcome = await executeIssue(issueContext, server);

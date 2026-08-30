@@ -50,6 +50,11 @@ const issue = (number: number, title: string, body = "Task body") => ({
     url: `https://github.com/owner/repository/issues/${number}`,
     body,
     labels: [],
+    state: "open" as const,
+    updatedAt: "2026-08-28T00:00:00.000Z",
+    comments: [],
+    commentCount: 0,
+    commentVersion: "2026-08-28T00:00:00.000Z",
 });
 
 const context = (

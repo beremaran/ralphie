@@ -18,6 +18,17 @@ const issue = (number: number): GitHubIssue => ({
 });
 
 describe("refreshable issue queue", () => {
+    test("does not charge skipped reconciliation items to the processing budget", () => {
+        const queue = createIssueQueue(toQueuedIssues([issue(1), issue(2)]), 1);
+        expect(queue.next()?.number).toBe(1);
+        queue.skip(1);
+        expect(queue.next()?.number).toBe(2);
+        expect(queue.snapshot()).toMatchObject({
+            processedCount: 1,
+            completedIssueNumbers: [1],
+        });
+    });
+
     test("adds newly discovered issues without duplicating existing work", () => {
         const queue = createIssueQueue([
             {

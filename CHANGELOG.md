@@ -5,6 +5,13 @@ All notable changes to Ralphie are documented here. The project follows
 
 ## [Unreleased]
 
+### Changed
+
+- Dequeued issues are refreshed from GitHub before branch or Pi work; closed or
+  label-ineligible issues are durably skipped without mutations, and cached
+  grounding, complexity, and resolution decisions now require matching live
+  issue freshness metadata.
+
 ### Added
 
 - A maintainer-approved public source and distribution topology, with one

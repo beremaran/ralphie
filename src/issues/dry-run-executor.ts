@@ -1,7 +1,7 @@
 import {
     IssueArtifactKind,
+    issueFreshnessFingerprint,
     issueArtifactPath,
-    issueFreshnessFingerprintSchema,
     makeIssueArtifactStore,
     sameIssueFreshnessFingerprint,
     type IssueArtifactStore,
@@ -50,25 +50,6 @@ const issueScope = (context: IssueExecutionContext) => ({
     repository: context.repository,
 });
 
-const freshnessFingerprint = (
-    context: IssueExecutionContext,
-): IssueFreshnessFingerprint | undefined => {
-    const parsed = issueFreshnessFingerprintSchema.safeParse({
-        ...(context.issue.updatedAt === undefined
-            ? {}
-            : { updatedAt: context.issue.updatedAt }),
-        ...(context.issue.commentCount === undefined
-            ? {}
-            : { commentCount: context.issue.commentCount }),
-        ...(context.issue.commentVersion === undefined
-            ? {}
-            : { commentVersion: context.issue.commentVersion }),
-    });
-    return parsed.success
-        ? (parsed.data as IssueFreshnessFingerprint)
-        : undefined;
-};
-
 type DryRunArtifactAccess = {
     readonly store: IssueArtifactStore;
     /** True only when the service explicitly loaded a durable read-only view. */
@@ -99,12 +80,9 @@ const readOnlyArtifactsFor = async (
 
 const matchingPersistedGrounding = async (
     artifacts: IssueArtifactStore,
-    fingerprint: IssueFreshnessFingerprint | undefined,
+    fingerprint: IssueFreshnessFingerprint,
 ): Promise<GroundingDecision | undefined> => {
-    if (
-        fingerprint === undefined ||
-        !artifacts.has(IssueArtifactKind.NeedsAttentionDecision)
-    ) {
+    if (!artifacts.has(IssueArtifactKind.NeedsAttentionDecision)) {
         return undefined;
     }
     const artifact = await artifacts.read(
@@ -131,7 +109,7 @@ const groundingFor = async (
 
     const persisted = await matchingPersistedGrounding(
         artifacts,
-        freshnessFingerprint(context),
+        issueFreshnessFingerprint(context.issue),
     );
     if (persisted !== undefined) {
         await progress.emit({
@@ -164,24 +142,31 @@ const complexityFor = async (
     progress: ProgressReporterService,
 ): Promise<ComplexityDecision> => {
     if (artifacts.has(IssueArtifactKind.ComplexityDecision)) {
-        const decision = await artifacts.read(
+        const artifact = await artifacts.read(
             IssueArtifactKind.ComplexityDecision,
         );
-        await progress.emit({
-            issue: {
-                number: context.issue.number,
-                title: context.issue.title,
-            },
-            stage: "complexity-assessment",
-            status: "skipped",
-            message: `Reusing the previous complexity decision for #${context.issue.number}; agent assessment was skipped.`,
-            details: {
-                dryRun: true,
-                complexity: decision.complexity,
-                agentWorkSkipped: true,
-            },
-        });
-        return decision;
+        if (
+            sameIssueFreshnessFingerprint(
+                artifact.fingerprint,
+                issueFreshnessFingerprint(context.issue),
+            )
+        ) {
+            await progress.emit({
+                issue: {
+                    number: context.issue.number,
+                    title: context.issue.title,
+                },
+                stage: "complexity-assessment",
+                status: "skipped",
+                message: `Reusing the previous complexity decision for #${context.issue.number}; agent assessment was skipped.`,
+                details: {
+                    dryRun: true,
+                    complexity: artifact.decision.complexity,
+                    agentWorkSkipped: true,
+                },
+            });
+            return artifact.decision;
+        }
     }
     return (await assessment.assess(context)).decision;
 };

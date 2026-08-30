@@ -2,10 +2,9 @@ import { type ProgressReporterService } from "../progress/progress.ts";
 import { RalphieError } from "../shared/error.ts";
 import {
     IssueArtifactKind,
+    issueFreshnessFingerprint,
     issueArtifactPath,
-    issueFreshnessFingerprintSchema,
     type IssueArtifactStoreService,
-    type IssueFreshnessFingerprint,
 } from "./artifacts.ts";
 import type { ComplexityAssessmentService } from "./complexity.ts";
 import {
@@ -37,37 +36,12 @@ export const makeIssueExecutorService = (
     groundingAssessment?: GroundingAssessmentService,
     progress?: ProgressReporterService,
 ): IssueExecutorService => {
-    const freshnessFingerprint = (
-        context: IssueExecutionContext,
-    ): IssueFreshnessFingerprint => {
-        const candidate = {
-            ...(context.issue.updatedAt === undefined
-                ? {}
-                : { updatedAt: context.issue.updatedAt }),
-            ...(context.issue.commentCount === undefined
-                ? {}
-                : { commentCount: context.issue.commentCount }),
-            ...(context.issue.commentVersion === undefined
-                ? {}
-                : { commentVersion: context.issue.commentVersion }),
-        };
-        const parsed = issueFreshnessFingerprintSchema.safeParse(candidate);
-        if (parsed.success) return parsed.data as IssueFreshnessFingerprint;
-        throw new RalphieError({
-            message:
-                `Issue #${context.issue.number} does not have a valid freshness fingerprint; ` +
-                "grounding requires updatedAt and a comment count or comment version.",
-            cause: parsed.error,
-        });
-    };
-
     const assessGrounding = async (
         context: IssueExecutionContext,
         artifacts: Awaited<ReturnType<IssueArtifactStoreService["forIssue"]>>,
     ): Promise<IssueExecutionOutcome | undefined> => {
         if (groundingAssessment === undefined) return undefined;
-        const fingerprint = freshnessFingerprint(context);
-        await artifacts.invalidateStaleNeedsAttentionDecision(fingerprint);
+        const fingerprint = issueFreshnessFingerprint(context.issue);
         if (artifacts.has(IssueArtifactKind.NeedsAttentionDecision)) {
             await progress?.emit({
                 issue: {
@@ -124,10 +98,14 @@ export const makeIssueExecutorService = (
         artifacts: Awaited<ReturnType<IssueArtifactStoreService["forIssue"]>>,
     ): Promise<ComplexityDecision> => {
         if (artifacts.has(IssueArtifactKind.ComplexityDecision)) {
-            return await artifacts.read(IssueArtifactKind.ComplexityDecision);
+            return (await artifacts.read(IssueArtifactKind.ComplexityDecision))
+                .decision;
         }
         const { decision } = await complexityAssessment.assess(context);
-        await artifacts.write(IssueArtifactKind.ComplexityDecision, decision);
+        await artifacts.write(IssueArtifactKind.ComplexityDecision, {
+            decision,
+            fingerprint: issueFreshnessFingerprint(context.issue),
+        });
         return decision;
     };
 
@@ -135,6 +113,9 @@ export const makeIssueExecutorService = (
         context: IssueExecutionContext,
         artifacts: Awaited<ReturnType<IssueArtifactStoreService["forIssue"]>>,
     ): Promise<IssueExecutionOutcome> => {
+        await artifacts.invalidateStaleIssueDecisions(
+            issueFreshnessFingerprint(context.issue),
+        );
         const deferred = await assessGrounding(context, artifacts);
         if (deferred !== undefined) return deferred;
         const decision = await assessOrReadDecision(context, artifacts);

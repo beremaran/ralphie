@@ -50,6 +50,11 @@ const firstIssue: GitHubIssue = {
     url: "https://github.com/owner/repo/issues/42",
     body: "Test body",
     labels: ["bug"],
+    state: "open",
+    updatedAt: "2026-08-28T00:00:00.000Z",
+    comments: [],
+    commentCount: 0,
+    commentVersion: "2026-08-28T00:00:00.000Z",
 };
 const secondIssue: GitHubIssue = {
     ...firstIssue,
@@ -61,6 +66,8 @@ const secondIssue: GitHubIssue = {
 type TestRuntimeOptions = {
     readonly outcomes?: ReadonlyArray<IssueExecutionOutcome>;
     readonly issueLists?: ReadonlyArray<ReadonlyArray<GitHubIssue>>;
+    readonly refreshIssues?: ReadonlyArray<GitHubIssue>;
+    readonly refreshFailure?: RalphieError;
     readonly githubFailure?: RalphieError;
     readonly gitFailure?: RalphieError;
     readonly startFailure?: RalphieError;
@@ -85,6 +92,7 @@ const testRuntime = (
     progressEvents: ProgressUpdate[] = [],
 ): RalphieRuntime => {
     let listIndex = 0;
+    let refreshIndex = 0;
     let outcomeIndex = 0;
     let captureIndex = options.captureStart ?? 0;
     const outcomes = options.outcomes ?? [
@@ -139,7 +147,25 @@ const testRuntime = (
     };
     const githubIssues: GitHubIssuesService = {
         listDecompositionChildren: async () => [],
-        refresh: async () => firstIssue,
+        refresh: async (_client, _repo, issueNumber) => {
+            calls.push(`refreshIssue:${issueNumber}`);
+            if (options.refreshFailure) throw options.refreshFailure;
+            const configured =
+                options.refreshIssues?.[
+                    Math.min(
+                        refreshIndex,
+                        (options.refreshIssues?.length ?? 1) - 1,
+                    )
+                ];
+            refreshIndex += 1;
+            return (
+                configured ??
+                issueLists
+                    .flat()
+                    .find(({ number }) => number === issueNumber) ??
+                firstIssue
+            );
+        },
         listOpen: async (_client, repo, filters) => {
             calls.push(
                 `listIssues:${repo}:${filters.labels.join(",")}:${filters.sort}:${filters.order}`,
@@ -395,6 +421,7 @@ describe("workflow", () => {
             "prepareRepository:owner/repo:develop:/tmp/ralphie",
             "listIssues:owner/repo:bug:created:asc",
             "startServer",
+            "refreshIssue:42",
             "executeIssue:42:/tmp/ralphie/repo:develop:reviewer",
             "closeIssue:42",
             "closeRuntime",
@@ -1386,5 +1413,100 @@ describe("workflow", () => {
             ),
         ).rejects.toThrow("Run cancelled");
         expect(calls).toEqual([]);
+    });
+
+    test("uses the refreshed issue before preparing a PR branch", async () => {
+        const calls: string[] = [];
+        const contexts: IssueExecutionContext[] = [];
+        const refreshed = {
+            ...firstIssue,
+            title: "Refreshed title",
+            body: "Refreshed body",
+            labels: ["BUG", "ready"],
+            comments: [
+                {
+                    id: 1,
+                    body: "Refreshed comment",
+                    updatedAt: "2026-08-29T00:00:00.000Z",
+                },
+            ],
+            updatedAt: "2026-08-29T00:00:00.000Z",
+            commentCount: 1,
+            commentVersion: "2026-08-29T00:00:00.000Z",
+        } as const;
+
+        await workflow(
+            { ...baseOptions, workflow: WorkflowMode.Pr },
+            testRuntime(calls, [], {
+                refreshIssues: [refreshed],
+                executionContexts: contexts,
+            }),
+        );
+
+        expect(contexts[0]?.issue).toEqual(refreshed);
+        expect(calls.indexOf("refreshIssue:42")).toBeLessThan(
+            calls.indexOf("prepareFeatureBranch:ralphie/issue-42:develop"),
+        );
+    });
+
+    test("fails closed when live issue refresh fails", async () => {
+        const calls: string[] = [];
+        const states: RunState[] = [];
+        await expect(
+            workflow(
+                { ...baseOptions, workflow: WorkflowMode.Pr },
+                testRuntime(calls, states, {
+                    refreshFailure: new RalphieError({
+                        message: "refresh failed",
+                    }),
+                }),
+            ),
+        ).rejects.toThrow("refresh failed");
+
+        expect(calls).not.toContainEqual(
+            expect.stringContaining("executeIssue"),
+        );
+        expect(calls).not.toContainEqual(
+            expect.stringContaining("prepareFeatureBranch"),
+        );
+        expect(
+            states.at(-1)?.queue.pending.map(({ number }) => number),
+        ).toEqual([42]);
+    });
+
+    test.each([
+        ["closed", { ...firstIssue, state: "closed" as const }],
+        ["missing required labels", { ...firstIssue, labels: ["ready"] }],
+    ])("skips %s live issues and continues", async (_name, ineligible) => {
+        const calls: string[] = [];
+        const states: RunState[] = [];
+        const summary = await workflow(
+            baseOptions,
+            testRuntime(calls, states, {
+                issueLists: [[firstIssue, secondIssue]],
+                refreshIssues: [ineligible, secondIssue],
+            }),
+        );
+
+        expect(summary.outcomes[0]).toMatchObject({
+            issueNumber: 42,
+            outcome: { kind: IssueExecutionOutcomeKind.Skipped },
+        });
+        expect(summary.outcomes[1]).toMatchObject({
+            issueNumber: 43,
+            outcome: { kind: IssueExecutionOutcomeKind.Completed },
+        });
+        expect(calls).not.toContainEqual(
+            expect.stringContaining("executeIssue:42"),
+        );
+        expect(calls).not.toContain("closeIssue:42");
+        expect(calls).toContainEqual(
+            expect.stringContaining("executeIssue:43"),
+        );
+        expect(states.at(-1)?.queue.pending).toEqual([]);
+        expect(states.at(-1)?.queue.completedIssueNumbers).toEqual([42, 43]);
+        expect(states.at(-1)?.outcomes[0]?.outcome.kind).toBe(
+            IssueExecutionOutcomeKind.Skipped,
+        );
     });
 });

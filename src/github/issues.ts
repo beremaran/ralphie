@@ -80,6 +80,18 @@ export type GitHubIssuesService = {
     ) => Promise<ReadonlyArray<GitHubDecompositionChild>>;
 };
 
+const normalizedLabel = (label: string): string => label.toLowerCase();
+
+/** Apply the same all-label, open-state contract used for configured discovery. */
+export const isIssueEligible = (
+    issue: GitHubIssue,
+    filters: IssueFilters,
+): boolean => {
+    if (issue.state !== "open") return false;
+    const labels = new Set(issue.labels.map(normalizedLabel));
+    return filters.labels.every((label) => labels.has(normalizedLabel(label)));
+};
+
 const issueLabels = (
     labels: ReadonlyArray<
         | string

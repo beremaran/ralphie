@@ -92,9 +92,10 @@ workspace to be dedicated to it.
 The queue is built from the discovered issues (or the pending issue snapshots
 from `state.queue.pending`, replaced with fresh live snapshots on resume).
 Generated child bodies contribute open issue-number dependencies.
-`--max-issues` is charged when an issue is dequeued, not when it succeeds. A
-refresh after decomposition adds newly discovered issues without duplicating
-known or completed numbers.
+`--max-issues` is charged when an eligible issue is dequeued, not when it
+succeeds. A live-reconciliation skip does not consume that budget. A refresh
+after decomposition adds newly discovered issues without duplicating known or
+completed numbers.
 
 ## 3. Pi runtime and issue loop
 
@@ -121,8 +122,10 @@ flowchart TD
     B -->|no| C{"Pending issues blocked by open dependencies?"}
     C -->|yes| D["Persist active state and fail"]
     C -->|no| E["Persist complete state"]
-    B -->|yes| F["Dequeue issue; charge budget; mark active"]
-    F --> G["Use prepared repository checkout"]
+    B -->|yes| F["Dequeue issue; refresh its live GitHub snapshot"]
+    F --> T{"Still open with every required label?"}
+    T -->|no| M["Record durable skip; complete queue item"]
+    T -->|yes| G["Charge budget; use prepared repository checkout"]
     G --> H["For PR mode, seed-push feature branch"]
     H --> I["IssueExecutor or DryRunIssueExecutor"]
     I --> J{"Outcome"}
@@ -145,14 +148,19 @@ flowchart TD
 
 For each dequeued issue, the worker:
 
-1. Saves the current checkout invariant (`branch` and `HEAD`) and active issue
-   in run state.
-2. In `pr` (but not dry-run), creates or resumes
+1. Refreshes the issue and its bounded comments from GitHub. Refresh failures
+   halt without stale execution. Closed issues and issues missing any configured
+   label are recorded as skipped and removed from pending work without branch,
+   Pi, implementation, closure, or pull-request mutations.
+2. Replaces the queued snapshot with the refreshed title, body, labels,
+   comments, and freshness metadata, then saves the current checkout invariant
+   (`branch` and `HEAD`) and active issue in run state.
+3. In `pr` (but not dry-run), creates or resumes
    `ralphie/issue-<number>` and pushes that branch non-force before agent work.
-3. Passes the issue, concrete repository path, target branch, Octokit client,
+4. Passes the issue, concrete repository path, target branch, Octokit client,
    shared Pi client, model selection, diagnostics, invariant service, and
    AbortSignal to the selected issue executor.
-4. Persists the outcome, performs delivery/closure, marks successful transitions
+5. Persists the outcome, performs delivery/closure, marks successful transitions
    in the queue, refreshes after decomposition, and continues.
 
 The workspace `.ralphie` tree contains repositories plus Ralphie's run state,
@@ -173,7 +181,10 @@ A normal issue execution obtains a durable per-issue artifact store at:
 The store prevents accidental overwrites and records readiness deferrals,
 complexity decisions, checkpoints, review attempts, commit messages, created
 commits, resolution proof, decomposition decisions, and created child-number
-mappings.
+mappings. Grounding/needs-attention, complexity, and resolution decisions carry
+the live issue timestamp, comment count, and comment version. Only matching
+fingerprints are reused; stale or legacy un-fingerprinted decisions are removed
+without disturbing other recovery artifacts.
 
 ## 4. Readiness, complexity assessment, and routing
 
@@ -198,8 +209,8 @@ complete evidence, questions, and artifact path; a matching persisted decision
 is reported as reused with agent work skipped. A new run discovers the
 still-open issue and assesses it again.
 
-`IssueExecutor` first reuses a persisted complexity decision when one exists.
-Otherwise `ComplexityAssessment`:
+`IssueExecutor` first reuses a persisted complexity decision when its freshness
+fingerprint matches the live issue. Otherwise `ComplexityAssessment`:
 
 1. captures the repository invariant and confirms the expected branch;
 2. creates a fresh read-only Pi session;

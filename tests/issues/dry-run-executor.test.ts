@@ -37,6 +37,8 @@ const context = (number: number): IssueExecutionContext => ({
         url: `issue/${number}`,
         body: "Assess this issue.",
         labels: [],
+        updatedAt: "2026-08-28T00:00:00.000Z",
+        commentCount: 1,
     },
     repository: "owner/repository",
     repositoryPath: "/workspace/repository",
@@ -250,8 +252,14 @@ describe("dry-run issue executor", () => {
             const persisted = makeIssueArtifactStoreService();
             const writable = await persisted.forIssue(42, scope);
             await writable.write(IssueArtifactKind.ComplexityDecision, {
-                complexity: ComplexityLevel.Level4,
-                rationale: "Previously assessed.",
+                decision: {
+                    complexity: ComplexityLevel.Level4,
+                    rationale: "Previously assessed.",
+                },
+                fingerprint: {
+                    updatedAt: "2026-08-28T00:00:00.000Z",
+                    commentCount: 1,
+                },
             });
             const path = join(
                 workspace,
@@ -292,6 +300,33 @@ describe("dry-run issue executor", () => {
                 kind: IssueExecutionOutcomeKind.Skipped,
                 route: "decomposition",
             });
+            let reassessments = 0;
+            const staleResult = await makeDryRunIssueExecutorService(
+                makeIssueArtifactStoreService(),
+                {
+                    assess: async () => {
+                        reassessments += 1;
+                        return {
+                            sessionID: "fresh-complexity",
+                            decision: {
+                                complexity: ComplexityLevel.Level2,
+                                rationale: "The issue changed.",
+                            },
+                        };
+                    },
+                },
+                makeProgressRecorder([]),
+            ).execute({
+                ...groundedContext(42),
+                issue: {
+                    ...groundedContext(42).issue,
+                    updatedAt: "2026-08-29T00:00:00.000Z",
+                },
+                workspace,
+                runId: "dry-run",
+            });
+            expect(staleResult).toMatchObject({ route: "implementation" });
+            expect(reassessments).toBe(1);
             expect(await Bun.file(path).text()).toBe(before);
         } finally {
             await rm(workspace, { recursive: true, force: true });

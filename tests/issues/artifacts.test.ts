@@ -13,6 +13,7 @@ import {
     ComplexityLevel,
     GroundingDisposition,
     ImplementationComplexityLevel,
+    IssueResolutionStatus,
     NeedsAttentionReason,
     ReviewFindingSeverity,
     ReviewVerdict,
@@ -22,6 +23,16 @@ const checkpoint = {
     branch: "main",
     sha: "0123456789abcdef0123456789abcdef01234567",
 } as const;
+
+const fingerprint = {
+    updatedAt: "2026-08-24T00:00:00.000Z",
+    commentCount: 2,
+} as const;
+
+const complexityArtifact = (decision: {
+    readonly complexity: ComplexityLevel;
+    readonly rationale: string;
+}) => ({ decision, fingerprint });
 
 const pullRequestReview = (attempt: number, overrides = {}) => ({
     pullRequestNumber: 42,
@@ -83,7 +94,10 @@ describe("per-issue artifact store", () => {
             ],
         };
 
-        await store.write(IssueArtifactKind.ComplexityDecision, complexity);
+        await store.write(
+            IssueArtifactKind.ComplexityDecision,
+            complexityArtifact(complexity),
+        );
         await store.write(IssueArtifactKind.IssueCheckpoint, checkpoint);
         await store.appendReview(review(1));
         await store.write(
@@ -99,7 +113,7 @@ describe("per-issue artifact store", () => {
         await store.recordCreatedIssue("second", 102);
 
         expect(await store.read(IssueArtifactKind.ComplexityDecision)).toEqual(
-            complexity,
+            complexityArtifact(complexity),
         );
         expect(await store.read(IssueArtifactKind.IssueCheckpoint)).toEqual(
             checkpoint,
@@ -128,13 +142,19 @@ describe("per-issue artifact store", () => {
             store.read(IssueArtifactKind.IssueCheckpoint),
         ).rejects.toThrow("has not been produced");
         await store.write(IssueArtifactKind.ComplexityDecision, {
-            complexity: ComplexityLevel.Level1,
-            rationale: "First decision.",
+            decision: {
+                complexity: ComplexityLevel.Level1,
+                rationale: "First decision.",
+            },
+            fingerprint,
         });
         await expect(
             store.write(IssueArtifactKind.ComplexityDecision, {
-                complexity: ComplexityLevel.Level2,
-                rationale: "Replacement decision.",
+                decision: {
+                    complexity: ComplexityLevel.Level2,
+                    rationale: "Replacement decision.",
+                },
+                fingerprint,
             }),
         ).rejects.toThrow("already been produced");
     });
@@ -308,7 +328,10 @@ describe("per-issue artifact store", () => {
                 complexity: ComplexityLevel.Level2,
                 rationale: "The change is localized.",
             };
-            await first.write(IssueArtifactKind.ComplexityDecision, complexity);
+            await first.write(
+                IssueArtifactKind.ComplexityDecision,
+                complexityArtifact(complexity),
+            );
             await first.appendReview(review(1));
             const persisted = await Bun.file(
                 join(
@@ -326,7 +349,7 @@ describe("per-issue artifact store", () => {
             const reloaded = await makeDurableIssueArtifactStore(42, scope);
             expect(
                 await reloaded.read(IssueArtifactKind.ComplexityDecision),
-            ).toEqual(complexity);
+            ).toEqual(complexityArtifact(complexity));
             expect(
                 await reloaded.read(IssueArtifactKind.ReviewAttempts),
             ).toEqual([review(1)]);
@@ -335,7 +358,7 @@ describe("per-issue artifact store", () => {
             expect(reset.has(IssueArtifactKind.ReviewAttempts)).toBe(false);
             expect(
                 await reset.read(IssueArtifactKind.ComplexityDecision),
-            ).toEqual(complexity);
+            ).toEqual(complexityArtifact(complexity));
         } finally {
             await rm(workspace, { recursive: true, force: true });
         }
@@ -349,10 +372,6 @@ describe("per-issue artifact store", () => {
                 runId: "run-freshness",
                 repository: "owner/repo",
             };
-            const fingerprint = {
-                updatedAt: "2026-08-24T00:00:00.000Z",
-                commentCount: 2,
-            } as const;
             const artifact = {
                 decision: {
                     disposition: GroundingDisposition.NeedsAttention,
@@ -398,7 +417,7 @@ describe("per-issue artifact store", () => {
                     "artifacts.json",
                 ),
             ).json();
-            expect(persisted.version).toBe(3);
+            expect(persisted.version).toBe(4);
             expect(persisted.artifacts).not.toHaveProperty(
                 IssueArtifactKind.NeedsAttentionDecision,
             );
@@ -407,7 +426,74 @@ describe("per-issue artifact store", () => {
         }
     });
 
-    test("atomically removes an invalid needs-attention fingerprint on load", async () => {
+    test("invalidates only issue-derived decisions when freshness changes", async () => {
+        const store = await makeIssueArtifactStore(42);
+        await store.write(
+            IssueArtifactKind.ComplexityDecision,
+            complexityArtifact({
+                complexity: ComplexityLevel.Level2,
+                rationale: "Previously assessed.",
+            }),
+        );
+        await store.write(IssueArtifactKind.IssueResolutionDecision, {
+            decision: {
+                status: IssueResolutionStatus.Resolved,
+                summary: "The issue was already resolved.",
+                evidence: ["Focused verification passed."],
+            },
+            fingerprint,
+        });
+        await store.write(IssueArtifactKind.NeedsAttentionDecision, {
+            decision: {
+                disposition: GroundingDisposition.NeedsAttention,
+                reason: NeedsAttentionReason.MissingInformation,
+                summary: "The target is unspecified.",
+                evidence: ["No target is named."],
+                questions: ["Which target should change?"],
+            },
+            fingerprint,
+        });
+        await store.write(IssueArtifactKind.IssueCheckpoint, checkpoint);
+        await store.appendReview(review(1));
+        await store.write(IssueArtifactKind.CreatedCommit, {
+            sha: "commit-sha",
+            treeSha: "tree-sha",
+        });
+        await store.recordCreatedIssue("child", 101);
+
+        expect(await store.invalidateStaleIssueDecisions(fingerprint)).toBe(
+            false,
+        );
+        expect(
+            await store.invalidateStaleIssueDecisions({
+                ...fingerprint,
+                commentVersion: "2026-08-29T00:00:00.000Z",
+            }),
+        ).toBe(true);
+
+        expect(store.has(IssueArtifactKind.ComplexityDecision)).toBe(false);
+        expect(store.has(IssueArtifactKind.IssueResolutionDecision)).toBe(
+            false,
+        );
+        expect(store.has(IssueArtifactKind.NeedsAttentionDecision)).toBe(false);
+        expect(await store.read(IssueArtifactKind.IssueCheckpoint)).toEqual(
+            checkpoint,
+        );
+        expect(await store.read(IssueArtifactKind.ReviewAttempts)).toEqual([
+            review(1),
+        ]);
+        expect(await store.read(IssueArtifactKind.CreatedCommit)).toEqual({
+            sha: "commit-sha",
+            treeSha: "tree-sha",
+        });
+        expect(await store.read(IssueArtifactKind.CreatedIssueNumbers)).toEqual(
+            {
+                child: 101,
+            },
+        );
+    });
+
+    test("atomically removes legacy and invalid issue decisions on load", async () => {
         const workspace = await mkdtemp(join(tmpdir(), "ralphie-artifacts-"));
         try {
             const path = join(
@@ -457,12 +543,7 @@ describe("per-issue artifact store", () => {
             expect(store.has(IssueArtifactKind.NeedsAttentionDecision)).toBe(
                 false,
             );
-            expect(
-                await store.read(IssueArtifactKind.ComplexityDecision),
-            ).toEqual({
-                complexity: ComplexityLevel.Level1,
-                rationale: "Keep this artifact.",
-            });
+            expect(store.has(IssueArtifactKind.ComplexityDecision)).toBe(false);
             expect((await Bun.file(path).json()).artifacts).not.toHaveProperty(
                 IssueArtifactKind.NeedsAttentionDecision,
             );
@@ -471,7 +552,7 @@ describe("per-issue artifact store", () => {
         }
     });
 
-    test("migrates version 2 durable artifacts without losing old values", async () => {
+    test("migrates version 2 artifacts without reusing legacy decisions", async () => {
         const workspace = await mkdtemp(join(tmpdir(), "ralphie-artifacts-"));
         try {
             const path = join(
@@ -494,6 +575,7 @@ describe("per-issue artifact store", () => {
                             complexity: ComplexityLevel.Level1,
                             rationale: "Legacy decision.",
                         },
+                        [IssueArtifactKind.IssueCheckpoint]: checkpoint,
                     },
                 }),
             );
@@ -501,13 +583,13 @@ describe("per-issue artifact store", () => {
                 workspace,
                 runId: "run-legacy",
             });
+            expect(loaded.has(IssueArtifactKind.ComplexityDecision)).toBe(
+                false,
+            );
             expect(
-                await loaded.read(IssueArtifactKind.ComplexityDecision),
-            ).toEqual({
-                complexity: ComplexityLevel.Level1,
-                rationale: "Legacy decision.",
-            });
-            expect((await Bun.file(path).json()).version).toBe(3);
+                await loaded.read(IssueArtifactKind.IssueCheckpoint),
+            ).toEqual(checkpoint);
+            expect((await Bun.file(path).json()).version).toBe(4);
         } finally {
             await rm(workspace, { recursive: true, force: true });
         }

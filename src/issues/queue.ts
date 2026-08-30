@@ -16,6 +16,7 @@ export enum IssueQueueState {
 export type IssueQueue = {
     readonly next: () => GitHubIssue | undefined;
     readonly complete: (issueNumber: number) => void;
+    readonly skip: (issueNumber: number) => void;
     readonly refresh: (issues: ReadonlyArray<QueuedIssue>) => number;
     readonly pendingCount: () => number;
     readonly processedCount: () => number;
@@ -77,6 +78,11 @@ export const createIssueQueue = (
             return ready.issue;
         },
         complete: (issueNumber) => {
+            known.add(issueNumber);
+            completed.add(issueNumber);
+        },
+        skip: (issueNumber) => {
+            processed = Math.max(0, processed - 1);
             known.add(issueNumber);
             completed.add(issueNumber);
         },

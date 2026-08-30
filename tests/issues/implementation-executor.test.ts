@@ -27,6 +27,7 @@ import {
 import type { WorkflowExecutorResult } from "../../src/issues/workflow-executor-input.ts";
 import { makeImplementationExecutorService } from "../../src/issues/implementation-executor.ts";
 import type { IssueVerificationService } from "../../src/issues/verification.ts";
+import type { ResolutionVerificationService } from "../../src/issues/resolution-verification.ts";
 import {
     type ReviewExhaustionOutcome,
     type IssueRecoveryService,
@@ -81,6 +82,8 @@ const issueContext = (
         url: "https://github.com/owner/repository/issues/42",
         body: "Refresh expired tokens.",
         labels: ["bug"],
+        updatedAt: "2026-08-28T00:00:00.000Z",
+        commentCount: 0,
     },
     repository: "owner/repository",
     repositoryPath: "/workspace/repository",
@@ -130,6 +133,7 @@ type ServiceOptions = {
     readonly remoteSafety?: Partial<GitRemoteSafetyService>;
     readonly safetyInputs?: GitRemoteSafetyInput[];
     readonly verification?: IssueVerificationService;
+    readonly resolutionVerification?: ResolutionVerificationService;
 };
 
 const services = (options: ServiceOptions = {}) => {
@@ -193,6 +197,7 @@ const services = (options: ServiceOptions = {}) => {
             recovery,
             progress,
             options.verification,
+            options.resolutionVerification,
         ),
         operations,
         recovery,
@@ -212,6 +217,55 @@ const run = async (
     });
 
 describe("implementation executor", () => {
+    test("reuses only a matching resolution decision", async () => {
+        const artifacts = await makeIssueArtifactStore(42);
+        const decision = {
+            status: IssueResolutionStatus.Resolved,
+            summary: "The issue is already resolved.",
+            evidence: ["Focused verification passed."],
+        };
+        await artifacts.write(IssueArtifactKind.IssueResolutionDecision, {
+            decision,
+            fingerprint: {
+                updatedAt: "2026-08-28T00:00:00.000Z",
+                commentCount: 0,
+            },
+        });
+        let verificationCalls = 0;
+        const setup = services({
+            operations: { hasStagedChanges: async () => false },
+            resolutionVerification: {
+                verify: async () => {
+                    verificationCalls += 1;
+                    return { sessionID: "resolution", decision };
+                },
+            },
+        });
+        const sessions: string[] = [];
+        const client = piClient([undefined], sessions);
+
+        const reused = await setup.executor.execute({
+            context: issueContext(client),
+            artifacts,
+        });
+        const changed = issueContext(client);
+        const refreshed = await setup.executor.execute({
+            context: {
+                ...changed,
+                issue: {
+                    ...changed.issue,
+                    commentVersion: "2026-08-29T00:00:00.000Z",
+                },
+            },
+            artifacts,
+        });
+
+        expect(reused).toMatchObject({ completion: "already-resolved" });
+        expect(refreshed).toMatchObject({ completion: "already-resolved" });
+        expect(verificationCalls).toBe(1);
+        expect(sessions).toHaveLength(1);
+    });
+
     test("implements, reviews, commits, and pushes after first-pass approval", async () => {
         const safetyInputs: GitRemoteSafetyInput[] = [];
         const setup = services({ safetyInputs });
