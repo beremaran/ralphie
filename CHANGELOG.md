@@ -35,10 +35,13 @@ All notable changes to Ralphie are documented here. The project follows
 - Discriminated top-level CLI configuration for issue,
   `maintain-issues`, and `get-pipelines-green` modes, including duplicate
   handling policy, bounded attempts, and strict pipeline timeout values.
-- Read-only issue grounding with a persisted needs-attention escape hatch, so
-  dependency-blocked issues remain open while later queue items continue.
-- An explicit `halt`/`continue` needs-attention policy, versioned run-state
-  migration, resume conflict protection, and handled exit status `2` for stops.
+- Read-only issue grounding with a persisted needs-attention deferral: blocked
+  issues keep their evidence, questions, and freshness fingerprint, remain
+  open, and are never closed or marked complete; complexity is never a
+  needs-attention reason.
+- An explicit `halt` (default) / `continue` needs-attention policy with
+  versioned run-state migration, resume conflict protection, exit status `2`
+  for handled stops and exit `0` only when `continue` drains the queue.
 - Confirmed needs-attention recovery that atomically preserves bounded,
   binary-safe worktree diagnostics before restoring and verifying the exact
   clean issue checkpoint.
@@ -65,7 +68,7 @@ All notable changes to Ralphie are documented here. The project follows
 - Refresh each issue before mandatory grounding, route actionable work through
   the existing complexity thresholds, require fresh concrete verification for
   already-resolved closure, and keep needs-attention outcomes out of closure
-  and PR delivery.
+  and PR delivery. Complexity is never a needs-attention reason.
 - Read container candidate digests from the supported Buildx action output,
   serialize every candidate contract field explicitly, and use the supported
   Intel macOS runner so release staging fails closed without hanging or writing
@@ -79,7 +82,8 @@ All notable changes to Ralphie are documented here. The project follows
 - Document the cross-mode display contract: interactive sticky footer and
   contextual Pi session output, periodic and lifecycle breadcrumbs, the
   `LIVE_OUTPUT_LIMIT` character threshold and human-preview defaults, active
-  leaf-stage status, append-only plain/CI output, failures-only quiet output,
+  leaf-stage status, append-only plain/CI output, quiet output limited to
+  failures and handled needs-attention stops,
   lossless JSON Lines without human breadcrumb records, and the independent
   durable progress-event log, including redaction and cleanup behavior.
 - Expose grounding and needs-attention decisions consistently across default,

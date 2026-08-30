@@ -241,6 +241,20 @@ export const needsAttentionHandoffArtifactSchema = z
     })
     .strict();
 
+const validatedArtifactSchemas: Partial<Record<IssueArtifactKind, z.ZodType>> =
+    {
+        [IssueArtifactKind.NeedsAttentionDecision]:
+            needsAttentionDecisionArtifactSchema,
+        [IssueArtifactKind.ComplexityDecision]:
+            complexityDecisionArtifactSchema,
+        [IssueArtifactKind.IssueResolutionDecision]:
+            issueResolutionDecisionArtifactSchema,
+        [IssueArtifactKind.ApprovedPullRequestReviewEvidence]:
+            approvedPullRequestReviewEvidenceSchema,
+        [IssueArtifactKind.NeedsAttentionHandoff]:
+            needsAttentionHandoffArtifactSchema,
+    };
+
 const createdCommitSchema = z.object({
     sha: z.string().min(1),
     treeSha: z.string().min(1),
@@ -651,18 +665,7 @@ const validateArtifactValue = (
     kind: IssueArtifactKind,
     value: unknown,
 ): void => {
-    const schema =
-        kind === IssueArtifactKind.NeedsAttentionDecision
-            ? needsAttentionDecisionArtifactSchema
-            : kind === IssueArtifactKind.ComplexityDecision
-              ? complexityDecisionArtifactSchema
-              : kind === IssueArtifactKind.IssueResolutionDecision
-                ? issueResolutionDecisionArtifactSchema
-                : kind === IssueArtifactKind.ApprovedPullRequestReviewEvidence
-                  ? approvedPullRequestReviewEvidenceSchema
-                  : kind === IssueArtifactKind.NeedsAttentionHandoff
-                    ? needsAttentionHandoffArtifactSchema
-                    : undefined;
+    const schema = validatedArtifactSchemas[kind];
     if (!schema) return;
     try {
         schema.parse(value);

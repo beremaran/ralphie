@@ -205,12 +205,15 @@ one of three dispositions:
   changed or invalid fingerprint is atomically invalidated before grounding is
   rerun.
 
-An unfinished prerequisite uses the `external_dependency` reason. A deferred
-outcome advances the current queue, while an ordinary failed outcome still
-halts the run. Progress emits the grounding decision with its policy and
-complete evidence, questions, and artifact path; a matching persisted decision
-is reported as reused with agent work skipped. A new run discovers the
-still-open issue and assesses it again.
+An unfinished prerequisite uses the `external_dependency` reason. Complexity,
+difficulty, size, slowness, or uncertainty are never valid needs-attention
+reasons; the source issue always remains open across every deferral. A deferred
+outcome follows the `--on-needs-attention` policy: `halt` (the default) keeps
+the issue pending and exits `2`, while `continue` advances the current queue.
+An ordinary failed outcome still halts the run. Progress emits the grounding
+decision with its policy and complete evidence, questions, and artifact path; a
+matching persisted decision is reported as reused with agent work skipped. A
+new run discovers the still-open issue and assesses it again.
 
 An unresolved, uncertain, malformed, or failed already-resolved verification is
 a failed non-completion. It does not invoke complexity, implementation, or
@@ -248,7 +251,9 @@ flowchart LR
 ```
 
 Structured decision sessions deny edits/writes and mutating Git/GitHub
-commands. Every decision task is schema-validated; invalid output or Pi
+commands, and Pi sessions cannot close issues, create or merge pull requests,
+or push: Ralphie's deterministic domain services perform every Git and GitHub
+mutation. Every decision task is schema-validated; invalid output or Pi
 failure becomes a failed issue outcome without proceeding to the next
 operation.
 
@@ -432,7 +437,7 @@ The cross-mode guarantees are:
 | --- | --- |
 | Interactive | Pi transcript scrollback plus one periodically refreshed sticky footer; completed milestones and lifecycle breadcrumbs remain durable rows. |
 | Plain and CI | Append-only human-readable lines. No ANSI cursor controls are emitted, so logs do not require terminal repainting. |
-| `--output quiet` | Failures only; routine progress and Pi transcript rows are suppressed. |
+| `--output quiet` | Failures and handled needs-attention stops only; routine progress and Pi transcript rows are suppressed. |
 | `--output json` | One parseable JSON object per line on stdout: progress records and lossless `pi_event` records (apart from credential redaction). Human headers, footers, and breadcrumb lines are not emitted. |
 | Durable event log | Redacted progress events are written independently to `events.jsonl` in the run directory, regardless of the renderer. |
 

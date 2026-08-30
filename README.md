@@ -109,7 +109,8 @@ lines/2,400 characters by default, or 40 lines/8,000 characters with
 `--output verbose`; these are not limits on the structured stream.
 
 Outside an interactive terminal—including CI—plain output is append-only and
-uses no ANSI cursor controls. Quiet output reports failures only. JSON output is
+uses no ANSI cursor controls. Quiet output reports failures and handled
+needs-attention stops only. JSON output is
 JSON Lines on stdout: each line is a parseable progress record or a lossless
 `pi_event` record, without
 human breadcrumb lines. The redacted durable progress-event log remains at
@@ -123,21 +124,58 @@ and its log, while failed runs retain diagnostics for recovery.
 ## How issue routing works
 
 Every selected open issue is refreshed from GitHub, then receives a read-only
-grounding decision. Issues that need attention retain their evidence and
-freshness fingerprint and remain open; actionable issues receive a complexity
-score:
+grounding decision:
 
-- scores **0–3** enter implementation, review, deterministic verification, and
-  delivery;
-- scores **4–5**, and implementation that exhausts its review budget, enter
-  decomposition into linked child issues; and
-- already-resolved issues close only after a separate fresh verifier returns a
-  nonblank summary and concrete evidence; and
-- needs-attention issues never enter closure or PR delivery, while unresolved
-  or uncertain verification fails safely without closing or deferring them.
+```mermaid
+flowchart TD
+    A[Refreshed live issue] --> G[Read-only grounding]
+    G -->|actionable| C[Complexity 0-5]
+    G -->|already_resolved| V[Fresh read-only resolution verifier]
+    G -->|needs_attention| D{--on-needs-attention}
+    D -->|halt default| H[Handled stop, exit 2, resumable]
+    D -->|continue| Q[Leave open, continue queue]
+    C -->|0-3| I[Implementation, review, delivery]
+    C -->|4-5| X[Decomposition]
+    V -->|resolved with evidence| O[Complete as already-resolved]
+    V -->|unresolved or uncertain| F[Fail safely, leave open]
+```
+
+- **Actionable** issues receive a complexity score: **0–3** enter
+  implementation, review, deterministic verification, and delivery; **4–5**,
+  and implementation that exhausts its review budget, enter decomposition into
+  linked child issues.
+- **Already-resolved** issues close only after a separate fresh verifier
+  returns a nonblank summary and concrete evidence; unresolved or uncertain
+  verification fails safely without closing or deferring the issue.
+- **Needs attention** issues are never closed, marked complete, or delivered:
+  Ralphie persists the decision with its reason, summary, evidence, questions,
+  and an issue-freshness fingerprint (`updatedAt`, comment count, and comment
+  version) in the per-issue artifact store, and progress events carry the same
+  fields plus the artifact path, policy, and queue position. Complexity,
+  difficulty, size, or uncertainty are never valid needs-attention reasons, and
+  the source issue always remains open.
+
+`--on-needs-attention halt` (the default) keeps the issue in the run state's
+pending queue, emits a handled-stop summary, and exits with code `2`; the run
+resumes later with `--resume`, reusing the persisted decision only while the
+issue's fingerprint still matches. `continue` defers the issue, processes the
+rest of the queue, and exits `0` when the queue drains. Both policies consume
+the attempt against `--max-issues`. An explicit `--notify-needs-attention`
+opt-in (with optional `--needs-attention-label`) publishes one idempotent
+structured comment and label per issue, saved as resumable intent before any
+GitHub mutation; dry runs never notify.
+
+`--dry-run` grounds every issue, reports all three routes, and performs no
+implementation, checkout mutation, Git or GitHub mutation, issue closure, or PR
+delivery. Pi sessions never close issues, create or merge pull requests, or
+push: every Git and GitHub mutation is performed by Ralphie's deterministic
+domain services, and agent sessions are denied mutating Git and GitHub
+commands.
 
 See [Workflows](./docs/workflows.md) for the full routing, implementation,
-decomposition, and delivery contracts.
+decomposition, and delivery contracts, and
+[Operations and recovery](./docs/operations-and-recovery.md) for the exact
+state, artifact, progress, and exit-code contracts.
 
 ## Documentation
 

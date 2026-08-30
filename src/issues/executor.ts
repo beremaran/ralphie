@@ -11,6 +11,7 @@ import {
     ComplexityLevel,
     type ComplexityDecision,
     GroundingDisposition,
+    type IssueResolutionDecision,
     IssueResolutionStatus,
     resolutionVerificationDecisionSchema,
 } from "./decisions.ts";
@@ -30,6 +31,21 @@ export type IssueExecutorService = {
         context: IssueExecutionContext,
     ) => Promise<IssueExecutionOutcome>;
 };
+
+const alreadyResolvedOutcome = (
+    decision: IssueResolutionDecision,
+): IssueExecutionOutcome =>
+    decision.status === IssueResolutionStatus.Resolved
+        ? {
+              kind: IssueExecutionOutcomeKind.Completed,
+              completion: "already-resolved",
+              resolutionSummary: decision.summary,
+              evidence: decision.evidence,
+          }
+        : {
+              kind: IssueExecutionOutcomeKind.Failed,
+              message: `Issue remains unresolved after fresh resolution verification: ${decision.summary}`,
+          };
 
 /** Assess one issue, retain the decision, then route it to its concrete workflow. */
 export const makeIssueExecutorService = (
@@ -56,17 +72,9 @@ export const makeIssueExecutorService = (
                 );
                 if (routed !== undefined) return routed;
             }
-            const parsed = resolutionVerificationDecisionSchema.safeParse(
+            const decision = resolutionVerificationDecisionSchema.parse(
                 result.decision,
             );
-            if (!parsed.success) {
-                return {
-                    kind: IssueExecutionOutcomeKind.Failed,
-                    message:
-                        "Fresh resolution verification returned invalid evidence.",
-                };
-            }
-            const decision = parsed.data;
             if (!artifacts.has(IssueArtifactKind.IssueResolutionDecision)) {
                 await artifacts.write(
                     IssueArtifactKind.IssueResolutionDecision,
@@ -76,17 +84,7 @@ export const makeIssueExecutorService = (
                     },
                 );
             }
-            return decision.status === IssueResolutionStatus.Resolved
-                ? {
-                      kind: IssueExecutionOutcomeKind.Completed,
-                      completion: "already-resolved",
-                      resolutionSummary: decision.summary,
-                      evidence: decision.evidence,
-                  }
-                : {
-                      kind: IssueExecutionOutcomeKind.Failed,
-                      message: `Issue remains unresolved after fresh resolution verification: ${decision.summary}`,
-                  };
+            return alreadyResolvedOutcome(decision);
         } catch (error) {
             return {
                 kind: IssueExecutionOutcomeKind.Failed,
