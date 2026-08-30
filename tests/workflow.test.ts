@@ -80,6 +80,7 @@ type TestRuntimeOptions = {
     readonly failPiReadyProgress?: boolean;
     readonly executionContexts?: IssueExecutionContext[];
     readonly executeGate?: (context: IssueExecutionContext) => Promise<void>;
+    readonly refreshedIssues?: Readonly<Record<number, GitHubIssue>>;
     readonly needsAttentionNotification?: GitHubNeedsAttentionNotificationService;
     readonly dryRunOutcome?: IssueExecutionOutcome;
     readonly onStateSave?: (state: RunState) => void;
@@ -160,6 +161,7 @@ const testRuntime = (
             refreshIndex += 1;
             return (
                 configured ??
+                options.refreshedIssues?.[issueNumber] ??
                 issueLists
                     .flat()
                     .find(({ number }) => number === issueNumber) ??
@@ -362,6 +364,7 @@ const testRuntime = (
         issueArtifactStore: artifactStore,
         complexityAssessment: {} as never,
         groundingAssessment: {} as never,
+        resolutionVerification: {} as never,
         decompositionExecutor: {} as never,
         implementationExecutor: {} as never,
         dryRunIssueExecutor,
@@ -1074,6 +1077,34 @@ describe("workflow", () => {
         ).rejects.toMatchObject({ _tag: "NeedsAttentionStop" });
 
         expect(contexts[0]?.issue).toEqual(currentIssue);
+    });
+
+    test("refreshes the selected issue before branch preparation and execution", async () => {
+        const calls: string[] = [];
+        const refreshedIssue = {
+            ...firstIssue,
+            body: "Current issue body",
+            updatedAt: "2026-08-29T00:00:00.000Z",
+            commentCount: 2,
+            commentVersion: "2026-08-29T00:00:00.000Z",
+        };
+        const contexts: IssueExecutionContext[] = [];
+
+        await workflow(
+            { ...baseOptions, workflow: WorkflowMode.Pr },
+            testRuntime(calls, [], {
+                refreshedIssues: { 42: refreshedIssue },
+                executionContexts: contexts,
+            }),
+        );
+
+        expect(contexts[0]?.issue).toEqual(refreshedIssue);
+        expect(calls.indexOf("refreshIssue:42")).toBeLessThan(
+            calls.indexOf("prepareFeatureBranch:ralphie/issue-42:develop"),
+        );
+        expect(calls.indexOf("refreshIssue:42")).toBeLessThan(
+            calls.findIndex((call) => call.startsWith("executeIssue:42:")),
+        );
     });
 
     test.each([

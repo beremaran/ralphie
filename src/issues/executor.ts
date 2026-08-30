@@ -11,6 +11,8 @@ import {
     ComplexityLevel,
     type ComplexityDecision,
     GroundingDisposition,
+    IssueResolutionStatus,
+    resolutionVerificationDecisionSchema,
 } from "./decisions.ts";
 import type {
     IssueExecutionContext,
@@ -20,6 +22,7 @@ import { IssueExecutionOutcomeKind } from "./execution.ts";
 import type { DecompositionExecutorService } from "./decomposition-executor.ts";
 import type { ImplementationExecutorService } from "./implementation-executor.ts";
 import type { GroundingAssessmentService } from "./grounding.ts";
+import type { ResolutionVerificationService } from "./resolution-verification.ts";
 
 export type IssueExecutorService = {
     readonly execute: (
@@ -33,14 +36,56 @@ export const makeIssueExecutorService = (
     complexityAssessment: ComplexityAssessmentService,
     implementationExecutor: ImplementationExecutorService,
     decompositionExecutor: DecompositionExecutorService,
-    groundingAssessment?: GroundingAssessmentService,
+    groundingAssessment: GroundingAssessmentService,
+    resolutionVerification: ResolutionVerificationService,
     progress?: ProgressReporterService,
 ): IssueExecutorService => {
+    const verifyAlreadyResolved = async (
+        context: IssueExecutionContext,
+        artifacts: Awaited<ReturnType<IssueArtifactStoreService["forIssue"]>>,
+    ): Promise<IssueExecutionOutcome> => {
+        try {
+            const result = await resolutionVerification.verify(context);
+            const parsed = resolutionVerificationDecisionSchema.safeParse(
+                result.decision,
+            );
+            if (!parsed.success) {
+                return {
+                    kind: IssueExecutionOutcomeKind.Failed,
+                    message:
+                        "Fresh resolution verification returned invalid evidence.",
+                };
+            }
+            const decision = parsed.data;
+            if (!artifacts.has(IssueArtifactKind.IssueResolutionDecision)) {
+                await artifacts.write(
+                    IssueArtifactKind.IssueResolutionDecision,
+                    decision,
+                );
+            }
+            return decision.status === IssueResolutionStatus.Resolved
+                ? {
+                      kind: IssueExecutionOutcomeKind.Completed,
+                      completion: "already-resolved",
+                      resolutionSummary: decision.summary,
+                      evidence: decision.evidence,
+                  }
+                : {
+                      kind: IssueExecutionOutcomeKind.Failed,
+                      message: `Issue remains unresolved after fresh resolution verification: ${decision.summary}`,
+                  };
+        } catch (error) {
+            return {
+                kind: IssueExecutionOutcomeKind.Failed,
+                message: `Fresh resolution verification failed: ${error instanceof Error ? error.message : String(error)}`,
+            };
+        }
+    };
+
     const assessGrounding = async (
         context: IssueExecutionContext,
         artifacts: Awaited<ReturnType<IssueArtifactStoreService["forIssue"]>>,
     ): Promise<IssueExecutionOutcome | undefined> => {
-        if (groundingAssessment === undefined) return undefined;
         const fingerprint = issueFreshnessFingerprint(context.issue);
         if (artifacts.has(IssueArtifactKind.NeedsAttentionDecision)) {
             await progress?.emit({
@@ -71,8 +116,11 @@ export const makeIssueExecutorService = (
             };
         }
         const { decision } = await groundingAssessment.assess(context);
-        if (decision.disposition !== GroundingDisposition.NeedsAttention) {
+        if (decision.disposition === GroundingDisposition.Actionable) {
             return undefined;
+        }
+        if (decision.disposition === GroundingDisposition.AlreadyResolved) {
+            return await verifyAlreadyResolved(context, artifacts);
         }
         await artifacts.write(IssueArtifactKind.NeedsAttentionDecision, {
             decision,

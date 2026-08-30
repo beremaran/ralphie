@@ -59,6 +59,10 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Changed
 
+- Refresh each issue before mandatory grounding, route actionable work through
+  the existing complexity thresholds, require fresh concrete verification for
+  already-resolved closure, and keep needs-attention outcomes out of closure
+  and PR delivery.
 - Read container candidate digests from the supported Buildx action output,
   serialize every candidate contract field explicitly, and use the supported
   Intel macOS runner so release staging fails closed without hanging or writing

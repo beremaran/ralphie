@@ -1118,6 +1118,24 @@ export const workflow = async (
                 issue.number,
                 outcomes,
             );
+            const refreshedIssue =
+                resumedClosureOutcome === undefined
+                    ? await track(
+                          progress,
+                          "issue-discovery",
+                          `Refreshing issue #${issue.number} before grounding...`,
+                          () =>
+                              githubIssues.refresh(octokit, repo, issue.number),
+                          `Issue #${issue.number} refreshed for grounding.`,
+                          {
+                              issue: {
+                                  number: issue.number,
+                                  title: issue.title,
+                              },
+                          },
+                      )
+                    : issue;
+            activeQueueIssues.set(issue.number, refreshedIssue);
             activeIssue = {
                 issueNumber: issue.number,
                 stage:
@@ -1139,7 +1157,7 @@ export const workflow = async (
                 : restoreIssueCheckout(issueBaseCheckout);
             await persistState(RunStateStatus.Active, activeIssue);
             return {
-                issue,
+                issue: refreshedIssue,
                 current,
                 total,
                 featureBranch,

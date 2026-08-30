@@ -125,9 +125,9 @@ flowchart TD
     B -->|yes| F["Dequeue issue; refresh its live GitHub snapshot"]
     F --> T{"Still open with every required label?"}
     T -->|no| M["Record durable skip; complete queue item"]
-    T -->|yes| G["Charge budget; use prepared repository checkout"]
-    G --> H["For PR mode, seed-push feature branch"]
-    H --> I["IssueExecutor or DryRunIssueExecutor"]
+    T -->|yes| G["Charge budget; mark active"]
+    G --> H["Use prepared checkout; create local PR branch when needed"]
+    H --> I["Ground issue, then route outcome"]
     I --> J{"Outcome"}
     J -->|completed| K["Issue closure / PR delivery"]
     J -->|decomposed or escalated| L["Mark complete; refresh open issue queue"]
@@ -155,12 +155,13 @@ For each dequeued issue, the worker:
 2. Replaces the queued snapshot with the refreshed title, body, labels,
    comments, and freshness metadata, then saves the current checkout invariant
    (`branch` and `HEAD`) and active issue in run state.
-3. In `pr` (but not dry-run), creates or resumes
-   `ralphie/issue-<number>` and pushes that branch non-force before agent work.
-4. Passes the issue, concrete repository path, target branch, Octokit client,
+3. In `pr` (but not dry-run), creates or resumes the local
+   `ralphie/issue-<number>` checkout. It does not push the branch unless
+   actionable work completes with a commit.
+4. Passes the refreshed issue, concrete repository path, target branch, Octokit client,
    shared Pi client, model selection, diagnostics, invariant service, and
    AbortSignal to the selected issue executor.
-5. Persists the outcome, performs delivery/closure, marks successful transitions
+5. Persists the outcome, performs delivery/closure only for completed outcomes, marks successful transitions
    in the queue, refreshes after decomposition, and continues.
 
 The workspace `.ralphie` tree contains repositories plus Ralphie's run state,
@@ -188,14 +189,16 @@ without disturbing other recovery artifacts.
 
 ## 4. Readiness, complexity assessment, and routing
 
-Before complexity routing, `IssueExecutor` starts a read-only structured
+After the per-issue live refresh and before reading even a cached complexity
+decision, `IssueExecutor` starts a read-only structured
 grounding session. In dry-run mode, `DryRunIssueExecutor` uses the same
 read-only grounding contract and stops after reporting its route. It returns
 one of three dispositions:
 
 - `actionable`: proceed normally;
-- `already_resolved`: proceed to the existing implementation/no-change proof
-  path; or
+- `already_resolved`: start a distinct fresh, read-only resolution verifier;
+  complete only when it returns `resolved` with a nonblank summary and at least
+  one concrete evidence item; or
 - `needs_attention`: persist a summary, evidence, questions, and issue freshness
   fingerprint, then defer the issue without closing it or marking its dependency
   complete. A matching durable fingerprint is reused without agent work; a
@@ -209,8 +212,14 @@ complete evidence, questions, and artifact path; a matching persisted decision
 is reported as reused with agent work skipped. A new run discovers the
 still-open issue and assesses it again.
 
-`IssueExecutor` first reuses a persisted complexity decision when its freshness
-fingerprint matches the live issue. Otherwise `ComplexityAssessment`:
+An unresolved, uncertain, malformed, or failed already-resolved verification is
+a failed non-completion. It does not invoke complexity, implementation, or
+decomposition, does not become `needs_attention`, and leaves the source issue
+open under the normal failure policy.
+
+For an actionable disposition, `IssueExecutor` reuses a persisted complexity
+decision when its freshness fingerprint matches the live issue. Otherwise
+`ComplexityAssessment`:
 
 1. captures the repository invariant and confirms the expected branch;
 2. creates a fresh read-only Pi session;
@@ -227,10 +236,15 @@ unreachable:
 
 ```mermaid
 flowchart LR
-    A["Validated complexity decision"] --> B{"Complexity"}
-    B -->|0-3| C["ImplementationExecutor"]
-    B -->|4-5| D["DecompositionExecutor"]
-    C -->|review exhaustion| D
+    A["Live issue refresh"] --> B["Read-only grounding"]
+    B -->|actionable| C["Validated or cached complexity"]
+    B -->|already resolved| D["Fresh resolution verification"]
+    B -->|needs attention| E["Persist fingerprint; leave open"]
+    C -->|0-3| F["ImplementationExecutor"]
+    C -->|4-5| G["DecompositionExecutor"]
+    F -->|review exhaustion| G
+    D -->|resolved with evidence| H["Completed: already-resolved"]
+    D -->|otherwise| I["Failed; leave open"]
 ```
 
 Structured decision sessions deny edits/writes and mutating Git/GitHub
@@ -357,6 +371,14 @@ the queue.
 | `pr` | `ralphie/issue-<number>` in the main checkout | Push feature branch, create/find matching PR, publish stored review attempts as marked comments, merge, and verify merged state | PR body contains `Closes #<issue>`; GitHub closes the issue on merge. The serial run restores the base checkout afterward. |
 | `--dry-run` | Prepared normal checkout | Ground the issue, then assess complexity and report implementation or decomposition when actionable; report already-resolved and needs-attention routes otherwise. No implementation, decomposition, delivery, commit, push, checkout, issue, or PR mutation | No issue is closed. The result is `skipped` except needs-attention, which remains a needs-attention outcome. |
 
+Only a `completed` outcome enters delivery or source-issue closure. A
+needs-attention outcome is retained in run state but is not added to completed
+issue numbers: `lgtm` does not close it, and `pr` does not push its feature
+branch, create or review a pull request, merge, or close it. The base checkout
+is restored before the queue continues. A verifier-proven `already-resolved`
+completion may close directly in either delivery mode because it has no commit
+to deliver.
+
 The direct-push path never uses force. A push rejection is authoritative: the
 created commit and artifacts are retained, the run halts, and resume can
 reconcile a commit that may already have reached the remote.
@@ -467,7 +489,10 @@ On `--resume`:
 
 Examples of resumable boundaries:
 
-- a saved complexity decision is reused;
+- after fresh grounding returns actionable, a saved complexity decision is
+  reused;
+- a saved needs-attention decision is reused only while its issue-update and
+  comment fingerprint still matches the refreshed issue;
 - a checkpoint plus created commit can finish a push without rerunning the
   implementation/review loop;
 - an active `issue-closure` with a completed outcome resumes closure without

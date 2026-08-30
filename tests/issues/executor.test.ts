@@ -11,6 +11,7 @@ import type { ComplexityAssessmentService } from "../../src/issues/complexity.ts
 import {
     ComplexityLevel,
     GroundingDisposition,
+    IssueResolutionStatus,
     NeedsAttentionReason,
 } from "../../src/issues/decisions.ts";
 import type { DecompositionExecutorService } from "../../src/issues/decomposition-executor.ts";
@@ -20,6 +21,7 @@ import {
     type IssueExecutionContext,
 } from "../../src/issues/execution.ts";
 import { makeIssueExecutorService } from "../../src/issues/executor.ts";
+import type { GroundingAssessmentService } from "../../src/issues/grounding.ts";
 import type { ImplementationExecutorService } from "../../src/issues/implementation-executor.ts";
 import { RalphieError } from "../../src/shared/error.ts";
 import {
@@ -39,6 +41,19 @@ const context = (number: number): IssueExecutionContext =>
             commentCount: 0,
         },
     }) as unknown as IssueExecutionContext;
+
+const actionableGrounding = {
+    assess: async () => ({
+        sessionID: "grounding-session",
+        decision: { disposition: GroundingDisposition.Actionable },
+    }),
+} satisfies GroundingAssessmentService;
+
+const unusedResolutionVerification = {
+    verify: async () => {
+        throw new Error("resolution verification must not run");
+    },
+};
 
 describe("IssueExecutor", () => {
     test("reuses matching grounding across a durable resumed run", async () => {
@@ -80,6 +95,7 @@ describe("IssueExecutor", () => {
                         },
                     },
                     grounding,
+                    unusedResolutionVerification,
                     makeProgressRecorder(events),
                 );
             const input = {
@@ -161,6 +177,7 @@ describe("IssueExecutor", () => {
                     };
                 },
             },
+            unusedResolutionVerification,
         );
         const base = {
             ...context(42),
@@ -175,7 +192,7 @@ describe("IssueExecutor", () => {
                 commentVersion: "2026-08-28T00:00:00.000Z",
             },
             repository: "owner/repo",
-            workspace: "/tmp/ralphie-grounding",
+            workspace: `/tmp/ralphie-grounding-${crypto.randomUUID()}`,
             runId: "run-1",
         } as IssueExecutionContext;
 
@@ -194,6 +211,7 @@ describe("IssueExecutor", () => {
 
     test("defers a dependency-blocked issue before complexity or implementation", async () => {
         let routed = false;
+        const workspace = `/tmp/ralphie-${crypto.randomUUID()}`;
         const stores = makeIssueArtifactStoreService();
         const executor = makeIssueExecutorService(
             stores,
@@ -229,6 +247,7 @@ describe("IssueExecutor", () => {
                     },
                 }),
             },
+            unusedResolutionVerification,
         );
         const result = await executor.execute({
             ...context(42),
@@ -242,7 +261,7 @@ describe("IssueExecutor", () => {
                 commentCount: 0,
             },
             repository: "owner/repo",
-            workspace: "/tmp/ralphie",
+            workspace,
             runId: "run-1",
         });
 
@@ -253,7 +272,7 @@ describe("IssueExecutor", () => {
         });
         expect(routed).toBe(false);
         const artifact = await stores.forIssue(42, {
-            workspace: "/tmp/ralphie",
+            workspace,
             runId: "run-1",
             repository: "owner/repo",
         });
@@ -315,6 +334,8 @@ describe("IssueExecutor", () => {
                 assessment,
                 implementation,
                 decomposition,
+                actionableGrounding,
+                unusedResolutionVerification,
             );
             const result = await executor.execute(context(complexity + 1));
             const artifacts = await stores.forIssue(complexity + 1);
@@ -337,6 +358,7 @@ describe("IssueExecutor", () => {
 
     test("reuses a persisted complexity decision when retrying an issue", async () => {
         let assessmentCalls = 0;
+        let groundingCalls = 0;
         let implementationCalls = 0;
         const stores = makeIssueArtifactStoreService();
         const executor = makeIssueExecutorService(
@@ -368,10 +390,23 @@ describe("IssueExecutor", () => {
                     childIssueNumbers: [],
                 }),
             },
+            {
+                assess: async () => {
+                    groundingCalls += 1;
+                    return {
+                        sessionID: `grounding-${groundingCalls}`,
+                        decision: {
+                            disposition: GroundingDisposition.Actionable,
+                        },
+                    };
+                },
+            },
+            unusedResolutionVerification,
         );
         await executor.execute(context(42));
         await executor.execute(context(42));
         expect(assessmentCalls).toBe(1);
+        expect(groundingCalls).toBe(2);
         expect(implementationCalls).toBe(2);
     });
 
@@ -439,6 +474,8 @@ describe("IssueExecutor", () => {
                     throw new Error("must not run");
                 },
             },
+            actionableGrounding,
+            unusedResolutionVerification,
         ).execute(context(42));
         expect(outcome).toEqual({
             kind: IssueExecutionOutcomeKind.Failed,
@@ -472,6 +509,8 @@ describe("IssueExecutor", () => {
                     childIssueNumbers: [101, 102],
                 }),
             },
+            actionableGrounding,
+            unusedResolutionVerification,
         ).execute(context(42));
         expect(outcome).toEqual({
             kind: IssueExecutionOutcomeKind.Escalated,
@@ -480,4 +519,130 @@ describe("IssueExecutor", () => {
             childIssueNumbers: [101, 102],
         });
     });
+
+    test("verifies an already-resolved grounding decision before completion", async () => {
+        const calls: string[] = [];
+        const stores = makeIssueArtifactStoreService();
+        const outcome = await makeIssueExecutorService(
+            stores,
+            {
+                assess: async () => {
+                    calls.push("complexity");
+                    throw new Error("must not assess complexity");
+                },
+            },
+            {
+                execute: async () => {
+                    calls.push("implementation");
+                    throw new Error("must not implement");
+                },
+            },
+            {
+                execute: async () => {
+                    calls.push("decomposition");
+                    throw new Error("must not decompose");
+                },
+            },
+            {
+                assess: async () => {
+                    calls.push("grounding");
+                    return {
+                        sessionID: "grounding-session",
+                        decision: {
+                            disposition: GroundingDisposition.AlreadyResolved,
+                        },
+                    };
+                },
+            },
+            {
+                verify: async () => {
+                    calls.push("verification");
+                    return {
+                        sessionID: "verification-session",
+                        decision: {
+                            status: IssueResolutionStatus.Resolved,
+                            summary: "The requested behavior is present.",
+                            evidence: ["The focused regression test passes."],
+                        },
+                    };
+                },
+            },
+        ).execute(context(42));
+
+        expect(calls).toEqual(["grounding", "verification"]);
+        expect(outcome).toEqual({
+            kind: IssueExecutionOutcomeKind.Completed,
+            completion: "already-resolved",
+            resolutionSummary: "The requested behavior is present.",
+            evidence: ["The focused regression test passes."],
+        });
+        const artifacts = await stores.forIssue(42);
+        expect(
+            artifacts.has(IssueArtifactKind.IssueResolutionDecision),
+        ).toBeTrue();
+    });
+
+    test.each([
+        {
+            name: "unresolved",
+            verify: async () => ({
+                sessionID: "verification-session",
+                decision: {
+                    status: IssueResolutionStatus.Unresolved,
+                    summary: "The bug still reproduces.",
+                    evidence: ["The regression test fails."],
+                },
+            }),
+        },
+        {
+            name: "invalid",
+            verify: async () => ({
+                sessionID: "verification-session",
+                decision: {
+                    status: "uncertain",
+                    summary: "No conclusion.",
+                    evidence: [],
+                },
+            }),
+        },
+        {
+            name: "thrown",
+            verify: async () => {
+                throw new Error("verifier unavailable");
+            },
+        },
+    ])(
+        "keeps an already-resolved issue open for $name verification",
+        async ({ verify }) => {
+            const outcome = await makeIssueExecutorService(
+                makeIssueArtifactStoreService(),
+                {
+                    assess: async () => {
+                        throw new Error("must not assess complexity");
+                    },
+                },
+                {
+                    execute: async () => {
+                        throw new Error("must not implement");
+                    },
+                },
+                {
+                    execute: async () => {
+                        throw new Error("must not decompose");
+                    },
+                },
+                {
+                    assess: async () => ({
+                        sessionID: "grounding-session",
+                        decision: {
+                            disposition: GroundingDisposition.AlreadyResolved,
+                        },
+                    }),
+                },
+                { verify } as never,
+            ).execute(context(42));
+
+            expect(outcome.kind).toBe(IssueExecutionOutcomeKind.Failed);
+        },
+    );
 });

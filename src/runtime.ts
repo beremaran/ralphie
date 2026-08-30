@@ -112,7 +112,7 @@ export type RalphieRuntime = {
     readonly complexityAssessment: ComplexityAssessmentService;
     readonly groundingAssessment: GroundingAssessmentService;
     /** Shared fresh, read-only resolution verifier for issue routes. */
-    readonly resolutionVerification?: ResolutionVerificationService;
+    readonly resolutionVerification: ResolutionVerificationService;
     readonly decompositionExecutor: DecompositionExecutorService;
     readonly implementationExecutor: ImplementationExecutorService;
     readonly dryRunIssueExecutor: DryRunIssueExecutorService;
@@ -193,6 +193,7 @@ export const makeLiveRuntime = ({
         implementationExecutor,
         decompositionExecutor,
         groundingAssessment,
+        resolutionVerification,
         progress,
     );
     return {

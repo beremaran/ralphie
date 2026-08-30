@@ -16,7 +16,11 @@ import {
 import { makeGitRepositoryInvariantService } from "../../src/git/repository-invariant.ts";
 import { makeIssueArtifactStoreService } from "../../src/issues/artifacts.ts";
 import { makeComplexityAssessmentService } from "../../src/issues/complexity.ts";
-import { ComplexityLevel, ReviewVerdict } from "../../src/issues/decisions.ts";
+import {
+    ComplexityLevel,
+    GroundingDisposition,
+    ReviewVerdict,
+} from "../../src/issues/decisions.ts";
 import type { DecompositionExecutorService } from "../../src/issues/decomposition-executor.ts";
 import {
     type IssueCompletionKind,
@@ -228,6 +232,19 @@ describe("local implementation end-to-end", () => {
                 complexity,
                 implementation,
                 decomposition,
+                {
+                    assess: async () => ({
+                        sessionID: "grounding-session",
+                        decision: {
+                            disposition: GroundingDisposition.Actionable,
+                        },
+                    }),
+                },
+                {
+                    verify: async () => {
+                        throw new Error("resolution verification must not run");
+                    },
+                },
             );
             const outcome = await executor.execute(
                 makeContext(

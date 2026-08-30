@@ -8,6 +8,7 @@ import {
 } from "../../src/issues/artifacts.ts";
 import {
     ComplexityLevel,
+    GroundingDisposition,
     ImplementationComplexityLevel,
 } from "../../src/issues/decisions.ts";
 import { makeDecompositionExecutorService } from "../../src/issues/decomposition-executor.ts";
@@ -203,6 +204,17 @@ test("runs the real decomposition workflow against a disposable in-memory GitHub
             },
         },
         decomposition,
+        {
+            assess: async () => ({
+                sessionID: "grounding-session",
+                decision: { disposition: GroundingDisposition.Actionable },
+            }),
+        },
+        {
+            verify: async () => {
+                throw new Error("resolution verification must not run");
+            },
+        },
     );
     const result = await executor.execute(context(fake.client));
     const mapping = await artifacts.read(IssueArtifactKind.CreatedIssueNumbers);

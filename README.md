@@ -122,15 +122,19 @@ and its log, while failed runs retain diagnostics for recovery.
 
 ## How issue routing works
 
-Every matching open issue first receives a read-only readiness decision. Issues
-that need attention remain open; actionable issues receive a complexity score:
+Every selected open issue is refreshed from GitHub, then receives a read-only
+grounding decision. Issues that need attention retain their evidence and
+freshness fingerprint and remain open; actionable issues receive a complexity
+score:
 
 - scores **0–3** enter implementation, review, deterministic verification, and
   delivery;
 - scores **4–5**, and implementation that exhausts its review budget, enter
   decomposition into linked child issues; and
-- already-resolved and blocked issues are handled explicitly rather than being
-  silently skipped.
+- already-resolved issues close only after a separate fresh verifier returns a
+  nonblank summary and concrete evidence; and
+- needs-attention issues never enter closure or PR delivery, while unresolved
+  or uncertain verification fails safely without closing or deferring them.
 
 See [Workflows](./docs/workflows.md) for the full routing, implementation,
 decomposition, and delivery contracts.

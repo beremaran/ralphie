@@ -11,6 +11,7 @@ import {
 import { makeComplexityAssessmentService } from "../../src/issues/complexity.ts";
 import {
     ComplexityLevel,
+    GroundingDisposition,
     ImplementationComplexityLevel,
 } from "../../src/issues/decisions.ts";
 import { makeDecompositionExecutorService } from "../../src/issues/decomposition-executor.ts";
@@ -335,6 +336,17 @@ describe("mocked end-to-end issue workflows", () => {
                         kind: IssueExecutionOutcomeKind.Decomposed,
                         childIssueNumbers: [101, 102],
                     };
+                },
+            },
+            {
+                assess: async () => ({
+                    sessionID: "grounding-session",
+                    decision: { disposition: GroundingDisposition.Actionable },
+                }),
+            },
+            {
+                verify: async () => {
+                    throw new Error("resolution verification must not run");
                 },
             },
         );
