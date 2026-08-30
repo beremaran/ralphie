@@ -24,6 +24,8 @@ export type PiTranscriptRendererOptions = {
     readonly width?: () => number;
     /** Current sanitized workflow state, sampled when a session header opens. */
     readonly getDisplayState?: () => DisplayState;
+    /** Called after a session header has been measured. */
+    readonly onSessionStart?: () => void;
 };
 
 /** A transcript listener with coordinator-facing stream-boundary hooks. */
@@ -286,6 +288,7 @@ const makeTranscriptWriter = (
     styles: TranscriptStyles,
     getDisplayState?: () => DisplayState,
     resetLineMeter?: () => void,
+    onSessionStart?: () => void,
 ): {
     readonly beginSession: (context: PiEventContext) => void;
     readonly ensureSession: (context: PiEventContext) => void;
@@ -346,6 +349,7 @@ const makeTranscriptWriter = (
         );
         sessionOpen = true;
         hasBlock = false;
+        onSessionStart?.();
     };
 
     const ensureSession = (context: PiEventContext): void => {
@@ -839,6 +843,7 @@ export const makePiTranscriptRenderer = ({
     verbose = false,
     width = () => process.stderr.columns ?? 100,
     getDisplayState,
+    onSessionStart,
 }: PiTranscriptRendererOptions): PiTranscriptRenderer => {
     const styles: TranscriptStyles = colors
         ? {
@@ -867,6 +872,7 @@ export const makePiTranscriptRenderer = ({
         styles,
         getDisplayState,
         lineMeter.reset,
+        onSessionStart,
     );
     const toolStates = new Map<string, ToolExecutionState>();
 

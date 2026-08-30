@@ -4,6 +4,13 @@ import type {
     PiSessionEvent,
 } from "../pi/client.ts";
 import {
+    arbitrateBreadcrumbCandidates,
+    breadcrumbCandidateFor,
+    makeBreadcrumbPolicy,
+    type BreadcrumbArbitrationCandidate,
+    type BreadcrumbPolicy,
+} from "./breadcrumb.ts";
+import {
     prepareBreadcrumbCandidate,
     type BreadcrumbLabelCandidate,
     type SanitizedBreadcrumb,
@@ -32,7 +39,12 @@ import {
 export type ProgressCoordinatorOptions = Omit<
     ProgressRendererOptions,
     "output"
->;
+> & {
+    /** Visible transcript rows required between breadcrumb opportunities. */
+    readonly breadcrumbThreshold?: number;
+    /** Alias for callers that use a generic cadence threshold. */
+    readonly threshold?: number;
+};
 
 /**
  * The shared presentation boundary for one workflow run.
@@ -61,6 +73,7 @@ const transcriptFor = (
     options: ProgressCoordinatorOptions,
     output: ProgressOutput,
     getDisplayState: () => DisplayState,
+    onSessionStart: () => void,
 ): PiTranscriptRenderer | undefined => {
     if (options.mode === "quiet") return undefined;
     return makePiTranscriptRenderer({
@@ -70,6 +83,110 @@ const transcriptFor = (
         verbose: options.verbose,
         width: options.width,
         getDisplayState,
+        onSessionStart,
+    });
+};
+
+const lifecycleBreadcrumbEvent = (event: PiSessionEvent): boolean => {
+    switch (event.type) {
+        case "tool_execution_end":
+        case "compaction_start":
+        case "compaction_end":
+        case "auto_retry_start":
+        case "auto_retry_end":
+        case "summarization_retry_scheduled":
+        case "summarization_retry_attempt_start":
+        case "summarization_retry_finished":
+            return true;
+        case "agent_end":
+            return event.willRetry;
+        default:
+            return false;
+    }
+};
+
+const closesTranscriptSession = (event: PiSessionEvent): boolean =>
+    event.type === "agent_end" || event.type === "agent_settled";
+
+const policyCandidateFor = (
+    candidate: BreadcrumbLabelCandidate,
+    visibleLinePosition: number,
+): BreadcrumbArbitrationCandidate["candidate"] => ({
+    visibleLinePosition,
+    key: candidate.canonicalKey,
+});
+
+const considerBreadcrumbEvent = (input: {
+    readonly policy: BreadcrumbPolicy;
+    readonly transcript: PiTranscriptRenderer;
+    readonly candidate: BreadcrumbLabelCandidate;
+    readonly visibleLinePosition: number;
+    readonly lifecycle: boolean;
+}): void => {
+    const policyCandidate = policyCandidateFor(
+        input.candidate,
+        input.visibleLinePosition,
+    );
+    const candidates: BreadcrumbArbitrationCandidate[] = [
+        ...(input.lifecycle
+            ? [{ kind: "lifecycle" as const, candidate: policyCandidate }]
+            : []),
+        { kind: "periodic", candidate: policyCandidate },
+    ];
+    const result = arbitrateBreadcrumbCandidates(input.policy, candidates);
+    if (result.emitted === undefined) return;
+    input.transcript.insertBreadcrumb(input.candidate);
+    input.policy.rebase(input.transcript.getVisibleLineCount());
+};
+
+const considerClosingBreadcrumb = (input: {
+    readonly policy: BreadcrumbPolicy;
+    readonly transcript: PiTranscriptRenderer | undefined;
+    readonly candidate: BreadcrumbLabelCandidate | undefined;
+    readonly before: number;
+    readonly closesSession: boolean;
+    readonly lifecycle: boolean;
+}): void => {
+    if (
+        input.transcript === undefined ||
+        input.candidate === undefined ||
+        !input.closesSession ||
+        !input.lifecycle
+    ) {
+        return;
+    }
+    considerBreadcrumbEvent({
+        policy: input.policy,
+        transcript: input.transcript,
+        candidate: input.candidate,
+        visibleLinePosition: input.before,
+        lifecycle: input.lifecycle,
+    });
+};
+
+const considerRenderedBreadcrumb = (input: {
+    readonly policy: BreadcrumbPolicy;
+    readonly transcript: PiTranscriptRenderer | undefined;
+    readonly candidate: BreadcrumbLabelCandidate | undefined;
+    readonly eventOutputBaseline: number;
+    readonly closesSession: boolean;
+    readonly lifecycle: boolean;
+}): void => {
+    if (
+        input.transcript === undefined ||
+        input.candidate === undefined ||
+        input.closesSession
+    ) {
+        return;
+    }
+    const after = input.transcript.getVisibleLineCount();
+    if (after <= input.eventOutputBaseline) return;
+    considerBreadcrumbEvent({
+        policy: input.policy,
+        transcript: input.transcript,
+        candidate: input.candidate,
+        visibleLinePosition: after,
+        lifecycle: input.lifecycle,
     });
 };
 
@@ -86,14 +203,56 @@ export const makeProgressCoordinator = (
         output,
     });
     const now = options.now ?? (() => new Date());
+    const breadcrumbPolicy = makeBreadcrumbPolicy({
+        ...(options.breadcrumbThreshold === undefined
+            ? {}
+            : { breadcrumbThreshold: options.breadcrumbThreshold }),
+        ...(options.threshold === undefined
+            ? {}
+            : { threshold: options.threshold }),
+    });
     let state = createDisplayState();
-    const transcript = transcriptFor(options, output, () => state);
+    let eventOutputBaseline = 0;
+    let transcript: PiTranscriptRenderer | undefined;
+    transcript = transcriptFor(
+        options,
+        output,
+        () => state,
+        () => {
+            eventOutputBaseline = transcript?.getVisibleLineCount() ?? 0;
+            breadcrumbPolicy.reset(eventOutputBaseline);
+        },
+    );
     let disposed = false;
 
     const piListener: PiEventListener = (event, context) => {
         if (disposed) return;
+        const before = transcript?.getVisibleLineCount() ?? 0;
+        eventOutputBaseline = before;
         state = reducePiSessionEvent(state, event, context, now);
+        const candidate =
+            transcript === undefined
+                ? undefined
+                : breadcrumbCandidateFor(state);
+        const lifecycle = lifecycleBreadcrumbEvent(event);
+        const closesSession = closesTranscriptSession(event);
+        considerClosingBreadcrumb({
+            policy: breadcrumbPolicy,
+            transcript,
+            candidate,
+            before,
+            closesSession,
+            lifecycle,
+        });
         transcript?.(event, context);
+        considerRenderedBreadcrumb({
+            policy: breadcrumbPolicy,
+            transcript,
+            candidate,
+            eventOutputBaseline,
+            closesSession,
+            lifecycle,
+        });
     };
 
     const progress: ProgressReporterService = {

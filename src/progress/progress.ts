@@ -455,6 +455,7 @@ export type {
 } from "./footer.ts";
 export {
     DEFAULT_BREADCRUMB_THRESHOLD,
+    arbitrateBreadcrumbCandidates,
     breadcrumbCandidateFor,
     breadcrumbCandidateFromDisplayState,
     breadcrumbForDisplayState,
@@ -498,6 +499,9 @@ export type {
     BreadcrumbPolicyResult,
     BreadcrumbPolicyState,
     SanitizedBreadcrumb,
+    BreadcrumbArbitrationCandidate,
+    BreadcrumbArbitrationResult,
+    BreadcrumbCandidateKind,
 } from "./breadcrumb.ts";
 export {
     makeDisplayCoordinator,

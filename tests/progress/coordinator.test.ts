@@ -11,6 +11,38 @@ const context = {
 
 const event = (value: unknown): PiSessionEvent => value as PiSessionEvent;
 
+const makeBreadcrumbCoordinator = (threshold = 4) => {
+    let output = "";
+    const coordinator = makeProgressCoordinator({
+        mode: "plain",
+        verbose: false,
+        colors: false,
+        breadcrumbThreshold: threshold,
+        write: (text) => {
+            output += text;
+        },
+    });
+    return {
+        coordinator,
+        get output() {
+            return output;
+        },
+    };
+};
+
+const primeRows = (
+    coordinator: ReturnType<typeof makeProgressCoordinator>,
+    text = "one\ntwo",
+): void => {
+    coordinator.listener(
+        event({
+            type: "message_update",
+            assistantMessageEvent: { type: "text_delta", delta: text },
+        }),
+        context,
+    );
+};
+
 describe("progress output coordinator", () => {
     test("updates display state before rendering either stream", async () => {
         let coordinator: ReturnType<typeof makeProgressCoordinator>;
@@ -267,5 +299,240 @@ describe("progress output coordinator", () => {
 
         expect(output).toEndWith("unfinished\n");
         expect(output.match(/unfinished/g)).toHaveLength(1);
+    });
+
+    test("prefers a tool-completion breadcrumb over the periodic candidate", () => {
+        const harness = makeBreadcrumbCoordinator(3);
+        harness.coordinator.listener(
+            event({
+                type: "tool_execution_start",
+                toolCallId: "tool-1",
+                toolName: "bash",
+                args: { command: "printf output" },
+            }),
+            context,
+        );
+        harness.coordinator.listener(
+            event({
+                type: "tool_execution_update",
+                toolCallId: "tool-1",
+                toolName: "bash",
+                partialResult: {
+                    content: [{ type: "text", text: "output\n" }],
+                },
+            }),
+            context,
+        );
+        harness.coordinator.listener(
+            event({
+                type: "tool_execution_end",
+                toolCallId: "tool-1",
+                toolName: "bash",
+                isError: false,
+                result: { content: [{ type: "text", text: "output\n" }] },
+            }),
+            context,
+        );
+
+        expect(harness.output.match(/› Waiting/g)).toHaveLength(1);
+
+        const insufficient = makeBreadcrumbCoordinator(3);
+        insufficient.coordinator.listener(
+            event({
+                type: "tool_execution_start",
+                toolCallId: "tool-empty",
+                toolName: "bash",
+                args: {},
+            }),
+            context,
+        );
+        insufficient.coordinator.listener(
+            event({
+                type: "tool_execution_end",
+                toolCallId: "tool-empty",
+                toolName: "bash",
+                isError: false,
+                result: { content: [] },
+            }),
+            context,
+        );
+        expect(insufficient.output).not.toContain("› Waiting");
+    });
+
+    test("emits one breadcrumb for a long tool result and does not reuse its backlog", () => {
+        const harness = makeBreadcrumbCoordinator(4);
+        harness.coordinator.listener(
+            event({
+                type: "tool_execution_start",
+                toolCallId: "tool-long",
+                toolName: "read",
+                args: { path: "src/index.ts" },
+            }),
+            context,
+        );
+        harness.coordinator.listener(
+            event({
+                type: "tool_execution_end",
+                toolCallId: "tool-long",
+                toolName: "read",
+                isError: false,
+                result: {
+                    content: [
+                        {
+                            type: "text",
+                            text: Array.from(
+                                { length: 20 },
+                                (_, index) => `line ${index + 1}`,
+                            ).join("\n"),
+                        },
+                    ],
+                },
+            }),
+            context,
+        );
+        harness.coordinator.listener(
+            event({ type: "compaction_start", reason: "threshold" }),
+            context,
+        );
+
+        expect(harness.output.match(/› Waiting/g)).toHaveLength(1);
+        expect(harness.output).not.toContain("› Compacting context");
+    });
+
+    test("emits a compaction-start candidate only when new rows are sufficient", () => {
+        const eligible = makeBreadcrumbCoordinator();
+        primeRows(eligible.coordinator);
+        eligible.coordinator.listener(
+            event({ type: "compaction_start", reason: "threshold" }),
+            context,
+        );
+        expect(eligible.output).toContain("› Compacting context");
+
+        const ineligible = makeBreadcrumbCoordinator();
+        primeRows(ineligible.coordinator, "one");
+        ineligible.coordinator.listener(
+            event({ type: "compaction_start", reason: "threshold" }),
+            context,
+        );
+        expect(ineligible.output).not.toContain("› Compacting context");
+    });
+
+    test("emits a compaction-end candidate only when new rows are sufficient", () => {
+        const eligible = makeBreadcrumbCoordinator();
+        primeRows(eligible.coordinator);
+        eligible.coordinator.listener(
+            event({
+                type: "compaction_end",
+                reason: "threshold",
+                result: undefined,
+                aborted: false,
+                willRetry: false,
+            }),
+            context,
+        );
+        expect(eligible.output).toContain("› Waiting");
+
+        const ineligible = makeBreadcrumbCoordinator();
+        primeRows(ineligible.coordinator, "one");
+        ineligible.coordinator.listener(
+            event({
+                type: "compaction_end",
+                reason: "threshold",
+                result: undefined,
+                aborted: false,
+                willRetry: false,
+            }),
+            context,
+        );
+        expect(ineligible.output).not.toContain("› Waiting");
+    });
+
+    test("emits auto-retry start and end candidates independently", () => {
+        const start = makeBreadcrumbCoordinator();
+        primeRows(start.coordinator);
+        start.coordinator.listener(
+            event({
+                type: "auto_retry_start",
+                attempt: 1,
+                maxAttempts: 2,
+                delayMs: 10,
+                errorMessage: "temporary",
+            }),
+            context,
+        );
+        expect(start.output).toContain("› Retrying");
+
+        const end = makeBreadcrumbCoordinator();
+        primeRows(end.coordinator);
+        end.coordinator.listener(
+            event({
+                type: "auto_retry_end",
+                success: true,
+                attempt: 1,
+            }),
+            context,
+        );
+        expect(end.output).toContain("› Waiting");
+
+        const insufficient = makeBreadcrumbCoordinator();
+        primeRows(insufficient.coordinator, "one");
+        insufficient.coordinator.listener(
+            event({
+                type: "auto_retry_end",
+                success: true,
+                attempt: 1,
+            }),
+            context,
+        );
+        expect(insufficient.output).not.toContain("› Waiting");
+    });
+
+    test("covers every summarization retry boundary and source variant", () => {
+        const events: ReadonlyArray<{
+            readonly event: PiSessionEvent;
+            readonly label: string;
+        }> = [
+            {
+                event: event({
+                    type: "summarization_retry_scheduled",
+                    attempt: 1,
+                    maxAttempts: 2,
+                    delayMs: 10,
+                    errorMessage: "temporary",
+                }),
+                label: "› Retrying",
+            },
+            {
+                event: event({
+                    type: "summarization_retry_attempt_start",
+                    source: "branchSummary",
+                }),
+                label: "› Retrying",
+            },
+            {
+                event: event({
+                    type: "summarization_retry_attempt_start",
+                    source: "compaction",
+                    reason: "overflow",
+                }),
+                label: "› Retrying",
+            },
+            {
+                event: event({ type: "summarization_retry_finished" }),
+                label: "› Waiting",
+            },
+        ];
+
+        for (const retryEvent of events) {
+            const eligible = makeBreadcrumbCoordinator();
+            primeRows(eligible.coordinator);
+            eligible.coordinator.listener(retryEvent.event, context);
+            expect(eligible.output.match(retryEvent.label)).toHaveLength(1);
+
+            const ineligible = makeBreadcrumbCoordinator();
+            primeRows(ineligible.coordinator, "one");
+            ineligible.coordinator.listener(retryEvent.event, context);
+            expect(ineligible.output).not.toContain(retryEvent.label);
+        }
     });
 });

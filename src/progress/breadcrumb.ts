@@ -277,6 +277,65 @@ export type BreadcrumbPolicy = {
     ) => boolean;
     /** Reset line accounting at a new visible-line accounting boundary. */
     readonly reset: (renderedOutputBaseline?: number) => void;
+    /** Rebase after inserting a breadcrumb without clearing its adjacent key. */
+    readonly rebase: (renderedOutputBaseline: number) => void;
+};
+
+export type BreadcrumbCandidateKind = "lifecycle" | "periodic";
+
+export type BreadcrumbArbitrationCandidate = {
+    readonly kind: BreadcrumbCandidateKind;
+    readonly candidate: BreadcrumbCandidateInput;
+};
+
+export type BreadcrumbArbitrationResult = {
+    readonly decisions: ReadonlyArray<{
+        readonly kind: BreadcrumbCandidateKind;
+        readonly decision: BreadcrumbPolicyDecision;
+    }>;
+    readonly emitted?: {
+        readonly kind: BreadcrumbCandidateKind;
+        readonly decision: BreadcrumbPolicyDecision;
+    };
+    readonly state: BreadcrumbPolicyState;
+};
+
+/**
+ * Consider lifecycle work before periodic work at one rendered boundary.
+ *
+ * Both candidates are evaluated against the same policy state and position.
+ * The first emission wins; the second consideration can still consume a
+ * duplicate crossing, but cannot fund another breadcrumb from that interval.
+ */
+export const arbitrateBreadcrumbCandidates = (
+    policy: BreadcrumbPolicy,
+    candidates: ReadonlyArray<BreadcrumbArbitrationCandidate>,
+): BreadcrumbArbitrationResult => {
+    const ordered = [...candidates].sort((left, right) =>
+        left.kind === right.kind ? 0 : left.kind === "lifecycle" ? -1 : 1,
+    );
+    const decisions: Array<{
+        readonly kind: BreadcrumbCandidateKind;
+        readonly decision: BreadcrumbPolicyDecision;
+    }> = [];
+    let emitted:
+        | {
+              readonly kind: BreadcrumbCandidateKind;
+              readonly decision: BreadcrumbPolicyDecision;
+          }
+        | undefined;
+    for (const { kind, candidate } of ordered) {
+        const decision = policy.consider(candidate);
+        decisions.push({ kind, decision });
+        if (emitted === undefined && decision.emit) {
+            emitted = { kind, decision };
+        }
+    }
+    return {
+        decisions,
+        ...(emitted === undefined ? {} : { emitted }),
+        state: policy.getState(),
+    };
 };
 
 /** Create a stateful policy adapter for the transcript/coordinator seam. */
@@ -299,6 +358,25 @@ export const makeBreadcrumbPolicy = (
         return result.decision;
     };
 
+    const reset = (renderedOutputBaseline = 0): void => {
+        state = stateFor({
+            renderedOutputBaseline,
+            processedPeriodicCrossings: 0,
+        });
+    };
+
+    const rebase = (renderedOutputBaseline: number): void => {
+        const normalized = nonNegativeSafeInteger(
+            renderedOutputBaseline,
+            "renderedOutputBaseline",
+        );
+        state = {
+            ...state,
+            renderedOutputBaseline: normalized,
+            processedPeriodicCrossings: 0,
+        };
+    };
+
     return {
         breadcrumbThreshold,
         getState: () => state,
@@ -306,12 +384,8 @@ export const makeBreadcrumbPolicy = (
         consider,
         evaluate: consider,
         shouldEmit: (candidateInput, key) => consider(candidateInput, key).emit,
-        reset: (renderedOutputBaseline = 0) => {
-            state = stateFor({
-                renderedOutputBaseline,
-                processedPeriodicCrossings: 0,
-            });
-        },
+        reset,
+        rebase,
     };
 };
 
