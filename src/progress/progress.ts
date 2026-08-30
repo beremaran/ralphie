@@ -443,6 +443,18 @@ export type {
     DisplayTimestamp,
 } from "./display-state.ts";
 export {
+    createTerminalBoundaryTracker,
+    createTerminalStreamBoundaryTracker,
+    makeTerminalBoundaryTracker,
+    makeTerminalStreamBoundaryTracker,
+} from "./terminal-stream-boundary.ts";
+export type {
+    TerminalBoundaryState,
+    TerminalBoundaryTracker,
+    TerminalStreamBoundaryState,
+    TerminalStreamBoundaryTracker,
+} from "./terminal-stream-boundary.ts";
+export {
     clipFooter,
     makeFooterRefreshScheduler,
     renderFooter,
