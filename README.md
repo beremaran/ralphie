@@ -28,7 +28,11 @@ For task-oriented details, start with the [documentation index](./docs/README.md
 - **Fresh-context review loops** — implementation, review, and review-fix work
   run in separate Pi sessions to reduce context bias.
 - **Deterministic delivery** — Ralphie stages, inspects, commits, and pushes the
-  resulting changes itself; agents do not own the delivery protocol.
+  resulting changes itself; agents do not own the delivery protocol. In `pr`
+  mode, merged delivery is a **check gate**: the pull request is merged only
+  after the checks for its exact head SHA reach a stable green snapshot, the
+  head is re-read immediately before merging, and a moved head invalidates the
+  saved decision.
 - **Crash-safe recovery** — versioned run state, issue checkpoints, artifacts,
   and idempotent reconciliation make interrupted runs resumable.
 - **Observable, bounded autonomy** — transcripts, progress, JSON Lines output,
@@ -120,6 +124,15 @@ other unsafe display text are redacted or sanitized at the reporting boundary.
 See [Operations and recovery](./docs/operations-and-recovery.md) for output,
 resume, and cleanup details; successful `--clean end` removes the workspace
 and its log, while failed runs retain diagnostics for recovery.
+
+PR delivery surfaces as `pr-gate` progress events: registration with the pull
+request number and exact head SHA, poll progress only for meaningful check
+transitions (registration, checked-in, disappeared, status changes), head
+invalidation, and terminal success or failure with the check summary and
+reason. Human and verbose output name the PR number, exact SHA, check summary,
+and reason; JSON events carry the structured normalized check snapshot and
+a timestamp; unchanged polls never emit, and quiet output suppresses the
+routine gate milestones while still reporting gate failures.
 
 ## How issue routing works
 

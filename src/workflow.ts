@@ -28,7 +28,9 @@ import {
 import type { PiRuntime } from "./pi/server.ts";
 import type { GitHubPullRequest } from "./github/pull-requests.ts";
 import type {
+    PipelineObservationOutcome,
     PipelineObservationResult,
+    PipelineObservationTransition,
     PipelineSnapshot,
 } from "./github/pipeline-observation.ts";
 import {
@@ -1300,6 +1302,134 @@ export const workflow = async (
 
         const nowIso = (): string => new Date().toISOString();
 
+        const prGateIssue = (
+            issueContext: WorkflowIssueContext,
+        ): ProgressUpdate["issue"] => ({
+            number: issueContext.issue.number,
+            title: issueContext.issue.title,
+        });
+
+        /** Emit a typed `pr-gate` progress event for the active PR gate. */
+        const emitPrGate = async (
+            issueContext: WorkflowIssueContext,
+            status: ProgressStatus,
+            message: string,
+            details?: Readonly<Record<string, unknown>>,
+        ): Promise<void> => {
+            await progress.emit({
+                stage: "pr-gate",
+                status,
+                message,
+                issue: prGateIssue(issueContext),
+                current: issueContext.current,
+                total: issueContext.total,
+                ...(details === undefined ? {} : { details }),
+            });
+        };
+
+        /** Render a normalized item key as a human-readable provider/name. */
+        const itemLabel = (key: string): string => {
+            const [source, provider, name] = key.split("\u0000");
+            return source === undefined ||
+                provider === undefined ||
+                name === undefined
+                ? key
+                : `${provider}/${name}`;
+        };
+
+        const itemLabels = (keys: ReadonlyArray<string>): string =>
+            keys.map(itemLabel).join(", ");
+
+        /** Poll progress is emitted only for meaningful state transitions. */
+        const transitionMessage = (
+            pullRequestNumber: number,
+            headSha: string,
+            transition: PipelineObservationTransition,
+        ): string => {
+            const prefix = `PR #${pullRequestNumber} head ${headSha}`;
+            switch (transition.kind) {
+                case "registration":
+                    return `${prefix}: no checks visible; waiting for registration.`;
+                case "registered":
+                    return `${prefix}: ${transition.itemCount} check${transition.itemCount === 1 ? "" : "s"} registered.`;
+                case "checked-in":
+                    return `${prefix}: new checks registered: ${itemLabels(transition.items)}.`;
+                case "disappeared":
+                    return `${prefix}: checks disappeared: ${itemLabels(transition.items)}.`;
+                case "status-changed":
+                    return `${prefix}: ${itemLabel(transition.item)} changed ${transition.from} -> ${transition.to}.`;
+            }
+        };
+
+        /** Compact human summary of a normalized check snapshot. */
+        const checkSummaryFor = (
+            snapshot: PipelineSnapshot | undefined,
+        ): string => {
+            if (snapshot === undefined) return "no snapshot";
+            if (snapshot.state === "empty")
+                return `${snapshot.reason} (no checks)`;
+            const counts = new Map<string, number>();
+            for (const item of snapshot.items)
+                counts.set(item.status, (counts.get(item.status) ?? 0) + 1);
+            const statuses = [...counts.entries()]
+                .map(([status, count]) =>
+                    count === 1 ? status : `${status} x${count}`,
+                )
+                .join(", ");
+            return `${snapshot.reason} (${statuses})`;
+        };
+
+        /** Terminal gate message with PR number, exact SHA, and reason. */
+        const observationTerminalMessage = (
+            pullRequest: GitHubPullRequest,
+            outcome: PipelineObservationOutcome,
+        ): string => {
+            const head = pullRequest.headSha;
+            switch (outcome.kind) {
+                case "green":
+                    return `Checks passed for PR #${pullRequest.number} head ${head} in ${outcome.elapsedMs}ms (${outcome.polls} polls): ${checkSummaryFor(outcome.snapshot)}.`;
+                case "failed":
+                    if (outcome.reason === "failing")
+                        return `Checks are failing for PR #${pullRequest.number} head ${head}: ${checkSummaryFor(outcome.snapshot)}.`;
+                    if (outcome.reason === "cancelled")
+                        return `Checks were cancelled for PR #${pullRequest.number} head ${head}: ${checkSummaryFor(outcome.snapshot)}.`;
+                    return `Check observation failed for PR #${pullRequest.number} head ${head}: ${outcome.message ?? "no message"}.`;
+                case "no-pipelines-discovered":
+                    return `No pipelines registered for PR #${pullRequest.number} head ${head} within ${outcome.elapsedMs}ms.`;
+                case "timeout":
+                    return `Check observation timed out for PR #${pullRequest.number} head ${head} after ${outcome.elapsedMs}ms (${outcome.polls} polls).`;
+                case "aborted":
+                    return `Check observation cancelled for PR #${pullRequest.number} head ${head}.`;
+                case "stale":
+                    return `Branch head invalidated while observing PR #${pullRequest.number} head ${outcome.observedSha}: ${outcome.headBefore} -> ${outcome.headAfter}.`;
+            }
+        };
+
+        /** Terminal gate event carrying the structured snapshot and timestamps. */
+        const emitPrGateObservationTerminal = async (
+            issueContext: WorkflowIssueContext,
+            pullRequest: GitHubPullRequest,
+            result: PipelineObservationResult,
+        ): Promise<void> => {
+            const outcome = result.outcome;
+            const status = gateStatusForObservation(outcome);
+            const snapshot = snapshotForObservation(outcome);
+            await emitPrGate(
+                issueContext,
+                status === "green" ? "succeeded" : "failed",
+                observationTerminalMessage(pullRequest, outcome),
+                {
+                    pullRequestNumber: pullRequest.number,
+                    observedHeadSha: pullRequest.headSha,
+                    gate: status,
+                    elapsedMs: outcome.elapsedMs,
+                    polls: outcome.polls,
+                    terminalReason: terminalReasonForObservation(outcome),
+                    ...(snapshot === undefined ? {} : { snapshot }),
+                },
+            );
+        };
+
         /** Atomically replace the persisted PR closure gate for the issue. */
         const setPrClosure = async (
             issueContext: WorkflowIssueContext,
@@ -1331,6 +1461,10 @@ export const workflow = async (
                 pullRequestNumber: pullRequest.number,
                 observedHeadSha: pullRequest.headSha,
                 gate: "merged",
+                // Retain the green observation snapshot as merge evidence.
+                ...(prClosure?.snapshot === undefined
+                    ? {}
+                    : { snapshot: prClosure.snapshot }),
                 ...(terminalReason === undefined ? {} : { terminalReason }),
             });
 
@@ -1371,6 +1505,22 @@ export const workflow = async (
                 },
                 options: PR_GATE_OBSERVATION_OPTIONS,
                 signal,
+                onTransition: (transition) => {
+                    void emitPrGate(
+                        issueContext,
+                        "info",
+                        transitionMessage(
+                            pullRequest.number,
+                            pullRequest.headSha,
+                            transition,
+                        ),
+                        {
+                            pullRequestNumber: pullRequest.number,
+                            observedHeadSha: pullRequest.headSha,
+                            transition,
+                        },
+                    ).catch(() => undefined);
+                },
             });
         };
 
@@ -1476,6 +1626,11 @@ export const workflow = async (
                 gate: status,
                 ...observationEvidence(outcome, status),
             });
+            await emitPrGateObservationTerminal(
+                issueContext,
+                pullRequest,
+                result,
+            );
             if (status === "green") return;
             if (status === "aborted" && signal?.aborted === true) {
                 checkCancellation(signal);
@@ -1563,22 +1718,63 @@ export const workflow = async (
          * its green state. A failed, cancelled, timed-out, absent, unknown,
          * closed, or already-merged gate never merges or closes the issue.
          */
+        /** Record and report an already-merged PR gate without a new merge call. */
+        const recordMergedGateEvent = async (
+            issueContext: WorkflowIssueContext,
+            pullRequest: GitHubPullRequest,
+            message: string,
+            terminalReason?: string,
+        ): Promise<void> => {
+            await recordMergedPrClosure(
+                issueContext,
+                pullRequest,
+                terminalReason,
+            );
+            await emitPrGate(issueContext, "succeeded", message, {
+                pullRequestNumber: pullRequest.number,
+                observedHeadSha: pullRequest.headSha,
+                gate: "merged",
+            });
+        };
+
+        /** Record and report a closed-without-merge PR gate. */
+        const recordClosedGateEvent = async (
+            issueContext: WorkflowIssueContext,
+            pullRequest: GitHubPullRequest,
+            message: string,
+            terminalReason: string,
+        ): Promise<void> => {
+            await recordClosedPrClosure(
+                issueContext,
+                pullRequest,
+                terminalReason,
+            );
+            await emitPrGate(issueContext, "failed", message, {
+                pullRequestNumber: pullRequest.number,
+                observedHeadSha: pullRequest.headSha,
+                gate: "closed",
+                terminalReason,
+            });
+        };
+
         const gatePullRequest = async (
             issueContext: WorkflowIssueContext,
             pullRequest: GitHubPullRequest,
         ): Promise<"reconciled" | undefined> => {
             if (pullRequest.merged) {
-                await recordMergedPrClosure(
+                await recordMergedGateEvent(
                     issueContext,
                     pullRequest,
+                    `PR #${pullRequest.number} (head ${pullRequest.headSha}) was already merged; reconciled without a new merge call.`,
                     "Pull request was already merged; no merge call was made.",
                 );
                 return "reconciled";
             }
             if (pullRequest.state === "closed") {
-                await recordClosedPrClosure(
+                await recordClosedGateEvent(
                     issueContext,
                     pullRequest,
+                    `PR #${pullRequest.number} (head ${pullRequest.headSha}) is closed without merging; issue #${issueContext.issue.number} stays open.`,
                     "Pull request is closed without merging.",
                 );
                 throw new RalphieError({
@@ -1623,9 +1819,10 @@ export const workflow = async (
                 current.number,
             );
             if (reconciled.merged) {
-                await recordMergedPrClosure(
+                await recordMergedGateEvent(
                     issueContext,
                     reconciled,
+                    `Merge response was lost but PR #${reconciled.number} is merged at head ${reconciled.headSha}; reconciled without a new merge call.`,
                     `Merge response was lost but pull request #${reconciled.number} is merged.`,
                 );
                 return reconciled;
@@ -1638,6 +1835,17 @@ export const workflow = async (
                 gate,
                 terminalReason: `Merge rejected: ${errorMessage(cause)}.`,
             });
+            await emitPrGate(
+                issueContext,
+                "failed",
+                `Merge rejected for PR #${current.number} (issue #${issueContext.issue.number} stays open): ${errorMessage(cause)}; gate ${gate}.`,
+                {
+                    pullRequestNumber: reconciled.number,
+                    observedHeadSha:
+                        gate === "stale" ? reconciled.headSha : observedHeadSha,
+                    gate,
+                },
+            );
             throw new RalphieError({
                 message: `Failed to merge pull request #${current.number} for issue #${issueContext.issue.number}: ${errorMessage(cause)}.`,
                 cause,
@@ -1667,6 +1875,65 @@ export const workflow = async (
             }
         };
 
+        /** Record and halt on an expected-head mismatch at the final gate. */
+        const recordStaleGateEvent = async (
+            issueContext: WorkflowIssueContext,
+            current: GitHubPullRequest,
+            observedHeadSha: string,
+        ): Promise<never> => {
+            await recordStalePrClosure(
+                issueContext,
+                current,
+                `Pull request head changed from ${observedHeadSha} to ${current.headSha} after a green observation; the saved decision was discarded.`,
+            );
+            await emitPrGate(
+                issueContext,
+                "failed",
+                `Expected-head mismatch for PR #${current.number} (issue #${issueContext.issue.number}): observed ${observedHeadSha} but the current head is ${current.headSha}; the saved green decision was invalidated.`,
+                {
+                    pullRequestNumber: current.number,
+                    observedHeadSha,
+                    expectedHeadSha: observedHeadSha,
+                    actualHeadSha: current.headSha,
+                    gate: "stale",
+                },
+            );
+            throw new RalphieError({
+                message: `Pull request #${current.number} head changed from ${observedHeadSha} to ${current.headSha} for issue #${issueContext.issue.number}; not merging.`,
+            });
+        };
+
+        /**
+         * Reconcile an already-merged or closed-without-merge PR read before
+         * merging; returns whether the gate is settled and needs no merge.
+         */
+        const reconcileMergedOrClosedGate = async (
+            issueContext: WorkflowIssueContext,
+            current: GitHubPullRequest,
+        ): Promise<boolean> => {
+            if (current.merged) {
+                await recordMergedGateEvent(
+                    issueContext,
+                    current,
+                    `PR #${current.number} (head ${current.headSha}) was already merged; reconciled without a new merge call.`,
+                    "Pull request was already merged; no merge call was made.",
+                );
+                return true;
+            }
+            if (current.state === "closed") {
+                await recordClosedGateEvent(
+                    issueContext,
+                    current,
+                    `PR #${current.number} (head ${current.headSha}) closed without merging before the gate could merge it; issue #${issueContext.issue.number} stays open.`,
+                    "Pull request closed without merging before the gate could merge it.",
+                );
+                throw new RalphieError({
+                    message: `Pull request #${current.number} closed without merging for issue #${issueContext.issue.number}.`,
+                });
+            }
+            return false;
+        };
+
         /**
          * Re-read the PR immediately before merging. A moved head invalidates
          * the saved green decision; a merged or closed PR is reconciled.
@@ -1680,35 +1947,17 @@ export const workflow = async (
                 repo,
                 pullRequest.number,
             );
-            if (current.merged) {
-                await recordMergedPrClosure(
-                    issueContext,
-                    current,
-                    "Pull request was already merged; no merge call was made.",
-                );
+            if (await reconcileMergedOrClosedGate(issueContext, current)) {
                 return;
-            }
-            if (current.state === "closed") {
-                await recordClosedPrClosure(
-                    issueContext,
-                    current,
-                    "Pull request closed without merging before the gate could merge it.",
-                );
-                throw new RalphieError({
-                    message: `Pull request #${current.number} closed without merging for issue #${issueContext.issue.number}.`,
-                });
             }
             const observedHeadSha =
                 prClosure?.observedHeadSha ?? pullRequest.headSha;
             if (current.headSha !== observedHeadSha) {
-                await recordStalePrClosure(
+                await recordStaleGateEvent(
                     issueContext,
                     current,
-                    `Pull request head changed from ${observedHeadSha} to ${current.headSha} after a green observation; the saved decision was discarded.`,
+                    observedHeadSha,
                 );
-                throw new RalphieError({
-                    message: `Pull request #${current.number} head changed from ${observedHeadSha} to ${current.headSha} for issue #${issueContext.issue.number}; not merging.`,
-                });
             }
             const merged = await attemptPrMerge(
                 issueContext,
@@ -1716,12 +1965,37 @@ export const workflow = async (
                 observedHeadSha,
             );
             await recordMergedPrClosure(issueContext, merged);
+            const mergedHeadSha = merged.headSha;
+            const mergedSnapshot = prClosure?.snapshot;
+            await emitPrGate(
+                issueContext,
+                "succeeded",
+                `PR #${merged.number} merged at head ${mergedHeadSha}.`,
+                {
+                    pullRequestNumber: merged.number,
+                    observedHeadSha: mergedHeadSha,
+                    gate: "merged",
+                    ...(mergedSnapshot === undefined
+                        ? {}
+                        : { snapshot: mergedSnapshot }),
+                },
+            );
         };
 
         const deliverPullRequest = async (
             issueContext: WorkflowIssueContext,
         ): Promise<void> => {
             const pullRequest = await resolvePullRequestForGate(issueContext);
+            await emitPrGate(
+                issueContext,
+                "started",
+                `Registering delivery check gate for PR #${pullRequest.number} head ${pullRequest.headSha}...`,
+                {
+                    pullRequestNumber: pullRequest.number,
+                    observedHeadSha: pullRequest.headSha,
+                    registration: true,
+                },
+            );
             const reconciled = await gatePullRequest(issueContext, pullRequest);
             if (reconciled !== "reconciled") {
                 await mergeGatedPullRequest(issueContext, pullRequest);

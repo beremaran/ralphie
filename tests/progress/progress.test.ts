@@ -46,6 +46,71 @@ describe("progress reporting", () => {
         });
     });
 
+    test("JSON pr-gate events expose structured snapshots and timestamps", async () => {
+        let output = "";
+        const progress = makeProgressReporter({
+            mode: "json",
+            verbose: true,
+            write: (text) => {
+                output += text;
+            },
+            now: () => new Date("2026-08-24T01:02:03.000Z"),
+            runId: "run-1",
+        });
+        await progress.emit({
+            stage: "pr-gate",
+            status: "succeeded",
+            message:
+                "Checks passed for PR #7 head aabbccddeeff00112233445566778899aabbccddee in 1200ms (3 polls): success (build passing).",
+            issue: { number: 42, title: "Fix issue" },
+            details: {
+                pullRequestNumber: 7,
+                observedHeadSha: "aabbccddeeff00112233445566778899aabbccddee",
+                gate: "green",
+                elapsedMs: 1200,
+                polls: 3,
+                snapshot: {
+                    repository: "owner/repo",
+                    branch: "ralphie/issue-42",
+                    commitSha: "aabbccddeeff00112233445566778899aabbccddee",
+                    state: "non-empty",
+                    items: [],
+                    sourceErrors: [],
+                    completenessErrors: [],
+                    diagnostics: [],
+                    reason: "success",
+                    greenCandidate: true,
+                    fingerprint:
+                        "success-aabbccddeeff00112233445566778899aabbccddee-1",
+                },
+            },
+        });
+        const event = JSON.parse(output);
+        expect(event).toMatchObject({
+            runId: "run-1",
+            timestamp: "2026-08-24T01:02:03.000Z",
+            stage: "pr-gate",
+            status: "succeeded",
+            message: expect.stringContaining("PR #7"),
+            details: {
+                pullRequestNumber: 7,
+                observedHeadSha: "aabbccddeeff00112233445566778899aabbccddee",
+                gate: "green",
+                elapsedMs: 1200,
+                polls: 3,
+                snapshot: {
+                    repository: "owner/repo",
+                    commitSha: "aabbccddeeff00112233445566778899aabbccddee",
+                    reason: "success",
+                    greenCandidate: true,
+                },
+            },
+        });
+        expect(event.details.snapshot.fingerprint).toBe(
+            "success-aabbccddeeff00112233445566778899aabbccddee-1",
+        );
+    });
+
     test("renders plain progress and optional verbose details", async () => {
         let output = "";
         const progress = makeProgressReporter({
@@ -329,6 +394,51 @@ describe("progress reporting", () => {
             message: "Failed.",
         });
         expect(output).toBe("⚠ Needs attention.\n✗ Failed.\n");
+    });
+
+    test("quiet mode suppresses unchanged pr-gate polls but reports gate failures", async () => {
+        let output = "";
+        const progress = makeProgressReporter({
+            mode: "quiet",
+            verbose: false,
+            write: (text) => {
+                output += text;
+            },
+            runId: "run-1",
+        });
+        // Registration, poll transitions, and terminal success are routine
+        // milestones in this gate: quiet mode must not surface them.
+        await progress.emit({
+            stage: "pr-gate",
+            status: "started",
+            message: "Registering delivery check gate for PR #1 head aabbcc...",
+        });
+        await progress.emit({
+            stage: "pr-gate",
+            status: "info",
+            message:
+                "PR #1 head aabbcc: no checks visible; waiting for registration.",
+        });
+        await progress.emit({
+            stage: "pr-gate",
+            status: "info",
+            message: "PR #1 head aabbcc: 1 check registered.",
+        });
+        await progress.emit({
+            stage: "pr-gate",
+            status: "succeeded",
+            message:
+                "Checks passed for PR #1 head aabbcc in 1000ms (2 polls): success (passing).",
+        });
+        await progress.emit({
+            stage: "pr-gate",
+            status: "failed",
+            message:
+                "Checks are failing for PR #2 head ddeeff: failure (build failing).",
+        });
+        expect(output).toBe(
+            "✗ Checks are failing for PR #2 head ddeeff: failure (build failing).\n",
+        );
     });
 
     test("redacts credentials from messages and nested JSON details", async () => {

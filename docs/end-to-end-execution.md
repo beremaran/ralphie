@@ -383,7 +383,7 @@ the queue.
 | Mode | Issue checkout | Delivery | Source issue closure |
 | --- | --- | --- | --- |
 | `lgtm` | Selected base branch | Commit and non-force push directly to that branch; verify remote SHA and clean checkout | Close directly as `completed` after verified delivery. |
-| `pr` | `ralphie/issue-<number>` in the main checkout | Push feature branch, create/find matching PR, persist its number and head SHA, publish stored review attempts as marked comments, wait for checks on the exact head SHA to pass, re-read the PR, and invoke the expected-head merge only when the head is unchanged | PR body contains `Closes #<issue>`; GitHub closes the issue on merge. A failed, cancelled, timed-out, absent, unknown, changed-head, closed, or unmergeable gate retains the feature branch and PR, leaves the issue open, and persists recoverable run state. The serial run restores the base checkout afterward. |
+| `pr` | `ralphie/issue-<number>` in the main checkout | Push feature branch, create/find matching PR, persist its number and head SHA, publish stored review attempts as marked comments, and gate merged delivery on the exact-head check observer: 30-second registration grace, 5s-to-60s bounded exponential backoff, a 30-minute deadline, and two stable green confirmations, with a re-read of the PR immediately before the expected-head merge | PR body contains `Closes #<issue>`; GitHub closes the issue on merge. A failed, cancelled, timed-out, absent, no-pipelines, unknown, changed-head, closed, or unmergeable gate retains the feature branch and PR, leaves the issue open, and persists recoverable run state. The serial run restores the base checkout afterward. |
 | `--dry-run` | Prepared normal checkout | Ground the issue, then assess complexity and report implementation or decomposition when actionable; report already-resolved and needs-attention routes otherwise. A decomposition dry run also performs the read-only breakdown session and reports the intended native sub-issue hierarchy, children to create or reuse, and dependency edges. No implementation, decomposition, delivery, commit, push, checkout, issue, or PR mutation | No issue is closed. The result is `skipped` except needs-attention, which remains a needs-attention outcome. |
 
 Only a `completed` outcome enters delivery or source-issue closure. A
@@ -397,16 +397,46 @@ to deliver.
 In `pr` mode the merged delivery is gated: after the feature branch is pushed
 and the matching pull request is created or found, its number and head SHA are
 persisted, review attempts are published idempotently, and the read-only
-observer polls checks for that exact SHA until it reaches its documented green
-state. The PR is re-read immediately before merging; a green decision is only
-acted on when the head is unchanged. Failed, cancelled, timed-out,
-no-pipelines, unknown, changed-head, closed, or unmergeable gates never merge
-and never close the source issue: the feature branch and PR are retained and
-an active, recoverable closure gate is persisted. On resume the existing
-matching PR is located instead of duplicated, pending gates continue polling,
-saved green evidence is re-verified against the current head (a changed head
-invalidates it), failed gates can be re-observed on a later rerun, and an
-already-merged PR is reconciled without another merge call.
+observer polls normalized snapshots for that exact SHA until it reaches its
+documented green state. The observer tolerates a 30-second registration grace
+period while no checks are visible, keeps polling while any check is pending,
+uses bounded exponential backoff from 5 seconds doubling to a 60-second cap,
+fails closed after a 30-minute deadline, and requires two consecutive identical
+green snapshots (stable terminal confirmations) plus a race-safe final remote
+HEAD read before reporting green. Neutral and skipped terminal states fail
+closed by policy: an absent no-checks set past the grace period, unknown
+states, cancelled checks, and failing checks never count as green, and the
+observation every time re-checks that the remote branch HEAD still points at
+the exact SHA being observed.
+
+The PR is re-read immediately before merging; a green decision is only acted
+on when the head is unchanged. Failed, cancelled, timed-out, no-pipelines,
+unknown, changed-head, closed, or unmergeable gates never merge and never
+close the source issue: the feature branch and PR are retained and an active,
+recoverable closure gate is persisted in run state. The persisted `prClosure`
+record is the audit trail for that gate: pull-request number, observed head
+SHA, the latest normalized check snapshot, observation start and last-update
+timestamps, the gate status (`pending`, `green`, `failed`, `cancelled`,
+`unknown`, `no-pipelines`, `timeout`, `aborted`, `stale`, `unmergeable`,
+`closed`, or `merged`), and the terminal reason; a merged record keeps the
+green snapshot as merge evidence. On resume the existing matching PR is
+located instead of duplicated, pending gates continue polling, saved green
+evidence is re-verified against the current head (a changed head invalidates
+it), failed gates can be re-observed on a later rerun, and an already-merged PR
+is reconciled without another merge call.
+
+Gate activity streams as `pr-gate` progress events: registration with the PR
+number and exact head SHA, poll progress for meaningful check transitions
+only (registration, checks registering, items appearing or disappearing, and
+status changes — unchanged polls never emit), head invalidation, and terminal
+success or failure with the check summary and reason. Human and verbose output
+explain the PR number, exact SHA, check summary (for example `success
+(passing)`) and reason; JSON events carry the structured normalized snapshot
+and a timestamp; quiet output suppresses the routine gate milestones while
+still reporting gate failures. Caller cancellation aborts the observation,
+records `aborted` in run state, and surfaces the safe "Run cancelled" stop
+that saves resumable state and exits `130`; every recoverable failure retains
+the open PR and source issue for a later rerun.
 
 The direct-push path never uses force. A push rejection is authoritative: the
 created commit and artifacts are retained, the run halts, and resume can
@@ -531,8 +561,12 @@ Examples of resumable boundaries:
 - a partially created decomposition reuses marker-discovered children and the
   saved key mapping.
 
-Progress events include `runId`, timestamp, stage, status, and message. The
-normal output also streams Pi `thinking_delta`, `text_delta`, tool-call, and
+Progress events include `runId`, timestamp, stage, status, and message. An
+active PR closure additionally streams `pr-gate` events with the pull-request
+number, exact observed head SHA, transition details, and terminal events whose
+verbose/JSON payloads carry the structured check snapshot, elapsed time, poll
+count, and terminal reason. The normal output also streams Pi `thinking_delta`,
+`text_delta`, tool-call, and
 tool-result events as they arrive. Human-readable Pi transcript output groups
 each session into a compact block: thinking and assistant text stream
 immediately, tool calls are shown as readable commands, and tool output is
@@ -578,7 +612,9 @@ stateDiagram-v2
   failures set process exit code `1`.
 - Cancellation is checked before long-running boundaries and passed into Pi.
   Ralphie attempts to restore the clean issue checkpoint, saves resumable state,
-  skips cleanup, and exits `130`.
+  skips cleanup, and exits `130`. An in-flight PR gate aborts its observation,
+  records `aborted` (or the observer's caller-cancellation outcome) in the
+  persisted closure gate, and leaves the PR and source issue open for resume.
 - Successful completion persists `complete` before optional `--clean end`
   removes the entire workspace. Cleanup is skipped on failure so state and
   diagnostics remain available.

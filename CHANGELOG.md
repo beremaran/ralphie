@@ -39,6 +39,25 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Added
 
+- The `pr` gate now streams dedicated `pr-gate` progress events for
+  registration (pull-request number and exact head SHA), poll progress only
+  for meaningful check transitions (registration, checks registering,
+  appearing or disappearing, and status changes — unchanged polls never
+  emit), head invalidation, and terminal success/failure, timeout, and
+  cancellation with the check summary and reason. Human and verbose output
+  explain the PR number, exact SHA, check summary, and reason; JSON output
+  exposes the structured normalized snapshot and timestamps; quiet output
+  suppresses the routine gate milestones while still reporting gate failures.
+  The observer exposes an optional `onTransition` callback invoked only on
+  meaningful transitions, and a merged gate record now retains the green
+  observation snapshot as persistent merge evidence.
+- Deterministic PR-gate regression coverage: a local end-to-end PR workflow
+  with a fake GitHub check service that records merge calls and proves none
+  occur before a stable green snapshot, resume from pending/green/failed and
+  already-merged gate states, unknown and cancelled gate outcomes, expected-head
+  merge rejection recording a stale gate, pending-to-failure and mixed Check
+  Run/commit-status transitions, and quiet/JSON rendering of gate events.
+
 - A deterministic, read-only pipeline observation service
   (`src/github/pipeline-observation.ts`) that polls normalized pipeline
   snapshots for one exact SHA: it tolerates an initial registration grace

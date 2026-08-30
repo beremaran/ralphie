@@ -39,6 +39,7 @@ export type ProgressStage =
     | "issue-creation"
     | "issue-relationships"
     | "issue-closure"
+    | "pr-gate"
     | "notification-recovery";
 
 export type ProgressStatus =

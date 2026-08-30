@@ -78,6 +78,7 @@ export const PROGRESS_STAGE_LABELS: Readonly<Record<ProgressStage, string>> = {
     "issue-creation": "Creating issues",
     "issue-relationships": "Linking issues",
     "issue-closure": "Closing issue",
+    "pr-gate": "Waiting for PR checks",
     "notification-recovery": "Publishing needs-attention notification",
 };
 

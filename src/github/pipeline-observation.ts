@@ -202,6 +202,13 @@ export type PipelineObservationInput = {
     readonly options?: PipelineObservationOptions;
     readonly settings?: PipelineObservationOptions;
     readonly signal?: AbortSignal;
+    /**
+     * Invoked synchronously when a poll produces a meaningful transition
+     * (registration, registered, checked-in, disappeared, or status-changed).
+     * Unchanged polls never invoke it, so callers can stream progress without
+     * emitting noisy identical events during long waits.
+     */
+    readonly onTransition?: (transition: PipelineObservationTransition) => void;
 };
 
 /** Coordinate-shaped input for using the built-in paginated GitHub reader. */
@@ -220,6 +227,12 @@ export type GitHubPipelineObservationInput = {
     readonly options?: PipelineObservationOptions;
     readonly settings?: PipelineObservationOptions;
     readonly signal?: AbortSignal;
+    /**
+     * Invoked synchronously when a poll produces a meaningful transition
+     * (registration, registered, checked-in, disappeared, or status-changed).
+     * Unchanged polls never invoke it.
+     */
+    readonly onTransition?: (transition: PipelineObservationTransition) => void;
 };
 
 export type PipelineObservationResult = {
@@ -519,6 +532,7 @@ type ObserveContext = {
     readonly deadlineAtMs: number;
     readonly observedSha: ExactCommitSha;
     readonly transitions: PipelineObservationTransition[];
+    readonly onTransition: (transition: PipelineObservationTransition) => void;
     readonly controller: AbortController;
     readonly deadlineMarker: DeadlineMarker;
     readonly dispose: () => void;
@@ -857,13 +871,23 @@ const greenOutcome = (
     polls: st.polls,
 });
 
+const recordTransitions = (
+    ctx: ObserveContext,
+    transitions: ReadonlyArray<PipelineObservationTransition>,
+): void => {
+    for (const transition of transitions) {
+        ctx.transitions.push(transition);
+        ctx.onTransition(transition);
+    }
+};
+
 const updateFinalState = (
     ctx: ObserveContext,
     st: LoopState,
     state: ObservationSetState,
     snapshot: PipelineSnapshot,
 ): void => {
-    ctx.transitions.push(...transitionsFor(st.previous, state));
+    recordTransitions(ctx, transitionsFor(st.previous, state));
     st.previous = state;
     st.signature = state.fingerprint;
     st.stableSinceMs = ctx.now();
@@ -928,7 +952,7 @@ const updateState = (
 ): ObservationSetState => {
     const state = stateForSnapshot(snapshot);
     st.lastSnapshot = snapshot;
-    ctx.transitions.push(...transitionsFor(st.previous, state));
+    recordTransitions(ctx, transitionsFor(st.previous, state));
     st.previous = state;
     const changed = state.fingerprint !== st.signature;
     if (changed) {
@@ -1237,6 +1261,7 @@ const makeContext = (
         deadlineAtMs,
         observedSha: requestForInput(input).commitSha,
         transitions: [],
+        onTransition: input.onTransition ?? (() => {}),
         controller,
         deadlineMarker,
         dispose: () => {

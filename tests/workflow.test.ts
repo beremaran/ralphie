@@ -14,9 +14,14 @@ import type {
 } from "../src/github/pull-requests.ts";
 import type {
     PipelineObservationOutcome,
+    PipelineObservationRead,
     PipelineObservationService,
+    PipelineObservationTransition,
+    PipelineRemoteHeadReader,
     PipelineSnapshot,
+    PipelineSnapshotFetcher,
 } from "../src/github/pipeline-observation.ts";
+import { makePipelineObservationService } from "../src/github/pipeline-observation.ts";
 import type { GitHubIssueMutationService } from "../src/github/issue-mutations.ts";
 import { makeParentCompletionService } from "../src/github/parent-completion.ts";
 import type { GitHubNeedsAttentionNotificationService } from "../src/github/needs-attention.ts";
@@ -113,6 +118,12 @@ type TestRuntimeOptions = {
     readonly prOverride?: GitHubPullRequest;
     /** Result of the gate's pre-merge re-read. */
     readonly prReadOverride?: GitHubPullRequest;
+    /** Sequential results returned by pull-request reads, in call order. */
+    readonly prReadSequence?: ReadonlyArray<GitHubPullRequest>;
+    /** Replaces the gate observer entirely (used by the local fake-check e2e). */
+    readonly pipelineObservationOverride?: PipelineObservationService;
+    /** Invoked when the pull-request merge mutation is attempted. */
+    readonly onMergeCall?: () => void;
     /** Outcomes returned by the gate's check observer, in call order. */
     readonly pipelineObservationOutcomes?: ReadonlyArray<PipelineObservationOutcome>;
     /** When set, the observer aborts the controller before returning. */
@@ -132,6 +143,7 @@ const testRuntime = (
     let outcomeIndex = 0;
     let captureIndex = options.captureStart ?? 0;
     let gateIndex = 0;
+    let readIndex = 0;
     const outcomes = options.outcomes ?? [
         {
             kind: IssueExecutionOutcomeKind.Completed,
@@ -247,7 +259,15 @@ const testRuntime = (
         },
         read: async (_client, repo, number) => {
             calls.push(`readPullRequest:${repo}:${number}`);
+            const sequenced =
+                options.prReadSequence === undefined
+                    ? undefined
+                    : options.prReadSequence[
+                          Math.min(readIndex, options.prReadSequence.length - 1)
+                      ];
+            readIndex += 1;
             return (
+                sequenced ??
                 options.prReadOverride ??
                 options.prOverride ?? {
                     number,
@@ -272,6 +292,7 @@ const testRuntime = (
         },
         merge: async (_client, repo, number, expectedHeadSha) => {
             calls.push(`mergePullRequest:${repo}:${number}:${expectedHeadSha}`);
+            options.onMergeCall?.();
             if (options.mergePullRequestFailure) {
                 throw options.mergePullRequestFailure;
             }
@@ -411,28 +432,30 @@ const testRuntime = (
         greenCandidate: reason === "success",
         fingerprint: `${reason}-${observedSha}`,
     });
-    const pipelineObservation: PipelineObservationService = {
-        observe: async (input) => {
-            calls.push("observePrGate");
-            if (options.observeAbortController !== undefined) {
-                options.observeAbortController.abort();
-            }
-            const observedSha = input.request?.commitSha ?? "feature-head-sha";
-            const outcomesList = options.pipelineObservationOutcomes ?? [
-                {
-                    kind: "green",
-                    observedSha,
-                    snapshot: snapshotForOutcome(observedSha, "success"),
-                    elapsedMs: 1_000,
-                    polls: 2,
-                } satisfies PipelineObservationOutcome,
-            ];
-            const outcome =
-                outcomesList[Math.min(gateIndex, outcomesList.length - 1)]!;
-            gateIndex += 1;
-            return { outcome, transitions: [] };
-        },
-    };
+    const pipelineObservation: PipelineObservationService =
+        options.pipelineObservationOverride ?? {
+            observe: async (input) => {
+                calls.push("observePrGate");
+                if (options.observeAbortController !== undefined) {
+                    options.observeAbortController.abort();
+                }
+                const observedSha =
+                    input.request?.commitSha ?? "feature-head-sha";
+                const outcomesList = options.pipelineObservationOutcomes ?? [
+                    {
+                        kind: "green",
+                        observedSha,
+                        snapshot: snapshotForOutcome(observedSha, "success"),
+                        elapsedMs: 1_000,
+                        polls: 2,
+                    } satisfies PipelineObservationOutcome,
+                ];
+                const outcome =
+                    outcomesList[Math.min(gateIndex, outcomesList.length - 1)]!;
+                gateIndex += 1;
+                return { outcome, transitions: [] };
+            },
+        };
     return {
         commandRunner: CommandRunnerLive,
         githubClient,
@@ -998,6 +1021,345 @@ describe("workflow", () => {
         expect(calls).not.toContain("closeIssue:42");
         expect(states.at(-1)?.status).toBe(RunStateStatus.Active);
         expect(states.at(-1)?.prClosure?.gate).toBe("aborted");
+    });
+
+    test("emits pr-gate progress events with the PR number, head SHA, and reason when checks fail", async () => {
+        const calls: string[] = [];
+        const states: RunState[] = [];
+        const events: ProgressUpdate[] = [];
+        await expect(
+            workflow(
+                { ...baseOptions, workflow: WorkflowMode.Pr },
+                testRuntime(
+                    calls,
+                    states,
+                    {
+                        pipelineObservationOutcomes: [
+                            {
+                                kind: "failed",
+                                observedSha: "feature-head-sha",
+                                reason: "failing",
+                                message: "check failed",
+                                snapshot: {
+                                    ...greenSnapshot("feature-head-sha"),
+                                    reason: "failure",
+                                    greenCandidate: false,
+                                    fingerprint: "failure-feature-head-sha",
+                                },
+                                elapsedMs: 500,
+                                polls: 1,
+                            } satisfies PipelineObservationOutcome,
+                        ],
+                    },
+                    events,
+                ),
+            ),
+        ).rejects.toThrow("PR gate did not pass");
+        const prGateEvents = events.filter(({ stage }) => stage === "pr-gate");
+        expect(prGateEvents.map(({ status }) => status)).toEqual([
+            "started",
+            "failed",
+        ]);
+        const failed = prGateEvents.find(({ status }) => status === "failed");
+        expect(failed?.message).toContain("PR #1");
+        expect(failed?.message).toContain("feature-head-sha");
+        expect(failed?.details).toMatchObject({
+            pullRequestNumber: 1,
+            observedHeadSha: "feature-head-sha",
+            gate: "failed",
+            elapsedMs: 500,
+        });
+        expect(calls).not.toContain("mergePullRequest");
+    });
+
+    test("does not merge before the fake check service reaches its stable green snapshot", async () => {
+        const gateHeadSha = "f".repeat(40);
+        const gateItem = (
+            status: PipelineSnapshot["items"][number]["status"],
+        ): PipelineSnapshot["items"][number] => ({
+            source: "check-run",
+            provider: "github-actions",
+            name: "build",
+            status,
+            rawState: {},
+            diagnostic: {
+                source: "check-run",
+                disposition: "selected",
+                provider: "github-actions",
+                name: "build",
+                rawState: {},
+                rawValues: {},
+                errors: [],
+            },
+        });
+        const gateSnapshot = (
+            items: ReadonlyArray<PipelineSnapshot["items"][number]>,
+            reason: PipelineSnapshot["reason"],
+        ): PipelineSnapshot => ({
+            repository: "owner/repo",
+            branch: "ralphie/issue-42",
+            commitSha: gateHeadSha,
+            state: items.length === 0 ? "empty" : "non-empty",
+            items,
+            sourceErrors: [],
+            completenessErrors: [],
+            diagnostics: [],
+            reason,
+            greenCandidate: reason === "success",
+            fingerprint: `${reason}-${gateHeadSha}-${items.length}`,
+        });
+        const scenario = [
+            gateSnapshot([], "no-checks"),
+            gateSnapshot([gateItem("pending")], "pending"),
+            gateSnapshot([gateItem("passing")], "success"),
+        ];
+        const timeline: string[] = [];
+        let fetchCount = 0;
+        const fetchSnapshot: PipelineSnapshotFetcher = async () => {
+            const snapshot =
+                scenario[Math.min(fetchCount, scenario.length - 1)]!;
+            fetchCount += 1;
+            timeline.push(`fetch:${snapshot.reason}`);
+            return { kind: "snapshot", snapshot };
+        };
+        const fakeCheckService = makePipelineObservationService({
+            now: () => 0,
+            sleep: async () => {},
+        });
+        const observedService: PipelineObservationService = {
+            observe: async (input) => {
+                if (!("request" in input) || input.request === undefined) {
+                    throw new Error("expected coordinate observation input");
+                }
+                return fakeCheckService.observe({
+                    client: input.client,
+                    request: input.request,
+                    options: input.options ?? input.settings,
+                    signal: input.signal,
+                    fetchSnapshot,
+                    readHead: async () => gateHeadSha,
+                    ...(input.onTransition === undefined
+                        ? {}
+                        : { onTransition: input.onTransition }),
+                });
+            },
+        };
+
+        const calls: string[] = [];
+        const states: RunState[] = [];
+        const events: ProgressUpdate[] = [];
+        const summary = await workflow(
+            { ...baseOptions, workflow: WorkflowMode.Pr },
+            testRuntime(
+                calls,
+                states,
+                {
+                    prOverride: {
+                        number: 1,
+                        url: "https://github.com/owner/repo/pull/1",
+                        merged: false,
+                        headSha: gateHeadSha,
+                        state: "open",
+                    },
+                    pipelineObservationOverride: observedService,
+                    onMergeCall: () => timeline.push("merge"),
+                },
+                events,
+            ),
+        );
+        expect(summary.counts.completed).toBe(1);
+        // The fake GitHub check service records every poll and every merge;
+        // the merge must come only after a stable green snapshot (two
+        // consecutive identical success reads plus the final verification read).
+        expect(timeline).toEqual([
+            "fetch:no-checks",
+            "fetch:pending",
+            "fetch:success",
+            "fetch:success",
+            "fetch:success",
+            "merge",
+        ]);
+        const mergeIndex = timeline.indexOf("merge");
+        expect(
+            timeline
+                .slice(0, mergeIndex)
+                .filter((entry) => entry === "fetch:success"),
+        ).toHaveLength(3);
+        expect(timeline.slice(0, mergeIndex)).not.toContain("merge");
+        const prGateEvents = events.filter(({ stage }) => stage === "pr-gate");
+        expect(prGateEvents.map(({ status }) => status)).toEqual([
+            "started",
+            "info",
+            "info",
+            "info",
+            "succeeded",
+            "succeeded",
+        ]);
+        expect(prGateEvents[1]?.message).toContain("waiting for registration");
+        expect(prGateEvents[2]?.message).toContain("1 check registered");
+        expect(prGateEvents[3]?.message).toContain("pending -> passing");
+        const checksPassed = prGateEvents.find(
+            (event) =>
+                event.status === "succeeded" &&
+                (event.message ?? "").includes("Checks passed"),
+        );
+        expect(checksPassed?.message).toContain("PR #1");
+        expect(checksPassed?.message).toContain(gateHeadSha);
+        expect(checksPassed?.message).toContain("success (passing)");
+        expect(checksPassed?.details).toMatchObject({
+            pullRequestNumber: 1,
+            observedHeadSha: gateHeadSha,
+            gate: "green",
+            polls: 4,
+        });
+        expect(checksPassed?.details?.snapshot).toBeDefined();
+        const merged = prGateEvents.find(
+            (event) =>
+                event.status === "succeeded" &&
+                (event.message ?? "").includes("merged at head"),
+        );
+        expect(merged?.message).toContain("PR #1");
+        expect(merged?.details).toMatchObject({
+            pullRequestNumber: 1,
+            gate: "merged",
+        });
+    });
+
+    test("resumes a pending PR gate by continuing to poll and merging once checks pass", async () => {
+        const resumeState: RunState = {
+            version: 6,
+            status: RunStateStatus.Active,
+            runId: "pending-gate-resume",
+            repository: baseOptions.repo,
+            branch: "develop",
+            workflow: WorkflowMode.Pr,
+            onNeedsAttention: NeedsAttentionPolicy.Continue,
+            dryRun: false,
+            notificationsEnabled: false,
+            selection: { agent: DEFAULT_PI_AGENT },
+            maxIssues: 1,
+            queue: {
+                pending: [{ ...firstIssue, labels: [...firstIssue.labels] }],
+                completedIssueNumbers: [],
+                processedCount: 0,
+            },
+            outcomes: [
+                {
+                    issueNumber: 42,
+                    outcome: {
+                        kind: IssueExecutionOutcomeKind.Completed,
+                        completion: "pushed-commit",
+                        commitSha: "abc123",
+                    },
+                },
+            ],
+            activeIssue: { issueNumber: 42, stage: "issue-closure" },
+            prClosure: {
+                pullRequestNumber: 1,
+                observedHeadSha: "feature-head-sha",
+                startedAt: "2026-08-28T00:00:00.000Z",
+                updatedAt: "2026-08-28T00:00:00.000Z",
+                gate: "pending",
+            },
+            checkout: { branch: "develop", head: "head-0" },
+            updatedAt: "2026-08-28T00:00:00.000Z",
+        };
+        const calls: string[] = [];
+        const states: RunState[] = [];
+        const summary = await workflow(
+            { ...baseOptions, workflow: WorkflowMode.Pr, resumeState },
+            testRuntime(calls, states, { issueLists: [[]] }),
+        );
+        expect(calls.some((call) => call.startsWith("executeIssue:"))).toBe(
+            false,
+        );
+        expect(calls).not.toContain(
+            "createPullRequest:owner/repo:ralphie/issue-42:develop",
+        );
+        expect(calls).toContain("observePrGate");
+        expect(calls).toContain(
+            "mergePullRequest:owner/repo:1:feature-head-sha",
+        );
+        expect(summary.counts.completed).toBe(1);
+        expect(
+            states.filter((state) => state.prClosure !== undefined).at(-1)
+                ?.prClosure,
+        ).toMatchObject({
+            pullRequestNumber: 1,
+            observedHeadSha: "feature-head-sha",
+            gate: "merged",
+        });
+    });
+
+    test("does not merge or close when the gate observes unknown checks", async () => {
+        const calls: string[] = [];
+        const states: RunState[] = [];
+        await expect(
+            workflow(
+                { ...baseOptions, workflow: WorkflowMode.Pr },
+                testRuntime(calls, states, {
+                    pipelineObservationOutcomes: [
+                        {
+                            kind: "failed",
+                            observedSha: "feature-head-sha",
+                            reason: "unknown",
+                            message: "ambiguous checks",
+                            snapshot: {
+                                ...greenSnapshot("feature-head-sha"),
+                                reason: "unknown",
+                                greenCandidate: false,
+                                fingerprint: "unknown-feature-head-sha",
+                            },
+                            elapsedMs: 500,
+                            polls: 1,
+                        } satisfies PipelineObservationOutcome,
+                    ],
+                }),
+            ),
+        ).rejects.toThrow("PR gate did not pass");
+        expect(calls).not.toContain("mergePullRequest");
+        expect(calls).not.toContain("closeIssue:42");
+        expect(states.at(-1)?.prClosure?.gate).toBe("unknown");
+        expect(states.at(-1)?.status).toBe(RunStateStatus.Active);
+    });
+
+    test("records a stale gate when the expected-head merge is rejected", async () => {
+        const calls: string[] = [];
+        const states: RunState[] = [];
+        const oldHead: GitHubPullRequest = {
+            number: 1,
+            url: "https://github.com/owner/repo/pull/1",
+            merged: false,
+            headSha: "feature-head-sha",
+            state: "open",
+        };
+        const newHead: GitHubPullRequest = {
+            ...oldHead,
+            headSha: "new-head-sha",
+        };
+        await expect(
+            workflow(
+                { ...baseOptions, workflow: WorkflowMode.Pr },
+                testRuntime(calls, states, {
+                    prReadSequence: [oldHead, newHead],
+                    mergePullRequestFailure: new RalphieError({
+                        message:
+                            "Pull request #1 head changed from feature-head-sha to new-head-sha.",
+                    }),
+                }),
+            ),
+        ).rejects.toThrow("Failed to merge");
+        expect(calls).toContain(
+            "mergePullRequest:owner/repo:1:feature-head-sha",
+        );
+        expect(calls).not.toContain("closeIssue:42");
+        expect(states.at(-1)?.prClosure).toMatchObject({
+            pullRequestNumber: 1,
+            observedHeadSha: "new-head-sha",
+            gate: "stale",
+            terminalReason: expect.stringContaining("head changed"),
+        });
+        expect(states.at(-1)?.status).toBe(RunStateStatus.Active);
     });
 
     test("dry-run assesses through the queue without invoking mutation execution", async () => {

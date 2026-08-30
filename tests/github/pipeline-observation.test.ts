@@ -54,27 +54,33 @@ const item = (
     name: string,
     status: PipelineItemStatus,
     provider = "github-actions",
-) => ({ provider, name, status });
+    source:
+        | "check-run"
+        | "check-suite"
+        | "status-context"
+        | "workflow-run" = "check-run",
+) => ({ provider, name, status, source });
 
 const makeSnapshot = (
     items: ReadonlyArray<{
         readonly provider: string;
         readonly name: string;
         readonly status: PipelineItemStatus;
+        readonly source?: Parameters<typeof item>[3];
     }>,
     sourceErrors = 0,
 ): PipelineSnapshot => {
     const snapshot = {
         ...request,
         state: items.length === 0 ? ("empty" as const) : ("non-empty" as const),
-        items: items.map(({ provider, name, status }) => ({
-            source: "check-run" as const,
+        items: items.map(({ provider, name, status, source }) => ({
+            source: source ?? "check-run",
             provider,
             name,
             status,
             rawState: {},
             diagnostic: {
-                source: "check-run" as const,
+                source: source ?? "check-run",
                 disposition: "selected" as const,
                 provider,
                 name,
@@ -187,6 +193,7 @@ const run = async (input: {
     readonly readHead?: PipelineRemoteHeadReader;
     readonly options?: PipelineObservationOptions;
     readonly signal?: AbortSignal;
+    readonly onTransition?: (transition: PipelineObservationTransition) => void;
 }): Promise<{
     readonly outcome: PipelineObservationOutcome;
     readonly transitions: ReadonlyArray<PipelineObservationTransition>;
@@ -203,6 +210,9 @@ const run = async (input: {
         readHead: input.readHead ?? sameHead(),
         options: input.options ?? defaultOptions(),
         signal: input.signal,
+        ...(input.onTransition === undefined
+            ? {}
+            : { onTransition: input.onTransition }),
     });
     return { ...result, sleeps: harness.sleeps };
 };
@@ -296,6 +306,73 @@ describe("pipeline observation", () => {
         const green = expectGreen(outcome);
         expect(green.polls).toBe(3);
         expect(transitions).toEqual([
+            { kind: "registered", itemCount: 1 },
+            {
+                kind: "status-changed",
+                item: "check-run\u0000github-actions\u0000build",
+                from: "pending",
+                to: "passing",
+            },
+        ]);
+    });
+
+    test("fails closed when a pending item moves to failing", async () => {
+        const { outcome, transitions } = await run({
+            fetchSnapshot: sequence(pending(), failing()),
+        });
+
+        expect(outcome.kind).toBe("failed");
+        if (outcome.kind !== "failed") return;
+        expect(outcome.reason).toBe("failing");
+        expect(outcome.snapshot?.items[0]?.status).toBe("failing");
+        // One pending poll plus one failing poll held stable across quiescence.
+        expect(outcome.polls).toBe(3);
+        expect(transitions).toEqual([
+            { kind: "registered", itemCount: 1 },
+            {
+                kind: "status-changed",
+                item: "check-run\u0000github-actions\u0000build",
+                from: "pending",
+                to: "failing",
+            },
+        ]);
+    });
+
+    test("tracks mixed Check Run and commit-status items through a status change", async () => {
+        const mixed = (lint: PipelineItemStatus) =>
+            read(
+                makeSnapshot([
+                    item("build", "passing", "github-actions", "check-run"),
+                    item("lint", lint, "github-actions", "status-context"),
+                ]),
+            );
+        const { outcome, transitions } = await run({
+            fetchSnapshot: sequence(mixed("pending"), mixed("passing")),
+        });
+
+        const green = expectGreen(outcome);
+        expect(green.snapshot.items).toHaveLength(2);
+        expect(transitions).toEqual([
+            { kind: "registered", itemCount: 2 },
+            {
+                kind: "status-changed",
+                item: "status-context\u0000github-actions\u0000lint",
+                from: "pending",
+                to: "passing",
+            },
+        ]);
+    });
+
+    test("invokes onTransition only for meaningful state changes", async () => {
+        const transitions: PipelineObservationTransition[] = [];
+        const { outcome } = await run({
+            fetchSnapshot: sequence(emptyRead(), pending(), pending(), pass()),
+            onTransition: (transition) => transitions.push(transition),
+        });
+
+        expectGreen(outcome);
+        expect(transitions).toEqual([
+            { kind: "registration" },
             { kind: "registered", itemCount: 1 },
             {
                 kind: "status-changed",
