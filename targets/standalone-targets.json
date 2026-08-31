@@ -1,0 +1,50 @@
+[
+  {
+    "id": "darwin-arm64",
+    "releaseAssetName": "ralphie-darwin-arm64",
+    "os": "darwin",
+    "arch": "arm64",
+    "bunCompileTarget": "bun-darwin-arm64",
+    "targetTriple": "aarch64-apple-darwin",
+    "binaryFormat": "Mach-O arm64",
+    "runner": "macos-14",
+    "bunVersion": "1.3.14",
+    "dockerPlatform": null
+  },
+  {
+    "id": "darwin-x64",
+    "releaseAssetName": "ralphie-darwin-x64",
+    "os": "darwin",
+    "arch": "x64",
+    "bunCompileTarget": "bun-darwin-x64",
+    "targetTriple": "x86_64-apple-darwin",
+    "binaryFormat": "Mach-O x86_64",
+    "runner": "macos-13",
+    "bunVersion": "1.3.14",
+    "dockerPlatform": null
+  },
+  {
+    "id": "linux-arm64",
+    "releaseAssetName": "ralphie-linux-arm64",
+    "os": "linux",
+    "arch": "arm64",
+    "bunCompileTarget": "bun-linux-arm64",
+    "targetTriple": "aarch64-unknown-linux-gnu",
+    "binaryFormat": "ELF aarch64",
+    "runner": "ubuntu-24.04-arm",
+    "bunVersion": "1.3.14",
+    "dockerPlatform": "linux/arm64"
+  },
+  {
+    "id": "linux-x64",
+    "releaseAssetName": "ralphie-linux-x64",
+    "os": "linux",
+    "arch": "x64",
+    "bunCompileTarget": "bun-linux-x64",
+    "targetTriple": "x86_64-unknown-linux-gnu",
+    "binaryFormat": "ELF x86_64",
+    "runner": "ubuntu-24.04",
+    "bunVersion": "1.3.14",
+    "dockerPlatform": "linux/amd64"
+  }
+]
