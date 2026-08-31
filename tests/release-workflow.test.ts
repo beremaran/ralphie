@@ -117,6 +117,14 @@ describe("release container metadata contract", () => {
 
         expect(dockerfile).toContain("ARG RALPHIE_VERSION=local");
         expect(dockerfile).toContain("ARG RALPHIE_COMMIT_SHA=local");
+        expect(dockerfile).toContain("ARG BUN_VERSION=1.3.14");
+        expect(dockerfile).toContain(
+            "FROM oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4 AS build",
+        );
+        expect(dockerfile).toContain('actual_bun_version="$(bun --version)"');
+        expect(dockerfile).toContain(
+            "Bun version mismatch: expected $BUN_VERSION, got $actual_bun_version",
+        );
         expect(dockerfile).toContain('org.opencontainers.image.licenses="MIT"');
         expect(dockerfile).toContain(
             'org.opencontainers.image.version="$RALPHIE_VERSION"',
@@ -241,7 +249,7 @@ describe("release container metadata contract", () => {
         );
 
         expect(new Set(argNames)).toEqual(
-            new Set(["RALPHIE_VERSION", "RALPHIE_COMMIT_SHA"]),
+            new Set(["RALPHIE_VERSION", "RALPHIE_COMMIT_SHA", "BUN_VERSION"]),
         );
         expect(envNames).toEqual(["HOME"]);
         expect(dockerfile).not.toContain("COPY . .");
@@ -271,6 +279,7 @@ describe("release container metadata contract", () => {
         expect(stageJob).toContain(
             "RALPHIE_COMMIT_SHA=${{ needs.validate.outputs.source_ref }}",
         );
+        expect(stageJob).toContain("BUN_VERSION=${{ env.BUN_VERSION }}");
         expect(stageJob).not.toContain("secrets.");
         expect(stageJob).not.toContain("github.token");
         expect(stageJob).not.toContain("sbom: true");

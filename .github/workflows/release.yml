@@ -403,6 +403,7 @@ jobs:
           build-args: |
             RALPHIE_VERSION=${{ needs.validate.outputs.version }}
             RALPHIE_COMMIT_SHA=${{ needs.validate.outputs.source_ref }}
+            BUN_VERSION=${{ env.BUN_VERSION }}
           labels: |
             org.opencontainers.image.licenses=MIT
             org.opencontainers.image.version=${{ needs.validate.outputs.version }}
