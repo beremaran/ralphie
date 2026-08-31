@@ -103,7 +103,7 @@ describe("release SHA-256 manifest", () => {
         }
     });
 
-    test("rejects duplicate and cross-platform or cross-release artifacts", async () => {
+    test("rejects missing, duplicate, cross-platform, and cross-release artifacts", async () => {
         const duplicateFixture = await createArtifactFixture(version);
         try {
             await writeFile(
@@ -123,6 +123,26 @@ describe("release SHA-256 manifest", () => {
             ).rejects.toThrow("exactly one binary");
         } finally {
             await rm(duplicateFixture, { recursive: true, force: true });
+        }
+
+        const missingFixture = await createArtifactFixture(version);
+        try {
+            await rm(
+                join(
+                    missingFixture,
+                    `ralphie-${version}-linux-arm64`,
+                    "ralphie-linux-arm64",
+                ),
+            );
+            await expect(
+                createSha256Sums({
+                    artifactDirectory: missingFixture,
+                    outputDirectory: missingFixture,
+                    version,
+                }),
+            ).rejects.toThrow("exactly one binary");
+        } finally {
+            await rm(missingFixture, { recursive: true, force: true });
         }
 
         const platformFixture = await createArtifactFixture(version);
@@ -164,6 +184,79 @@ describe("release SHA-256 manifest", () => {
             ).rejects.toThrow("must be exactly");
         } finally {
             await rm(releaseFixture, { recursive: true, force: true });
+        }
+    });
+
+    test("rejects empty binaries and stale output instead of overwriting it", async () => {
+        const emptyFixture = await createArtifactFixture(version);
+        try {
+            await writeFile(
+                join(
+                    emptyFixture,
+                    `ralphie-${version}-linux-x64`,
+                    "ralphie-linux-x64",
+                ),
+                "",
+            );
+            await expect(
+                createSha256Sums({
+                    artifactDirectory: emptyFixture,
+                    outputDirectory: emptyFixture,
+                    version,
+                }),
+            ).rejects.toThrow("is empty");
+        } finally {
+            await rm(emptyFixture, { recursive: true, force: true });
+        }
+
+        const fixture = await createArtifactFixture(version);
+        const output = await mkdtemp(
+            join(tmpdir(), "ralphie-checksum-output-"),
+        );
+        try {
+            const stalePath = join(output, "stale-release-asset");
+            await writeFile(stalePath, "keep me");
+            await expect(
+                createSha256Sums({
+                    artifactDirectory: fixture,
+                    outputDirectory: output,
+                    version,
+                }),
+            ).rejects.toThrow("stale or unexpected entries");
+            expect(await readFile(stalePath, "utf8")).toBe("keep me");
+
+            await rm(stalePath);
+            const manifestPath = join(output, "SHA256SUMS");
+            await writeFile(manifestPath, "old manifest\n");
+            await expect(
+                createSha256Sums({
+                    artifactDirectory: fixture,
+                    outputDirectory: output,
+                    version,
+                }),
+            ).rejects.toThrow("Duplicate release asset");
+            expect(await readFile(manifestPath, "utf8")).toBe("old manifest\n");
+        } finally {
+            await Promise.all([
+                rm(fixture, { recursive: true, force: true }),
+                rm(output, { recursive: true, force: true }),
+            ]);
+        }
+    });
+
+    test("requires and verifies staged sidecar checksums when requested", async () => {
+        const fixture = await createArtifactFixture(version);
+        try {
+            await expect(
+                createSha256Sums({
+                    artifactDirectory: fixture,
+                    outputDirectory: fixture,
+                    requireChecksums: true,
+                    version,
+                }),
+            ).rejects.toThrow("exactly one binary");
+        } finally {
+            await rm(fixture, { recursive: true, force: true });
         }
     });
 });

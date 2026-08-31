@@ -1,15 +1,17 @@
 #!/usr/bin/env bun
 
 import { createHash } from "node:crypto";
+import { constants as fsConstants } from "node:fs";
 import {
     copyFile,
+    lstat,
     mkdir,
     readdir,
     readFile,
     stat,
     writeFile,
 } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 export const RELEASE_TARGETS = [
     "darwin-arm64",
@@ -18,7 +20,13 @@ export const RELEASE_TARGETS = [
     "linux-x64",
 ] as const;
 
-type ReleaseTarget = (typeof RELEASE_TARGETS)[number];
+export type ReleaseTarget = (typeof RELEASE_TARGETS)[number];
+
+export const releaseAssetName = (target: ReleaseTarget): string =>
+    `ralphie-${target}`;
+
+export const RELEASE_ASSET_NAMES: ReadonlyArray<string> =
+    RELEASE_TARGETS.map(releaseAssetName);
 
 type CreateSha256SumsOptions = {
     readonly artifactDirectory: string;
@@ -30,11 +38,10 @@ type CreateSha256SumsOptions = {
 const releaseVersionPattern =
     /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
 
-const expectedAssetName = (target: ReleaseTarget): string =>
-    `ralphie-${target}`;
+const expectedAssetName = releaseAssetName;
 
 const expectedChecksumName = (target: ReleaseTarget): string =>
-    `${expectedAssetName(target)}.sha256`;
+    `${releaseAssetName(target)}.sha256`;
 
 const expectedArtifactName = (version: string, target: ReleaseTarget): string =>
     `ralphie-${version}-${target}`;
@@ -79,7 +86,7 @@ const assertExpectedArtifactSet = (
 
 const assertAbsent = async (path: string): Promise<void> => {
     try {
-        await stat(path);
+        await lstat(path);
     } catch (error) {
         if (isMissingPathError(error)) return;
         throw error;
@@ -87,13 +94,17 @@ const assertAbsent = async (path: string): Promise<void> => {
     throw new Error(`Duplicate release asset: ${path}`);
 };
 
-const copyValidatedAsset = async (
+type ValidatedAsset = {
+    readonly assetName: string;
+    readonly sourcePath: string;
+};
+
+const validateArtifact = async (
     artifactDirectory: string,
-    outputDirectory: string,
     version: string,
     target: ReleaseTarget,
     requireChecksums: boolean,
-): Promise<string> => {
+): Promise<ValidatedAsset> => {
     const assetName = expectedAssetName(target);
     const checksumName = expectedChecksumName(target);
     const artifactPath = join(
@@ -122,7 +133,8 @@ const copyValidatedAsset = async (
     }
 
     const sourcePath = join(artifactPath, assetName);
-    if ((await stat(sourcePath)).size === 0) {
+    const sourceStat = await stat(sourcePath);
+    if (sourceStat.size === 0) {
         throw new Error(`Release asset '${sourcePath}' is empty.`);
     }
 
@@ -139,10 +151,38 @@ const copyValidatedAsset = async (
         }
     }
 
-    const outputPath = join(outputDirectory, assetName);
-    await assertAbsent(outputPath);
-    await copyFile(sourcePath, outputPath);
-    return outputPath;
+    return { assetName, sourcePath };
+};
+
+const assertOutputDirectoryReady = async (
+    artifactDirectory: string,
+    artifactEntries: ReadonlyArray<{ readonly name: string }>,
+    outputDirectory: string,
+): Promise<void> => {
+    const outputEntries = await readDirectory(outputDirectory);
+    const sameDirectory =
+        resolve(artifactDirectory) === resolve(outputDirectory);
+    const allowedEntries = sameDirectory
+        ? new Set(artifactEntries.map((entry) => entry.name))
+        : new Set<string>();
+    const generatedEntries = new Set([...RELEASE_ASSET_NAMES, "SHA256SUMS"]);
+    const staleEntries = outputEntries
+        .filter(
+            (entry) =>
+                !allowedEntries.has(entry.name) &&
+                !generatedEntries.has(entry.name),
+        )
+        .map((entry) => entry.name);
+    if (staleEntries.length > 0) {
+        throw new Error(
+            `Release output directory '${outputDirectory}' contains stale or unexpected entries: ${staleEntries.join(", ")}.`,
+        );
+    }
+
+    for (const assetName of RELEASE_ASSET_NAMES) {
+        await assertAbsent(join(outputDirectory, assetName));
+    }
+    await assertAbsent(join(outputDirectory, "SHA256SUMS"));
 };
 
 const sha256 = async (path: string): Promise<string> =>
@@ -169,20 +209,32 @@ export const createSha256Sums = async ({
         version,
     );
 
-    await mkdir(outputDirectory, { recursive: true });
-    const assetPaths = await Promise.all(
+    const validatedAssets = await Promise.all(
         RELEASE_TARGETS.map((target) =>
-            copyValidatedAsset(
+            validateArtifact(
                 artifactDirectory,
-                outputDirectory,
                 version,
                 target,
                 requireChecksums,
             ),
         ),
     );
+
+    await mkdir(outputDirectory, { recursive: true });
+    await assertOutputDirectoryReady(
+        artifactDirectory,
+        artifactEntries,
+        outputDirectory,
+    );
+
+    const assetPaths = await Promise.all(
+        validatedAssets.map(async ({ assetName, sourcePath }) => {
+            const outputPath = join(outputDirectory, assetName);
+            await copyFile(sourcePath, outputPath, fsConstants.COPYFILE_EXCL);
+            return outputPath;
+        }),
+    );
     const manifestPath = join(outputDirectory, "SHA256SUMS");
-    await assertAbsent(manifestPath);
     const manifest = (
         await Promise.all(
             RELEASE_TARGETS.map(async (target, index) => {
@@ -191,7 +243,10 @@ export const createSha256Sums = async ({
             }),
         )
     ).join("\n");
-    await writeFile(manifestPath, `${manifest}\n`, "utf8");
+    await writeFile(manifestPath, `${manifest}\n`, {
+        encoding: "utf8",
+        flag: "wx",
+    });
     return manifestPath;
 };
 
