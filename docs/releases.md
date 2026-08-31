@@ -51,7 +51,16 @@ uses the
 `source_ref`, platform, OCI archive name and SHA-256, BuildKit image
 manifest `digest`, and OCI version/revision labels; the final publisher
 must verify those fields before promotion. The canonical GHCR tag is the
-normalized package version without `v` (for example, `0.1.0`). The minor
+normalized package version without `v` (for example, `0.1.0`). The publisher
+also emits exactly four deterministic SPDX 2.3 JSON SBOMs in `release-assets`:
+`ralphie-<target>.sbom.spdx.json`. The checked-in `scripts/create-sboms.ts`
+wrapper runs only after the final renamed binaries and checksum manifest are
+present. It validates each document with the pinned Ajv 8.17.1 dependency
+against the checked-in SPDX 2.3 JSON schema and release identifier profile. It
+binds each document to the validated tag, commit, target, final binary bytes
+and size, checked-out source and `bun.lock`, build inputs, Bun and build-tool
+versions, and the generator version. It rejects incomplete, cross-release,
+duplicate, or digest-mismatched inputs. The minor
 version, `latest` for stable releases only, and `sha-<commit>` are explicit
 aliases. A dry run skips GitHub Release and GHCR publication. A normal tag
 push is not a dry run and runs release and container publication in the

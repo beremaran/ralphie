@@ -402,6 +402,53 @@ describe("release container metadata contract", () => {
         expect(publishJob).toContain("release-assets/SHA256SUMS.sigstore.json");
     });
 
+    test("generates and publishes one SBOM for each final native asset", async () => {
+        const workflow = await readRepositoryFile(
+            ".github/workflows/release.yml",
+        );
+        const publishJob = workflow.slice(workflow.indexOf("  publish:"));
+        const collectStart = publishJob.indexOf(
+            "name: Collect binaries and create SHA256SUMS",
+        );
+        const sbomStart = publishJob.indexOf(
+            "name: Generate and validate deterministic SPDX SBOMs",
+        );
+        const signStart = publishJob.indexOf(
+            "name: Sign and verify SHA256SUMS with Sigstore",
+        );
+
+        expect(sbomStart).toBeGreaterThan(collectStart);
+        expect(signStart).toBeGreaterThan(sbomStart);
+        expect(publishJob).toContain("bun scripts/create-sboms.ts");
+        expect(publishJob).toContain("--assets-dir release-assets");
+        expect(publishJob).toContain("--output-dir release-assets");
+        expect(publishJob).toContain("--source-dir .");
+        expect(publishJob).toContain("--commit-sha $SOURCE_REF");
+        expect(publishJob).toContain('bun_version="$(bun --version)"');
+        expect(publishJob).toContain('test "$bun_version" = 1.3.14');
+        expect(publishJob).toContain(
+            "name: Install dependencies for SBOM validation",
+        );
+        expect(publishJob).toContain("bun install --frozen-lockfile");
+        expect(publishJob).toContain('--build-tool-version "$bun_version"');
+        expect(publishJob).toContain('--bun-version "$bun_version"');
+        expect(publishJob.indexOf("uses: actions/checkout@v4")).toBeLessThan(
+            publishJob.indexOf(
+                "name: Download verified release metadata bundle",
+            ),
+        );
+        for (const target of [
+            "darwin-arm64",
+            "darwin-x64",
+            "linux-arm64",
+            "linux-x64",
+        ]) {
+            expect(publishJob).toContain(
+                `release-assets/ralphie-${target}.sbom.spdx.json`,
+            );
+        }
+    });
+
     test("documents runnable Sigstore GitHub source selectors", async () => {
         const readme = await readRepositoryFile("README.md");
         const commandStart = readme.indexOf(

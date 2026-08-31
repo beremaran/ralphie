@@ -45,6 +45,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.5.10",
     "@types/bun": "latest",
+    "ajv": "8.17.1",
     "typescript": "^5"
   },
   "dependencies": {

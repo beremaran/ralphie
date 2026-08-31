@@ -5,6 +5,8 @@ All notable changes to Ralphie are documented here. The project follows
 
 ## [Unreleased]
 
+- Add deterministic SPDX 2.3 SBOMs for the four final native release assets;
+  each document binds the validated source, build inputs, and final binary digest.
 - Add an exact-tag GitHub release verifier that emits a deterministic,
   checksum-verified Homebrew asset manifest.
 
