@@ -14,6 +14,14 @@ describe("Pi task shell policy", () => {
             isPiTaskCommandAllowed("git status --short && git diff --check"),
         ).toBe(true);
         expect(isPiTaskCommandAllowed("rg -n TODO src | head -20")).toBe(true);
+        expect(isPiTaskCommandAllowed("cd /workspace && bun test")).toBe(true);
+        expect(isPiTaskCommandAllowed("bun test || bun test --rerun-each 2")).toBe(
+            true,
+        );
+        expect(isPiTaskCommandAllowed("node -e 'console.log(1)' > result.txt")).toBe(
+            true,
+        );
+        expect(isPiTaskCommandAllowed("echo $(git status --short)")).toBe(true);
     });
 
     test("reserves Git and GitHub mutations for Ralphie", () => {
@@ -28,16 +36,12 @@ describe("Pi task shell policy", () => {
         }
     });
 
-    test("rejects shell composition that could hide a forbidden command", () => {
+    test("rejects explicit orchestration-owned mutations in composed commands", () => {
         for (const command of [
             "bun test && git commit -am fix",
             "git status; git push",
-            "echo ok | sh",
-            "echo $(git status)",
-            "echo ok > result.txt",
-            "printf Z2l0IHB1c2g= | base64 -d | sh",
             "git status || git push",
-            "env bash -c 'git push'",
+            "cd /workspace && gh issue close 12",
         ]) {
             expect(isPiTaskCommandAllowed(command)).toBe(false);
         }

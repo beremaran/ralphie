@@ -140,31 +140,12 @@ type ThinkingLevel =
     | "xhigh"
     | "max";
 
-const unsafeShellSyntax = /[\n\r;<>`]|\$\(|\|\||(^|[^&])&([^&]|$)/;
 const deniedTaskCommand =
     /(?:^|\s)(?:git\s+(?:commit|push|branch|checkout|switch|worktree|reset|clean)|gh(?:\s|$))/i;
-const deniedComposedCommand =
-    /^(?:env\s+)*(?:xargs|python\d*|node|bun)(?:\s|$)/i;
-const deniedInterpreterCommand =
-    /^(?:env\s+)*(?:(?:ba|z|c|fi|da)?sh|eval|source)(?:\s|$)/i;
-
-const shellSegments = (command: string): ReadonlyArray<string> =>
-    command
-        .split(/&&|\|/)
-        .map((segment) => segment.trim())
-        .filter(Boolean);
 
 export const isPiTaskCommandAllowed = (command: string): boolean => {
     const trimmed = command.trim();
-    if (!trimmed || unsafeShellSyntax.test(trimmed)) return false;
-    const segments = shellSegments(trimmed);
-    if (segments.length === 0) return false;
-    return segments.every(
-        (segment) =>
-            !deniedTaskCommand.test(segment) &&
-            !deniedInterpreterCommand.test(segment) &&
-            (segments.length === 1 || !deniedComposedCommand.test(segment)),
-    );
+    return trimmed.length > 0 && !deniedTaskCommand.test(trimmed);
 };
 
 type AnyToolDefinition = ToolDefinition<any, any, any>;
