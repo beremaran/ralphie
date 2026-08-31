@@ -905,9 +905,9 @@ jobs:
           done
           (cd release-assets && sha256sum --check SHA256SUMS)
 
-      # The former scripts/create-sha256sums.ts collector is intentionally not
-      # run here: the aggregation job already created and verified this exact
-      # SHA256SUMS file and release-metadata.json bundle.
+      # Recompute the canonical manifest from the final bytes in the
+      # immutable metadata bundle. The aggregation manifest must match this
+      # fresh computation before anything can be published.
       - name: Collect binaries and create SHA256SUMS
         env:
           TAG: ${{ needs.validate.outputs.tag }}
@@ -915,9 +915,19 @@ jobs:
         run: |
           set -euo pipefail
           test "$TAG" = "v$VERSION"
-          # scripts/create-sha256sums.ts is intentionally not run by the
-          # publisher; aggregation created this exact file already.
-          test -s release-assets/SHA256SUMS
+          manifest="$RUNNER_TEMP/SHA256SUMS"
+          : > "$manifest"
+          for asset in \
+            ralphie-darwin-arm64 \
+            ralphie-darwin-x64 \
+            ralphie-linux-arm64 \
+            ralphie-linux-x64; do
+            test -s "release-assets/$asset"
+            digest="$(sha256sum "release-assets/$asset" | awk '{print $1}')"
+            printf '%s  %s\n' "$digest" "$asset" >> "$manifest"
+          done
+          cmp --silent "$manifest" release-assets/SHA256SUMS
+          test "$(wc -l < "$manifest" | tr -d '[:space:]')" = 4
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -1195,27 +1205,21 @@ jobs:
             core.setOutput("release_id", String(release.id));
             core.setOutput("upload_url", release.upload_url);
             core.setOutput("state", state);
-            core.setOutput("terminal", String(state === "published"));
 
-      # Keep this explicit list in sync with the checksum collector. A
-      # published handle is terminal: never upload or publish a second time
-      # when reconciling a rerun.
+      # Keep this explicit list in sync with the checksum collector. Existing
+      # release assets are reconciled by digest; no rerun may replace bytes.
       - name: Upload assets and publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.validate.outputs.tag }}
           RELEASE_ID: ${{ steps.release-handle.outputs.release_id }}
           UPLOAD_URL: ${{ steps.release-handle.outputs.upload_url }}
           RELEASE_STATE: ${{ steps.release-handle.outputs.state }}
-          RELEASE_TERMINAL: ${{ steps.release-handle.outputs.terminal }}
         run: |
           set -euo pipefail
-          if [[ "$RELEASE_TERMINAL" == true ]]; then
-            test "$RELEASE_STATE" = published
-            echo "Release $RELEASE_ID is already published; reconciliation is terminal"
-            exit 0
-          fi
-          test "$RELEASE_STATE" = draft
+          test "$GITHUB_REF" = "refs/tags/$TAG"
+          test "$RELEASE_STATE" = draft || test "$RELEASE_STATE" = published
           test "$RELEASE_ID" =~ ^[1-9][0-9]*$
           test -n "$UPLOAD_URL"
 
@@ -1239,23 +1243,59 @@ jobs:
           )
           upload_endpoint="${UPLOAD_URL%%\{*}"
           test "$upload_endpoint" != "$UPLOAD_URL"
+          existing_assets="$RUNNER_TEMP/release-assets.json"
+          gh api --paginate --slurp \
+            "repos/$GH_REPO/releases/$RELEASE_ID/assets?per_page=100" \
+            > "$existing_assets"
           for asset in "${assets[@]}"; do
             test -f "$asset"
             asset_name="$(basename "$asset")"
 
-            # Release assets are immutable by name. Delete only a same-named
-            # asset from this validated handle so a rerun can repair a partial
-            # upload without touching another release.
-            while IFS= read -r asset_id; do
-              test -n "$asset_id"
-              gh api --method DELETE \
-                "repos/$GH_REPO/releases/$RELEASE_ID/assets/$asset_id"
-            done < <(
-              gh api --paginate \
-                "repos/$GH_REPO/releases/$RELEASE_ID/assets?per_page=100" \
-                --jq ".[] | select(.name == \"$asset_name\") | .id"
-            )
+            # Release assets are immutable by name. Never delete or replace
+            # one: an existing asset is accepted only when its downloaded
+            # bytes have exactly the same SHA-256 as the local bytes.
+            existing_count="$(jq -r --arg name "$asset_name" \
+              '[.[][] | select(.name == $name)] | length' "$existing_assets")"
+            if (( existing_count > 1 )); then
+              echo "Release contains duplicate assets named $asset_name" >&2
+              exit 1
+            fi
 
+            if (( existing_count == 1 )); then
+              existing_id="$(jq -er --arg name "$asset_name" \
+                '[.[][] | select(.name == $name)][0].id' "$existing_assets")"
+              existing_url="$(jq -er --arg name "$asset_name" \
+                '[.[][] | select(.name == $name)][0].browser_download_url' "$existing_assets")"
+              test "$existing_id" =~ ^[1-9][0-9]*$
+              expected_url="https://github.com/$GH_REPO/releases/download/$TAG/$asset_name"
+              test "$existing_url" = "$expected_url"
+              downloaded="$RUNNER_TEMP/existing-$asset_name"
+              if [[ "$RELEASE_STATE" == published ]]; then
+                # Published assets must also prove the anonymous distribution
+                # URL used by downstream clients before they are accepted.
+                curl --fail --silent --show-error --location --retry 3 \
+                  --output "$downloaded" "$existing_url"
+              else
+                # Draft assets are not anonymously downloadable. The
+                # authenticated asset endpoint is used only for this internal
+                # pre-publication reconciliation.
+                gh api \
+                  -H "Accept: application/octet-stream" \
+                  "repos/$GH_REPO/releases/assets/$existing_id" \
+                  > "$downloaded"
+              fi
+              local_digest="$(sha256sum "$asset" | awk '{print $1}')"
+              existing_digest="$(sha256sum "$downloaded" | awk '{print $1}')"
+              if [[ "$local_digest" != "$existing_digest" ]]; then
+                echo "Existing release asset differs: $asset_name" >&2
+                exit 1
+              fi
+              echo "Existing release asset matches: $asset_name"
+              continue
+            fi
+
+            # A missing asset may be added. A concurrent upload or any upload
+            # error fails closed; there is deliberately no overwrite path.
             curl --fail --silent --show-error --retry 3 \
               -X POST \
               -H "Accept: application/vnd.github+json" \
@@ -1266,6 +1306,11 @@ jobs:
               "$upload_endpoint?name=$asset_name" \
               > /dev/null
           done
+
+          if [[ "$RELEASE_STATE" == published ]]; then
+            echo "Release $RELEASE_ID is already published; all existing assets match"
+            exit 0
+          fi
 
           # Publishing is deliberately last. Any failure before this request
           # leaves the release created by the handle as a draft.

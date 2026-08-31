@@ -383,6 +383,7 @@ describe("release container metadata contract", () => {
             "validate",
             "build-binaries",
             "stage-container",
+            "aggregate-release-metadata",
         ]) {
             expect(publishJob).toContain(
                 `needs.${prerequisite}.result == 'success'`,
@@ -396,6 +397,12 @@ describe("release container metadata contract", () => {
         expect(publishJob).toContain("name: release");
         expect(publishJob).toContain("contents: write");
         expect(publishJob).toContain("id-token: write");
+        expect(publishJob).toContain(
+            "name: ralphie-release-metadata-${{ needs.validate.outputs.version }}",
+        );
+        expect(
+            workflow.indexOf("name: Aggregate release metadata"),
+        ).toBeLessThan(workflow.indexOf("  publish:"));
     });
 
     test("creates and validates an idempotent REST release handle after validation", async () => {
@@ -442,7 +449,7 @@ describe("release container metadata contract", () => {
         expect(publishJob).not.toContain("github.event.repo.upload_url");
     });
 
-    test("reuses draft handles, repairs assets, and treats published handles as terminal", async () => {
+    test("reconciles existing assets without replacing bytes", async () => {
         const workflow = await readRepositoryFile(
             ".github/workflows/release.yml",
         );
@@ -460,21 +467,29 @@ describe("release container metadata contract", () => {
         );
 
         expect(publishJob).toContain("merge-multiple: false");
-        expect(collectStep).toContain("scripts/create-sha256sums.ts");
         expect(collectStep).toContain('test "$TAG" = "v$VERSION"');
+        expect(collectStep).toContain('manifest="$RUNNER_TEMP/SHA256SUMS"');
+        expect(collectStep).toContain('sha256sum "release-assets/$asset"');
+        expect(collectStep).toContain(
+            'cmp --silent "$manifest" release-assets/SHA256SUMS',
+        );
         expect(releaseStep).toContain(
             "RELEASE_ID: ${{ steps.release-handle.outputs.release_id }}",
         );
         expect(releaseStep).toContain(
             "UPLOAD_URL: ${{ steps.release-handle.outputs.upload_url }}",
         );
-        expect(releaseStep).toContain(
-            "RELEASE_TERMINAL: ${{ steps.release-handle.outputs.terminal }}",
-        );
-        expect(releaseStep).toContain('[[ "$RELEASE_TERMINAL" == true ]]');
-        expect(releaseStep).toContain("gh api --method DELETE");
+        expect(releaseStep).toContain("TAG: ${{ needs.validate.outputs.tag }}");
+        expect(releaseStep).toContain("browser_download_url");
+        expect(releaseStep).toContain("expected_url=");
+        expect(releaseStep).toContain("releases/download/$TAG/$asset_name");
+        expect(releaseStep).toContain("Accept: application/octet-stream");
+        expect(releaseStep).toContain("existing_digest=");
+        expect(releaseStep).toContain("Existing release asset differs");
         expect(releaseStep).toContain("curl --fail");
         expect(releaseStep).toContain("gh api --method PATCH");
+        expect(releaseStep).not.toContain("gh api --method DELETE");
+        expect(releaseStep).not.toContain("--clobber");
         expect(releaseStep).toContain("-F draft=false");
         expect(releaseStep).not.toContain("gh release create");
         expect(releaseStep).not.toContain("gh release view");
@@ -495,6 +510,49 @@ describe("release container metadata contract", () => {
                 "name: Upload assets and publish GitHub release",
             ),
         );
+    });
+
+    test("continues through the missing-asset path", async () => {
+        const workflow = await readRepositoryFile(
+            ".github/workflows/release.yml",
+        );
+        const publishJob = workflow.slice(workflow.indexOf("  publish:"));
+        const releaseStep = publishJob.slice(
+            publishJob.indexOf(
+                "name: Upload assets and publish GitHub release",
+            ),
+        );
+
+        expect(releaseStep).toContain(
+            'existing_count="$(jq -r --arg name "$asset_name" \\',
+        );
+        const result = Bun.spawnSync(
+            [
+                "bash",
+                "-c",
+                `set -euo pipefail
+existing_assets="$(mktemp)"
+trap 'rm -f "$existing_assets"' EXIT
+printf '[[]]\\n' > "$existing_assets"
+asset_name="ralphie-linux-x64"
+existing_count="$(jq -r --arg name "$asset_name" \\
+  '[.[][] | select(.name == $name)] | length' "$existing_assets")"
+if (( existing_count > 1 )); then
+    exit 1
+fi
+if (( existing_count == 1 )); then
+    exit 1
+fi
+printf 'upload\\n'`,
+            ],
+            {
+                stderr: "pipe",
+                stdout: "pipe",
+            },
+        );
+
+        expect(result.exitCode).toBe(0);
+        expect(result.stdout.toString()).toBe("upload\n");
     });
 
     test("signs and verifies the exact manifest before publishing its bundle", async () => {

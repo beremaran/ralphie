@@ -15,6 +15,7 @@ distribution metadata:
 - repository: <https://github.com/beremaran/ralphie>;
 - Git clone URL: <https://github.com/beremaran/ralphie.git>;
 - releases and native assets: <https://github.com/beremaran/ralphie/releases>;
+- native asset URL template: `https://github.com/beremaran/ralphie/releases/download/<tag>/<asset-name>` (anonymous);
 - raw installer: <https://raw.githubusercontent.com/beremaran/ralphie/main/scripts/install.sh>;
 - Homebrew custom tap: `brew tap beremaran/ralphie https://github.com/beremaran/ralphie`;
 - Homebrew formula source: <https://raw.githubusercontent.com/beremaran/ralphie/main/Formula/ralphie.rb>;
@@ -53,9 +54,12 @@ non-fast-forward updates, has no bypass actors, and supplies the protected-tag
 binding required by the release workflow.
 
 The native release workflow owns the four platform assets and their public
-release records. The installer, Homebrew, and OCI channels were published and
-verified as part of #73; this page records their stable ownership for future
-releases.
+release records. Downstream clients must use the exact anonymous URL template
+`https://github.com/beremaran/ralphie/releases/download/<tag>/<asset-name>`;
+`<tag>` is the validated `v<major>.<minor>.<patch>` tag and `<asset-name>` is
+one of the four canonical binary names (or a published manifest/signature).
+The installer, Homebrew, and OCI channels were published and verified as part
+of #73; this page records their stable ownership for future releases.
 
 ## License boundary
 

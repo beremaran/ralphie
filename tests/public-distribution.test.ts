@@ -26,6 +26,12 @@ describe("public distribution verification contract", () => {
         expect(topology.releasesUrl).toBe(
             "https://github.com/beremaran/ralphie/releases",
         );
+        const topologyDocument = await readRepositoryFile(
+            "docs/public-distribution.md",
+        );
+        expect(topologyDocument).toContain(
+            "https://github.com/beremaran/ralphie/releases/download/<tag>/<asset-name>",
+        );
         expect(topology.rawInstallerUrl).toBe(
             "https://raw.githubusercontent.com/beremaran/ralphie/main/scripts/install.sh",
         );
