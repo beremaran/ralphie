@@ -13,6 +13,11 @@ All notable changes to Ralphie are documented here. The project follows
 - Implementation completion is schema validated. Unresolved empty diffs enter
   a bounded fresh-session retry loop with verifier evidence, configurable
   implementation thinking, retry count, and optional fallback model.
+- A tentative `already_resolved` grounding route now continues through
+  complexity assessment when fresh verification finds unresolved work. The
+  verifier evidence seeds the first implementation session, unresolved
+  resolution artifacts cannot short-circuit resumed work, and operational or
+  malformed verification failures still fail closed.
 - `--on-issue-failure continue` restores failed issue checkouts and drains
   independent queued work before returning an aggregate non-zero result;
   failed prerequisites continue to block dependent issues.

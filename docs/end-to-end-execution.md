@@ -215,10 +215,12 @@ decision with its policy and complete evidence, questions, and artifact path; a
 matching persisted decision is reported as reused with agent work skipped. A
 new run discovers the still-open issue and assesses it again.
 
-An unresolved, uncertain, malformed, or failed already-resolved verification is
-a failed non-completion. It does not invoke complexity, implementation, or
-decomposition, does not become `needs_attention`, and leaves the source issue
-open under the normal failure policy.
+An unresolved already-resolved verification corrects the tentative grounding
+route to `actionable`, carries the verifier summary and evidence into the first
+implementation session, and continues through complexity assessment. The
+unresolved decision is not persisted as terminal resolution proof. An
+uncertain, malformed, or failed verification still fails closed and leaves the
+source issue open under the normal failure policy.
 
 For an actionable disposition, `IssueExecutor` reuses a persisted complexity
 decision when its freshness fingerprint matches the live issue. Otherwise
@@ -247,7 +249,8 @@ flowchart LR
     C -->|4-5| G["DecompositionExecutor"]
     F -->|review exhaustion| G
     D -->|resolved with evidence| H["Completed: already-resolved"]
-    D -->|otherwise| I["Failed; leave open"]
+    D -->|unresolved| C
+    D -->|invalid or failed| I["Failed; leave open"]
 ```
 
 Structured decision sessions deny edits/writes and mutating Git/GitHub

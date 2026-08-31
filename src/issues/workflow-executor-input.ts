@@ -3,6 +3,7 @@ import type {
     IssueExecutionContext,
     IssueExecutionOutcome,
 } from "./execution.ts";
+import type { IssueResolutionDecision } from "./decisions.ts";
 
 /**
  * Inputs shared by the concrete per-issue workflow executors.
@@ -15,6 +16,8 @@ import type {
 export type WorkflowExecutorInput = {
     readonly context: IssueExecutionContext;
     readonly artifacts: IssueArtifactStore;
+    /** Fresh evidence that corrected an already-resolved grounding route. */
+    readonly unresolvedResolution?: IssueResolutionDecision;
 };
 
 export type WorkflowExecutorResult = IssueExecutionOutcome;

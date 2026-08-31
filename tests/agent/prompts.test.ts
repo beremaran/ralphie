@@ -9,6 +9,7 @@ import {
     buildCommitMessagePrompt,
     buildComplexityPrompt,
     buildDecompositionPrompt,
+    buildImplementationAfterResolutionCorrectionPrompt,
     buildImplementationPrompt,
     buildResolutionVerificationPrompt,
     PROMPT_ISSUE_COMMENT_TOTAL_LIMIT,
@@ -120,12 +121,36 @@ describe("Pi prompts", () => {
 
         expect(prompt).toContain("starting with fresh context");
         expect(prompt).toContain('Return "resolved" only');
+        expect(prompt).toContain("tentative resolution claim");
         expect(prompt).toContain(
-            "cite concrete source or command-result evidence",
+            "cite concrete source or permitted Git-inspection evidence",
         );
         expect(prompt).toContain("Do not edit files");
         expect(prompt).toContain("git ls-files");
         expect(prompt).toContain('Issue title: "Close response bodies"');
+    });
+
+    test("builds an implementation prompt from a corrected resolution route", () => {
+        const prompt = buildImplementationAfterResolutionCorrectionPrompt({
+            issue: {
+                number: 10,
+                title: "Complete the integration coverage",
+                url: "issue/10",
+                body: "Compare every output mode.",
+                labels: [],
+            },
+            repositoryPath: "/workspace/repo",
+            targetBranch: "main",
+            unresolvedSummary: "Cross-mode comparison is missing.",
+            evidence: ["tests/integration/runtime.test.ts only checks labels."],
+        });
+
+        expect(prompt).toContain('tentative "already resolved"');
+        expect(prompt).toContain("Cross-mode comparison is missing.");
+        expect(prompt).toContain(
+            '["tests/integration/runtime.test.ts only checks labels."]',
+        );
+        expect(prompt).not.toContain("previous implementation session");
     });
 
     test("builds a review prompt from only issue, metadata, and staged diff", () => {

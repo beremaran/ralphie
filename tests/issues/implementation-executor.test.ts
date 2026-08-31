@@ -112,7 +112,11 @@ const issueContext = (
 const piClient = (
     outputs: ReadonlyArray<unknown>,
     sessions?: string[],
-    prompts?: Array<{ readonly model?: unknown; readonly variant?: unknown }>,
+    prompts?: Array<{
+        readonly model?: unknown;
+        readonly variant?: unknown;
+        readonly parts?: ReadonlyArray<{ readonly text?: string }>;
+    }>,
 ) => {
     let index = 0;
     let sessionIndex = 0;
@@ -127,6 +131,7 @@ const piClient = (
                 format?: unknown;
                 model?: unknown;
                 variant?: unknown;
+                parts?: ReadonlyArray<{ readonly text?: string }>;
             }) => {
                 prompts?.push(parameters);
                 const output = outputs[index++];
@@ -309,6 +314,50 @@ describe("implementation executor", () => {
         expect(
             safetyInputs.map(({ expectedCommitSha }) => expectedCommitSha),
         ).toEqual([undefined, "commit-1"]);
+    });
+
+    test("clears unresolved proof and seeds implementation with verifier evidence", async () => {
+        const artifacts = await makeIssueArtifactStore(42);
+        const unresolved = {
+            status: IssueResolutionStatus.Unresolved,
+            summary: "The cross-mode comparison is missing.",
+            evidence: ["The integration test only checks selected labels."],
+        };
+        await artifacts.write(IssueArtifactKind.IssueResolutionDecision, {
+            decision: unresolved,
+            fingerprint: {
+                updatedAt: "2026-08-28T00:00:00.000Z",
+                commentCount: 0,
+            },
+        });
+        const prompts: Array<{
+            readonly parts?: ReadonlyArray<{ readonly text?: string }>;
+        }> = [];
+        const result = await services({}).executor.execute({
+            context: issueContext(
+                piClient(
+                    [
+                        implementation,
+                        review("approved"),
+                        { subject: "complete cross-mode coverage" },
+                    ],
+                    undefined,
+                    prompts,
+                ),
+            ),
+            artifacts,
+            unresolvedResolution: unresolved,
+        });
+
+        expect(result).toMatchObject({ completion: "pushed-commit" });
+        expect(prompts[0]?.parts?.[0]?.text).toContain(
+            'rejected an earlier tentative "already resolved"',
+        );
+        expect(prompts[0]?.parts?.[0]?.text).toContain(unresolved.summary);
+        expect(prompts[0]?.parts?.[0]?.text).toContain(unresolved.evidence[0]!);
+        expect(
+            artifacts.has(IssueArtifactKind.IssueResolutionDecision),
+        ).toBeFalse();
     });
 
     test("never reviews or commits when deterministic verification fails", async () => {
@@ -632,6 +681,7 @@ describe("implementation executor", () => {
         const prompts: Array<{
             readonly model?: unknown;
             readonly variant?: unknown;
+            readonly parts?: ReadonlyArray<{ readonly text?: string }>;
         }> = [];
         const unresolved = {
             status: IssueResolutionStatus.Unresolved,

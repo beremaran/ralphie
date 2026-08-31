@@ -9,6 +9,7 @@ import {
 } from "../git/remote-safety.ts";
 import {
     buildCommitMessagePrompt,
+    buildImplementationAfterResolutionCorrectionPrompt,
     buildImplementationPrompt,
     buildImplementationRetryPrompt,
     buildReviewFixPrompt,
@@ -123,6 +124,37 @@ const implementationResultSchema = z
         validation: z.array(z.string().trim().min(1)).max(20),
     })
     .strict();
+
+const implementationPrompt = (
+    input: WorkflowExecutorInput,
+    attempt: number,
+    unresolvedSummary: string | undefined,
+): string => {
+    const { context, unresolvedResolution } = input;
+    if (attempt === 1 && unresolvedResolution !== undefined) {
+        return buildImplementationAfterResolutionCorrectionPrompt({
+            issue: context.issue,
+            repositoryPath: context.repositoryPath,
+            targetBranch: context.targetBranch,
+            unresolvedSummary: unresolvedResolution.summary,
+            evidence: unresolvedResolution.evidence,
+        });
+    }
+    if (unresolvedSummary !== undefined) {
+        return buildImplementationRetryPrompt({
+            issue: context.issue,
+            repositoryPath: context.repositoryPath,
+            targetBranch: context.targetBranch,
+            unresolvedSummary,
+            attempt,
+        });
+    }
+    return buildImplementationPrompt({
+        issue: context.issue,
+        repositoryPath: context.repositoryPath,
+        targetBranch: context.targetBranch,
+    });
+};
 
 const stage = async <A>(
     progress: ProgressReporterService,
@@ -350,20 +382,11 @@ export const makeImplementationExecutorService = (
                         context.piSelection.variant,
                     permission: PI_TASK_PERMISSION_POLICY,
                     schema: implementationResultSchema,
-                    prompt:
-                        unresolvedSummary === undefined
-                            ? buildImplementationPrompt({
-                                  issue: context.issue,
-                                  repositoryPath: context.repositoryPath,
-                                  targetBranch: context.targetBranch,
-                              })
-                            : buildImplementationRetryPrompt({
-                                  issue: context.issue,
-                                  repositoryPath: context.repositoryPath,
-                                  targetBranch: context.targetBranch,
-                                  unresolvedSummary,
-                                  attempt,
-                              }),
+                    prompt: implementationPrompt(
+                        input,
+                        attempt,
+                        unresolvedSummary,
+                    ),
                     runId: context.runId,
                     diagnostics: context.piDiagnostics,
                     repositoryInvariant: invariant,
@@ -1012,7 +1035,10 @@ export const makeImplementationExecutorService = (
             const resolution = await artifacts.read(
                 IssueArtifactKind.IssueResolutionDecision,
             );
-            return resolutionOutcome(resolution.decision);
+            if (resolution.decision.status === IssueResolutionStatus.Resolved) {
+                return resolutionOutcome(resolution.decision);
+            }
+            await artifacts.clearUnresolvedResolutionDecision();
         }
 
         const recovered = await recoverCommittedAttempt(input);

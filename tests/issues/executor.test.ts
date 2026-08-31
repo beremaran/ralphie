@@ -654,18 +654,94 @@ describe("IssueExecutor", () => {
         ).toBeTrue();
     });
 
-    test.each([
-        {
-            name: "unresolved",
-            verify: async () => ({
-                sessionID: "verification-session",
-                decision: {
-                    status: IssueResolutionStatus.Unresolved,
-                    summary: "The bug still reproduces.",
-                    evidence: ["The regression test fails."],
+    test("reroutes a rejected already-resolved claim into implementation", async () => {
+        const calls: string[] = [];
+        const inputs: Parameters<ImplementationExecutorService["execute"]>[] =
+            [];
+        const events: ProgressUpdate[] = [];
+        const stores = makeIssueArtifactStoreService();
+        const outcome = await makeIssueExecutorService(
+            stores,
+            {
+                assess: async () => {
+                    calls.push("complexity");
+                    return {
+                        sessionID: "complexity-session",
+                        decision: {
+                            complexity: ComplexityLevel.Level2,
+                            rationale: "A focused implementation is required.",
+                        },
+                    };
                 },
+            },
+            {
+                execute: async (input) => {
+                    calls.push("implementation");
+                    inputs.push([input]);
+                    return {
+                        kind: IssueExecutionOutcomeKind.Skipped,
+                        reason: "Implementation captured for the test.",
+                    };
+                },
+            },
+            {
+                execute: async () => {
+                    throw new Error("must not decompose");
+                },
+            },
+            {
+                assess: async () => {
+                    calls.push("grounding");
+                    return {
+                        sessionID: "grounding-session",
+                        decision: {
+                            disposition: GroundingDisposition.AlreadyResolved,
+                        },
+                    };
+                },
+            },
+            {
+                verify: async () => {
+                    calls.push("verification");
+                    return {
+                        sessionID: "verification-session",
+                        decision: {
+                            status: IssueResolutionStatus.Unresolved,
+                            summary: "The bug still reproduces.",
+                            evidence: ["The regression test fails."],
+                        },
+                    };
+                },
+            },
+            makeProgressRecorder(events),
+        ).execute(context(42));
+
+        expect(calls).toEqual([
+            "grounding",
+            "verification",
+            "complexity",
+            "implementation",
+        ]);
+        expect(outcome.kind).toBe(IssueExecutionOutcomeKind.Skipped);
+        expect(inputs[0]?.[0].unresolvedResolution).toEqual({
+            status: IssueResolutionStatus.Unresolved,
+            summary: "The bug still reproduces.",
+            evidence: ["The regression test fails."],
+        });
+        expect(events).toContainEqual(
+            expect.objectContaining({
+                stage: "grounding",
+                status: "succeeded",
+                message: expect.stringContaining("continuing as actionable"),
             }),
-        },
+        );
+        const artifacts = await stores.forIssue(42);
+        expect(
+            artifacts.has(IssueArtifactKind.IssueResolutionDecision),
+        ).toBeFalse();
+    });
+
+    test.each([
         {
             name: "invalid",
             verify: async () => ({
@@ -684,7 +760,7 @@ describe("IssueExecutor", () => {
             },
         },
     ])(
-        "keeps an already-resolved issue open for $name verification",
+        "fails closed for $name already-resolved verification",
         async ({ verify }) => {
             const outcome = await makeIssueExecutorService(
                 makeIssueArtifactStoreService(),

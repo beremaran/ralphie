@@ -84,6 +84,12 @@ retry budget fails the issue. If the review budget is
 exhausted, Ralphie preserves the patch and review diagnostics, restores the
 clean checkpoint, and sends the issue through decomposition.
 
+Grounding's `already_resolved` disposition is tentative. A fresh verifier must
+confirm it before completion; an `unresolved` result corrects the route to
+actionable, proceeds through complexity assessment, and supplies its summary
+and evidence to the first implementation session. Invalid output or verifier
+infrastructure failure still fails closed.
+
 The boundary between agent work and deterministic operations stays explicit
 throughout the loop:
 

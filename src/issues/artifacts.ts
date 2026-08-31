@@ -22,6 +22,7 @@ import {
     type ComplexityDecision,
     type IssueBreakdownDecision,
     type IssueResolutionDecision,
+    IssueResolutionStatus,
     type NeedsAttentionDecision,
 } from "./decisions.ts";
 import {
@@ -138,6 +139,8 @@ export type IssueArtifactStore = {
     ) => Promise<void>;
     /** Drop artifacts from an interrupted implementation attempt after checkout restore. */
     readonly resetImplementationAttempt: () => Promise<void>;
+    /** Remove a non-terminal unresolved decision before actionable work resumes. */
+    readonly clearUnresolvedResolutionDecision: () => Promise<boolean>;
     /** Remove issue-derived decisions only when the live issue has changed. */
     readonly invalidateStaleIssueDecisions: (
         fingerprint: IssueFreshnessFingerprint,
@@ -935,6 +938,21 @@ const makeStore = (
             nextValues.delete(IssueArtifactKind.CreatedCommit);
             nextValues.delete(IssueArtifactKind.IssueResolutionDecision);
             await save(nextValues);
+        },
+
+        clearUnresolvedResolutionDecision: async () => {
+            const artifact = values.get(
+                IssueArtifactKind.IssueResolutionDecision,
+            ) as IssueResolutionDecisionArtifact | undefined;
+            if (
+                artifact?.decision.status !== IssueResolutionStatus.Unresolved
+            ) {
+                return false;
+            }
+            const nextValues = new Map(values);
+            nextValues.delete(IssueArtifactKind.IssueResolutionDecision);
+            await save(nextValues);
+            return true;
         },
 
         invalidateStaleIssueDecisions,
