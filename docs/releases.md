@@ -110,22 +110,53 @@ token is stored in the repository, build context, logs, or release metadata.
 ## Homebrew formula updates
 
 `Formula/ralphie.rb` contains one `sha256` value for each release asset:
-`darwin-arm64`, `darwin-x64`, `linux-arm64`, and `linux-x64`. After publishing a
-release, download `SHA256SUMS` from that same release, update `version` and the
-four matching formula branches, and validate the result before submitting the
-formula change:
+`darwin-arm64`, `darwin-x64`, `linux-arm64`, and `linux-x64`. The deterministic
+generator consumes an explicit `release-metadata.json` file from the validated
+release bundle; it never queries GitHub or chooses a latest release. Its input
+contract is an object with `version`, the exact `tag` (`v${version}`), and an
+`assets` array containing exactly these four objects:
 
-```bash
-VERSION=0.1.0
-bun run validate:homebrew-formula -- \
-  --formula Formula/ralphie.rb \
-  --manifest /path/to/SHA256SUMS \
-  --version "$VERSION"
+```json
+{
+  "version": "0.1.2",
+  "tag": "v0.1.2",
+  "assets": [
+    { "name": "ralphie-darwin-arm64", "sha256": "<64 lowercase hex characters>" },
+    { "name": "ralphie-darwin-x64", "sha256": "<64 lowercase hex characters>" },
+    { "name": "ralphie-linux-arm64", "sha256": "<64 lowercase hex characters>" },
+    { "name": "ralphie-linux-x64", "sha256": "<64 lowercase hex characters>" }
+  ]
+}
 ```
 
-The validator rejects missing or extra mappings, wrong asset names or release
-versions, malformed hashes, and values that differ from the canonical manifest.
-Never copy one platform's checksum to another branch or use a placeholder.
+The version must be strict `major.minor.patch` with no prerelease suffix, and
+the tag must match it exactly. Missing, duplicate, unexpected, or malformed
+assets are rejected. The workflow integration can generate the formula in place
+from the bundle with:
+
+```bash
+bun run generate:homebrew-formula -- \
+  --metadata release-bundle/release-metadata.json \
+  --formula Formula/ralphie.rb
+```
+
+Only the region between the `BEGIN RALPHIE GENERATED RELEASE METADATA` and
+`END RALPHIE GENERATED RELEASE METADATA` markers is replaced. The generator
+fails when the markers are missing, duplicated, or out of order, preserving the
+description, homepage, install behavior, and smoke test outside that region.
+Validate the generated formula against the same release manifest before
+submitting the formula change:
+
+```bash
+bun run validate:homebrew-formula -- \
+  --formula Formula/ralphie.rb \
+  --manifest release-bundle/SHA256SUMS \
+  --version 0.1.2
+```
+
+The validator also rejects wrong asset names or release versions, malformed
+hashes, and values that differ from the canonical manifest. Never copy one
+platform's checksum to another branch or use a placeholder.
 
 ## Release checksum trust policy
 

@@ -69,6 +69,7 @@
     "test": "bun test tests",
     "typecheck": "bunx tsc --noEmit",
     "validate:homebrew-formula": "bun scripts/validate-homebrew-formula.ts",
+    "generate:homebrew-formula": "bun scripts/generate-homebrew-formula.ts",
     "verify:public-distribution": "bun run scripts/verify-public-distribution.ts"
   }
 }

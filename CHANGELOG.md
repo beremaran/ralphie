@@ -228,6 +228,9 @@ All notable changes to Ralphie are documented here. The project follows
   `--pi-dir` directories remain operator-owned, while environment-generated
   configuration uses a private temporary directory with secure permissions and
   cleanup on close or startup failure.
+- Add a deterministic Homebrew formula generator that consumes explicit,
+  version-tag-bound release metadata, validates the exact four lowercase
+  checksums, and updates only the marked formula metadata region.
 - Add exact per-platform Homebrew formula checksums and a validator that checks
   them against the canonical release manifest.
 - Make the standalone installer fail closed by requiring the signed checksum

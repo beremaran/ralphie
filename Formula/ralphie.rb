@@ -2,6 +2,7 @@ class Ralphie < Formula
   desc "Turn a GitHub issue queue into reviewed commits with Pi"
   homepage "https://github.com/beremaran/ralphie"
   license "MIT"
+  # BEGIN RALPHIE GENERATED RELEASE METADATA
   version "0.1.2"
 
   on_macos do
@@ -23,6 +24,7 @@ class Ralphie < Formula
       sha256 "c0d8b5ff1b24e554121bf879fb68380038ca7fbe27a63fd5857d6a1b27d2b300"
     end
   end
+  # END RALPHIE GENERATED RELEASE METADATA
 
   def install
     # The downloaded asset is named ralphie-<os>-<arch>; install it as `ralphie`.
