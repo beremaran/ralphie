@@ -53,6 +53,10 @@ export type ProgressCoordinatorOptions = Omit<
     readonly breadcrumbThreshold?: number;
     /** Alias for callers that use a generic cadence threshold. */
     readonly threshold?: number;
+    /** Visible rendered rows required by the coordinator's breadcrumb policy. */
+    readonly renderedLineThreshold?: number;
+    /** Shared output sink, primarily useful for deterministic tests. */
+    readonly output?: ProgressOutput;
     /** Injectable sticky-footer scheduler and view settings. */
     readonly footer?: Omit<TerminalFooterOptions, "footerLine">;
     /** Injectable terminal surface, useful for deterministic coordinator tests. */
@@ -255,6 +259,7 @@ export const makeProgressCoordinator = (
             : undefined;
     const output: ProgressOutput =
         controller ??
+        options.output ??
         makeProgressOutput({
             mode: options.mode,
             write: options.write,
@@ -270,6 +275,9 @@ export const makeProgressCoordinator = (
         ...(options.threshold === undefined
             ? {}
             : { threshold: options.threshold }),
+        ...(options.renderedLineThreshold === undefined
+            ? {}
+            : { renderedLineThreshold: options.renderedLineThreshold }),
     });
     let eventOutputBaseline = 0;
     let transcript: PiTranscriptRenderer | undefined;

@@ -65,6 +65,8 @@ export type BreadcrumbPolicyOptions = {
     readonly breadcrumbThreshold?: number;
     /** Short alias for callers that already have a generic threshold option. */
     readonly threshold?: number;
+    /** Explicit name for the rendered-line cadence used by the policy. */
+    readonly renderedLineThreshold?: number;
     readonly initialState?: BreadcrumbPolicyState;
 };
 
@@ -102,6 +104,7 @@ const nonNegativeSafeInteger = (value: number, name: string): number => {
 const thresholdFor = (options: BreadcrumbPolicyOptions): number =>
     positiveSafeInteger(
         options.breadcrumbThreshold ??
+            options.renderedLineThreshold ??
             options.threshold ??
             DEFAULT_BREADCRUMB_THRESHOLD,
         "breadcrumbThreshold",

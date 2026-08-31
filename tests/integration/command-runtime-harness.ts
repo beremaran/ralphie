@@ -12,8 +12,14 @@ import type {
     PiEventContext,
     PiEventListener,
     PiSessionEvent,
+    PiClient,
 } from "../../src/pi/client.ts";
 import { makeProgressCoordinator } from "../../src/progress/coordinator.ts";
+import {
+    makeProgressOutput,
+    type ProgressOutput,
+} from "../../src/progress/progress.ts";
+import type { PiRuntime } from "../../src/pi/server.ts";
 import {
     createDisplayState,
     type DisplayState,
@@ -29,9 +35,26 @@ export type RuntimeScenarioPiEvent = {
     readonly context: PiEventContext;
 };
 
-export type RuntimeScenarioEmission =
+export type CommandRuntimeHarnessStep =
     | { readonly kind: "progress"; readonly event: ProgressUpdate }
-    | RuntimeScenarioPiEvent;
+    | RuntimeScenarioPiEvent
+    | {
+          readonly kind: "wait-for-signal";
+          /** Defaults to the signal supplied to runCommand. */
+          readonly signal?: AbortSignal;
+      }
+    | {
+          /** Short alias useful for focused harness tests. */
+          readonly kind: "wait";
+          /** Defaults to the signal supplied to runCommand. */
+          readonly signal?: AbortSignal;
+      }
+    | { readonly kind: "failure"; readonly error: Error };
+
+export type RuntimeScenarioEmission = Extract<
+    CommandRuntimeHarnessStep,
+    { readonly kind: "progress" | "pi" }
+>;
 
 export type RuntimeScenarioOracle = {
     /** The ordered source stream used to drive the command/runtime boundary. */
@@ -50,10 +73,23 @@ export type CommandRuntimeRunCapture = {
     readonly displayStates: DisplayState[];
     readonly piEvents: RuntimeScenarioPiEvent[];
     eventLogPath?: string;
+    eventLogContents?: string;
+    eventLog?: string;
 };
 
 export type CommandRuntimeHarnessOptions = {
     readonly scenario?: RuntimeScenarioOracle;
+    /** Explicit ordered source steps for focused lifecycle tests. */
+    readonly steps?: ReadonlyArray<CommandRuntimeHarnessStep>;
+    /** Width passed to the real transcript and progress renderers. */
+    readonly terminalWidth?: number;
+    /** Short alias for terminalWidth. */
+    readonly width?: number;
+    /** Visible rendered rows between breadcrumb opportunities. */
+    readonly renderedLineThreshold?: number;
+    /** Compatibility aliases for the coordinator's cadence option. */
+    readonly breadcrumbThreshold?: number;
+    readonly threshold?: number;
 };
 
 const piEvent = (event: object): PiSessionEvent =>
@@ -595,6 +631,31 @@ export type CommandRuntimeHarness = ReturnType<
     typeof makeCommandRuntimeHarness
 >;
 
+const defaultSteps: ReadonlyArray<CommandRuntimeHarnessStep> = [
+    {
+        kind: "progress",
+        event: {
+            stage: "implementation",
+            status: "started",
+            message: "Fake progress",
+        },
+    },
+    {
+        kind: "pi",
+        event: {
+            type: "message_update",
+            assistantMessageEvent: {
+                type: "text_delta",
+                delta: "fake Pi event",
+            },
+        } as PiSessionEvent,
+        context: {
+            sessionID: "fake-session",
+            directory: "/fake/workspace",
+        },
+    },
+];
+
 const fakeService = (name: string, lifecycle: string[]): object =>
     new Proxy(
         {},
@@ -605,6 +666,50 @@ const fakeService = (name: string, lifecycle: string[]): object =>
             },
         },
     );
+
+const waitForSignal = (signal: AbortSignal): Promise<never> =>
+    new Promise((_, reject) => {
+        const rejectOnAbort = (): void =>
+            reject(signal.reason ?? new Error("Harness signal was aborted."));
+        if (signal.aborted) {
+            rejectOnAbort();
+            return;
+        }
+        signal.addEventListener("abort", rejectOnAbort, { once: true });
+    });
+
+const requireWorkflowSignal = (
+    signal: AbortSignal | undefined,
+): AbortSignal => {
+    if (signal === undefined) {
+        throw new Error(
+            "runCommand did not pass an AbortSignal to the fake workflow.",
+        );
+    }
+    return signal;
+};
+
+const runHarnessStep = async (input: {
+    readonly step: CommandRuntimeHarnessStep;
+    readonly signal: AbortSignal;
+    readonly progress: CommandRuntime["progress"];
+    readonly emitPi: PiEventListener;
+}): Promise<void> => {
+    switch (input.step.kind) {
+        case "progress":
+            await input.progress.emit(input.step.event);
+            return;
+        case "pi":
+            input.emitPi(input.step.event, input.step.context);
+            return;
+        case "failure":
+            throw input.step.error;
+        case "wait":
+        case "wait-for-signal":
+            await waitForSignal(input.step.signal ?? input.signal);
+            return;
+    }
+};
 
 /** Deterministic command boundary used by command/runtime integration tests. */
 export const makeCommandRuntimeHarness = (
@@ -617,9 +722,24 @@ export const makeCommandRuntimeHarness = (
     const lifecycle: string[] = [];
     const piEvents: PiSessionEvent[] = [];
     const eventLogPaths: string[] = [];
+    const eventLogContents: string[] = [];
     const runCaptures: CommandRuntimeRunCapture[] = [];
     const abortController = new AbortController();
+    const workflowSignals: AbortSignal[] = [];
+    const disposalCalls = {
+        runtime: 0,
+        coordinator: 0,
+        piRuntime: 0,
+        output: 0,
+    };
+    const writesAfterCleanup: string[] = [];
     let eventLogPath: string | undefined;
+    const configuredWidth = options.terminalWidth ?? options.width ?? 80;
+    const configuredThreshold =
+        options.renderedLineThreshold ??
+        options.breadcrumbThreshold ??
+        options.threshold;
+    let activeTerminalWidth = configuredWidth;
     let activeCapture: CommandRuntimeRunCapture | undefined;
     let listener: PiEventListener | undefined;
     let disposeCoordinator: (() => Promise<void>) | undefined;
@@ -627,6 +747,8 @@ export const makeCommandRuntimeHarness = (
     let failure: Error | undefined;
     let runtimeDisposalFailure: Error | undefined;
     let runtime: CommandRuntime | undefined;
+    let piRuntime: PiRuntime | undefined;
+    let outputDisposed = false;
     let getDisplayState: (() => DisplayState) | undefined;
     let cleaned = false;
 
@@ -638,11 +760,49 @@ export const makeCommandRuntimeHarness = (
         makeCoordinator: (coordinatorOptions) => {
             eventLogPath = coordinatorOptions.eventLogPath;
             if (eventLogPath !== undefined) eventLogPaths.push(eventLogPath);
+            const baseOutput = makeProgressOutput({
+                mode: coordinatorOptions.mode,
+                write: coordinatorOptions.write,
+            });
+            outputDisposed = false;
+            const observeOutputCall = (text: string): void => {
+                if (outputDisposed) writesAfterCleanup.push(text);
+            };
+            const output: ProgressOutput = {
+                beginLive: (line) => {
+                    observeOutputCall(line);
+                    baseOutput.beginLive(line);
+                },
+                appendLine: (line, liveLine) => {
+                    observeOutputCall(line);
+                    if (liveLine !== undefined) observeOutputCall(liveLine);
+                    baseOutput.appendLine(line, liveLine);
+                },
+                writeLine: (line) => {
+                    observeOutputCall(line);
+                    baseOutput.writeLine(line);
+                },
+                writeTranscript: (text) => {
+                    observeOutputCall(text);
+                    baseOutput.writeTranscript(text);
+                },
+                dispose: () => {
+                    disposalCalls.output += 1;
+                    lifecycle.push("output.dispose");
+                    baseOutput.dispose();
+                    outputDisposed = true;
+                },
+            };
             const coordinator = makeProgressCoordinator({
                 ...coordinatorOptions,
                 ...(scenario === undefined
                     ? {}
                     : { now: () => new Date(SCENARIO_TIME) }),
+                width: () => activeTerminalWidth,
+                ...(configuredThreshold === undefined
+                    ? {}
+                    : { renderedLineThreshold: configuredThreshold }),
+                output,
                 colors: false,
             });
             getDisplayState = coordinator.getDisplayState;
@@ -650,10 +810,8 @@ export const makeCommandRuntimeHarness = (
                 activeCapture.eventLogPath = eventLogPath;
                 activeCapture.displayStates.push(coordinator.getDisplayState());
             }
-            let disposed = false;
             disposeCoordinator = async () => {
-                if (disposed) return;
-                disposed = true;
+                disposalCalls.coordinator += 1;
                 lifecycle.push("coordinator.dispose");
                 await coordinator.dispose();
             };
@@ -678,14 +836,47 @@ export const makeCommandRuntimeHarness = (
                 piListener(event, context);
                 recordState(getDisplayState?.() ?? createDisplayState());
             };
-            return { start: async () => undefined as never };
+            const client: PiClient = {
+                session: {
+                    create: async () => {
+                        lifecycle.push("pi.client.session.create");
+                        return { data: { id: "fake-session" } };
+                    },
+                    prompt: async () => {
+                        lifecycle.push("pi.client.session.prompt");
+                        return {
+                            data: {
+                                info: {
+                                    id: "fake-assistant",
+                                    role: "assistant",
+                                },
+                                parts: [],
+                            },
+                        };
+                    },
+                },
+                close: () => lifecycle.push("pi.client.close"),
+            };
+            return {
+                start: async () => {
+                    lifecycle.push("pi.start");
+                    piRuntime = {
+                        url: "embedded://fake-pi",
+                        client,
+                        close: async () => {
+                            disposalCalls.piRuntime += 1;
+                            lifecycle.push("pi.runtime.close");
+                            client.close?.();
+                        },
+                    };
+                    return piRuntime;
+                },
+            };
         },
         makeRuntime: ({ pi, progress }) => {
             lifecycle.push("runtime");
-            let disposed = false;
             disposeRuntime = async () => {
-                if (disposed) return;
-                disposed = true;
+                disposalCalls.runtime += 1;
                 lifecycle.push("runtime.dispose");
                 if (runtimeDisposalFailure !== undefined) {
                     throw runtimeDisposalFailure;
@@ -722,44 +913,49 @@ export const makeCommandRuntimeHarness = (
                     fakeService(name, lifecycle),
                 ]),
             );
+            const observedProgress = {
+                ...progress,
+                emit: async (update: ProgressUpdate) => {
+                    if (outputDisposed) {
+                        writesAfterCleanup.push(JSON.stringify(update));
+                    }
+                    await progress.emit(update);
+                },
+                writeRaw: (text: string) => {
+                    if (outputDisposed) writesAfterCleanup.push(text);
+                    progress.writeRaw?.(text);
+                },
+            };
             runtime = {
                 ...services,
                 pi,
-                progress,
+                progress: observedProgress,
                 dispose: disposeRuntime,
             } as CommandRuntime;
             return runtime;
         },
-        runWorkflow: async (_options, currentRuntime) => {
+        runWorkflow: async (workflowOptions, currentRuntime) => {
             lifecycle.push("workflow");
             if (failure !== undefined) throw failure;
-            if (scenario === undefined) {
-                await currentRuntime.progress.emit({
-                    stage: "implementation",
-                    status: "started",
-                    message: "Fake progress",
-                });
-                listener?.(
-                    {
-                        type: "message_update",
-                        assistantMessageEvent: {
-                            type: "text_delta",
-                            delta: "fake Pi event",
-                        },
-                    } as PiSessionEvent,
-                    {
-                        sessionID: "fake-session",
-                        directory: "/fake/workspace",
-                    },
-                );
-                return undefined as never;
-            }
-            for (const emission of scenario.emissions) {
-                if (emission.kind === "progress") {
-                    await currentRuntime.progress.emit(emission.event);
-                } else {
-                    listener?.(emission.event, emission.context);
+            const signal = requireWorkflowSignal(workflowOptions.signal);
+            workflowSignals.push(signal);
+            const steps =
+                options.steps ??
+                (scenario === undefined ? defaultSteps : scenario.emissions);
+            const startedRuntime = await currentRuntime.pi.start();
+            piRuntime = startedRuntime;
+            try {
+                for (const step of steps) {
+                    if (signal.aborted) signal.throwIfAborted();
+                    await runHarnessStep({
+                        step,
+                        signal,
+                        progress: currentRuntime.progress,
+                        emitPi: (event, context) => listener?.(event, context),
+                    });
                 }
+            } finally {
+                await startedRuntime.close();
             }
             return undefined as never;
         },
@@ -770,8 +966,13 @@ export const makeCommandRuntimeHarness = (
 
     const run = async (
         args: ReadonlyArray<string> = ["owner/repository", "--dry-run"],
-        terminal = { isInteractive: false, isCI: true, width: 80 },
+        terminal = {
+            isInteractive: false,
+            isCI: true,
+            width: configuredWidth,
+        },
     ): Promise<void> => {
+        activeTerminalWidth = terminal.width;
         const effectiveArgs = hasOption(args, "--workspace")
             ? [...args]
             : [...args, "--workspace", workspace];
@@ -801,31 +1002,23 @@ export const makeCommandRuntimeHarness = (
                 },
             });
         } finally {
+            const path = capture.eventLogPath;
+            if (path !== undefined && (await Bun.file(path).exists())) {
+                capture.eventLogContents = await readFile(path, "utf8");
+                capture.eventLog = capture.eventLogContents;
+                eventLogContents.push(capture.eventLogContents);
+            }
             activeCapture = undefined;
         }
     };
 
     const dispose = async (): Promise<void> => {
-        let cleanupError: unknown;
-        try {
-            await disposeRuntime?.();
-        } catch (error) {
-            cleanupError = error;
-        }
-        try {
-            await disposeCoordinator?.();
-        } catch (error) {
-            cleanupError ??= error;
-        }
-        if (!cleaned) {
-            cleaned = true;
-            try {
-                await rm(workspace, { recursive: true, force: true });
-            } catch (error) {
-                cleanupError ??= error;
-            }
-        }
-        if (cleanupError !== undefined) throw cleanupError;
+        // runCommand owns runtime and coordinator disposal. This optional
+        // teardown only removes the fixture workspace and must not mask a
+        // missing or duplicate command cleanup before assertions run.
+        if (cleaned) return;
+        cleaned = true;
+        await rm(workspace, { recursive: true, force: true });
     };
 
     return {
@@ -834,10 +1027,20 @@ export const makeCommandRuntimeHarness = (
         lifecycle,
         piEvents,
         eventLogPaths,
+        eventLogContents,
         runCaptures,
         abortController,
+        workflowSignals,
         workspace,
         scenario,
+        steps:
+            options.steps ??
+            (scenario === undefined ? defaultSteps : scenario.emissions),
+        disposalCalls,
+        writesAfterCleanup,
+        get piRuntime() {
+            return piRuntime;
+        },
         get eventLogPath() {
             return eventLogPath;
         },
@@ -860,8 +1063,16 @@ export const makeCommandRuntimeHarness = (
         runMode: (mode: "default" | "ci" | "quiet" | "json") => {
             const terminal =
                 mode === "default"
-                    ? { isInteractive: false, isCI: false, width: 80 }
-                    : { isInteractive: false, isCI: true, width: 80 };
+                    ? {
+                          isInteractive: false,
+                          isCI: false,
+                          width: configuredWidth,
+                      }
+                    : {
+                          isInteractive: false,
+                          isCI: true,
+                          width: configuredWidth,
+                      };
             const args =
                 mode === "default" || mode === "ci"
                     ? ["owner/repository", "--dry-run"]

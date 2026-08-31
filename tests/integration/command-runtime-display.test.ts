@@ -2,7 +2,11 @@ import { describe, expect, test } from "bun:test";
 
 import packageJson from "../../package.json";
 import { NeedsAttentionStop } from "../../src/process/exit-code.ts";
-import { makeCommandRuntimeHarness } from "./command-runtime-harness.ts";
+import {
+    makeCommandRuntimeHarness,
+    type CommandRuntimeHarnessStep,
+} from "./command-runtime-harness.ts";
+import type { PiSessionEvent } from "../../src/pi/client.ts";
 
 describe("command/runtime display harness", () => {
     test("routes maintenance mode to its guarded entry point", async () => {
@@ -56,6 +60,20 @@ describe("command/runtime display harness", () => {
                     (call) => call === "coordinator.dispose",
                 ),
             ).toHaveLength(1);
+            expect(harness.lifecycle).toContain("pi.start");
+            expect(harness.lifecycle).toContain("pi.runtime.close");
+            expect(harness.lifecycle).toContain("pi.client.close");
+            expect(harness.lifecycle).toContain("output.dispose");
+            expect(harness.disposalCalls).toEqual({
+                runtime: 1,
+                coordinator: 1,
+                piRuntime: 1,
+                output: 1,
+            });
+            expect(harness.runCaptures[0]?.eventLogContents).toContain(
+                '"stage":"implementation"',
+            );
+            expect(harness.writesAfterCleanup).toEqual([]);
         } finally {
             await harness.cleanup();
         }
@@ -76,6 +94,138 @@ describe("command/runtime display harness", () => {
         } finally {
             await harness.cleanup();
         }
+    });
+
+    test("releases an open transcript stream when the command signal aborts", async () => {
+        const context = {
+            sessionID: "cancel-session",
+            directory: "/fake/workspace",
+        };
+        const pi = (event: object): PiSessionEvent =>
+            event as unknown as PiSessionEvent;
+        const steps = [
+            { kind: "pi", event: pi({ type: "agent_start" }), context },
+            {
+                kind: "pi",
+                event: pi({
+                    type: "message_update",
+                    assistantMessageEvent: { type: "text_start" },
+                }),
+                context,
+            },
+            {
+                kind: "pi",
+                event: pi({
+                    type: "message_update",
+                    assistantMessageEvent: {
+                        type: "text_delta",
+                        delta: "still streaming",
+                    },
+                }),
+                context,
+            },
+            { kind: "wait-for-signal" },
+        ] satisfies ReadonlyArray<CommandRuntimeHarnessStep>;
+        const previousExitCode = process.exitCode;
+        const harness = makeCommandRuntimeHarness({ steps });
+        try {
+            const pending = harness.run();
+            await Bun.sleep(10);
+            expect(harness.workflowSignals).toHaveLength(1);
+            expect(harness.workflowSignals[0]).toBe(
+                harness.abortController.signal,
+            );
+            harness.abortController.abort();
+            await expect(pending).rejects.toThrow("operation was aborted");
+            expect(process.exitCode).toBe(130);
+            expect(harness.stderr.join("")).toContain("still streaming");
+            expect(harness.disposalCalls).toMatchObject({
+                runtime: 1,
+                coordinator: 1,
+                piRuntime: 1,
+                output: 1,
+            });
+        } finally {
+            await harness.cleanup();
+            process.exitCode = previousExitCode ?? 0;
+        }
+    });
+
+    test("uses the rendered-line threshold in the real coordinator policy", async () => {
+        const context = {
+            sessionID: "threshold-session",
+            directory: "/fake/workspace",
+        };
+        const pi = (event: object): PiSessionEvent =>
+            event as unknown as PiSessionEvent;
+        const steps = [
+            { kind: "pi", event: pi({ type: "agent_start" }), context },
+            {
+                kind: "pi",
+                event: pi({
+                    type: "message_update",
+                    assistantMessageEvent: { type: "text_start" },
+                }),
+                context,
+            },
+            {
+                kind: "pi",
+                event: pi({
+                    type: "message_update",
+                    assistantMessageEvent: {
+                        type: "text_delta",
+                        delta: "first\nsecond",
+                    },
+                }),
+                context,
+            },
+            {
+                kind: "pi",
+                event: pi({
+                    type: "message_update",
+                    assistantMessageEvent: { type: "text_end" },
+                }),
+                context,
+            },
+            {
+                kind: "pi",
+                event: pi({
+                    type: "compaction_start",
+                    reason: "threshold",
+                }),
+                context,
+            },
+            {
+                kind: "pi",
+                event: pi({
+                    type: "agent_end",
+                    messages: [],
+                    willRetry: false,
+                }),
+                context,
+            },
+            {
+                kind: "pi",
+                event: pi({ type: "agent_settled" }),
+                context,
+            },
+        ] satisfies ReadonlyArray<CommandRuntimeHarnessStep>;
+        const outputFor = async (renderedLineThreshold: number) => {
+            const harness = makeCommandRuntimeHarness({
+                steps,
+                renderedLineThreshold,
+                terminalWidth: 24,
+            });
+            try {
+                await harness.run();
+                return harness.stderr.join("");
+            } finally {
+                await harness.cleanup();
+            }
+        };
+
+        expect(await outputFor(1)).toContain("› Compacting context");
+        expect(await outputFor(100)).not.toContain("› Compacting context");
     });
 
     test("uses the package version for plain and JSON version output", async () => {
