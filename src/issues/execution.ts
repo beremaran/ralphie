@@ -3,7 +3,7 @@ import type { PiClient } from "../pi/client.ts";
 
 import type { GitHubIssue } from "../github/issues.ts";
 import type { NeedsAttentionReason } from "./decisions.ts";
-import type { PiSelection } from "../agent/model.ts";
+import type { PiModel, PiSelection } from "../agent/model.ts";
 import type { PiSessionDiagnostics } from "../agent/task-session.ts";
 import type { GitRepositoryInvariantService } from "../git/repository-invariant.ts";
 import type { NeedsAttentionPolicy } from "../options.ts";
@@ -132,6 +132,7 @@ export type IssueExecutionContext = {
         readonly commitMessage?: string;
     };
     readonly implementationAttempts?: number;
+    readonly implementationFallbackModel?: PiModel;
     readonly piDiagnostics: PiSessionDiagnostics;
     readonly repositoryInvariant: GitRepositoryInvariantService;
     readonly verificationCommands?: ReadonlyArray<string>;

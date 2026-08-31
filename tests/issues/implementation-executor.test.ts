@@ -109,7 +109,11 @@ const issueContext = (
     },
 });
 
-const piClient = (outputs: ReadonlyArray<unknown>, sessions?: string[]) => {
+const piClient = (
+    outputs: ReadonlyArray<unknown>,
+    sessions?: string[],
+    prompts?: Array<{ readonly model?: unknown; readonly variant?: unknown }>,
+) => {
     let index = 0;
     let sessionIndex = 0;
     return {
@@ -119,7 +123,12 @@ const piClient = (outputs: ReadonlyArray<unknown>, sessions?: string[]) => {
                 sessions?.push(sessionID);
                 return { data: { id: sessionID } };
             },
-            prompt: async (parameters: { format?: unknown }) => {
+            prompt: async (parameters: {
+                format?: unknown;
+                model?: unknown;
+                variant?: unknown;
+            }) => {
+                prompts?.push(parameters);
                 const output = outputs[index++];
                 return {
                     data: {
@@ -616,6 +625,57 @@ describe("implementation executor", () => {
             kind: IssueExecutionOutcomeKind.Failed,
             message:
                 "Issue remains unresolved after 3 no-change implementation attempts: The reported behavior still reproduces.",
+        });
+    });
+
+    test("uses implementation-specific thinking and the fallback model on retry", async () => {
+        const prompts: Array<{
+            readonly model?: unknown;
+            readonly variant?: unknown;
+        }> = [];
+        const unresolved = {
+            status: IssueResolutionStatus.Unresolved,
+            summary: "Work remains.",
+            evidence: ["targeted test fails"],
+        };
+        const client = piClient(
+            [
+                implementation,
+                unresolved,
+                implementation,
+                {
+                    status: IssueResolutionStatus.Resolved,
+                    summary: "Resolved on retry.",
+                    evidence: ["targeted test passes"],
+                },
+            ],
+            undefined,
+            prompts,
+        );
+        const setup = services({
+            operations: { hasStagedChanges: async () => false },
+        });
+        const context = issueContext(client);
+        const result = await setup.executor.execute({
+            context: {
+                ...context,
+                implementationAttempts: 2,
+                implementationFallbackModel: {
+                    providerID: "openai",
+                    modelID: "gpt-5.6-sol",
+                },
+                piStageVariants: { implementation: "medium" },
+            },
+            artifacts: await makeIssueArtifactStore(42),
+        });
+        expect(result).toMatchObject({ completion: "already-resolved" });
+        expect(prompts[0]).toMatchObject({ variant: "medium" });
+        expect(prompts[2]).toMatchObject({
+            variant: "medium",
+            model: {
+                providerID: "openai",
+                modelID: "gpt-5.6-sol",
+            },
         });
     });
 

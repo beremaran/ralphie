@@ -49,6 +49,7 @@ export type DuplicatePolicy = DuplicateAction;
 export const DEFAULT_EXECUTION_MODE = ExecutionMode.Issues;
 export const DEFAULT_DUPLICATE_ACTION = DuplicateAction.Link;
 export const DEFAULT_MAX_ATTEMPTS = 3;
+export const DEFAULT_IMPLEMENTATION_ATTEMPTS = 3;
 
 export type CleanWhen = "start" | "end" | "both";
 
@@ -117,6 +118,9 @@ export type RalphieCliOptions = {
     readonly model?: PiModel;
     readonly thinking?: string;
     readonly groundingThinking?: string;
+    readonly implementationThinking?: string;
+    readonly implementationAttempts?: number;
+    readonly implementationFallbackModel?: PiModel;
     readonly complexityThinking?: string;
     readonly reviewThinking?: string;
     readonly commitThinking?: string;
@@ -165,6 +169,9 @@ export type IssueRalphieConfig = SharedRalphieConfig &
         readonly notificationsEnabled: boolean;
         readonly needsAttentionLabel?: string;
         readonly groundingThinking?: string;
+        readonly implementationThinking?: string;
+        readonly implementationAttempts: number;
+        readonly implementationFallbackModel?: PiModel;
         readonly complexityThinking?: string;
         readonly reviewThinking?: string;
         readonly commitThinking?: string;
@@ -268,6 +275,21 @@ const modeOptionRules: ReadonlyArray<ModeOptionRule> = [
         modes: [ExecutionMode.Issues],
     },
     {
+        option: "--implementation-thinking",
+        field: "implementationThinking",
+        modes: [ExecutionMode.Issues],
+    },
+    {
+        option: "--implementation-attempts",
+        field: "implementationAttempts",
+        modes: [ExecutionMode.Issues],
+    },
+    {
+        option: "--implementation-fallback-model",
+        field: "implementationFallbackModel",
+        modes: [ExecutionMode.Issues],
+    },
+    {
         option: "--complexity-thinking",
         field: "complexityThinking",
         modes: [ExecutionMode.Issues],
@@ -350,6 +372,15 @@ const validateMaxAttempts = (options: RalphieCliOptions): void => {
     ) {
         throw new RalphieError({
             message: "Option --max-attempts requires a positive integer.",
+        });
+    }
+    if (
+        options.implementationAttempts !== undefined &&
+        (!Number.isSafeInteger(options.implementationAttempts) ||
+            options.implementationAttempts <= 0)
+    ) {
+        throw new RalphieError({
+            message: "Option --implementation-attempts requires a positive integer.",
         });
     }
 };
@@ -456,6 +487,16 @@ const buildResolvedConfig = (
             options.needsAttentionLabel?.trim(),
         ),
         ...optionalProperty("groundingThinking", options.groundingThinking),
+        ...optionalProperty(
+            "implementationThinking",
+            options.implementationThinking,
+        ),
+        implementationAttempts:
+            options.implementationAttempts ?? DEFAULT_IMPLEMENTATION_ATTEMPTS,
+        ...optionalProperty(
+            "implementationFallbackModel",
+            options.implementationFallbackModel,
+        ),
         ...optionalProperty("complexityThinking", options.complexityThinking),
         ...optionalProperty("reviewThinking", options.reviewThinking),
         ...optionalProperty("commitThinking", options.commitThinking),

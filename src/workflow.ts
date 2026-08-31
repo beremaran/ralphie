@@ -509,6 +509,8 @@ export type WorkflowOptions = {
     readonly modelVariant?: string;
     readonly piStageVariants?: IssueExecutionContext["piStageVariants"];
     readonly verificationCommands?: ReadonlyArray<string>;
+    readonly implementationAttempts?: number;
+    readonly implementationFallbackModel?: PiModel;
     readonly workspace: string;
     readonly cleanup: boolean;
     readonly startClean: boolean;
@@ -536,6 +538,8 @@ type WorkflowConfiguration = {
     readonly modelVariant?: string;
     readonly piStageVariants?: IssueExecutionContext["piStageVariants"];
     readonly verificationCommands: ReadonlyArray<string>;
+    readonly implementationAttempts?: number;
+    readonly implementationFallbackModel?: PiModel;
     readonly workspace: string;
     readonly cleanup: boolean;
     readonly startClean: boolean;
@@ -576,6 +580,8 @@ const makeWorkflowConfiguration = (
         modelVariant,
         piStageVariants,
         verificationCommands = [],
+        implementationAttempts,
+        implementationFallbackModel,
         workspace,
         cleanup,
         startClean,
@@ -619,6 +625,8 @@ const makeWorkflowConfiguration = (
         modelVariant,
         piStageVariants,
         verificationCommands,
+        implementationAttempts,
+        implementationFallbackModel,
         workspace,
         cleanup,
         startClean,
@@ -1285,6 +1293,9 @@ export const workflow = async (
                         piDiagnostics: diagnostics,
                         repositoryInvariant: invariantService,
                         verificationCommands: config.verificationCommands,
+                        implementationAttempts: config.implementationAttempts,
+                        implementationFallbackModel:
+                            config.implementationFallbackModel,
                         signal,
                         needsAttentionPolicy: onNeedsAttention,
                     }),

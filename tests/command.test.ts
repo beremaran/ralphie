@@ -21,6 +21,9 @@ describe("native CLI parser", () => {
         expect(HELP_TEXT).toContain("--duplicate-action");
         expect(HELP_TEXT).toContain("--on-needs-attention <halt|continue>");
         expect(HELP_TEXT).toContain("--on-issue-failure <halt|continue>");
+        expect(HELP_TEXT).toContain("--implementation-thinking <level>");
+        expect(HELP_TEXT).toContain("--implementation-attempts <n>");
+        expect(HELP_TEXT).toContain("--implementation-fallback-model");
         expect(HELP_TEXT).toContain("--notify-needs-attention");
         expect(HELP_TEXT).toContain("--needs-attention-label <name>");
         expect(HELP_TEXT).toContain("default halt");
@@ -79,6 +82,31 @@ describe("native CLI parser", () => {
         ).toBe(IssueFailurePolicy.Continue);
         expect(() =>
             parseCliArgs(["owner/repository", "--on-issue-failure", "retry"]),
+        ).toThrow();
+    });
+
+    test("parses implementation-specific unattended controls", () => {
+        const options = parseCliArgs([
+            "owner/repository",
+            "--implementation-thinking",
+            "medium",
+            "--implementation-attempts",
+            "4",
+            "--implementation-fallback-model",
+            "openai/gpt-5.6-sol",
+        ]).options;
+        expect(options.implementationThinking).toBe("medium");
+        expect(options.implementationAttempts).toBe(4);
+        expect(options.implementationFallbackModel).toEqual({
+            providerID: "openai",
+            modelID: "gpt-5.6-sol",
+        });
+        expect(() =>
+            parseCliArgs([
+                "owner/repository",
+                "--implementation-attempts",
+                "0",
+            ]),
         ).toThrow();
     });
 

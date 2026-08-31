@@ -340,7 +340,11 @@ export const makeImplementationExecutorService = (
                     directory: context.repositoryPath,
                     title: `Implement issue #${context.issue.number}`,
                     agent: context.piSelection.agent,
-                    model: context.piSelection.model,
+                    model:
+                        attempt > 1 &&
+                        context.implementationFallbackModel !== undefined
+                            ? context.implementationFallbackModel
+                            : context.piSelection.model,
                     variant:
                         context.piStageVariants?.implementation ??
                         context.piSelection.variant,

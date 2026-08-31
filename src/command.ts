@@ -66,6 +66,9 @@ const cliOptions = {
     model: { type: "string" },
     thinking: { type: "string" },
     "grounding-thinking": { type: "string" },
+    "implementation-thinking": { type: "string" },
+    "implementation-attempts": { type: "string" },
+    "implementation-fallback-model": { type: "string" },
     "complexity-thinking": { type: "string" },
     "review-thinking": { type: "string" },
     "commit-thinking": { type: "string" },
@@ -260,6 +263,21 @@ const parseCliOptions = (
                 ? undefined
                 : piModelVariantSchema.parse(thinkingValue),
         groundingThinking: parseThinking(values, "grounding-thinking"),
+        implementationThinking: parseThinking(
+            values,
+            "implementation-thinking",
+        ),
+        implementationAttempts: asNumber(values, "implementation-attempts"),
+        implementationFallbackModel:
+            asNonEmptyString(values, "implementation-fallback-model") ===
+            undefined
+                ? undefined
+                : piModelSchema.parse(
+                      asNonEmptyString(
+                          values,
+                          "implementation-fallback-model",
+                      ),
+                  ),
         complexityThinking: parseThinking(values, "complexity-thinking"),
         reviewThinking: parseThinking(values, "review-thinking"),
         commitThinking: parseThinking(values, "commit-thinking"),
@@ -358,6 +376,10 @@ Options:
       --model <provider/model> Pi model selection
       --thinking <level>       Pi thinking level: off, minimal, low, medium, high, xhigh, or max
       --grounding-thinking <level> Readiness reasoning (default low)
+      --implementation-thinking <level> Implementation reasoning (default high)
+      --implementation-attempts <n> Empty implementation retries (default 3)
+      --implementation-fallback-model <provider/model>
+                               Model used after the first empty implementation
       --complexity-thinking <level> Complexity reasoning (default medium)
       --review-thinking <level> Review reasoning (default high)
       --commit-thinking <level> Commit-message reasoning (default low)
@@ -516,11 +538,14 @@ const workflowOptionsFor = (
     modelVariant: config.thinking,
     piStageVariants: {
         grounding: config.groundingThinking ?? "low",
+        implementation: config.implementationThinking ?? "high",
         complexity: config.complexityThinking ?? "medium",
         review: config.reviewThinking ?? "high",
         commitMessage: config.commitThinking ?? "low",
     },
     verificationCommands: config.verificationCommands,
+    implementationAttempts: config.implementationAttempts,
+    implementationFallbackModel: config.implementationFallbackModel,
     agent: config.agent,
     workspace: config.workspace,
     cleanup: config.cleanEnd,
