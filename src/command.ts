@@ -17,6 +17,7 @@ import {
     validateExplicitRalphieCliOptions,
     validateRalphieCliOptions,
     WorkflowMode,
+    DEFAULT_MAX_DECOMPOSITION_DEPTH,
 } from "./options.ts";
 import { IssueOrder, IssueSort } from "./github/issues.ts";
 import { piModelSchema, piModelVariantSchema } from "./agent/model.ts";
@@ -58,6 +59,7 @@ const cliOptions = {
     "needs-attention-label": { type: "string" },
     "duplicate-action": { type: "string" },
     "max-issues": { type: "string" },
+    "max-decomposition-depth": { type: "string" },
     "issue-label": { type: "string", multiple: true },
     "issue-sort": { type: "string" },
     "verify-command": { type: "string", multiple: true },
@@ -254,6 +256,7 @@ const parseCliOptions = (
         ...notificationOptions,
         ...(duplicateAction === undefined ? {} : { duplicateAction }),
         maxIssues: asNumber(values, "max-issues"),
+        maxDecompositionDepth: asNumber(values, "max-decomposition-depth"),
         issueLabels: parseIssueLabels(values),
         verificationCommands: parseRepeatedStrings(values, "verify-command"),
         ...(issueSortValue === undefined ? {} : parseIssueSort(issueSortValue)),
@@ -367,6 +370,8 @@ Options:
       --duplicate-action <link|close>
                                Duplicate handling in maintain-issues mode (default link)
       --max-issues <n>         Maximum issues to process
+      --max-decomposition-depth <n>
+                               Maximum recursive decomposition depth (default 3)
       --issue-label <label>    Include only issues with this label (repeatable)
       --issue-sort <sort>      created, updated, or comments, optionally :asc or :desc
       --verify-command <cmd>   Deterministic pre-commit gate (repeatable)
@@ -451,6 +456,7 @@ const resolveCommandFactories = (
 const loadResumeState = async (
     config: ResolvedRalphieConfig,
     explicitPolicy?: NeedsAttentionPolicy,
+    explicitMaxDecompositionDepth?: number,
 ): Promise<RunState | undefined> => {
     if (config.resume === undefined) return undefined;
 
@@ -463,6 +469,18 @@ const loadResumeState = async (
             message:
                 `Cannot resume run ${resumeState.runId}: saved on-needs-attention policy is ` +
                 `${resumeState.onNeedsAttention}, but requested policy is ${explicitPolicy}.`,
+        });
+    }
+    if (
+        explicitMaxDecompositionDepth !== undefined &&
+        explicitMaxDecompositionDepth !==
+            (resumeState.maxDecompositionDepth ??
+                DEFAULT_MAX_DECOMPOSITION_DEPTH)
+    ) {
+        throw new RalphieError({
+            message:
+                `Cannot resume run ${resumeState.runId}: saved maximum decomposition depth is ` +
+                `${resumeState.maxDecompositionDepth ?? DEFAULT_MAX_DECOMPOSITION_DEPTH}, but requested maximum is ${explicitMaxDecompositionDepth}.`,
         });
     }
     if (config.branch === undefined) return resumeState;
@@ -517,9 +535,14 @@ const makeCommandCoordinator = (
 const resumeStateForConfig = async (
     config: ResolvedRalphieConfig,
     explicitPolicy?: NeedsAttentionPolicy,
+    explicitMaxDecompositionDepth?: number,
 ): Promise<RunState | undefined> =>
     config.mode === ExecutionMode.Issues
-        ? await loadResumeState(config, explicitPolicy)
+        ? await loadResumeState(
+              config,
+              explicitPolicy,
+              explicitMaxDecompositionDepth,
+          )
         : undefined;
 
 const workflowOptionsFor = (
@@ -532,6 +555,8 @@ const workflowOptionsFor = (
     repo: config.repo,
     branch: config.branch,
     maxIssues: config.maxIssues,
+    maxDecompositionDepth:
+        resumeState?.maxDecompositionDepth ?? config.maxDecompositionDepth,
     issueFilters: {
         labels: config.issueLabels,
         sort: config.issueSort,
@@ -659,6 +684,7 @@ export const runCommand = async (
     const resumeState = await resumeStateForConfig(
         config,
         parsed.options.onNeedsAttention,
+        parsed.options.maxDecompositionDepth,
     );
 
     const terminal = input.terminal ?? terminalInfo();

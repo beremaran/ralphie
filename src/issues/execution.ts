@@ -76,7 +76,7 @@ export type IssueExecutionOutcome =
                 readonly policy?: NeedsAttentionPolicy;
             }
           | {
-                /** Dry-run route; no per-issue artifact is written. */
+                /** Controlled route with no per-issue recovery artifact. */
                 readonly route: "needs-attention";
                 readonly policy?: NeedsAttentionPolicy;
                 readonly artifactPath?: never;
@@ -139,4 +139,6 @@ export type IssueExecutionContext = {
     readonly signal?: AbortSignal;
     /** The policy selected for this run, used by dry-run reporting. */
     readonly needsAttentionPolicy?: NeedsAttentionPolicy;
+    /** Maximum generated-child lineage depth allowed for decomposition. */
+    readonly maxDecompositionDepth?: number;
 };

@@ -7,6 +7,12 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Changed
 
+- Added `--max-decomposition-depth` (default `3`) and persisted it in run state.
+  A direct or review-escalated decomposition beyond the configured ceiling now
+  leaves the issue open as `decomposition_limit_reached` needs attention and
+  continues independent queued work instead of failing and halting the run;
+  dependent issues remain blocked.
+
 - Pi implementation sessions now allow ordinary composed shell commands,
   pipes, redirection, and interpreters while continuing to reject explicit
   orchestration-owned Git/GitHub mutations.

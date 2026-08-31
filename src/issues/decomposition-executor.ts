@@ -37,6 +37,7 @@ import type {
     WorkflowExecutorResult,
 } from "./workflow-executor-input.ts";
 import type { NeedsAttentionRouterService } from "./needs-attention.ts";
+import { DEFAULT_MAX_DECOMPOSITION_DEPTH } from "../options.ts";
 
 export type DecompositionExecutorService = {
     readonly execute: (
@@ -620,7 +621,10 @@ export const makeDecompositionExecutorService = (
         input: WorkflowExecutorInput,
     ): Promise<WorkflowExecutorResult> => {
         const { context } = input;
-        const lineage = nextDecompositionLineage(context.issue);
+        const lineage = nextDecompositionLineage(
+            context.issue,
+            context.maxDecompositionDepth ?? DEFAULT_MAX_DECOMPOSITION_DEPTH,
+        );
         const reviewAttempts = await readReviewAttempts(input);
         const breakdown = await loadBreakdown(input, reviewAttempts);
         let mapping = await existingMapping(input);

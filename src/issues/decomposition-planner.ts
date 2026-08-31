@@ -17,6 +17,7 @@ import {
     type DecompositionOperationPlan,
 } from "./decomposition-plan.ts";
 import type { IssueExecutionContext } from "./execution.ts";
+import { DEFAULT_MAX_DECOMPOSITION_DEPTH } from "../options.ts";
 
 export type DecompositionPlanResult =
     | {
@@ -46,7 +47,10 @@ export const makeDecompositionPlannerService = (
     progress: ProgressReporterService,
 ): DecompositionPlannerService => ({
     plan: async (context) => {
-        const lineage = nextDecompositionLineage(context.issue);
+        const lineage = nextDecompositionLineage(
+            context.issue,
+            context.maxDecompositionDepth ?? DEFAULT_MAX_DECOMPOSITION_DEPTH,
+        );
         const invariant = await context.repositoryInvariant.capture(
             context.repositoryPath,
         );

@@ -37,6 +37,7 @@ export enum NeedsAttentionReason {
     MissingInformation = "missing_information",
     ExternalDependency = "external_dependency",
     CannotReproduce = "cannot_reproduce",
+    DecompositionLimitReached = "decomposition_limit_reached",
 }
 
 export enum GroundingDisposition {

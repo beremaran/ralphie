@@ -26,6 +26,8 @@ import type { ProgressReporterService } from "../progress/progress.ts";
 import type { PiNeedsAttentionRequest } from "../agent/task-session.ts";
 import type { DecompositionPlannerService } from "./decomposition-planner.ts";
 import type { DecompositionOperationPlan } from "./decomposition-plan.ts";
+import { DecompositionDepthLimitError } from "../github/decomposition-markdown.ts";
+import { decompositionLimitOutcome } from "./decomposition-limit.ts";
 
 export type DryRunIssueExecutorService = {
     readonly execute: (
@@ -397,7 +399,15 @@ const plannedDecompositionOutcome = async (
     grounding: GroundingDecision | undefined,
     complexity: ComplexityLevel,
 ): Promise<IssueExecutionOutcome> => {
-    const planned = await planner.plan(context);
+    let planned: Awaited<ReturnType<DecompositionPlannerService["plan"]>>;
+    try {
+        planned = await planner.plan(context);
+    } catch (error) {
+        if (error instanceof DecompositionDepthLimitError) {
+            return decompositionLimitOutcome(context.issue.number, error);
+        }
+        throw error;
+    }
     if (planned.kind === "needs-attention") {
         await reportDecompositionSignal(context, progress, planned.request);
         return decompositionSignalOutcome(context, planned.request);

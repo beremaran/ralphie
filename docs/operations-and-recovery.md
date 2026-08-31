@@ -136,6 +136,10 @@ from needs-attention handling.
 A needs-attention stop is handled separately and exits with status `2` by
 default. `--on-needs-attention continue` drains later work and completes with
 status `0` when the queue is drained. The issue remains open in either policy.
+The deterministic `decomposition_limit_reached` boundary is always handled as
+`continue`: raise the persisted `--max-decomposition-depth`, narrow the issue,
+or resolve its review findings manually before a later run. It never closes or
+marks the capped issue complete, so dependent work remains blocked.
 
 ## Needs-attention handling
 

@@ -2,7 +2,7 @@ import type { GitHubIssue } from "./issues.ts";
 import type { IssueBreakdownDecision } from "../issues/decisions.ts";
 import { RalphieError } from "../shared/error.ts";
 
-export const MAX_DECOMPOSITION_DEPTH = 3;
+export const DEFAULT_MAX_DECOMPOSITION_DEPTH = 3;
 export const RALPHIE_DECOMPOSITION_MARKER = "ralphie:decomposition";
 
 export type DecompositionLineage = {
@@ -11,15 +11,36 @@ export type DecompositionLineage = {
     readonly depth: number;
 };
 
-const validateDepth = (depth: number): void => {
+export class DecompositionDepthLimitError extends RalphieError {
+    override readonly _tag = "DecompositionDepthLimitError" as const;
+
+    constructor(
+        readonly depth: number,
+        readonly maximumDepth: number,
+    ) {
+        super({
+            message: `Decomposition depth ${depth} exceeds the configured maximum of ${maximumDepth}.`,
+        });
+        this.name = "DecompositionDepthLimitError";
+    }
+}
+
+const validateDepth = (depth: number, maximumDepth?: number): void => {
+    if (!Number.isInteger(depth) || depth < 1) {
+        throw new RalphieError({
+            message: `Decomposition depth ${depth} must be a positive integer.`,
+        });
+    }
     if (
-        !Number.isInteger(depth) ||
-        depth < 1 ||
-        depth > MAX_DECOMPOSITION_DEPTH
+        maximumDepth !== undefined &&
+        (!Number.isInteger(maximumDepth) || maximumDepth < 1)
     ) {
         throw new RalphieError({
-            message: `Decomposition depth ${depth} is outside the supported range 1–${MAX_DECOMPOSITION_DEPTH}.`,
+            message: `Maximum decomposition depth ${maximumDepth} must be a positive integer.`,
         });
+    }
+    if (maximumDepth !== undefined && depth > maximumDepth) {
+        throw new DecompositionDepthLimitError(depth, maximumDepth);
     }
 };
 
@@ -74,10 +95,11 @@ export const isDecomposedParent = (issue: GitHubIssue): boolean =>
 /** Derive lineage for the children of an issue, including recursively generated children. */
 export const nextDecompositionLineage = (
     issue: GitHubIssue,
+    maximumDepth = DEFAULT_MAX_DECOMPOSITION_DEPTH,
 ): DecompositionLineage => {
     const marker = parseDecompositionMarker(issue.body);
     const depth = marker === undefined ? 1 : marker.depth + 1;
-    validateDepth(depth);
+    validateDepth(depth, maximumDepth);
     return {
         rootIssueNumber: marker?.rootIssueNumber ?? issue.number,
         parentIssueNumber: issue.number,

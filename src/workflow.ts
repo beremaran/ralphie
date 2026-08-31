@@ -55,6 +55,7 @@ import { resolveWorkspacePath } from "./workspace/workspace.ts";
 import {
     DEFAULT_NEEDS_ATTENTION_POLICY,
     DEFAULT_ISSUE_FAILURE_POLICY,
+    DEFAULT_MAX_DECOMPOSITION_DEPTH,
     DEFAULT_WORKFLOW_MODE,
     NeedsAttentionPolicy,
     IssueFailurePolicy,
@@ -382,6 +383,7 @@ type PersistWorkflowStateInput = {
     readonly prClosure?: RunState["prClosure"];
     readonly selection: PiSelection;
     readonly issueLimit?: number;
+    readonly maxDecompositionDepth: number;
     readonly outcomes: ReadonlyArray<WorkflowOutcomeEntry>;
     readonly checkout: WorkflowCheckout;
 };
@@ -434,6 +436,7 @@ const persistWorkflowState = async (
         workflow: input.workflowMode,
         onNeedsAttention: input.onNeedsAttention,
         onIssueFailure: input.issueFailurePolicy,
+        maxDecompositionDepth: input.maxDecompositionDepth,
         dryRun: input.dryRun,
         notificationsEnabled: input.notificationsEnabled,
         ...(input.needsAttentionLabel === undefined
@@ -503,6 +506,7 @@ export type WorkflowOptions = {
     readonly repo: string;
     readonly branch?: string;
     readonly maxIssues?: number;
+    readonly maxDecompositionDepth?: number;
     readonly issueFilters: IssueFilters;
     readonly agent: string;
     readonly model?: PiModel;
@@ -532,6 +536,7 @@ type WorkflowConfiguration = {
     readonly repo: string;
     readonly requestedBranch?: string;
     readonly maxIssues?: number;
+    readonly maxDecompositionDepth: number;
     readonly issueFilters: IssueFilters;
     readonly agent: string;
     readonly model?: PiModel;
@@ -574,6 +579,7 @@ const makeWorkflowConfiguration = (
         repo,
         branch: requestedBranch,
         maxIssues,
+        maxDecompositionDepth = DEFAULT_MAX_DECOMPOSITION_DEPTH,
         issueFilters,
         agent,
         model,
@@ -619,6 +625,8 @@ const makeWorkflowConfiguration = (
         repo,
         requestedBranch,
         maxIssues,
+        maxDecompositionDepth:
+            resumeState?.maxDecompositionDepth ?? maxDecompositionDepth,
         issueFilters,
         agent,
         model,
@@ -686,6 +694,7 @@ const emitRunStarted = async (
                 config.resumeState?.maxIssues ??
                 config.maxIssues ??
                 "unlimited",
+            maxDecompositionDepth: config.maxDecompositionDepth,
             runId: config.actualRunId,
             dryRun: config.effectiveDryRun,
             workflow: config.workflowMode,
@@ -778,6 +787,7 @@ export const workflow = async (
         repo,
         requestedBranch,
         maxIssues,
+        maxDecompositionDepth,
         issueFilters,
         agent,
         model,
@@ -1019,6 +1029,7 @@ export const workflow = async (
                         prClosure,
                         selection,
                         issueLimit: resumeState?.maxIssues ?? maxIssues,
+                        maxDecompositionDepth,
                         outcomes,
                         checkout,
                     },
@@ -1298,6 +1309,7 @@ export const workflow = async (
                             config.implementationFallbackModel,
                         signal,
                         needsAttentionPolicy: onNeedsAttention,
+                        maxDecompositionDepth,
                     }),
                 (result) => outcomeMessage(issueContext.issue.number, result),
                 {
@@ -2100,6 +2112,7 @@ export const workflow = async (
             issueContext: WorkflowIssueContext,
             outcome: NeedsAttentionOutcome,
         ): Promise<void> => {
+            const policy = outcome.policy ?? onNeedsAttention;
             await progress.emit({
                 issue: {
                     number: issueContext.issue.number,
@@ -2116,7 +2129,7 @@ export const workflow = async (
                 ),
                 details: needsAttentionProgressDetails({
                     outcome,
-                    policy: onNeedsAttention,
+                    policy,
                     dryRun: effectiveDryRun,
                     current: issueContext.current,
                     budget: resumeState?.maxIssues ?? maxIssues,
@@ -2278,6 +2291,7 @@ export const workflow = async (
                 { readonly kind: IssueExecutionOutcomeKind.NeedsAttention }
             >,
         ): Promise<void> => {
+            const policy = outcome.policy ?? onNeedsAttention;
             checkout = await captureNeedsAttentionCheckout(issueContext);
             await emitNeedsAttentionEvent(issueContext, outcome);
             const notificationEnabled =
@@ -2292,7 +2306,7 @@ export const workflow = async (
                     intent,
                 );
             }
-            if (onNeedsAttention !== NeedsAttentionPolicy.Halt) return;
+            if (policy !== NeedsAttentionPolicy.Halt) return;
             if (notificationEnabled) {
                 await clearHaltedNeedsAttention(issueContext.issue.number);
             } else {

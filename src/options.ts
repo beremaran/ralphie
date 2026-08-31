@@ -1,4 +1,6 @@
 import { IssueOrder, IssueSort } from "./github/issues.ts";
+import { DEFAULT_MAX_DECOMPOSITION_DEPTH } from "./github/decomposition-markdown.ts";
+export { DEFAULT_MAX_DECOMPOSITION_DEPTH } from "./github/decomposition-markdown.ts";
 import { parseRepositorySlug } from "./github/repository.ts";
 import { MODEL_API_KEY_ENV, MODEL_BASE_URL_ENV } from "./pi/config.ts";
 import { DEFAULT_PI_AGENT, type PiModel } from "./agent/model.ts";
@@ -108,6 +110,7 @@ export type RalphieCliOptions = {
     readonly needsAttentionLabel?: string;
     readonly branch?: string;
     readonly maxIssues?: number;
+    readonly maxDecompositionDepth?: number;
     readonly issueLabels?: ReadonlyArray<string>;
     readonly issueSort?: IssueSort;
     readonly issueOrder?: IssueOrder;
@@ -176,6 +179,7 @@ export type IssueRalphieConfig = SharedRalphieConfig &
         readonly reviewThinking?: string;
         readonly commitThinking?: string;
         readonly verificationCommands?: ReadonlyArray<string>;
+        readonly maxDecompositionDepth: number;
     };
 
 export type MaintainIssuesRalphieConfig = SharedRalphieConfig &
@@ -242,6 +246,11 @@ const modeOptionRules: ReadonlyArray<ModeOptionRule> = [
     {
         option: "--workflow",
         field: "workflow",
+        modes: [ExecutionMode.Issues],
+    },
+    {
+        option: "--max-decomposition-depth",
+        field: "maxDecompositionDepth",
         modes: [ExecutionMode.Issues],
     },
     {
@@ -384,6 +393,16 @@ const validateMaxAttempts = (options: RalphieCliOptions): void => {
                 "Option --implementation-attempts requires a positive integer.",
         });
     }
+    if (
+        options.maxDecompositionDepth !== undefined &&
+        (!Number.isSafeInteger(options.maxDecompositionDepth) ||
+            options.maxDecompositionDepth <= 0)
+    ) {
+        throw new RalphieError({
+            message:
+                "Option --max-decomposition-depth requires a positive integer.",
+        });
+    }
 };
 
 /** Reject explicitly supplied flags that belong to another top-level mode. */
@@ -502,6 +521,8 @@ const buildResolvedConfig = (
         ...optionalProperty("reviewThinking", options.reviewThinking),
         ...optionalProperty("commitThinking", options.commitThinking),
         verificationCommands: [...(options.verificationCommands ?? [])],
+        maxDecompositionDepth:
+            options.maxDecompositionDepth ?? DEFAULT_MAX_DECOMPOSITION_DEPTH,
     };
 };
 

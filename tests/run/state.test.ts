@@ -25,6 +25,7 @@ const state: RunState = {
     onNeedsAttention: NeedsAttentionPolicy.Halt,
     selection: { agent: "build" },
     maxIssues: 3,
+    maxDecompositionDepth: 3,
     queue: {
         pending: [
             {

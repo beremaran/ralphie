@@ -6,7 +6,7 @@ import {
 } from "../../src/issues/decisions.ts";
 import type { GitHubIssue } from "../../src/github/issues.ts";
 import {
-    MAX_DECOMPOSITION_DEPTH,
+    DEFAULT_MAX_DECOMPOSITION_DEPTH,
     RALPHIE_DECOMPOSITION_MARKER,
     isDecomposedParent,
     nextDecompositionLineage,
@@ -53,6 +53,8 @@ const issueNumbers = {
     storage: 11,
     api: 12,
 };
+const decompositionMarkerForDepth = (depth: number): string =>
+    `<!-- ralphie:decomposition root=10 parent=9 key="generated" depth=${depth} -->`;
 
 describe("decomposition Markdown", () => {
     test("keeps the stable marker and dependencies without redundant lineage lists", () => {
@@ -96,16 +98,14 @@ describe("decomposition Markdown", () => {
     });
 
     test("rejects decomposition beyond the maximum depth", () => {
-        expect(() =>
-            renderChildIssueBody({
-                child: breakdown.issues[0]!,
-                lineage: {
-                    ...lineage,
-                    depth: MAX_DECOMPOSITION_DEPTH + 1,
-                },
-                issueNumbers,
-            }),
-        ).toThrow();
+        const generated = {
+            ...original,
+            body: decompositionMarkerForDepth(DEFAULT_MAX_DECOMPOSITION_DEPTH),
+        };
+        expect(() => nextDecompositionLineage(generated)).toThrow(
+            "exceeds the configured maximum",
+        );
+        expect(nextDecompositionLineage(generated, 4).depth).toBe(4);
     });
 
     test("increments lineage when a generated child requires decomposition", () => {

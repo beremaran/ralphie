@@ -543,6 +543,7 @@ describe("workflow", () => {
                 model: { providerID: "openai", modelID: "gpt-5" },
                 modelVariant: "high",
                 agent: "reviewer",
+                maxDecompositionDepth: 6,
                 cleanup: true,
                 startClean: true,
             },
@@ -553,6 +554,7 @@ describe("workflow", () => {
         expect(states.at(-1)?.onNeedsAttention).toBe(
             NeedsAttentionPolicy.Continue,
         );
+        expect(states.at(-1)?.maxDecompositionDepth).toBe(6);
         expect(states.at(-1)?.queue.completedIssueNumbers).toEqual([42]);
         expect(calls).toEqual([
             "removeWorkspace:/tmp/ralphie",
@@ -1509,6 +1511,50 @@ describe("workflow", () => {
         expect(states.at(-1)?.queue.completedIssueNumbers).toEqual([43]);
         expect(calls).not.toContain("closeIssue:42");
         expect(calls).toContain("closeIssue:43");
+    });
+
+    test("continues after the decomposition ceiling even when needs-attention defaults to halt", async () => {
+        const calls: string[] = [];
+        const states: RunState[] = [];
+        const summary = await workflow(
+            {
+                ...baseOptions,
+                maxIssues: 2,
+                onNeedsAttention: NeedsAttentionPolicy.Halt,
+            },
+            testRuntime(calls, states, {
+                issueLists: [[firstIssue, secondIssue]],
+                outcomes: [
+                    {
+                        kind: IssueExecutionOutcomeKind.NeedsAttention,
+                        reason: NeedsAttentionReason.DecompositionLimitReached,
+                        summary: "Maximum decomposition depth reached.",
+                        evidence: [
+                            "The next depth exceeds the configured maximum.",
+                        ],
+                        questions: [
+                            "Increase the maximum or narrow the issue.",
+                        ],
+                        route: "needs-attention",
+                        policy: NeedsAttentionPolicy.Continue,
+                    },
+                    {
+                        kind: IssueExecutionOutcomeKind.Completed,
+                        completion: "pushed-commit",
+                        commitSha: "second-sha",
+                    },
+                ],
+            }),
+        );
+
+        expect(summary.outcomes.map(({ issueNumber }) => issueNumber)).toEqual([
+            42, 43,
+        ]);
+        expect(summary.counts[IssueExecutionOutcomeKind.NeedsAttention]).toBe(
+            1,
+        );
+        expect(calls).toContain("closeIssue:43");
+        expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
     });
 
     test("halts with a handled stop without reporting an ordinary failure", async () => {

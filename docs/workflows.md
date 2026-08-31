@@ -188,6 +188,13 @@ actionable 0–3 children, stable keys, and an acyclic dependency graph. The
 breakdown is persisted before the first GitHub mutation.
 
 Each child receives a stable marker containing root, parent, key, and depth.
+The positive `--max-decomposition-depth` setting (default `3`) bounds recursive
+splitting and is persisted in run state. If direct complexity routing or review
+exhaustion would exceed it, Ralphie does not attempt another breakdown: it
+leaves the issue open, records `decomposition_limit_reached` needs attention,
+and continues independent queued work even when the general
+`--on-needs-attention` policy is `halt`. The issue is not marked complete, so
+its dependents remain blocked.
 Ralphie discovers those markers and reconciles them with the persisted mapping
 before creating anything. Thus a lost create response, a restart, or a partial
 linking failure can resume without blindly duplicating children. Creation,

@@ -24,6 +24,8 @@ import { makeIssueExecutorService } from "../../src/issues/executor.ts";
 import type { GroundingAssessmentService } from "../../src/issues/grounding.ts";
 import type { ImplementationExecutorService } from "../../src/issues/implementation-executor.ts";
 import { RalphieError } from "../../src/shared/error.ts";
+import { DecompositionDepthLimitError } from "../../src/github/decomposition-markdown.ts";
+import { NeedsAttentionPolicy } from "../../src/options.ts";
 import {
     makeProgressRecorder,
     type ProgressUpdate,
@@ -589,6 +591,76 @@ describe("IssueExecutor", () => {
             diagnosticsPath: "/workspace/diagnostics",
             reason: "Review budget exhausted.",
             childIssueNumbers: [101, 102],
+        });
+    });
+
+    test("preserves needs attention when review escalation cannot decompose", async () => {
+        const needsAttention = {
+            kind: IssueExecutionOutcomeKind.NeedsAttention,
+            reason: NeedsAttentionReason.DecompositionLimitReached,
+            summary: "Maximum decomposition depth reached.",
+            evidence: ["The next depth is unsupported."],
+            questions: ["Increase the configured maximum or narrow the issue."],
+            route: "needs-attention" as const,
+            policy: NeedsAttentionPolicy.Continue,
+        } as const;
+        const outcome = await makeIssueExecutorService(
+            makeIssueArtifactStoreService(),
+            {
+                assess: async () => ({
+                    decision: {
+                        complexity: ComplexityLevel.Level3,
+                        rationale: "Implementation is appropriate.",
+                    },
+                    sessionID: "complexity-session",
+                }),
+            },
+            {
+                execute: async () => ({
+                    kind: IssueExecutionOutcomeKind.Escalated,
+                    diagnosticsPath: "/workspace/diagnostics",
+                    reason: "Review budget exhausted.",
+                }),
+            },
+            { execute: async () => needsAttention },
+            actionableGrounding,
+            unusedResolutionVerification,
+        ).execute(context(42));
+
+        expect(outcome).toEqual(needsAttention);
+    });
+
+    test("routes the decomposition ceiling to non-halting needs attention", async () => {
+        const outcome = await makeIssueExecutorService(
+            makeIssueArtifactStoreService(),
+            {
+                assess: async () => ({
+                    decision: {
+                        complexity: ComplexityLevel.Level4,
+                        rationale: "Decomposition is required.",
+                    },
+                    sessionID: "complexity-session",
+                }),
+            },
+            {
+                execute: async () => {
+                    throw new Error("must not implement");
+                },
+            },
+            {
+                execute: async () => {
+                    throw new DecompositionDepthLimitError(4, 3);
+                },
+            },
+            actionableGrounding,
+            unusedResolutionVerification,
+        ).execute(context(42));
+
+        expect(outcome).toMatchObject({
+            kind: IssueExecutionOutcomeKind.NeedsAttention,
+            reason: NeedsAttentionReason.DecompositionLimitReached,
+            policy: NeedsAttentionPolicy.Continue,
+            route: "needs-attention",
         });
     });
 

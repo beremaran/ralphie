@@ -15,12 +15,13 @@ import { RalphieError } from "../shared/error.ts";
 import {
     DEFAULT_NEEDS_ATTENTION_POLICY,
     DEFAULT_ISSUE_FAILURE_POLICY,
+    DEFAULT_MAX_DECOMPOSITION_DEPTH,
     IssueFailurePolicy,
     NeedsAttentionPolicy,
     WorkflowMode,
 } from "../options.ts";
 
-export const RUN_STATE_VERSION = 7 as const;
+export const RUN_STATE_VERSION = 8 as const;
 
 /** Terminal and transitional states of an active PR delivery gate. */
 export const PR_CLOSURE_GATE_STATUSES = [
@@ -242,6 +243,11 @@ const runStateFields = {
         variant: z.string().min(1).optional(),
     }),
     maxIssues: z.number().int().positive().optional(),
+    maxDecompositionDepth: z
+        .number()
+        .int()
+        .positive()
+        .default(DEFAULT_MAX_DECOMPOSITION_DEPTH),
     queue: z.object({
         pending: z.array(issueSchema),
         completedIssueNumbers: z.array(z.number().int().positive()),
@@ -282,16 +288,22 @@ const legacyRunStateSchema = z.object({
         z.literal(4),
         z.literal(5),
         z.literal(6),
+        z.literal(7),
     ]),
     ...runStateFields,
     onNeedsAttention: z.enum(NeedsAttentionPolicy).optional(),
     onIssueFailure: z.enum(IssueFailurePolicy).optional(),
+    maxDecompositionDepth: z.number().int().positive().optional(),
 });
 
 // Keep older versions resumable as in-memory inputs while newly persisted
 // state is validated at the current version.
 type RunStateFields = z.infer<z.ZodObject<typeof runStateFields>>;
-export type RunState = RunStateFields & { readonly version: 4 | 5 | 6 | 7 };
+export type RunState = Omit<RunStateFields, "maxDecompositionDepth"> & {
+    /** Optional only for typed legacy-state fixtures; loading fills the default. */
+    readonly maxDecompositionDepth?: number;
+    readonly version: 4 | 5 | 6 | 7 | 8;
+};
 
 type LoadedRunState = {
     readonly state: RunState;
@@ -307,7 +319,8 @@ const migrateRunState = (value: unknown): LoadedRunState => {
             value.version === 3 ||
             value.version === 4 ||
             value.version === 5 ||
-            value.version === 6)
+            value.version === 6 ||
+            value.version === 7)
     ) {
         const legacy = legacyRunStateSchema.parse(value);
         return {
@@ -319,6 +332,9 @@ const migrateRunState = (value: unknown): LoadedRunState => {
                 onIssueFailure:
                     legacy.onIssueFailure ?? DEFAULT_ISSUE_FAILURE_POLICY,
                 notificationsEnabled: legacy.notificationsEnabled ?? false,
+                maxDecompositionDepth:
+                    legacy.maxDecompositionDepth ??
+                    DEFAULT_MAX_DECOMPOSITION_DEPTH,
             }),
             migrated: true,
         };

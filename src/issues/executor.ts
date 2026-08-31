@@ -1,5 +1,6 @@
 import { type ProgressReporterService } from "../progress/progress.ts";
 import { RalphieError } from "../shared/error.ts";
+import { DecompositionDepthLimitError } from "../github/decomposition-markdown.ts";
 import {
     IssueArtifactKind,
     issueFreshnessFingerprint,
@@ -25,6 +26,7 @@ import type { ImplementationExecutorService } from "./implementation-executor.ts
 import type { GroundingAssessmentService } from "./grounding.ts";
 import type { ResolutionVerificationService } from "./resolution-verification.ts";
 import { type NeedsAttentionRouterService } from "./needs-attention.ts";
+import { decompositionLimitOutcome } from "./decomposition-limit.ts";
 
 export type IssueExecutorService = {
     readonly execute: (
@@ -312,6 +314,9 @@ export const makeIssueExecutorService = (
         }
 
         const decomposition = await decompositionExecutor.execute(input);
+        if (decomposition.kind === IssueExecutionOutcomeKind.NeedsAttention) {
+            return decomposition;
+        }
         if (decomposition.kind !== IssueExecutionOutcomeKind.Decomposed) {
             return {
                 kind: IssueExecutionOutcomeKind.Failed,
@@ -339,6 +344,12 @@ export const makeIssueExecutorService = (
                 );
                 return await executeIssue(context, artifacts);
             } catch (error) {
+                if (error instanceof DecompositionDepthLimitError) {
+                    return decompositionLimitOutcome(
+                        context.issue.number,
+                        error,
+                    );
+                }
                 if (error instanceof RalphieError) {
                     return {
                         kind: IssueExecutionOutcomeKind.Failed,

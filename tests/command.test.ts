@@ -24,6 +24,7 @@ describe("native CLI parser", () => {
         expect(HELP_TEXT).toContain("--implementation-thinking <level>");
         expect(HELP_TEXT).toContain("--implementation-attempts <n>");
         expect(HELP_TEXT).toContain("--implementation-fallback-model");
+        expect(HELP_TEXT).toContain("--max-decomposition-depth <n>");
         expect(HELP_TEXT).toContain("--notify-needs-attention");
         expect(HELP_TEXT).toContain("--needs-attention-label <name>");
         expect(HELP_TEXT).toContain("default halt");
@@ -104,6 +105,20 @@ describe("native CLI parser", () => {
             parseCliArgs([
                 "owner/repository",
                 "--implementation-attempts",
+                "0",
+            ]),
+        ).toThrow();
+    });
+
+    test("parses and validates the maximum decomposition depth", () => {
+        expect(
+            parseCliArgs(["owner/repository", "--max-decomposition-depth", "6"])
+                .options.maxDecompositionDepth,
+        ).toBe(6);
+        expect(() =>
+            parseCliArgs([
+                "owner/repository",
+                "--max-decomposition-depth",
                 "0",
             ]),
         ).toThrow();

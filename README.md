@@ -167,6 +167,9 @@ flowchart TD
   fields plus the artifact path, policy, and queue position. Complexity,
   difficulty, size, or uncertainty are never valid needs-attention reasons, and
   the source issue always remains open.
+- Recursive splitting defaults to three levels and can be changed with
+  `--max-decomposition-depth`. Reaching that ceiling leaves the issue open and
+  continues independent queue work instead of aborting the run.
 
 `--on-needs-attention halt` (the default) keeps the issue in the run state's
 pending queue, emits a handled-stop summary, and exits with code `2`; the run
