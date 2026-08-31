@@ -68,8 +68,17 @@ the immutable `actions/attest-build-provenance` action revision.
 `attestation-subjects.json` records each final path and freshly computed
 SHA-256 together with the validated tag, commit, release workflow, Bun and
 build-tool versions, and build command, so each subject can be checked against
-the released bytes. Attestation and signing complete before the publisher
-creates a release handle; any missing or failed attestation stops publication.
+the released bytes. Before creating a release handle, the publisher requires
+exactly four final binaries and exactly one matching SPDX document per target,
+checks every SBOM's tag/version/commit and binary digest against the bytes in
+`release-assets`, and verifies exactly one attestation for each digest. The
+GitHub attestation API response must contain exactly one bundle, and the
+verified provenance predicate must identify the current release workflow run.
+`gh attestation verify` must also validate the release workflow, protected tag,
+commit, repository, and Actions OIDC issuer. Missing, duplicate, stale, or
+mismatched SBOMs and attestations fail closed before any release is
+created. Attestation and signing complete before the publisher creates a
+release handle; any missing or failed attestation stops publication.
 The minor
 version, `latest` for stable releases only, and `sha-<commit>` are explicit
 aliases. A dry run skips GitHub Release and GHCR publication. A normal tag

@@ -511,6 +511,65 @@ describe("release container metadata contract", () => {
         ).toBe(false);
     });
 
+    test("fails closed on exact final SBOM and provenance mappings before release creation", async () => {
+        const workflow = await readRepositoryFile(
+            ".github/workflows/release.yml",
+        );
+        const publishJob = workflow.slice(workflow.indexOf("  publish:"));
+        const gateStart = publishJob.indexOf(
+            "name: Verify final SBOMs and build provenance",
+        );
+        const signStart = publishJob.indexOf(
+            "name: Sign and verify SHA256SUMS with Sigstore",
+        );
+        const releaseCreateStart = publishJob.indexOf(
+            "name: Create or reuse draft release handle",
+        );
+
+        expect(gateStart).toBeGreaterThan(-1);
+        expect(gateStart).toBeLessThan(signStart);
+        expect(signStart).toBeLessThan(releaseCreateStart);
+        expect(publishJob).toContain("find release-assets -maxdepth 1");
+        expect(publishJob).toContain("expected_binaries=");
+        expect(publishJob).toContain("expected_sboms=");
+        expect(publishJob).toContain('sha256sum "$binary"');
+        expect(publishJob).toContain("$metadata.finalBinarySha256 == $digest");
+        expect(publishJob).toContain("$metadata.releaseTag == $tag");
+        expect(publishJob).toContain("$metadata.releaseVersion == $version");
+        expect(publishJob).toContain("$metadata.commitSha == $commit");
+        expect(publishJob).toContain("$metadata.target == $target");
+        expect(publishJob).toContain("$statement.subject[0].name == $binary");
+        expect(publishJob).not.toContain("$predicate.runDetails.builder.id");
+        expect(publishJob).toContain("gh api");
+        expect(publishJob).toContain("/attestations/sha256:$digest");
+        expect(publishJob).toContain("attestations[]] | length == 1");
+        expect(publishJob).toContain('gh attestation verify "$binary"');
+        expect(publishJob).toContain(
+            '--signer-workflow "$GH_REPO/.github/workflows/release.yml"',
+        );
+        expect(publishJob).toContain('--source-ref "refs/tags/$TAG"');
+        expect(publishJob).not.toContain("--source-digest");
+        expect(publishJob).toContain(
+            "--predicate-type https://slsa.dev/provenance/v1",
+        );
+        expect(publishJob).toContain("--format json");
+        expect(publishJob).toContain("runDetails.metadata.invocationId");
+        expect(publishJob).toContain("resolvedDependencies");
+        expect(publishJob).toContain(
+            "--cert-oidc-issuer https://token.actions.githubusercontent.com",
+        );
+        expect(publishJob).toContain("sort -u | wc -l");
+        for (const target of [
+            "darwin-arm64",
+            "darwin-x64",
+            "linux-arm64",
+            "linux-x64",
+        ]) {
+            expect(publishJob).toContain(`ralphie-${target}.sbom.spdx.json`);
+            expect(publishJob).toContain(`ralphie-${target}`);
+        }
+    });
+
     test("documents runnable Sigstore GitHub source selectors", async () => {
         const readme = await readRepositoryFile("README.md");
         const commandStart = readme.indexOf(

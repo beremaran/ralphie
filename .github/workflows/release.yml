@@ -961,8 +961,120 @@ jobs:
           ATTESTATION_IDS: ${{ steps.attest_darwin_arm64.outputs.attestation-id }} ${{ steps.attest_darwin_x64.outputs.attestation-id }} ${{ steps.attest_linux_arm64.outputs.attestation-id }} ${{ steps.attest_linux_x64.outputs.attestation-id }}
         run: |
           set -euo pipefail
-          for attestation_id in $ATTESTATION_IDS; do test -n "$attestation_id"; done
-          test "$(printf '%s\n' $ATTESTATION_IDS | wc -l)" = 4
+          read -r -a attestation_ids <<< "$ATTESTATION_IDS"
+          test "${#attestation_ids[@]}" = 4
+          for attestation_id in "${attestation_ids[@]}"; do test -n "$attestation_id"; done
+          test "$(printf '%s\n' "${attestation_ids[@]}" | wc -l)" = 4
+          test "$(printf '%s\n' "${attestation_ids[@]}" | sort -u | wc -l)" = 4
+
+      # Verify the generated documents and the attestations against the exact
+      # files that the release uploader will consume. The API count is checked
+      # as well as the cryptographic gh verification: a valid attestation for
+      # an old filename, source checkout, or another run is not sufficient.
+      # This gate must remain before the release handle is created.
+      - name: Verify final SBOMs and build provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.validate.outputs.tag }}
+          VERSION: ${{ needs.validate.outputs.version }}
+          SOURCE_REF: ${{ needs.validate.outputs.source_ref }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/tags/$TAG"
+          test "$GITHUB_SHA" = "$SOURCE_REF"
+          test "$GITHUB_WORKFLOW_REF" = "$GITHUB_REPOSITORY/.github/workflows/release.yml@refs/tags/$TAG"
+          test "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$
+          test "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$
+
+          expected_binaries=$'ralphie-darwin-arm64\nralphie-darwin-x64\nralphie-linux-arm64\nralphie-linux-x64'
+          actual_binaries="$(find release-assets -maxdepth 1 -type f -name 'ralphie-*' ! -name '*.sha256' ! -name '*.sbom.spdx.json' -printf '%f\n' | sort)"
+          test "$actual_binaries" = "$expected_binaries"
+          expected_sboms=$'ralphie-darwin-arm64.sbom.spdx.json\nralphie-darwin-x64.sbom.spdx.json\nralphie-linux-arm64.sbom.spdx.json\nralphie-linux-x64.sbom.spdx.json'
+          actual_sboms="$(find release-assets -maxdepth 1 -type f -name '*.sbom.spdx.json' -printf '%f\n' | sort)"
+          test "$actual_sboms" = "$expected_sboms"
+
+          attestation_response="$RUNNER_TEMP/ralphie-attestations.json"
+          for target in darwin-arm64 darwin-x64 linux-arm64 linux-x64; do
+            binary="release-assets/ralphie-$target"
+            sbom="$binary.sbom.spdx.json"
+            test "$(find release-assets -maxdepth 1 -type f -name "ralphie-$target" | wc -l | tr -d '[:space:]')" = 1
+            test "$(find release-assets -maxdepth 1 -type f -name "ralphie-$target.sbom.spdx.json" | wc -l | tr -d '[:space:]')" = 1
+            test -s "$binary"
+            test -s "$sbom"
+
+            digest="$(sha256sum "$binary" | awk '{print $1}')"
+            size="$(wc -c < "$binary" | tr -d '[:space:]')"
+            jq -e \
+              --arg tag "$TAG" \
+              --arg version "$VERSION" \
+              --arg commit "$SOURCE_REF" \
+              --arg target "$target" \
+              --arg binary "ralphie-$target" \
+              --arg digest "$digest" \
+              --arg size "$size" \
+              ' . as $document |
+               ($document.creationInfo.comment | fromjson) as $metadata |
+               ($document.spdxVersion == "SPDX-2.3") and
+               ($document.name == ("ralphie-" + $version + "-" + $target)) and
+               ($metadata.releaseTag == $tag) and
+               ($metadata.releaseVersion == $version) and
+               ($metadata.commitSha == $commit) and
+               ($metadata.target == $target) and
+               ($metadata.finalBinaryFilename == $binary) and
+               ($metadata.finalBinarySha256 == $digest) and
+               ($metadata.finalBinarySize == ($size | tonumber)) and
+               ([ $document.files[]? | select(.fileName == $binary) ] | length == 1) and
+               ([ $document.files[]? | select(.fileName == $binary) | .checksums[]? |
+                  select(.algorithm == "SHA256") | .checksumValue ] == [$digest])' \
+              "$sbom" > /dev/null
+
+            gh api --paginate --slurp \
+              -H 'Accept: application/vnd.github+json' \
+              "repos/$GH_REPO/attestations/sha256:$digest?per_page=100" > "$attestation_response"
+            jq -e \
+              '([.[].attestations[]] | length == 1) and
+               ([.[].attestations[]] | .[0].bundle != null)' \
+              "$attestation_response" > /dev/null
+
+            verification="$(
+              gh attestation verify "$binary" \
+                --repo "$GH_REPO" \
+                --signer-workflow "$GH_REPO/.github/workflows/release.yml" \
+                --source-ref "refs/tags/$TAG" \
+                --cert-identity "https://github.com/$GH_REPO/.github/workflows/release.yml@refs/tags/$TAG" \
+                --cert-oidc-issuer https://token.actions.githubusercontent.com \
+                --predicate-type https://slsa.dev/provenance/v1 \
+                --format json
+            )"
+            jq -e \
+              --arg digest "$digest" \
+              --arg binary "ralphie-$target" \
+              --arg repo "$GH_REPO" \
+              --arg tag "$TAG" \
+              --arg commit "$SOURCE_REF" \
+              --arg event "$GITHUB_EVENT_NAME" \
+              --arg run_id "$GITHUB_RUN_ID" \
+              --arg run_attempt "$GITHUB_RUN_ATTEMPT" \
+              'if length != 1 then false else
+               .[0] as $attestation |
+               ($attestation.verificationResult.statement) as $statement |
+               ($statement.predicate) as $predicate |
+               ($statement.predicateType == "https://slsa.dev/provenance/v1") and
+               ([ $statement.subject[]? ] | length == 1) and
+               ($statement.subject[0].name == $binary) and
+               ($statement.subject[0].digest.sha256 == $digest) and
+               ($predicate.buildDefinition.externalParameters.workflow.repository == ("https://github.com/" + $repo)) and
+               ($predicate.buildDefinition.externalParameters.workflow.path == ".github/workflows/release.yml") and
+               ($predicate.buildDefinition.externalParameters.workflow.ref == ("refs/tags/" + $tag)) and
+               ($predicate.buildDefinition.internalParameters.github.event_name == $event) and
+               ([ $predicate.buildDefinition.resolvedDependencies[]? |
+                  select(.uri == ("git+https://github.com/" + $repo + "@refs/tags/" + $tag) and
+                         .digest.gitCommit == $commit) ] | length == 1) and
+               ($predicate.runDetails.metadata.invocationId == ("https://github.com/" + $repo + "/actions/runs/" + $run_id + "/attempts/" + $run_attempt))
+               end' \
+              <<< "$verification"
+          done
 
       # Sign the exact manifest that will be published. Ambient GitHub OIDC
       # credentials stay inside the Sigstore action and are never written to

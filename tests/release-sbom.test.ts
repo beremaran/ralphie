@@ -433,6 +433,21 @@ describe("deterministic native release SBOMs", () => {
         try {
             const output = join(fixture.root, "sboms");
             await createSboms(optionsFor(fixture, output));
+            await writeFile(
+                join(output, "ralphie-unexpected.sbom.spdx.json"),
+                "{}\n",
+            );
+            await expect(
+                validateSbomSet(
+                    output,
+                    version,
+                    tag,
+                    fixture.commitSha,
+                    fixture.root,
+                    fixture.assets,
+                ),
+            ).rejects.toThrow("exactly one document per native target");
+            await rm(join(output, "ralphie-unexpected.sbom.spdx.json"));
             await rm(join(output, "ralphie-linux-x64.sbom.spdx.json"));
             await expect(
                 validateSbomSet(
