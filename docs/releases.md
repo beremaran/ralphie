@@ -34,7 +34,10 @@ Manual dispatches default to `dry_run: true`. Every validated release run
 builds and smoke-tests `linux/amd64` and `linux/arm64` container candidates
 without logging into GHCR or pushing public tags. Each platform is staged as
 an immutable `actions/upload-artifact@v4` artifact named
-`ralphie-container-candidate-<version>-<arch>`. Its
+`ralphie-container-candidate-<version>-<arch>`. Native targets are likewise
+staged as `ralphie-<version>-<target>` artifacts containing the renamed
+executable and its `<executable>.sha256` checksum; the publisher verifies
+that checksum before creating `SHA256SUMS`. Its
 `ralphie-container-<arch>.metadata.json` uses the
 `ralphie.container-candidate.v1` contract and records the validated
 `source_ref`, platform, OCI archive name and SHA-256, BuildKit image

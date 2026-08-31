@@ -27,7 +27,7 @@ Useful individual commands:
 | `bun run format:check` | Verify formatting without modifying files. |
 | `bun run lint` | Check TypeScript cognitive complexity (maximum 12). |
 | `bun run build` | Build the standalone executable at `dist/cli` (local builds use the `local` commit sentinel). |
-| `bun run build -- --commit-sha <sha>` | Build with an explicit release commit SHA. |
+| `bun run build -- --commit-sha <sha> [--version <version>]` | Build with explicit release metadata. |
 | `bun run build:package` | Build the publishable package bundle at `dist/ralphie.js`. |
 | `bun run package:check` | Pack, inspect, install, and run the local package in isolated temporary directories. |
 | `bun run package:inspect` | Inspect the local `npm pack --dry-run` file list without installing it. |

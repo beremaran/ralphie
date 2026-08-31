@@ -23,6 +23,7 @@ type ReleaseTarget = (typeof RELEASE_TARGETS)[number];
 type CreateSha256SumsOptions = {
     readonly artifactDirectory: string;
     readonly outputDirectory: string;
+    readonly requireChecksums?: boolean;
     readonly version: string;
 };
 
@@ -31,6 +32,9 @@ const releaseVersionPattern =
 
 const expectedAssetName = (target: ReleaseTarget): string =>
     `ralphie-${target}`;
+
+const expectedChecksumName = (target: ReleaseTarget): string =>
+    `${expectedAssetName(target)}.sha256`;
 
 const expectedArtifactName = (version: string, target: ReleaseTarget): string =>
     `ralphie-${version}-${target}`;
@@ -88,26 +92,51 @@ const copyValidatedAsset = async (
     outputDirectory: string,
     version: string,
     target: ReleaseTarget,
+    requireChecksums: boolean,
 ): Promise<string> => {
     const assetName = expectedAssetName(target);
+    const checksumName = expectedChecksumName(target);
     const artifactPath = join(
         artifactDirectory,
         expectedArtifactName(version, target),
     );
     const entries = await readDirectory(artifactPath);
+    const hasExpectedFiles =
+        entries.length === 2 &&
+        entries.every(
+            (entry) =>
+                entry.isFile() &&
+                (entry.name === assetName || entry.name === checksumName),
+        );
+    const hasOnlyBinary =
+        entries.length === 1 &&
+        entries[0]?.name === assetName &&
+        entries[0]?.isFile() === true;
     if (
-        entries.length !== 1 ||
-        entries[0]?.name !== assetName ||
-        !entries[0]?.isFile()
+        (!hasExpectedFiles && !hasOnlyBinary) ||
+        (requireChecksums && !hasExpectedFiles)
     ) {
         throw new Error(
-            `Release artifact '${artifactPath}' must contain exactly one binary named '${assetName}'.`,
+            `Release artifact '${artifactPath}' must contain exactly one binary named '${assetName}' and its checksum.`,
         );
     }
 
     const sourcePath = join(artifactPath, assetName);
     if ((await stat(sourcePath)).size === 0) {
         throw new Error(`Release asset '${sourcePath}' is empty.`);
+    }
+
+    if (hasExpectedFiles) {
+        const checksum = (
+            await readFile(join(artifactPath, checksumName), "utf8")
+        ).trim();
+        const expectedDigest = await sha256(sourcePath);
+        const expectedRecord = `${expectedDigest}  ${assetName}`;
+        if (checksum !== expectedRecord) {
+            throw new Error(
+                `Release asset checksum for '${sourcePath}' does not match its contents.`,
+            );
+        }
     }
 
     const outputPath = join(outputDirectory, assetName);
@@ -124,6 +153,7 @@ const sha256 = async (path: string): Promise<string> =>
 export const createSha256Sums = async ({
     artifactDirectory,
     outputDirectory,
+    requireChecksums = false,
     version,
 }: CreateSha256SumsOptions): Promise<string> => {
     assertReleaseVersion(version);
@@ -147,6 +177,7 @@ export const createSha256Sums = async ({
                 outputDirectory,
                 version,
                 target,
+                requireChecksums,
             ),
         ),
     );
@@ -175,14 +206,16 @@ const optionValue = (args: ReadonlyArray<string>, option: string): string => {
 
 const main = async (): Promise<void> => {
     const args = Bun.argv.slice(2);
-    if (args.length !== 6) {
+    const requireChecksums = args.includes("--require-checksums");
+    if (args.length !== (requireChecksums ? 7 : 6)) {
         throw new Error(
-            "Usage: create-sha256sums.ts --version <version> --artifacts-dir <path> --output-dir <path>",
+            "Usage: create-sha256sums.ts --version <version> --artifacts-dir <path> --output-dir <path> [--require-checksums]",
         );
     }
     await createSha256Sums({
         artifactDirectory: optionValue(args, "--artifacts-dir"),
         outputDirectory: optionValue(args, "--output-dir"),
+        requireChecksums,
         version: optionValue(args, "--version"),
     });
 };

@@ -22,6 +22,9 @@ const valueForOption = (
 const resolveTarget = (args: ReadonlyArray<string>): BuildTarget =>
     args.includes("--package") ? "package" : "native";
 
+const resolveVersion = (args: ReadonlyArray<string>): string =>
+    valueForOption(args, "--version") ?? packageJson.version;
+
 const resolveCommitSha = (args: ReadonlyArray<string>): string =>
     valueForOption(args, "--commit-sha") ?? LOCAL_BUILD_COMMIT_SHA;
 
@@ -52,7 +55,7 @@ const buildConfigFor = (
 const build = async (): Promise<void> => {
     const args = Bun.argv.slice(2);
     const buildInfo: BuildInfo = {
-        version: packageJson.version,
+        version: resolveVersion(args),
         commitSha: resolveCommitSha(args),
     };
     const result = await Bun.build(

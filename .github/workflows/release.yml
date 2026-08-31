@@ -173,27 +173,51 @@ jobs:
           fi
 
       - name: Build native binary
-        run: bun run build -- --commit-sha "${{ needs.validate.outputs.source_ref }}"
+        env:
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+          RELEASE_COMMIT_SHA: ${{ needs.validate.outputs.source_ref }}
+        run: >-
+          bun run build -- --commit-sha "$RELEASE_COMMIT_SHA"
+          --version "$RELEASE_VERSION"
 
-      - name: Verify and smoke-test native binary
+      - name: Verify native binary metadata
+        env:
+          EXPECTED_VERSION: ${{ needs.validate.outputs.version }}
+          EXPECTED_COMMIT_SHA: ${{ needs.validate.outputs.source_ref }}
         run: |
           set -euo pipefail
           test -x dist/cli
-          ./dist/cli --version
+          version_json="$(./dist/cli --version --output json)"
+          jq -e \
+            --arg version "$EXPECTED_VERSION" \
+            --arg commit_sha "$EXPECTED_COMMIT_SHA" \
+            'type == "object" and .version == $version and .commitSha == $commit_sha' \
+            <<< "$version_json" >/dev/null
 
-      - name: Prepare release asset
+      - name: Prepare and checksum release asset
         env:
           TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
-          mv dist/cli "ralphie-${TARGET}"
+          asset="ralphie-${TARGET}"
+          checksum_file="${asset}.sha256"
+          mv dist/cli "$asset"
+          if [[ "$(uname -s)" == Darwin ]]; then
+            digest="$(shasum -a 256 "$asset" | awk '{print $1}')"
+          else
+            digest="$(sha256sum "$asset" | awk '{print $1}')"
+          fi
+          printf '%s  %s\n' "$digest" "$asset" > "$checksum_file"
+          test "$(awk '{print $1}' "$checksum_file")" = "$digest"
 
       # Artifacts are only staging. The token cannot publish a release asset.
-      - name: Stage release asset
+      - name: Stage release asset and checksum
         uses: actions/upload-artifact@v4
         with:
           name: ralphie-${{ needs.validate.outputs.version }}-${{ matrix.target }}
-          path: ralphie-${{ matrix.target }}
+          path: |
+            ralphie-${{ matrix.target }}
+            ralphie-${{ matrix.target }}.sha256
           if-no-files-found: error
           # Keep staged inputs through the protected-environment approval
           # window; 90 days is the maximum GitHub Actions artifact lifetime.
@@ -822,7 +846,8 @@ jobs:
           bun scripts/create-sha256sums.ts \
             --version "$VERSION" \
             --artifacts-dir release-assets \
-            --output-dir release-assets
+            --output-dir release-assets \
+            --require-checksums
 
       # Sign the exact manifest that will be published. Ambient GitHub OIDC
       # credentials stay inside the Sigstore action and are never written to
