@@ -175,13 +175,17 @@ export const createReleaseMetadata = async ({
     await assertEmptyOutputDirectory(outputDirectory);
     for (const target of RELEASE_TARGETS) {
         const assetName = expectedAssetName(target);
+        const artifactPath = join(
+            artifactDirectory,
+            expectedArtifactName(version, target),
+        );
         await copyFile(
-            join(
-                artifactDirectory,
-                expectedArtifactName(version, target),
-                assetName,
-            ),
+            join(artifactPath, assetName),
             join(outputDirectory, assetName),
+        );
+        await copyFile(
+            join(artifactPath, expectedChecksumName(target)),
+            join(outputDirectory, expectedChecksumName(target)),
         );
     }
 

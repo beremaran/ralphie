@@ -998,9 +998,13 @@ jobs:
 
           assets=(
             release-assets/ralphie-darwin-arm64
+            release-assets/ralphie-darwin-arm64.sha256
             release-assets/ralphie-darwin-x64
+            release-assets/ralphie-darwin-x64.sha256
             release-assets/ralphie-linux-arm64
+            release-assets/ralphie-linux-arm64.sha256
             release-assets/ralphie-linux-x64
+            release-assets/ralphie-linux-x64.sha256
             release-assets/SHA256SUMS
             release-assets/SHA256SUMS.sigstore.json
             release-assets/release-metadata.json

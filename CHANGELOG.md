@@ -5,6 +5,9 @@ All notable changes to Ralphie are documented here. The project follows
 
 ## [Unreleased]
 
+- Add an exact-tag GitHub release verifier that emits a deterministic,
+  checksum-verified Homebrew asset manifest.
+
 ### Changed
 
 - The protected native release publisher now gates on every validated build

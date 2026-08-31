@@ -43,9 +43,9 @@ checksum against its sidecar. It stages the immutable
 `ralphie-release-metadata-<version>` bundle containing the deterministic
 `release-metadata.json` contract `ralphie.release-metadata.v1` (exact tag,
 normalized version, validated commit, and sorted binary names and SHA-256
-values), the four binaries, and `SHA256SUMS`. The publisher downloads only
-that exact bundle, verifies it, and never reconstructs release metadata or
-uses a broad native-asset glob. Its `ralphie-container-<arch>.metadata.json`
+values), the four binaries, their `.sha256` sidecars, and `SHA256SUMS`. The
+publisher downloads only that exact bundle, verifies it, and never
+reconstructs release metadata or uses a broad native-asset glob. Its `ralphie-container-<arch>.metadata.json`
 uses the
 `ralphie.container-candidate.v1` contract and records the validated
 `source_ref`, platform, OCI archive name and SHA-256, BuildKit image
@@ -131,8 +131,26 @@ contract is an object with `version`, the exact `tag` (`v${version}`), and an
 
 The version must be strict `major.minor.patch` with no prerelease suffix, and
 the tag must match it exactly. Missing, duplicate, unexpected, or malformed
-assets are rejected. The workflow integration can generate the formula in place
-from the bundle with:
+assets are rejected. Before changing a formula, verify the already-published
+release directly with the exact-tag asset gate:
+
+```bash
+bun run verify:homebrew-assets -- \
+  --tag v0.1.2 \
+  --version 0.1.2 \
+  --repository beremaran/ralphie \
+  --output release-bundle/homebrew-assets.json
+```
+
+The verifier queries only `/releases/tags/<tag>`, rejects draft and prerelease
+releases, downloads each of the four canonical binaries and its `.sha256`
+sidecar, and writes `ralphie.homebrew-asset-manifest.v1` only after every byte
+has been checked. It never selects `latest` or a branch. In GitHub Actions,
+`GITHUB_REPOSITORY`, `GITHUB_API_URL`, and `GH_TOKEN`/`GITHUB_TOKEN` are used
+when provided. The resulting entries are sorted by asset name and include the
+target, exact asset name, release download URL, and verified SHA-256.
+
+The workflow integration can generate the formula in place from the bundle with:
 
 ```bash
 bun run generate:homebrew-formula -- \

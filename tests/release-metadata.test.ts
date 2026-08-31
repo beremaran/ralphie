@@ -63,6 +63,14 @@ describe("release metadata aggregation", () => {
             expect(
                 await readFile(join(output, "SHA256SUMS"), "utf8"),
             ).toContain("ralphie-linux-x64");
+            expect(
+                await readFile(
+                    join(output, "ralphie-linux-x64.sha256"),
+                    "utf8",
+                ),
+            ).toBe(
+                `${createHash("sha256").update("binary for linux-x64").digest("hex")}  ralphie-linux-x64\n`,
+            );
         } finally {
             await rm(fixture, { recursive: true, force: true });
         }
