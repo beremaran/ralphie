@@ -223,6 +223,79 @@ jobs:
           # window; 90 days is the maximum GitHub Actions artifact lifetime.
           retention-days: 90
 
+  aggregate-release-metadata:
+    name: Aggregate release metadata
+    needs:
+      - validate
+      - build-binaries
+    if: >-
+      ${{
+        always() &&
+        needs.validate.result == 'success' &&
+        needs.build-binaries.result == 'success'
+      }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out validated source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.source_ref }}
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      # Use one exact artifact name per target. This prevents an untrusted
+      # artifact matching a broad pattern from entering the release bundle.
+      - name: Download darwin-arm64 staging artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ralphie-${{ needs.validate.outputs.version }}-darwin-arm64
+          path: release-staging/ralphie-${{ needs.validate.outputs.version }}-darwin-arm64
+      - name: Download darwin-x64 staging artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ralphie-${{ needs.validate.outputs.version }}-darwin-x64
+          path: release-staging/ralphie-${{ needs.validate.outputs.version }}-darwin-x64
+      - name: Download linux-arm64 staging artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ralphie-${{ needs.validate.outputs.version }}-linux-arm64
+          path: release-staging/ralphie-${{ needs.validate.outputs.version }}-linux-arm64
+      - name: Download linux-x64 staging artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ralphie-${{ needs.validate.outputs.version }}-linux-x64
+          path: release-staging/ralphie-${{ needs.validate.outputs.version }}-linux-x64
+
+      - name: Verify binaries and create release metadata
+        env:
+          TAG: ${{ needs.validate.outputs.tag }}
+          VERSION: ${{ needs.validate.outputs.version }}
+          SOURCE_REF: ${{ needs.validate.outputs.source_ref }}
+        run: |
+          set -euo pipefail
+          bun scripts/create-release-metadata.ts \
+            --version "$VERSION" \
+            --tag "$TAG" \
+            --commit-sha "$SOURCE_REF" \
+            --artifacts-dir release-staging \
+            --output-dir release-bundle
+
+      # This is the only native bundle consumed by the publisher. v4 artifact
+      # names are immutable and include the validated package version.
+      - name: Stage immutable release metadata bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: ralphie-release-metadata-${{ needs.validate.outputs.version }}
+          path: release-bundle
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 90
+
   # This job deliberately has no registry credentials or write permissions.
   # Each matrix leg produces one tested, platform-specific candidate. The
   # protected publisher can later download these immutable artifacts and
@@ -389,10 +462,11 @@ jobs:
     name: Publish npm package
     needs:
       - validate
+      - aggregate-release-metadata
+    if: needs.validate.outputs.dry_run == 'false' && github.ref_type == 'tag' && startsWith(github.ref, 'refs/tags/v') && needs.aggregate-release-metadata.result == 'success'
     # The validation job also rejects unqualified manual dispatches. Keep the
     # ref guard here so this publisher can never run from a branch, even if a
     # future change weakens another job's condition.
-    if: needs.validate.outputs.dry_run == 'false' && github.ref_type == 'tag' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     # One-time npm setup: in the package's npmjs.com settings, add the GitHub
     # Actions trusted publisher for owner beremaran, repository ralphie,
@@ -548,7 +622,15 @@ jobs:
     needs:
       - validate
       - stage-container
-    if: needs.validate.outputs.dry_run == 'false'
+      - aggregate-release-metadata
+    if: >-
+      ${{
+        always() &&
+        needs.validate.result == 'success' &&
+        needs.stage-container.result == 'success' &&
+        needs.aggregate-release-metadata.result == 'success' &&
+        needs.validate.outputs.dry_run == 'false'
+      }}
     runs-on: ubuntu-latest
     # Container publication is separately downstream of the metadata check.
     # Its protected environment prevents a retry from bypassing validation.
@@ -696,12 +778,14 @@ jobs:
       - validate
       - build-binaries
       - stage-container
+      - aggregate-release-metadata
     if: >-
       ${{
         always() &&
         needs.validate.result == 'success' &&
         needs.build-binaries.result == 'success' &&
         needs.stage-container.result == 'success' &&
+        needs.aggregate-release-metadata.result == 'success' &&
         needs.validate.outputs.dry_run == 'false' &&
         github.ref_type == 'tag' &&
         startsWith(github.ref, 'refs/tags/v')
@@ -816,26 +900,56 @@ jobs:
             core.setOutput("state", state);
             core.setOutput("terminal", String(state === "published"));
 
+      - name: Download verified release metadata bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: ralphie-release-metadata-${{ needs.validate.outputs.version }}
+          path: release-assets
+          merge-multiple: false
+
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.validate.outputs.source_ref }}
           persist-credentials: false
 
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.3.14
+      - name: Verify release metadata and exact assets
+        env:
+          TAG: ${{ needs.validate.outputs.tag }}
+          VERSION: ${{ needs.validate.outputs.version }}
+          SOURCE_REF: ${{ needs.validate.outputs.source_ref }}
+        run: |
+          set -euo pipefail
+          test "$TAG" = "v$VERSION"
+          jq -e \
+            --arg schema "ralphie.release-metadata.v1" \
+            --arg tag "$TAG" \
+            --arg version "$VERSION" \
+            --arg commit "$SOURCE_REF" \
+            '(.schema == $schema) and
+             (.tag == $tag) and
+             (.version == $version) and
+             (.commit == $commit) and
+             (.commit | test("^[0-9a-f]{40}$")) and
+             (.assets | (type == "array" and length == 4 and
+              ((map(select((.name | type) == "string" and (.sha256 | type) == "string"))) | length == 4))) and
+             ([.assets[].name] | sort) == ["ralphie-darwin-arm64", "ralphie-darwin-x64", "ralphie-linux-arm64", "ralphie-linux-x64"] and
+             ([.assets[].sha256] | all(test("^[0-9a-f]{64}$")))' \
+            release-assets/release-metadata.json > /dev/null
+          jq -r '.assets[] | "\(.sha256)  \(.name)"' \
+            release-assets/release-metadata.json > "$RUNNER_TEMP/release-metadata-sums"
+          cmp --silent "$RUNNER_TEMP/release-metadata-sums" release-assets/SHA256SUMS
+          for asset in \
+            ralphie-darwin-arm64 \
+            ralphie-darwin-x64 \
+            ralphie-linux-arm64 \
+            ralphie-linux-x64; do
+            test -s "release-assets/$asset"
+          done
+          (cd release-assets && sha256sum --check SHA256SUMS)
 
-      - name: Download staged binaries
-        uses: actions/download-artifact@v4
-        with:
-          pattern: ralphie-${{ needs.validate.outputs.version }}-*
-          path: release-assets
-          # Preserve each immutable artifact boundary so the collector can
-          # reject missing, duplicate, cross-platform, and cross-release files.
-          merge-multiple: false
-
-      # This copies only the four expected binaries into one directory and
-      # hashes those exact files. The same paths are passed to gh below.
+      # The former scripts/create-sha256sums.ts collector is intentionally not
+      # run here: the aggregation job already created and verified this exact
+      # SHA256SUMS file and release-metadata.json bundle.
       - name: Collect binaries and create SHA256SUMS
         env:
           TAG: ${{ needs.validate.outputs.tag }}
@@ -843,11 +957,9 @@ jobs:
         run: |
           set -euo pipefail
           test "$TAG" = "v$VERSION"
-          bun scripts/create-sha256sums.ts \
-            --version "$VERSION" \
-            --artifacts-dir release-assets \
-            --output-dir release-assets \
-            --require-checksums
+          # scripts/create-sha256sums.ts is intentionally not run by the
+          # publisher; aggregation created this exact file already.
+          test -s release-assets/SHA256SUMS
 
       # Sign the exact manifest that will be published. Ambient GitHub OIDC
       # credentials stay inside the Sigstore action and are never written to
@@ -891,6 +1003,7 @@ jobs:
             release-assets/ralphie-linux-x64
             release-assets/SHA256SUMS
             release-assets/SHA256SUMS.sigstore.json
+            release-assets/release-metadata.json
           )
           upload_endpoint="${UPLOAD_URL%%\{*}"
           test "$upload_endpoint" != "$UPLOAD_URL"

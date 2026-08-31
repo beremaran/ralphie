@@ -36,9 +36,17 @@ without logging into GHCR or pushing public tags. Each platform is staged as
 an immutable `actions/upload-artifact@v4` artifact named
 `ralphie-container-candidate-<version>-<arch>`. Native targets are likewise
 staged as `ralphie-<version>-<target>` artifacts containing the renamed
-executable and its `<executable>.sha256` checksum; the publisher verifies
-that checksum before creating `SHA256SUMS`. Its
-`ralphie-container-<arch>.metadata.json` uses the
+executable and its `<executable>.sha256` checksum. After all four native legs
+succeed, the aggregation job downloads those exact versioned artifacts, rejects
+missing, extra, duplicate, and cross-version files, and recomputes each binary
+checksum against its sidecar. It stages the immutable
+`ralphie-release-metadata-<version>` bundle containing the deterministic
+`release-metadata.json` contract `ralphie.release-metadata.v1` (exact tag,
+normalized version, validated commit, and sorted binary names and SHA-256
+values), the four binaries, and `SHA256SUMS`. The publisher downloads only
+that exact bundle, verifies it, and never reconstructs release metadata or
+uses a broad native-asset glob. Its `ralphie-container-<arch>.metadata.json`
+uses the
 `ralphie.container-candidate.v1` contract and records the validated
 `source_ref`, platform, OCI archive name and SHA-256, BuildKit image
 manifest `digest`, and OCI version/revision labels; the final publisher
