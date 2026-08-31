@@ -15,8 +15,18 @@
     "dist/ralphie.js",
     "README.md",
     "CHANGELOG.md",
-    "docs",
-    "LICENSE"
+    "LICENSE",
+    "docs/architecture.md",
+    "docs/cli-reference.md",
+    "docs/development.md",
+    "docs/end-to-end-execution.md",
+    "docs/getting-started.md",
+    "docs/operations-and-recovery.md",
+    "docs/public-distribution.md",
+    "docs/README.md",
+    "docs/releases.md",
+    "docs/safety.md",
+    "docs/workflows.md"
   ],
   "repository": {
     "type": "git",

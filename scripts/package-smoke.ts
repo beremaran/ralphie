@@ -1,13 +1,6 @@
 #!/usr/bin/env bun
 
-import {
-    access,
-    mkdtemp,
-    mkdir,
-    readdir,
-    rm,
-    writeFile,
-} from "node:fs/promises";
+import { access, mkdtemp, mkdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative, resolve, sep } from "node:path";
 
@@ -29,6 +22,7 @@ type ProcessOutput = {
 
 type TemporaryLayout = {
     readonly cache: string;
+    readonly extract: string;
     readonly home: string;
     readonly install: string;
     readonly pack: string;
@@ -39,6 +33,11 @@ type TemporaryLayout = {
 type InstalledPackage = {
     readonly executable: string;
     readonly manifest: JsonRecord;
+    readonly root: string;
+};
+
+type ExtractedPackage = {
+    readonly executable: string;
     readonly root: string;
 };
 
@@ -232,13 +231,38 @@ const parseJsonOutput = (output: string, label: string): unknown => {
     }
 };
 
-const packRecordFrom = (output: string): JsonRecord => {
-    const parsed = parseJsonOutput(output, "npm pack --dry-run");
+const packRecordFrom = (output: string, label: string): JsonRecord => {
+    const parsed = parseJsonOutput(output, label);
     const record = Array.isArray(parsed) ? parsed[0] : parsed;
     if (!isRecord(record)) {
-        return fail("npm pack --dry-run returned no package record.");
+        return fail(`${label} returned no package record.`);
     }
     return record;
+};
+
+const expectedTarballName = (version: string): string =>
+    `beremaran-ralphie-${version}.tgz`;
+
+const validatePackRecord = (
+    record: JsonRecord,
+    label: string,
+    expectedVersion: string,
+): void => {
+    if (record.name !== expectedPackageName) {
+        fail(
+            `${label} reports package name ${JSON.stringify(record.name)}; expected ${expectedPackageName}.`,
+        );
+    }
+    if (record.version !== expectedVersion) {
+        fail(
+            `${label} reports version ${JSON.stringify(record.version)}; expected ${expectedVersion}.`,
+        );
+    }
+    if (record.filename !== expectedTarballName(expectedVersion)) {
+        fail(
+            `${label} reports filename ${JSON.stringify(record.filename)}; expected ${expectedTarballName(expectedVersion)}.`,
+        );
+    }
 };
 
 const normalizeArchivePath = (entry: string): string => {
@@ -247,8 +271,12 @@ const normalizeArchivePath = (entry: string): string => {
     return normalized;
 };
 
-const dryRunFilesFrom = (output: string): ReadonlyArray<string> => {
-    const record = packRecordFrom(output);
+const dryRunFilesFrom = (
+    output: string,
+    expectedVersion: string,
+): ReadonlyArray<string> => {
+    const record = packRecordFrom(output, "npm pack --dry-run");
+    validatePackRecord(record, "npm pack --dry-run", expectedVersion);
     const rawFiles = record.files;
     if (!Array.isArray(rawFiles)) {
         return fail("npm pack --dry-run returned no file list.");
@@ -281,16 +309,33 @@ const archiveFilesFrom = (
 };
 
 const sourceRuntimeEntry = (): string => {
-    const bin = packageJson.bin;
+    const packageRecord = packageJson as JsonRecord;
+    const bin = packageRecord.bin;
     const entry =
         typeof bin === "string"
             ? bin
-            : bin && typeof bin.ralphie === "string"
+            : isRecord(bin) && typeof bin.ralphie === "string"
               ? bin.ralphie
               : undefined;
-    if (entry === undefined)
-        return fail("package.json does not define the ralphie bin.");
-    return normalizeArchivePath(entry);
+    const exports = packageRecord.exports;
+    const exportEntry =
+        typeof exports === "string"
+            ? exports
+            : isRecord(exports) && typeof exports["."] === "string"
+              ? exports["."]
+              : undefined;
+    const expectedEntry = "./dist/ralphie.js";
+    if (
+        entry !== expectedEntry ||
+        packageRecord.main !== expectedEntry ||
+        packageRecord.module !== expectedEntry ||
+        exportEntry !== expectedEntry
+    ) {
+        return fail(
+            "package.json bin, main, module, and exports must all resolve to ./dist/ralphie.js; source checkout entries are not publishable.",
+        );
+    }
+    return normalizeArchivePath(expectedEntry);
 };
 
 const allowedDocumentationEntries = new Set([
@@ -385,7 +430,7 @@ const inspectPack = (
         "npm pack --dry-run",
         isolatedEnvironment(layout.home),
     ).stdout;
-    return dryRunFilesFrom(output);
+    return dryRunFilesFrom(output, expectedInstalledVersion(options));
 };
 
 const packageTarball = async (
@@ -402,21 +447,25 @@ const packageTarball = async (
         ...npmArgs(layout.cache),
     );
     const cwd = options.registry ? layout.registry : repositoryRoot;
-    runProcess("npm", args, cwd, "npm pack", isolatedEnvironment(layout.home));
-
-    const tarballs = (await readdir(layout.pack)).filter((entry) =>
-        entry.endsWith(".tgz"),
-    );
-    if (tarballs.length !== 1) {
-        return fail(
-            `expected npm pack to create one tarball in ${layout.pack}, found ${tarballs.length}.`,
-        );
+    const output = runProcess(
+        "npm",
+        args,
+        cwd,
+        "npm pack",
+        isolatedEnvironment(layout.home),
+    ).stdout;
+    const expectedVersion = expectedInstalledVersion(options);
+    const record = packRecordFrom(output, "npm pack");
+    validatePackRecord(record, "npm pack", expectedVersion);
+    const filename = record.filename;
+    if (typeof filename !== "string") {
+        return fail("npm pack returned no tarball filename.");
     }
-    const tarball = tarballs[0];
-    if (tarball === undefined) {
-        return fail(`npm pack did not create a tarball in ${layout.pack}.`);
+    const tarball = join(layout.pack, filename);
+    if (!(await pathExists(tarball))) {
+        return fail(`npm pack did not create ${tarball}.`);
     }
-    return join(layout.pack, tarball);
+    return tarball;
 };
 
 const validateSourcePackage = (): void => {
@@ -452,6 +501,7 @@ const makeLayout = async (): Promise<TemporaryLayout> => {
 
     const layout = {
         cache: join(root, "npm-cache"),
+        extract: join(root, "extract"),
         home: join(root, "home"),
         install: join(root, "install"),
         pack: join(root, "pack"),
@@ -461,6 +511,7 @@ const makeLayout = async (): Promise<TemporaryLayout> => {
     await Promise.all(
         [
             layout.cache,
+            layout.extract,
             layout.home,
             layout.install,
             layout.pack,
@@ -492,6 +543,31 @@ const directDependencyName = async (
         return fail("fresh fixture dependency name is missing.");
     }
     return packageName;
+};
+
+const extractedPackage = async (
+    tarball: string,
+    runtimeEntry: string,
+    layout: TemporaryLayout,
+): Promise<ExtractedPackage> => {
+    runProcess(
+        "tar",
+        ["-xzf", tarball, "-C", layout.extract],
+        layout.root,
+        "tarball extraction",
+    );
+    const root = join(layout.extract, "package");
+    const executable = join(root, runtimeEntry);
+    if (!(await pathExists(executable))) {
+        return fail(`extracted executable is missing: ${executable}.`);
+    }
+    const executableMode = (await stat(executable)).mode & 0o777;
+    if (executableMode !== 0o755) {
+        return fail(
+            `extracted executable has mode ${executableMode.toString(8)}; expected 755.`,
+        );
+    }
+    return { executable, root };
 };
 
 const installedExecutable = async (
@@ -635,6 +711,69 @@ const expectedInstalledVersion = (options: SmokeOptions): string => {
     return version;
 };
 
+const validateJsonVersionOutput = (
+    executable: string,
+    cwd: string,
+    label: string,
+    expectedVersion: string,
+    environment: Record<string, string>,
+): void => {
+    const json = parseJsonOutput(
+        runProcess(
+            process.execPath,
+            [executable, "--version", "--output", "json"],
+            cwd,
+            `${label} --version --output json`,
+            environment,
+        ).stdout,
+        `${label} --version --output json`,
+    );
+    const jsonRecord = isRecord(json)
+        ? json
+        : fail(
+              `${label} JSON version output was ${JSON.stringify(json)}; expected an object.`,
+          );
+    if (jsonRecord.version !== expectedVersion) {
+        fail(
+            `${label} JSON version output was ${JSON.stringify(jsonRecord)}; expected version ${expectedVersion}.`,
+        );
+    }
+    if (
+        typeof jsonRecord.commitSha !== "string" ||
+        jsonRecord.commitSha.length === 0
+    ) {
+        fail(`${label} JSON version output has no build commit SHA.`);
+    }
+};
+
+const validateVersionOutputs = (
+    executable: string,
+    cwd: string,
+    label: string,
+    expectedVersion: string,
+    environment: Record<string, string>,
+): void => {
+    const plain = runProcess(
+        process.execPath,
+        [executable, "--version"],
+        cwd,
+        `${label} --version`,
+        environment,
+    );
+    if (plain.stdout !== `${expectedVersion}\n`) {
+        fail(
+            `${label} reported ${JSON.stringify(plain.stdout)}; expected exactly ${JSON.stringify(`${expectedVersion}\n`)}.`,
+        );
+    }
+    validateJsonVersionOutput(
+        executable,
+        cwd,
+        label,
+        expectedVersion,
+        environment,
+    );
+};
+
 const validateInstalledIdentity = (
     installed: InstalledPackage,
     options: SmokeOptions,
@@ -685,12 +824,61 @@ const validateInstalledIdentity = (
             `installed executable reported ${JSON.stringify(result.stdout)}; expected exactly ${JSON.stringify(expectedOutput)} for manifest version ${manifest.version}.`,
         );
     }
+    validateJsonVersionOutput(
+        installed.executable,
+        layout.install,
+        "installed executable",
+        manifest.version as string,
+        environment,
+    );
+    const bunxVersion = runProcess(
+        process.execPath,
+        ["x", "--bun", "--no-install", "ralphie", "--version"],
+        layout.install,
+        "bunx installed executable --version",
+        environment,
+    );
+    if (bunxVersion.stdout !== `${manifest.version}\n`) {
+        fail(
+            `bunx installed executable reported ${JSON.stringify(bunxVersion.stdout)}; expected exactly ${JSON.stringify(`${manifest.version}\n`)}.`,
+        );
+    }
+    const bunxJson = parseJsonOutput(
+        runProcess(
+            process.execPath,
+            [
+                "x",
+                "--bun",
+                "--no-install",
+                "ralphie",
+                "--version",
+                "--output",
+                "json",
+            ],
+            layout.install,
+            "bunx installed executable --version --output json",
+            environment,
+        ).stdout,
+        "bunx installed executable --version --output json",
+    );
+    const bunxJsonRecord = isRecord(bunxJson)
+        ? bunxJson
+        : fail(
+              `bunx JSON version output was ${JSON.stringify(bunxJson)}; expected an object.`,
+          );
+    if (bunxJsonRecord.version !== manifest.version) {
+        fail(
+            `bunx JSON version output was ${JSON.stringify(bunxJsonRecord)}; expected version ${manifest.version}.`,
+        );
+    }
 };
 
 const isolatedEnvironment = (home: string): Record<string, string> => {
     const environment: Record<string, string> = {};
     for (const [key, value] of Object.entries(process.env)) {
-        if (value !== undefined) environment[key] = value;
+        if (value !== undefined && !key.toLowerCase().startsWith("npm_")) {
+            environment[key] = value;
+        }
     }
     environment.HOME = home;
     environment.XDG_CONFIG_HOME = join(home, ".config");
@@ -722,6 +910,14 @@ const runSmoke = async (options: SmokeOptions): Promise<void> => {
         const tarball = await packageTarball(options, layout);
         const archiveFiles = archiveFilesFrom(tarball, layout.root);
         validateArchiveFiles(archiveFiles, "created tarball", runtimeEntry);
+        const extracted = await extractedPackage(tarball, runtimeEntry, layout);
+        validateVersionOutputs(
+            extracted.executable,
+            extracted.root,
+            "extracted executable",
+            expectedInstalledVersion(options),
+            isolatedEnvironment(layout.home),
+        );
         const installed = await installFixture(tarball, layout);
         validateInstalledIdentity(installed, options, layout);
         console.log(
