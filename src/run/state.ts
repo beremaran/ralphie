@@ -14,11 +14,13 @@ import {
 import { RalphieError } from "../shared/error.ts";
 import {
     DEFAULT_NEEDS_ATTENTION_POLICY,
+    DEFAULT_ISSUE_FAILURE_POLICY,
+    IssueFailurePolicy,
     NeedsAttentionPolicy,
     WorkflowMode,
 } from "../options.ts";
 
-export const RUN_STATE_VERSION = 6 as const;
+export const RUN_STATE_VERSION = 7 as const;
 
 /** Terminal and transitional states of an active PR delivery gate. */
 export const PR_CLOSURE_GATE_STATUSES = [
@@ -216,6 +218,7 @@ const runStateFields = {
     branch: z.string().min(1),
     workflow: z.enum(WorkflowMode).optional(),
     onNeedsAttention: z.enum(NeedsAttentionPolicy),
+    onIssueFailure: z.enum(IssueFailurePolicy).optional(),
     dryRun: z.boolean().optional(),
     /** Whether needs-attention outcomes should be published to GitHub. */
     notificationsEnabled: z.boolean().optional(),
@@ -273,15 +276,22 @@ export const runStateSchema = z.object({
 });
 
 const legacyRunStateSchema = z.object({
-    version: z.union([z.literal(2), z.literal(3), z.literal(4), z.literal(5)]),
+    version: z.union([
+        z.literal(2),
+        z.literal(3),
+        z.literal(4),
+        z.literal(5),
+        z.literal(6),
+    ]),
     ...runStateFields,
     onNeedsAttention: z.enum(NeedsAttentionPolicy).optional(),
+    onIssueFailure: z.enum(IssueFailurePolicy).optional(),
 });
 
-// Keep versions 4 and 5 resumable as in-memory inputs while all newly
-// persisted state is validated as version 6 by runStateSchema.
+// Keep older versions resumable as in-memory inputs while newly persisted
+// state is validated at the current version.
 type RunStateFields = z.infer<z.ZodObject<typeof runStateFields>>;
-export type RunState = RunStateFields & { readonly version: 4 | 5 | 6 };
+export type RunState = RunStateFields & { readonly version: 4 | 5 | 6 | 7 };
 
 type LoadedRunState = {
     readonly state: RunState;
@@ -296,7 +306,8 @@ const migrateRunState = (value: unknown): LoadedRunState => {
         (value.version === 2 ||
             value.version === 3 ||
             value.version === 4 ||
-            value.version === 5)
+            value.version === 5 ||
+            value.version === 6)
     ) {
         const legacy = legacyRunStateSchema.parse(value);
         return {
@@ -305,6 +316,8 @@ const migrateRunState = (value: unknown): LoadedRunState => {
                 version: RUN_STATE_VERSION,
                 onNeedsAttention:
                     legacy.onNeedsAttention ?? DEFAULT_NEEDS_ATTENTION_POLICY,
+                onIssueFailure:
+                    legacy.onIssueFailure ?? DEFAULT_ISSUE_FAILURE_POLICY,
                 notificationsEnabled: legacy.notificationsEnabled ?? false,
             }),
             migrated: true,

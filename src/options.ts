@@ -21,6 +21,14 @@ export enum NeedsAttentionPolicy {
 
 export const DEFAULT_NEEDS_ATTENTION_POLICY = NeedsAttentionPolicy.Halt;
 
+/** Policy used when an issue ends in an ordinary failure. */
+export enum IssueFailurePolicy {
+    Halt = "halt",
+    Continue = "continue",
+}
+
+export const DEFAULT_ISSUE_FAILURE_POLICY = IssueFailurePolicy.Halt;
+
 /** The top-level command mode, separate from the issue delivery workflow. */
 export enum ExecutionMode {
     Issues = "issues",
@@ -94,6 +102,7 @@ export type RalphieCliOptions = {
     readonly mode?: ExecutionMode;
     readonly workflow?: WorkflowMode;
     readonly onNeedsAttention?: NeedsAttentionPolicy;
+    readonly onIssueFailure?: IssueFailurePolicy;
     readonly notifyNeedsAttention?: boolean;
     readonly needsAttentionLabel?: string;
     readonly branch?: string;
@@ -152,6 +161,7 @@ export type IssueRalphieConfig = SharedRalphieConfig &
         readonly mode: ExecutionMode.Issues;
         readonly workflow: WorkflowMode;
         readonly onNeedsAttention: NeedsAttentionPolicy;
+        readonly onIssueFailure: IssueFailurePolicy;
         readonly notificationsEnabled: boolean;
         readonly needsAttentionLabel?: string;
         readonly groundingThinking?: string;
@@ -230,6 +240,11 @@ const modeOptionRules: ReadonlyArray<ModeOptionRule> = [
     {
         option: "--on-needs-attention",
         field: "onNeedsAttention",
+        modes: [ExecutionMode.Issues],
+    },
+    {
+        option: "--on-issue-failure",
+        field: "onIssueFailure",
         modes: [ExecutionMode.Issues],
     },
     {
@@ -430,6 +445,10 @@ const buildResolvedConfig = (
         onNeedsAttention: withDefault(
             options.onNeedsAttention,
             DEFAULT_NEEDS_ATTENTION_POLICY,
+        ),
+        onIssueFailure: withDefault(
+            options.onIssueFailure,
+            DEFAULT_ISSUE_FAILURE_POLICY,
         ),
         notificationsEnabled: options.notifyNeedsAttention ?? false,
         ...optionalProperty(

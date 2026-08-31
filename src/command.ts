@@ -7,6 +7,7 @@ import {
     DEFAULT_EXECUTION_MODE,
     DuplicateAction,
     ExecutionMode,
+    IssueFailurePolicy,
     NeedsAttentionPolicy,
     parsePipelineTimeout,
     type ResolvedRalphieConfig,
@@ -52,6 +53,7 @@ const cliOptions = {
     branch: { type: "string", short: "b" },
     workflow: { type: "string" },
     "on-needs-attention": { type: "string" },
+    "on-issue-failure": { type: "string" },
     "notify-needs-attention": { type: "boolean" },
     "needs-attention-label": { type: "string" },
     "duplicate-action": { type: "string" },
@@ -232,6 +234,12 @@ const parseCliOptions = (
                 ? undefined
                 : z.enum(WorkflowMode).parse(asString(values, "workflow")),
         onNeedsAttention,
+        onIssueFailure:
+            asNonEmptyString(values, "on-issue-failure") === undefined
+                ? undefined
+                : z
+                      .enum(IssueFailurePolicy)
+                      .parse(asNonEmptyString(values, "on-issue-failure")),
         ...notificationOptions,
         ...(duplicateAction === undefined ? {} : { duplicateAction }),
         maxIssues: asNumber(values, "max-issues"),
@@ -334,6 +342,8 @@ Options:
       --workflow <mode>        Issue workflow: lgtm or pr (issues mode only)
       --on-needs-attention <halt|continue>
                                Needs-attention policy (default halt; issues mode only)
+      --on-issue-failure <halt|continue>
+                               Ordinary issue failure policy (default halt; issues mode only)
       --notify-needs-attention Enable needs-attention GitHub notifications (default disabled)
       --needs-attention-label <name>
                                Add this label to notifications (requires the opt-in flag)
@@ -521,6 +531,8 @@ const workflowOptionsFor = (
     resumePath: config.resume,
     dryRun: config.dryRun,
     onNeedsAttention: resumeState?.onNeedsAttention ?? config.onNeedsAttention,
+    issueFailurePolicy:
+        resumeState?.onIssueFailure ?? config.onIssueFailure,
     notificationsEnabled:
         resumeState?.notificationsEnabled ?? config.notificationsEnabled,
     needsAttentionLabel:

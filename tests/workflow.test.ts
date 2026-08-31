@@ -52,7 +52,11 @@ import {
 } from "../src/run/state.ts";
 import type { WorkspaceService } from "../src/workspace/workspace.ts";
 import { workflow } from "../src/workflow.ts";
-import { NeedsAttentionPolicy, WorkflowMode } from "../src/options.ts";
+import {
+    IssueFailurePolicy,
+    NeedsAttentionPolicy,
+    WorkflowMode,
+} from "../src/options.ts";
 import { IssueOrder, IssueSort } from "../src/github/issues.ts";
 import type { RalphieRuntime } from "../src/runtime.ts";
 import { RalphieError } from "../src/shared/error.ts";
@@ -2052,6 +2056,39 @@ describe("workflow", () => {
         ).toEqual([42]);
         expect(states.at(-1)?.queue.processedCount).toBe(0);
         expect(calls.at(-1)).toBe("closeRuntime");
+    });
+
+    test("continues independent issues after failure and reports partial failure after draining", async () => {
+        const calls: string[] = [];
+        const states: RunState[] = [];
+        await expect(
+            workflow(
+                {
+                    ...baseOptions,
+                    maxIssues: 2,
+                    issueFailurePolicy: IssueFailurePolicy.Continue,
+                },
+                testRuntime(calls, states, {
+                    issueLists: [[firstIssue, secondIssue]],
+                    outcomes: [
+                        {
+                            kind: IssueExecutionOutcomeKind.Failed,
+                            message: "boom",
+                        },
+                        {
+                            kind: IssueExecutionOutcomeKind.Completed,
+                            completion: "pushed-commit",
+                            commitSha: "second-commit",
+                        },
+                    ],
+                }),
+            ),
+        ).rejects.toThrow("Run drained with issue failures");
+        expect(
+            calls.filter((call) => call.startsWith("executeIssue:")),
+        ).toHaveLength(2);
+        expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
+        expect(calls).toContain("restoreCheckout");
     });
 
     test("closes Pi if ready progress reporting fails after startup", async () => {

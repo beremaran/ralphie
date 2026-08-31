@@ -7,6 +7,7 @@ import { HELP_TEXT, parseCliArgs, runCommand } from "../src/command.ts";
 import {
     DuplicateAction,
     ExecutionMode,
+    IssueFailurePolicy,
     NeedsAttentionPolicy,
     WorkflowMode,
 } from "../src/options.ts";
@@ -19,6 +20,7 @@ describe("native CLI parser", () => {
         expect(HELP_TEXT).toContain("maintain-issues");
         expect(HELP_TEXT).toContain("--duplicate-action");
         expect(HELP_TEXT).toContain("--on-needs-attention <halt|continue>");
+        expect(HELP_TEXT).toContain("--on-issue-failure <halt|continue>");
         expect(HELP_TEXT).toContain("--notify-needs-attention");
         expect(HELP_TEXT).toContain("--needs-attention-label <name>");
         expect(HELP_TEXT).toContain("default halt");
@@ -63,6 +65,20 @@ describe("native CLI parser", () => {
         ).toBe(NeedsAttentionPolicy.Continue);
         expect(() =>
             parseCliArgs(["owner/repository", "--on-needs-attention", "retry"]),
+        ).toThrow();
+    });
+
+    test("parses and validates the ordinary issue failure policy", () => {
+        expect(parseCliArgs(["owner/repository"]).options.onIssueFailure).toBeUndefined();
+        expect(
+            parseCliArgs([
+                "owner/repository",
+                "--on-issue-failure",
+                "continue",
+            ]).options.onIssueFailure,
+        ).toBe(IssueFailurePolicy.Continue);
+        expect(() =>
+            parseCliArgs(["owner/repository", "--on-issue-failure", "retry"]),
         ).toThrow();
     });
 

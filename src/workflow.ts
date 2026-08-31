@@ -54,8 +54,10 @@ import { RalphieError } from "./shared/error.ts";
 import { resolveWorkspacePath } from "./workspace/workspace.ts";
 import {
     DEFAULT_NEEDS_ATTENTION_POLICY,
+    DEFAULT_ISSUE_FAILURE_POLICY,
     DEFAULT_WORKFLOW_MODE,
     NeedsAttentionPolicy,
+    IssueFailurePolicy,
     WorkflowMode,
 } from "./options.ts";
 import type { RalphieRuntime } from "./runtime.ts";
@@ -326,9 +328,6 @@ const track = async <Result>(
     }
 };
 
-export const IssueFailurePolicy = "halt" as const;
-export type IssueFailurePolicy = typeof IssueFailurePolicy;
-
 export type WorkflowSummary = {
     readonly runId: string;
     readonly outcomes: ReadonlyArray<{
@@ -375,6 +374,7 @@ type PersistWorkflowStateInput = {
     readonly branch: string;
     readonly workflowMode: WorkflowMode;
     readonly onNeedsAttention: NeedsAttentionPolicy;
+    readonly issueFailurePolicy: IssueFailurePolicy;
     readonly dryRun: boolean;
     readonly notificationsEnabled: boolean;
     readonly needsAttentionLabel?: string;
@@ -433,6 +433,7 @@ const persistWorkflowState = async (
         branch: input.branch,
         workflow: input.workflowMode,
         onNeedsAttention: input.onNeedsAttention,
+        onIssueFailure: input.issueFailurePolicy,
         dryRun: input.dryRun,
         notificationsEnabled: input.notificationsEnabled,
         ...(input.needsAttentionLabel === undefined
@@ -582,7 +583,7 @@ const makeWorkflowConfiguration = (
         runId = crypto.randomUUID(),
         resumeState,
         resumePath,
-        issueFailurePolicy = IssueFailurePolicy,
+        issueFailurePolicy = DEFAULT_ISSUE_FAILURE_POLICY,
         onNeedsAttention = DEFAULT_NEEDS_ATTENTION_POLICY,
         notificationsEnabled = false,
         needsAttentionLabel,
@@ -1002,6 +1003,7 @@ export const workflow = async (
                         branch,
                         workflowMode,
                         onNeedsAttention,
+                        issueFailurePolicy,
                         dryRun: effectiveDryRun,
                         notificationsEnabled,
                         needsAttentionLabel,
@@ -2244,11 +2246,18 @@ export const workflow = async (
                 issueNumber: issueContext.issue.number,
                 stage: "issue-execution",
             });
-            if (issueFailurePolicy === IssueFailurePolicy) {
+            if (issueFailurePolicy === IssueFailurePolicy.Halt) {
                 throw new RalphieError({
                     message: `Issue #${issueContext.issue.number} failed: ${outcome.message}`,
                 });
             }
+            await restoreCancellationCheckout?.();
+            activeQueueIssues.delete(issueContext.issue.number);
+            activeIssue = undefined;
+            prClosure = undefined;
+            restoreCancellationCheckout = undefined;
+            checkout = await captureCheckout();
+            await persistState(RunStateStatus.Active);
         };
 
         const handleNeedsAttentionIssue = async (
@@ -2501,6 +2510,14 @@ export const workflow = async (
         activeQueueIssues.clear();
         restoreCancellationCheckout = undefined;
         const summary = summarize(actualRunId, outcomes);
+        if (summary.counts.failed > 0) {
+            throw new RalphieError({
+                message: summaryMessage(
+                    "Run drained with issue failures",
+                    summary.counts,
+                ),
+            });
+        }
         if (cleanup) {
             const startedMessage = `Removing workspace ${workspace}...`;
             await progress.emit({
