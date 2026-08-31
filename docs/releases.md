@@ -151,6 +151,49 @@ bundle for the exact bytes of `SHA256SUMS`. The release publisher uses keyless
 Sigstore signing with the GitHub Actions OIDC issuer; no signing key or OIDC
 token is stored in the repository, build context, logs, or release metadata.
 
+## Verified Homebrew release handoff
+
+The verified public release for the tap handoff is **0.1.2** (`v0.1.2`). The
+release contains exactly the four native assets below, `SHA256SUMS`, and
+`SHA256SUMS.sigstore.json`; no other release assets are part of this handoff.
+Every digest is copied from that release's verified `SHA256SUMS`:
+
+| Asset | SHA-256 |
+| --- | --- |
+| `ralphie-darwin-arm64` | `30be72de92306adb5609a6e8bc2ddb9e9cc29d671e8e0dd87c1921f11aaaf5c5` |
+| `ralphie-darwin-x64` | `c08317b2f19011970d7a1579422d9c634cb756eaefafb147704ef8bbf1605ac8` |
+| `ralphie-linux-arm64` | `c23f670a69c60c8770bb4958e91ae3007804bab889b55ee8807f2fffd04295f5` |
+| `ralphie-linux-x64` | `c0d8b5ff1b24e554121bf879fb68380038ca7fbe27a63fd5857d6a1b27d2b300` |
+
+The exact release is [v0.1.2](https://github.com/beremaran/ralphie/releases/tag/v0.1.2).
+Its protected annotated tag resolves to commit
+`a7c098f20ef212c6f6940825143396680c054bba`, and the active `Protect release
+tags` ruleset covers `refs/tags/v*` with deletion and non-fast-forward updates
+blocked. The signed manifest's certificate was verified with these exact
+selectors:
+
+- workflow identity:
+  `https://github.com/beremaran/ralphie/.github/workflows/release.yml@refs/tags/v0.1.2`;
+- repository: `beremaran/ralphie` and workflow name: `Release`;
+- event/ref: `push`, `refs/tags/v0.1.2`;
+- commit: `a7c098f20ef212c6f6940825143396680c054bba`; and
+- OIDC issuer: `https://token.actions.githubusercontent.com`.
+
+The release has exactly these six public assets:
+
+- [ralphie-darwin-arm64](https://github.com/beremaran/ralphie/releases/download/v0.1.2/ralphie-darwin-arm64)
+- [ralphie-darwin-x64](https://github.com/beremaran/ralphie/releases/download/v0.1.2/ralphie-darwin-x64)
+- [ralphie-linux-arm64](https://github.com/beremaran/ralphie/releases/download/v0.1.2/ralphie-linux-arm64)
+- [ralphie-linux-x64](https://github.com/beremaran/ralphie/releases/download/v0.1.2/ralphie-linux-x64)
+- [SHA256SUMS](https://github.com/beremaran/ralphie/releases/download/v0.1.2/SHA256SUMS)
+- [SHA256SUMS.sigstore.json](https://github.com/beremaran/ralphie/releases/download/v0.1.2/SHA256SUMS.sigstore.json)
+
+The Sigstore bundle verification returned `verified: true`, and
+`sha256sum --check SHA256SUMS` returned `OK` for all four assets. Downstream
+tap automation must fail closed and rerun the exact-tag verification if any
+asset, selector, signature, issuer, tag/commit binding, or checksum differs;
+these recorded values must never be replaced with placeholders.
+
 ## Homebrew formula updates
 
 `Formula/ralphie.rb` contains one `sha256` value for each release asset:
