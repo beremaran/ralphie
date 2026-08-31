@@ -13,12 +13,16 @@ credential setup, verification, and the first dry run. Return to the
 
 ## Prerequisites and authentication
 
-Ralphie expects these tools on `PATH`:
+The required local tools depend on how Ralphie is installed:
 
-- [Bun](https://bun.sh/)
-- [Git](https://git-scm.com/)
-- [GitHub CLI](https://cli.github.com/)
-- model credentials supported by [Pi](https://github.com/earendil-works/pi)
+- A verified standalone binary needs Git, the [GitHub CLI](https://cli.github.com/),
+  a POSIX shell, and model credentials supported by [Pi](https://github.com/earendil-works/pi),
+  but does not need [Bun](https://bun.sh/) to execute.
+- The published JavaScript package and a source checkout need Bun to run.
+- Building Ralphie from source also needs Bun.
+
+The standalone installer additionally needs `curl`, the Sigstore CLI, and a
+SHA-256 utility (`sha256sum` or `shasum`).
 
 By default, configure Pi in `~/.pi/agent/auth.json`, or point `--pi-dir` at an
 existing Pi agent directory outside the Ralphie workspace. An explicitly
@@ -33,11 +37,12 @@ system-temporary directory with 0600 files. That directory is removed on
 normal close and failed startup, and is never placed under the persistent
 workspace.
 
-For `github.com`, set `GH_TOKEN` (preferred) or `GITHUB_TOKEN` (fallback) for
-noninteractive GitHub CLI authentication. Ralphie verifies the token with
-`gh auth status` and reads it with `gh auth token`; interactive `gh auth login`
-and a mounted GitHub CLI profile are not required. This contract covers
-`github.com` only.
+For interactive GitHub authentication, run `gh auth login` and verify the
+selected account with `gh auth status`. For unattended runs, set `GH_TOKEN`
+(preferred) or `GITHUB_TOKEN` (fallback) in the process environment. The
+credential is supplied as an input and does not need to be printed or exposed;
+a mounted GitHub CLI profile is not required when an environment token is
+provided. This contract covers `github.com` only.
 
 Your GitHub account must be able to read the target repository and its issues.
 Non-dry runs also require permission to push to the selected branch and create,
@@ -50,7 +55,8 @@ create, comment on, and merge pull requests.
 
 The standalone installer downloads and verifies the native release binary for
 macOS or Linux. It uses this stable, unauthenticated repository entry point
-and installs the latest release by default. Verification is mandatory: install
+and installs the latest release by default. The installed binary runs without
+Bun. Verification is mandatory: install
 the Sigstore CLI (`sigstore`) and ensure either `sha256sum` (Linux) or `shasum`
 (macOS) is available on `PATH` before running it. The installer has no unsigned
 or checksum-only fallback:
@@ -143,13 +149,22 @@ bun run index.ts --version
 
 ## Verify the installation
 
-For a published installation:
+For a published JavaScript installation (which requires Bun):
 
 ```bash
 bunx @beremaran/ralphie --version
 ```
 
-For a source checkout, use the source entry point instead:
+For a verified standalone installation (which does not require Bun):
+
+```bash
+ralphie --version
+git --version
+gh --version
+gh auth status
+```
+
+For a source checkout, use the source entry point instead (Bun required):
 
 ```bash
 bun run index.ts --version
@@ -161,6 +176,16 @@ and `commitSha`. Both forms work without a repository, GitHub credentials, or
 Pi configuration. Release builds embed the immutable commit SHA supplied by
 the build entry point; local builds use the documented `local` commit sentinel
 when no release SHA is supplied.
+
+## Target-repository verification dependencies
+
+Ralphie runs deterministic verification commands in the target checkout through
+`/bin/sh`. If the target has a `package.json` `check` script, Ralphie defaults
+to `bun run check`; otherwise provide one or more `--verify-command` values.
+The tools used by that command belong to the target repository's contract, not
+Ralphie's standalone runtime. For example, a standalone run may still need Bun
+if the target's check uses Bun, and a Docker run needs a target-specific image
+or another available runtime if its check needs a tool not included there.
 
 ## First dry run
 
@@ -207,12 +232,19 @@ docker run --rm \
 
 Alternatively, omit `--pi-dir` and provide `RALPHIE_MODEL_BASE_URL` (and, when
 required, `RALPHIE_MODEL_API_KEY`) at runtime; Ralphie then uses a private
-system-temporary configuration directory. The image contains the GitHub CLI,
-Git, Pi's shell/search tools, and CA certificates; it does not contain
-credentials or credential-bearing defaults. For `github.com`, pass `GH_TOKEN`
-(preferred) or `GITHUB_TOKEN` (fallback) at runtime. Authentication is
-noninteractive: `gh auth login` and a mounted GitHub CLI profile are not
-required.
+system-temporary configuration directory. The image contains the GitHub CLI, Git, a POSIX shell, Pi's shell/search tools,
+and CA certificates; it does not contain Bun, credentials, or credential-bearing
+defaults. For `github.com`, pass `GH_TOKEN` (preferred) or `GITHUB_TOKEN`
+(fallback) at runtime. The container smoke check is:
+
+```bash
+docker run --rm --env GH_TOKEN --entrypoint gh \
+  ghcr.io/beremaran/ralphie:latest auth status
+```
+
+Authentication inputs are noninteractive; do not print or expose the
+credential. Pi configuration may instead be provided through
+`RALPHIE_MODEL_BASE_URL` and, when required, `RALPHIE_MODEL_API_KEY`.
 
 For all available options and mode-specific commands, continue to the [CLI
 reference](cli-reference.md).

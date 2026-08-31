@@ -99,11 +99,13 @@ Model credentials are read from environment variables:
 | `RALPHIE_MODEL_BASE_URL` | OpenAI-compatible model base URL; enables a private temporary Pi configuration when `--pi-dir` is absent. |
 | `RALPHIE_MODEL_API_KEY` | Model API key for that temporary configuration; supply it only through the environment. |
 
-For `github.com`, Ralphie verifies authentication with `gh auth status` and
-reads the token with `gh auth token`; interactive `gh auth login` and a mounted
-GitHub CLI profile are not required. This authentication contract covers
-`github.com` only. See [Getting started](getting-started.md) for the complete
-credential and container setup.
+For interactive `github.com` use, authenticate with `gh auth login` and verify
+with `gh auth status`. For unattended use, provide `GH_TOKEN` (preferred) or
+`GITHUB_TOKEN` as an environment input; it does not need to be printed or
+exposed. A mounted GitHub CLI profile is not required when an environment token
+is provided. This authentication contract covers `github.com` only. See
+[Getting started](getting-started.md) for the complete credential and
+container setup.
 
 ## Common recipes
 

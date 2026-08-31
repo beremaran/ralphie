@@ -42,9 +42,9 @@ flowchart TD
    and resolves defaults:
    `lgtm`, one issue at a time, created/ascending issue sort, the `build` Pi
    agent, `~/.ralphie`, and no clean, dry-run, or alternate output mode.
-   For `github.com`, GitHub CLI authentication uses `GH_TOKEN` (preferred) or
-   `GITHUB_TOKEN` (fallback); interactive `gh auth login` and a mounted CLI
-   profile are not required. Model credentials come from the
+   For `github.com`, interactively authenticate with `gh auth login` and verify
+   with `gh auth status`; unattended runs may provide `GH_TOKEN` (preferred) or
+   `GITHUB_TOKEN` (fallback) as environment inputs. Model credentials come from the
    `RALPHIE_MODEL_BASE_URL` and `RALPHIE_MODEL_API_KEY` environment variables.
    One `--output` flag selects
    `default`, `verbose`, `quiet`, or `json`, so `json` and `quiet` cannot be
@@ -73,7 +73,7 @@ order:
 | 0 | Cancellation | Refuse to begin if the signal is already aborted. |
 | 1 | Optional cleanup | `--clean start` removes the selected workspace after protected-path checks. |
 | 2 | Workspace | Create the workspace directory. |
-| 3 | GitHub authentication | Pass the `GH_TOKEN`/`GITHUB_TOKEN` environment contract to `gh`; run `gh auth status`, read `gh auth token`, and initialize an authenticated Octokit client. |
+| 3 | GitHub authentication | Pass the `GH_TOKEN`/`GITHUB_TOKEN` environment contract to `gh`; validate the configured account with `gh auth status`, then initialize an authenticated Octokit client without exposing the credential to the operator. |
 | 4 | Git | Verify `git --version`. |
 | 5 | Repository | Clone with `gh repo clone` when absent; otherwise verify the checkout and `origin`, fetch existing repositories, select the requested branch or `main`/`master`, and prepare the checkout. |
 | 6 | Issue discovery | Paginate open GitHub issues, apply labels/sort/order, and exclude pull requests. |

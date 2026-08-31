@@ -5,6 +5,10 @@ All notable changes to Ralphie are documented here. The project follows
 
 ## [Unreleased]
 
+- Correct the runtime documentation: verified standalone binaries and Docker
+  images run without Bun, while Bun remains required for source and published
+  JavaScript usage; target-repository verification commands keep their own
+  dependencies.
 - Add deterministic SPDX 2.3 SBOMs for the four final native release assets;
   each document binds the validated source, build inputs, and final binary digest.
 - Add an exact-tag GitHub release verifier that emits a deterministic,

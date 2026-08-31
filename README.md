@@ -41,9 +41,52 @@ For task-oriented details, start with the [documentation index](./docs/README.md
 
 ## Install and try it
 
-Ralphie requires [Bun](https://bun.sh/), Git, the [GitHub CLI](https://cli.github.com/),
-and model credentials supported by Pi. The shortest way to verify the published
-package is:
+Ralphie has three runtime forms with different local dependencies:
+
+- **Verified standalone binary:** executing a release binary does not require
+  [Bun](https://bun.sh/). The installer needs `curl`, the Sigstore CLI, and a
+  SHA-256 utility (`sha256sum` or `shasum`); it supports macOS and Linux on
+  `arm64` and `x64`.
+- **Published JavaScript package or source checkout:** Bun is required to run
+  `bunx @beremaran/ralphie` or `bun run index.ts`, and to build Ralphie from
+  source.
+- **Docker image:** the published image runs the native binary and does not
+  include Bun at runtime. It includes the GitHub CLI, Git, a POSIX shell, Pi's
+  shell/search tools, and CA certificates.
+
+Every repository workflow also needs GitHub CLI, Git, a shell, and model
+credentials supported by Pi. The target repository's verification command is a
+separate dependency boundary: install whatever that command uses (for example,
+Bun, Node.js, or a project compiler) in the selected runtime. The default
+`bun run check` is therefore a target-repository requirement, not a standalone
+Ralphie requirement. Ralphie discovers that command from `package.json`; use
+one or more `--verify-command` options for a target-specific verification
+command.
+
+For an interactive GitHub setup, authenticate and verify the active account:
+
+```bash
+gh auth login
+gh auth status
+git --version
+gh --version
+```
+
+For unattended runs, provide `GH_TOKEN` (preferred) or `GITHUB_TOKEN` to the
+process instead; credentials are inputs and need not be printed or exposed.
+Configure Pi in `~/.pi/agent/auth.json` or with `--pi-dir`. For an
+OpenAI-compatible endpoint, use `RALPHIE_MODEL_BASE_URL` and, when required,
+`RALPHIE_MODEL_API_KEY`. See [Getting started](./docs/getting-started.md) for
+the complete installation, authentication, container, and source-checkout
+contract.
+
+Verify an installed standalone binary without contacting a repository:
+
+```bash
+ralphie --version
+```
+
+The shortest safe package smoke check is:
 
 ```bash
 bunx @beremaran/ralphie --version
@@ -56,12 +99,6 @@ install the Sigstore CLI and a SHA-256 utility before using it:
 curl -fsSL https://raw.githubusercontent.com/beremaran/ralphie/main/scripts/install.sh | sh
 ralphie --version
 ```
-
-Configure `GH_TOKEN` (preferred) or `GITHUB_TOKEN` for noninteractive access to
-`github.com`, and configure Pi in `~/.pi/agent/auth.json` or with `--pi-dir`.
-For an OpenAI-compatible endpoint, use `RALPHIE_MODEL_BASE_URL` and, when
-required, `RALPHIE_MODEL_API_KEY`. See [Getting started](./docs/getting-started.md)
-for installation, authentication, container, and source-checkout details.
 
 Preview one issue without implementation, commits, pushes, or GitHub mutations:
 
@@ -89,8 +126,50 @@ the [OCI image](https://ghcr.io/beremaran/ralphie), the
 [published npm package](https://www.npmjs.com/package/@beremaran/ralphie), and
 the [MIT license](https://github.com/beremaran/ralphie/blob/main/LICENSE).
 Public artifacts do not require GitHub credentials. Operating on a private target
-repository still requires `GH_TOKEN` (preferred) or `GITHUB_TOKEN`; Pi model
-credentials are also required when Ralphie asks Pi to make a decision.
+repository still requires a GitHub account or runtime token with the necessary
+permissions; Pi model credentials are also required when Ralphie asks Pi to make
+a decision.
+
+## Docker runtime
+
+The published OCI image is a verified standalone runtime. It runs as
+`65532:65532` with `HOME` and the working directory set to `/home/nonroot`.
+The image contains no credentials or credential-bearing defaults. Supply all
+credentials and configuration at runtime:
+
+- `GH_TOKEN` (preferred) or `GITHUB_TOKEN` for noninteractive GitHub CLI access;
+- either a Pi directory mounted at `/home/nonroot/.pi/agent` and passed with
+  `--pi-dir`, or `RALPHIE_MODEL_BASE_URL` and, when required,
+  `RALPHIE_MODEL_API_KEY` so Ralphie can create private temporary Pi config;
+- a writable `/home/nonroot/.ralphie` volume for checkouts, state, and recovery
+  artifacts.
+
+Use these safe image and authentication smoke checks:
+
+```bash
+docker run --rm ghcr.io/beremaran/ralphie:latest --version
+docker run --rm --env GH_TOKEN --entrypoint gh \
+  ghcr.io/beremaran/ralphie:latest auth status
+```
+
+A complete first-run preview keeps the state and Pi configuration separate:
+
+```bash
+docker run --rm \
+  --env GH_TOKEN \
+  --mount type=volume,source=ralphie-state,target=/home/nonroot/.ralphie \
+  --mount type=bind,source="$HOME/.pi/agent",target=/home/nonroot/.pi/agent \
+  ghcr.io/beremaran/ralphie:latest owner/repository \
+  --workspace /home/nonroot/.ralphie \
+  --pi-dir /home/nonroot/.pi/agent \
+  --dry-run --max-issues 1
+```
+
+The Docker runtime does not include Bun. If the target repository's
+verification command is `bun run check` or otherwise needs a tool not in the
+image, use a target-specific image/runtime or supply a verification command
+whose dependencies are available there. See [Getting started](./docs/getting-started.md)
+for the full contract.
 
 ## Output contract
 
