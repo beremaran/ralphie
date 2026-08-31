@@ -5,6 +5,8 @@ import {
     multiIssueRuntimeOracle,
     type CommandRuntimeRunCapture,
 } from "./command-runtime-harness.ts";
+import { redactSensitiveValue } from "../../src/shared/redaction.ts";
+
 const ANSI_CURSOR_CONTROL =
     /\u001b(?:\][^\u0007]*(?:\u0007|\u001b\\)|\[[0-?]*[ -/]*[@-~]|[ -/]*[0-~])/;
 
@@ -77,6 +79,95 @@ const expectSecretAbsentFromStreams = (
     for (const stream of [capture.stdout, capture.stderr]) {
         expect(stream.join("")).not.toContain(multiIssueRuntimeOracle.secret);
     }
+};
+
+type JsonRecord = Record<string, unknown>;
+
+const isJsonRecord = (value: unknown): value is JsonRecord =>
+    typeof value === "object" && value !== null && !Array.isArray(value);
+
+const parseJsonLines = (text: string): JsonRecord[] => {
+    const records: JsonRecord[] = [];
+    for (const line of text.split("\n")) {
+        if (line.trim() === "") continue;
+        const value: unknown = JSON.parse(line);
+        if (!isJsonRecord(value)) {
+            throw new Error("JSON Lines output contained a non-object record.");
+        }
+        records.push(value);
+    }
+    return records;
+};
+
+const scenarioTimestamp = "2026-01-02T03:04:05.000Z";
+
+const expectedProgressRecords = (runId: string): JsonRecord[] =>
+    multiIssueRuntimeOracle.progressEvents.map((event) => ({
+        ...(redactSensitiveValue(event) as JsonRecord),
+        runId,
+        timestamp: scenarioTimestamp,
+    }));
+
+const expectedPiRecord = (
+    event: (typeof multiIssueRuntimeOracle.piEvents)[number],
+): JsonRecord => ({
+    type: "pi_event",
+    sessionID: event.context.sessionID,
+    directory: event.context.directory,
+    ...(event.context.title === undefined
+        ? {}
+        : { title: event.context.title }),
+    event: redactSensitiveValue(event.event),
+});
+
+const expectedJsonRecords = (runId: string): JsonRecord[] =>
+    multiIssueRuntimeOracle.emissions.map((emission) =>
+        emission.kind === "progress"
+            ? {
+                  ...(redactSensitiveValue(emission.event) as JsonRecord),
+                  runId,
+                  timestamp: scenarioTimestamp,
+              }
+            : expectedPiRecord(emission),
+    );
+
+const expectJsonOutputContract = (capture: CommandRuntimeRunCapture): void => {
+    const stdout = capture.stdout.join("");
+    const stderr = capture.stderr.join("");
+    expect(stdout).toEndWith("\n");
+    expect(capture.stderr).toEqual([]);
+    expect(stderr).toBe("");
+    expectSecretAbsentFromStreams(capture);
+
+    const records = parseJsonLines(stdout);
+    const progressRecords = records.filter(
+        (record) => record.type === undefined,
+    );
+    const piRecords = records.filter((record) => record.type === "pi_event");
+    const invalidRecords = records.filter(
+        (record) => record.type !== undefined && record.type !== "pi_event",
+    );
+    expect(invalidRecords).toEqual([]);
+
+    const runId = progressRecords[0]?.runId;
+    if (typeof runId !== "string") {
+        throw new Error("JSON Lines output did not contain a progress run ID.");
+    }
+    expect(progressRecords).toEqual(expectedProgressRecords(runId));
+    expect(piRecords).toEqual(
+        multiIssueRuntimeOracle.piEvents.map(expectedPiRecord),
+    );
+    expect(records).toEqual(expectedJsonRecords(runId));
+};
+
+const expectEventLogContract = (log: string): void => {
+    expect(log).toEndWith("\n");
+    const records = parseJsonLines(log);
+    const runId = records[0]?.runId;
+    if (typeof runId !== "string") {
+        throw new Error("Durable event log did not contain a run ID.");
+    }
+    expect(records).toEqual(expectedProgressRecords(runId));
 };
 
 describe("multi-issue command/runtime scenario oracle", () => {
@@ -167,14 +258,7 @@ describe("multi-issue command/runtime scenario oracle", () => {
                     await Bun.file(capture.eventLogPath ?? "").exists(),
                 ).toBe(true);
                 const log = await harness.readEventLog(capture.eventLogPath);
-                const events = log
-                    .trim()
-                    .split("\n")
-                    .filter(Boolean)
-                    .map((line) => JSON.parse(line) as Record<string, unknown>);
-                expect(events).toHaveLength(
-                    multiIssueRuntimeOracle.progressEvents.length,
-                );
+                expectEventLogContract(log);
                 expect(log).not.toContain(multiIssueRuntimeOracle.secret);
             }
 
@@ -198,14 +282,7 @@ describe("multi-issue command/runtime scenario oracle", () => {
             ]);
 
             expect(json).toBeDefined();
-            expect(json!.stderr).toEqual([]);
-            const jsonRecords = json!.stdout.map((line) => JSON.parse(line));
-            expect(jsonRecords).toEqual(
-                expect.arrayContaining([
-                    expect.objectContaining({ type: "pi_event" }),
-                    expect.objectContaining({ status: "failed" }),
-                ]),
-            );
+            expectJsonOutputContract(json!);
         } finally {
             await harness.cleanup();
         }
