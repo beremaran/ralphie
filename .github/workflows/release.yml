@@ -180,13 +180,65 @@ jobs:
           bun run build -- --commit-sha "$RELEASE_COMMIT_SHA"
           --version "$RELEASE_VERSION"
 
+      - name: Verify native binary format and architecture
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          binary=dist/cli
+          test -s "$binary"
+          test -x "$binary"
+          command -v file >/dev/null
+          description="$(file -b "$binary")"
+
+          case "$TARGET" in
+            darwin-arm64)
+              [[ "$description" == "Mach-O 64-bit executable arm64" ]]
+              test "$(lipo -archs "$binary")" = arm64
+              test "$(otool -l "$binary" | awk '
+                $1 == "cmd" { command = $2 }
+                command == "LC_BUILD_VERSION" && $1 == "platform" {
+                  print $2
+                  exit
+                }
+              ')" = 1
+              ;;
+            darwin-x64)
+              [[ "$description" == "Mach-O 64-bit executable x86_64" ]]
+              test "$(lipo -archs "$binary")" = x86_64
+              test "$(otool -l "$binary" | awk '
+                $1 == "cmd" { command = $2 }
+                command == "LC_BUILD_VERSION" && $1 == "platform" {
+                  print $2
+                  exit
+                }
+              ')" = 1
+              ;;
+            linux-arm64)
+              [[ "$description" == ELF* && "$description" == *"ARM aarch64"* ]]
+              [[ "$description" == *"GNU/Linux"* ]]
+              ;;
+            linux-x64)
+              [[ "$description" == ELF* && "$description" == *"x86-64"* ]]
+              [[ "$description" == *"GNU/Linux"* ]]
+              ;;
+            *)
+              echo "Unsupported native target: $TARGET" >&2
+              exit 1
+              ;;
+          esac
+
       - name: Verify native binary metadata
         env:
           EXPECTED_VERSION: ${{ needs.validate.outputs.version }}
           EXPECTED_COMMIT_SHA: ${{ needs.validate.outputs.source_ref }}
         run: |
           set -euo pipefail
+          test -s dist/cli
           test -x dist/cli
+          version_output="$RUNNER_TEMP/ralphie-version.txt"
+          ./dist/cli --version > "$version_output"
+          test -s "$version_output"
           version_json="$(./dist/cli --version --output json)"
           jq -e \
             --arg version "$EXPECTED_VERSION" \
@@ -219,6 +271,9 @@ jobs:
             ralphie-${{ matrix.target }}
             ralphie-${{ matrix.target }}.sha256
           if-no-files-found: error
+          # v4 artifacts are immutable; an attempted rerun must fail rather
+          # than replace an artifact produced by another run.
+          overwrite: false
           # Keep staged inputs through the protected-environment approval
           # window; 90 days is the maximum GitHub Actions artifact lifetime.
           retention-days: 90

@@ -39,7 +39,12 @@ staged as `ralphie-<version>-<target>` artifacts containing the renamed
 executable and its `<executable>.sha256` checksum. After all four native legs
 succeed, the aggregation job downloads those exact versioned artifacts, rejects
 missing, extra, duplicate, and cross-version files, and recomputes each binary
-checksum against its sidecar. It stages the immutable
+checksum against its sidecar. Native builds use `macos-14` for
+`darwin-arm64`, `macos-15-intel` for `darwin-x64`, `ubuntu-24.04-arm` for
+`linux-arm64`, and `ubuntu-24.04` for `linux-x64`; each leg verifies both the
+host and the compiled binary's OS, `file` format, and architecture (using
+`otool` and `lipo` on macOS). The staging upload is immutable and fails if a
+rerun attempts to overwrite an existing target artifact. It stages the immutable
 `ralphie-release-metadata-<version>` bundle containing the deterministic
 `release-metadata.json` contract `ralphie.release-metadata.v1` (exact tag,
 normalized version, validated commit, and sorted binary names and SHA-256

@@ -289,7 +289,31 @@ describe("release container metadata contract", () => {
         );
 
         expect(buildJob).toContain("Verify native target architecture");
-        expect(buildJob).toContain("bun run build -- --commit-sha");
+        expect(buildJob).toContain(
+            "Verify native binary format and architecture",
+        );
+        expect(buildJob).toContain('description="$(file -b "$binary")"');
+        expect(buildJob).toContain('lipo -archs "$binary"');
+        expect(buildJob).toContain('test -s "$binary"');
+        expect(buildJob).toContain('./dist/cli --version > "$version_output"');
+        expect(buildJob).toContain('test -s "$version_output"');
+        expect(buildJob).toContain("')\" = 1");
+        for (const assertion of [
+            '"Mach-O 64-bit executable arm64"',
+            '"Mach-O 64-bit executable x86_64"',
+            '"LC_BUILD_VERSION"',
+            '"platform"',
+            '"ARM aarch64"',
+            '"x86-64"',
+            '"GNU/Linux"',
+        ]) {
+            expect(buildJob).toContain(assertion);
+        }
+        expect(buildJob).toContain('asset="ralphie-${TARGET}"');
+        expect(buildJob).toContain("overwrite: false");
+        expect(buildJob).toContain(
+            "path: |\n            ralphie-${{ matrix.target }}\n            ralphie-${{ matrix.target }}.sha256",
+        );
         for (const [target, runner] of [
             ["darwin-arm64", "macos-14"],
             ["darwin-x64", "macos-15-intel"],
