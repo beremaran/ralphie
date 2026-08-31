@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 
 import type { PiSessionEvent } from "../../src/pi/client.ts";
+import type { FooterTimer } from "../../src/progress/footer.ts";
 import { makeProgressCoordinator } from "../../src/progress/coordinator.ts";
+import type { TerminalOutputStrategy } from "../../src/progress/terminal-controller.ts";
 
 const context = {
     sessionID: "session-1",
@@ -41,6 +43,56 @@ const primeRows = (
         }),
         context,
     );
+};
+
+const makeFooterTimer = (): {
+    readonly timer: FooterTimer;
+    readonly flush: () => void;
+    readonly cancelled: number;
+} => {
+    const callbacks: Array<() => void> = [];
+    let cancelled = 0;
+    return {
+        timer: {
+            schedule: (callback) => {
+                callbacks.push(callback);
+                return callbacks.length;
+            },
+            cancel: () => {
+                cancelled += 1;
+            },
+        },
+        flush: () => callbacks.shift()?.(),
+        get cancelled() {
+            return cancelled;
+        },
+    };
+};
+
+const makeFooterSurface = (): {
+    readonly strategy: TerminalOutputStrategy;
+    readonly content: string[];
+    readonly footers: string[];
+    readonly restores: number;
+} => {
+    const content: string[] = [];
+    const footers: string[] = [];
+    let restores = 0;
+    return {
+        strategy: {
+            write: (text) => content.push(text),
+            paintFooter: (text) => footers.push(text),
+            clearFooter: () => {},
+            restore: () => {
+                restores += 1;
+            },
+        },
+        content,
+        footers,
+        get restores() {
+            return restores;
+        },
+    };
 };
 
 describe("progress output coordinator", () => {
@@ -150,12 +202,290 @@ describe("progress output coordinator", () => {
             context,
         );
 
-        expect(output).toBe(
-            "◐ Implementing...\r\x1b[2K╭─ Pi · Task · session-1 · Implementing changes\n│\n" +
-                "│  ✦ assistant partial token\n" +
-                "• Still working.\n◐ Implementing..." +
-                "\r\x1b[2K│    continued",
+        expect(output).toContain(
+            "◐ › Implementing changes › Waiting · 0s\r\x1b[2K╭─ Pi · Task · session-1 · Implementing changes\n",
         );
+        expect(output).toContain("│  ✦ assistant partial token");
+        expect(output).toContain("• Still working.");
+        expect(output).toContain("│    continued");
+        expect(output).not.toContain("◐ Implementing...");
+    });
+
+    test("interrupts a partial Pi chunk before a subsequent event", async () => {
+        let output = "";
+        const coordinator = makeProgressCoordinator({
+            mode: "interactive",
+            verbose: false,
+            colors: false,
+            write: (text) => {
+                output += text;
+            },
+            width: () => 80,
+            now: () => new Date("2026-01-01T00:00:00.000Z"),
+        });
+
+        await coordinator.progress.emit({
+            stage: "implementation",
+            status: "started",
+            message: "Implementing...",
+        });
+        coordinator.listener(
+            event({
+                type: "message_update",
+                assistantMessageEvent: {
+                    type: "text_delta",
+                    delta: "partial",
+                },
+            }),
+            context,
+        );
+        coordinator.listener(event({ type: "turn_end" }), context);
+
+        expect(output).toContain("│  ✦ assistant partial\n");
+        expect(output).toEndWith("◐ › Implementing changes › Waiting · 0s");
+        await coordinator.dispose();
+    });
+
+    test("keeps the sticky footer aligned with nested stages and Pi activity", async () => {
+        const timer = makeFooterTimer();
+        const surface = makeFooterSurface();
+        const issue = { number: 63, title: "Footer coordinator" };
+        const coordinator = makeProgressCoordinator({
+            mode: "interactive",
+            verbose: false,
+            colors: false,
+            write: (text) => surface.content.push(text),
+            strategy: surface.strategy,
+            width: () => 200,
+            footer: { timer: timer.timer },
+            now: () => new Date("2026-01-01T00:00:00.000Z"),
+        });
+
+        await coordinator.progress.emit({
+            stage: "issue-execution",
+            status: "started",
+            message: "Executing issue...",
+            repository: "owner/repo",
+            issue,
+            current: 2,
+            total: 5,
+            attempt: 2,
+            maxAttempts: 4,
+        });
+        await coordinator.progress.emit({
+            stage: "implementation",
+            status: "started",
+            message: "Implementing...",
+            issue,
+        });
+        timer.flush();
+
+        const activityLabels: string[] = [];
+        const send = (value: unknown): void => {
+            coordinator.listener(event(value), context);
+            timer.flush();
+            activityLabels.push(coordinator.getDisplayState().activityLabel);
+        };
+        send(event({ type: "agent_start" }));
+        send(
+            event({
+                type: "message_update",
+                assistantMessageEvent: {
+                    type: "thinking_delta",
+                    delta: "thinking",
+                },
+            }),
+        );
+        send(
+            event({
+                type: "message_update",
+                assistantMessageEvent: { type: "thinking_end" },
+            }),
+        );
+        send(
+            event({
+                type: "message_update",
+                assistantMessageEvent: {
+                    type: "text_delta",
+                    delta: "partial ",
+                },
+            }),
+        );
+        send(
+            event({
+                type: "message_update",
+                assistantMessageEvent: {
+                    type: "text_delta",
+                    delta: "token",
+                },
+            }),
+        );
+        send(
+            event({
+                type: "message_update",
+                assistantMessageEvent: { type: "text_end" },
+            }),
+        );
+        send(
+            event({
+                type: "tool_execution_start",
+                toolCallId: "tool-1",
+                toolName: "bash",
+                args: { command: "printf output" },
+            }),
+        );
+        send(event({ type: "compaction_start", reason: "threshold" }));
+        send(
+            event({
+                type: "auto_retry_start",
+                attempt: 1,
+                maxAttempts: 2,
+                delayMs: 10,
+                errorMessage: "temporary",
+            }),
+        );
+        send(event({ type: "auto_retry_end", success: true, attempt: 1 }));
+        send(event({ type: "agent_settled" }));
+
+        expect(activityLabels).toEqual([
+            "Thinking",
+            "Thinking",
+            "Thinking",
+            "Responding",
+            "Responding",
+            "Responding",
+            "Using bash",
+            "Compacting context",
+            "Retrying",
+            "Waiting",
+            "Waiting",
+        ]);
+        expect(coordinator.getDisplayState()).toMatchObject({
+            repository: "owner/repo",
+            issue: { current: 2, total: 5, number: 63 },
+            stage: "implementation",
+            reviewAttempt: { current: 2, total: 4 },
+            activity: "waiting",
+            activityLabel: "Waiting",
+        });
+        expect(surface.content.join("")).toContain("partial ");
+        expect(surface.content.join("")).toContain("│    token");
+        expect(
+            surface.footers.some((line) =>
+                line.startsWith(
+                    "◐ [owner/repo] [2/5] #63 Footer coordinator Review 2/4 › Implementing changes",
+                ),
+            ),
+        ).toBeTrue();
+        for (const label of [
+            "Thinking",
+            "Responding",
+            "Using bash",
+            "Compacting context",
+            "Retrying",
+            "Waiting",
+        ]) {
+            expect(
+                surface.footers.some((line) => line.includes(`› ${label}`)),
+            ).toBeTrue();
+        }
+        expect(
+            surface.footers.some((line) => line.endsWith("· 0s")),
+        ).toBeTrue();
+        await coordinator.dispose();
+    });
+
+    test("keeps non-interactive coordinator modes footer-free", async () => {
+        const modes = [
+            { label: "plain", mode: "plain" },
+            { label: "CI-resolved plain", mode: "plain" },
+            { label: "JSON", mode: "json" },
+            { label: "quiet", mode: "quiet" },
+        ] as const;
+
+        for (const { label, mode } of modes) {
+            let output = "";
+            const surface = makeFooterSurface();
+            let resizeSubscriptions = 0;
+            const coordinator = makeProgressCoordinator({
+                mode,
+                verbose: false,
+                colors: false,
+                write: (text) => {
+                    output += text;
+                },
+                strategy: surface.strategy,
+                resize: () => {
+                    resizeSubscriptions += 1;
+                    return () => {};
+                },
+            });
+
+            await coordinator.progress.emit({
+                stage: "implementation",
+                status: "started",
+                message: `${label} started.`,
+            });
+            coordinator.listener(
+                event({
+                    type: "message_update",
+                    assistantMessageEvent: {
+                        type: "text_delta",
+                        delta: "partial",
+                    },
+                }),
+                context,
+            );
+            await coordinator.progress.emit({
+                stage: "implementation",
+                status: "failed",
+                message: `${label} failed.`,
+            });
+            await coordinator.dispose();
+
+            expect(surface.footers).toHaveLength(0);
+            expect(resizeSubscriptions).toBe(0);
+            expect(output).not.toContain("\r");
+            expect(output).not.toContain("\x1b");
+        }
+    });
+
+    test("cleans up the footer controller when the coordinator is disposed", async () => {
+        const timer = makeFooterTimer();
+        const surface = makeFooterSurface();
+        let resizeRemovals = 0;
+        const coordinator = makeProgressCoordinator({
+            mode: "interactive",
+            verbose: false,
+            colors: false,
+            write: (text) => surface.content.push(text),
+            strategy: surface.strategy,
+            footer: { timer: timer.timer },
+            resize: () => () => {
+                resizeRemovals += 1;
+            },
+        });
+
+        await coordinator.progress.emit({
+            stage: "implementation",
+            status: "started",
+            message: "Implementing...",
+        });
+        const contentBeforeDispose = surface.content.length;
+        await coordinator.dispose();
+        await coordinator.dispose();
+        coordinator.listener(event({ type: "turn_start" }), context);
+        await coordinator.progress.emit({
+            stage: "implementation",
+            status: "info",
+            message: "ignored",
+        });
+
+        expect(timer.cancelled).toBe(1);
+        expect(resizeRemovals).toBe(1);
+        expect(surface.restores).toBe(1);
+        expect(surface.content).toHaveLength(contentBeforeDispose + 1);
+        expect(surface.footers).toHaveLength(1);
     });
 
     test("keeps plain append-only and quiet failures-only", async () => {
@@ -238,7 +568,10 @@ describe("progress output coordinator", () => {
             message: "Progress.",
         });
 
-        expect(output).toMatch(/Progress\.\n$/);
+        expect(output).toContain("Progress.\n");
+        expect(output).toEndWith(
+            "\x1b[90m◐ › Implementing changes › Waiting · 0s\x1b[0m",
+        );
         expect(output).not.toContain("\n\n");
     });
 

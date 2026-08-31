@@ -34,6 +34,15 @@ import {
     type ProgressRendererOptions,
     type ProgressUpdate,
 } from "./progress.ts";
+import { dim } from "./colors.ts";
+import { renderFooter } from "./footer.ts";
+import {
+    makeTerminalOutputController,
+    type TerminalFooterOptions,
+    type TerminalOutputStrategy,
+    type TerminalResizeListener,
+    type TerminalResizeSubscription,
+} from "./terminal-controller.ts";
 
 /** Options for the shared progress/Pi output coordinator. */
 export type ProgressCoordinatorOptions = Omit<
@@ -44,6 +53,15 @@ export type ProgressCoordinatorOptions = Omit<
     readonly breadcrumbThreshold?: number;
     /** Alias for callers that use a generic cadence threshold. */
     readonly threshold?: number;
+    /** Injectable sticky-footer scheduler and view settings. */
+    readonly footer?: Omit<TerminalFooterOptions, "footerLine">;
+    /** Injectable terminal surface, useful for deterministic coordinator tests. */
+    readonly strategy?: TerminalOutputStrategy;
+    /** Injectable resize source; the default listens to stderr in interactive mode. */
+    readonly resize?: TerminalResizeSubscription | TerminalResizeListener;
+    /** Compatibility aliases for resize-source injection. */
+    readonly onResize?: TerminalResizeListener;
+    readonly subscribeResize?: TerminalResizeListener;
 };
 
 /**
@@ -211,15 +229,40 @@ const considerRenderedBreadcrumb = (input: {
 export const makeProgressCoordinator = (
     options: ProgressCoordinatorOptions,
 ) => {
-    const output = makeProgressOutput({
-        mode: options.mode,
-        write: options.write,
-    });
+    const now = options.now ?? (() => new Date());
+    let state = createDisplayState();
+    const footerWidth = options.footer?.width ?? options.width;
+    const controller =
+        options.mode === "interactive"
+            ? makeTerminalOutputController({
+                  mode: options.mode,
+                  write: options.write,
+                  strategy: options.strategy,
+                  width: footerWidth,
+                  resize: options.resize,
+                  onResize: options.onResize,
+                  subscribeResize: options.subscribeResize,
+                  footer: {
+                      ...options.footer,
+                      footerLine: () =>
+                          renderFooter(state, {
+                              now,
+                              width: footerWidth,
+                              color: options.colors ? dim : undefined,
+                          }),
+                  },
+              })
+            : undefined;
+    const output: ProgressOutput =
+        controller ??
+        makeProgressOutput({
+            mode: options.mode,
+            write: options.write,
+        });
     const progressRenderer = makeProgressReporter({
         ...options,
         output,
     });
-    const now = options.now ?? (() => new Date());
     const breadcrumbPolicy = makeBreadcrumbPolicy({
         ...(options.breadcrumbThreshold === undefined
             ? {}
@@ -228,7 +271,6 @@ export const makeProgressCoordinator = (
             ? {}
             : { threshold: options.threshold }),
     });
-    let state = createDisplayState();
     let eventOutputBaseline = 0;
     let transcript: PiTranscriptRenderer | undefined;
     transcript = transcriptFor(
@@ -252,6 +294,8 @@ export const makeProgressCoordinator = (
                 ? undefined
                 : breadcrumbCandidateFor(state);
         state = reducePiSessionEvent(state, event, context, now);
+        controller?.invalidate();
+        transcript?.interruptLine();
         const candidate =
             transcript === undefined
                 ? undefined
@@ -285,8 +329,14 @@ export const makeProgressCoordinator = (
         emit: async (update: ProgressUpdate) => {
             if (disposed) return;
             state = reduceProgressUpdate(state, update, now);
+            controller?.invalidate();
             transcript?.interruptLine();
             await progressRenderer.emit(update);
+        },
+        writeRaw: (text) => {
+            if (disposed || text.length === 0) return;
+            transcript?.interruptLine();
+            progressRenderer.writeRaw?.(text);
         },
         stopPersisting: progressRenderer.stopPersisting,
     };
