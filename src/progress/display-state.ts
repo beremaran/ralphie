@@ -3,6 +3,7 @@ import { redactSensitiveText } from "../shared/redaction.ts";
 import type {
     ProgressEvent,
     ProgressStage,
+    ProgressStatus,
     ProgressUpdate,
 } from "./progress.ts";
 
@@ -30,7 +31,12 @@ export type DisplayReviewAttempt = {
 export type DisplayState = {
     readonly repository?: string;
     readonly issue?: DisplayIssue;
+    /** The active decomposition parent, when the queue is running a leaf. */
+    readonly parentIssue?: number;
+    /** The nested leaf currently being run under the active parent. */
+    readonly activeLeaf?: number;
     readonly stage?: ProgressStage;
+    readonly status?: ProgressStatus;
     readonly reviewAttempt?: DisplayReviewAttempt;
     readonly activity: DisplayActivity;
     readonly activityLabel: string;
@@ -229,6 +235,33 @@ const repositoryFor = (
     return clean === "" ? state.repository : clean;
 };
 
+const isLeafCompletion = (update: ProgressUpdate): boolean =>
+    update.stage === "issue-closure" && update.status === "succeeded";
+
+const nestedIssueContextFor = (
+    state: DisplayState,
+    update: ProgressUpdate,
+): Pick<DisplayState, "parentIssue" | "activeLeaf"> => {
+    const details = recordValue(update.details);
+    const parentIssue = numberValue(details.parentIssue);
+    const activeLeaf = numberValue(details.activeLeaf);
+    const leafCompleted = isLeafCompletion(update);
+    return {
+        ...(parentIssue === undefined
+            ? state.parentIssue === undefined
+                ? {}
+                : { parentIssue: state.parentIssue }
+            : { parentIssue }),
+        ...(leafCompleted
+            ? {}
+            : activeLeaf === undefined
+              ? state.activeLeaf === undefined
+                  ? {}
+                  : { activeLeaf: state.activeLeaf }
+              : { activeLeaf }),
+    };
+};
+
 const issueFor = (
     state: DisplayState,
     update: ProgressUpdate,
@@ -312,16 +345,24 @@ export const reduceProgressUpdate = (
     const timestamp = timestampFromProgress(update, clock);
     const repository = repositoryFor(state, update);
     const issue = issueFor(state, update);
-    const reviewAttempt = reviewAttemptFor(state, update);
-    const { reviewAttempt: _previousReviewAttempt, ...stateWithoutAttempt } =
-        state;
+    const nestedIssueContext = nestedIssueContextFor(state, update);
+    const reviewAttempt = isLeafCompletion(update)
+        ? undefined
+        : reviewAttemptFor(state, update);
+    const {
+        reviewAttempt: _previousReviewAttempt,
+        activeLeaf: _previousActiveLeaf,
+        ...stateWithoutAttempt
+    } = state;
     const stage = update.stage;
     return {
         ...stateWithoutAttempt,
         ...(repository === undefined ? {} : { repository }),
         ...(issue === undefined ? {} : { issue }),
+        ...nestedIssueContext,
         ...(reviewAttempt === undefined ? {} : { reviewAttempt }),
         stage,
+        status: update.status,
         activity: "waiting",
         activityLabel: displayText(DISPLAY_ACTIVITY_LABELS.waiting),
         stageStartedAt: stageStartedAtFor(state, update, timestamp),

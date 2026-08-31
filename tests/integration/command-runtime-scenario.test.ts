@@ -5,6 +5,7 @@ import {
     multiIssueRuntimeOracle,
     type CommandRuntimeRunCapture,
 } from "./command-runtime-harness.ts";
+import type { DisplayState } from "../../src/progress/display-state.ts";
 import { redactSensitiveValue } from "../../src/shared/redaction.ts";
 
 const ANSI_CURSOR_CONTROL =
@@ -160,7 +161,7 @@ const expectJsonOutputContract = (capture: CommandRuntimeRunCapture): void => {
     expect(records).toEqual(expectedJsonRecords(runId));
 };
 
-const expectEventLogContract = (log: string): void => {
+const expectEventLogContract = (log: string): JsonRecord[] => {
     expect(log).toEndWith("\n");
     const records = parseJsonLines(log);
     const runId = records[0]?.runId;
@@ -168,6 +169,151 @@ const expectEventLogContract = (log: string): void => {
         throw new Error("Durable event log did not contain a run ID.");
     }
     expect(records).toEqual(expectedProgressRecords(runId));
+    return records;
+};
+
+const normalizeDurableEvents = (
+    records: ReadonlyArray<JsonRecord>,
+): JsonRecord[] =>
+    records.map(({ runId: _runId, timestamp: _timestamp, ...event }) => event);
+
+const expectNamedDisplayTransitions = (
+    capture: CommandRuntimeRunCapture,
+): void => {
+    const oracle = multiIssueRuntimeOracle;
+    const stateAfter = (
+        predicate: (emission: (typeof oracle.emissions)[number]) => boolean,
+    ): DisplayState => {
+        const emissionIndex = oracle.emissions.findIndex(predicate);
+        if (emissionIndex < 0) {
+            throw new Error("Scenario is missing a named display transition.");
+        }
+        const state = capture.displayStates[emissionIndex + 1];
+        expect(state).toEqual(oracle.expectedDisplayStates[emissionIndex + 1]);
+        if (state === undefined) {
+            throw new Error("Display state capture ended before the scenario.");
+        }
+        return state;
+    };
+
+    const parentQueue = stateAfter(
+        (emission) =>
+            emission.kind === "progress" &&
+            emission.event.stage === "issue-queue" &&
+            emission.event.issue?.number === 101,
+    );
+    expect(parentQueue).toMatchObject({
+        repository: "owner/repository",
+        issue: { current: 1, total: 2, number: 101 },
+        parentIssue: 100,
+        activeLeaf: 101,
+        stage: "issue-queue",
+        status: "started",
+    });
+
+    const thinking = stateAfter(
+        (emission) =>
+            emission.kind === "pi" &&
+            emission.event.type === "message_update" &&
+            emission.event.assistantMessageEvent.type === "thinking_start",
+    );
+    expect(thinking).toMatchObject({
+        parentIssue: 100,
+        activeLeaf: 101,
+        activity: "thinking",
+        activityLabel: "Thinking",
+    });
+
+    const tool = stateAfter(
+        (emission) =>
+            emission.kind === "pi" &&
+            emission.event.type === "tool_execution_start",
+    );
+    expect(tool).toMatchObject({
+        parentIssue: 100,
+        activeLeaf: 101,
+        activity: "tool",
+        activityLabel: "Using read",
+    });
+
+    const returnedToWorkflow = stateAfter(
+        (emission) =>
+            emission.kind === "pi" && emission.event.type === "agent_settled",
+    );
+    expect(returnedToWorkflow).toMatchObject({
+        parentIssue: 100,
+        activeLeaf: 101,
+        activity: "waiting",
+        activityLabel: "Waiting",
+    });
+
+    const firstReview = stateAfter(
+        (emission) =>
+            emission.kind === "progress" &&
+            emission.event.stage === "review" &&
+            emission.event.status === "started" &&
+            emission.event.attempt === 1,
+    );
+    expect(firstReview).toMatchObject({
+        parentIssue: 100,
+        activeLeaf: 101,
+        stage: "review",
+        status: "started",
+        reviewAttempt: { current: 1, total: 2 },
+    });
+
+    const retryReview = stateAfter(
+        (emission) =>
+            emission.kind === "progress" &&
+            emission.event.stage === "review" &&
+            emission.event.status === "started" &&
+            emission.event.attempt === 2,
+    );
+    expect(retryReview).toMatchObject({
+        reviewAttempt: { current: 2, total: 2 },
+        stage: "review",
+        status: "started",
+    });
+
+    const successfulReview = stateAfter(
+        (emission) =>
+            emission.kind === "progress" &&
+            emission.event.stage === "review" &&
+            emission.event.status === "succeeded",
+    );
+    expect(successfulReview).toMatchObject({
+        stage: "review",
+        status: "succeeded",
+        reviewAttempt: { current: 2, total: 2 },
+    });
+
+    const returnedToParent = stateAfter(
+        (emission) =>
+            emission.kind === "progress" &&
+            emission.event.stage === "issue-closure" &&
+            emission.event.status === "succeeded",
+    );
+    expect(returnedToParent).toMatchObject({
+        parentIssue: 100,
+        stage: "issue-closure",
+        status: "succeeded",
+    });
+    expect(returnedToParent.activeLeaf).toBeUndefined();
+    expect(returnedToParent.reviewAttempt).toBeUndefined();
+
+    const secondIssueFailure = stateAfter(
+        (emission) =>
+            emission.kind === "progress" &&
+            emission.event.issue?.number === 102 &&
+            emission.event.status === "failed",
+    );
+    expect(secondIssueFailure).toMatchObject({
+        issue: { current: 2, total: 2, number: 102 },
+        parentIssue: 100,
+        activeLeaf: 102,
+        stage: "implementation",
+        status: "failed",
+    });
 };
 
 describe("multi-issue command/runtime scenario oracle", () => {
@@ -245,10 +391,12 @@ describe("multi-issue command/runtime scenario oracle", () => {
 
             expect(harness.runCaptures).toHaveLength(4);
             expect(harness.eventLogPaths).toHaveLength(4);
+            const durableEvents: JsonRecord[][] = [];
             for (const capture of harness.runCaptures) {
                 expect(capture.displayStates).toEqual([
                     ...multiIssueRuntimeOracle.expectedDisplayStates,
                 ]);
+                expectNamedDisplayTransitions(capture);
                 expect(capture.piEvents).toEqual([
                     ...multiIssueRuntimeOracle.piEvents,
                 ]);
@@ -258,9 +406,28 @@ describe("multi-issue command/runtime scenario oracle", () => {
                     await Bun.file(capture.eventLogPath ?? "").exists(),
                 ).toBe(true);
                 const log = await harness.readEventLog(capture.eventLogPath);
-                expectEventLogContract(log);
+                durableEvents.push(expectEventLogContract(log));
                 expect(log).not.toContain(multiIssueRuntimeOracle.secret);
             }
+
+            // Run identity and timestamps are per invocation; every persisted
+            // source event must otherwise be byte-for-byte equivalent in order.
+            const normalizedDurableEvents = durableEvents.map(
+                normalizeDurableEvents,
+            );
+            const normalizedOracleEvents = normalizeDurableEvents(
+                expectedProgressRecords("normalized-run-id"),
+            );
+            expect(normalizedDurableEvents).toEqual(
+                durableEvents.map(() => normalizedOracleEvents),
+            );
+            const firstNormalizedEvents = normalizedDurableEvents[0];
+            if (firstNormalizedEvents === undefined) {
+                throw new Error("No durable event logs were captured.");
+            }
+            expect(normalizedDurableEvents).toEqual(
+                durableEvents.map(() => firstNormalizedEvents),
+            );
 
             const [plain, ci, quiet, json] = harness.runCaptures;
             expect(plain).toBeDefined();

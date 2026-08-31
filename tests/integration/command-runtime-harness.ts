@@ -16,8 +16,6 @@ import type {
 import { makeProgressCoordinator } from "../../src/progress/coordinator.ts";
 import {
     createDisplayState,
-    reducePiSessionEvent,
-    reduceProgressUpdate,
     type DisplayState,
 } from "../../src/progress/display-state.ts";
 import type { ProgressUpdate } from "../../src/progress/progress.ts";
@@ -327,24 +325,256 @@ const makeMultiIssueRuntimeOracle = (): RuntimeScenarioOracle => {
             { ...issueTwoContext, details: { failure: "fixture failure" } },
         ),
     ];
-    let state = createDisplayState();
-    const expectedDisplayStates = [state];
-    for (const emission of emissions) {
-        state =
-            emission.kind === "progress"
-                ? reduceProgressUpdate(
-                      state,
-                      emission.event,
-                      () => new Date(SCENARIO_TIME),
-                  )
-                : reducePiSessionEvent(
-                      state,
-                      emission.event,
-                      emission.context,
-                      () => new Date(SCENARIO_TIME),
-                  );
-        expectedDisplayStates.push(state);
-    }
+    // This sequence is the hand-authored source oracle for the scenario. Keep
+    // it independent from the display-state reducer so reducer regressions
+    // cannot update both the implementation and its expected values.
+    const stageStartedAt = SCENARIO_TIME.getTime();
+    const initialState: DisplayState = {
+        activity: "waiting",
+        activityLabel: "Waiting",
+    };
+    const repositoryState = {
+        activity: "waiting",
+        activityLabel: "Waiting",
+        repository: "owner/repository",
+        stageStartedAt,
+    } as const;
+    const issueOneState = {
+        ...repositoryState,
+        issue: {
+            current: 1,
+            total: 2,
+            number: 101,
+            title: "Implement the first queued issue",
+        },
+        parentIssue: 100,
+        activeLeaf: 101,
+    } as const;
+    const issueOneClosureState = {
+        ...repositoryState,
+        issue: issueOneState.issue,
+        parentIssue: 100,
+    } as const;
+    const issueTwoState = {
+        ...repositoryState,
+        issue: {
+            current: 2,
+            total: 2,
+            number: 102,
+            title: "Implement the second queued issue",
+        },
+        parentIssue: 100,
+        activeLeaf: 102,
+    } as const;
+    const expectedDisplayStates: ReadonlyArray<DisplayState> = [
+        initialState,
+        {
+            ...repositoryState,
+            stage: "repository-discovery",
+            status: "started",
+        },
+        {
+            ...repositoryState,
+            stage: "repository-discovery",
+            status: "succeeded",
+        },
+        {
+            ...repositoryState,
+            stage: "issue-discovery",
+            status: "succeeded",
+        },
+        {
+            ...issueOneState,
+            stage: "issue-queue",
+            status: "started",
+        },
+        {
+            ...issueOneState,
+            stage: "issue-planning",
+            status: "started",
+        },
+        {
+            ...issueOneState,
+            stage: "implementation",
+            status: "started",
+        },
+        {
+            ...issueOneState,
+            stage: "implementation",
+            status: "started",
+            activity: "thinking",
+            activityLabel: "Thinking",
+        },
+        {
+            ...issueOneState,
+            stage: "implementation",
+            status: "started",
+            activity: "thinking",
+            activityLabel: "Thinking",
+        },
+        {
+            ...issueOneState,
+            stage: "implementation",
+            status: "started",
+            activity: "thinking",
+            activityLabel: "Thinking",
+        },
+        {
+            ...issueOneState,
+            stage: "implementation",
+            status: "started",
+            activity: "thinking",
+            activityLabel: "Thinking",
+        },
+        {
+            ...issueOneState,
+            stage: "implementation",
+            status: "started",
+            activity: "tool",
+            activityLabel: "Using read",
+        },
+        {
+            ...issueOneState,
+            stage: "implementation",
+            status: "started",
+            activity: "tool",
+            activityLabel: "Using read",
+        },
+        {
+            ...issueOneState,
+            stage: "implementation",
+            status: "started",
+            activity: "tool",
+            activityLabel: "Using read",
+        },
+        {
+            ...issueOneState,
+            stage: "implementation",
+            status: "started",
+            activity: "tool",
+            activityLabel: "Using read",
+        },
+        {
+            ...issueOneState,
+            stage: "implementation",
+            status: "started",
+            activity: "waiting",
+            activityLabel: "Waiting",
+        },
+        {
+            ...issueOneState,
+            stage: "implementation",
+            status: "started",
+            activity: "responding",
+            activityLabel: "Responding",
+        },
+        {
+            ...issueOneState,
+            stage: "implementation",
+            status: "started",
+            activity: "responding",
+            activityLabel: "Responding",
+        },
+        {
+            ...issueOneState,
+            stage: "implementation",
+            status: "started",
+            activity: "responding",
+            activityLabel: "Responding",
+        },
+        {
+            ...issueOneState,
+            stage: "implementation",
+            status: "started",
+            activity: "retrying",
+            activityLabel: "Retrying",
+        },
+        {
+            ...issueOneState,
+            stage: "implementation",
+            status: "started",
+            activity: "retrying",
+            activityLabel: "Retrying",
+        },
+        {
+            ...issueOneState,
+            stage: "implementation",
+            status: "started",
+            activity: "waiting",
+            activityLabel: "Waiting",
+        },
+        {
+            ...issueOneState,
+            stage: "implementation",
+            status: "started",
+            activity: "thinking",
+            activityLabel: "Thinking",
+        },
+        {
+            ...issueOneState,
+            stage: "implementation",
+            status: "started",
+            activity: "waiting",
+            activityLabel: "Waiting",
+        },
+        {
+            ...issueOneState,
+            stage: "implementation",
+            status: "started",
+            activity: "waiting",
+            activityLabel: "Waiting",
+        },
+        {
+            ...issueOneState,
+            stage: "review",
+            status: "started",
+            reviewAttempt: { current: 1, total: 2 },
+        },
+        {
+            ...issueOneState,
+            stage: "review",
+            status: "failed",
+            reviewAttempt: { current: 1, total: 2 },
+        },
+        {
+            ...issueOneState,
+            stage: "review-fix",
+            status: "started",
+            reviewAttempt: { current: 1, total: 2 },
+        },
+        {
+            ...issueOneState,
+            stage: "review",
+            status: "started",
+            reviewAttempt: { current: 2, total: 2 },
+        },
+        {
+            ...issueOneState,
+            stage: "review",
+            status: "succeeded",
+            reviewAttempt: { current: 2, total: 2 },
+        },
+        {
+            ...issueOneClosureState,
+            stage: "issue-closure",
+            status: "succeeded",
+        },
+        {
+            ...issueTwoState,
+            stage: "issue-queue",
+            status: "started",
+        },
+        {
+            ...issueTwoState,
+            stage: "implementation",
+            status: "started",
+        },
+        {
+            ...issueTwoState,
+            stage: "implementation",
+            status: "failed",
+        },
+    ];
     return {
         emissions,
         progressEvents: emissions.flatMap((emission) =>
