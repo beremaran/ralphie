@@ -54,7 +54,8 @@ flowchart TD
 ## Implementation workflow: complexity 0–3
 
 1. Capture the exact clean branch and commit as an issue checkpoint.
-2. Ask a fresh Pi session to implement the issue.
+2. Ask a fresh Pi session to implement the issue and require a schema-valid
+   completion result; prose or premature model termination is not completion.
 3. Stage every change deterministically and capture the exact staged diff.
 4. Run deterministic verification. If a command exits non-zero, give its
    bounded output and the staged diff to a fresh fix session, then restage and
@@ -75,8 +76,11 @@ flowchart TD
 
 When implementation produces no changes, a fresh read-only session must prove
 that the current checkout already resolves the issue and return concrete
-evidence. A proven resolution is completed and closed; an unresolved or
-uncertain result fails safely and remains open. If the review budget is
+evidence. A proven resolution is completed and closed. An unresolved result is
+fed back to a fresh implementation session for up to
+`--implementation-attempts` attempts, optionally switching to
+`--implementation-fallback-model` after the first attempt. Only an exhausted
+retry budget fails the issue. If the review budget is
 exhausted, Ralphie preserves the patch and review diagnostics, restores the
 clean checkpoint, and sends the issue through decomposition.
 

@@ -126,6 +126,13 @@ stateDiagram-v2
   removes the entire workspace. Cleanup is skipped on failure so state and
   diagnostics remain available.
 
+Ordinary issue failures halt by default. With `--on-issue-failure continue`,
+Ralphie restores the failed issue checkout, records its outcome, and continues
+independent issues. Failed prerequisites are not marked complete, so dependent
+issues remain blocked. After draining all reachable work, the run exits with
+status `1` and an aggregate partial-failure summary. This policy is independent
+from needs-attention handling.
+
 A needs-attention stop is handled separately and exits with status `2` by
 default. `--on-needs-attention continue` drains later work and completes with
 status `0` when the queue is drained. The issue remains open in either policy.

@@ -316,8 +316,9 @@ Detailed behavior:
   exact choice to be authorized by the issue; otherwise execution halts before
   review or delivery rather than silently establishing policy.
 - A no-change implementation is not silently accepted. A fresh read-only
-  resolution session must return `resolved` plus concrete evidence. Otherwise
-  the issue fails and remains open.
+  resolution session must return `resolved` plus concrete evidence. An
+  unresolved decision starts a fresh bounded implementation retry with that
+  evidence; the issue fails only after the configured attempts are exhausted.
 - After approval, Pi generates a schema-valid subject (maximum 72 characters)
   and optional body. Git commits the staged tree, verifies the resulting tree
   and clean checkout, then pushes and verifies the expected remote SHA.

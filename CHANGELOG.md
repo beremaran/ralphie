@@ -7,6 +7,16 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Changed
 
+- Pi implementation sessions now allow ordinary composed shell commands,
+  pipes, redirection, and interpreters while continuing to reject explicit
+  orchestration-owned Git/GitHub mutations.
+- Implementation completion is schema validated. Unresolved empty diffs enter
+  a bounded fresh-session retry loop with verifier evidence, configurable
+  implementation thinking, retry count, and optional fallback model.
+- `--on-issue-failure continue` restores failed issue checkouts and drains
+  independent queued work before returning an aggregate non-zero result;
+  failed prerequisites continue to block dependent issues.
+
 - Deterministic verification command failures now enter a bounded repair loop
   instead of immediately failing the issue and halting the queue. Each repair
   receives the exact staged diff and bounded failed-command evidence in a fresh

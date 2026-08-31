@@ -68,16 +68,35 @@ const makePi = (repositoryPath: string) => {
             create: async () => ({
                 data: { id: `local-session-${++session}` },
             }),
-            prompt: async (parameters: { readonly format?: unknown }) => {
+            prompt: async (parameters: {
+                readonly format?: unknown;
+                readonly parts?: ReadonlyArray<{ readonly text: string }>;
+            }) => {
                 const structured = parameters.format !== undefined;
                 promptKinds.push(structured ? "structured" : "text");
-                if (!structured && !implementationWritten) {
+                if (
+                    parameters.parts?.[0]?.text.includes(
+                        "Address the GitHub issue",
+                    ) &&
+                    !implementationWritten
+                ) {
                     implementationWritten = true;
                     await writeFile(
                         join(repositoryPath, "implemented.txt"),
                         "implemented\n",
                     );
-                    return { data: { info: {}, parts: [] } };
+                    return {
+                        data: {
+                            info: {
+                                structured: {
+                                    status: "changed",
+                                    summary: "Created implemented.txt.",
+                                    validation: ["bun run check"],
+                                },
+                            },
+                            parts: [],
+                        },
+                    };
                 }
                 if (structured && promptKinds.length === 1) {
                     return {
@@ -94,9 +113,9 @@ const makePi = (repositoryPath: string) => {
                     };
                 }
                 if (
-                    structured &&
-                    promptKinds.filter((kind) => kind === "structured")
-                        .length === 2
+                    parameters.parts?.[0]?.text.includes(
+                        "Review the staged implementation",
+                    )
                 ) {
                     return {
                         data: {
@@ -287,7 +306,7 @@ describe("local implementation end-to-end", () => {
             ).toBe("implemented\n");
             expect(piSetup.promptKinds).toEqual([
                 "structured",
-                "text",
+                "structured",
                 "structured",
                 "structured",
             ]);
@@ -328,7 +347,10 @@ describe("local implementation end-to-end", () => {
                         sessions.push(id);
                         return { data: { id } };
                     },
-                    prompt: async (parameters: { format?: unknown }) => {
+                    prompt: async (parameters: {
+                        format?: unknown;
+                        parts?: ReadonlyArray<{ readonly text: string }>;
+                    }) => {
                         prompt += 1;
                         if (prompt === 1) {
                             return {
@@ -343,14 +365,25 @@ describe("local implementation end-to-end", () => {
                                 },
                             };
                         }
-                        if (parameters.format === undefined) {
+                        if (
+                            parameters.parts?.[0]?.text.includes(
+                                "Address the GitHub issue",
+                            )
+                        ) {
                             await writeFile(
                                 join(repositoryPath, "partial.txt"),
                                 "partial\n",
                             );
                             return {
                                 data: {
-                                    info: {},
+                                    info: {
+                                        structured: {
+                                            status: "changed",
+                                            summary:
+                                                "Partial work exposed a dependency.",
+                                            validation: [],
+                                        },
+                                    },
                                     parts: [],
                                     needsAttention: {
                                         reason: "external_dependency",

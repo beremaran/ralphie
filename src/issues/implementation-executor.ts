@@ -959,22 +959,12 @@ export const makeImplementationExecutorService = (
         });
     };
 
-    const executeImplementation = async (
+    const runImplementationAttempts = async (
         input: WorkflowExecutorInput,
+        checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
+        invariant: { readonly branch: string; readonly head: string },
     ): Promise<WorkflowExecutorResult> => {
-        const { context, artifacts } = input;
-        checkSignal(context.signal);
-        if (artifacts.has(IssueArtifactKind.IssueResolutionDecision)) {
-            const resolution = await artifacts.read(
-                IssueArtifactKind.IssueResolutionDecision,
-            );
-            return resolutionOutcome(resolution.decision);
-        }
-
-        const recovered = await recoverCommittedAttempt(input);
-        if (recovered !== undefined) return recovered;
-
-        const { checkpoint, invariant } = await prepareAttempt(input);
+        const { context } = input;
         const maximumAttempts = context.implementationAttempts ?? 3;
         let unresolvedSummary: string | undefined;
         for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
@@ -1011,6 +1001,25 @@ export const makeImplementationExecutorService = (
         throw new RalphieError({
             message: "Implementation retry loop ended unexpectedly.",
         });
+    };
+
+    const executeImplementation = async (
+        input: WorkflowExecutorInput,
+    ): Promise<WorkflowExecutorResult> => {
+        const { context, artifacts } = input;
+        checkSignal(context.signal);
+        if (artifacts.has(IssueArtifactKind.IssueResolutionDecision)) {
+            const resolution = await artifacts.read(
+                IssueArtifactKind.IssueResolutionDecision,
+            );
+            return resolutionOutcome(resolution.decision);
+        }
+
+        const recovered = await recoverCommittedAttempt(input);
+        if (recovered !== undefined) return recovered;
+
+        const { checkpoint, invariant } = await prepareAttempt(input);
+        return await runImplementationAttempts(input, checkpoint, invariant);
     };
 
     return {

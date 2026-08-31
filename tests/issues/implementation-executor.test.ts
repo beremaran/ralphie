@@ -727,7 +727,11 @@ describe("implementation executor", () => {
         });
         await expect(
             run(
-                piClient([implementation, review("approved"), { subject: "fix" }]),
+                piClient([
+                    implementation,
+                    review("approved"),
+                    { subject: "fix" },
+                ]),
                 await makeIssueArtifactStore(42),
                 setup,
             ),
@@ -751,7 +755,11 @@ describe("implementation executor", () => {
         const artifacts = await makeIssueArtifactStore(42);
         await expect(
             run(
-                piClient([implementation, review("approved"), { subject: "fix" }]),
+                piClient([
+                    implementation,
+                    review("approved"),
+                    { subject: "fix" },
+                ]),
                 artifacts,
                 setup,
             ),

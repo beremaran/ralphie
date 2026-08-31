@@ -140,6 +140,20 @@ const parseNeedsAttentionPolicy = (
         : z.enum(NeedsAttentionPolicy).parse(value);
 };
 
+const parseIssueFailurePolicy = (
+    values: Record<string, unknown>,
+): IssueFailurePolicy | undefined => {
+    const value = asNonEmptyString(values, "on-issue-failure");
+    return value === undefined
+        ? undefined
+        : z.enum(IssueFailurePolicy).parse(value);
+};
+
+const parseModel = (values: Record<string, unknown>, name: string) => {
+    const value = asNonEmptyString(values, name);
+    return value === undefined ? undefined : piModelSchema.parse(value);
+};
+
 const cleanWhenSchema = z.enum(["start", "end", "both"]);
 const outputModeSchema = z.enum(["default", "verbose", "quiet", "json"]);
 
@@ -210,7 +224,6 @@ const parseCliOptions = (
             : z.enum(ExecutionMode).parse(modeValue);
     validateExplicitRalphieCliOptions(values, mode);
 
-    const modelValue = asString(values, "model");
     const onNeedsAttention = parseNeedsAttentionPolicy(values);
     const notificationOptions = parseNotificationOptions(values);
     const duplicateActionValue = asNonEmptyString(values, "duplicate-action");
@@ -237,12 +250,7 @@ const parseCliOptions = (
                 ? undefined
                 : z.enum(WorkflowMode).parse(asString(values, "workflow")),
         onNeedsAttention,
-        onIssueFailure:
-            asNonEmptyString(values, "on-issue-failure") === undefined
-                ? undefined
-                : z
-                      .enum(IssueFailurePolicy)
-                      .parse(asNonEmptyString(values, "on-issue-failure")),
+        onIssueFailure: parseIssueFailurePolicy(values),
         ...notificationOptions,
         ...(duplicateAction === undefined ? {} : { duplicateAction }),
         maxIssues: asNumber(values, "max-issues"),
@@ -254,10 +262,7 @@ const parseCliOptions = (
             pipelineTimeoutValue === undefined
                 ? undefined
                 : parsePipelineTimeout(pipelineTimeoutValue),
-        model:
-            modelValue === undefined
-                ? undefined
-                : piModelSchema.parse(modelValue),
+        model: parseModel(values, "model"),
         thinking:
             thinkingValue === undefined
                 ? undefined
@@ -268,16 +273,10 @@ const parseCliOptions = (
             "implementation-thinking",
         ),
         implementationAttempts: asNumber(values, "implementation-attempts"),
-        implementationFallbackModel:
-            asNonEmptyString(values, "implementation-fallback-model") ===
-            undefined
-                ? undefined
-                : piModelSchema.parse(
-                      asNonEmptyString(
-                          values,
-                          "implementation-fallback-model",
-                      ),
-                  ),
+        implementationFallbackModel: parseModel(
+            values,
+            "implementation-fallback-model",
+        ),
         complexityThinking: parseThinking(values, "complexity-thinking"),
         reviewThinking: parseThinking(values, "review-thinking"),
         commitThinking: parseThinking(values, "commit-thinking"),
@@ -556,8 +555,7 @@ const workflowOptionsFor = (
     resumePath: config.resume,
     dryRun: config.dryRun,
     onNeedsAttention: resumeState?.onNeedsAttention ?? config.onNeedsAttention,
-    issueFailurePolicy:
-        resumeState?.onIssueFailure ?? config.onIssueFailure,
+    issueFailurePolicy: resumeState?.onIssueFailure ?? config.onIssueFailure,
     notificationsEnabled:
         resumeState?.notificationsEnabled ?? config.notificationsEnabled,
     needsAttentionLabel:

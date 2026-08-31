@@ -109,6 +109,11 @@ const reviewApproved = {
     summary: "Looks good.",
     findings: [],
 } as const;
+const implementationCompleted = {
+    status: "changed",
+    summary: "Implemented the requested change.",
+    validation: ["bun run check"],
+} as const;
 const breakdown = {
     rationale: "Split storage before dependent tests.",
     issues: [
@@ -234,7 +239,7 @@ describe("mocked end-to-end issue workflows", () => {
     test("executes a complexity-2 issue through push", async () => {
         const progress: ProgressUpdate[] = [];
         const client = clientFor([
-            undefined,
+            implementationCompleted,
             reviewApproved,
             { subject: "complete task" },
         ]);
@@ -306,9 +311,9 @@ describe("mocked end-to-end issue workflows", () => {
     });
 
     test("hands five-review exhaustion from implementation to decomposition without commit or push", async () => {
-        const outputs: unknown[] = [];
+        const outputs: unknown[] = [implementationCompleted];
         for (let index = 0; index < 5; index += 1) {
-            outputs.push(undefined, {
+            outputs.push({
                 verdict: "changes_requested",
                 summary: "Blocker remains.",
                 findings: [
@@ -318,6 +323,7 @@ describe("mocked end-to-end issue workflows", () => {
                     },
                 ],
             });
+            if (index < 4) outputs.push(undefined);
         }
         const client = clientFor(outputs);
         const artifacts = await makeIssueArtifactStore(42);

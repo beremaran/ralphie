@@ -30,6 +30,7 @@ command schema.
 | `--mode <mode>` | `issues` | Select `issues`, `maintain-issues`, or `get-pipelines-green`. |
 | `--workflow <mode>` | `lgtm` | Select direct-push `lgtm` or automatically merged `pr` delivery in issue mode. |
 | `--on-needs-attention <policy>` | `halt` | Halt with exit status `2`, or `continue` through the remaining queue, when an issue needs attention. |
+| `--on-issue-failure <policy>` | `halt` | Halt on an ordinary issue failure, or restore its checkout and continue independent queued work. Continued runs exit non-zero after draining if any issue failed. |
 | `--notify-needs-attention` | off | Opt in to publishing needs-attention outcomes as an idempotent GitHub comment and optional label. Notifications are never enabled implicitly. |
 | `--needs-attention-label <name>` | none | Add a trimmed, non-empty label to needs-attention notifications; requires `--notify-needs-attention`. |
 | `--duplicate-action <action>` | `link` | In maintenance mode, link duplicates or close them. |
@@ -40,6 +41,9 @@ command schema.
 | `--model <provider/model>` | Pi default | Override Pi's model selection. |
 | `--thinking <level>` | Pi default | Pi thinking level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. |
 | `--grounding-thinking <level>` | `low` | Thinking level for issue grounding/readiness. |
+| `--implementation-thinking <level>` | `high` | Thinking level for implementation sessions, independent of the global level. |
+| `--implementation-attempts <count>` | `3` | Positive number of implementation attempts allowed when sessions leave an unresolved empty diff. |
+| `--implementation-fallback-model <provider/model>` | none | Optional model used after the first unresolved empty implementation attempt. |
 | `--complexity-thinking <level>` | `medium` | Thinking level for complexity routing. |
 | `--review-thinking <level>` | `high` | Thinking level for staged-change reviews. |
 | `--commit-thinking <level>` | `low` | Thinking level for commit-message generation. |

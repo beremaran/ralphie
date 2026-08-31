@@ -72,13 +72,12 @@ describe("native CLI parser", () => {
     });
 
     test("parses and validates the ordinary issue failure policy", () => {
-        expect(parseCliArgs(["owner/repository"]).options.onIssueFailure).toBeUndefined();
         expect(
-            parseCliArgs([
-                "owner/repository",
-                "--on-issue-failure",
-                "continue",
-            ]).options.onIssueFailure,
+            parseCliArgs(["owner/repository"]).options.onIssueFailure,
+        ).toBeUndefined();
+        expect(
+            parseCliArgs(["owner/repository", "--on-issue-failure", "continue"])
+                .options.onIssueFailure,
         ).toBe(IssueFailurePolicy.Continue);
         expect(() =>
             parseCliArgs(["owner/repository", "--on-issue-failure", "retry"]),

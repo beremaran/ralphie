@@ -26,6 +26,13 @@ again before a push that:
 If any invariant fails, Ralphie halts instead of guessing or retrying a
 dangerous operation.
 
+Implementation agents may use normal shell composition, pipes, redirection,
+and language runtimes. Ralphie's shell hook rejects explicit agent requests for
+orchestration-owned Git/GitHub mutations such as commits, pushes, branch
+changes, resets, cleans, and `gh` calls. This hook is a guardrail, not a
+security sandbox: deterministic repository invariants and the isolated
+delivery services remain authoritative.
+
 In `pr` mode, the feature branch, pull request, review comments, and merge are
 reconciled through GitHub before the linked issue is considered complete.
 

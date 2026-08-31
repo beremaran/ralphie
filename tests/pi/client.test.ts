@@ -15,12 +15,12 @@ describe("Pi task shell policy", () => {
         ).toBe(true);
         expect(isPiTaskCommandAllowed("rg -n TODO src | head -20")).toBe(true);
         expect(isPiTaskCommandAllowed("cd /workspace && bun test")).toBe(true);
-        expect(isPiTaskCommandAllowed("bun test || bun test --rerun-each 2")).toBe(
-            true,
-        );
-        expect(isPiTaskCommandAllowed("node -e 'console.log(1)' > result.txt")).toBe(
-            true,
-        );
+        expect(
+            isPiTaskCommandAllowed("bun test || bun test --rerun-each 2"),
+        ).toBe(true);
+        expect(
+            isPiTaskCommandAllowed("node -e 'console.log(1)' > result.txt"),
+        ).toBe(true);
         expect(isPiTaskCommandAllowed("echo $(git status --short)")).toBe(true);
     });
 

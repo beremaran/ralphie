@@ -380,7 +380,8 @@ const validateMaxAttempts = (options: RalphieCliOptions): void => {
             options.implementationAttempts <= 0)
     ) {
         throw new RalphieError({
-            message: "Option --implementation-attempts requires a positive integer.",
+            message:
+                "Option --implementation-attempts requires a positive integer.",
         });
     }
 };
