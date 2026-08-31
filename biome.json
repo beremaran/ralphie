@@ -7,6 +7,17 @@
     "enabled": true,
     "useEditorconfig": true
   },
+  "overrides": [
+    {
+      "includes": [
+        "tests/integration/command-runtime-harness.ts",
+        "tests/integration/command-runtime-scenario.test.ts"
+      ],
+      "formatter": {
+        "trailingNewline": true
+      }
+    }
+  ],
   "linter": {
     "enabled": true,
     "rules": {
