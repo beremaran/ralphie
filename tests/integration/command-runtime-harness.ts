@@ -694,6 +694,7 @@ const runHarnessStep = async (input: {
     readonly signal: AbortSignal;
     readonly progress: CommandRuntime["progress"];
     readonly emitPi: PiEventListener;
+    readonly onWaitForSignal: () => void;
 }): Promise<void> => {
     switch (input.step.kind) {
         case "progress":
@@ -706,6 +707,7 @@ const runHarnessStep = async (input: {
             throw input.step.error;
         case "wait":
         case "wait-for-signal":
+            input.onWaitForSignal();
             await waitForSignal(input.step.signal ?? input.signal);
             return;
     }
@@ -751,6 +753,10 @@ export const makeCommandRuntimeHarness = (
     let outputDisposed = false;
     let getDisplayState: (() => DisplayState) | undefined;
     let cleaned = false;
+    let resolveWaitForSignalEntered: (() => void) | undefined;
+    const waitForSignalEntered = new Promise<void>((resolve) => {
+        resolveWaitForSignalEntered = resolve;
+    });
 
     const recordState = (state: DisplayState): void => {
         activeCapture?.displayStates.push(state);
@@ -952,6 +958,7 @@ export const makeCommandRuntimeHarness = (
                         signal,
                         progress: currentRuntime.progress,
                         emitPi: (event, context) => listener?.(event, context),
+                        onWaitForSignal: () => resolveWaitForSignalEntered?.(),
                     });
                 }
             } finally {
@@ -1031,6 +1038,7 @@ export const makeCommandRuntimeHarness = (
         runCaptures,
         abortController,
         workflowSignals,
+        waitForSignalEntered,
         workspace,
         scenario,
         steps:
@@ -1056,6 +1064,15 @@ export const makeCommandRuntimeHarness = (
         readEventLog: async (path = eventLogPath): Promise<string> => {
             if (path === undefined) return "";
             return await readFile(path, "utf8");
+        },
+        emitPi: (event: PiSessionEvent, context: PiEventContext): void => {
+            listener?.(event, context);
+        },
+        emitProgress: async (event: ProgressUpdate): Promise<void> => {
+            await runtime?.progress.emit(event);
+        },
+        writeDirectOutput: (text: string): void => {
+            runtime?.progress.writeRaw?.(text);
         },
         cleanup: dispose,
         dispose,
