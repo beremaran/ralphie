@@ -252,6 +252,22 @@ ${needsAttentionGuidance}
 ${checkoutContext({ repositoryPath, targetBranch })}
 ${issueBlock(issue)}`;
 
+export const buildImplementationRetryPrompt = ({
+    issue,
+    repositoryPath,
+    targetBranch,
+    unresolvedSummary,
+    attempt,
+}: ImplementationPromptInput & {
+    readonly unresolvedSummary: string;
+    readonly attempt: number;
+}): string => `${buildImplementationPrompt({ issue, repositoryPath, targetBranch })}
+
+This is implementation attempt ${attempt}. A previous implementation session produced no changes, and a fresh verifier confirmed the issue remains unresolved:
+${unresolvedSummary}
+
+Use the existing checkout directly; the shell tool already starts in ${JSON.stringify(repositoryPath)}. Make concrete repository changes and validate them before submitting the implementation result.`;
+
 export const buildResolutionVerificationPrompt = ({
     issue,
     repositoryPath,

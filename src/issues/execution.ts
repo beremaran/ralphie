@@ -125,11 +125,13 @@ export type IssueExecutionContext = {
     readonly pi: PiClient;
     readonly piSelection: PiSelection;
     readonly piStageVariants?: {
+        readonly implementation?: string;
         readonly grounding?: string;
         readonly complexity?: string;
         readonly review?: string;
         readonly commitMessage?: string;
     };
+    readonly implementationAttempts?: number;
     readonly piDiagnostics: PiSessionDiagnostics;
     readonly repositoryInvariant: GitRepositoryInvariantService;
     readonly verificationCommands?: ReadonlyArray<string>;

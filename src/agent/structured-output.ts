@@ -1,4 +1,4 @@
-import type { PiClient } from "../pi/client.ts";
+import type { PiClient, PiPermissionRuleset } from "../pi/client.ts";
 import { z } from "zod";
 
 import { RalphieError } from "../shared/error.ts";
@@ -25,6 +25,7 @@ export type StructuredOutputRequest<Output> = {
     readonly schema: z.ZodType<Output>;
     readonly retryCount?: number;
     readonly agent?: string;
+    readonly permission?: PiPermissionRuleset;
     readonly model?: PiModel;
     readonly variant?: string;
     readonly runId?: string;
@@ -73,7 +74,7 @@ const createSessionInput = <Output>(
     directory: request.directory,
     title: request.title,
     ...(request.agent === undefined ? {} : { agent: request.agent }),
-    permission: PI_DECISION_PERMISSION_POLICY,
+    permission: request.permission ?? PI_DECISION_PERMISSION_POLICY,
 });
 
 const validateStructuredOutput = <Output>(

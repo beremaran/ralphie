@@ -74,6 +74,12 @@ const review = (
               ],
 });
 
+const implementation = {
+    status: "changed" as const,
+    summary: "Implemented the requested change.",
+    validation: ["bun run check"],
+};
+
 const issueContext = (
     pi: PiClient,
     verify: IssueExecutionContext["repositoryInvariant"]["verify"] = async () => {},
@@ -245,7 +251,7 @@ describe("implementation executor", () => {
             },
         });
         const sessions: string[] = [];
-        const client = piClient([undefined], sessions);
+        const client = piClient([implementation], sessions);
 
         const reused = await setup.executor.execute({
             context: issueContext(client),
@@ -275,7 +281,7 @@ describe("implementation executor", () => {
         const artifacts = await makeIssueArtifactStore(42);
         const result = await run(
             piClient([
-                undefined,
+                implementation,
                 review("approved"),
                 { subject: "fix token refresh" },
             ]),
@@ -314,7 +320,7 @@ describe("implementation executor", () => {
         });
         const artifacts = await makeIssueArtifactStore(42);
         await expect(
-            run(piClient([undefined]), artifacts, setup),
+            run(piClient([implementation]), artifacts, setup),
         ).rejects.toThrow("bun run check failed");
         expect(commitCalled).toBe(false);
     });
@@ -339,7 +345,7 @@ describe("implementation executor", () => {
         const artifacts = await makeIssueArtifactStore(42);
         const outcome = await run(
             piClient([
-                undefined,
+                implementation,
                 review("approved"),
                 review("approved"),
                 { subject: "fix token refresh" },
@@ -399,7 +405,7 @@ describe("implementation executor", () => {
         const outcome = await run(
             piClient(
                 [
-                    undefined,
+                    implementation,
                     undefined,
                     review("approved"),
                     { subject: "fix lint failure" },
@@ -448,7 +454,7 @@ describe("implementation executor", () => {
         const outcome = await run(
             piClient(
                 [
-                    undefined,
+                    implementation,
                     undefined,
                     undefined,
                     undefined,
@@ -535,7 +541,7 @@ describe("implementation executor", () => {
         const result = await run(
             piClient(
                 [
-                    undefined,
+                    implementation,
                     review("changes_requested"),
                     undefined,
                     review("approved"),
@@ -560,7 +566,7 @@ describe("implementation executor", () => {
         let commitCalled = false;
         const artifacts = await makeIssueArtifactStore(42);
         const client = piClient([
-            undefined,
+            implementation,
             {
                 status: IssueResolutionStatus.Resolved,
                 summary: "The checkout already closes every response body.",
@@ -589,14 +595,19 @@ describe("implementation executor", () => {
 
     test("fails safely when a no-change implementation remains unresolved", async () => {
         const artifacts = await makeIssueArtifactStore(42);
+        const unresolved = {
+            status: IssueResolutionStatus.Unresolved,
+            summary: "The reported behavior still reproduces.",
+            evidence: ["targeted test still fails"],
+        };
         const result = await run(
             piClient([
-                undefined,
-                {
-                    status: IssueResolutionStatus.Unresolved,
-                    summary: "The reported behavior still reproduces.",
-                    evidence: ["targeted test still fails"],
-                },
+                implementation,
+                unresolved,
+                implementation,
+                unresolved,
+                implementation,
+                unresolved,
             ]),
             artifacts,
             services({ operations: { hasStagedChanges: async () => false } }),
@@ -604,7 +615,7 @@ describe("implementation executor", () => {
         expect(result).toEqual({
             kind: IssueExecutionOutcomeKind.Failed,
             message:
-                "Issue remains unresolved after a no-change implementation: The reported behavior still reproduces.",
+                "Issue remains unresolved after 3 no-change implementation attempts: The reported behavior still reproduces.",
         });
     });
 
@@ -633,7 +644,11 @@ describe("implementation executor", () => {
     test("fails when a review response is invalid", async () => {
         const artifacts = await makeIssueArtifactStore(42);
         await expect(
-            run(piClient([{ verdict: "invalid" }]), artifacts, services()),
+            run(
+                piClient([implementation, { verdict: "invalid" }]),
+                artifacts,
+                services(),
+            ),
         ).rejects.toThrow("structured output");
         expect(artifacts.has(IssueArtifactKind.ReviewAttempts)).toBe(false);
     });
@@ -652,7 +667,7 @@ describe("implementation executor", () => {
         });
         await expect(
             run(
-                piClient([undefined, review("approved"), { subject: "fix" }]),
+                piClient([implementation, review("approved"), { subject: "fix" }]),
                 await makeIssueArtifactStore(42),
                 setup,
             ),
@@ -676,7 +691,7 @@ describe("implementation executor", () => {
         const artifacts = await makeIssueArtifactStore(42);
         await expect(
             run(
-                piClient([undefined, review("approved"), { subject: "fix" }]),
+                piClient([implementation, review("approved"), { subject: "fix" }]),
                 artifacts,
                 setup,
             ),
@@ -710,7 +725,7 @@ describe("implementation executor", () => {
             },
         });
         const client = piClient([
-            undefined,
+            implementation,
             review("changes_requested", "Fix blocker one."),
             undefined,
             review("changes_requested", "Fix blocker two."),

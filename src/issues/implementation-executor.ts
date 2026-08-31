@@ -10,6 +10,7 @@ import {
 import {
     buildCommitMessagePrompt,
     buildImplementationPrompt,
+    buildImplementationRetryPrompt,
     buildReviewFixPrompt,
     buildReviewPrompt,
     buildVerificationFixPrompt,
@@ -17,8 +18,10 @@ import {
 import { requestStructuredOutput } from "../agent/structured-output.ts";
 import {
     runPiTask,
+    PI_TASK_PERMISSION_POLICY,
     type PiNeedsAttentionRequest,
 } from "../agent/task-session.ts";
+import { z } from "zod";
 import {
     type ProgressStage,
     type ProgressStatus,
@@ -112,6 +115,14 @@ const checkSignal = (signal: AbortSignal | undefined): void => {
         });
     }
 };
+
+const implementationResultSchema = z
+    .object({
+        status: z.enum(["changed", "already_resolved"]),
+        summary: z.string().trim().min(1),
+        validation: z.array(z.string().trim().min(1)).max(20),
+    })
+    .strict();
 
 const stage = async <A>(
     progress: ProgressReporterService,
@@ -315,6 +326,8 @@ export const makeImplementationExecutorService = (
         input: WorkflowExecutorInput,
         invariant: { readonly branch: string; readonly head: string },
         checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
+        attempt: number,
+        unresolvedSummary?: string,
     ): Promise<WorkflowExecutorResult | undefined> => {
         const { context } = input;
         const result = await stage(
@@ -323,15 +336,30 @@ export const makeImplementationExecutorService = (
             "implementation",
             `Implementing #${context.issue.number}...`,
             () =>
-                runPiTask(context.pi, {
+                requestStructuredOutput(context.pi, {
                     directory: context.repositoryPath,
                     title: `Implement issue #${context.issue.number}`,
-                    selection: context.piSelection,
-                    prompt: buildImplementationPrompt({
-                        issue: context.issue,
-                        repositoryPath: context.repositoryPath,
-                        targetBranch: context.targetBranch,
-                    }),
+                    agent: context.piSelection.agent,
+                    model: context.piSelection.model,
+                    variant:
+                        context.piStageVariants?.implementation ??
+                        context.piSelection.variant,
+                    permission: PI_TASK_PERMISSION_POLICY,
+                    schema: implementationResultSchema,
+                    prompt:
+                        unresolvedSummary === undefined
+                            ? buildImplementationPrompt({
+                                  issue: context.issue,
+                                  repositoryPath: context.repositoryPath,
+                                  targetBranch: context.targetBranch,
+                              })
+                            : buildImplementationRetryPrompt({
+                                  issue: context.issue,
+                                  repositoryPath: context.repositoryPath,
+                                  targetBranch: context.targetBranch,
+                                  unresolvedSummary,
+                                  attempt,
+                              }),
                     runId: context.runId,
                     diagnostics: context.piDiagnostics,
                     repositoryInvariant: invariant,
@@ -342,15 +370,20 @@ export const makeImplementationExecutorService = (
                     progressIssue: issueProgress(input).issue,
                     signal: context.signal,
                 }),
-            "Implementation completed.",
+            "Implementation session submitted; inspecting repository changes.",
+            undefined,
+            attempt,
         );
         return await routeSignal(input, result.needsAttention, checkpoint);
     };
 
-    const verifyNoChangeResolution = async (
+    const inspectNoChangeResolution = async (
         input: WorkflowExecutorInput,
         checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
-    ): Promise<WorkflowExecutorResult> => {
+        finalAttempt: boolean,
+    ): Promise<
+        WorkflowExecutorResult | { readonly unresolvedSummary: string }
+    > => {
         const { context, artifacts } = input;
         const resolution = await resolutionVerification.verify(context);
         const routed = await routeSignal(
@@ -359,15 +392,21 @@ export const makeImplementationExecutorService = (
             checkpoint,
         );
         if (routed !== undefined) return routed;
+        const outcome = resolutionOutcome(resolution.decision);
+        if (
+            outcome.kind === IssueExecutionOutcomeKind.Failed &&
+            !finalAttempt
+        ) {
+            return { unresolvedSummary: outcome.message };
+        }
         await artifacts.write(IssueArtifactKind.IssueResolutionDecision, {
             decision: resolution.decision,
             fingerprint: issueFreshnessFingerprint(context.issue),
         });
-        const outcome = resolutionOutcome(resolution.decision);
         return outcome.kind === IssueExecutionOutcomeKind.Failed
             ? {
                   ...outcome,
-                  message: `Issue remains unresolved after a no-change implementation: ${outcome.message}`,
+                  message: `Issue remains unresolved after ${context.implementationAttempts ?? 3} no-change implementation attempts: ${outcome.message}`,
               }
             : outcome;
     };
@@ -932,25 +971,42 @@ export const makeImplementationExecutorService = (
         if (recovered !== undefined) return recovered;
 
         const { checkpoint, invariant } = await prepareAttempt(input);
-        const implementation = await runImplementation(
-            input,
-            invariant,
-            checkpoint,
-        );
-        if (implementation !== undefined) return implementation;
-        checkSignal(context.signal);
-        await stage(
-            progress,
-            input,
-            "change-staging",
-            "Staging all implementation changes...",
-            () => operations.stageAll(context.repositoryPath),
-            "Implementation changes staged.",
-        );
-        if (!(await operations.hasStagedChanges(context.repositoryPath))) {
-            return await verifyNoChangeResolution(input, checkpoint);
+        const maximumAttempts = context.implementationAttempts ?? 3;
+        let unresolvedSummary: string | undefined;
+        for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
+            const implementation = await runImplementation(
+                input,
+                invariant,
+                checkpoint,
+                attempt,
+                unresolvedSummary,
+            );
+            if (implementation !== undefined) return implementation;
+            checkSignal(context.signal);
+            await stage(
+                progress,
+                input,
+                "change-staging",
+                `Inspecting and staging implementation attempt ${attempt}...`,
+                () => operations.stageAll(context.repositoryPath),
+                `Implementation attempt ${attempt} inspected.`,
+                undefined,
+                attempt,
+            );
+            if (await operations.hasStagedChanges(context.repositoryPath)) {
+                return await runReviewLoop(input, checkpoint, invariant);
+            }
+            const noChange = await inspectNoChangeResolution(
+                input,
+                checkpoint,
+                attempt === maximumAttempts,
+            );
+            if (!("unresolvedSummary" in noChange)) return noChange;
+            unresolvedSummary = noChange.unresolvedSummary;
         }
-        return await runReviewLoop(input, checkpoint, invariant);
+        throw new RalphieError({
+            message: "Implementation retry loop ended unexpectedly.",
+        });
     };
 
     return {
