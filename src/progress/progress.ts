@@ -1,10 +1,7 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
-import {
-    redactSensitiveText,
-    redactSensitiveValue,
-} from "../shared/redaction.ts";
+import { redactSensitiveValue } from "../shared/redaction.ts";
 import { cyan, dim, green, red, yellow } from "./colors.ts";
 
 export type ProgressStage =
@@ -245,15 +242,7 @@ const makeProgressEvent = (
     runId: string,
     timestamp: Date,
 ): ProgressEvent => ({
-    ...update,
-    message: redactSensitiveText(update.message),
-    ...(update.details === undefined
-        ? {}
-        : {
-              details: redactSensitiveValue(update.details) as Readonly<
-                  Record<string, unknown>
-              >,
-          }),
+    ...(redactSensitiveValue(update) as ProgressUpdate),
     runId,
     timestamp: timestamp.toISOString(),
 });
