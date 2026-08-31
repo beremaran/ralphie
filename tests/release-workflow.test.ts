@@ -254,33 +254,106 @@ describe("release container metadata contract", () => {
         ).toBeLessThan(pushJobStart);
     });
 
-    test("collects and hashes the four release binaries before one upload", async () => {
+    test("gates the sole release publisher on every successful prerequisite", async () => {
+        const workflow = await readRepositoryFile(
+            ".github/workflows/release.yml",
+        );
+        const publishJob = workflow.slice(workflow.indexOf("  publish:"));
+
+        expect(publishJob).toContain("always()");
+        for (const prerequisite of [
+            "validate",
+            "build-binaries",
+            "stage-container",
+        ]) {
+            expect(publishJob).toContain(
+                `needs.${prerequisite}.result == 'success'`,
+            );
+        }
+        expect(publishJob).toContain(
+            "needs.validate.outputs.dry_run == 'false'",
+        );
+        expect(publishJob).toContain("github.ref_type == 'tag'");
+        expect(publishJob).toContain("startsWith(github.ref, 'refs/tags/v')");
+        expect(publishJob).toContain("name: release");
+        expect(publishJob).toContain("contents: write");
+        expect(publishJob).toContain("id-token: write");
+    });
+
+    test("creates and validates an idempotent REST release handle first", async () => {
+        const workflow = await readRepositoryFile(
+            ".github/workflows/release.yml",
+        );
+        const publishJob = workflow.slice(workflow.indexOf("  publish:"));
+        const handleStart = publishJob.indexOf(
+            "name: Create or reuse draft release handle",
+        );
+        const checkoutStart = publishJob.indexOf("uses: actions/checkout@v4");
+        const handle = publishJob.slice(handleStart, checkoutStart);
+
+        expect(handleStart).toBeGreaterThan(-1);
+        expect(handleStart).toBeLessThan(checkoutStart);
+        expect(handle).toContain("actions/github-script@v7");
+        expect(handle).toContain("getReleaseByTag");
+        expect(handle).toContain("createRelease");
+        expect(handle).toContain("tag_name: tag");
+        expect(handle).toContain("target_commitish: sourceRef");
+        expect(handle).toContain("draft: true");
+        expect(handle).toContain("release.tag_name !== tag");
+        expect(handle).toContain("release.target_commitish !== sourceRef");
+        expect(handle).toContain('typeof release.draft !== "boolean"');
+        expect(handle).toContain("Number.isSafeInteger(release.id)");
+        expect(handle).toContain('typeof release.upload_url !== "string"');
+        expect(handle).toContain("uploadUrlPattern");
+        expect(handle).toContain(
+            "release.draft && release.published_at !== null",
+        );
+        expect(handle).toContain(
+            '!release.draft && typeof release.published_at !== "string"',
+        );
+        expect(handle).toContain("error.status !== 422");
+        expect(handle).toContain('core.setOutput("release_id"');
+        expect(handle).toContain('core.setOutput("upload_url"');
+        expect(handle).toContain('core.setOutput("state"');
+        expect(publishJob).not.toContain("github.event.repo.upload_url");
+    });
+
+    test("reuses draft handles, repairs assets, and treats published handles as terminal", async () => {
         const workflow = await readRepositoryFile(
             ".github/workflows/release.yml",
         );
         const publishJob = workflow.slice(workflow.indexOf("  publish:"));
         const collectStep = publishJob.slice(
             publishJob.indexOf("name: Collect binaries and create SHA256SUMS"),
-            publishJob.indexOf("name: Create GitHub release"),
+            publishJob.indexOf(
+                "name: Sign and verify SHA256SUMS with Sigstore",
+            ),
         );
         const releaseStep = publishJob.slice(
-            publishJob.indexOf("name: Create GitHub release"),
+            publishJob.indexOf(
+                "name: Upload assets and publish GitHub release",
+            ),
         );
 
         expect(publishJob).toContain("merge-multiple: false");
         expect(collectStep).toContain("scripts/create-sha256sums.ts");
         expect(collectStep).toContain('test "$TAG" = "v$VERSION"');
-        expect(releaseStep).toContain("GH_REPO: ${{ github.repository }}");
-        expect(releaseStep).toContain('gh release view "$TAG"');
         expect(releaseStep).toContain(
-            'gh release upload "$TAG" "${assets[@]}"',
+            "RELEASE_ID: ${{ steps.release-handle.outputs.release_id }}",
         );
-        expect(releaseStep).toContain("--clobber");
-        expect(releaseStep).toContain('gh release edit "$TAG"');
-        expect(releaseStep).toContain("--draft=false");
-        expect(
-            releaseStep.indexOf('gh release upload "$TAG" "${assets[@]}"'),
-        ).toBeLessThan(releaseStep.indexOf('gh release edit "$TAG"'));
+        expect(releaseStep).toContain(
+            "UPLOAD_URL: ${{ steps.release-handle.outputs.upload_url }}",
+        );
+        expect(releaseStep).toContain(
+            "RELEASE_TERMINAL: ${{ steps.release-handle.outputs.terminal }}",
+        );
+        expect(releaseStep).toContain('[[ "$RELEASE_TERMINAL" == true ]]');
+        expect(releaseStep).toContain("gh api --method DELETE");
+        expect(releaseStep).toContain("curl --fail");
+        expect(releaseStep).toContain("gh api --method PATCH");
+        expect(releaseStep).toContain("-F draft=false");
+        expect(releaseStep).not.toContain("gh release create");
+        expect(releaseStep).not.toContain("gh release view");
         expect(releaseStep).not.toContain("github.event.repo.upload_url");
         for (const target of [
             "darwin-arm64",
@@ -291,8 +364,12 @@ describe("release container metadata contract", () => {
             expect(releaseStep).toContain(`release-assets/ralphie-${target}`);
         }
         expect(releaseStep).toContain("release-assets/SHA256SUMS");
-        expect(releaseStep).toContain(
-            'gh release create "$TAG" "${assets[@]}"',
+        expect(
+            publishJob.indexOf("name: Create or reuse draft release handle"),
+        ).toBeLessThan(
+            publishJob.indexOf(
+                "name: Upload assets and publish GitHub release",
+            ),
         );
     });
 
@@ -305,7 +382,7 @@ describe("release container metadata contract", () => {
             "name: Sign and verify SHA256SUMS with Sigstore",
         );
         const releaseStepStart = publishJob.indexOf(
-            "name: Create GitHub release",
+            "name: Upload assets and publish GitHub release",
         );
         const signStep = publishJob.slice(signStepStart, releaseStepStart);
 

@@ -45,9 +45,10 @@ version, `latest` for stable releases only, and `sha-<commit>` are explicit
 aliases. A dry run skips GitHub Release and GHCR publication. A normal tag
 push is not a dry run and runs release and container publication in the
 protected GitHub `release` environment. The native publisher targets the
-canonical repository explicitly, creates the tag's release with its assets on
-the first run, and reuses it with clobbering uploads on retries so a partial
-publication can be repaired without changing the public download URLs.
+canonical repository explicitly, creates or reuses a validated draft release
+handle before any asset mutation, and publishes its assets only after all
+staging and signing steps succeed. Retries repair same-named assets through the
+handle; an already-published handle is terminal and is never recreated.
 Repository administrators must configure that environment in **Settings →
 Environments → release** with the required reviewer(s); approval is required
 before the final publisher can write release assets or packages.

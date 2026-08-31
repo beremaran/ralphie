@@ -7,6 +7,10 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Changed
 
+- The protected native release publisher now gates on every validated build
+  matrix result and creates or reuses a REST-validated draft release handle
+  before any asset mutation; reruns repair drafts idempotently and treat
+  already-published releases as terminal.
 - Added `--max-decomposition-depth` (default `3`) and persisted it in run state.
   A direct or review-escalated decomposition beyond the configured ceiling now
   leaves the issue open as `decomposition_limit_reached` needs attention and
