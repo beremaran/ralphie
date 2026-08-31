@@ -60,7 +60,17 @@ against the checked-in SPDX 2.3 JSON schema and release identifier profile. It
 binds each document to the validated tag, commit, target, final binary bytes
 and size, checked-out source and `bun.lock`, build inputs, Bun and build-tool
 versions, and the generator version. It rejects incomplete, cross-release,
-duplicate, or digest-mismatched inputs. The minor
+duplicate, or digest-mismatched inputs. The publisher then creates four
+independent GitHub build-provenance attestations, each subjecting exactly one
+final path (`release-assets/ralphie-darwin-arm64`, `release-assets/ralphie-darwin-x64`,
+`release-assets/ralphie-linux-arm64`, or `release-assets/ralphie-linux-x64`) with
+the immutable `actions/attest-build-provenance` action revision.
+`attestation-subjects.json` records each final path and freshly computed
+SHA-256 together with the validated tag, commit, release workflow, Bun and
+build-tool versions, and build command, so each subject can be checked against
+the released bytes. Attestation and signing complete before the publisher
+creates a release handle; any missing or failed attestation stops publication.
+The minor
 version, `latest` for stable releases only, and `sha-<commit>` are explicit
 aliases. A dry run skips GitHub Release and GHCR publication. A normal tag
 push is not a dry run and runs release and container publication in the

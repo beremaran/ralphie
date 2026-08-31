@@ -799,107 +799,8 @@ jobs:
     permissions:
       contents: write
       id-token: write
+      attestations: write
     steps:
-      # This is intentionally the first step. It creates only a draft, so any
-      # later validation, artifact, signing, or upload failure leaves an
-      # unpublished release recoverable by a rerun.
-      - name: Create or reuse draft release handle
-        id: release-handle
-        uses: actions/github-script@v7
-        env:
-          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
-          SOURCE_REF: ${{ needs.validate.outputs.source_ref }}
-        with:
-          github-token: ${{ github.token }}
-          script: |
-            const tag = process.env.RELEASE_TAG;
-            const sourceRef = process.env.SOURCE_REF;
-            const { owner, repo } = context.repo;
-
-            if (!tag || !sourceRef) {
-              throw new Error("Validated release tag and source ref are required");
-            }
-
-            const getRelease = async () => {
-              try {
-                return (await github.rest.repos.getReleaseByTag({
-                  owner,
-                  repo,
-                  tag,
-                })).data;
-              } catch (error) {
-                if (error.status === 404) {
-                  return undefined;
-                }
-                throw error;
-              }
-            };
-
-            let release = await getRelease();
-            if (!release) {
-              try {
-                release = (await github.rest.repos.createRelease({
-                  owner,
-                  repo,
-                  tag_name: tag,
-                  target_commitish: sourceRef,
-                  name: tag,
-                  generate_notes: true,
-                  draft: true,
-                })).data;
-              } catch (error) {
-                // Another run may have created the handle between our lookup
-                // and POST. Re-read it and validate that response instead of
-                // creating a second release.
-                if (error.status !== 422) {
-                  throw error;
-                }
-                release = await getRelease();
-                if (!release) {
-                  throw new Error("Release creation conflicted but no release could be found");
-                }
-              }
-            }
-
-            if (release.tag_name !== tag) {
-              throw new Error(`Release tag mismatch: expected ${tag}, got ${release.tag_name}`);
-            }
-            if (release.target_commitish !== sourceRef) {
-              throw new Error(
-                `Release target mismatch: expected ${sourceRef}, got ${release.target_commitish}`,
-              );
-            }
-            if (typeof release.draft !== "boolean") {
-              throw new Error("Release draft state is missing or invalid");
-            }
-            if (release.draft && release.published_at !== null) {
-              throw new Error("A draft release must not have a published timestamp");
-            }
-            if (!release.draft && typeof release.published_at !== "string") {
-              throw new Error("A published release must have a published timestamp");
-            }
-            if (!Number.isSafeInteger(release.id) || release.id <= 0) {
-              throw new Error(`Release id is invalid: ${release.id}`);
-            }
-            const uploadUrlPattern =
-              /^https:\/\/uploads\.github\.com\/repos\/[^/]+\/[^/]+\/releases\/([1-9][0-9]*)\/assets\{\?name,label\}$/;
-            if (typeof release.upload_url !== "string") {
-              throw new Error("Release upload_url is missing or invalid");
-            }
-            const uploadUrlMatch = release.upload_url.match(uploadUrlPattern);
-            if (
-              uploadUrlMatch === null ||
-              Number(uploadUrlMatch[1]) !== release.id
-            ) {
-              throw new Error("Release upload_url is missing or invalid");
-            }
-
-            const state = release.draft ? "draft" : "published";
-            core.setOutput("release_id", String(release.id));
-            core.setOutput("upload_url", release.upload_url);
-            core.setOutput("state", state);
-            core.setOutput("terminal", String(state === "published"));
-
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.validate.outputs.source_ref }}
@@ -993,6 +894,76 @@ jobs:
             --build-tool-version "$bun_version" \
             --build-command "bun run build -- --commit-sha $SOURCE_REF --version $VERSION"
 
+      # Keep non-secret digest evidence for the exact final paths below. The
+      # preceding metadata gate and this fresh hash both cover final bytes.
+      - name: Record final attestation subject digests
+        env:
+          TAG: ${{ needs.validate.outputs.tag }}
+          VERSION: ${{ needs.validate.outputs.version }}
+          SOURCE_REF: ${{ needs.validate.outputs.source_ref }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/tags/$TAG"
+          test "$GITHUB_SHA" = "$SOURCE_REF"
+          test "$GITHUB_WORKFLOW_REF" = "$GITHUB_REPOSITORY/.github/workflows/release.yml@refs/tags/$TAG"
+          bun_version="$(bun --version)"
+          test "$bun_version" = 1.3.14
+          subjects='[]'
+          for asset in ralphie-darwin-arm64 ralphie-darwin-x64 ralphie-linux-arm64 ralphie-linux-x64; do
+            path="release-assets/$asset"
+            test -s "$path"
+            digest="$(sha256sum "$path" | awk '{print $1}')"
+            expected="$(jq -er --arg name "$asset" '.assets[] | select(.name == $name) | .sha256' release-assets/release-metadata.json)"
+            test "$digest" = "$expected"
+            subjects="$(jq --arg path "$path" --arg name "$asset" --arg digest "$digest" '. + [{path: $path, name: $name, algorithm: "sha256", digest: $digest}]' <<< "$subjects")"
+          done
+          jq -n \
+            --arg schema "ralphie.release-attestation-subjects.v1" \
+            --arg tag "$TAG" --arg version "$VERSION" --arg commit "$SOURCE_REF" \
+            --arg workflow "Release" --arg workflow_file ".github/workflows/release.yml" \
+            --arg workflow_ref "$GITHUB_WORKFLOW_REF" --arg bun_version "$bun_version" \
+            --arg build_command "bun run build -- --commit-sha $SOURCE_REF --version $VERSION" \
+            --argjson subjects "$subjects" \
+            '{schema: $schema, tag: $tag, version: $version, commit: $commit,
+              workflow: $workflow, workflow_file: $workflow_file, workflow_ref: $workflow_ref,
+              build: {bun_version: $bun_version, build_tool: "Bun", build_tool_version: $bun_version, build_command: $build_command},
+              subjects: $subjects}' > release-assets/attestation-subjects.json
+
+      # Attest each final renamed binary independently. A missing subject makes
+      # the action fail, and the immutable pin prevents action ref drift.
+      - name: Attest darwin-arm64 final binary
+        id: attest_darwin_arm64
+        uses: actions/attest-build-provenance@bd77c077858b8d561b7a36cbe48ef4cc642ca39d # v2.2.2
+        with:
+          subject-path: release-assets/ralphie-darwin-arm64
+          show-summary: true
+      - name: Attest darwin-x64 final binary
+        id: attest_darwin_x64
+        uses: actions/attest-build-provenance@bd77c077858b8d561b7a36cbe48ef4cc642ca39d # v2.2.2
+        with:
+          subject-path: release-assets/ralphie-darwin-x64
+          show-summary: true
+      - name: Attest linux-arm64 final binary
+        id: attest_linux_arm64
+        uses: actions/attest-build-provenance@bd77c077858b8d561b7a36cbe48ef4cc642ca39d # v2.2.2
+        with:
+          subject-path: release-assets/ralphie-linux-arm64
+          show-summary: true
+      - name: Attest linux-x64 final binary
+        id: attest_linux_x64
+        uses: actions/attest-build-provenance@bd77c077858b8d561b7a36cbe48ef4cc642ca39d # v2.2.2
+        with:
+          subject-path: release-assets/ralphie-linux-x64
+          show-summary: true
+
+      - name: Verify all binary attestations exist
+        env:
+          ATTESTATION_IDS: ${{ steps.attest_darwin_arm64.outputs.attestation-id }} ${{ steps.attest_darwin_x64.outputs.attestation-id }} ${{ steps.attest_linux_arm64.outputs.attestation-id }} ${{ steps.attest_linux_x64.outputs.attestation-id }}
+        run: |
+          set -euo pipefail
+          for attestation_id in $ATTESTATION_IDS; do test -n "$attestation_id"; done
+          test "$(printf '%s\n' $ATTESTATION_IDS | wc -l)" = 4
+
       # Sign the exact manifest that will be published. Ambient GitHub OIDC
       # credentials stay inside the Sigstore action and are never written to
       # the checkout, build context, logs, or release assets.
@@ -1005,10 +976,63 @@ jobs:
           verify-oidc-issuer: https://token.actions.githubusercontent.com
           release-signing-artifacts: false
 
-      # The handle has already validated the tag, target, state, numeric id,
-      # and REST upload URL. Keep this explicit list in sync with the checksum
-      # collector. A published handle is terminal: never upload or publish a
-      # second time when reconciling a rerun.
+      # Create the draft release handle only after final collection, SBOM,
+      # attestation, and signing have succeeded. Any later upload failure still
+      # leaves this validated handle as a recoverable draft.
+      - name: Create or reuse draft release handle
+        id: release-handle
+        uses: actions/github-script@v7
+        env:
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+          SOURCE_REF: ${{ needs.validate.outputs.source_ref }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const tag = process.env.RELEASE_TAG;
+            const sourceRef = process.env.SOURCE_REF;
+            const { owner, repo } = context.repo;
+            if (!tag || !sourceRef) throw new Error("Validated release tag and source ref are required");
+
+            const getRelease = async () => {
+              try {
+                return (await github.rest.repos.getReleaseByTag({ owner, repo, tag })).data;
+              } catch (error) {
+                if (error.status === 404) return undefined;
+                throw error;
+              }
+            };
+            let release = await getRelease();
+            if (!release) {
+              try {
+                release = (await github.rest.repos.createRelease({
+                  owner, repo, tag_name: tag, target_commitish: sourceRef,
+                  name: tag, generate_notes: true, draft: true,
+                })).data;
+              } catch (error) {
+                if (error.status !== 422) throw error;
+                release = await getRelease();
+                if (!release) throw new Error("Release creation conflicted but no release could be found");
+              }
+            }
+            if (release.tag_name !== tag) throw new Error(`Release tag mismatch: expected ${tag}, got ${release.tag_name}`);
+            if (release.target_commitish !== sourceRef) throw new Error(`Release target mismatch: expected ${sourceRef}, got ${release.target_commitish}`);
+            if (typeof release.draft !== "boolean") throw new Error("Release draft state is missing or invalid");
+            if (release.draft && release.published_at !== null) throw new Error("A draft release must not have a published timestamp");
+            if (!release.draft && typeof release.published_at !== "string") throw new Error("A published release must have a published timestamp");
+            if (!Number.isSafeInteger(release.id) || release.id <= 0) throw new Error(`Release id is invalid: ${release.id}`);
+            const uploadUrlPattern = /^https:\/\/uploads\.github\.com\/repos\/[^/]+\/[^/]+\/releases\/([1-9][0-9]*)\/assets\{\?name,label\}$/;
+            if (typeof release.upload_url !== "string") throw new Error("Release upload_url is missing or invalid");
+            const uploadUrlMatch = release.upload_url.match(uploadUrlPattern);
+            if (uploadUrlMatch === null || Number(uploadUrlMatch[1]) !== release.id) throw new Error("Release upload_url is missing or invalid");
+            const state = release.draft ? "draft" : "published";
+            core.setOutput("release_id", String(release.id));
+            core.setOutput("upload_url", release.upload_url);
+            core.setOutput("state", state);
+            core.setOutput("terminal", String(state === "published"));
+
+      # Keep this explicit list in sync with the checksum collector. A
+      # published handle is terminal: never upload or publish a second time
+      # when reconciling a rerun.
       - name: Upload assets and publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -1044,6 +1068,7 @@ jobs:
             release-assets/ralphie-darwin-x64.sbom.spdx.json
             release-assets/ralphie-linux-arm64.sbom.spdx.json
             release-assets/ralphie-linux-x64.sbom.spdx.json
+            release-assets/attestation-subjects.json
           )
           upload_endpoint="${UPLOAD_URL%%\{*}"
           test "$upload_endpoint" != "$UPLOAD_URL"

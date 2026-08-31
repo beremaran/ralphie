@@ -280,7 +280,7 @@ describe("release container metadata contract", () => {
         expect(publishJob).toContain("id-token: write");
     });
 
-    test("creates and validates an idempotent REST release handle first", async () => {
+    test("creates and validates an idempotent REST release handle after validation", async () => {
         const workflow = await readRepositoryFile(
             ".github/workflows/release.yml",
         );
@@ -289,10 +289,16 @@ describe("release container metadata contract", () => {
             "name: Create or reuse draft release handle",
         );
         const checkoutStart = publishJob.indexOf("uses: actions/checkout@v4");
-        const handle = publishJob.slice(handleStart, checkoutStart);
+        const handle = publishJob.slice(
+            handleStart,
+            publishJob.indexOf(
+                "name: Upload assets and publish GitHub release",
+                handleStart,
+            ),
+        );
 
         expect(handleStart).toBeGreaterThan(-1);
-        expect(handleStart).toBeLessThan(checkoutStart);
+        expect(checkoutStart).toBeLessThan(handleStart);
         expect(handle).toContain("actions/github-script@v7");
         expect(handle).toContain("getReleaseByTag");
         expect(handle).toContain("createRelease");
@@ -447,6 +453,62 @@ describe("release container metadata contract", () => {
                 `release-assets/ralphie-${target}.sbom.spdx.json`,
             );
         }
+    });
+
+    test("attests each exact final binary with least privilege and digest evidence", async () => {
+        const workflow = await readRepositoryFile(
+            ".github/workflows/release.yml",
+        );
+        const publishJobStart = workflow.indexOf("  publish:");
+        const publishJob = workflow.slice(publishJobStart);
+        const attestationPin =
+            "actions/attest-build-provenance@bd77c077858b8d561b7a36cbe48ef4cc642ca39d";
+        const collectStart = publishJob.indexOf(
+            "name: Collect binaries and create SHA256SUMS",
+        );
+        const attestStart = publishJob.indexOf(attestationPin);
+        const releaseCreateStart = publishJob.indexOf(
+            "name: Create or reuse draft release handle",
+        );
+
+        expect(publishJob).toContain("contents: write");
+        expect(publishJob).toContain("id-token: write");
+        expect(publishJob).toContain("attestations: write");
+        expect(publishJob).not.toContain("packages: write");
+        expect(workflow.slice(0, publishJobStart)).not.toContain(
+            "attestations: write",
+        );
+        expect(publishJob.match(new RegExp(attestationPin, "g"))).toHaveLength(
+            4,
+        );
+        expect(attestStart).toBeGreaterThan(collectStart);
+        expect(releaseCreateStart).toBeGreaterThan(attestStart);
+        expect(publishJob).toContain(
+            "name: Record final attestation subject digests",
+        );
+        expect(publishJob).toContain("ralphie.release-attestation-subjects.v1");
+        expect(publishJob).toContain(
+            "release-assets/attestation-subjects.json",
+        );
+        expect(publishJob).toContain("GITHUB_WORKFLOW_REF");
+        expect(publishJob).toContain("bun_version");
+        expect(publishJob).toContain("build_tool_version");
+        expect(publishJob).toContain("build_command");
+
+        const subjectPaths = [
+            ...publishJob.matchAll(/subject-path: (\S+)/g),
+        ].map((match) => match[1] as string);
+        expect(subjectPaths).toEqual([
+            "release-assets/ralphie-darwin-arm64",
+            "release-assets/ralphie-darwin-x64",
+            "release-assets/ralphie-linux-arm64",
+            "release-assets/ralphie-linux-x64",
+        ]);
+        expect(
+            subjectPaths.some((path) =>
+                /dist\/cli|upload-artifact|(^|\/)src\//.test(path),
+            ),
+        ).toBe(false);
     });
 
     test("documents runnable Sigstore GitHub source selectors", async () => {
