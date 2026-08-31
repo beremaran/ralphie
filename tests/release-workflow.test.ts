@@ -183,6 +183,100 @@ describe("release container metadata contract", () => {
         );
     });
 
+    test("uses a deny-by-default Docker context with explicit secret exclusions", async () => {
+        const dockerignore = await readRepositoryFile(".dockerignore");
+        const rules = dockerignore
+            .split("\n")
+            .map((line) => line.trim())
+            .filter((line) => line !== "" && !line.startsWith("#"));
+        const allowRules = rules.filter((rule) => rule.startsWith("!"));
+
+        expect(rules).toContain("*");
+        expect(allowRules).toEqual([
+            "!package.json",
+            "!bun.lock",
+            "!index.ts",
+            "!src/",
+            "!src/**",
+            "!scripts/",
+            "!scripts/build.ts",
+        ]);
+        for (const rule of [
+            ".git",
+            ".github",
+            ".env",
+            ".env.*",
+            "**/.npmrc",
+            "**/.ssh",
+            "**/.config",
+            "node_modules",
+            "dist",
+            "out",
+            "*.log",
+            "tests/**",
+            "coverage",
+            "**/*credentials*",
+            "**/*token*",
+            "**/*secret*",
+            "**/*.pem",
+            "**/*.key",
+        ]) {
+            expect(rules).toContain(rule);
+        }
+    });
+
+    test("keeps private values out of Docker instructions and stage-container", async () => {
+        const [dockerfile, workflow] = await Promise.all([
+            readRepositoryFile("Dockerfile"),
+            readRepositoryFile(".github/workflows/release.yml"),
+        ]);
+        const stageStart = workflow.indexOf("  stage-container:");
+        const nextJob = workflow.indexOf("  publish-npm:", stageStart);
+        const stageJob = workflow.slice(stageStart, nextJob);
+        const argNames = [...dockerfile.matchAll(/^ARG\s+([A-Z0-9_]+)/gm)].map(
+            (match) => match[1],
+        );
+        const envNames = [...dockerfile.matchAll(/^ENV\s+([A-Z0-9_]+)=/gm)].map(
+            (match) => match[1],
+        );
+
+        expect(new Set(argNames)).toEqual(
+            new Set(["RALPHIE_VERSION", "RALPHIE_COMMIT_SHA"]),
+        );
+        expect(envNames).toEqual(["HOME"]);
+        expect(dockerfile).not.toContain("COPY . .");
+        for (const copy of [
+            "COPY index.ts ./index.ts",
+            "COPY src ./src",
+            "COPY scripts/build.ts ./scripts/build.ts",
+        ]) {
+            expect(dockerfile).toContain(copy);
+        }
+        for (const forbidden of [
+            "GITHUB_TOKEN",
+            "GH_TOKEN",
+            "ACTIONS_ID_TOKEN",
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "PI_CREDENTIAL",
+            "--mount=type=secret",
+        ]) {
+            expect(dockerfile).not.toContain(forbidden);
+            expect(stageJob).not.toContain(forbidden);
+        }
+        expect(stageJob).toContain("context: .");
+        expect(stageJob).toContain(
+            "RALPHIE_VERSION=${{ needs.validate.outputs.version }}",
+        );
+        expect(stageJob).toContain(
+            "RALPHIE_COMMIT_SHA=${{ needs.validate.outputs.source_ref }}",
+        );
+        expect(stageJob).not.toContain("secrets.");
+        expect(stageJob).not.toContain("github.token");
+        expect(stageJob).not.toContain("sbom: true");
+        expect(stageJob).not.toContain("provenance: true");
+    });
+
     test("builds each native asset on a matching host architecture", async () => {
         const workflow = await readRepositoryFile(
             ".github/workflows/release.yml",

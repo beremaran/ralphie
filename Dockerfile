@@ -1,7 +1,9 @@
 # syntax=docker/dockerfile:1
 
-# Release metadata is supplied by the release workflow. Local builds retain a
-# useful sentinel while release builds must pass the validated values.
+# Release metadata is public and supplied by the release workflow. Local builds
+# retain useful sentinels while release builds pass only validated values.
+# Never add credentials or other private values as ARG, ENV, LABEL, or COPY
+# inputs: they would be retained in image history or build metadata.
 ARG RALPHIE_VERSION=local
 ARG RALPHIE_COMMIT_SHA=local
 
@@ -15,7 +17,11 @@ ARG RALPHIE_COMMIT_SHA
 WORKDIR /src
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
-COPY . .
+# Copy only the files needed for the native build, even if a caller supplies a
+# broader context than the repository's deny-by-default .dockerignore.
+COPY index.ts ./index.ts
+COPY src ./src
+COPY scripts/build.ts ./scripts/build.ts
 RUN bun run build -- --commit-sha "$RALPHIE_COMMIT_SHA"
 
 # ---- runtime stage --------------------------------------------------------

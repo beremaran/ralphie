@@ -88,6 +88,32 @@ describe("Docker image runtime contract", () => {
                 expect(
                     config.Labels?.["org.opencontainers.image.licenses"],
                 ).toBe("MIT");
+                expect(
+                    config.Labels?.["org.opencontainers.image.version"],
+                ).toBe("local");
+                expect(
+                    config.Labels?.["org.opencontainers.image.revision"],
+                ).toBe("local");
+                const history = runDocker([
+                    "history",
+                    "--no-trunc",
+                    "--format",
+                    "{{.CreatedBy}}",
+                    image,
+                ]);
+                for (const secretName of [
+                    "GITHUB_TOKEN",
+                    "GH_TOKEN",
+                    "ACTIONS_ID_TOKEN",
+                    "OPENAI_API_KEY",
+                    "ANTHROPIC_API_KEY",
+                ]) {
+                    expect(config.Env?.join("\\n")).not.toContain(secretName);
+                    expect(
+                        Object.keys(config.Labels ?? {}).join("\\n"),
+                    ).not.toContain(secretName);
+                    expect(history).not.toContain(secretName);
+                }
 
                 runDocker(["run", "--rm", image, "--version"]);
                 runDocker([

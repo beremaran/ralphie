@@ -14,12 +14,20 @@ scripts/*
 
 # Keep local, generated, and secret material excluded even under an allowed
 # source directory. These rules must remain after the allowlist above.
-**/node_modules
+.git
+.git/**
+.github
+.github/**
+node_modules
 **/node_modules/**
-**/dist
+dist
 **/dist/**
-**/.git
-**/.git/**
+out
+**/out/**
+build
+**/build/**
+coverage
+**/coverage/**
 **/.ralphie
 **/.ralphie/**
 workspace/**
@@ -28,14 +36,43 @@ state/**
 .ralphie-state/**
 tests/**
 
-# Credentials, dotenv files, and private keys/certificates.
+# Credentials, dotenv files, local configuration, and private keys. The
+# deny-by-default rule above is the primary boundary; these rules also protect
+# any matching file that is placed below an allowed source directory.
 .env
 .env.*
+*.env
 **/.env
 **/.env.*
+**/*.env
 **/.npmrc
+**/.yarnrc*
+**/.netrc
+**/.pypirc
+**/.aws
+**/.aws/**
+**/.azure
+**/.azure/**
+**/.config
+**/.config/**
+**/.docker
+**/.docker/**
+**/.gnupg
+**/.gnupg/**
+**/.kube
+**/.kube/**
+**/.pi
+**/.pi/**
+**/.ssh
+**/.ssh/**
 **/*credentials*
+**/*credential*
 **/*secret*
+**/*token*
+**/*password*
+**/*apikey*
+**/*api-key*
+**/*private*
 **/*.pem
 **/*.key
 **/*.crt
@@ -48,18 +85,20 @@ tests/**
 **/id_rsa*
 **/id_ed25519*
 
-# Logs, editor metadata, coverage, and test output.
+# Logs, editor metadata, and other generated or test output.
 *.log
 **/*.log
+logs
 **/logs/**
+.idea
 **/.idea/**
+.vscode
 **/.vscode/**
+.DS_Store
 **/.DS_Store
 **/*~
 **/*.swp
 **/*.swo
-**/coverage
-**/coverage/**
 **/*.lcov
 **/.nyc_output/**
 **/test-results/**

@@ -92,6 +92,22 @@ Repository administrators must configure that environment in **Settings →
 Environments → release** with the required reviewer(s); approval is required
 before the final publisher can write release assets or packages.
 
+### Container build input boundary
+
+The `stage-container` job uses the repository root as its Docker context, but
+`.dockerignore` is a deny-by-default allowlist for the package metadata, entry
+point, build script, and runtime source only. The `Dockerfile` also copies those
+inputs explicitly rather than using a broad `COPY . .`. Environment files,
+local configuration and credentials, generated output, logs, tests, and
+repository metadata are excluded.
+
+No private build input is required. The container build receives only the
+validated public version and commit values as `RALPHIE_VERSION` and
+`RALPHIE_COMMIT_SHA`; GitHub tokens, OIDC tokens, and Pi/model credentials are
+never build arguments, environment variables, labels, copied files, or build
+metadata inputs. Credentials are supplied only at runtime where needed. The
+version and commit remain the intentional public OCI labels.
+
 The dedicated `publish-npm` job is also limited to a validated `v*` tag and a
 non-dry-run release. It rechecks that removing the leading `v` from the tag
 produces the exact `package.json` version, then installs dependencies and runs
