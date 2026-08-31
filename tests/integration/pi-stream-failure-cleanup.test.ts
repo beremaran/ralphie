@@ -173,6 +173,13 @@ const expectDisposedExactlyOnce = (
     expect(
         harness.lifecycle.filter((call) => call === "output.dispose"),
     ).toHaveLength(1);
+    expect(harness.lifecycle.slice(-5)).toEqual([
+        "pi.runtime.close",
+        "pi.client.close",
+        "runtime.dispose",
+        "coordinator.dispose",
+        "output.dispose",
+    ]);
 };
 
 const expectDurableProgress = (log: string, message: string): void => {
@@ -248,6 +255,7 @@ describe("Pi stream failure and cleanup lifecycle matrix", () => {
             if (capture === undefined) {
                 throw new Error("Lifecycle scenario did not capture its run.");
             }
+            expect(capture.stdout).toEqual([]);
             expect(capture.stderr.join("")).toContain(scenario.expectedOutput);
             expect(capture.stderr.join("")).toEndWith("\n");
             expectDurableProgress(
