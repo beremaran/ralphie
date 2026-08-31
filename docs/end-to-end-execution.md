@@ -299,15 +299,19 @@ Detailed behavior:
 - Staging is deterministic (`git add --all`). Ralphie reads the exact staged
   binary diff, runs every configured verification command, and records bounded
   stdout/stderr plus the exact staged-tree hash. The reviewer receives that
-  trusted evidence with the issue and diff. Verification is repeated after
-  every fix and immediately before commit; a changed tree invalidates approval.
+  trusted evidence with the issue and diff. A non-zero command exit starts a
+  fresh, bounded verification-fix session with the failed command evidence and
+  staged diff; Ralphie restages and retries before review. Verification is
+  repeated after every fix and immediately before commit; a repaired or
+  otherwise changed tree invalidates approval and is reviewed again.
   An approved review cannot contain blocking findings; a
   `changes_requested` review must contain one. Identical blocking findings
   repeated after a verified fix stop early rather than consuming the full loop.
 - Verification commands come from repeated `--verify-command` flags or a
-  discovered `package.json` `check` script. Missing commands and non-zero exits
-  fail closed. Review attempts persist their verification evidence for resume
-  diagnostics.
+  discovered `package.json` `check` script. Non-zero exits receive up to five
+  repair attempts. Exhausted repairs, missing commands, staged-tree mutation,
+  and verification infrastructure faults fail closed. Review attempts persist
+  their verification evidence for resume diagnostics.
 - Protected maintainer choices such as selecting a project license require the
   exact choice to be authorized by the issue; otherwise execution halts before
   review or delivery rather than silently establishing policy.

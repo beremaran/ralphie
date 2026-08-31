@@ -26,7 +26,10 @@ import {
 } from "../../src/issues/execution.ts";
 import type { WorkflowExecutorResult } from "../../src/issues/workflow-executor-input.ts";
 import { makeImplementationExecutorService } from "../../src/issues/implementation-executor.ts";
-import type { IssueVerificationService } from "../../src/issues/verification.ts";
+import {
+    type IssueVerificationService,
+    VerificationCommandError,
+} from "../../src/issues/verification.ts";
 import type { ResolutionVerificationService } from "../../src/issues/resolution-verification.ts";
 import {
     type ReviewExhaustionOutcome,
@@ -316,13 +319,13 @@ describe("implementation executor", () => {
         expect(commitCalled).toBe(false);
     });
 
-    test("refuses commit when the staged tree changes after approval", async () => {
+    test("reviews again when verification repair changes an approved tree", async () => {
         let verificationCount = 0;
         const verification: IssueVerificationService = {
             stagedTreeSha: async () => "a".repeat(40),
             verify: async () => ({
                 stagedTreeSha:
-                    ++verificationCount < 3 ? "a".repeat(40) : "b".repeat(40),
+                    ++verificationCount < 2 ? "a".repeat(40) : "b".repeat(40),
                 commands: [
                     {
                         command: "bun run check",
@@ -334,13 +337,141 @@ describe("implementation executor", () => {
             }),
         };
         const artifacts = await makeIssueArtifactStore(42);
-        await expect(
-            run(
-                piClient([undefined, review("approved")]),
-                artifacts,
-                services({ verification }),
+        const outcome = await run(
+            piClient([
+                undefined,
+                review("approved"),
+                review("approved"),
+                { subject: "fix token refresh" },
+            ]),
+            artifacts,
+            services({ verification }),
+        );
+        expect(outcome).toMatchObject({
+            kind: IssueExecutionOutcomeKind.Completed,
+            reviewCount: 2,
+        });
+    });
+
+    test("repairs a deterministic command failure before review", async () => {
+        let verificationCount = 0;
+        let commitCalled = false;
+        const verification: IssueVerificationService = {
+            stagedTreeSha: async () => "a".repeat(40),
+            verify: async () => {
+                verificationCount += 1;
+                if (verificationCount === 1) {
+                    throw new VerificationCommandError({
+                        stagedTreeSha: "a".repeat(40),
+                        commands: [
+                            {
+                                command: "bun run check",
+                                exitCode: 1,
+                                stdout: "",
+                                stderr: "lint failed",
+                            },
+                        ],
+                    });
+                }
+                return {
+                    stagedTreeSha: "a".repeat(40),
+                    commands: [
+                        {
+                            command: "bun run check",
+                            exitCode: 0,
+                            stdout: "passed",
+                            stderr: "",
+                        },
+                    ],
+                };
+            },
+        };
+        const setup = services({
+            verification,
+            operations: {
+                commit: async () => {
+                    commitCalled = true;
+                    return { sha: "commit-1", treeSha: "tree-1" };
+                },
+            },
+        });
+        const sessions: string[] = [];
+        const outcome = await run(
+            piClient(
+                [
+                    undefined,
+                    undefined,
+                    review("approved"),
+                    { subject: "fix lint failure" },
+                ],
+                sessions,
             ),
-        ).rejects.toThrow("staged tree changed after approval");
+            await makeIssueArtifactStore(42),
+            setup,
+        );
+        expect(outcome.kind).toBe(IssueExecutionOutcomeKind.Completed);
+        expect(verificationCount).toBe(3);
+        expect(sessions).toHaveLength(4);
+        expect(commitCalled).toBe(true);
+    });
+
+    test("fails only after the verification repair budget is exhausted", async () => {
+        let verificationCount = 0;
+        let commitCalled = false;
+        const verification: IssueVerificationService = {
+            stagedTreeSha: async () => "a".repeat(40),
+            verify: async () => {
+                verificationCount += 1;
+                throw new VerificationCommandError({
+                    stagedTreeSha: "a".repeat(40),
+                    commands: [
+                        {
+                            command: "bun run check",
+                            exitCode: 1,
+                            stdout: "",
+                            stderr: "lint still fails",
+                        },
+                    ],
+                });
+            },
+        };
+        const setup = services({
+            verification,
+            operations: {
+                commit: async () => {
+                    commitCalled = true;
+                    return { sha: "commit-1", treeSha: "tree-1" };
+                },
+            },
+        });
+        const sessions: string[] = [];
+        const outcome = await run(
+            piClient(
+                [
+                    undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                ],
+                sessions,
+            ),
+            await makeIssueArtifactStore(42),
+            setup,
+        );
+
+        expect(outcome).toMatchObject({
+            kind: IssueExecutionOutcomeKind.Failed,
+        });
+        expect(
+            outcome.kind === IssueExecutionOutcomeKind.Failed
+                ? outcome.message
+                : "",
+        ).toContain("after 5 repair attempts");
+        expect(verificationCount).toBe(6);
+        expect(sessions).toHaveLength(6);
+        expect(commitCalled).toBe(false);
     });
 
     test("refuses unsafe direct pushes before starting an agent session", async () => {

@@ -4,7 +4,10 @@ import type {
     CommandResult,
     CommandRunnerService,
 } from "../../src/process/command-runner.ts";
-import { makeIssueVerificationService } from "../../src/issues/verification.ts";
+import {
+    makeIssueVerificationService,
+    VerificationCommandError,
+} from "../../src/issues/verification.ts";
 
 const result = (exitCode: number, stdout = "", stderr = ""): CommandResult => ({
     exitCode,
@@ -35,16 +38,43 @@ describe("issue verification", () => {
         expect(calls).toContain("/repo:/bin/sh:-c bun run check");
     });
 
-    test("fails immediately on a non-zero command", async () => {
+    test("returns repairable evidence for a non-zero command", async () => {
         const outputs = [
             result(0, "a".repeat(40)),
             result(1, "", "format failed"),
+            result(0, "a".repeat(40)),
         ];
         const runner: CommandRunnerService = {
             run: async () => outputs.shift()!,
         };
+        try {
+            await makeIssueVerificationService(runner).verify("/repo", [
+                "check",
+            ]);
+            throw new Error("Expected verification to fail");
+        } catch (error) {
+            expect(error).toBeInstanceOf(VerificationCommandError);
+            expect((error as VerificationCommandError).message).toContain(
+                "format failed",
+            );
+            expect(
+                (error as VerificationCommandError).verification.commands[0],
+            ).toMatchObject({ command: "check", exitCode: 1 });
+        }
+    });
+
+    test("fails closed when a failing command changes the staged tree", async () => {
+        const outputs = [
+            result(0, "a".repeat(40)),
+            result(1, "", "check failed"),
+            result(0, "b".repeat(40)),
+        ];
+        const runner: CommandRunnerService = {
+            run: async () => outputs.shift()!,
+        };
+
         await expect(
             makeIssueVerificationService(runner).verify("/repo", ["check"]),
-        ).rejects.toThrow("format failed");
+        ).rejects.toThrow("Verification changed the staged tree");
     });
 });

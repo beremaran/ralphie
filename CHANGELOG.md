@@ -7,6 +7,13 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Changed
 
+- Deterministic verification command failures now enter a bounded repair loop
+  instead of immediately failing the issue and halting the queue. Each repair
+  receives the exact staged diff and bounded failed-command evidence in a fresh
+  mutating session, is restaged and reverified, and must pass before review or
+  commit. Repairs that change an approved staged tree force another review;
+  exhausted repairs and verification integrity faults still fail closed.
+
 - Decomposition now uses native GitHub sub-issues and dependencies: every
   created or recovered child is attached to the original issue as a native
   sub-issue, declared `dependsOn` edges become native `blocked_by`

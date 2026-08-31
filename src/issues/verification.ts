@@ -26,6 +26,26 @@ export const verificationEvidenceSchema = z.object({
 
 export type VerificationEvidence = z.infer<typeof verificationEvidenceSchema>;
 
+/** A deterministic command rejected an otherwise intact staged tree. */
+export class VerificationCommandError extends RalphieError {
+    override readonly _tag = "VerificationCommandError" as const;
+    readonly verification: VerificationEvidence;
+
+    constructor(verification: VerificationEvidence) {
+        const failed = verification.commands.findLast(
+            ({ exitCode }) => exitCode !== 0,
+        );
+        super({
+            message:
+                failed === undefined
+                    ? "Deterministic verification failed without a failing command."
+                    : `Verification command failed (${failed.exitCode}): ${failed.command}\n${failed.stderr || failed.stdout}`,
+        });
+        this.name = "VerificationCommandError";
+        this.verification = verification;
+    }
+}
+
 export type IssueVerificationService = {
     readonly verify: (
         repositoryPath: string,
@@ -94,8 +114,16 @@ export const makeIssueVerificationService = (
                 };
                 results.push(evidence);
                 if (result.exitCode !== 0) {
-                    throw new RalphieError({
-                        message: `Verification command failed (${result.exitCode}): ${command}\n${evidence.stderr || evidence.stdout}`,
+                    const after = await stagedTreeSha(repositoryPath);
+                    if (after.toLowerCase() !== tree.toLowerCase()) {
+                        throw new RalphieError({
+                            message:
+                                "Verification changed the staged tree; refusing to continue.",
+                        });
+                    }
+                    throw new VerificationCommandError({
+                        stagedTreeSha: tree,
+                        commands: results,
                     });
                 }
             }

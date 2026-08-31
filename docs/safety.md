@@ -89,7 +89,11 @@ services. Every decision task is schema-validated; invalid output or Pi
 failure becomes a failed issue outcome without proceeding to the next operation.
 
 Verification commands are run against the staged tree and their evidence is
-bound to that tree before review or commit. The direct-push path never uses
-force. See [Workflows](workflows.md) for the complete implementation and
-delivery sequence, and [Operations and recovery](operations-and-recovery.md) for
-what remains available after a safety stop.
+bound to that tree before review or commit. A non-zero command exit is treated
+as actionable implementation feedback: a fresh fix session receives bounded
+failure evidence, and Ralphie restages and retries up to five times. Missing
+verification configuration, staged-tree mutation, and exhausted repair remain
+hard safety stops. The direct-push path never uses force. See
+[Workflows](workflows.md) for the complete implementation and delivery sequence,
+and [Operations and recovery](operations-and-recovery.md) for what remains
+available after a safety stop.

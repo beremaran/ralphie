@@ -31,11 +31,14 @@ flowchart TD
     Z -->|Actionable or apparently resolved| B[Structured complexity assessment]
     B -->|0–3| C[Implementation session]
     C --> D[Deterministically stage changes]
-    D -->|Changes present| E[Fresh review session]
+    D -->|Changes present| V[Deterministic verification]
+    V -->|Passed| E[Fresh review session]
+    V -->|Command failed| R[Fresh verification-fix session]
+    R --> D
     D -->|No changes| N[Fresh structured resolution verification]
     N -->|Resolved with evidence| O[Close issue as completed]
     N -->|Unresolved or uncertain| P[Fail and leave issue open]
-    E -->|Approved| F[Structured commit message]
+    E -->|Approved and reverified| F[Structured commit message]
     E -->|Changes requested| G[Fresh review-fix session]
     G --> D
     E -->|Five reviews exhausted| H[Preserve diagnostics and restore checkout]
@@ -53,12 +56,17 @@ flowchart TD
 1. Capture the exact clean branch and commit as an issue checkpoint.
 2. Ask a fresh Pi session to implement the issue.
 3. Stage every change deterministically and capture the exact staged diff.
-4. Ask a separate session for a schema-validated review.
-5. If changes are requested, give the review to a fresh fix session and repeat
+4. Run deterministic verification. If a command exits non-zero, give its
+   bounded output and the staged diff to a fresh fix session, then restage and
+   retry up to five times.
+5. Ask a separate session for a schema-validated review only after verification
+   passes.
+6. If changes are requested, give the review to a fresh fix session and repeat
    staging and review.
-6. Stop after approval or five review attempts.
-7. Generate a validated commit message and commit the changes.
-8. In `lgtm` mode, recheck the remote and push the commit without force, then
+7. Stop after approval or five review attempts. Reverify immediately before
+   commit; if repair changes an approved tree, review the repaired tree again.
+8. Generate a validated commit message and commit the changes.
+9. In `lgtm` mode, recheck the remote and push the commit without force, then
    close the source issue after the push is verified. In `pr` mode, create a
    feature branch, push it, open a pull request linked with `Closes #<issue>`,
    publish the review results, wait for every check on the exact head SHA to
@@ -90,6 +98,12 @@ sequenceDiagram
 
     alt Changes present
         loop Until approved or five reviews
+            R->>G: Run deterministic verification
+            opt Verification command fails and repair budget remains
+                R->>O: Start fresh verification-fix session
+                O-->>R: Update the checkout
+                R->>G: Restage and rerun verification
+            end
             R->>O: Start fresh structured-review session
             O-->>R: Return approved or changes requested
             opt Changes requested and budget remains
@@ -98,6 +112,7 @@ sequenceDiagram
                 R->>G: Restage changes and read exact diff
             end
         end
+        R->>G: Reverify the exact approved staged tree
     alt Review approved: lgtm mode
             R->>O: Generate structured commit message
             R->>G: Commit exact staged tree

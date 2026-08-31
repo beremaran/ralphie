@@ -27,6 +27,7 @@ export type ProgressStage =
     | "implementation"
     | "change-staging"
     | "verification"
+    | "verification-fix"
     | "resolution-verification"
     | "review"
     | "review-fix"

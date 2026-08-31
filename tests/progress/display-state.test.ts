@@ -45,7 +45,7 @@ describe("display state", () => {
 
     test("provides a label for every progress stage", () => {
         const stages = Object.keys(PROGRESS_STAGE_LABELS) as ProgressStage[];
-        expect(stages).toHaveLength(33);
+        expect(stages).toHaveLength(34);
         for (const stage of stages) {
             expect(PROGRESS_STAGE_LABELS[stage]).not.toBe("");
         }

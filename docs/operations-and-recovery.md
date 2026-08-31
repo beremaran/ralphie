@@ -237,6 +237,13 @@ One issue failure currently halts the run. This preserves the checkout and
 diagnostics at the first uncertain boundary instead of allowing later issues to
 continue on questionable state.
 
+A deterministic verification command returning non-zero is handled before it
+becomes an issue failure. Ralphie gives the bounded command output and staged
+diff to a fresh verification-fix session, restages its changes, and retries up
+to five times. Only repair exhaustion or a non-repairable verification fault
+(for example missing configuration or a command changing the staged tree)
+reaches the ordinary halt boundary.
+
 ## Cleanup
 
 `--clean end` removes the entire workspace after success, including completed

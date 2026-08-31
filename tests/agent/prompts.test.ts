@@ -14,6 +14,7 @@ import {
     PROMPT_ISSUE_COMMENT_TOTAL_LIMIT,
     buildReviewFixPrompt,
     buildReviewPrompt,
+    buildVerificationFixPrompt,
 } from "../../src/agent/prompts.ts";
 
 describe("Pi prompts", () => {
@@ -191,6 +192,38 @@ describe("Pi prompts", () => {
         expect(prompt).toContain("external_dependency");
         expect(prompt).toContain("must not create commits, push");
         expect(prompt).toContain('Issue body: ""');
+    });
+
+    test("builds a verification-fix prompt with trusted failure evidence", () => {
+        const prompt = buildVerificationFixPrompt({
+            issue: {
+                number: 179,
+                title: "Reduce helper complexity",
+                url: "issue/179",
+                body: "Keep the test helper readable.",
+                labels: ["bug"],
+            },
+            repositoryPath: "/workspace/repo",
+            targetBranch: "main",
+            stagedDiff: "diff --git a/tests/helper.ts b/tests/helper.ts",
+            failedVerification: {
+                stagedTreeSha: "a".repeat(40),
+                commands: [
+                    {
+                        command: "bun run check",
+                        exitCode: 1,
+                        stdout: "",
+                        stderr: "Excessive complexity of 14 detected",
+                    },
+                ],
+            },
+        });
+
+        expect(prompt).toContain("Repair the staged implementation");
+        expect(prompt).toContain('"exitCode": 1');
+        expect(prompt).toContain("Excessive complexity of 14 detected");
+        expect(prompt).toContain("tests/helper.ts");
+        expect(prompt).toContain("must not create commits, push");
     });
 
     test("builds a commit-message prompt with final staged diff restrictions", () => {
