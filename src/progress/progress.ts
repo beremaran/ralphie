@@ -469,6 +469,8 @@ export type {
 } from "./footer.ts";
 export {
     makeDefaultTerminalOutputStrategy,
+    makeDurableBreadcrumbStrategy,
+    makeDurableBreadcrumbTerminalOutputStrategy,
     makeTerminalOutputController,
 } from "./terminal-controller.ts";
 export type {
@@ -476,6 +478,8 @@ export type {
     TerminalOutputController,
     TerminalOutputControllerOptions,
     TerminalOutputStrategy,
+    TerminalResizeListener,
+    TerminalResizeSubscription,
 } from "./terminal-controller.ts";
 export {
     DEFAULT_BREADCRUMB_THRESHOLD,

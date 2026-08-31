@@ -48,6 +48,7 @@ const makeRecordingStrategy = (): {
                 clears += 1;
                 events.push("clear");
             },
+            restore: () => {},
         },
         get content() {
             return content;
@@ -67,18 +68,50 @@ const makeRecordingStrategy = (): {
 const makeFakeTimer = (): {
     readonly timer: FooterTimer;
     readonly scheduled: Array<() => void>;
+    readonly cancelled: number;
 } => {
     const scheduled: Array<() => void> = [];
+    let cancelled = 0;
     return {
         timer: {
             schedule: (callback) => {
                 scheduled.push(callback);
                 return scheduled.length;
             },
-            cancel: () => {},
+            cancel: () => {
+                cancelled += 1;
+            },
         },
         get scheduled() {
             return scheduled;
+        },
+        get cancelled() {
+            return cancelled;
+        },
+    };
+};
+
+const makeFakeResize = () => {
+    let listener: (() => void) | undefined;
+    let subscriptions = 0;
+    let removals = 0;
+    return {
+        resize: {
+            subscribe: (next: () => void) => {
+                listener = next;
+                subscriptions += 1;
+                return () => {
+                    listener = undefined;
+                    removals += 1;
+                };
+            },
+        },
+        emit: () => listener?.(),
+        get subscriptions() {
+            return subscriptions;
+        },
+        get removals() {
+            return removals;
         },
     };
 };
@@ -317,6 +350,34 @@ describe("terminal output controller", () => {
         ]);
         controller.dispose();
     });
+
+    test("clips and repaints the footer on width reduction and expansion", () => {
+        const recording = makeRecordingStrategy();
+        const resize = makeFakeResize();
+        let width = 20;
+        const controller = makeTerminalOutputController({
+            mode: "interactive",
+            strategy: recording.strategy,
+            width: () => width,
+            resize: resize.resize,
+        });
+
+        controller.beginLive("\x1b[31mabcdef\x1b[0m");
+        expect(resize.subscriptions).toBe(1);
+        width = 4;
+        resize.emit();
+        width = 20;
+        resize.emit();
+
+        expect(recording.events).toEqual([
+            "paint:\x1b[31mabcdef\x1b[0m",
+            "clear",
+            "paint:\x1b[31mabc…\x1b[0m",
+            "clear",
+            "paint:\x1b[31mabcdef\x1b[0m",
+        ]);
+        controller.dispose();
+    });
 });
 
 describe("terminal output controller scheduler", () => {
@@ -384,6 +445,36 @@ describe("terminal output controller scheduler", () => {
         expect(sink.output).toBe(
             `◐ Working...${CLEAR_LINE}partial\n◐ Working...`,
         );
+        controller.dispose();
+    });
+
+    test("defers a resize repaint across partial and control-sequence state", () => {
+        const recording = makeRecordingStrategy();
+        const resize = makeFakeResize();
+        let width = 8;
+        const controller = makeTerminalOutputController({
+            mode: "interactive",
+            strategy: recording.strategy,
+            width: () => width,
+            resize: resize.resize,
+        });
+
+        controller.beginLive("abcdef");
+        controller.writeTranscript("partial");
+        width = 4;
+        resize.emit();
+        expect(recording.events).toEqual([
+            "paint:abcdef",
+            "clear",
+            "write:partial",
+        ]);
+
+        controller.writeTranscript("\n");
+        expect(recording.events.at(-1)).toBe("paint:abc…");
+        controller.writeTranscript("\x1b[31");
+        resize.emit();
+        controller.writeTranscript("m\n");
+        expect(recording.events.at(-1)).toBe("paint:abc…");
         controller.dispose();
     });
 });
@@ -463,5 +554,31 @@ describe("terminal output controller modes", () => {
         controller.dispose();
 
         expect(sink.output).toBe("unfinished\n");
+    });
+
+    test("cleans up timer and resize callbacks and restores a strategy once", () => {
+        const recording = makeRecordingStrategy();
+        const resize = makeFakeResize();
+        const fakeTimer = makeFakeTimer();
+        const { timer, scheduled } = fakeTimer;
+        let restored = 0;
+        const controller = makeTerminalOutputController({
+            mode: "interactive",
+            strategy: { ...recording.strategy, restore: () => (restored += 1) },
+            resize: resize.resize,
+            footer: { timer },
+        });
+
+        controller.setFooter("stale");
+        controller.dispose();
+        controller.dispose();
+        scheduled[0]?.();
+        resize.emit();
+
+        expect(fakeTimer.cancelled).toBe(1);
+        expect(resize.removals).toBe(1);
+        expect(restored).toBe(1);
+        expect(recording.footers).toEqual([]);
+        expect(controller.isFooterVisible()).toBeFalse();
     });
 });

@@ -1,13 +1,17 @@
 import type { ProgressOutput, ProgressRenderMode } from "./progress.ts";
-import { makeFooterRefreshScheduler, type FooterTimer } from "./footer.ts";
+import {
+    clipFooter,
+    makeFooterRefreshScheduler,
+    type FooterTimer,
+} from "./footer.ts";
 import { makeTerminalStreamBoundaryTracker } from "./terminal-stream-boundary.ts";
 
 /**
  * Terminal primitives the controller drives.
  *
- * Splitting the footer surface from the content surface lets tests (and later
- * cursor-reserved-row strategies) prove that footer bytes never enter the
- * transcript or durable scrollback stream.
+ * Splitting the footer surface from the content surface lets strategies own
+ * cursor, reserved-row, and scroll-region mechanics without exposing those
+ * mechanics to the transcript or progress renderer.
  */
 export type TerminalOutputStrategy = {
     /** Emit arbitrary content bytes (transcript, durable progress lines). */
@@ -16,7 +20,16 @@ export type TerminalOutputStrategy = {
     readonly paintFooter: (text: string) => void;
     /** Erase the currently visible footer without touching content. */
     readonly clearFooter: () => void;
+    /** Restore cursor and scroll state when the controller is disposed. */
+    readonly restore: () => void;
 };
+
+/** Injectable source of terminal resize notifications. */
+export type TerminalResizeSubscription = {
+    readonly subscribe: (listener: () => void) => () => void;
+};
+
+export type TerminalResizeListener = (listener: () => void) => () => void;
 
 /** State-driven footer content plus the refresh cadence. */
 export type TerminalFooterOptions = {
@@ -26,6 +39,8 @@ export type TerminalFooterOptions = {
      * and setFooter.
      */
     readonly footerLine?: () => string | undefined;
+    /** Width used to clip footer text before it reaches a terminal strategy. */
+    readonly width?: () => number;
     /** Footer refresh cadence; forwarded to the footer view scheduler. */
     readonly intervalMs?: number;
     /** Injectable timer for deterministic scheduler tests. */
@@ -38,6 +53,14 @@ export type TerminalOutputControllerOptions = {
     /** Replace the terminal surface primitives (defaults mirror stderr writes). */
     readonly strategy?: TerminalOutputStrategy;
     readonly footer?: TerminalFooterOptions;
+    /** Current terminal width, sampled for every footer paint and resize. */
+    readonly width?: () => number;
+    /** Injectable resize source; defaults to the interactive stderr stream. */
+    readonly resize?: TerminalResizeSubscription | TerminalResizeListener;
+    /** Compatibility alias for resize, useful when wiring an event source. */
+    readonly onResize?: TerminalResizeListener;
+    /** Compatibility alias for resize subscription wiring. */
+    readonly subscribeResize?: TerminalResizeListener;
 };
 
 /**
@@ -61,26 +84,58 @@ export type TerminalOutputController = ProgressOutput & {
 
 const CLEAR_LINE = "\r\x1b[2K";
 
-/** Default strategy: every surface writes to the same byte sink. */
+/** Default strategy: durable breadcrumb/content bytes share one byte sink. */
 export const makeDefaultTerminalOutputStrategy = (
     write: (text: string) => void,
 ): TerminalOutputStrategy => ({
     write,
     paintFooter: write,
     clearFooter: () => write(CLEAR_LINE),
+    restore: () => {},
 });
+
+/** Explicit name for the conservative, durable default strategy. */
+export const makeDurableBreadcrumbStrategy = makeDefaultTerminalOutputStrategy;
+export const makeDurableBreadcrumbTerminalOutputStrategy =
+    makeDefaultTerminalOutputStrategy;
+
+const nativeResizeSubscription: TerminalResizeSubscription = {
+    subscribe: (listener) => {
+        process.stderr.on("resize", listener);
+        return () => process.stderr.removeListener("resize", listener);
+    },
+};
+
+const resizeSubscriptionFor = (
+    resize: TerminalResizeSubscription | TerminalResizeListener | undefined,
+    onResize: TerminalResizeListener | undefined,
+): TerminalResizeListener => {
+    if (resize !== undefined) {
+        return typeof resize === "function"
+            ? resize
+            : (listener) => resize.subscribe(listener);
+    }
+    return (
+        onResize ?? ((listener) => nativeResizeSubscription.subscribe(listener))
+    );
+};
 
 export const makeTerminalOutputController = ({
     mode,
     write = (text) => process.stderr.write(text),
     strategy = makeDefaultTerminalOutputStrategy(write),
     footer,
+    width = footer?.width ?? (() => process.stderr.columns ?? 80),
+    resize,
+    onResize,
+    subscribeResize,
 }: TerminalOutputControllerOptions): TerminalOutputController => {
     const boundary = makeTerminalStreamBoundaryTracker();
     const interactive = mode === "interactive";
     let footerTarget: string | undefined;
     let footerRendered: string | undefined;
     let footerShown = false;
+    let resizePending = false;
     let disposed = false;
     const pendingLines: string[] = [];
 
@@ -95,13 +150,23 @@ export const makeTerminalOutputController = ({
     };
 
     /** Strict clear-before-draw: replacement repaints always erase first. */
-    const renderFooter = (content: string | undefined): void => {
-        if (content === undefined || content === "") return;
-        if (footerShown && footerRendered === content) return;
+    const renderFooter = (
+        content: string | undefined,
+        force = false,
+        clippedContent?: string,
+    ): void => {
+        const clipped =
+            clippedContent ??
+            (content === undefined ? undefined : clipFooter(content, width()));
+        if (clipped === undefined || clipped === "") {
+            clearVisibleFooter();
+            return;
+        }
+        if (!force && footerShown && footerRendered === clipped) return;
         clearVisibleFooter();
-        strategy.paintFooter(content);
+        strategy.paintFooter(clipped);
         footerShown = true;
-        footerRendered = content;
+        footerRendered = clipped;
     };
 
     const flushPending = (): void => {
@@ -115,8 +180,7 @@ export const makeTerminalOutputController = ({
     const scheduler = interactive
         ? makeFooterRefreshScheduler({
               repaint: () => {
-                  if (disposed) return;
-                  if (!boundary.isRedrawSafe()) return;
+                  if (disposed || !boundary.isRedrawSafe()) return;
                   renderFooter(footerContent());
               },
               intervalMs: footer?.intervalMs,
@@ -131,13 +195,28 @@ export const makeTerminalOutputController = ({
 
     const restoreFooter = (): void => {
         if (!interactive || !boundary.isRedrawSafe()) return;
-        renderFooter(footerContent());
+        const needsRedraw = resizePending || !footerShown;
+        resizePending = false;
+        if (needsRedraw) renderFooter(footerContent());
     };
 
     const afterContentWrite = (): void => {
         if (!interactive) return;
         flushPending();
         restoreFooter();
+    };
+
+    /** Repaint at the new width, but never insert bytes into an unsafe stream. */
+    const handleResize = (): void => {
+        if (disposed) return;
+        resizePending = true;
+        const content = footerContent();
+        const clipped =
+            content === undefined ? undefined : clipFooter(content, width());
+        clearVisibleFooter();
+        if (!boundary.isRedrawSafe()) return;
+        resizePending = false;
+        renderFooter(content, true, clipped);
     };
 
     /** Close an open control sequence and finish a partial line. */
@@ -166,6 +245,14 @@ export const makeTerminalOutputController = ({
         if (interactive) afterContentWrite();
     };
 
+    const resizeListener = resizeSubscriptionFor(
+        resize,
+        onResize ?? subscribeResize,
+    );
+    const unregisterResize = interactive
+        ? resizeListener(handleResize)
+        : () => {};
+
     return {
         beginLive: (line) => {
             if (disposed) return;
@@ -177,6 +264,7 @@ export const makeTerminalOutputController = ({
             renderFooter(footerContent());
         },
         appendLine: (line, liveLine) => {
+            if (disposed) return;
             if (liveLine !== undefined) footerTarget = liveLine;
             writeDurableLine(line);
         },
@@ -200,12 +288,17 @@ export const makeTerminalOutputController = ({
             if (disposed) return;
             disposed = true;
             scheduler?.dispose();
+            unregisterResize();
             ensureLineBoundary();
             for (const line of pendingLines) strategy.write(`${line}\n`);
             pendingLines.length = 0;
             if (footerShown) strategy.write("\n");
+            footerTarget = undefined;
             footerShown = false;
             footerRendered = undefined;
+            resizePending = false;
+            boundary.reset();
+            strategy.restore?.();
         },
     };
 };
