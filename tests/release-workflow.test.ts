@@ -607,7 +607,7 @@ printf 'upload\\n'`,
         expect(publishJob).toContain("--source-dir .");
         expect(publishJob).toContain("--commit-sha $SOURCE_REF");
         expect(publishJob).toContain('bun_version="$(bun --version)"');
-        expect(publishJob).toContain('test "$bun_version" = 1.3.14');
+        expect(publishJob).toContain('test "$bun_version" = "$BUN_VERSION"');
         expect(publishJob).toContain(
             "name: Install dependencies for SBOM validation",
         );

@@ -25,6 +25,9 @@ on:
 # Jobs must opt into their small, explicit permission set.
 permissions: {}
 
+env:
+  BUN_VERSION: "1.3.14"
+
 jobs:
   validate:
     name: Validate release context
@@ -148,7 +151,10 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Verify Bun version
+        run: test "$(bun --version)" = "$BUN_VERSION"
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -301,7 +307,10 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Verify Bun version
+        run: test "$(bun --version)" = "$BUN_VERSION"
 
       # Use one exact artifact name per target. This prevents an untrusted
       # artifact matching a broad pattern from entering the release bundle.
@@ -580,7 +589,10 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Verify Bun version
+        run: test "$(bun --version)" = "$BUN_VERSION"
 
       # npm trusted publishing requires a recent npm CLI and Node runtime.
       # Do not configure setup-node with a registry or auth file: npm obtains
@@ -931,7 +943,10 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Verify Bun version
+        run: test "$(bun --version)" = "$BUN_VERSION"
 
       - name: Install dependencies for SBOM validation
         run: bun install --frozen-lockfile
@@ -947,7 +962,7 @@ jobs:
         run: |
           set -euo pipefail
           bun_version="$(bun --version)"
-          test "$bun_version" = 1.3.14
+          test "$bun_version" = "$BUN_VERSION"
           bun scripts/create-sboms.ts \
             --assets-dir release-assets \
             --output-dir release-assets \
@@ -972,7 +987,7 @@ jobs:
           test "$GITHUB_SHA" = "$SOURCE_REF"
           test "$GITHUB_WORKFLOW_REF" = "$GITHUB_REPOSITORY/.github/workflows/release.yml@refs/tags/$TAG"
           bun_version="$(bun --version)"
-          test "$bun_version" = 1.3.14
+          test "$bun_version" = "$BUN_VERSION"
           subjects='[]'
           for asset in ralphie-darwin-arm64 ralphie-darwin-x64 ralphie-linux-arm64 ralphie-linux-x64; do
             path="release-assets/$asset"
