@@ -127,6 +127,52 @@ jobs:
             echo "dry_run=$RELEASE_DRY_RUN"
           } >> "$GITHUB_OUTPUT"
 
+  stage-package:
+    name: Stage npm package and installer
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out validated source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.source_ref }}
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Verify Bun version
+        run: test "$(bun --version)" = "$BUN_VERSION"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # This job only prepares immutable inputs. The script builds with the
+      # validated source/version and never publishes to npm or GitHub.
+      - name: Build and validate package staging inputs
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+          SOURCE_REF: ${{ needs.validate.outputs.source_ref }}
+        run: >-
+          bun run package:stage --
+          --version "$VERSION"
+          --commit-sha "$SOURCE_REF"
+          --output-dir release-package
+
+      - name: Upload immutable package staging inputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: ralphie-package-${{ needs.validate.outputs.version }}
+          path: |
+            release-package/beremaran-ralphie-${{ needs.validate.outputs.version }}.tgz
+            release-package/scripts/install.sh
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 90
+
   build-binaries:
     name: Build ${{ matrix.target }}
     needs: validate
@@ -527,8 +573,9 @@ jobs:
     name: Publish npm package
     needs:
       - validate
+      - stage-package
       - aggregate-release-metadata
-    if: needs.validate.outputs.dry_run == 'false' && github.ref_type == 'tag' && startsWith(github.ref, 'refs/tags/v') && needs.aggregate-release-metadata.result == 'success'
+    if: needs.validate.outputs.dry_run == 'false' && github.ref_type == 'tag' && startsWith(github.ref, 'refs/tags/v') && needs['stage-package'].result == 'success' && needs.aggregate-release-metadata.result == 'success'
     # The validation job also rejects unqualified manual dispatches. Keep the
     # ref guard here so this publisher can never run from a branch, even if a
     # future change weakens another job's condition.
@@ -549,6 +596,13 @@ jobs:
         with:
           ref: ${{ needs.validate.outputs.source_ref }}
           persist-credentials: false
+
+      - name: Download validated package staging inputs
+        uses: actions/download-artifact@v4
+        with:
+          name: ralphie-package-${{ needs.validate.outputs.version }}
+          path: package-staging
+          merge-multiple: false
 
       - name: Verify scoped package and release tag version
         id: npm-context
@@ -615,7 +669,7 @@ jobs:
         run: bun run package:check
 
       - name: Publish scoped package with npm provenance
-        run: npm publish --provenance --access public
+        run: npm publish --provenance --access public "package-staging/beremaran-ralphie-${{ needs.validate.outputs.version }}.tgz"
 
       - name: Verify exact package from npm registry
         env:

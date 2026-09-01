@@ -31,6 +31,7 @@ Useful individual commands:
 | `bun run build:package` | Build the publishable package bundle at `dist/ralphie.js`. |
 | `bun run package:check` | Pack, inspect, install, and run the local package in isolated temporary directories. |
 | `bun run package:inspect` | Inspect the local `npm pack --dry-run` file list without installing it. |
+| `bun run package:stage -- --version <version> --commit-sha <sha> --output-dir <dir>` | Build and validate release package and installer staging inputs without publishing. |
 | `env -u GH_TOKEN -u GITHUB_TOKEN bun run verify:public-distribution` | Verify the public repository, release assets, installer, formula, OCI image, and license anonymously (requires `sigstore`). |
 | `bun run probe:structured-output` | Exercise a real schema-validated Pi decision. |
 
@@ -38,7 +39,10 @@ The package check builds an actual tarball, verifies its allowlist, installs it
 with `npm install --omit=dev` in a fresh project, and invokes the installed bin
 with Bun. Its isolated install does not use the checkout's lockfile or `node_modules`;
 all temporary pack, install, cache, and home directories are created outside the
-checkout.
+checkout. `package:stage` is the release handoff: it verifies the exact source
+revision, builds with explicit version and commit metadata, packs the scoped
+package with scripts disabled, and stages only the versioned tarball plus the
+exact `scripts/install.sh` under stable contract paths.
 For an explicitly opt-in registry check, pass a package spec:
 
 ```bash

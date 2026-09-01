@@ -75,6 +75,7 @@
     "lint": "biome lint .",
     "package:check": "bun run scripts/package-smoke.ts",
     "package:inspect": "bun run scripts/package-smoke.ts --dry-run",
+    "package:stage": "bun run scripts/stage-release-package.ts",
     "prepack": "bun run build:package",
     "probe:structured-output": "bun run scripts/probe-structured-output.ts",
     "test": "bun test tests",

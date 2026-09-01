@@ -31,6 +31,15 @@ this protection, rather than a non-atomic API recheck, closes the check/use
 race between validation and publication.
 
 Manual dispatches default to `dry_run: true`. Every validated release run
+first stages an immutable package input artifact named
+`ralphie-package-<version>`. That artifact contains only
+`beremaran-ralphie-<version>.tgz` and the byte-for-byte checked-in
+`scripts/install.sh`; the package is built with the validated commit and
+canonical version, and its packed manifest, allowlist, and embedded `--version
+--output json` metadata are checked before upload. The installer is checked for
+its release-tag API, checksum, Sigstore-bundle, and commit references and is
+never replaced with a host-specific binary or a moving-branch download. The
+staging job has no npm or GitHub publication step. Every validated release run
 builds and smoke-tests `linux/amd64` and `linux/arm64` container candidates
 without logging into GHCR or pushing public tags. Each platform is staged as
 an immutable `actions/upload-artifact@v4` artifact named
@@ -136,6 +145,20 @@ explicit; changing the workflow filename or environment requires updating the
 npm publisher configuration too.
 
 Before staging a release, run the local package smoke check from the checkout:
+
+To create the same disposable package/installer staging inputs locally, provide
+an exact validated checkout revision:
+
+```bash
+bun run package:stage -- \
+  --version <release-version> \
+  --commit-sha <40-character-commit-sha> \
+  --output-dir release-package
+```
+
+The command refuses a version or source revision mismatch, extra staging files,
+missing installer, unexpected npm tarball files, and missing embedded metadata.
+It only runs the local build and `npm pack --ignore-scripts`; it never publishes.
 
 ```bash
 bun run package:check

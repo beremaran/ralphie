@@ -7,6 +7,44 @@ const readRepositoryFile = (path: string): Promise<string> =>
     Bun.file(resolve(repositoryRoot, path)).text();
 
 describe("npm release publication contract", () => {
+    test("stages the validated package and installer without publishing", async () => {
+        const workflow = await readRepositoryFile(
+            ".github/workflows/release.yml",
+        );
+        const stageStart = workflow.indexOf("  stage-package:");
+        const stageEnd = workflow.indexOf("  build-binaries:", stageStart);
+        const stageJob = workflow.slice(stageStart, stageEnd);
+
+        expect(stageJob).toContain(
+            "ref: ${{ needs.validate.outputs.source_ref }}",
+        );
+        expect(stageJob).toContain("bun run package:stage");
+        expect(stageJob).toContain('--version "$VERSION"');
+        expect(stageJob).toContain('--commit-sha "$SOURCE_REF"');
+        expect(stageJob).toContain(
+            "beremaran-ralphie-${{ needs.validate.outputs.version }}.tgz",
+        );
+        expect(stageJob).toContain("release-package/scripts/install.sh");
+        expect(stageJob).toContain("overwrite: false");
+        expect(stageJob).not.toContain("npm publish");
+        expect(stageJob).not.toContain("gh api");
+
+        const npmJob = workflow.slice(
+            workflow.indexOf("  publish-npm:"),
+            workflow.indexOf(
+                "  push-container:",
+                workflow.indexOf("  publish-npm:"),
+            ),
+        );
+        expect(npmJob).toContain("- stage-package");
+        expect(npmJob).toContain(
+            "name: ralphie-package-${{ needs.validate.outputs.version }}",
+        );
+        expect(npmJob).toContain(
+            "package-staging/beremaran-ralphie-${{ needs.validate.outputs.version }}.tgz",
+        );
+    });
+
     test("guards the scoped tag/version and uses trusted publishing only", async () => {
         const workflow = await readRepositoryFile(
             ".github/workflows/release.yml",
