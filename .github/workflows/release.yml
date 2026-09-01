@@ -228,8 +228,10 @@ jobs:
         env:
           RELEASE_VERSION: ${{ needs.validate.outputs.version }}
           RELEASE_COMMIT_SHA: ${{ needs.validate.outputs.source_ref }}
+          TARGET: ${{ matrix.target }}
         run: >-
-          bun run build -- --commit-sha "$RELEASE_COMMIT_SHA"
+          bun run build -- --target "$TARGET"
+          --commit-sha "$RELEASE_COMMIT_SHA"
           --version "$RELEASE_VERSION"
 
       - name: Verify native binary format and architecture
@@ -237,9 +239,10 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
-          binary=dist/cli
+          binary="dist/ralphie-${TARGET}"
           test -s "$binary"
           test -x "$binary"
+          bun scripts/verify-native-artifact.ts --target "$TARGET" --path "$binary" >/dev/null
           command -v file >/dev/null
           description="$(file -b "$binary")"
 
@@ -284,14 +287,16 @@ jobs:
         env:
           EXPECTED_VERSION: ${{ needs.validate.outputs.version }}
           EXPECTED_COMMIT_SHA: ${{ needs.validate.outputs.source_ref }}
+          TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
-          test -s dist/cli
-          test -x dist/cli
+          binary="dist/ralphie-${TARGET}"
+          test -s "$binary"
+          test -x "$binary"
           version_output="$RUNNER_TEMP/ralphie-version.txt"
-          ./dist/cli --version > "$version_output"
+          ./$binary --version > "$version_output"
           test -s "$version_output"
-          version_json="$(./dist/cli --version --output json)"
+          version_json="$(./$binary --version --output json)"
           jq -e \
             --arg version "$EXPECTED_VERSION" \
             --arg commit_sha "$EXPECTED_COMMIT_SHA" \
@@ -305,12 +310,10 @@ jobs:
           set -euo pipefail
           asset="ralphie-${TARGET}"
           checksum_file="${asset}.sha256"
-          mv dist/cli "$asset"
-          if [[ "$(uname -s)" == Darwin ]]; then
-            digest="$(shasum -a 256 "$asset" | awk '{print $1}')"
-          else
-            digest="$(sha256sum "$asset" | awk '{print $1}')"
-          fi
+          binary="dist/${asset}"
+          mv "$binary" "$asset"
+          digest="$(bun scripts/verify-native-artifact.ts --target "$TARGET" --path "$asset" | awk '{print $1}')"
+          echo "$asset SHA-256: $digest"
           printf '%s  %s\n' "$digest" "$asset" > "$checksum_file"
           test "$(awk '{print $1}' "$checksum_file")" = "$digest"
 

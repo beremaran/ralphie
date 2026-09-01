@@ -31,7 +31,7 @@ const BINARY_FORMATS = [
 ] as const;
 const RUNNERS = [
     "macos-14",
-    "macos-13",
+    "macos-15-intel",
     "ubuntu-24.04-arm",
     "ubuntu-24.04",
 ] as const;
@@ -75,7 +75,7 @@ const CANONICAL_TARGETS = {
         bunCompileTarget: "bun-darwin-x64",
         targetTriple: "x86_64-apple-darwin",
         binaryFormat: "Mach-O x86_64",
-        runner: "macos-13",
+        runner: "macos-15-intel",
     },
     "linux-arm64": {
         releaseAssetName: "ralphie-linux-arm64",

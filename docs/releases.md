@@ -45,8 +45,10 @@ without logging into GHCR or pushing public tags. Each platform is staged as
 an immutable `actions/upload-artifact@v4` artifact named
 `ralphie-container-candidate-<version>-<arch>`. Native targets are likewise
 staged as `ralphie-<version>-<target>` artifacts containing the renamed
-executable and its `<executable>.sha256` checksum. After all four native legs
-succeed, the aggregation job downloads those exact versioned artifacts, rejects
+executable and its `<executable>.sha256` checksum. Each leg passes its
+canonical target to Bun's compile target input (rather than renaming a host
+build) and validates the resulting executable header before staging. After all
+four native legs succeed, the aggregation job downloads those exact versioned artifacts, rejects
 missing, extra, duplicate, and cross-version files, and recomputes each binary
 checksum against its sidecar. Native builds use `macos-14` for
 `darwin-arm64`, `macos-15-intel` for `darwin-x64`, `ubuntu-24.04-arm` for

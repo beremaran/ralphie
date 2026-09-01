@@ -2,8 +2,19 @@
 
 import packageJson from "../package.json";
 import { LOCAL_BUILD_COMMIT_SHA, type BuildInfo } from "../src/build-info.ts";
+import { STANDALONE_TARGET_IDS } from "../src/targets/standalone-targets.ts";
 
 type BuildTarget = "native" | "package";
+type NativeReleaseTarget = (typeof STANDALONE_TARGET_IDS)[number];
+
+const BUN_COMPILE_TARGETS: Readonly<
+    Record<NativeReleaseTarget, Bun.Build.CompileTarget>
+> = {
+    "darwin-arm64": "bun-darwin-arm64",
+    "darwin-x64": "bun-darwin-x64",
+    "linux-arm64": "bun-linux-arm64",
+    "linux-x64": "bun-linux-x64",
+};
 
 const valueForOption = (
     args: ReadonlyArray<string>,
@@ -28,9 +39,23 @@ const resolveVersion = (args: ReadonlyArray<string>): string =>
 const resolveCommitSha = (args: ReadonlyArray<string>): string =>
     valueForOption(args, "--commit-sha") ?? LOCAL_BUILD_COMMIT_SHA;
 
+const resolveNativeReleaseTarget = (
+    args: ReadonlyArray<string>,
+): NativeReleaseTarget | undefined => {
+    const value = valueForOption(args, "--target");
+    if (value === undefined) return undefined;
+    if (!(STANDALONE_TARGET_IDS as ReadonlyArray<string>).includes(value)) {
+        throw new Error(
+            `Unsupported native target '${value}'; expected ${STANDALONE_TARGET_IDS.join(", ")}.`,
+        );
+    }
+    return value as NativeReleaseTarget;
+};
+
 const buildConfigFor = (
     target: BuildTarget,
     buildInfo: BuildInfo,
+    nativeTarget: NativeReleaseTarget | undefined,
 ): Bun.BuildConfig => {
     const shared = {
         entrypoints: ["./index.ts"],
@@ -48,18 +73,31 @@ const buildConfigFor = (
           }
         : {
               ...shared,
-              compile: { outfile: "./dist/cli" },
+              compile: {
+                  outfile:
+                      nativeTarget === undefined
+                          ? "./dist/cli"
+                          : `./dist/ralphie-${nativeTarget}`,
+                  ...(nativeTarget === undefined
+                      ? {}
+                      : { target: BUN_COMPILE_TARGETS[nativeTarget] }),
+              },
           };
 };
 
 const build = async (): Promise<void> => {
     const args = Bun.argv.slice(2);
+    const buildTarget = resolveTarget(args);
+    const nativeTarget = resolveNativeReleaseTarget(args);
+    if (buildTarget === "package" && nativeTarget !== undefined) {
+        throw new Error("--target is only supported for native builds.");
+    }
     const buildInfo: BuildInfo = {
         version: resolveVersion(args),
         commitSha: resolveCommitSha(args),
     };
     const result = await Bun.build(
-        buildConfigFor(resolveTarget(args), buildInfo),
+        buildConfigFor(buildTarget, buildInfo, nativeTarget),
     );
 
     if (result.success) return;

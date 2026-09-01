@@ -52,7 +52,7 @@ describe("standalone target manifest", () => {
             { field: "bunCompileTarget", value: "bun-darwin-x64" },
             { field: "targetTriple", value: "x86_64-apple-darwin" },
             { field: "binaryFormat", value: "Mach-O x86_64" },
-            { field: "runner", value: "macos-13" },
+            { field: "runner", value: "macos-15-intel" },
         ];
 
         for (const { field, value } of mutations) {

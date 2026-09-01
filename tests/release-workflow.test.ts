@@ -339,10 +339,15 @@ describe("release container metadata contract", () => {
         expect(buildJob).toContain(
             "Verify native binary format and architecture",
         );
+        expect(buildJob).toContain('bun run build -- --target "$TARGET"');
+        expect(buildJob).toContain('binary="dist/ralphie-${TARGET}"');
+        expect(buildJob).toContain(
+            'bun scripts/verify-native-artifact.ts --target "$TARGET" --path "$binary"',
+        );
         expect(buildJob).toContain('description="$(file -b "$binary")"');
         expect(buildJob).toContain('lipo -archs "$binary"');
         expect(buildJob).toContain('test -s "$binary"');
-        expect(buildJob).toContain('./dist/cli --version > "$version_output"');
+        expect(buildJob).toContain('./$binary --version > "$version_output"');
         expect(buildJob).toContain('test -s "$version_output"');
         expect(buildJob).toContain("')\" = 1");
         for (const assertion of [
@@ -357,6 +362,9 @@ describe("release container metadata contract", () => {
             expect(buildJob).toContain(assertion);
         }
         expect(buildJob).toContain('asset="ralphie-${TARGET}"');
+        expect(buildJob).toContain(
+            'digest="$(bun scripts/verify-native-artifact.ts --target "$TARGET" --path "$asset" | awk \'{print $1}\')"',
+        );
         expect(buildJob).toContain("overwrite: false");
         expect(buildJob).toContain(
             "path: |\n            ralphie-${{ matrix.target }}\n            ralphie-${{ matrix.target }}.sha256",

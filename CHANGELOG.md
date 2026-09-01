@@ -13,6 +13,8 @@ All notable changes to Ralphie are documented here. The project follows
   each document binds the validated source, build inputs, and final binary digest.
 - Add an exact-tag GitHub release verifier that emits a deterministic,
   checksum-verified Homebrew asset manifest.
+- Build each native release binary with its explicit Bun target and validate its
+  executable header and architecture before emitting checksums.
 
 ### Changed
 
