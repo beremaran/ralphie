@@ -763,6 +763,26 @@ describe("IssueExecutor", () => {
     test("verifies an already-resolved grounding decision before completion", async () => {
         const calls: string[] = [];
         const stores = makeIssueArtifactStoreService();
+        const cachedArtifacts = await stores.forIssue(42);
+        const fingerprint = {
+            updatedAt: "2026-08-28T00:00:00.000Z",
+            commentCount: 0,
+        };
+        await cachedArtifacts.write(IssueArtifactKind.ComplexityDecision, {
+            decision: {
+                complexity: ComplexityLevel.Level2,
+                rationale: "Cached complexity must not control this route.",
+            },
+            fingerprint,
+        });
+        await cachedArtifacts.write(IssueArtifactKind.IssueResolutionDecision, {
+            decision: {
+                status: IssueResolutionStatus.Resolved,
+                summary: "Cached resolution must be replaced.",
+                evidence: ["Stale session evidence."],
+            },
+            fingerprint,
+        });
         const outcome = await makeIssueExecutorService(
             stores,
             {
@@ -818,42 +838,37 @@ describe("IssueExecutor", () => {
         });
         const artifacts = await stores.forIssue(42);
         expect(
-            artifacts.has(IssueArtifactKind.IssueResolutionDecision),
-        ).toBeTrue();
+            await artifacts.read(IssueArtifactKind.IssueResolutionDecision),
+        ).toEqual({
+            decision: {
+                status: IssueResolutionStatus.Resolved,
+                summary: "The requested behavior is present.",
+                evidence: ["The focused regression test passes."],
+            },
+            fingerprint,
+        });
     });
 
-    test("reroutes a rejected already-resolved claim into implementation", async () => {
+    test("fails closed when fresh verification rejects an already-resolved claim", async () => {
         const calls: string[] = [];
-        const inputs: Parameters<ImplementationExecutorService["execute"]>[] =
-            [];
-        const events: ProgressUpdate[] = [];
         const stores = makeIssueArtifactStoreService();
         const outcome = await makeIssueExecutorService(
             stores,
             {
                 assess: async () => {
                     calls.push("complexity");
-                    return {
-                        sessionID: "complexity-session",
-                        decision: {
-                            complexity: ComplexityLevel.Level2,
-                            rationale: "A focused implementation is required.",
-                        },
-                    };
-                },
-            },
-            {
-                execute: async (input) => {
-                    calls.push("implementation");
-                    inputs.push([input]);
-                    return {
-                        kind: IssueExecutionOutcomeKind.Skipped,
-                        reason: "Implementation captured for the test.",
-                    };
+                    throw new Error("must not assess complexity");
                 },
             },
             {
                 execute: async () => {
+                    calls.push("implementation");
+                    throw new Error("must not implement");
+                },
+            },
+            {
+                execute: async () => {
+                    calls.push("decomposition");
                     throw new Error("must not decompose");
                 },
             },
@@ -881,32 +896,89 @@ describe("IssueExecutor", () => {
                     };
                 },
             },
-            makeProgressRecorder(events),
         ).execute(context(42));
 
-        expect(calls).toEqual([
-            "grounding",
-            "verification",
-            "complexity",
-            "implementation",
-        ]);
-        expect(outcome.kind).toBe(IssueExecutionOutcomeKind.Skipped);
-        expect(inputs[0]?.[0].unresolvedResolution).toEqual({
-            status: IssueResolutionStatus.Unresolved,
-            summary: "The bug still reproduces.",
-            evidence: ["The regression test fails."],
+        expect(calls).toEqual(["grounding", "verification"]);
+        expect(outcome).toEqual({
+            kind: IssueExecutionOutcomeKind.Failed,
+            message: "The bug still reproduces.",
         });
-        expect(events).toContainEqual(
-            expect.objectContaining({
-                stage: "grounding",
-                status: "succeeded",
-                message: expect.stringContaining("continuing as actionable"),
-            }),
-        );
         const artifacts = await stores.forIssue(42);
         expect(
-            artifacts.has(IssueArtifactKind.IssueResolutionDecision),
-        ).toBeFalse();
+            await artifacts.read(IssueArtifactKind.IssueResolutionDecision),
+        ).toEqual({
+            decision: {
+                status: IssueResolutionStatus.Unresolved,
+                summary: "The bug still reproduces.",
+                evidence: ["The regression test fails."],
+            },
+            fingerprint: {
+                updatedAt: "2026-08-28T00:00:00.000Z",
+                commentCount: 0,
+            },
+        });
+    });
+
+    test("does not route verifier needs-attention signals", async () => {
+        let routerCalls = 0;
+        const outcome = await makeIssueExecutorService(
+            makeIssueArtifactStoreService(),
+            {
+                assess: async () => {
+                    throw new Error("must not assess complexity");
+                },
+            },
+            {
+                execute: async () => {
+                    throw new Error("must not implement");
+                },
+            },
+            {
+                execute: async () => {
+                    throw new Error("must not decompose");
+                },
+            },
+            {
+                assess: async () => ({
+                    sessionID: "grounding-session",
+                    decision: {
+                        disposition: GroundingDisposition.AlreadyResolved,
+                    },
+                }),
+            },
+            {
+                verify: async () => ({
+                    sessionID: "verification-session",
+                    decision: {
+                        status: IssueResolutionStatus.Resolved,
+                        summary: "A synthetic fallback decision.",
+                        evidence: ["This must not be trusted."],
+                    },
+                    needsAttention: {},
+                }),
+            } as never,
+            undefined,
+            {
+                route: async () => {
+                    routerCalls += 1;
+                    return {
+                        kind: IssueExecutionOutcomeKind.NeedsAttention,
+                        reason: NeedsAttentionReason.MissingInformation,
+                        summary: "Should not be routed.",
+                        evidence: ["Verifier signal."],
+                        questions: ["Should this be routed?"],
+                        route: "needs-attention",
+                    };
+                },
+            },
+        ).execute(context(42));
+
+        expect(routerCalls).toBe(0);
+        expect(outcome).toEqual({
+            kind: IssueExecutionOutcomeKind.Failed,
+            message:
+                "Fresh resolution verification could not establish that the issue is resolved.",
+        });
     });
 
     test.each([

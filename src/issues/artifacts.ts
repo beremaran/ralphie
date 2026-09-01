@@ -129,6 +129,10 @@ export type IssueArtifactStore = {
         kind: K,
     ) => Promise<IssueArtifactValues[K]>;
     readonly has: (kind: IssueArtifactKind) => boolean;
+    /** Persist the latest fresh resolution proof, replacing an older decision. */
+    readonly recordResolutionDecision: (
+        value: IssueResolutionDecisionArtifact,
+    ) => Promise<void>;
     readonly appendReview: (review: ReviewAttempt) => Promise<void>;
     readonly appendPullRequestReview: (
         review: PullRequestReviewAttempt,
@@ -833,6 +837,17 @@ const makeStore = (
         },
 
         has: (kind) => values.has(kind),
+
+        recordResolutionDecision: async (value) => {
+            validateArtifactValue(
+                issueNumber,
+                IssueArtifactKind.IssueResolutionDecision,
+                value,
+            );
+            const nextValues = new Map(values);
+            nextValues.set(IssueArtifactKind.IssueResolutionDecision, value);
+            await save(nextValues);
+        },
 
         appendPullRequestReview: async (review) => {
             let validated: PullRequestReviewAttempt;

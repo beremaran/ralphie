@@ -43,10 +43,6 @@ const alreadyResolvedOutcome = (
     evidence: decision.evidence,
 });
 
-type GroundingRoute =
-    | { readonly outcome: IssueExecutionOutcome }
-    | { readonly unresolvedResolution: IssueResolutionDecision };
-
 /** Assess one issue, retain the decision, then route it to its concrete workflow. */
 export const makeIssueExecutorService = (
     artifactStores: IssueArtifactStoreService,
@@ -62,47 +58,31 @@ export const makeIssueExecutorService = (
         context: IssueExecutionContext,
         artifacts: Awaited<ReturnType<IssueArtifactStoreService["forIssue"]>>,
         decision: IssueResolutionDecision,
-    ): Promise<GroundingRoute> => {
-        if (decision.status === IssueResolutionStatus.Unresolved) {
-            await artifacts.clearUnresolvedResolutionDecision();
-            await progress?.emit({
-                issue: {
-                    number: context.issue.number,
-                    title: context.issue.title,
-                },
-                stage: "grounding",
-                status: "succeeded",
-                message:
-                    "Fresh verification corrected the tentative already-resolved route; continuing as actionable.",
-                details: {
-                    summary: decision.summary,
-                    evidence: decision.evidence,
-                },
-            });
-            return { unresolvedResolution: decision };
-        }
-        if (!artifacts.has(IssueArtifactKind.IssueResolutionDecision)) {
-            await artifacts.write(IssueArtifactKind.IssueResolutionDecision, {
-                decision,
-                fingerprint: issueFreshnessFingerprint(context.issue),
-            });
-        }
-        return { outcome: alreadyResolvedOutcome(decision) };
+    ): Promise<IssueExecutionOutcome> => {
+        await artifacts.recordResolutionDecision({
+            decision,
+            fingerprint: issueFreshnessFingerprint(context.issue),
+        });
+        return decision.status === IssueResolutionStatus.Resolved
+            ? alreadyResolvedOutcome(decision)
+            : {
+                  kind: IssueExecutionOutcomeKind.Failed,
+                  message: decision.summary,
+              };
     };
 
     const verifyAlreadyResolved = async (
         context: IssueExecutionContext,
         artifacts: Awaited<ReturnType<IssueArtifactStoreService["forIssue"]>>,
-    ): Promise<GroundingRoute> => {
+    ): Promise<IssueExecutionOutcome> => {
         try {
             const result = await resolutionVerification.verify(context);
             if (result.needsAttention !== undefined) {
-                const routed = await routeSignal(
-                    context,
-                    artifacts,
-                    result.needsAttention,
-                );
-                if (routed !== undefined) return { outcome: routed };
+                return {
+                    kind: IssueExecutionOutcomeKind.Failed,
+                    message:
+                        "Fresh resolution verification could not establish that the issue is resolved.",
+                };
             }
             const decision = resolutionVerificationDecisionSchema.parse(
                 result.decision,
@@ -110,10 +90,8 @@ export const makeIssueExecutorService = (
             return await routeResolutionDecision(context, artifacts, decision);
         } catch (error) {
             return {
-                outcome: {
-                    kind: IssueExecutionOutcomeKind.Failed,
-                    message: `Fresh resolution verification failed: ${error instanceof Error ? error.message : String(error)}`,
-                },
+                kind: IssueExecutionOutcomeKind.Failed,
+                message: `Fresh resolution verification failed: ${error instanceof Error ? error.message : String(error)}`,
             };
         }
     };
@@ -151,7 +129,7 @@ export const makeIssueExecutorService = (
     const assessGrounding = async (
         context: IssueExecutionContext,
         artifacts: Awaited<ReturnType<IssueArtifactStoreService["forIssue"]>>,
-    ): Promise<GroundingRoute | undefined> => {
+    ): Promise<IssueExecutionOutcome | undefined> => {
         const fingerprint = issueFreshnessFingerprint(context.issue);
         if (artifacts.has(IssueArtifactKind.NeedsAttentionDecision)) {
             await progress?.emit({
@@ -169,18 +147,16 @@ export const makeIssueExecutorService = (
             );
             const { disposition: _disposition, ...details } = decision;
             return {
-                outcome: {
-                    kind: IssueExecutionOutcomeKind.NeedsAttention,
-                    ...details,
-                    artifactPath: issueArtifactPath(
-                        {
-                            workspace: context.workspace,
-                            runId: context.runId,
-                            repository: context.repository,
-                        },
-                        context.issue.number,
-                    ),
-                },
+                kind: IssueExecutionOutcomeKind.NeedsAttention,
+                ...details,
+                artifactPath: issueArtifactPath(
+                    {
+                        workspace: context.workspace,
+                        runId: context.runId,
+                        repository: context.repository,
+                    },
+                    context.issue.number,
+                ),
             };
         }
         const grounding = await groundingAssessment.assess(context);
@@ -191,7 +167,7 @@ export const makeIssueExecutorService = (
                 artifacts,
                 grounding.needsAttention,
             );
-            if (routed !== undefined) return { outcome: routed };
+            if (routed !== undefined) return routed;
         }
         if (decision.disposition === GroundingDisposition.Actionable) {
             return undefined;
@@ -205,18 +181,16 @@ export const makeIssueExecutorService = (
         });
         const { disposition: _disposition, ...details } = decision;
         return {
-            outcome: {
-                kind: IssueExecutionOutcomeKind.NeedsAttention,
-                ...details,
-                artifactPath: issueArtifactPath(
-                    {
-                        workspace: context.workspace,
-                        runId: context.runId,
-                        repository: context.repository,
-                    },
-                    context.issue.number,
-                ),
-            },
+            kind: IssueExecutionOutcomeKind.NeedsAttention,
+            ...details,
+            artifactPath: issueArtifactPath(
+                {
+                    workspace: context.workspace,
+                    runId: context.runId,
+                    repository: context.repository,
+                },
+                context.issue.number,
+            ),
         };
     };
 
@@ -270,40 +244,19 @@ export const makeIssueExecutorService = (
         );
         const resumed = await resumeNeedsAttention(context, artifacts);
         if (resumed !== undefined) return resumed;
-        const groundingRoute = await assessGrounding(context, artifacts);
-        if (groundingRoute !== undefined && "outcome" in groundingRoute) {
-            return groundingRoute.outcome;
-        }
+        const groundingOutcome = await assessGrounding(context, artifacts);
+        if (groundingOutcome !== undefined) return groundingOutcome;
         const assessed = await assessOrReadDecision(context, artifacts);
         if (!("complexity" in assessed)) return assessed;
-        return await executeAssessedIssue(
-            context,
-            artifacts,
-            assessed,
-            groundingRoute,
-        );
+        return await executeAssessedIssue(context, artifacts, assessed);
     };
 
     const executeAssessedIssue = async (
         context: IssueExecutionContext,
         artifacts: Awaited<ReturnType<IssueArtifactStoreService["forIssue"]>>,
         decision: ComplexityDecision,
-        groundingRoute:
-            | Extract<
-                  GroundingRoute,
-                  { readonly unresolvedResolution: unknown }
-              >
-            | undefined,
     ): Promise<IssueExecutionOutcome> => {
-        const input = {
-            context,
-            artifacts,
-            ...(groundingRoute === undefined
-                ? {}
-                : {
-                      unresolvedResolution: groundingRoute.unresolvedResolution,
-                  }),
-        };
+        const input = { context, artifacts };
         if (decision.complexity >= ComplexityLevel.Level4) {
             return await decompositionExecutor.execute(input);
         }
