@@ -32,7 +32,10 @@ import {
     type IssueExecutionOutcome,
     IssueExecutionOutcomeKind,
 } from "../src/issues/execution.ts";
-import type { IssueExecutorService } from "../src/issues/executor.ts";
+import {
+    makeIssueExecutorService,
+    type IssueExecutorService,
+} from "../src/issues/executor.ts";
 import type { DryRunIssueExecutorService } from "../src/issues/dry-run-executor.ts";
 import type { IssueArtifactStoreService } from "../src/issues/artifacts.ts";
 import { makeIssueArtifactStore } from "../src/issues/artifacts.ts";
@@ -60,7 +63,13 @@ import {
 import { IssueOrder, IssueSort } from "../src/github/issues.ts";
 import type { RalphieRuntime } from "../src/runtime.ts";
 import { RalphieError } from "../src/shared/error.ts";
-import { NeedsAttentionReason } from "../src/issues/decisions.ts";
+import {
+    ComplexityLevel,
+    type GroundingDecision,
+    GroundingDisposition,
+    IssueResolutionStatus,
+    NeedsAttentionReason,
+} from "../src/issues/decisions.ts";
 
 const firstIssue: GitHubIssue = {
     number: 42,
@@ -112,6 +121,7 @@ type TestRuntimeOptions = {
     readonly failPiReadyProgress?: boolean;
     readonly executionContexts?: IssueExecutionContext[];
     readonly executeGate?: (context: IssueExecutionContext) => Promise<void>;
+    readonly issueExecutor?: IssueExecutorService;
     readonly refreshedIssues?: Readonly<Record<number, GitHubIssue>>;
     readonly needsAttentionNotification?: GitHubNeedsAttentionNotificationService;
     readonly dryRunOutcome?: IssueExecutionOutcome;
@@ -120,6 +130,8 @@ type TestRuntimeOptions = {
     readonly parentSubIssues?: ReadonlyArray<GitHubIssue>;
     /** Result of creating or re-reading the matching pull request. */
     readonly prOverride?: GitHubPullRequest;
+    /** Assign a stable fake PR number from its feature branch. */
+    readonly prNumberForHead?: (head: string) => number;
     /** Result of the gate's pre-merge re-read. */
     readonly prReadOverride?: GitHubPullRequest;
     /** Sequential results returned by pull-request reads, in call order. */
@@ -251,10 +263,11 @@ const testRuntime = (
     const pullRequests: GitHubPullRequestService = {
         createOrFind: async (_client, repo, input) => {
             calls.push(`createPullRequest:${repo}:${input.head}:${input.base}`);
+            const number = options.prNumberForHead?.(input.head) ?? 1;
             return (
                 options.prOverride ?? {
-                    number: 1,
-                    url: "https://github.com/owner/repo/pull/1",
+                    number,
+                    url: `https://github.com/owner/repo/pull/${number}`,
                     merged: false,
                     headSha: "feature-head-sha",
                     state: "open",
@@ -340,7 +353,7 @@ const testRuntime = (
     const artifactStore: IssueArtifactStoreService = {
         forIssue: (issueNumber) => makeIssueArtifactStore(issueNumber),
     };
-    const issueExecutor: IssueExecutorService = {
+    const issueExecutor: IssueExecutorService = options.issueExecutor ?? {
         execute: async (context) => {
             options.executionContexts?.push(context);
             if (options.executeGate !== undefined)
@@ -538,6 +551,115 @@ const expectNoIssueWork = (calls: ReadonlyArray<string>): void => {
     ).toEqual([]);
 };
 
+const expectCallOrder = (
+    calls: ReadonlyArray<string>,
+    expected: ReadonlyArray<string>,
+): void => {
+    const expectedCalls = new Set(expected);
+    expect(calls.filter((call) => expectedCalls.has(call))).toEqual([
+        ...expected,
+    ]);
+};
+
+type GroundedRoute = "actionable" | "already-resolved" | "needs-attention";
+
+const groundingDecisionFor = (route: GroundedRoute): GroundingDecision => {
+    switch (route) {
+        case "actionable":
+            return { disposition: GroundingDisposition.Actionable };
+        case "already-resolved":
+            return { disposition: GroundingDisposition.AlreadyResolved };
+        case "needs-attention":
+            return {
+                disposition: GroundingDisposition.NeedsAttention,
+                reason: NeedsAttentionReason.ExternalDependency,
+                summary: "A prerequisite is still open.",
+                evidence: ["Issue body links the open prerequisite."],
+                questions: ["Complete the prerequisite, then retry."],
+            };
+    }
+};
+
+/** Exercise workflow routing through the real issue-executor outcome contract. */
+const groundedRouteExecutor = (
+    calls: string[],
+    routes: Readonly<Record<number, GroundedRoute>>,
+): IssueExecutorService => {
+    const stores = new Map<
+        number,
+        Awaited<ReturnType<typeof makeIssueArtifactStore>>
+    >();
+    const artifacts: IssueArtifactStoreService = {
+        forIssue: async (issueNumber) => {
+            const existing = stores.get(issueNumber);
+            if (existing !== undefined) return existing;
+            const created = await makeIssueArtifactStore(issueNumber);
+            stores.set(issueNumber, created);
+            return created;
+        },
+    };
+    return makeIssueExecutorService(
+        artifacts,
+        {
+            assess: async (context) => {
+                calls.push(`complexity:${context.issue.number}`);
+                return {
+                    decision: {
+                        complexity: ComplexityLevel.Level2,
+                        rationale: "The fixture is directly actionable.",
+                    },
+                    sessionID: `complexity-${context.issue.number}`,
+                };
+            },
+        },
+        {
+            execute: async ({ context }) => {
+                calls.push(`implementation:${context.issue.number}`);
+                if (context.allowMissingRemoteBranch !== true) {
+                    calls.push(
+                        `directPush:${context.issue.number}:${context.targetBranch}`,
+                    );
+                }
+                return {
+                    kind: IssueExecutionOutcomeKind.Completed,
+                    completion: "pushed-commit",
+                    commitSha: `commit-${context.issue.number}`,
+                    reviewCount: 1,
+                };
+            },
+        },
+        {
+            execute: async () => {
+                throw new Error("The route fixture must not decompose");
+            },
+        },
+        {
+            assess: async (context) => {
+                calls.push(`grounding:${context.issue.number}`);
+                return {
+                    decision: groundingDecisionFor(
+                        routes[context.issue.number] ?? "actionable",
+                    ),
+                    sessionID: `grounding-${context.issue.number}`,
+                };
+            },
+        },
+        {
+            verify: async (context) => {
+                calls.push(`verification:${context.issue.number}`);
+                return {
+                    decision: {
+                        status: IssueResolutionStatus.Resolved,
+                        summary: "The requested behavior is already present.",
+                        evidence: ["The focused regression test passes."],
+                    },
+                    sessionID: `verification-${context.issue.number}`,
+                };
+            },
+        },
+    );
+};
+
 const baseOptions = {
     repo: "owner/repo",
     branch: "develop",
@@ -655,6 +777,229 @@ describe("workflow", () => {
             gate: "merged",
         });
     });
+
+    test.each([
+        { name: "lgtm", workflowMode: WorkflowMode.Lgtm },
+        { name: "pr", workflowMode: WorkflowMode.Pr },
+    ])(
+        "safely finalizes grounded outcome routes in $name mode",
+        async ({ workflowMode }) => {
+            const prNumberForHead = (head: string): number =>
+                Number(head.match(/\d+$/)?.[0] ?? 1);
+
+            const actionableCalls: string[] = [];
+            const actionableStates: RunState[] = [];
+            const actionable = await workflow(
+                { ...baseOptions, workflow: workflowMode },
+                testRuntime(actionableCalls, actionableStates, {
+                    issueExecutor: groundedRouteExecutor(actionableCalls, {
+                        42: "actionable",
+                    }),
+                    prNumberForHead,
+                }),
+            );
+
+            expect(actionable.outcomes).toEqual([
+                {
+                    issueNumber: 42,
+                    outcome: {
+                        kind: IssueExecutionOutcomeKind.Completed,
+                        completion: "pushed-commit",
+                        commitSha: "commit-42",
+                        reviewCount: 1,
+                    },
+                },
+            ]);
+            expect(
+                actionableStates.at(-1)?.queue.completedIssueNumbers,
+            ).toEqual([42]);
+            expectCallOrder(actionableCalls, [
+                "refreshIssue:42",
+                "grounding:42",
+                "complexity:42",
+                "implementation:42",
+            ]);
+            if (workflowMode === WorkflowMode.Lgtm) {
+                expect(actionableCalls).toContain("directPush:42:develop");
+                expect(actionableCalls).toContain("closeIssue:42");
+                expect(actionableCalls).not.toContainEqual(
+                    expect.stringContaining("createPullRequest:"),
+                );
+            } else {
+                expect(actionableCalls).toContain(
+                    "pushBranch:ralphie/issue-42",
+                );
+                expect(actionableCalls).toContain(
+                    "createPullRequest:owner/repo:ralphie/issue-42:develop",
+                );
+                expect(actionableCalls).toContain(
+                    "publishReviews:owner/repo:42",
+                );
+                expect(actionableCalls).toContain(
+                    "mergePullRequest:owner/repo:42:feature-head-sha",
+                );
+                expect(actionableCalls).not.toContain("closeIssue:42");
+            }
+
+            const resolvedCalls: string[] = [];
+            const resolvedStates: RunState[] = [];
+            const resolvedEvents: ProgressUpdate[] = [];
+            const resolved = await workflow(
+                { ...baseOptions, workflow: workflowMode },
+                testRuntime(
+                    resolvedCalls,
+                    resolvedStates,
+                    {
+                        issueExecutor: groundedRouteExecutor(resolvedCalls, {
+                            42: "already-resolved",
+                        }),
+                        prNumberForHead,
+                    },
+                    resolvedEvents,
+                ),
+            );
+
+            const resolvedOutcome = {
+                kind: IssueExecutionOutcomeKind.Completed,
+                completion: "already-resolved",
+                resolutionSummary: "The requested behavior is already present.",
+                evidence: ["The focused regression test passes."],
+            } satisfies IssueExecutionOutcome;
+            expect(resolved.outcomes).toEqual([
+                { issueNumber: 42, outcome: resolvedOutcome },
+            ]);
+            expect(resolvedStates.at(-1)?.outcomes).toEqual([
+                { issueNumber: 42, outcome: resolvedOutcome },
+            ]);
+            expect(resolvedCalls).toContain("closeIssue:42");
+            expect(resolvedCalls).not.toContain("directPush:42:develop");
+            expect(resolvedCalls).not.toContain("pushBranch:ralphie/issue-42");
+            expect(resolvedCalls).not.toContainEqual(
+                expect.stringContaining("createPullRequest:"),
+            );
+            expect(resolvedCalls).not.toContainEqual(
+                expect.stringContaining("publishReviews:"),
+            );
+            expect(resolvedCalls).not.toContainEqual(
+                expect.stringContaining("mergePullRequest:"),
+            );
+            expectCallOrder(resolvedCalls, [
+                "refreshIssue:42",
+                "grounding:42",
+                "verification:42",
+                "closeIssue:42",
+            ]);
+            expect(resolvedEvents).toContainEqual(
+                expect.objectContaining({
+                    stage: "issue-closure",
+                    status: "succeeded",
+                    details: { completion: "already-resolved" },
+                }),
+            );
+
+            const needsAttentionCalls: string[] = [];
+            const needsAttentionStates: RunState[] = [];
+            const needsAttentionEvents: ProgressUpdate[] = [];
+            const needsAttention = await workflow(
+                {
+                    ...baseOptions,
+                    workflow: workflowMode,
+                    maxIssues: 2,
+                },
+                testRuntime(
+                    needsAttentionCalls,
+                    needsAttentionStates,
+                    {
+                        issueLists: [[firstIssue, secondIssue]],
+                        issueExecutor: groundedRouteExecutor(
+                            needsAttentionCalls,
+                            { 42: "needs-attention", 43: "actionable" },
+                        ),
+                        prNumberForHead,
+                    },
+                    needsAttentionEvents,
+                ),
+            );
+
+            expect(
+                needsAttention.outcomes.map(({ issueNumber }) => issueNumber),
+            ).toEqual([42, 43]);
+            expect(
+                needsAttention.counts[IssueExecutionOutcomeKind.NeedsAttention],
+            ).toBe(1);
+            const finalNeedsAttentionState = needsAttentionStates.at(-1);
+            expect(
+                finalNeedsAttentionState?.queue.completedIssueNumbers,
+            ).toEqual([43]);
+            expect(finalNeedsAttentionState?.queue.processedCount).toBe(2);
+            expect(
+                finalNeedsAttentionState?.outcomes.find(
+                    ({ issueNumber }) => issueNumber === 42,
+                ),
+            ).toMatchObject({
+                issueNumber: 42,
+                outcome: {
+                    kind: IssueExecutionOutcomeKind.NeedsAttention,
+                    reason: NeedsAttentionReason.ExternalDependency,
+                    summary: "A prerequisite is still open.",
+                    evidence: ["Issue body links the open prerequisite."],
+                    questions: ["Complete the prerequisite, then retry."],
+                    artifactPath: expect.any(String),
+                },
+            });
+            expect(needsAttentionCalls).not.toContain("closeIssue:42");
+            expect(needsAttentionCalls).not.toContain("directPush:42:develop");
+            expect(needsAttentionCalls).not.toContain(
+                "pushBranch:ralphie/issue-42",
+            );
+            expect(needsAttentionCalls).not.toContain(
+                "createPullRequest:owner/repo:ralphie/issue-42:develop",
+            );
+            expect(needsAttentionCalls).not.toContain(
+                "publishReviews:owner/repo:42",
+            );
+            expect(needsAttentionCalls).not.toContainEqual(
+                expect.stringContaining("mergePullRequest:owner/repo:42:"),
+            );
+            expectCallOrder(needsAttentionCalls, [
+                "refreshIssue:42",
+                "grounding:42",
+                "refreshIssue:43",
+                "grounding:43",
+            ]);
+            expect(needsAttentionEvents).toContainEqual(
+                expect.objectContaining({
+                    issue: { number: 42, title: "Test issue" },
+                    stage: "grounding",
+                    status: "needs-attention",
+                    details: expect.objectContaining({
+                        reason: NeedsAttentionReason.ExternalDependency,
+                        summary: "A prerequisite is still open.",
+                        evidence: ["Issue body links the open prerequisite."],
+                        questions: ["Complete the prerequisite, then retry."],
+                        artifactPath: expect.any(String),
+                    }),
+                }),
+            );
+            if (workflowMode === WorkflowMode.Lgtm) {
+                expect(needsAttentionCalls).toContain("directPush:43:develop");
+                expect(needsAttentionCalls).toContain("closeIssue:43");
+            } else {
+                expect(needsAttentionCalls).toContain(
+                    "pushBranch:ralphie/issue-43",
+                );
+                expect(needsAttentionCalls).toContain(
+                    "createPullRequest:owner/repo:ralphie/issue-43:develop",
+                );
+                expect(needsAttentionCalls).toContain(
+                    "publishReviews:owner/repo:43",
+                );
+                expect(needsAttentionCalls).toContain(
+                    "mergePullRequest:owner/repo:43:feature-head-sha",
+                );
+            }
+        },
+    );
 
     test("keeps the feature branch and PR and persists an active gate when checks fail", async () => {
         const calls: string[] = [];
@@ -2238,6 +2583,67 @@ describe("workflow", () => {
         expect(resumedStates.at(-1)?.onNeedsAttention).toBe(
             NeedsAttentionPolicy.Continue,
         );
+    });
+
+    test("resumes a saved verified closure without rerunning grounding or verification", async () => {
+        const failedCalls: string[] = [];
+        const failedStates: RunState[] = [];
+        await expect(
+            workflow(
+                baseOptions,
+                testRuntime(failedCalls, failedStates, {
+                    issueExecutor: groundedRouteExecutor(failedCalls, {
+                        42: "already-resolved",
+                    }),
+                    closeFailure: new RalphieError({
+                        message: "close response lost",
+                    }),
+                }),
+            ),
+        ).rejects.toThrow("close response lost");
+
+        const resumeState = failedStates.at(-1);
+        if (resumeState === undefined)
+            throw new Error("Missing resumable state");
+        expect(resumeState.activeIssue).toEqual({
+            issueNumber: 42,
+            stage: "issue-closure",
+        });
+        expect(resumeState.outcomes).toEqual([
+            {
+                issueNumber: 42,
+                outcome: {
+                    kind: IssueExecutionOutcomeKind.Completed,
+                    completion: "already-resolved",
+                    resolutionSummary:
+                        "The requested behavior is already present.",
+                    evidence: ["The focused regression test passes."],
+                },
+            },
+        ]);
+
+        const resumedCalls: string[] = [];
+        const resumedStates: RunState[] = [];
+        const summary = await workflow(
+            { ...baseOptions, resumeState },
+            testRuntime(resumedCalls, resumedStates, {
+                issueExecutor: groundedRouteExecutor(resumedCalls, {
+                    42: "actionable",
+                }),
+                issueLists: [[]],
+                captureStart: 1,
+            }),
+        );
+
+        expect(summary.counts.completed).toBe(1);
+        expect(resumedCalls).toContain("refreshIssue:42");
+        expect(resumedCalls).toContain("closeIssue:42");
+        expect(resumedCalls).not.toContain("grounding:42");
+        expect(resumedCalls).not.toContain("verification:42");
+        expect(resumedCalls).not.toContain("complexity:42");
+        expect(resumedCalls).not.toContain("implementation:42");
+        expect(resumedStates.at(-1)?.outcomes).toHaveLength(1);
+        expect(resumedStates.at(-1)?.status).toBe(RunStateStatus.Complete);
     });
 
     test("refreshes the queue after decomposition and runs a new child within budget", async () => {
