@@ -8,8 +8,8 @@ import {
     renderBreadcrumbLine,
 } from "../../src/progress/breadcrumb-label.ts";
 import type { BreadcrumbLabelCandidate } from "../../src/progress/breadcrumb-label.ts";
-import type { PiSessionEvent } from "../../src/pi/client.ts";
-import { makePiTranscriptRenderer } from "../../src/progress/transcript.ts";
+import type { CodexSessionEvent } from "../../src/codex/client.ts";
+import { makeCodexTranscriptRenderer } from "../../src/progress/transcript.ts";
 
 const context = {
     sessionID: "session-1",
@@ -17,7 +17,7 @@ const context = {
     title: "Task",
 };
 
-const event = (value: unknown): PiSessionEvent => value as PiSessionEvent;
+const event = (value: unknown): CodexSessionEvent => value as CodexSessionEvent;
 
 const displayState: DisplayState = {
     repository: "owner/repo",
@@ -94,7 +94,7 @@ describe("breadcrumb labels", () => {
 describe("breadcrumb transcript insertion", () => {
     test("resumes an incomplete stream through the transcript boundary", () => {
         let output = "";
-        const render = makePiTranscriptRenderer({
+        const render = makeCodexTranscriptRenderer({
             write: (text) => {
                 output += text;
             },
@@ -132,7 +132,7 @@ describe("breadcrumb transcript insertion", () => {
 
         expect(prepared.canonicalKey).toBe("› Using Bearer [REDACTED]");
         expect(output).toBe(
-            "╭─ Pi · Task · session-1\n" +
+            "╭─ Codex · Task · session-1\n" +
                 "│\n" +
                 "│  ✦ assistant before\n" +
                 "│  › Using Bearer [REDACTED]\n" +

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import type { PiClient } from "../../src/pi/client.ts";
+import type { CodexClient } from "../../src/codex/client.ts";
 import type { Octokit } from "octokit";
 
 import {
@@ -20,7 +20,7 @@ import { makeIssueExecutorService } from "../../src/issues/executor.ts";
 import { makeGitHubIssueMutationsService } from "../../src/github/issue-mutations.ts";
 import { makeGitHubIssuesService } from "../../src/github/issues.ts";
 import { makeGitHubIssueRelationshipService } from "../../src/github/issue-relationships.ts";
-import { makePiSessionDiagnostics } from "../../src/agent/task-session.ts";
+import { makeCodexSessionDiagnostics } from "../../src/agent/task-session.ts";
 import {
     makeProgressRecorder,
     type ProgressUpdate,
@@ -223,14 +223,14 @@ const makeOctokit = () => {
     return { client, issues, requests, subIssues, blockedBy };
 };
 
-const pi = {
+const codex = {
     session: {
         create: async () => ({ data: { id: "decomposition-session" } }),
         prompt: async () => ({
             data: { info: { structured: breakdown }, parts: [] },
         }),
     },
-} as unknown as PiClient;
+} as unknown as CodexClient;
 
 const context = (octokit: Octokit): IssueExecutionContext => ({
     issue: {
@@ -251,9 +251,9 @@ const context = (octokit: Octokit): IssueExecutionContext => ({
     workspace: "/tmp/ralphie-local-decomposition-workspace",
     runId: "local-decomposition-e2e",
     octokit,
-    pi,
-    piSelection: { agent: "build" },
-    piDiagnostics: makePiSessionDiagnostics(() => "now"),
+    codex,
+    codexSelection: { agent: "build" },
+    codexDiagnostics: makeCodexSessionDiagnostics(() => "now"),
     repositoryInvariant: {
         capture: async () => ({ branch: "main", head: "abc123" }),
         verify: async () => {},

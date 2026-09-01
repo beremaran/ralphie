@@ -8,12 +8,12 @@ import {
     IssueResolutionStatus,
 } from "./decisions.ts";
 import type { IssueExecutionContext } from "./execution.ts";
-import type { PiNeedsAttentionRequest } from "../agent/task-session.ts";
+import type { CodexNeedsAttentionRequest } from "../agent/task-session.ts";
 
 export type ResolutionVerificationResult = {
     readonly decision: ResolutionVerificationDecision;
     readonly sessionID: string;
-    readonly needsAttention?: PiNeedsAttentionRequest;
+    readonly needsAttention?: CodexNeedsAttentionRequest;
 };
 
 export type ResolutionVerificationService = {
@@ -54,7 +54,7 @@ export const makeResolutionVerificationService = (
                     message: `Resolution verification requires branch ${context.targetBranch}, but checkout is on ${checkpoint.branch}.`,
                 });
             }
-            const result = await requestStructuredOutput(context.pi, {
+            const result = await requestStructuredOutput(context.codex, {
                 directory: context.repositoryPath,
                 title: `Verify resolution of issue #${context.issue.number}`,
                 prompt: buildResolutionVerificationPrompt({
@@ -63,11 +63,11 @@ export const makeResolutionVerificationService = (
                     targetBranch: context.targetBranch,
                 }),
                 schema: resolutionVerificationDecisionSchema,
-                agent: context.piSelection.agent,
-                model: context.piSelection.model,
-                variant: context.piSelection.variant,
+                agent: context.codexSelection.agent,
+                model: context.codexSelection.model,
+                variant: context.codexSelection.variant,
                 runId: context.runId,
-                diagnostics: context.piDiagnostics,
+                diagnostics: context.codexDiagnostics,
                 repositoryInvariant: checkpoint,
                 verifyRepositoryInvariant: context.repositoryInvariant.verify,
                 progress,

@@ -33,7 +33,7 @@ Useful individual commands:
 | `bun run package:inspect` | Inspect the local `npm pack --dry-run` file list without installing it. |
 | `bun run package:stage -- --version <version> --commit-sha <sha> --output-dir <dir>` | Build and validate release package and installer staging inputs without publishing. |
 | `env -u GH_TOKEN -u GITHUB_TOKEN bun run verify:public-distribution` | Verify the public repository, release assets, installer, formula, OCI image, and license anonymously (requires `sigstore`). |
-| `bun run probe:structured-output` | Exercise a real schema-validated Pi decision. |
+| `bun run probe:structured-output` | Exercise a real schema-validated Codex decision. |
 
 The package check builds an actual tarball, verifies its allowlist, installs it
 with `npm install --omit=dev` in a fresh project, and invokes the installed bin
@@ -90,7 +90,7 @@ host with the native sub-issues and dependencies endpoints and a token with
 issue write permission.
 
 The normal `bun run test` suite includes local end-to-end tests that build
-temporary Git repositories with a stubbed Pi client; they do not need network
+temporary Git repositories with a stubbed Codex client; they do not need network
 access or credentials.
 
 ## Contribution expectations

@@ -11,12 +11,12 @@ import {
     type ComplexityDecision,
 } from "./decisions.ts";
 import type { IssueExecutionContext } from "./execution.ts";
-import type { PiNeedsAttentionRequest } from "../agent/task-session.ts";
+import type { CodexNeedsAttentionRequest } from "../agent/task-session.ts";
 
 export type ComplexityAssessmentResult = {
     readonly decision: ComplexityDecision;
     readonly sessionID: string;
-    readonly needsAttention?: PiNeedsAttentionRequest;
+    readonly needsAttention?: CodexNeedsAttentionRequest;
 };
 
 export type ComplexityAssessmentService = {
@@ -55,7 +55,7 @@ export const makeComplexityAssessmentService = (
                 });
             }
 
-            const result = await requestStructuredOutput(context.pi, {
+            const result = await requestStructuredOutput(context.codex, {
                 directory: context.repositoryPath,
                 title: `Assess issue #${context.issue.number}`,
                 prompt: buildComplexityPrompt({
@@ -64,13 +64,13 @@ export const makeComplexityAssessmentService = (
                     targetBranch: context.targetBranch,
                 }),
                 schema: complexityDecisionSchema,
-                agent: context.piSelection.agent,
-                model: context.piSelection.model,
+                agent: context.codexSelection.agent,
+                model: context.codexSelection.model,
                 variant:
-                    context.piStageVariants?.complexity ??
-                    context.piSelection.variant,
+                    context.codexStageVariants?.complexity ??
+                    context.codexSelection.variant,
                 runId: context.runId,
-                diagnostics: context.piDiagnostics,
+                diagnostics: context.codexDiagnostics,
                 verifyAfter: () =>
                     context.repositoryInvariant.verify(
                         context.repositoryPath,

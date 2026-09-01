@@ -7,7 +7,7 @@ import {
     type IssueCheckpoint,
 } from "../git/issue-checkpoint.ts";
 import type { GitRepositoryInvariantService } from "../git/repository-invariant.ts";
-import type { PiNeedsAttentionRequest } from "../agent/task-session.ts";
+import type { CodexNeedsAttentionRequest } from "../agent/task-session.ts";
 import type { GitHubIssue } from "../github/issues.ts";
 import {
     type ProgressStage,
@@ -70,9 +70,9 @@ export type NeedsAttentionRecoveryInput = {
     /** The grounding decision that confirmed the agent's request. */
     readonly decision: NeedsAttentionDecision;
     /** The original bounded request from the mutating agent, when available. */
-    readonly request?: PiNeedsAttentionRequest;
+    readonly request?: CodexNeedsAttentionRequest;
     /** Compatibility name for callers that retain the agent terminology. */
-    readonly agentRequest?: PiNeedsAttentionRequest;
+    readonly agentRequest?: CodexNeedsAttentionRequest;
     /** May be supplied by callers when the service was assembled without one. */
     readonly repositoryInvariant?: GitRepositoryInvariantService;
 };

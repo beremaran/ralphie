@@ -187,9 +187,9 @@ const stateCheck = (
 
 const makeRuntime = () =>
     makeLiveRuntime({
-        pi: {
+        codex: {
             start: async () => {
-                throw new Error("Pi must not start for a snapshot read");
+                throw new Error("Codex must not start for a snapshot read");
             },
         },
         progress: makeProgressRecorder([]),

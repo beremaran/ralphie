@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import type { Octokit } from "octokit";
-import type { PiClient } from "../../src/pi/client.ts";
+import type { CodexClient } from "../../src/codex/client.ts";
 
-import { makePiSessionDiagnostics } from "../../src/agent/task-session.ts";
+import { makeCodexSessionDiagnostics } from "../../src/agent/task-session.ts";
 import {
     type GroundingDecision,
     GroundingDisposition,
@@ -49,7 +49,7 @@ describe("issue grounding", () => {
                     data: { info: assistantInfo(decision), parts: [] },
                 }),
             },
-        } as unknown as PiClient;
+        } as unknown as CodexClient;
         const context: IssueExecutionContext = {
             issue: {
                 number: 42,
@@ -64,9 +64,9 @@ describe("issue grounding", () => {
             workspace: "/workspace",
             runId: "run-1",
             octokit: {} as Octokit,
-            pi: client,
-            piSelection: { agent: "build" },
-            piDiagnostics: makePiSessionDiagnostics(),
+            codex: client,
+            codexSelection: { agent: "build" },
+            codexDiagnostics: makeCodexSessionDiagnostics(),
             repositoryInvariant: {
                 capture: async () => ({ branch: "main", head: "abc123" }),
                 verify: async () => {

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import type { PiSessionEvent } from "../../src/pi/client.ts";
+import type { CodexSessionEvent } from "../../src/codex/client.ts";
 import type { FooterTimer } from "../../src/progress/footer.ts";
 import { makeProgressCoordinator } from "../../src/progress/coordinator.ts";
 import type { TerminalOutputStrategy } from "../../src/progress/terminal-controller.ts";
@@ -11,7 +11,7 @@ const context = {
     title: "Task",
 };
 
-const event = (value: unknown): PiSessionEvent => value as PiSessionEvent;
+const event = (value: unknown): CodexSessionEvent => value as CodexSessionEvent;
 
 const makeBreadcrumbCoordinator = (threshold = 4) => {
     let output = "";
@@ -155,7 +155,7 @@ describe("progress output coordinator", () => {
         coordinator.listener(event({ type: "agent_start" }), context);
 
         expect(output).toContain(
-            "╭─ Pi · Task · session-1 · owner/repo · issue 2/4 · #56 · Addressing review findings · attempt 1/3\n",
+            "╭─ Codex · Task · session-1 · owner/repo · issue 2/4 · #56 · Addressing review findings · attempt 1/3\n",
         );
     });
 
@@ -203,7 +203,7 @@ describe("progress output coordinator", () => {
         );
 
         expect(output).toContain(
-            "◐ › Implementing changes › Waiting · 0s\r\x1b[2K╭─ Pi · Task · session-1 · Implementing changes\n",
+            "◐ › Implementing changes › Waiting · 0s\r\x1b[2K╭─ Codex · Task · session-1 · Implementing changes\n",
         );
         expect(output).toContain("│  ✦ assistant partial token");
         expect(output).toContain("• Still working.");
@@ -211,7 +211,7 @@ describe("progress output coordinator", () => {
         expect(output).not.toContain("◐ Implementing...");
     });
 
-    test("interrupts a partial Pi chunk before a subsequent event", async () => {
+    test("interrupts a partial Codex chunk before a subsequent event", async () => {
         let output = "";
         const coordinator = makeProgressCoordinator({
             mode: "interactive",
@@ -246,7 +246,7 @@ describe("progress output coordinator", () => {
         await coordinator.dispose();
     });
 
-    test("keeps the sticky footer aligned with nested stages and Pi activity", async () => {
+    test("keeps the sticky footer aligned with nested stages and Codex activity", async () => {
         const timer = makeFooterTimer();
         const surface = makeFooterSurface();
         const issue = { number: 63, title: "Footer coordinator" };
@@ -596,7 +596,7 @@ describe("progress output coordinator", () => {
         expect(output).not.toContain("\n\n");
     });
 
-    test("keeps JSON output as lossless progress and Pi JSON Lines", async () => {
+    test("keeps JSON output as lossless progress and Codex JSON Lines", async () => {
         let output = "";
         const coordinator = makeProgressCoordinator({
             mode: "json",
@@ -696,7 +696,7 @@ describe("progress output coordinator", () => {
             },
         });
         expect(lines[2]).toMatchObject({
-            type: "pi_event",
+            type: "codex_event",
             event: { type: "turn_start" },
         });
         expect(output).not.toContain("╭─");
@@ -917,7 +917,7 @@ describe("progress output coordinator", () => {
 
     test("covers every summarization retry boundary and source variant", () => {
         const events: ReadonlyArray<{
-            readonly event: PiSessionEvent;
+            readonly event: CodexSessionEvent;
             readonly label: string;
         }> = [
             {

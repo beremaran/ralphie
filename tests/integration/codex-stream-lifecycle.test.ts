@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 
-import type { PiEventContext, PiSessionEvent } from "../../src/pi/client.ts";
+import type {
+    CodexEventContext,
+    CodexSessionEvent,
+} from "../../src/codex/client.ts";
 import {
     makeCommandRuntimeHarness,
     type CommandRuntimeHarnessStep,
@@ -10,28 +13,28 @@ const SECRET = "github_pat_pi_stream_contract_secret";
 const REPOSITORY = `owner/repository?token=${SECRET}`;
 const ISSUE = {
     number: 191,
-    title: `Implement the Pi stream contract ${SECRET}`,
+    title: `Implement the Codex stream contract ${SECRET}`,
 };
-const firstContext: PiEventContext = {
-    sessionID: "pi-stream-first-session",
-    directory: `/tmp/pi-stream/${SECRET}`,
-    title: `First Pi context ${SECRET}`,
+const firstContext: CodexEventContext = {
+    sessionID: "codex-stream-first-session",
+    directory: `/tmp/codex-stream/${SECRET}`,
+    title: `First Codex context ${SECRET}`,
 };
-const secondContext: PiEventContext = {
-    sessionID: "pi-stream-retry-session",
-    directory: `/tmp/pi-stream-retry/${SECRET}`,
-    title: `Retry Pi context ${SECRET}`,
+const secondContext: CodexEventContext = {
+    sessionID: "codex-stream-retry-session",
+    directory: `/tmp/codex-stream-retry/${SECRET}`,
+    title: `Retry Codex context ${SECRET}`,
 };
 
-const pi = (event: object): PiSessionEvent =>
-    event as unknown as PiSessionEvent;
+const codex = (event: object): CodexSessionEvent =>
+    event as unknown as CodexSessionEvent;
 
-const piStep = (
+const codexStep = (
     event: object,
-    context: PiEventContext = firstContext,
+    context: CodexEventContext = firstContext,
 ): CommandRuntimeHarnessStep => ({
-    kind: "pi",
-    event: pi(event),
+    kind: "codex",
+    event: codex(event),
     context,
 });
 
@@ -61,27 +64,27 @@ const lifecycleSteps = (): ReadonlyArray<CommandRuntimeHarnessStep> => {
         `CUMULATIVE-TOOL-CHUNK ${SECRET}\n` + "x".repeat(2_500);
     return [
         progressStep("started", `Implementing ${SECRET}`),
-        piStep({ type: "agent_start" }),
-        piStep({
+        codexStep({ type: "agent_start" }),
+        codexStep({
             type: "message_update",
             assistantMessageEvent: { type: "thinking_start" },
         }),
-        piStep({
+        codexStep({
             type: "message_update",
             assistantMessageEvent: {
                 type: "thinking_delta",
                 delta: `thinking ${SECRET}`,
             },
         }),
-        piStep({
+        codexStep({
             type: "message_update",
             assistantMessageEvent: { type: "thinking_end" },
         }),
-        piStep({
+        codexStep({
             type: "message_update",
             assistantMessageEvent: { type: "text_start" },
         }),
-        piStep({
+        codexStep({
             type: "message_update",
             assistantMessageEvent: {
                 type: "text_delta",
@@ -89,81 +92,81 @@ const lifecycleSteps = (): ReadonlyArray<CommandRuntimeHarnessStep> => {
             },
         }),
         progressStep("info", `progress interrupts ${SECRET}`),
-        piStep({
+        codexStep({
             type: "message_update",
             assistantMessageEvent: {
                 type: "text_delta",
                 delta: " resumed\nthreshold row 1\nthreshold row 2",
             },
         }),
-        piStep({
+        codexStep({
             type: "message_update",
             assistantMessageEvent: { type: "text_end" },
         }),
-        piStep({
+        codexStep({
             type: "tool_execution_start",
-            toolCallId: "pi-stream-tool",
+            toolCallId: "codex-stream-tool",
             toolName: "read",
             args: { path: `/tmp/${SECRET}` },
         }),
-        piStep({
+        codexStep({
             type: "tool_execution_update",
-            toolCallId: "pi-stream-tool",
+            toolCallId: "codex-stream-tool",
             toolName: "read",
             partialResult: {
                 content: `CUMULATIVE-TOOL-CHUNK ${SECRET}`,
             },
         }),
-        piStep({
+        codexStep({
             type: "tool_execution_update",
-            toolCallId: "pi-stream-tool",
+            toolCallId: "codex-stream-tool",
             toolName: "read",
             partialResult: {
                 content: `CUMULATIVE-TOOL-CHUNK ${SECRET}`,
             },
         }),
-        piStep({
+        codexStep({
             type: "tool_execution_update",
-            toolCallId: "pi-stream-tool",
+            toolCallId: "codex-stream-tool",
             toolName: "read",
             partialResult: { content: cumulativeToolOutput },
         }),
-        piStep({
+        codexStep({
             type: "tool_execution_end",
-            toolCallId: "pi-stream-tool",
+            toolCallId: "codex-stream-tool",
             toolName: "read",
             result: { content: cumulativeToolOutput },
             isError: false,
         }),
-        piStep({ type: "compaction_start", reason: `threshold ${SECRET}` }),
-        piStep({
+        codexStep({ type: "compaction_start", reason: `threshold ${SECRET}` }),
+        codexStep({
             type: "compaction_end",
             aborted: false,
             errorMessage: undefined,
         }),
-        piStep({
+        codexStep({
             type: "summarization_retry_scheduled",
             attempt: 1,
             maxAttempts: 2,
             delayMs: 0,
         }),
-        piStep({
+        codexStep({
             type: "summarization_retry_attempt_start",
             attempt: 1,
             maxAttempts: 2,
         }),
-        piStep({ type: "summarization_retry_finished" }),
-        piStep({ type: "agent_end", messages: [], willRetry: true }),
-        piStep({
+        codexStep({ type: "summarization_retry_finished" }),
+        codexStep({ type: "agent_end", messages: [], willRetry: true }),
+        codexStep({
             type: "auto_retry_start",
             attempt: 2,
             maxAttempts: 3,
             delayMs: 0,
             errorMessage: `retrying ${SECRET}`,
         }),
-        piStep({ type: "auto_retry_end", attempt: 2, success: true }),
-        piStep({ type: "agent_start" }, secondContext),
-        piStep(
+        codexStep({ type: "auto_retry_end", attempt: 2, success: true }),
+        codexStep({ type: "agent_start" }, secondContext),
+        codexStep(
             {
                 type: "message_update",
                 assistantMessageEvent: {
@@ -173,11 +176,11 @@ const lifecycleSteps = (): ReadonlyArray<CommandRuntimeHarnessStep> => {
             },
             secondContext,
         ),
-        piStep(
+        codexStep(
             { type: "agent_end", messages: [], willRetry: false },
             secondContext,
         ),
-        piStep({ type: "agent_settled" }, secondContext),
+        codexStep({ type: "agent_settled" }, secondContext),
     ];
 };
 
@@ -207,24 +210,24 @@ const breadcrumbLabels = (text: string): Array<string> =>
         .map((line) => line.slice(line.lastIndexOf(" › ") + 3));
 
 const thresholdBoundarySteps = (): ReadonlyArray<CommandRuntimeHarnessStep> => [
-    piStep({ type: "agent_start" }),
-    piStep({
+    codexStep({ type: "agent_start" }),
+    codexStep({
         type: "message_update",
         assistantMessageEvent: { type: "text_start" },
     }),
-    piStep({
+    codexStep({
         type: "message_update",
         assistantMessageEvent: {
             type: "text_delta",
             delta: "boundary one\nboundary two",
         },
     }),
-    piStep({
+    codexStep({
         type: "message_update",
         assistantMessageEvent: { type: "text_end" },
     }),
-    piStep({ type: "compaction_start", reason: "boundary" }),
-    piStep({ type: "agent_settled" }),
+    codexStep({ type: "compaction_start", reason: "boundary" }),
+    codexStep({ type: "agent_settled" }),
 ];
 
 const displayAtThreshold = async (
@@ -245,8 +248,8 @@ const displayAtThreshold = async (
     }
 };
 
-describe("Pi stream lifecycle command/runtime contract", () => {
-    test("renders and persists a successful retrying Pi stream end to end", async () => {
+describe("Codex stream lifecycle command/runtime contract", () => {
+    test("renders and persists a successful retrying Codex stream end to end", async () => {
         const previousExitCode = process.exitCode;
         const harness = makeCommandRuntimeHarness({
             steps: lifecycleSteps(),
@@ -273,10 +276,10 @@ describe("Pi stream lifecycle command/runtime contract", () => {
             expect(structured).not.toContain(SECRET);
 
             const firstHeader =
-                "╭─ Pi · First Pi context [REDACTED] · pi-stream-first-session · " +
+                "╭─ Codex · First Codex context [REDACTED] · codex-stream-first-session · " +
                 "owner/repository?token=[REDACTED] · issue 1/1 · #191 · Implementing changes\n";
             const retryHeader =
-                "╭─ Pi · Retry Pi context [REDACTED] · pi-stream-retry-session · " +
+                "╭─ Codex · Retry Codex context [REDACTED] · codex-stream-retry-session · " +
                 "owner/repository?token=[REDACTED] · issue 1/1 · #191 · Implementing changes\n";
             expect(display).toContain(firstHeader);
             expect(display).toContain(retryHeader);
@@ -293,8 +296,8 @@ describe("Pi stream lifecycle command/runtime contract", () => {
                 "↻ retrying context summary\n",
                 "↻ context summary finished\n",
                 "╰─ retrying…\n",
-                "↻ retrying Pi request · attempt 2/3\n",
-                "↻ Pi retry succeeded\n",
+                "↻ retrying Codex request · attempt 2/3\n",
+                "↻ Codex retry succeeded\n",
                 "╰─ interrupted\n",
                 retryHeader,
                 "╰─ done\n",
@@ -385,13 +388,13 @@ describe("Pi stream lifecycle command/runtime contract", () => {
             ]);
 
             const structuredRecords = parseJsonLines(structured);
-            const piRecords = structuredRecords.filter(
-                (record) => record.type === "pi_event",
+            const codexRecords = structuredRecords.filter(
+                (record) => record.type === "codex_event",
             );
             expect(structuredRecords).toHaveLength(lifecycleSteps().length);
-            expect(piRecords).toHaveLength(25);
+            expect(codexRecords).toHaveLength(25);
             expect(
-                piRecords.map(
+                codexRecords.map(
                     (record) => (record.event as { type?: string }).type,
                 ),
             ).toEqual([
@@ -424,15 +427,16 @@ describe("Pi stream lifecycle command/runtime contract", () => {
             expect(structuredRecords[0]).toMatchObject({
                 repository: "owner/repository?token=[REDACTED]",
                 issue: {
-                    title: "Implement the Pi stream contract [REDACTED]",
+                    title: "Implement the Codex stream contract [REDACTED]",
                 },
                 details: {
                     repository: "owner/repository?token=[REDACTED]",
-                    issueTitle: "Implement the Pi stream contract [REDACTED]",
+                    issueTitle:
+                        "Implement the Codex stream contract [REDACTED]",
                     secret: "[REDACTED]",
                 },
             });
-            const thinkingRecord = piRecords.find(
+            const thinkingRecord = codexRecords.find(
                 (record) =>
                     (
                         record.event as {
@@ -442,15 +446,15 @@ describe("Pi stream lifecycle command/runtime contract", () => {
             );
             expect(thinkingRecord).toMatchObject({
                 sessionID: firstContext.sessionID,
-                directory: "/tmp/pi-stream/[REDACTED]",
-                title: "First Pi context [REDACTED]",
+                directory: "/tmp/codex-stream/[REDACTED]",
+                title: "First Codex context [REDACTED]",
                 event: {
                     assistantMessageEvent: {
                         type: "thinking_start",
                     },
                 },
             });
-            const thinkingDeltaRecord = piRecords.find(
+            const thinkingDeltaRecord = codexRecords.find(
                 (record) =>
                     (record.event as { type?: string }).type ===
                         "message_update" &&
@@ -467,18 +471,18 @@ describe("Pi stream lifecycle command/runtime contract", () => {
                     },
                 },
             });
-            const toolRecord = piRecords.find(
+            const toolRecord = codexRecords.find(
                 (record) =>
                     (record.event as { type?: string }).type ===
                     "tool_execution_start",
             );
             expect(toolRecord).toMatchObject({
-                directory: "/tmp/pi-stream/[REDACTED]",
+                directory: "/tmp/codex-stream/[REDACTED]",
                 event: {
                     args: { path: "/tmp/[REDACTED]" },
                 },
             });
-            const toolUpdateRecord = piRecords.find(
+            const toolUpdateRecord = codexRecords.find(
                 (record) =>
                     (record.event as { type?: string }).type ===
                         "tool_execution_update" &&
@@ -491,23 +495,23 @@ describe("Pi stream lifecycle command/runtime contract", () => {
                     },
                 },
             });
-            expect(piRecords.map((record) => record.event)).toEqual(
+            expect(codexRecords.map((record) => record.event)).toEqual(
                 expect.arrayContaining([
                     expect.objectContaining({ type: "agent_end" }),
                     expect.objectContaining({ type: "auto_retry_start" }),
                     expect.objectContaining({ type: "auto_retry_end" }),
                 ]),
             );
-            const retryRecord = piRecords.find(
+            const retryRecord = codexRecords.find(
                 (record) =>
                     (record as { sessionID?: unknown }).sessionID ===
                     secondContext.sessionID,
             );
             expect(retryRecord).toMatchObject({
-                directory: "/tmp/pi-stream-retry/[REDACTED]",
-                title: "Retry Pi context [REDACTED]",
+                directory: "/tmp/codex-stream-retry/[REDACTED]",
+                title: "Retry Codex context [REDACTED]",
             });
-            for (const record of piRecords) {
+            for (const record of codexRecords) {
                 expect(record).not.toHaveProperty(
                     "directory",
                     secondContext.directory,
@@ -524,22 +528,24 @@ describe("Pi stream lifecycle command/runtime contract", () => {
                 repository: "owner/repository?token=[REDACTED]",
                 issue: {
                     number: 191,
-                    title: "Implement the Pi stream contract [REDACTED]",
+                    title: "Implement the Codex stream contract [REDACTED]",
                 },
                 details: {
                     repository: "owner/repository?token=[REDACTED]",
-                    issueTitle: "Implement the Pi stream contract [REDACTED]",
+                    issueTitle:
+                        "Implement the Codex stream contract [REDACTED]",
                     secret: "[REDACTED]",
                 },
             });
             expect(durableRecords[1]).toMatchObject({
                 repository: "owner/repository?token=[REDACTED]",
                 issue: {
-                    title: "Implement the Pi stream contract [REDACTED]",
+                    title: "Implement the Codex stream contract [REDACTED]",
                 },
                 details: {
                     repository: "owner/repository?token=[REDACTED]",
-                    issueTitle: "Implement the Pi stream contract [REDACTED]",
+                    issueTitle:
+                        "Implement the Codex stream contract [REDACTED]",
                     secret: "[REDACTED]",
                 },
                 message: "progress interrupts [REDACTED]",

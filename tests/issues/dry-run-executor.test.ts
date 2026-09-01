@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { Octokit } from "octokit";
-import type { PiClient } from "../../src/pi/client.ts";
+import type { CodexClient } from "../../src/codex/client.ts";
 
 import {
     IssueArtifactKind,
@@ -50,9 +50,9 @@ const context = (number: number): IssueExecutionContext => ({
     workspace: "/workspace",
     runId: "dry-run",
     octokit: {} as Octokit,
-    pi: {} as PiClient,
-    piSelection: { agent: "build" },
-    piDiagnostics: { record: () => undefined, list: () => [] },
+    codex: {} as CodexClient,
+    codexSelection: { agent: "build" },
+    codexDiagnostics: { record: () => undefined, list: () => [] },
     repositoryInvariant: {
         capture: async () => ({ branch: "main", head: "abc123" }),
         verify: async () => {},

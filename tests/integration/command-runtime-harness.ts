@@ -9,17 +9,17 @@ import {
     type CommandRuntime,
 } from "../../src/command.ts";
 import type {
-    PiEventContext,
-    PiEventListener,
-    PiSessionEvent,
-    PiClient,
-} from "../../src/pi/client.ts";
+    CodexEventContext,
+    CodexEventListener,
+    CodexSessionEvent,
+    CodexClient,
+} from "../../src/codex/client.ts";
 import { makeProgressCoordinator } from "../../src/progress/coordinator.ts";
 import {
     makeProgressOutput,
     type ProgressOutput,
 } from "../../src/progress/progress.ts";
-import type { PiRuntime } from "../../src/pi/server.ts";
+import type { CodexRuntime } from "../../src/codex/server.ts";
 import {
     createDisplayState,
     type DisplayState,
@@ -29,15 +29,15 @@ import type { ProgressUpdate } from "../../src/progress/progress.ts";
 const SCENARIO_TIME = new Date("2026-01-02T03:04:05.000Z");
 const SCENARIO_SECRET = "github_pat_runtime_scenario_secret";
 
-export type RuntimeScenarioPiEvent = {
-    readonly kind: "pi";
-    readonly event: PiSessionEvent;
-    readonly context: PiEventContext;
+export type RuntimeScenarioCodexEvent = {
+    readonly kind: "codex";
+    readonly event: CodexSessionEvent;
+    readonly context: CodexEventContext;
 };
 
 export type CommandRuntimeHarnessStep =
     | { readonly kind: "progress"; readonly event: ProgressUpdate }
-    | RuntimeScenarioPiEvent
+    | RuntimeScenarioCodexEvent
     | {
           readonly kind: "wait-for-signal";
           /** Defaults to the signal supplied to runCommand. */
@@ -53,14 +53,14 @@ export type CommandRuntimeHarnessStep =
 
 export type RuntimeScenarioEmission = Extract<
     CommandRuntimeHarnessStep,
-    { readonly kind: "progress" | "pi" }
+    { readonly kind: "progress" | "codex" }
 >;
 
 export type RuntimeScenarioOracle = {
     /** The ordered source stream used to drive the command/runtime boundary. */
     readonly emissions: ReadonlyArray<RuntimeScenarioEmission>;
     readonly progressEvents: ReadonlyArray<ProgressUpdate>;
-    readonly piEvents: ReadonlyArray<RuntimeScenarioPiEvent>;
+    readonly codexEvents: ReadonlyArray<RuntimeScenarioCodexEvent>;
     /** Includes the initial state, followed by one state per source emission. */
     readonly expectedDisplayStates: ReadonlyArray<DisplayState>;
     readonly secret: string;
@@ -71,7 +71,7 @@ export type CommandRuntimeRunCapture = {
     readonly stdout: string[];
     readonly stderr: string[];
     readonly displayStates: DisplayState[];
-    readonly piEvents: RuntimeScenarioPiEvent[];
+    readonly codexEvents: RuntimeScenarioCodexEvent[];
     eventLogPath?: string;
     eventLogContents?: string;
     eventLog?: string;
@@ -92,12 +92,15 @@ export type CommandRuntimeHarnessOptions = {
     readonly threshold?: number;
 };
 
-const piEvent = (event: object): PiSessionEvent =>
-    event as unknown as PiSessionEvent;
+const codexEvent = (event: object): CodexSessionEvent =>
+    event as unknown as CodexSessionEvent;
 
-const scenarioPi = (event: object, issue: number): RuntimeScenarioPiEvent => ({
-    kind: "pi",
-    event: piEvent(event),
+const scenarioCodex = (
+    event: object,
+    issue: number,
+): RuntimeScenarioCodexEvent => ({
+    kind: "codex",
+    event: codexEvent(event),
     context: {
         sessionID: `scenario-session-${issue}`,
         directory: `/tmp/ralphie-runtime-scenario/issue-${issue}`,
@@ -186,15 +189,15 @@ const makeMultiIssueRuntimeOracle = (): RuntimeScenarioOracle => {
                 },
             },
         ),
-        scenarioPi({ type: "agent_start" }, 101),
-        scenarioPi(
+        scenarioCodex({ type: "agent_start" }, 101),
+        scenarioCodex(
             {
                 type: "message_update",
                 assistantMessageEvent: { type: "thinking_start" },
             },
             101,
         ),
-        scenarioPi(
+        scenarioCodex(
             {
                 type: "message_update",
                 assistantMessageEvent: {
@@ -204,14 +207,14 @@ const makeMultiIssueRuntimeOracle = (): RuntimeScenarioOracle => {
             },
             101,
         ),
-        scenarioPi(
+        scenarioCodex(
             {
                 type: "message_update",
                 assistantMessageEvent: { type: "thinking_end" },
             },
             101,
         ),
-        scenarioPi(
+        scenarioCodex(
             {
                 type: "message_update",
                 assistantMessageEvent: {
@@ -221,7 +224,7 @@ const makeMultiIssueRuntimeOracle = (): RuntimeScenarioOracle => {
             },
             101,
         ),
-        scenarioPi(
+        scenarioCodex(
             {
                 type: "message_update",
                 assistantMessageEvent: {
@@ -231,7 +234,7 @@ const makeMultiIssueRuntimeOracle = (): RuntimeScenarioOracle => {
             },
             101,
         ),
-        scenarioPi(
+        scenarioCodex(
             {
                 type: "tool_execution_start",
                 toolCallId: "scenario-read-101",
@@ -240,7 +243,7 @@ const makeMultiIssueRuntimeOracle = (): RuntimeScenarioOracle => {
             },
             101,
         ),
-        scenarioPi(
+        scenarioCodex(
             {
                 type: "tool_execution_update",
                 toolCallId: "scenario-read-101",
@@ -249,7 +252,7 @@ const makeMultiIssueRuntimeOracle = (): RuntimeScenarioOracle => {
             },
             101,
         ),
-        scenarioPi(
+        scenarioCodex(
             {
                 type: "tool_execution_end",
                 toolCallId: "scenario-read-101",
@@ -259,14 +262,14 @@ const makeMultiIssueRuntimeOracle = (): RuntimeScenarioOracle => {
             },
             101,
         ),
-        scenarioPi(
+        scenarioCodex(
             {
                 type: "message_update",
                 assistantMessageEvent: { type: "text_start" },
             },
             101,
         ),
-        scenarioPi(
+        scenarioCodex(
             {
                 type: "message_update",
                 assistantMessageEvent: {
@@ -276,15 +279,18 @@ const makeMultiIssueRuntimeOracle = (): RuntimeScenarioOracle => {
             },
             101,
         ),
-        scenarioPi(
+        scenarioCodex(
             {
                 type: "message_update",
                 assistantMessageEvent: { type: "text_end" },
             },
             101,
         ),
-        scenarioPi({ type: "agent_end", messages: [], willRetry: true }, 101),
-        scenarioPi(
+        scenarioCodex(
+            { type: "agent_end", messages: [], willRetry: true },
+            101,
+        ),
+        scenarioCodex(
             {
                 type: "auto_retry_start",
                 attempt: 2,
@@ -294,10 +300,16 @@ const makeMultiIssueRuntimeOracle = (): RuntimeScenarioOracle => {
             },
             101,
         ),
-        scenarioPi({ type: "auto_retry_end", attempt: 2, success: true }, 101),
-        scenarioPi({ type: "agent_start" }, 101),
-        scenarioPi({ type: "agent_end", messages: [], willRetry: false }, 101),
-        scenarioPi({ type: "agent_settled" }, 101),
+        scenarioCodex(
+            { type: "auto_retry_end", attempt: 2, success: true },
+            101,
+        ),
+        scenarioCodex({ type: "agent_start" }, 101),
+        scenarioCodex(
+            { type: "agent_end", messages: [], willRetry: false },
+            101,
+        ),
+        scenarioCodex({ type: "agent_settled" }, 101),
         scenarioProgress(
             "review",
             "started",
@@ -616,8 +628,8 @@ const makeMultiIssueRuntimeOracle = (): RuntimeScenarioOracle => {
         progressEvents: emissions.flatMap((emission) =>
             emission.kind === "progress" ? [emission.event] : [],
         ),
-        piEvents: emissions.flatMap((emission) =>
-            emission.kind === "pi" ? [emission] : [],
+        codexEvents: emissions.flatMap((emission) =>
+            emission.kind === "codex" ? [emission] : [],
         ),
         expectedDisplayStates,
         secret: SCENARIO_SECRET,
@@ -641,14 +653,14 @@ const defaultSteps: ReadonlyArray<CommandRuntimeHarnessStep> = [
         },
     },
     {
-        kind: "pi",
+        kind: "codex",
         event: {
             type: "message_update",
             assistantMessageEvent: {
                 type: "text_delta",
-                delta: "fake Pi event",
+                delta: "fake Codex event",
             },
-        } as PiSessionEvent,
+        } as CodexSessionEvent,
         context: {
             sessionID: "fake-session",
             directory: "/fake/workspace",
@@ -693,14 +705,14 @@ const runHarnessStep = async (input: {
     readonly step: CommandRuntimeHarnessStep;
     readonly signal: AbortSignal;
     readonly progress: CommandRuntime["progress"];
-    readonly emitPi: PiEventListener;
+    readonly emitPi: CodexEventListener;
     readonly onWaitForSignal: () => void;
 }): Promise<void> => {
     switch (input.step.kind) {
         case "progress":
             await input.progress.emit(input.step.event);
             return;
-        case "pi":
+        case "codex":
             input.emitPi(input.step.event, input.step.context);
             return;
         case "failure":
@@ -722,7 +734,7 @@ export const makeCommandRuntimeHarness = (
     const stdout: string[] = [];
     const stderr: string[] = [];
     const lifecycle: string[] = [];
-    const piEvents: PiSessionEvent[] = [];
+    const codexEvents: CodexSessionEvent[] = [];
     const eventLogPaths: string[] = [];
     const eventLogContents: string[] = [];
     const runCaptures: CommandRuntimeRunCapture[] = [];
@@ -731,7 +743,7 @@ export const makeCommandRuntimeHarness = (
     const disposalCalls = {
         runtime: 0,
         coordinator: 0,
-        piRuntime: 0,
+        codexRuntime: 0,
         output: 0,
     };
     const writesAfterCleanup: string[] = [];
@@ -743,13 +755,13 @@ export const makeCommandRuntimeHarness = (
         options.threshold;
     let activeTerminalWidth = configuredWidth;
     let activeCapture: CommandRuntimeRunCapture | undefined;
-    let listener: PiEventListener | undefined;
+    let listener: CodexEventListener | undefined;
     let disposeCoordinator: (() => Promise<void>) | undefined;
     let disposeRuntime: (() => Promise<void>) | undefined;
     let failure: Error | undefined;
     let runtimeDisposalFailure: Error | undefined;
     let runtime: CommandRuntime | undefined;
-    let piRuntime: PiRuntime | undefined;
+    let codexRuntime: CodexRuntime | undefined;
     let outputDisposed = false;
     let getDisplayState: (() => DisplayState) | undefined;
     let cleaned = false;
@@ -834,22 +846,26 @@ export const makeCommandRuntimeHarness = (
                 dispose: disposeCoordinator,
             };
         },
-        makePi: (_config, piListener) => {
-            lifecycle.push("pi");
+        makeCodex: (_config, codexListener) => {
+            lifecycle.push("codex");
             listener = (event, context) => {
-                piEvents.push(event);
-                activeCapture?.piEvents.push({ kind: "pi", event, context });
-                piListener(event, context);
+                codexEvents.push(event);
+                activeCapture?.codexEvents.push({
+                    kind: "codex",
+                    event,
+                    context,
+                });
+                codexListener(event, context);
                 recordState(getDisplayState?.() ?? createDisplayState());
             };
-            const client: PiClient = {
+            const client: CodexClient = {
                 session: {
                     create: async () => {
-                        lifecycle.push("pi.client.session.create");
+                        lifecycle.push("codex.client.session.create");
                         return { data: { id: "fake-session" } };
                     },
                     prompt: async () => {
-                        lifecycle.push("pi.client.session.prompt");
+                        lifecycle.push("codex.client.session.prompt");
                         return {
                             data: {
                                 info: {
@@ -861,25 +877,25 @@ export const makeCommandRuntimeHarness = (
                         };
                     },
                 },
-                close: () => lifecycle.push("pi.client.close"),
+                close: () => lifecycle.push("codex.client.close"),
             };
             return {
                 start: async () => {
-                    lifecycle.push("pi.start");
-                    piRuntime = {
-                        url: "embedded://fake-pi",
+                    lifecycle.push("codex.start");
+                    codexRuntime = {
+                        url: "embedded://fake-codex",
                         client,
                         close: async () => {
-                            disposalCalls.piRuntime += 1;
-                            lifecycle.push("pi.runtime.close");
+                            disposalCalls.codexRuntime += 1;
+                            lifecycle.push("codex.runtime.close");
                             client.close?.();
                         },
                     };
-                    return piRuntime;
+                    return codexRuntime;
                 },
             };
         },
-        makeRuntime: ({ pi, progress }) => {
+        makeRuntime: ({ codex, progress }) => {
             lifecycle.push("runtime");
             disposeRuntime = async () => {
                 disposalCalls.runtime += 1;
@@ -934,7 +950,7 @@ export const makeCommandRuntimeHarness = (
             };
             runtime = {
                 ...services,
-                pi,
+                codex,
                 progress: observedProgress,
                 dispose: disposeRuntime,
             } as CommandRuntime;
@@ -948,8 +964,8 @@ export const makeCommandRuntimeHarness = (
             const steps =
                 options.steps ??
                 (scenario === undefined ? defaultSteps : scenario.emissions);
-            const startedRuntime = await currentRuntime.pi.start();
-            piRuntime = startedRuntime;
+            const startedRuntime = await currentRuntime.codex.start();
+            codexRuntime = startedRuntime;
             try {
                 for (const step of steps) {
                     if (signal.aborted) signal.throwIfAborted();
@@ -988,7 +1004,7 @@ export const makeCommandRuntimeHarness = (
             stdout: [],
             stderr: [],
             displayStates: [],
-            piEvents: [],
+            codexEvents: [],
         };
         runCaptures.push(capture);
         activeCapture = capture;
@@ -1032,7 +1048,7 @@ export const makeCommandRuntimeHarness = (
         stdout,
         stderr,
         lifecycle,
-        piEvents,
+        codexEvents,
         eventLogPaths,
         eventLogContents,
         runCaptures,
@@ -1046,8 +1062,8 @@ export const makeCommandRuntimeHarness = (
             (scenario === undefined ? defaultSteps : scenario.emissions),
         disposalCalls,
         writesAfterCleanup,
-        get piRuntime() {
-            return piRuntime;
+        get codexRuntime() {
+            return codexRuntime;
         },
         get eventLogPath() {
             return eventLogPath;
@@ -1065,7 +1081,10 @@ export const makeCommandRuntimeHarness = (
             if (path === undefined) return "";
             return await readFile(path, "utf8");
         },
-        emitPi: (event: PiSessionEvent, context: PiEventContext): void => {
+        emitPi: (
+            event: CodexSessionEvent,
+            context: CodexEventContext,
+        ): void => {
             listener?.(event, context);
         },
         emitProgress: async (event: ProgressUpdate): Promise<void> => {

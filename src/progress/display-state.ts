@@ -1,4 +1,4 @@
-import type { PiEventContext, PiSessionEvent } from "../pi/client.ts";
+import type { CodexEventContext, CodexSessionEvent } from "../codex/client.ts";
 import { redactSensitiveText } from "../shared/redaction.ts";
 import type {
     ProgressEvent,
@@ -62,7 +62,7 @@ export const PROGRESS_STAGE_LABELS: Readonly<Record<ProgressStage, string>> = {
     "repository-discovery": "Discovering repository",
     "repository-preparation": "Preparing repository",
     "issue-discovery": "Discovering issues",
-    "pi-runtime": "Starting Pi",
+    "codex-runtime": "Starting Codex",
     "issue-planning": "Planning issue",
     "issue-execution": "Executing issue",
     "issue-queue": "Updating issue queue",
@@ -200,8 +200,8 @@ const nestedTimestamp = (value: unknown): number | undefined => {
 };
 
 const timestampFromPi = (
-    event: PiSessionEvent,
-    context: PiEventContext,
+    event: CodexSessionEvent,
+    context: CodexEventContext,
     clock: DisplayClock,
 ): number => {
     const eventRecord = recordValue(event);
@@ -380,14 +380,14 @@ const change = (activity: DisplayActivity, label?: string): ActivityChange => ({
 });
 
 const messageToolName = (
-    event: Extract<PiSessionEvent, { type: "message_update" }>,
+    event: Extract<CodexSessionEvent, { type: "message_update" }>,
 ): string | undefined =>
     stringValue(
         recordValue(recordValue(event.assistantMessageEvent).toolCall).name,
     );
 
 const messageActivity = (
-    event: Extract<PiSessionEvent, { type: "message_update" }>,
+    event: Extract<CodexSessionEvent, { type: "message_update" }>,
 ): ActivityChange | undefined => {
     const kind = event.assistantMessageEvent.type;
     if (
@@ -417,7 +417,7 @@ const messageActivity = (
 };
 
 const lifecycleActivity = (
-    event: PiSessionEvent,
+    event: CodexSessionEvent,
 ): ActivityChange | undefined => {
     switch (event.type) {
         case "agent_start":
@@ -444,7 +444,9 @@ const lifecycleActivity = (
     }
 };
 
-const piActivity = (event: PiSessionEvent): ActivityChange | undefined => {
+const codexActivity = (
+    event: CodexSessionEvent,
+): ActivityChange | undefined => {
     if (event.type === "message_update") return messageActivity(event);
     if (event.type === "tool_execution_start") {
         return change("tool", activityLabelFor("tool", event.toolName));
@@ -467,14 +469,14 @@ const piActivity = (event: PiSessionEvent): ActivityChange | undefined => {
     return lifecycleActivity(event);
 };
 
-export const reducePiSessionEvent = (
+export const reduceCodexSessionEvent = (
     currentState: DisplayState | undefined,
-    event: PiSessionEvent,
-    context: PiEventContext = { sessionID: "", directory: "" },
+    event: CodexSessionEvent,
+    context: CodexEventContext = { sessionID: "", directory: "" },
     now?: DisplayClock | DisplayStateOptions,
 ): DisplayState => {
     const state = sanitizedState(currentState ?? makeInitialDisplayState());
-    const activity = piActivity(event);
+    const activity = codexActivity(event);
     if (activity === undefined) return state;
     const timestamp =
         state.stage === undefined || state.stageStartedAt !== undefined
@@ -498,19 +500,19 @@ export function updateDisplayState(
 ): DisplayState;
 export function updateDisplayState(
     state: DisplayState | undefined,
-    event: PiSessionEvent,
-    context: PiEventContext,
+    event: CodexSessionEvent,
+    context: CodexEventContext,
     now?: DisplayClock | DisplayStateOptions,
 ): DisplayState;
 export function updateDisplayState(
     state: DisplayState | undefined,
-    event: PiSessionEvent,
+    event: CodexSessionEvent,
     now?: DisplayClock | DisplayStateOptions,
 ): DisplayState;
 export function updateDisplayState(
     state: DisplayState | undefined,
-    input: ProgressUpdate | ProgressEvent | PiSessionEvent,
-    contextOrNow?: PiEventContext | DisplayClock | DisplayStateOptions,
+    input: ProgressUpdate | ProgressEvent | CodexSessionEvent,
+    contextOrNow?: CodexEventContext | DisplayClock | DisplayStateOptions,
     now?: DisplayClock | DisplayStateOptions,
 ): DisplayState {
     if ("type" in input) {
@@ -520,12 +522,12 @@ export function updateDisplayState(
             "sessionID" in contextOrNow &&
             "directory" in contextOrNow;
         const context = hasContext
-            ? (contextOrNow as PiEventContext)
+            ? (contextOrNow as CodexEventContext)
             : undefined;
         const clock = hasContext
             ? now
             : (contextOrNow as DisplayClock | DisplayStateOptions | undefined);
-        return reducePiSessionEvent(
+        return reduceCodexSessionEvent(
             state,
             input,
             context ?? { sessionID: "", directory: "" },
@@ -537,4 +539,4 @@ export function updateDisplayState(
 
 export const reduceDisplayState = updateDisplayState;
 export const updateDisplayStateFromProgress = reduceProgressUpdate;
-export const updateDisplayStateFromPi = reducePiSessionEvent;
+export const updateDisplayStateFromCodex = reduceCodexSessionEvent;

@@ -73,7 +73,7 @@ const contextPartsFor = (state: DisplayState): string[] => {
 
 /**
  * Build a breadcrumb from the sanitized display context and current activity.
- * Pi events, tool arguments, and tool output are intentionally not inputs to
+ * Codex events, tool arguments, and tool output are intentionally not inputs to
  * this function.
  */
 export const breadcrumbLabelFor = (state: DisplayState): string =>

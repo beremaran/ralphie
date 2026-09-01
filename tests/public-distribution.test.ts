@@ -40,7 +40,7 @@ describe("public distribution verification contract", () => {
         );
         expect(topology.image).toBe("ghcr.io/beremaran/ralphie");
         expect(topology.description).toBe(
-            "Turn a GitHub issue queue into reviewed commits with Pi.",
+            "Turn a GitHub issue queue into reviewed commits with Codex.",
         );
         expect(topology.homepage).toBe(
             "https://github.com/beremaran/ralphie#readme",

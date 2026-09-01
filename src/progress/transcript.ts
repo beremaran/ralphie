@@ -1,8 +1,8 @@
 import type {
-    PiEventContext,
-    PiEventListener,
-    PiSessionEvent,
-} from "../pi/client.ts";
+    CodexEventContext,
+    CodexEventListener,
+    CodexSessionEvent,
+} from "../codex/client.ts";
 import {
     redactSensitiveText,
     redactSensitiveValue,
@@ -16,7 +16,7 @@ import {
 } from "./breadcrumb-label.ts";
 import { progressStageLabel, type DisplayState } from "./display-state.ts";
 
-export type PiTranscriptRendererOptions = {
+export type CodexTranscriptRendererOptions = {
     readonly write: (text: string) => void;
     readonly colors?: boolean;
     readonly json?: boolean;
@@ -29,14 +29,14 @@ export type PiTranscriptRendererOptions = {
 };
 
 /** A transcript listener with coordinator-facing stream-boundary hooks. */
-export type PiTranscriptRenderer = PiEventListener & {
+export type CodexTranscriptRenderer = CodexEventListener & {
     /** Finish the current visible line without dropping the active stream key. */
     readonly interruptLine: () => void;
     /** Insert a sanitized breadcrumb and safely resume any interrupted stream. */
     readonly insertBreadcrumb: (
         candidate: BreadcrumbLabelCandidate,
     ) => SanitizedBreadcrumb;
-    /** Visible terminal rows written during the current Pi session. */
+    /** Visible terminal rows written during the current Codex session. */
     readonly getVisibleLineCount: () => number;
 };
 
@@ -143,9 +143,12 @@ const safeJson = (value: unknown): string => {
     }
 };
 
-const eventJson = (event: PiSessionEvent, context: PiEventContext): string =>
+const eventJson = (
+    event: CodexSessionEvent,
+    context: CodexEventContext,
+): string =>
     safeJson({
-        type: "pi_event",
+        type: "codex_event",
         sessionID: context.sessionID,
         directory: context.directory,
         ...(context.title === undefined ? {} : { title: context.title }),
@@ -290,8 +293,8 @@ const makeTranscriptWriter = (
     resetLineMeter?: () => void,
     onSessionStart?: () => void,
 ): {
-    readonly beginSession: (context: PiEventContext) => void;
-    readonly ensureSession: (context: PiEventContext) => void;
+    readonly beginSession: (context: CodexEventContext) => void;
+    readonly ensureSession: (context: CodexEventContext) => void;
     readonly startStream: (key: StreamKey, label: string) => void;
     readonly writeStream: (
         key: StreamKey,
@@ -338,21 +341,21 @@ const makeTranscriptWriter = (
         if (hasBlock) write("│\n");
     };
 
-    const beginSession = (context: PiEventContext): void => {
+    const beginSession = (context: CodexEventContext): void => {
         if (sessionOpen) finishSession("interrupted");
         resetLineMeter?.();
-        const title = oneLine(context.title ?? "Pi task") || "Pi task";
+        const title = oneLine(context.title ?? "Codex task") || "Codex task";
         const session = oneLine(context.sessionID);
         const workflow = workflowHeader(getDisplayState?.());
         write(
-            `╭─ ${styles.assistant("Pi")} · ${title}${session === "" ? "" : ` · ${styles.event(session)}`}${styles.event(workflow)}\n│\n`,
+            `╭─ ${styles.assistant("Codex")} · ${title}${session === "" ? "" : ` · ${styles.event(session)}`}${styles.event(workflow)}\n│\n`,
         );
         sessionOpen = true;
         hasBlock = false;
         onSessionStart?.();
     };
 
-    const ensureSession = (context: PiEventContext): void => {
+    const ensureSession = (context: CodexEventContext): void => {
         if (!sessionOpen) beginSession(context);
     };
 
@@ -459,7 +462,10 @@ const makeTranscriptWriter = (
     };
 };
 
-type MessageUpdateEvent = Extract<PiSessionEvent, { type: "message_update" }>;
+type MessageUpdateEvent = Extract<
+    CodexSessionEvent,
+    { type: "message_update" }
+>;
 
 const contentIndexFor = (event: MessageUpdateEvent): string => {
     const index = (
@@ -571,7 +577,7 @@ const renderMessageUpdate = (
             const message =
                 update.error.errorMessage ??
                 update.reason ??
-                "Pi response failed.";
+                "Codex response failed.";
             writer.line(
                 `${styles.error("✗ assistant error")} ${sanitizeTerminalText(message)}`,
             );
@@ -622,7 +628,7 @@ const renderToolDelta = (
 };
 
 const renderToolExecutionUpdate = (
-    event: Extract<PiSessionEvent, { type: "tool_execution_update" }>,
+    event: Extract<CodexSessionEvent, { type: "tool_execution_update" }>,
     states: Map<string, ToolExecutionState>,
     styles: TranscriptStyles,
     writer: TranscriptWriter,
@@ -637,7 +643,7 @@ const renderToolExecutionUpdate = (
 };
 
 const renderBashExecutionUpdate = (
-    event: Extract<PiSessionEvent, { type: "bash_execution_update" }>,
+    event: Extract<CodexSessionEvent, { type: "bash_execution_update" }>,
     states: Map<string, ToolExecutionState>,
     styles: TranscriptStyles,
     writer: TranscriptWriter,
@@ -649,7 +655,7 @@ const renderBashExecutionUpdate = (
 };
 
 const renderToolExecutionEnd = (
-    event: Extract<PiSessionEvent, { type: "tool_execution_end" }>,
+    event: Extract<CodexSessionEvent, { type: "tool_execution_end" }>,
     states: Map<string, ToolExecutionState>,
     styles: TranscriptStyles,
     writer: TranscriptWriter,
@@ -688,7 +694,7 @@ const renderToolExecutionEnd = (
 };
 
 const renderUserMessage = (
-    event: Extract<PiSessionEvent, { type: "message_start" }>,
+    event: Extract<CodexSessionEvent, { type: "message_start" }>,
     styles: TranscriptStyles,
     writer: TranscriptWriter,
     verbose: boolean,
@@ -710,7 +716,7 @@ const renderUserMessage = (
 };
 
 const renderLifecycleEvent = (
-    event: PiSessionEvent,
+    event: CodexSessionEvent,
     styles: TranscriptStyles,
     writer: TranscriptWriter,
 ): void => {
@@ -731,12 +737,12 @@ const renderLifecycleEvent = (
         }
         case "auto_retry_start":
             writer.line(
-                `${styles.event("↻")} retrying Pi request · attempt ${event.attempt}/${event.maxAttempts}`,
+                `${styles.event("↻")} retrying Codex request · attempt ${event.attempt}/${event.maxAttempts}`,
             );
             return;
         case "auto_retry_end":
             writer.line(
-                `${styles.event("↻")} Pi retry ${event.success ? "succeeded" : "failed"}`,
+                `${styles.event("↻")} Codex retry ${event.success ? "succeeded" : "failed"}`,
             );
             return;
         case "summarization_retry_scheduled":
@@ -761,8 +767,8 @@ const renderLifecycleEvent = (
 };
 
 const renderTerminalEvent = (
-    event: PiSessionEvent,
-    context: PiEventContext,
+    event: CodexSessionEvent,
+    context: CodexEventContext,
     styles: TranscriptStyles,
     writer: TranscriptWriter,
     states: Map<string, ToolExecutionState>,
@@ -836,7 +842,7 @@ const renderTerminalEvent = (
     }
 };
 
-export const makePiTranscriptRenderer = ({
+export const makeCodexTranscriptRenderer = ({
     write,
     colors = false,
     json = false,
@@ -844,7 +850,7 @@ export const makePiTranscriptRenderer = ({
     width = () => process.stderr.columns ?? 100,
     getDisplayState,
     onSessionStart,
-}: PiTranscriptRendererOptions): PiTranscriptRenderer => {
+}: CodexTranscriptRendererOptions): CodexTranscriptRenderer => {
     const styles: TranscriptStyles = colors
         ? {
               assistant: cyan,
@@ -876,7 +882,7 @@ export const makePiTranscriptRenderer = ({
     );
     const toolStates = new Map<string, ToolExecutionState>();
 
-    const render: PiEventListener = (event, context) => {
+    const render: CodexEventListener = (event, context) => {
         if (json) {
             write(`${eventJson(event, context)}\n`);
             return;

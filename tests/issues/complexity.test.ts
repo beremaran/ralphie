@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { PiClient } from "../../src/pi/client.ts";
+import type { CodexClient } from "../../src/codex/client.ts";
 import type { Octokit } from "octokit";
 
 import {
@@ -11,7 +11,7 @@ import {
 import { makeComplexityAssessmentService } from "../../src/issues/complexity.ts";
 import { ComplexityLevel } from "../../src/issues/decisions.ts";
 import type { IssueExecutionContext } from "../../src/issues/execution.ts";
-import { makePiSessionDiagnostics } from "../../src/agent/task-session.ts";
+import { makeCodexSessionDiagnostics } from "../../src/agent/task-session.ts";
 
 const assistantInfo = (structured: unknown) => ({
     id: "message-1",
@@ -30,9 +30,9 @@ const assistantInfo = (structured: unknown) => ({
 });
 
 const context = (
-    client: PiClient,
+    client: CodexClient,
     overrides: Partial<
-        Pick<IssueExecutionContext, "piDiagnostics" | "repositoryInvariant">
+        Pick<IssueExecutionContext, "codexDiagnostics" | "repositoryInvariant">
     > = {},
 ): IssueExecutionContext => ({
     issue: {
@@ -48,10 +48,10 @@ const context = (
     workspace: "/workspace",
     runId: "run-1",
     octokit: {} as Octokit,
-    pi: client,
-    piSelection: { agent: "build" },
-    piDiagnostics:
-        overrides.piDiagnostics ?? makePiSessionDiagnostics(() => "now"),
+    codex: client,
+    codexSelection: { agent: "build" },
+    codexDiagnostics:
+        overrides.codexDiagnostics ?? makeCodexSessionDiagnostics(() => "now"),
     repositoryInvariant: overrides.repositoryInvariant ?? {
         capture: async () => ({ branch: "main", head: "abc123" }),
         verify: async () => {},
@@ -74,7 +74,7 @@ describe("complexity assessment", () => {
                     },
                 }),
             },
-        } as unknown as PiClient;
+        } as unknown as CodexClient;
         const result = await makeComplexityAssessmentService(
             makeProgressRecorder(events),
         ).assess(context(client));
@@ -112,7 +112,7 @@ describe("complexity assessment", () => {
                     },
                 }),
             },
-        } as unknown as PiClient;
+        } as unknown as CodexClient;
         await expect(
             makeComplexityAssessmentService(
                 makeProgressRecorder(events),
@@ -122,7 +122,7 @@ describe("complexity assessment", () => {
     });
 
     test("records the assessment session and verifies its checkout invariant", async () => {
-        const diagnostics = makePiSessionDiagnostics(() => "now");
+        const diagnostics = makeCodexSessionDiagnostics(() => "now");
         let verified: unknown;
         const client = {
             session: {
@@ -137,12 +137,12 @@ describe("complexity assessment", () => {
                     },
                 }),
             },
-        } as unknown as PiClient;
+        } as unknown as CodexClient;
         const result = await makeComplexityAssessmentService(
             makeProgressRecorder([]),
         ).assess(
             context(client, {
-                piDiagnostics: diagnostics,
+                codexDiagnostics: diagnostics,
                 repositoryInvariant: {
                     capture: async () => ({ branch: "main", head: "abc123" }),
                     verify: async (directory, invariant) => {

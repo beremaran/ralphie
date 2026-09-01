@@ -1,7 +1,7 @@
 import { join } from "node:path";
 
-import { makePiSessionDiagnostics } from "./agent/task-session.ts";
-import type { PiModel, PiSelection } from "./agent/model.ts";
+import { makeCodexSessionDiagnostics } from "./agent/task-session.ts";
+import type { CodexModel, CodexSelection } from "./agent/model.ts";
 import { type GitHubIssueCloseReason } from "./github/issue-mutations.ts";
 import {
     GitHubNeedsAttentionNotificationRecoveryError,
@@ -25,7 +25,7 @@ import {
     IssueQueueState,
     toQueuedIssues,
 } from "./issues/queue.ts";
-import type { PiRuntime } from "./pi/server.ts";
+import type { CodexRuntime } from "./codex/server.ts";
 import type { GitHubPullRequest } from "./github/pull-requests.ts";
 import type {
     PipelineObservationOutcome,
@@ -381,7 +381,7 @@ type PersistWorkflowStateInput = {
     readonly needsAttentionLabel?: string;
     readonly pendingNotification?: RunState["pendingNotification"];
     readonly prClosure?: RunState["prClosure"];
-    readonly selection: PiSelection;
+    readonly selection: CodexSelection;
     readonly issueLimit?: number;
     readonly maxDecompositionDepth: number;
     readonly outcomes: ReadonlyArray<WorkflowOutcomeEntry>;
@@ -509,12 +509,12 @@ export type WorkflowOptions = {
     readonly maxDecompositionDepth?: number;
     readonly issueFilters: IssueFilters;
     readonly agent: string;
-    readonly model?: PiModel;
+    readonly model?: CodexModel;
     readonly modelVariant?: string;
-    readonly piStageVariants?: IssueExecutionContext["piStageVariants"];
+    readonly codexStageVariants?: IssueExecutionContext["codexStageVariants"];
     readonly verificationCommands?: ReadonlyArray<string>;
     readonly implementationAttempts?: number;
-    readonly implementationFallbackModel?: PiModel;
+    readonly implementationFallbackModel?: CodexModel;
     readonly workspace: string;
     readonly cleanup: boolean;
     readonly startClean: boolean;
@@ -539,12 +539,12 @@ type WorkflowConfiguration = {
     readonly maxDecompositionDepth: number;
     readonly issueFilters: IssueFilters;
     readonly agent: string;
-    readonly model?: PiModel;
+    readonly model?: CodexModel;
     readonly modelVariant?: string;
-    readonly piStageVariants?: IssueExecutionContext["piStageVariants"];
+    readonly codexStageVariants?: IssueExecutionContext["codexStageVariants"];
     readonly verificationCommands: ReadonlyArray<string>;
     readonly implementationAttempts?: number;
-    readonly implementationFallbackModel?: PiModel;
+    readonly implementationFallbackModel?: CodexModel;
     readonly workspace: string;
     readonly cleanup: boolean;
     readonly startClean: boolean;
@@ -584,7 +584,7 @@ const makeWorkflowConfiguration = (
         agent,
         model,
         modelVariant,
-        piStageVariants,
+        codexStageVariants,
         verificationCommands = [],
         implementationAttempts,
         implementationFallbackModel,
@@ -631,7 +631,7 @@ const makeWorkflowConfiguration = (
         agent,
         model,
         modelVariant,
-        piStageVariants,
+        codexStageVariants,
         verificationCommands,
         implementationAttempts,
         implementationFallbackModel,
@@ -683,8 +683,8 @@ const emitRunStarted = async (
             workspace: config.workspace,
             model: config.model
                 ? `${config.model.providerID}/${config.model.modelID}`
-                : "Pi default",
-            variant: config.modelVariant ?? "Pi default",
+                : "Codex default",
+            variant: config.modelVariant ?? "Codex default",
             agent: config.agent,
             issueLimit:
                 config.resumeState?.maxIssues ??
@@ -828,7 +828,7 @@ export const workflow = async (
         pipelineObservation,
         issueExecutor: normalIssueExecutor,
         dryRunIssueExecutor,
-        pi,
+        codex,
     } = runtime;
 
     await emitRunStarted(progress, config);
@@ -1000,7 +1000,7 @@ export const workflow = async (
             const outcomes: Array<WorkflowOutcomeEntry> = [
                 ...(resumeState?.outcomes ?? []),
             ];
-            const selection: PiSelection = {
+            const selection: CodexSelection = {
                 agent,
                 model,
                 variant: modelVariant,
@@ -1043,7 +1043,7 @@ export const workflow = async (
             const issueExecutor = effectiveDryRun
                 ? dryRunIssueExecutor
                 : normalIssueExecutor;
-            const diagnostics = makePiSessionDiagnostics();
+            const diagnostics = makeCodexSessionDiagnostics();
             return {
                 octokit,
                 prepared,
@@ -1272,7 +1272,7 @@ export const workflow = async (
 
         const executeIssue = async (
             issueContext: WorkflowIssueContext,
-            server: PiRuntime,
+            server: CodexRuntime,
         ): Promise<IssueExecutionOutcome> => {
             if (issueContext.resumedClosureOutcome !== undefined) {
                 return issueContext.resumedClosureOutcome;
@@ -1300,10 +1300,10 @@ export const workflow = async (
                         workspace,
                         runId: actualRunId,
                         octokit,
-                        pi: server.client,
-                        piSelection: selection,
-                        piStageVariants: config.piStageVariants,
-                        piDiagnostics: diagnostics,
+                        codex: server.client,
+                        codexSelection: selection,
+                        codexStageVariants: config.codexStageVariants,
+                        codexDiagnostics: diagnostics,
                         repositoryInvariant: invariantService,
                         verificationCommands: config.verificationCommands,
                         implementationAttempts: config.implementationAttempts,
@@ -2498,7 +2498,7 @@ export const workflow = async (
         };
 
         const processNextIssue = async (
-            server: PiRuntime,
+            server: CodexRuntime,
         ): Promise<boolean> => {
             checkCancellation(signal);
             const queuedIssue = queue.next();
@@ -2533,7 +2533,7 @@ export const workflow = async (
             return true;
         };
 
-        const processQueue = async (server: PiRuntime): Promise<void> => {
+        const processQueue = async (server: CodexRuntime): Promise<void> => {
             const worker = async (): Promise<void> => {
                 while (queue.state() === IssueQueueState.Ready) {
                     if (!(await processNextIssue(server))) break;
@@ -2544,18 +2544,18 @@ export const workflow = async (
 
         await recoverPendingNotification();
 
-        let server: PiRuntime | undefined;
+        let server: CodexRuntime | undefined;
         try {
             const startedServer = await track(
                 progress,
-                "pi-runtime",
-                "Starting Pi runtime...",
+                "codex-runtime",
+                "Starting Codex runtime...",
                 async () => {
-                    const started = await pi.start();
+                    const started = await codex.start();
                     server = started;
                     return started;
                 },
-                "Pi runtime ready.",
+                "Codex runtime ready.",
             );
             await processQueue(startedServer);
         } finally {

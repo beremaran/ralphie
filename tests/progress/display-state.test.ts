@@ -1,18 +1,21 @@
 import { describe, expect, test } from "bun:test";
 
-import type { PiEventContext, PiSessionEvent } from "../../src/pi/client.ts";
+import type {
+    CodexEventContext,
+    CodexSessionEvent,
+} from "../../src/codex/client.ts";
 import {
     DISPLAY_ACTIVITY_LABELS,
     PROGRESS_STAGE_LABELS,
     createDisplayState,
     progressStageLabel,
-    reducePiSessionEvent,
+    reduceCodexSessionEvent,
     reduceProgressUpdate,
     type DisplayClock,
 } from "../../src/progress/display-state.ts";
 import type { ProgressStage } from "../../src/progress/progress.ts";
 
-const context: PiEventContext = {
+const context: CodexEventContext = {
     sessionID: "session-1",
     directory: "/workspace/repository",
     title: "Task",
@@ -23,7 +26,8 @@ const at =
     () =>
         value;
 
-const piEvent = (event: object): PiSessionEvent => event as PiSessionEvent;
+const codexEvent = (event: object): CodexSessionEvent =>
+    event as CodexSessionEvent;
 
 const baseProgress = {
     stage: "issue-execution" as const,
@@ -126,18 +130,18 @@ describe("display state", () => {
         });
     });
 
-    test("maps Pi startup, thinking, response, tool, compaction, retry, and waiting activity", () => {
+    test("maps Codex startup, thinking, response, tool, compaction, retry, and waiting activity", () => {
         let state = reduceProgressUpdate(undefined, baseProgress, at("now"));
-        state = reducePiSessionEvent(
+        state = reduceCodexSessionEvent(
             state,
-            piEvent({ type: "agent_start" }),
+            codexEvent({ type: "agent_start" }),
             context,
         );
         expect(state.activity).toBe("thinking");
 
-        state = reducePiSessionEvent(
+        state = reduceCodexSessionEvent(
             state,
-            piEvent({
+            codexEvent({
                 type: "message_update",
                 assistantMessageEvent: { type: "thinking_delta", delta: "..." },
             }),
@@ -145,9 +149,9 @@ describe("display state", () => {
         );
         expect(state.activity).toBe("thinking");
 
-        state = reducePiSessionEvent(
+        state = reduceCodexSessionEvent(
             state,
-            piEvent({
+            codexEvent({
                 type: "message_update",
                 assistantMessageEvent: { type: "text_delta", delta: "answer" },
             }),
@@ -155,9 +159,9 @@ describe("display state", () => {
         );
         expect(state.activity).toBe("responding");
 
-        state = reducePiSessionEvent(
+        state = reduceCodexSessionEvent(
             state,
-            piEvent({
+            codexEvent({
                 type: "tool_execution_start",
                 toolCallId: "tool-1",
                 toolName: "bash",
@@ -170,16 +174,16 @@ describe("display state", () => {
             activityLabel: "Using bash",
         });
 
-        state = reducePiSessionEvent(
+        state = reduceCodexSessionEvent(
             state,
-            piEvent({ type: "compaction_start", reason: "threshold" }),
+            codexEvent({ type: "compaction_start", reason: "threshold" }),
             context,
         );
         expect(state.activity).toBe("compacting");
 
-        state = reducePiSessionEvent(
+        state = reduceCodexSessionEvent(
             state,
-            piEvent({
+            codexEvent({
                 type: "auto_retry_start",
                 attempt: 1,
                 maxAttempts: 2,
@@ -190,9 +194,9 @@ describe("display state", () => {
         );
         expect(state.activity).toBe("retrying");
 
-        state = reducePiSessionEvent(
+        state = reduceCodexSessionEvent(
             state,
-            piEvent({ type: "agent_settled" }),
+            codexEvent({ type: "agent_settled" }),
             context,
         );
         expect(state).toMatchObject({
@@ -201,15 +205,15 @@ describe("display state", () => {
         });
     });
 
-    test("retains review attempt metadata through Pi events", () => {
+    test("retains review attempt metadata through Codex events", () => {
         const state = reduceProgressUpdate(undefined, {
             ...baseProgress,
             attempt: 3,
             maxAttempts: 5,
         });
-        const next = reducePiSessionEvent(
+        const next = reduceCodexSessionEvent(
             state,
-            piEvent({ type: "turn_start" }),
+            codexEvent({ type: "turn_start" }),
             context,
         );
         expect(next.reviewAttempt).toEqual({ current: 3, total: 5 });
@@ -265,9 +269,9 @@ describe("display state", () => {
                 title: "Bearer private-value",
             },
         });
-        const next = reducePiSessionEvent(
+        const next = reduceCodexSessionEvent(
             state,
-            piEvent({
+            codexEvent({
                 type: "tool_execution_start",
                 toolCallId: "tool-1",
                 toolName: "\u001b[31mBearer private-value\u001b[0m",
@@ -289,9 +293,9 @@ describe("display state", () => {
             repository: "\u001b[31mowner/repo\u001b[0m\r\nforged",
             issue: { number: 13, title: "title\u0007\nsecond line" },
         });
-        const next = reducePiSessionEvent(
+        const next = reduceCodexSessionEvent(
             state,
-            piEvent({
+            codexEvent({
                 type: "tool_execution_start",
                 toolCallId: "tool-1",
                 toolName: "read\u001b[2J\nforged",

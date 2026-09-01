@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
-import type { PiSessionEvent } from "../../src/pi/client.ts";
+import type { CodexSessionEvent } from "../../src/codex/client.ts";
 import type { DisplayState } from "../../src/progress/display-state.ts";
-import { makePiTranscriptRenderer } from "../../src/progress/transcript.ts";
+import { makeCodexTranscriptRenderer } from "../../src/progress/transcript.ts";
 
 const context = {
     sessionID: "session-1",
@@ -10,7 +10,7 @@ const context = {
     title: "Implement issue #42",
 };
 
-const event = (value: unknown): PiSessionEvent => value as PiSessionEvent;
+const event = (value: unknown): CodexSessionEvent => value as CodexSessionEvent;
 
 const graphemeSegmenter = new Intl.Segmenter(undefined, {
     granularity: "grapheme",
@@ -40,10 +40,10 @@ const visibleRows = (text: string, width: number): number => {
     return rows;
 };
 
-describe("Pi transcript rendering", () => {
+describe("Codex transcript rendering", () => {
     test("streams thinking, assistant text, tool calls, and results", () => {
         let output = "";
-        const render = makePiTranscriptRenderer({
+        const render = makeCodexTranscriptRenderer({
             write: (text) => {
                 output += text;
             },
@@ -124,7 +124,7 @@ describe("Pi transcript rendering", () => {
         render(event({ type: "agent_settled" }), context);
 
         expect(output).toBe(
-            "╭─ Pi · Implement issue #42 · session-1\n" +
+            "╭─ Codex · Implement issue #42 · session-1\n" +
                 "│\n" +
                 "│  ⋯ thinking inspect files\n" +
                 "│\n" +
@@ -147,7 +147,7 @@ describe("Pi transcript rendering", () => {
             activity: "waiting",
             activityLabel: "Waiting",
         };
-        const render = makePiTranscriptRenderer({
+        const render = makeCodexTranscriptRenderer({
             write: (text) => {
                 output += text;
             },
@@ -157,7 +157,7 @@ describe("Pi transcript rendering", () => {
         render(event({ type: "agent_start" }), context);
 
         expect(output).toStartWith(
-            "╭─ Pi · Implement issue #42 · session-1 · owner/repo · issue 2/4 · #56 · Addressing review findings · attempt 1/3\n",
+            "╭─ Codex · Implement issue #42 · session-1 · owner/repo · issue 2/4 · #56 · Addressing review findings · attempt 1/3\n",
         );
     });
 
@@ -168,7 +168,7 @@ describe("Pi transcript rendering", () => {
             activity: "waiting",
             activityLabel: "Waiting",
         };
-        const render = makePiTranscriptRenderer({
+        const render = makeCodexTranscriptRenderer({
             write: (text) => {
                 output += text;
             },
@@ -181,17 +181,17 @@ describe("Pi transcript rendering", () => {
         render(event({ type: "turn_start" }), context);
 
         expect(output).toContain(
-            "╭─ Pi · Implement issue #42 · session-1 · owner/repo\n",
+            "╭─ Codex · Implement issue #42 · session-1 · owner/repo\n",
         );
         expect(output).toContain(
-            "╭─ Pi · Implement issue #42 · session-1 · owner/repo · Implementing changes\n",
+            "╭─ Codex · Implement issue #42 · session-1 · owner/repo · Implementing changes\n",
         );
         expect(output).not.toContain("undefined");
     });
 
     test("redacts secrets and terminal controls in header fields", () => {
         let output = "";
-        const render = makePiTranscriptRenderer({
+        const render = makeCodexTranscriptRenderer({
             write: (text) => {
                 output += text;
             },
@@ -218,7 +218,7 @@ describe("Pi transcript rendering", () => {
 
     test("redacts streamed text and emits complete JSON events", () => {
         let output = "";
-        const render = makePiTranscriptRenderer({
+        const render = makeCodexTranscriptRenderer({
             write: (text) => {
                 output += text;
             },
@@ -245,7 +245,7 @@ describe("Pi transcript rendering", () => {
 
         const parsed = JSON.parse(output);
         expect(parsed).toMatchObject({
-            type: "pi_event",
+            type: "codex_event",
             sessionID: "session-1",
             event: {
                 type: "message_update",
@@ -262,7 +262,7 @@ describe("Pi transcript rendering", () => {
 
     test("keeps interleaved streams readable and de-duplicates tool output", () => {
         let output = "";
-        const render = makePiTranscriptRenderer({
+        const render = makeCodexTranscriptRenderer({
             write: (text) => {
                 output += text;
             },
@@ -386,7 +386,7 @@ describe("Pi transcript rendering", () => {
         render(event({ type: "agent_end", willRetry: false }), context);
 
         expect(output).toBe(
-            "╭─ Pi · Implement issue #42 · session-1\n" +
+            "╭─ Codex · Implement issue #42 · session-1\n" +
                 "│\n" +
                 "│  ⋯ thinking checking\n" +
                 "│\n" +
@@ -402,7 +402,7 @@ describe("Pi transcript rendering", () => {
 
     test("resumes an open stream after an inserted lifecycle line", () => {
         let output = "";
-        const render = makePiTranscriptRenderer({
+        const render = makeCodexTranscriptRenderer({
             write: (text) => {
                 output += text;
             },
@@ -426,7 +426,7 @@ describe("Pi transcript rendering", () => {
         render(event({ type: "agent_end", willRetry: false }), context);
 
         expect(output).toBe(
-            "╭─ Pi · Implement issue #42 · session-1\n" +
+            "╭─ Codex · Implement issue #42 · session-1\n" +
                 "│\n" +
                 "│  ✦ assistant a\n" +
                 "│\n" +
@@ -438,7 +438,7 @@ describe("Pi transcript rendering", () => {
 
     test("normalizes terminal control sequences in streamed text", () => {
         let output = "";
-        const render = makePiTranscriptRenderer({
+        const render = makeCodexTranscriptRenderer({
             write: (text) => {
                 output += text;
             },
@@ -457,7 +457,7 @@ describe("Pi transcript rendering", () => {
         );
 
         expect(output).toBe(
-            "╭─ Pi · Implement issue #42 · session-1\n" +
+            "╭─ Codex · Implement issue #42 · session-1\n" +
                 "│\n" +
                 "│  ✦ assistant one\n" +
                 "│    two    three",
@@ -469,7 +469,7 @@ describe("Pi transcript rendering", () => {
     test("meters sanitized incremental output as visible terminal rows", () => {
         let output = "";
         let width = 4;
-        const render = makePiTranscriptRenderer({
+        const render = makeCodexTranscriptRenderer({
             write: (text) => {
                 output += text;
             },
@@ -532,7 +532,7 @@ describe("Pi transcript rendering", () => {
     test("meters cumulative tool updates only once", () => {
         let output = "";
         const width = 12;
-        const render = makePiTranscriptRenderer({
+        const render = makeCodexTranscriptRenderer({
             write: (text) => {
                 output += text;
             },
@@ -569,7 +569,7 @@ describe("Pi transcript rendering", () => {
 
     test("bounds noisy tool results while keeping a useful summary", () => {
         let output = "";
-        const render = makePiTranscriptRenderer({
+        const render = makeCodexTranscriptRenderer({
             write: (text) => {
                 output += text;
             },

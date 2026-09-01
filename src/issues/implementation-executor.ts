@@ -18,9 +18,9 @@ import {
 } from "../agent/prompts.ts";
 import { requestStructuredOutput } from "../agent/structured-output.ts";
 import {
-    runPiTask,
-    PI_TASK_PERMISSION_POLICY,
-    type PiNeedsAttentionRequest,
+    runCodexTask,
+    CODEX_TASK_PERMISSION_POLICY,
+    type CodexNeedsAttentionRequest,
 } from "../agent/task-session.ts";
 import { z } from "zod";
 import {
@@ -234,7 +234,7 @@ export const makeImplementationExecutorService = (
 ): ImplementationExecutorService => {
     const routeSignal = async (
         input: WorkflowExecutorInput,
-        request: PiNeedsAttentionRequest | undefined,
+        request: CodexNeedsAttentionRequest | undefined,
         checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
     ): Promise<WorkflowExecutorResult | undefined> => {
         if (request === undefined) return undefined;
@@ -368,19 +368,19 @@ export const makeImplementationExecutorService = (
             "implementation",
             `Implementing #${context.issue.number}...`,
             () =>
-                requestStructuredOutput(context.pi, {
+                requestStructuredOutput(context.codex, {
                     directory: context.repositoryPath,
                     title: `Implement issue #${context.issue.number}`,
-                    agent: context.piSelection.agent,
+                    agent: context.codexSelection.agent,
                     model:
                         attempt > 1 &&
                         context.implementationFallbackModel !== undefined
                             ? context.implementationFallbackModel
-                            : context.piSelection.model,
+                            : context.codexSelection.model,
                     variant:
-                        context.piStageVariants?.implementation ??
-                        context.piSelection.variant,
-                    permission: PI_TASK_PERMISSION_POLICY,
+                        context.codexStageVariants?.implementation ??
+                        context.codexSelection.variant,
+                    permission: CODEX_TASK_PERMISSION_POLICY,
                     schema: implementationResultSchema,
                     prompt: implementationPrompt(
                         input,
@@ -388,7 +388,7 @@ export const makeImplementationExecutorService = (
                         unresolvedSummary,
                     ),
                     runId: context.runId,
-                    diagnostics: context.piDiagnostics,
+                    diagnostics: context.codexDiagnostics,
                     repositoryInvariant: invariant,
                     verifyRepositoryInvariant:
                         context.repositoryInvariant.verify,
@@ -476,10 +476,10 @@ export const makeImplementationExecutorService = (
             "verification-fix",
             `Repairing deterministic verification (attempt ${attempt}/${REVIEW_ITERATION_LIMIT})...`,
             () =>
-                runPiTask(context.pi, {
+                runCodexTask(context.codex, {
                     directory: context.repositoryPath,
                     title: `Repair verification for issue #${context.issue.number} (attempt ${attempt})`,
-                    selection: context.piSelection,
+                    selection: context.codexSelection,
                     prompt: buildVerificationFixPrompt({
                         issue: context.issue,
                         repositoryPath: context.repositoryPath,
@@ -488,7 +488,7 @@ export const makeImplementationExecutorService = (
                         failedVerification: failure.verification,
                     }),
                     runId: context.runId,
-                    diagnostics: context.piDiagnostics,
+                    diagnostics: context.codexDiagnostics,
                     repositoryInvariant: invariant,
                     verifyRepositoryInvariant:
                         context.repositoryInvariant.verify,
@@ -576,7 +576,7 @@ export const makeImplementationExecutorService = (
             "review",
             `Reviewing staged changes (attempt ${attempt}/${REVIEW_ITERATION_LIMIT})...`,
             () =>
-                requestStructuredOutput(context.pi, {
+                requestStructuredOutput(context.codex, {
                     directory: context.repositoryPath,
                     title: `Review issue #${context.issue.number} (attempt ${attempt})`,
                     prompt: buildReviewPrompt({
@@ -590,13 +590,13 @@ export const makeImplementationExecutorService = (
                         ),
                     }),
                     schema: reviewDecisionSchema,
-                    agent: context.piSelection.agent,
-                    model: context.piSelection.model,
+                    agent: context.codexSelection.agent,
+                    model: context.codexSelection.model,
                     variant:
-                        context.piStageVariants?.review ??
-                        context.piSelection.variant,
+                        context.codexStageVariants?.review ??
+                        context.codexSelection.variant,
                     runId: context.runId,
-                    diagnostics: context.piDiagnostics,
+                    diagnostics: context.codexDiagnostics,
                     repositoryInvariant: invariant,
                     verifyRepositoryInvariant:
                         context.repositoryInvariant.verify,
@@ -652,7 +652,7 @@ export const makeImplementationExecutorService = (
             "commit-message",
             "Generating a commit message...",
             () =>
-                requestStructuredOutput(context.pi, {
+                requestStructuredOutput(context.codex, {
                     directory: context.repositoryPath,
                     title: `Generate commit message for issue #${context.issue.number}`,
                     prompt: buildCommitMessagePrompt({
@@ -663,13 +663,13 @@ export const makeImplementationExecutorService = (
                         verification: verificationEvidence,
                     }),
                     schema: commitMessageDecisionSchema,
-                    agent: context.piSelection.agent,
-                    model: context.piSelection.model,
+                    agent: context.codexSelection.agent,
+                    model: context.codexSelection.model,
                     variant:
-                        context.piStageVariants?.commitMessage ??
-                        context.piSelection.variant,
+                        context.codexStageVariants?.commitMessage ??
+                        context.codexSelection.variant,
                     runId: context.runId,
-                    diagnostics: context.piDiagnostics,
+                    diagnostics: context.codexDiagnostics,
                     repositoryInvariant: invariant,
                     verifyRepositoryInvariant:
                         context.repositoryInvariant.verify,
@@ -756,10 +756,10 @@ export const makeImplementationExecutorService = (
             "review-fix",
             `Addressing review findings (attempt ${attempt})...`,
             () =>
-                runPiTask(context.pi, {
+                runCodexTask(context.codex, {
                     directory: context.repositoryPath,
                     title: `Address review for issue #${context.issue.number} (attempt ${attempt})`,
-                    selection: context.piSelection,
+                    selection: context.codexSelection,
                     prompt: buildReviewFixPrompt({
                         issue: context.issue,
                         repositoryPath: context.repositoryPath,
@@ -769,7 +769,7 @@ export const makeImplementationExecutorService = (
                         verification: review.verification,
                     }),
                     runId: context.runId,
-                    diagnostics: context.piDiagnostics,
+                    diagnostics: context.codexDiagnostics,
                     repositoryInvariant: invariant,
                     verifyRepositoryInvariant:
                         context.repositoryInvariant.verify,

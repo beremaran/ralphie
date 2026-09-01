@@ -233,10 +233,10 @@ const runStateFields = {
         .strict()
         .optional(),
     selection: z.object({
-        agent: z.string().min(1),
+        agent: z.string().min(1).optional(),
         model: z
             .object({
-                providerID: z.string().min(1),
+                providerID: z.string().min(1).optional(),
                 modelID: z.string().min(1),
             })
             .optional(),

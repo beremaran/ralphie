@@ -6,7 +6,7 @@ import {
     makeCommandRuntimeHarness,
     type CommandRuntimeHarnessStep,
 } from "./command-runtime-harness.ts";
-import type { PiSessionEvent } from "../../src/pi/client.ts";
+import type { CodexSessionEvent } from "../../src/codex/client.ts";
 
 describe("command/runtime display harness", () => {
     test("routes maintenance mode to its guarded entry point", async () => {
@@ -32,7 +32,7 @@ describe("command/runtime display harness", () => {
         }
     });
 
-    test("routes fake progress and Pi events through the command coordinator", async () => {
+    test("routes fake progress and Codex events through the command coordinator", async () => {
         const harness = makeCommandRuntimeHarness();
         try {
             await harness.run();
@@ -40,15 +40,15 @@ describe("command/runtime display harness", () => {
             await harness.dispose();
 
             expect(harness.stderr.join("")).toContain("Fake progress");
-            expect(harness.stderr.join("")).toContain("fake Pi event");
+            expect(harness.stderr.join("")).toContain("fake Codex event");
             expect(harness.stdout).toEqual([]);
-            expect(harness.piEvents).toHaveLength(1);
+            expect(harness.codexEvents).toHaveLength(1);
             expect(harness.eventLogPath).toEndWith("events.jsonl");
             expect(harness.runtime?.githubClient).toBeDefined();
             expect(harness.runtime?.gitRepository).toBeDefined();
             expect(harness.runtime?.workspace).toBeDefined();
             expect(harness.lifecycle.slice(0, 3)).toEqual([
-                "pi",
+                "codex",
                 "runtime",
                 "workflow",
             ]);
@@ -60,14 +60,14 @@ describe("command/runtime display harness", () => {
                     (call) => call === "coordinator.dispose",
                 ),
             ).toHaveLength(1);
-            expect(harness.lifecycle).toContain("pi.start");
-            expect(harness.lifecycle).toContain("pi.runtime.close");
-            expect(harness.lifecycle).toContain("pi.client.close");
+            expect(harness.lifecycle).toContain("codex.start");
+            expect(harness.lifecycle).toContain("codex.runtime.close");
+            expect(harness.lifecycle).toContain("codex.client.close");
             expect(harness.lifecycle).toContain("output.dispose");
             expect(harness.disposalCalls).toEqual({
                 runtime: 1,
                 coordinator: 1,
-                piRuntime: 1,
+                codexRuntime: 1,
                 output: 1,
             });
             expect(harness.runCaptures[0]?.eventLogContents).toContain(
@@ -101,21 +101,21 @@ describe("command/runtime display harness", () => {
             sessionID: "cancel-session",
             directory: "/fake/workspace",
         };
-        const pi = (event: object): PiSessionEvent =>
-            event as unknown as PiSessionEvent;
+        const codex = (event: object): CodexSessionEvent =>
+            event as unknown as CodexSessionEvent;
         const steps = [
-            { kind: "pi", event: pi({ type: "agent_start" }), context },
+            { kind: "codex", event: codex({ type: "agent_start" }), context },
             {
-                kind: "pi",
-                event: pi({
+                kind: "codex",
+                event: codex({
                     type: "message_update",
                     assistantMessageEvent: { type: "text_start" },
                 }),
                 context,
             },
             {
-                kind: "pi",
-                event: pi({
+                kind: "codex",
+                event: codex({
                     type: "message_update",
                     assistantMessageEvent: {
                         type: "text_delta",
@@ -142,10 +142,10 @@ describe("command/runtime display harness", () => {
             expect(harness.disposalCalls).toEqual({
                 runtime: 1,
                 coordinator: 1,
-                piRuntime: 1,
+                codexRuntime: 1,
                 output: 1,
             });
-            expect(harness.lifecycle).toContain("pi.client.close");
+            expect(harness.lifecycle).toContain("codex.client.close");
             expect(harness.writesAfterCleanup).toEqual([]);
         } finally {
             await harness.cleanup();
@@ -158,21 +158,21 @@ describe("command/runtime display harness", () => {
             sessionID: "threshold-session",
             directory: "/fake/workspace",
         };
-        const pi = (event: object): PiSessionEvent =>
-            event as unknown as PiSessionEvent;
+        const codex = (event: object): CodexSessionEvent =>
+            event as unknown as CodexSessionEvent;
         const steps = [
-            { kind: "pi", event: pi({ type: "agent_start" }), context },
+            { kind: "codex", event: codex({ type: "agent_start" }), context },
             {
-                kind: "pi",
-                event: pi({
+                kind: "codex",
+                event: codex({
                     type: "message_update",
                     assistantMessageEvent: { type: "text_start" },
                 }),
                 context,
             },
             {
-                kind: "pi",
-                event: pi({
+                kind: "codex",
+                event: codex({
                     type: "message_update",
                     assistantMessageEvent: {
                         type: "text_delta",
@@ -182,24 +182,24 @@ describe("command/runtime display harness", () => {
                 context,
             },
             {
-                kind: "pi",
-                event: pi({
+                kind: "codex",
+                event: codex({
                     type: "message_update",
                     assistantMessageEvent: { type: "text_end" },
                 }),
                 context,
             },
             {
-                kind: "pi",
-                event: pi({
+                kind: "codex",
+                event: codex({
                     type: "compaction_start",
                     reason: "threshold",
                 }),
                 context,
             },
             {
-                kind: "pi",
-                event: pi({
+                kind: "codex",
+                event: codex({
                     type: "agent_end",
                     messages: [],
                     willRetry: false,
@@ -207,8 +207,8 @@ describe("command/runtime display harness", () => {
                 context,
             },
             {
-                kind: "pi",
-                event: pi({ type: "agent_settled" }),
+                kind: "codex",
+                event: codex({ type: "agent_settled" }),
                 context,
             },
         ] satisfies ReadonlyArray<CommandRuntimeHarnessStep>;
@@ -410,10 +410,10 @@ describe("command/runtime display harness", () => {
             expect(harness.disposalCalls).toEqual({
                 runtime: 1,
                 coordinator: 1,
-                piRuntime: 1,
+                codexRuntime: 1,
                 output: 1,
             });
-            expect(harness.lifecycle).toContain("pi.client.close");
+            expect(harness.lifecycle).toContain("codex.client.close");
             expect(harness.writesAfterCleanup).toEqual([]);
         } finally {
             await harness.cleanup();
@@ -479,7 +479,7 @@ describe("command/runtime display harness", () => {
             expect(success.disposalCalls).toEqual({
                 runtime: 1,
                 coordinator: 1,
-                piRuntime: 1,
+                codexRuntime: 1,
                 output: 1,
             });
         } finally {
@@ -495,10 +495,10 @@ describe("command/runtime display harness", () => {
             expect(failure.disposalCalls).toEqual({
                 runtime: 1,
                 coordinator: 1,
-                piRuntime: 1,
+                codexRuntime: 1,
                 output: 1,
             });
-            expect(failure.lifecycle).toContain("pi.client.close");
+            expect(failure.lifecycle).toContain("codex.client.close");
             expect(failure.writesAfterCleanup).toEqual([]);
         } finally {
             await failure.cleanup();

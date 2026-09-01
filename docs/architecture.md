@@ -21,7 +21,7 @@ flowchart LR
         W --> Q[Issue queue and executors]
         W --> S[Run state and artifacts]
         W --> P[Progress and audit events]
-        Q --> OC[Pi adapter]
+        Q --> OC[Codex adapter]
         Q --> GD[Git domain]
         Q --> GHD[GitHub domain]
     end
@@ -29,7 +29,7 @@ flowchart LR
     AUTH[Local gh CLI] --> GHD
     GHD <--> GH[GitHub API]
     GD <--> REPO[Workspace checkout]
-    OC <--> SERVER[Embedded Pi model runtime]
+    OC <--> SERVER[Embedded Codex model runtime]
     S --> DISK[Versioned JSON and issue artifacts]
     P --> TERM[Terminal or JSON Lines]
 ```
@@ -43,7 +43,7 @@ effects and validate their invariants at the boundary.
 | `src/git/` | Checkout preparation, checkpoints, deterministic issue operations, invariants, and remote safety. |
 | `src/issues/` | Queueing, complexity routing, implementation, review, recovery, and decomposition. |
 | `src/agent/` | Ralphie's session, prompt, schema, diagnostics, and structured-output boundary. |
-| `src/pi/` | Embedded upstream Pi client, model runtime, tools, and safety policy. |
+| `src/codex/` | Embedded upstream Codex client, model runtime, tools, and safety policy. |
 | `src/progress/` | Typed events, audit persistence, redaction, and terminal/JSON renderers. |
 | `src/run/` | Versioned state, artifacts, reconciliation, and resume behavior. |
 | `src/workspace/` | Path expansion and protected workspace removal. |
@@ -95,8 +95,8 @@ services under `src/git/` and `src/github/` perform those side effects and
 verify their invariants. The explicit runtime object makes these boundaries
 testable without a framework-specific execution model.
 
-Pi configuration is separate from persistent workspace state: it is read from
-the default or explicitly supplied `--pi-dir`, or generated in a private
+Codex configuration is separate from persistent workspace state: it is read from
+the default or explicitly supplied `--codex-dir`, or generated in a private
 system-temporary directory when model environment variables are used. Run state
 and recovery artifacts belong under the workspace's `.ralphie` directory.
 
@@ -116,7 +116,7 @@ and [Safety](safety.md). For state transitions and reconciliation, see
 | Complexity routing | `src/issues/executor.ts`, `src/issues/complexity.ts` |
 | Implementation/review/delivery | `src/issues/implementation-executor.ts` |
 | Decomposition and GitHub mutations | `src/issues/decomposition-executor.ts`, `src/github/issue-mutations.ts`, `src/github/issue-relationships.ts` |
-| Pi sessions and structured results | `src/agent/`, `src/pi/` |
+| Codex sessions and structured results | `src/agent/`, `src/codex/` |
 | Git checkpoints, safety, and branches | `src/git/` |
 | Durable state and reconciliation | `src/run/`, `src/issues/artifacts.ts` |
 | Progress, redaction, and exit semantics | `src/progress/`, `src/shared/redaction.ts`, `src/process/exit-code.ts` |

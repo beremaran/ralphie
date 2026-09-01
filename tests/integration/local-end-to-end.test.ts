@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { PiClient } from "../../src/pi/client.ts";
+import type { CodexClient } from "../../src/codex/client.ts";
 import type { Octokit } from "octokit";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -35,7 +35,7 @@ import { makeIssueExecutorService } from "../../src/issues/executor.ts";
 import { makeImplementationExecutorService } from "../../src/issues/implementation-executor.ts";
 import { makeIssueRecoveryService } from "../../src/issues/recovery.ts";
 import { makeNeedsAttentionRouterService } from "../../src/issues/needs-attention.ts";
-import { makePiSessionDiagnostics } from "../../src/agent/task-session.ts";
+import { makeCodexSessionDiagnostics } from "../../src/agent/task-session.ts";
 import {
     makeProgressRecorder,
     type ProgressUpdate,
@@ -62,7 +62,7 @@ const run = (
 const git = (repositoryPath: string, args: ReadonlyArray<string>): string =>
     run("git", args, repositoryPath);
 
-const makePi = (repositoryPath: string) => {
+const makeCodex = (repositoryPath: string) => {
     let session = 0;
     let implementationWritten = false;
     const promptKinds: string[] = [];
@@ -144,12 +144,12 @@ const makePi = (repositoryPath: string) => {
             },
         },
     };
-    return { client: client as unknown as PiClient, promptKinds };
+    return { client: client as unknown as CodexClient, promptKinds };
 };
 
 const makeContext = (
     repositoryPath: string,
-    pi: PiClient,
+    codex: CodexClient,
     workspace: string,
     runId: string,
     invariant: ReturnType<typeof makeGitRepositoryInvariantService>,
@@ -172,9 +172,9 @@ const makeContext = (
     workspace,
     runId,
     octokit: {} as Octokit,
-    pi,
-    piSelection: { agent: "build" },
-    piDiagnostics: makePiSessionDiagnostics(() => "now"),
+    codex,
+    codexSelection: { agent: "build" },
+    codexDiagnostics: makeCodexSessionDiagnostics(() => "now"),
     repositoryInvariant: invariant,
 });
 
@@ -200,7 +200,7 @@ describe("local implementation end-to-end", () => {
             git(repositoryPath, ["remote", "add", "origin", remotePath]);
             git(repositoryPath, ["push", "--set-upstream", "origin", "main"]);
             const initialSha = git(repositoryPath, ["rev-parse", "HEAD"]);
-            const piSetup = makePi(repositoryPath);
+            const codexSetup = makeCodex(repositoryPath);
             const progressEvents: ProgressUpdate[] = [];
             const safetyInputs: Array<{
                 readonly intendedBaseSha: string;
@@ -273,7 +273,7 @@ describe("local implementation end-to-end", () => {
             const outcome = await executor.execute(
                 makeContext(
                     repositoryPath,
-                    piSetup.client,
+                    codexSetup.client,
                     workspace,
                     "local-implementation-e2e",
                     invariant,
@@ -307,7 +307,7 @@ describe("local implementation end-to-end", () => {
             expect(
                 await Bun.file(join(repositoryPath, "implemented.txt")).text(),
             ).toBe("implemented\n");
-            expect(piSetup.promptKinds).toEqual([
+            expect(codexSetup.promptKinds).toEqual([
                 "structured",
                 "structured",
                 "structured",
@@ -343,7 +343,7 @@ describe("local implementation end-to-end", () => {
             const initialSha = git(repositoryPath, ["rev-parse", "HEAD"]);
             let prompt = 0;
             const sessions: string[] = [];
-            const pi = {
+            const codex = {
                 session: {
                     create: async () => {
                         const id = `attention-session-${sessions.length + 1}`;
@@ -418,7 +418,7 @@ describe("local implementation end-to-end", () => {
                         };
                     },
                 },
-            } as unknown as PiClient;
+            } as unknown as CodexClient;
             const runner = CommandRunnerLive;
             const gitCheckpoint = makeGitIssueCheckpointService(runner);
             const artifacts = makeIssueArtifactStoreService();
@@ -484,7 +484,7 @@ describe("local implementation end-to-end", () => {
             const outcome = await executor.execute(
                 makeContext(
                     repositoryPath,
-                    pi,
+                    codex,
                     workspace,
                     "local-needs-attention-e2e",
                     invariant,
@@ -524,7 +524,7 @@ describe("local implementation end-to-end", () => {
             const resumedOutcome = await executor.execute(
                 makeContext(
                     repositoryPath,
-                    pi,
+                    codex,
                     workspace,
                     "local-needs-attention-e2e",
                     invariant,

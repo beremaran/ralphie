@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { HELP_TEXT, parseCliArgs } from "../../src/command.ts";
-import type { PiSessionEvent } from "../../src/pi/client.ts";
+import type { CodexSessionEvent } from "../../src/codex/client.ts";
 import { makeProgressCoordinator } from "../../src/progress/coordinator.ts";
 import { breadcrumbCandidateFor } from "../../src/progress/breadcrumb-label.ts";
 
@@ -11,7 +11,7 @@ const context = {
     title: "Task",
 };
 
-const event = (value: unknown): PiSessionEvent => value as PiSessionEvent;
+const event = (value: unknown): CodexSessionEvent => value as CodexSessionEvent;
 
 type BreadcrumbHarness = ReturnType<typeof makeBreadcrumbHarness>;
 
@@ -71,7 +71,7 @@ const writeAssistant = (
 
 const settleSession = (
     harness: BreadcrumbHarness,
-    settledEvent: PiSessionEvent = event({ type: "agent_settled" }),
+    settledEvent: CodexSessionEvent = event({ type: "agent_settled" }),
 ): void => {
     harness.coordinator.listener(settledEvent, context);
 };
@@ -79,7 +79,7 @@ const settleSession = (
 describe("assembled breadcrumb policy regressions", () => {
     test("does not add a breadcrumb when a session ends below threshold", () => {
         const endings: ReadonlyArray<{
-            readonly event: PiSessionEvent;
+            readonly event: CodexSessionEvent;
             readonly footer: string;
         }> = [
             {
@@ -103,7 +103,7 @@ describe("assembled breadcrumb policy regressions", () => {
             settleSession(harness, ending.event);
 
             expect(visibleLines(harness.output)).toEqual([
-                "╭─ Pi · Task · session-1",
+                "╭─ Codex · Task · session-1",
                 "│",
                 "│  ✦ assistant one",
                 ending.footer,
@@ -119,7 +119,7 @@ describe("assembled breadcrumb policy regressions", () => {
         settleSession(harness);
 
         expect(visibleLines(harness.output)).toEqual([
-            "╭─ Pi · Task · session-1",
+            "╭─ Codex · Task · session-1",
             "│",
             "│  ✦ assistant one",
             "│    two",
@@ -142,7 +142,7 @@ describe("assembled breadcrumb policy regressions", () => {
         settleSession(harness);
 
         expect(visibleLines(harness.output)).toEqual([
-            "╭─ Pi · Task · session-1",
+            "╭─ Codex · Task · session-1",
             "│",
             "│  ✦ assistant one",
             "│",
@@ -169,7 +169,7 @@ describe("assembled breadcrumb policy regressions", () => {
         settleSession(harness);
 
         const expectedRows = [
-            "╭─ Pi · Task · session-1",
+            "╭─ Codex · Task · session-1",
             "│",
             "│  ✦ assistant row 1",
             ...rows.slice(1).map((row) => `│    ${row}`),
@@ -200,7 +200,7 @@ describe("assembled breadcrumb policy regressions", () => {
         settleSession(harness);
 
         expect(visibleLines(harness.output)).toEqual([
-            "╭─ Pi · Task · session-1",
+            "╭─ Codex · Task · session-1",
             "│",
             "│  ✦ assistant periodic one",
             "│    periodic two",
@@ -244,7 +244,7 @@ describe("assembled breadcrumb policy regressions", () => {
         settleSession(harness);
 
         expect(visibleLines(harness.output)).toEqual([
-            "╭─ Pi · Task · session-1",
+            "╭─ Codex · Task · session-1",
             "│",
             "│  $ printf tool-output",
             ...Array.from(
@@ -261,7 +261,7 @@ describe("assembled breadcrumb policy regressions", () => {
 
     const lifecycleCases: ReadonlyArray<{
         readonly name: string;
-        readonly event: PiSessionEvent;
+        readonly event: CodexSessionEvent;
         readonly renderedLine: string;
         readonly breadcrumb: string;
     }> = [
@@ -292,7 +292,7 @@ describe("assembled breadcrumb policy regressions", () => {
                 delayMs: 10,
                 errorMessage: "temporary",
             }),
-            renderedLine: "│  ↻ retrying Pi request · attempt 1/2",
+            renderedLine: "│  ↻ retrying Codex request · attempt 1/2",
             breadcrumb: "│  › Retrying",
         },
         {
@@ -302,7 +302,7 @@ describe("assembled breadcrumb policy regressions", () => {
                 success: true,
                 attempt: 1,
             }),
-            renderedLine: "│  ↻ Pi retry succeeded",
+            renderedLine: "│  ↻ Codex retry succeeded",
             breadcrumb: "│  › Waiting",
         },
         {
@@ -353,7 +353,7 @@ describe("assembled breadcrumb policy regressions", () => {
             settleSession(harness);
 
             expect(visibleLines(harness.output)).toEqual([
-                "╭─ Pi · Task · session-1",
+                "╭─ Codex · Task · session-1",
                 "│",
                 "│  ✦ assistant one",
                 "│    two",
@@ -391,7 +391,7 @@ describe("assembled breadcrumb policy regressions", () => {
         settleSession(harness);
 
         expect(visibleLines(harness.output)).toEqual([
-            "╭─ Pi · Task · session-1",
+            "╭─ Codex · Task · session-1",
             "│",
             "│  ✦ assistant one",
             "│",
@@ -437,7 +437,7 @@ describe("assembled breadcrumb policy regressions", () => {
             "[owner/repo?token=[REDACTED]] [1/1] #1 Bearer [REDACTED] › Implementing changes › Compacting context",
         );
         expect(visibleLines(harness.output)).toEqual([
-            "╭─ Pi · Task · session-1 · owner/repo?token=[REDACTED] · issue 1/1 · #1 · Implementing changes",
+            "╭─ Codex · Task · session-1 · owner/repo?token=[REDACTED] · issue 1/1 · #1 · Implementing changes",
             "│",
             "│  ✦ assistant one",
             "│    two",
@@ -462,7 +462,7 @@ describe("assembled breadcrumb policy regressions", () => {
         settleSession(harness);
 
         expect(visibleLines(harness.output)).toEqual([
-            "╭─ Pi · Task · session-1",
+            "╭─ Codex · Task · session-1",
             "│",
             "│  ✦ assistant one",
             "│    two",
@@ -513,7 +513,7 @@ describe("assembled breadcrumb policy regressions", () => {
             "message_update",
             "agent_settled",
         ]);
-        expect(records.every((record) => record.type === "pi_event")).toBe(
+        expect(records.every((record) => record.type === "codex_event")).toBe(
             true,
         );
         expect(harness.output).not.toContain("│  › ");

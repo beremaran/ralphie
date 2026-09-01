@@ -1,13 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import type { PiClient } from "../../src/pi/client.ts";
+import type { CodexClient } from "../../src/codex/client.ts";
 import { z } from "zod";
 
 import { requestStructuredOutput } from "../../src/agent/structured-output.ts";
 import {
-    PI_DECISION_PERMISSION_POLICY,
-    type PiAssistantErrorKind,
-    makePiSessionDiagnostics,
-    toPiAssistantError,
+    CODEX_DECISION_PERMISSION_POLICY,
+    type CodexAssistantErrorKind,
+    makeCodexSessionDiagnostics,
+    toCodexAssistantError,
 } from "../../src/agent/task-session.ts";
 
 enum ProbeDecision {
@@ -46,7 +46,7 @@ const assistantInfo = (
     ...(error === undefined ? {} : { error }),
 });
 
-describe("Pi structured output", () => {
+describe("Codex structured output", () => {
     test("sends a JSON schema and validates the assistant decision", async () => {
         let createParameters: unknown;
         let promptParameters: unknown;
@@ -70,7 +70,7 @@ describe("Pi structured output", () => {
                     };
                 },
             },
-        } as unknown as PiClient;
+        } as unknown as CodexClient;
 
         const result = await requestStructuredOutput(client, {
             directory: "/workspace",
@@ -103,14 +103,14 @@ describe("Pi structured output", () => {
         expect(promptParameters).not.toHaveProperty("model");
         expect(promptParameters).not.toHaveProperty("variant");
         expect(createParameters).toMatchObject({
-            permission: PI_DECISION_PERMISSION_POLICY,
+            permission: CODEX_DECISION_PERMISSION_POLICY,
         });
-        expect(PI_DECISION_PERMISSION_POLICY).toContainEqual({
+        expect(CODEX_DECISION_PERMISSION_POLICY).toContainEqual({
             permission: "bash",
             pattern: "git ls-files*",
             action: "allow",
         });
-        expect(PI_DECISION_PERMISSION_POLICY.at(-1)).toEqual({
+        expect(CODEX_DECISION_PERMISSION_POLICY.at(-1)).toEqual({
             permission: "bash",
             pattern: "git ls-files*",
             action: "allow",
@@ -140,7 +140,7 @@ describe("Pi structured output", () => {
                     };
                 },
             },
-        } as unknown as PiClient;
+        } as unknown as CodexClient;
 
         await requestStructuredOutput(client, {
             directory: "/workspace",
@@ -191,7 +191,7 @@ describe("Pi structured output", () => {
                     },
                 }),
             },
-        } as unknown as PiClient;
+        } as unknown as CodexClient;
 
         const result = await requestStructuredOutput(client, {
             directory: "/workspace",
@@ -240,7 +240,7 @@ describe("Pi structured output", () => {
                         },
                     }),
                 },
-            } as unknown as PiClient;
+            } as unknown as CodexClient;
 
             const result = await requestStructuredOutput(client, {
                 directory: "/workspace",
@@ -254,7 +254,7 @@ describe("Pi structured output", () => {
     });
 
     test("records the session and verifies repository invariants", async () => {
-        const diagnostics = makePiSessionDiagnostics(
+        const diagnostics = makeCodexSessionDiagnostics(
             () => "2026-08-24T00:00:00.000Z",
         );
         let verified: unknown;
@@ -272,7 +272,7 @@ describe("Pi structured output", () => {
                     },
                 }),
             },
-        } as unknown as PiClient;
+        } as unknown as CodexClient;
 
         await requestStructuredOutput(client, {
             directory: "/workspace",
@@ -324,7 +324,7 @@ describe("Pi structured output", () => {
                     };
                 },
             },
-        } as unknown as PiClient;
+        } as unknown as CodexClient;
 
         await requestStructuredOutput(client, {
             directory: "/workspace",
@@ -352,7 +352,7 @@ describe("Pi structured output", () => {
                     },
                 }),
             },
-        } as unknown as PiClient;
+        } as unknown as CodexClient;
 
         await expect(
             requestStructuredOutput(client, {
@@ -361,7 +361,7 @@ describe("Pi structured output", () => {
                 prompt: "Make a decision.",
                 schema: decisionSchema,
             }),
-        ).rejects.toThrow("Failed to get structured output from Pi");
+        ).rejects.toThrow("Failed to get structured output from Codex");
     });
 
     test.each([
@@ -388,7 +388,7 @@ describe("Pi structured output", () => {
                     data: { info: assistantInfo(undefined, error), parts: [] },
                 }),
             },
-        } as unknown as PiClient;
+        } as unknown as CodexClient;
 
         try {
             await requestStructuredOutput(client, {
@@ -399,11 +399,11 @@ describe("Pi structured output", () => {
             });
             throw new Error("expected structured output to fail");
         } catch (failure) {
-            expect(String(failure)).toContain("Pi assistant failed");
+            expect(String(failure)).toContain("Codex assistant failed");
         }
 
-        const typed = toPiAssistantError(error as never);
-        expect(typed.kind).toBe(kind as PiAssistantErrorKind);
+        const typed = toCodexAssistantError(error as never);
+        expect(typed.kind).toBe(kind as CodexAssistantErrorKind);
         if (kind === "structured-output-retry-exhausted") {
             expect(typed.retries).toBe(2);
         }

@@ -1,25 +1,28 @@
 import { describe, expect, test } from "bun:test";
 
 import { RalphieExitCode } from "../../src/process/exit-code.ts";
-import type { PiEventContext, PiSessionEvent } from "../../src/pi/client.ts";
+import type {
+    CodexEventContext,
+    CodexSessionEvent,
+} from "../../src/codex/client.ts";
 import {
     makeCommandRuntimeHarness,
     type CommandRuntimeHarnessStep,
-    type RuntimeScenarioPiEvent,
+    type RuntimeScenarioCodexEvent,
 } from "./command-runtime-harness.ts";
 
-const context: PiEventContext = {
+const context: CodexEventContext = {
     sessionID: "failure-matrix-session",
     directory: "/fake/workspace",
     title: "Failure matrix",
 };
 
-const pi = (event: object): PiSessionEvent =>
-    event as unknown as PiSessionEvent;
+const codex = (event: object): CodexSessionEvent =>
+    event as unknown as CodexSessionEvent;
 
-const piStep = (event: object): RuntimeScenarioPiEvent => ({
-    kind: "pi",
-    event: pi(event),
+const codexStep = (event: object): RuntimeScenarioCodexEvent => ({
+    kind: "codex",
+    event: codex(event),
     context,
 });
 
@@ -34,13 +37,13 @@ const progressStep = (message: string): CommandRuntimeHarnessStep => ({
     },
 });
 
-const agentStart = piStep({ type: "agent_start" });
-const assistantStart = piStep({
+const agentStart = codexStep({ type: "agent_start" });
+const assistantStart = codexStep({
     type: "message_update",
     assistantMessageEvent: { type: "text_start" },
 });
 const assistantDelta = (text: string): CommandRuntimeHarnessStep =>
-    piStep({
+    codexStep({
         type: "message_update",
         assistantMessageEvent: { type: "text_delta", delta: text },
     });
@@ -55,33 +58,33 @@ const scenarios = [
             agentStart,
             assistantStart,
             assistantDelta("completed transcript"),
-            piStep({
+            codexStep({
                 type: "message_update",
                 assistantMessageEvent: { type: "text_end" },
             }),
-            piStep({ type: "agent_end", messages: [], willRetry: false }),
-            piStep({ type: "agent_settled" }),
+            codexStep({ type: "agent_end", messages: [], willRetry: false }),
+            codexStep({ type: "agent_settled" }),
         ],
     },
     {
-        name: "Pi failure",
+        name: "Codex failure",
         expectedExitCode: RalphieExitCode.Failure,
-        error: "Pi operation failed",
-        expectedOutput: "Pi provider failed",
+        error: "Codex operation failed",
+        expectedOutput: "Codex provider failed",
         steps: [
-            progressStep("progress before Pi failure"),
+            progressStep("progress before Codex failure"),
             agentStart,
             assistantStart,
             assistantDelta("partial assistant output"),
-            piStep({
+            codexStep({
                 type: "message_update",
                 assistantMessageEvent: {
                     type: "error",
                     reason: "provider failure",
-                    error: { errorMessage: "Pi provider failed" },
+                    error: { errorMessage: "Codex provider failed" },
                 },
             }),
-            { kind: "failure", error: new Error("Pi operation failed") },
+            { kind: "failure", error: new Error("Codex operation failed") },
         ],
     },
     {
@@ -92,13 +95,13 @@ const scenarios = [
         steps: [
             progressStep("progress before tool failure"),
             agentStart,
-            piStep({
+            codexStep({
                 type: "tool_execution_start",
                 toolCallId: "failure-matrix-tool",
                 toolName: "read",
                 args: { path: "missing.txt" },
             }),
-            piStep({
+            codexStep({
                 type: "tool_execution_end",
                 toolCallId: "failure-matrix-tool",
                 toolName: "read",
@@ -128,13 +131,13 @@ const scenarios = [
         steps: [
             progressStep("progress before cancellation"),
             agentStart,
-            piStep({
+            codexStep({
                 type: "tool_execution_start",
                 toolCallId: "cancellation-tool",
                 toolName: "read",
                 args: { path: "still-reading.txt" },
             }),
-            piStep({
+            codexStep({
                 type: "tool_execution_update",
                 toolCallId: "cancellation-tool",
                 toolName: "read",
@@ -164,18 +167,18 @@ const expectDisposedExactlyOnce = (
     expect(harness.disposalCalls).toEqual({
         runtime: 1,
         coordinator: 1,
-        piRuntime: 1,
+        codexRuntime: 1,
         output: 1,
     });
     expect(
-        harness.lifecycle.filter((call) => call === "pi.runtime.close"),
+        harness.lifecycle.filter((call) => call === "codex.runtime.close"),
     ).toHaveLength(1);
     expect(
         harness.lifecycle.filter((call) => call === "output.dispose"),
     ).toHaveLength(1);
     expect(harness.lifecycle.slice(-5)).toEqual([
-        "pi.runtime.close",
-        "pi.client.close",
+        "codex.runtime.close",
+        "codex.client.close",
         "runtime.dispose",
         "coordinator.dispose",
         "output.dispose",
@@ -206,7 +209,7 @@ const expectStableAfterCleanup = async (
     };
 
     harness.emitPi(
-        piStep({
+        codexStep({
             type: "message_update",
             assistantMessageEvent: {
                 type: "text_delta",
@@ -230,7 +233,7 @@ const expectStableAfterCleanup = async (
     );
 };
 
-describe("Pi stream failure and cleanup lifecycle matrix", () => {
+describe("Codex stream failure and cleanup lifecycle matrix", () => {
     test.each(scenarios)("$name", async (scenario) => {
         const previousExitCode = process.exitCode;
         const harness = makeCommandRuntimeHarness({ steps: scenario.steps });

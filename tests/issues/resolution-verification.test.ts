@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import type { Octokit } from "octokit";
 
-import type { PiClient } from "../../src/pi/client.ts";
-import { makePiSessionDiagnostics } from "../../src/agent/task-session.ts";
+import type { CodexClient } from "../../src/codex/client.ts";
+import { makeCodexSessionDiagnostics } from "../../src/agent/task-session.ts";
 import { makeResolutionVerificationService } from "../../src/issues/resolution-verification.ts";
 import { IssueResolutionStatus } from "../../src/issues/decisions.ts";
 import type { IssueExecutionContext } from "../../src/issues/execution.ts";
@@ -30,7 +30,7 @@ const assistantInfo = (structured: unknown) => ({
 describe("resolution verification", () => {
     test("uses a fresh read-only structured session with invariant and progress checks", async () => {
         const events: ProgressUpdate[] = [];
-        const diagnostics = makePiSessionDiagnostics(() => "now");
+        const diagnostics = makeCodexSessionDiagnostics(() => "now");
         const controller = new AbortController();
         let createInput: unknown;
         let createOptions: unknown;
@@ -61,7 +61,7 @@ describe("resolution verification", () => {
                     };
                 },
             },
-        } as unknown as PiClient;
+        } as unknown as CodexClient;
         const context: IssueExecutionContext = {
             issue: {
                 number: 42,
@@ -76,13 +76,13 @@ describe("resolution verification", () => {
             workspace: "/workspace",
             runId: "run-1",
             octokit: {} as Octokit,
-            pi: client,
-            piSelection: {
+            codex: client,
+            codexSelection: {
                 agent: "reviewer",
                 model: { providerID: "openai", modelID: "gpt-test" },
                 variant: "low",
             },
-            piDiagnostics: diagnostics,
+            codexDiagnostics: diagnostics,
             repositoryInvariant: {
                 capture: async () => ({ branch: "main", head: "abc123" }),
                 verify: async (directory, invariant) => {

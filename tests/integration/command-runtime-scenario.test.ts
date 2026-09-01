@@ -33,7 +33,7 @@ const expectPlainOutputContract = (capture: CommandRuntimeRunCapture): void => {
     expect(output).toContain("│  ⋯ thinking");
     expect(output).toContain("│  read README.md");
     expect(output).toContain("│  ✦ assistant");
-    expect(output).toContain("retrying Pi request · attempt 2/3");
+    expect(output).toContain("retrying Codex request · attempt 2/3");
     expect(
         capture.displayStates.some(
             (state) =>
@@ -109,10 +109,10 @@ const expectedProgressRecords = (runId: string): JsonRecord[] =>
         timestamp: scenarioTimestamp,
     }));
 
-const expectedPiRecord = (
-    event: (typeof multiIssueRuntimeOracle.piEvents)[number],
+const expectedCodexRecord = (
+    event: (typeof multiIssueRuntimeOracle.codexEvents)[number],
 ): JsonRecord => ({
-    type: "pi_event",
+    type: "codex_event",
     sessionID: event.context.sessionID,
     directory: event.context.directory,
     ...(event.context.title === undefined
@@ -129,7 +129,7 @@ const expectedJsonRecords = (runId: string): JsonRecord[] =>
                   runId,
                   timestamp: scenarioTimestamp,
               }
-            : expectedPiRecord(emission),
+            : expectedCodexRecord(emission),
     );
 
 const expectJsonOutputContract = (capture: CommandRuntimeRunCapture): void => {
@@ -144,9 +144,11 @@ const expectJsonOutputContract = (capture: CommandRuntimeRunCapture): void => {
     const progressRecords = records.filter(
         (record) => record.type === undefined,
     );
-    const piRecords = records.filter((record) => record.type === "pi_event");
+    const codexRecords = records.filter(
+        (record) => record.type === "codex_event",
+    );
     const invalidRecords = records.filter(
-        (record) => record.type !== undefined && record.type !== "pi_event",
+        (record) => record.type !== undefined && record.type !== "codex_event",
     );
     expect(invalidRecords).toEqual([]);
 
@@ -155,8 +157,8 @@ const expectJsonOutputContract = (capture: CommandRuntimeRunCapture): void => {
         throw new Error("JSON Lines output did not contain a progress run ID.");
     }
     expect(progressRecords).toEqual(expectedProgressRecords(runId));
-    expect(piRecords).toEqual(
-        multiIssueRuntimeOracle.piEvents.map(expectedPiRecord),
+    expect(codexRecords).toEqual(
+        multiIssueRuntimeOracle.codexEvents.map(expectedCodexRecord),
     );
     expect(records).toEqual(expectedJsonRecords(runId));
 };
@@ -213,7 +215,7 @@ const expectNamedDisplayTransitions = (
 
     const thinking = stateAfter(
         (emission) =>
-            emission.kind === "pi" &&
+            emission.kind === "codex" &&
             emission.event.type === "message_update" &&
             emission.event.assistantMessageEvent.type === "thinking_start",
     );
@@ -226,7 +228,7 @@ const expectNamedDisplayTransitions = (
 
     const tool = stateAfter(
         (emission) =>
-            emission.kind === "pi" &&
+            emission.kind === "codex" &&
             emission.event.type === "tool_execution_start",
     );
     expect(tool).toMatchObject({
@@ -238,7 +240,8 @@ const expectNamedDisplayTransitions = (
 
     const returnedToWorkflow = stateAfter(
         (emission) =>
-            emission.kind === "pi" && emission.event.type === "agent_settled",
+            emission.kind === "codex" &&
+            emission.event.type === "agent_settled",
     );
     expect(returnedToWorkflow).toMatchObject({
         parentIssue: 100,
@@ -342,8 +345,8 @@ describe("multi-issue command/runtime scenario oracle", () => {
                 expect.objectContaining({ status: "failed" }),
             ]),
         );
-        expect(oracle.piEvents.length).toBeGreaterThan(8);
-        expect(oracle.piEvents).toEqual(
+        expect(oracle.codexEvents.length).toBeGreaterThan(8);
+        expect(oracle.codexEvents).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({
                     context: expect.objectContaining({
@@ -397,8 +400,8 @@ describe("multi-issue command/runtime scenario oracle", () => {
                     ...multiIssueRuntimeOracle.expectedDisplayStates,
                 ]);
                 expectNamedDisplayTransitions(capture);
-                expect(capture.piEvents).toEqual([
-                    ...multiIssueRuntimeOracle.piEvents,
+                expect(capture.codexEvents).toEqual([
+                    ...multiIssueRuntimeOracle.codexEvents,
                 ]);
                 expectSecretAbsentFromStreams(capture);
                 expect(capture.eventLogPath).toBeString();

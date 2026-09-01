@@ -16,7 +16,7 @@ credential setup, verification, and the first dry run. Return to the
 The required local tools depend on how Ralphie is installed:
 
 - A verified standalone binary needs Git, the [GitHub CLI](https://cli.github.com/),
-  a POSIX shell, and model credentials supported by [Pi](https://github.com/earendil-works/pi),
+  a POSIX shell, and model credentials supported by [Codex](https://github.com/earendil-works/codex),
   but does not need [Bun](https://bun.sh/) to execute.
 - The published JavaScript package and a source checkout need Bun to run.
 - Building Ralphie from source also needs Bun.
@@ -24,14 +24,14 @@ The required local tools depend on how Ralphie is installed:
 The standalone installer additionally needs `curl`, the Sigstore CLI, and a
 SHA-256 utility (`sha256sum` or `shasum`).
 
-By default, configure Pi in `~/.pi/agent/auth.json`, or point `--pi-dir` at an
-existing Pi agent directory outside the Ralphie workspace. An explicitly
-supplied `--pi-dir` is operator-owned and is never removed. A static
-configuration can be mounted read-only, but use a read-write mount when Pi
+By default, configure Codex in `~/.codex/agent/auth.json`, or point `--codex-dir` at an
+existing Codex agent directory outside the Ralphie workspace. An explicitly
+supplied `--codex-dir` is operator-owned and is never removed. A static
+configuration can be mounted read-only, but use a read-write mount when Codex
 must update `auth.json`, `models.json`, or its model store.
 
 For an OpenAI-compatible endpoint, set `RALPHIE_MODEL_BASE_URL` and, when
-required by the provider, `RALPHIE_MODEL_API_KEY`. When `--pi-dir` is not
+required by the provider, `RALPHIE_MODEL_API_KEY`. When `--codex-dir` is not
 supplied, Ralphie creates `models.json` and `auth.json` in a private 0700
 system-temporary directory with 0600 files. That directory is removed on
 normal close and failed startup, and is never placed under the persistent
@@ -173,7 +173,7 @@ bun run index.ts --version
 `ralphie --version` prints only the release version. For automation,
 `ralphie --version --output json` prints a stable object containing `version`
 and `commitSha`. Both forms work without a repository, GitHub credentials, or
-Pi configuration. Release builds embed the immutable commit SHA supplied by
+Codex configuration. Release builds embed the immutable commit SHA supplied by
 the build entry point; local builds use the documented `local` commit sentinel
 when no release SHA is supplied.
 
@@ -202,9 +202,9 @@ bun run index.ts owner/repository --dry-run --max-issues 1
 ```
 
 This performs authentication and Git preflight, prepares a clean checkout,
-discovers issues, and asks Pi for read-only grounding and a complexity
+discovers issues, and asks Codex for read-only grounding and a complexity
 assessment. It may create or reset the local workspace and write run
-artifacts, but it does not ask Pi to edit the repository, create commits, push,
+artifacts, but it does not ask Codex to edit the repository, create commits, push,
 or mutate GitHub. Dry-run also reports already-resolved and needs-attention
 routes, then remains mutation-free on resume. See [Workflows](workflows.md) for
 what the selected route means and [Operations and recovery](operations-and-recovery.md)
@@ -214,25 +214,25 @@ for the artifacts it leaves behind.
 
 The container runs as UID/GID `65532:65532` with `HOME` and its working
 directory set to `/home/nonroot`. Supply credentials only at runtime and keep
-Pi configuration in a separate mount from the persistent state/workspace. This
-example uses a read-write bind mount because Pi may update its configuration;
+Codex configuration in a separate mount from the persistent state/workspace. This
+example uses a read-write bind mount because Codex may update its configuration;
 use `readonly` only for a fully provisioned static configuration that does not
-need Pi writes:
+need Codex writes:
 
 ```bash
 docker run --rm \
   --env GH_TOKEN \
   --mount type=volume,source=ralphie-state,target=/home/nonroot/.ralphie \
-  --mount type=bind,source="$HOME/.pi/agent",target=/home/nonroot/.pi/agent \
+  --mount type=bind,source="$HOME/.codex/agent",target=/home/nonroot/.codex/agent \
   ghcr.io/beremaran/ralphie:latest owner/repository \
   --workspace /home/nonroot/.ralphie \
-  --pi-dir /home/nonroot/.pi/agent \
+  --codex-dir /home/nonroot/.codex/agent \
   --dry-run --max-issues 1
 ```
 
-Alternatively, omit `--pi-dir` and provide `RALPHIE_MODEL_BASE_URL` (and, when
+Alternatively, omit `--codex-dir` and provide `RALPHIE_MODEL_BASE_URL` (and, when
 required, `RALPHIE_MODEL_API_KEY`) at runtime; Ralphie then uses a private
-system-temporary configuration directory. The image contains the GitHub CLI, Git, a POSIX shell, Pi's shell/search tools,
+system-temporary configuration directory. The image contains the GitHub CLI, Git, a POSIX shell, Codex's shell/search tools,
 and CA certificates; it does not contain Bun, credentials, or credential-bearing
 defaults. For `github.com`, pass `GH_TOKEN` (preferred) or `GITHUB_TOKEN`
 (fallback) at runtime. The container smoke check is:
@@ -243,7 +243,7 @@ docker run --rm --env GH_TOKEN --entrypoint gh \
 ```
 
 Authentication inputs are noninteractive; do not print or expose the
-credential. Pi configuration may instead be provided through
+credential. Codex configuration may instead be provided through
 `RALPHIE_MODEL_BASE_URL` and, when required, `RALPHIE_MODEL_API_KEY`.
 
 For all available options and mode-specific commands, continue to the [CLI

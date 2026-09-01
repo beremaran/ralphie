@@ -1,9 +1,9 @@
 import type {
-    PiAssistantMessage,
-    PiClient,
-    PiPart,
-    PiPermissionRuleset,
-} from "../pi/client.ts";
+    CodexAssistantMessage,
+    CodexClient,
+    CodexPart,
+    CodexPermissionRuleset,
+} from "../codex/client.ts";
 import { z } from "zod";
 
 import {
@@ -13,34 +13,34 @@ import {
     type ProgressReporterService,
 } from "../progress/progress.ts";
 import { RalphieError } from "../shared/error.ts";
-import type { PiModel, PiSelection } from "./model.ts";
+import type { CodexModel, CodexSelection } from "./model.ts";
 
-export type PiTaskSessionRequest = {
+export type CodexTaskSessionRequest = {
     readonly directory: string;
     readonly title: string;
-    readonly selection: PiSelection;
+    readonly selection: CodexSelection;
     readonly runId?: string;
-    readonly diagnostics?: PiSessionDiagnostics;
+    readonly diagnostics?: CodexSessionDiagnostics;
     readonly signal?: AbortSignal;
 };
 
-export type PiTaskSession = {
+export type CodexTaskSession = {
     readonly sessionID: string;
     readonly directory: string;
-    readonly selection: PiSelection;
+    readonly selection: CodexSelection;
 };
 
-export type PiTaskRequest = PiTaskSessionRequest & {
+export type CodexTaskRequest = CodexTaskSessionRequest & {
     readonly prompt: string;
-    readonly repositoryInvariant?: PiRepositoryInvariant;
-    readonly verifyRepositoryInvariant?: PiRepositoryInvariantVerifier;
+    readonly repositoryInvariant?: CodexRepositoryInvariant;
+    readonly verifyRepositoryInvariant?: CodexRepositoryInvariantVerifier;
     readonly verifyAfter?: () => Promise<void>;
     readonly progress?: ProgressReporterService;
     readonly progressStage?: ProgressStage;
     readonly progressIssue?: ProgressIssue;
 };
 
-export const PI_NEEDS_ATTENTION_REASONS = [
+export const CODEX_NEEDS_ATTENTION_REASONS = [
     "outdated_premise",
     "conflicting_requirements",
     "missing_information",
@@ -48,19 +48,19 @@ export const PI_NEEDS_ATTENTION_REASONS = [
     "cannot_reproduce",
 ] as const;
 
-export type PiNeedsAttentionReason =
-    (typeof PI_NEEDS_ATTENTION_REASONS)[number];
+export type CodexNeedsAttentionReason =
+    (typeof CODEX_NEEDS_ATTENTION_REASONS)[number];
 
-export const PI_NEEDS_ATTENTION_MESSAGE_LIMIT = 2_000;
+export const CODEX_NEEDS_ATTENTION_MESSAGE_LIMIT = 2_000;
 
 /** A bounded request to defer work; this is not a final workflow decision. */
-export const piNeedsAttentionRequestSchema = z
+export const codexNeedsAttentionRequestSchema = z
     .object({
-        reason: z.enum(PI_NEEDS_ATTENTION_REASONS),
+        reason: z.enum(CODEX_NEEDS_ATTENTION_REASONS),
         message: z
             .string()
             .min(1)
-            .max(PI_NEEDS_ATTENTION_MESSAGE_LIMIT)
+            .max(CODEX_NEEDS_ATTENTION_MESSAGE_LIMIT)
             .refine((value) => value.trim().length > 0, {
                 message: "Expected a non-blank message.",
             })
@@ -68,49 +68,49 @@ export const piNeedsAttentionRequestSchema = z
     })
     .strict();
 
-export type PiNeedsAttentionRequest = z.infer<
-    typeof piNeedsAttentionRequestSchema
+export type CodexNeedsAttentionRequest = z.infer<
+    typeof codexNeedsAttentionRequestSchema
 >;
 
-export type NeedsAttentionRequest = PiNeedsAttentionRequest;
+export type NeedsAttentionRequest = CodexNeedsAttentionRequest;
 
-/** Parse only the structured Pi side channel; invalid values are ignored. */
-export const parsePiNeedsAttentionRequest = (
+/** Parse only the structured Codex side channel; invalid values are ignored. */
+export const parseCodexNeedsAttentionRequest = (
     value: unknown,
-): PiNeedsAttentionRequest | undefined => {
-    const parsed = piNeedsAttentionRequestSchema.safeParse(value);
+): CodexNeedsAttentionRequest | undefined => {
+    const parsed = codexNeedsAttentionRequestSchema.safeParse(value);
     return parsed.success ? parsed.data : undefined;
 };
 
-export type PiTaskResult = {
-    readonly session: PiTaskSession;
-    readonly response: PiAssistantMessage;
-    readonly parts: ReadonlyArray<PiPart>;
-    readonly needsAttention?: PiNeedsAttentionRequest;
+export type CodexTaskResult = {
+    readonly session: CodexTaskSession;
+    readonly response: CodexAssistantMessage;
+    readonly parts: ReadonlyArray<CodexPart>;
+    readonly needsAttention?: CodexNeedsAttentionRequest;
 };
 
-export type PiAssistantErrorKind =
+export type CodexAssistantErrorKind =
     | "aborted"
     | "output-length-exceeded"
     | "structured-output-retry-exhausted"
     | "other";
 
-export class PiAssistantError extends Error {
-    readonly _tag = "PiAssistantError";
-    readonly kind: PiAssistantErrorKind;
+export class CodexAssistantError extends Error {
+    readonly _tag = "CodexAssistantError";
+    readonly kind: CodexAssistantErrorKind;
     readonly errorName: string;
     readonly retries?: number;
-    readonly sdkError: NonNullable<PiAssistantMessage["error"]>;
+    readonly sdkError: NonNullable<CodexAssistantMessage["error"]>;
 
     constructor(input: {
-        readonly kind: PiAssistantErrorKind;
+        readonly kind: CodexAssistantErrorKind;
         readonly message: string;
         readonly errorName: string;
         readonly retries?: number;
-        readonly sdkError: NonNullable<PiAssistantMessage["error"]>;
+        readonly sdkError: NonNullable<CodexAssistantMessage["error"]>;
     }) {
         super(input.message);
-        this.name = "PiAssistantError";
+        this.name = "CodexAssistantError";
         this.kind = input.kind;
         this.errorName = input.errorName;
         this.retries = input.retries;
@@ -118,46 +118,49 @@ export class PiAssistantError extends Error {
     }
 }
 
-export type PiRepositoryInvariant = {
+export type CodexRepositoryInvariant = {
     readonly branch: string;
     readonly head: string;
 };
 
-export type PiRepositoryInvariantVerifier = (
+export type CodexRepositoryInvariantVerifier = (
     repositoryPath: string,
-    expected: PiRepositoryInvariant,
+    expected: CodexRepositoryInvariant,
 ) => Promise<void>;
 
-export type PiSessionDiagnostic = {
+export type CodexSessionDiagnostic = {
     readonly runId: string;
     readonly sessionID: string;
     readonly directory: string;
     readonly agent?: string;
-    readonly model?: PiModel;
+    readonly model?: CodexModel;
     readonly variant?: string;
     readonly recordedAt: string;
 };
 
-export type PiSessionDiagnosticInput = Omit<
-    PiSessionDiagnostic,
+export type CodexSessionDiagnosticInput = Omit<
+    CodexSessionDiagnostic,
     "runId" | "recordedAt"
 >;
 
 /** Successful sessions remain available for post-run inspection. */
-export const PiSessionRetentionPolicy = "retain" as const;
-export type PiSessionRetentionPolicy = typeof PiSessionRetentionPolicy;
+export const CodexSessionRetentionPolicy = "retain" as const;
+export type CodexSessionRetentionPolicy = typeof CodexSessionRetentionPolicy;
 
-export const PI_SESSION_RETENTION_POLICY = PiSessionRetentionPolicy;
+export const CODEX_SESSION_RETENTION_POLICY = CodexSessionRetentionPolicy;
 
-export type PiSessionDiagnostics = {
-    readonly record: (runId: string, session: PiSessionDiagnosticInput) => void;
-    readonly list: (runId: string) => ReadonlyArray<PiSessionDiagnostic>;
+export type CodexSessionDiagnostics = {
+    readonly record: (
+        runId: string,
+        session: CodexSessionDiagnosticInput,
+    ) => void;
+    readonly list: (runId: string) => ReadonlyArray<CodexSessionDiagnostic>;
 };
 
-export const makePiSessionDiagnostics = (
+export const makeCodexSessionDiagnostics = (
     now: () => string = () => new Date().toISOString(),
-): PiSessionDiagnostics => {
-    const sessions = new Map<string, PiSessionDiagnostic[]>();
+): CodexSessionDiagnostics => {
+    const sessions = new Map<string, CodexSessionDiagnostic[]>();
 
     return {
         record: (runId, session) => {
@@ -170,42 +173,26 @@ export const makePiSessionDiagnostics = (
 };
 
 /**
- * Pi permission rules for task agents. The agent may inspect and edit
+ * Codex permission rules for task agents. The agent may inspect and edit
  * files, but deterministic Ralphie steps retain ownership of commits, pushes,
  * branch changes, worktrees, resets/cleanups, and GitHub mutations.
  */
-export const PI_TASK_PERMISSION_POLICY: PiPermissionRuleset = [
-    { permission: "bash", pattern: "git commit*", action: "deny" },
-    { permission: "bash", pattern: "git push*", action: "deny" },
-    { permission: "bash", pattern: "git branch*", action: "deny" },
-    { permission: "bash", pattern: "git checkout*", action: "deny" },
-    { permission: "bash", pattern: "git switch*", action: "deny" },
-    { permission: "bash", pattern: "git worktree*", action: "deny" },
-    { permission: "bash", pattern: "git reset*", action: "deny" },
-    { permission: "bash", pattern: "git clean*", action: "deny" },
-    { permission: "bash", pattern: "gh *", action: "deny" },
-];
+export const CODEX_TASK_PERMISSION_POLICY: CodexPermissionRuleset =
+    "workspace-write";
 
 /**
  * Structured decision sessions may inspect repository files and read Git state,
- * but cannot mutate the checkout. Pi permission rules use the last matching
+ * but cannot mutate the checkout. Codex permission rules use the last matching
  * rule, so the narrow read-only allowances must follow the catch-all denial.
  */
-export const PI_DECISION_PERMISSION_POLICY: PiPermissionRuleset = [
-    { permission: "edit", pattern: "*", action: "deny" },
-    { permission: "write", pattern: "*", action: "deny" },
-    { permission: "bash", pattern: "*", action: "deny" },
-    ...PI_TASK_PERMISSION_POLICY,
-    { permission: "bash", pattern: "git status*", action: "allow" },
-    { permission: "bash", pattern: "git diff*", action: "allow" },
-    { permission: "bash", pattern: "git ls-files*", action: "allow" },
-];
+export const CODEX_DECISION_PERMISSION_POLICY: CodexPermissionRuleset =
+    "read-only";
 
-type PiPromptParameters = Parameters<PiClient["session"]["prompt"]>[0];
+type CodexPromptParameters = Parameters<CodexClient["session"]["prompt"]>[0];
 
-export type PiTaskPromptInput = Omit<
-    PiPromptParameters,
-    "sessionID" | "directory" | "agent" | "model" | "variant"
+export type CodexTaskPromptInput = Omit<
+    CodexPromptParameters,
+    "sessionID" | "directory" | "model" | "variant"
 >;
 
 const describeApiError = (error: unknown): string => {
@@ -216,7 +203,7 @@ const describeApiError = (error: unknown): string => {
         readonly data?: { readonly message?: unknown };
     };
     const name =
-        typeof candidate.name === "string" ? candidate.name : "PiError";
+        typeof candidate.name === "string" ? candidate.name : "CodexError";
     const message =
         typeof candidate.data?.message === "string"
             ? candidate.data.message
@@ -225,9 +212,9 @@ const describeApiError = (error: unknown): string => {
     return `${name}: ${message}`;
 };
 
-export const toPiAssistantError = (
-    error: NonNullable<PiAssistantMessage["error"]>,
-): PiAssistantError => {
+export const toCodexAssistantError = (
+    error: NonNullable<CodexAssistantMessage["error"]>,
+): CodexAssistantError => {
     const kind =
         error.name === "MessageAbortedError"
             ? "aborted"
@@ -237,7 +224,7 @@ export const toPiAssistantError = (
                 ? "structured-output-retry-exhausted"
                 : "other";
 
-    return new PiAssistantError({
+    return new CodexAssistantError({
         kind,
         message: describeApiError(error),
         errorName: error.name,
@@ -251,16 +238,16 @@ export const toPiAssistantError = (
 
 const assistantFailure = (
     prefix: string,
-    error: NonNullable<PiAssistantMessage["error"]>,
+    error: NonNullable<CodexAssistantMessage["error"]>,
 ): RalphieError => {
-    const typedError = toPiAssistantError(error);
+    const typedError = toCodexAssistantError(error);
     return new RalphieError({
         message: `${prefix} (${typedError.kind}): ${typedError.message}`,
         cause: typedError,
     });
 };
 
-export const reportPiFailure = async (
+export const reportCodexFailure = async (
     request: {
         readonly directory: string;
         readonly title: string;
@@ -273,7 +260,7 @@ export const reportPiFailure = async (
     if (request.progress === undefined) return;
 
     const assistantError =
-        error.cause instanceof PiAssistantError ? error.cause : undefined;
+        error.cause instanceof CodexAssistantError ? error.cause : undefined;
     const causeMessage = (() => {
         let cause: unknown = error.cause;
         for (let depth = 0; depth < 4 && cause !== undefined; depth += 1) {
@@ -299,7 +286,7 @@ export const reportPiFailure = async (
             ...(request.progressIssue === undefined
                 ? {}
                 : { issue: request.progressIssue }),
-            message: `Pi task failed: ${error.message}`,
+            message: `Codex task failed: ${error.message}`,
             details: {
                 directory: request.directory,
                 title: request.title,
@@ -319,19 +306,16 @@ export const reportPiFailure = async (
             },
         });
     } catch {
-        // Reporting must never hide the original Pi failure.
+        // Reporting must never hide the original Codex failure.
     }
 };
-
-const createSessionModel = (model: PiModel) => ({
-    providerID: model.providerID,
-    id: model.modelID,
-});
 
 const signalOptions = (signal: AbortSignal | undefined) =>
     signal === undefined ? undefined : { signal };
 
-const verifyPiTaskRequest = async (request: PiTaskRequest): Promise<void> => {
+const verifyCodexTaskRequest = async (
+    request: CodexTaskRequest,
+): Promise<void> => {
     if (
         request.repositoryInvariant !== undefined &&
         request.verifyRepositoryInvariant !== undefined
@@ -344,11 +328,11 @@ const verifyPiTaskRequest = async (request: PiTaskRequest): Promise<void> => {
     if (request.verifyAfter !== undefined) await request.verifyAfter();
 };
 
-const promptPiTask = async (
-    client: PiClient,
-    session: PiTaskSession,
-    request: PiTaskRequest,
-): Promise<PiTaskResult> => {
+const promptCodexTask = async (
+    client: CodexClient,
+    session: CodexTaskSession,
+    request: CodexTaskRequest,
+): Promise<CodexTaskResult> => {
     const response = await client.session.prompt(
         taskSessionPromptParameters(session, {
             parts: [{ type: "text", text: request.prompt }],
@@ -358,34 +342,32 @@ const promptPiTask = async (
 
     if (response.error !== undefined || response.data === undefined) {
         throw new Error(
-            `Pi task prompt failed: ${describeApiError(response.error)}`,
+            `Codex task prompt failed: ${describeApiError(response.error)}`,
         );
     }
     if (response.data.info.error !== undefined) {
-        throw assistantFailure("Pi assistant failed", response.data.info.error);
+        throw assistantFailure(
+            "Codex assistant failed",
+            response.data.info.error,
+        );
     }
 
-    await verifyPiTaskRequest(request);
-    const needsAttention = parsePiNeedsAttentionRequest(
-        response.data.needsAttention,
-    );
+    await verifyCodexTaskRequest(request);
     return {
         session,
         response: response.data.info,
         parts: response.data.parts,
-        ...(needsAttention === undefined ? {} : { needsAttention }),
     };
 };
 
 /** Build prompt parameters for a task session. */
 export const taskSessionPromptParameters = (
-    session: PiTaskSession,
-    input: PiTaskPromptInput,
-): PiPromptParameters => ({
+    session: CodexTaskSession,
+    input: CodexTaskPromptInput,
+): CodexPromptParameters => ({
     ...input,
     sessionID: session.sessionID,
     directory: session.directory,
-    agent: session.selection.agent,
     ...(session.selection.model === undefined
         ? {}
         : { model: session.selection.model }),
@@ -395,20 +377,19 @@ export const taskSessionPromptParameters = (
 });
 
 /** Create an isolated task session rooted in a repository checkout. */
-export const createPiTaskSession = async (
-    client: PiClient,
-    request: PiTaskSessionRequest,
-): Promise<PiTaskSession> => {
+export const createCodexTaskSession = async (
+    client: CodexClient,
+    request: CodexTaskSessionRequest,
+): Promise<CodexTaskSession> => {
     try {
         const response = await client.session.create(
             {
                 directory: request.directory,
                 title: request.title,
-                agent: request.selection.agent,
-                permission: PI_TASK_PERMISSION_POLICY,
+                sandbox: CODEX_TASK_PERMISSION_POLICY,
                 ...(request.selection.model === undefined
                     ? {}
-                    : { model: createSessionModel(request.selection.model) }),
+                    : { model: request.selection.model }),
             },
             request.signal === undefined
                 ? undefined
@@ -417,7 +398,7 @@ export const createPiTaskSession = async (
 
         if (response.error !== undefined || response.data === undefined) {
             throw new Error(
-                `Could not create Pi task session: ${describeApiError(response.error)}`,
+                `Could not create Codex task session: ${describeApiError(response.error)}`,
             );
         }
 
@@ -431,7 +412,6 @@ export const createPiTaskSession = async (
             request.diagnostics.record(request.runId, {
                 sessionID: session.sessionID,
                 directory: session.directory,
-                agent: session.selection.agent,
                 model: session.selection.model,
                 variant: session.selection.variant,
             });
@@ -441,44 +421,46 @@ export const createPiTaskSession = async (
     } catch (cause) {
         if (cause instanceof RalphieError) throw cause;
         throw new RalphieError({
-            message: "Failed to create an Pi task session.",
+            message: "Failed to create an Codex task session.",
             cause,
         });
     }
 };
 
 /** Run an ordinary text task in a new session. */
-export const runPiTask = async (
-    client: PiClient,
-    request: PiTaskRequest,
-): Promise<PiTaskResult> => {
+export const runCodexTask = async (
+    client: CodexClient,
+    request: CodexTaskRequest,
+): Promise<CodexTaskResult> => {
     try {
-        const session = await createPiTaskSession(client, request);
-        return await promptPiTask(client, session, request);
+        const session = await createCodexTaskSession(client, request);
+        return await promptCodexTask(client, session, request);
     } catch (cause) {
         const error =
             cause instanceof RalphieError
                 ? cause
                 : new RalphieError({
-                      message: "Failed to run an Pi task.",
+                      message: "Failed to run an Codex task.",
                       cause,
                   });
-        await reportPiFailure(request, error);
+        await reportCodexFailure(request, error);
         throw error;
     }
 };
 
-export type PiTaskSessionService = {
-    readonly create: (request: PiTaskSessionRequest) => Promise<PiTaskSession>;
-    readonly run: (request: PiTaskRequest) => Promise<PiTaskResult>;
-    readonly diagnostics: PiSessionDiagnostics;
+export type CodexTaskSessionService = {
+    readonly create: (
+        request: CodexTaskSessionRequest,
+    ) => Promise<CodexTaskSession>;
+    readonly run: (request: CodexTaskRequest) => Promise<CodexTaskResult>;
+    readonly diagnostics: CodexSessionDiagnostics;
 };
 
-export const makePiTaskSessionService = (
-    client: PiClient,
-): PiTaskSessionService => {
-    const diagnostics = makePiSessionDiagnostics();
-    const withDiagnostics = <Request extends PiTaskSessionRequest>(
+export const makeCodexTaskSessionService = (
+    client: CodexClient,
+): CodexTaskSessionService => {
+    const diagnostics = makeCodexSessionDiagnostics();
+    const withDiagnostics = <Request extends CodexTaskSessionRequest>(
         request: Request,
     ): Request =>
         request.diagnostics === undefined
@@ -488,7 +470,7 @@ export const makePiTaskSessionService = (
     return {
         diagnostics,
         create: (request) =>
-            createPiTaskSession(client, withDiagnostics(request)),
-        run: (request) => runPiTask(client, withDiagnostics(request)),
+            createCodexTaskSession(client, withDiagnostics(request)),
+        run: (request) => runCodexTask(client, withDiagnostics(request)),
     };
 };

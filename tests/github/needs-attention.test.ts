@@ -294,14 +294,14 @@ describe("GitHub needs-attention notifications", () => {
         expect(client.comments).toHaveLength(1);
     });
 
-    test("has no Pi dependency", async () => {
+    test("has no Codex dependency", async () => {
         const source = await readFile(
             new URL("../../src/github/needs-attention.ts", import.meta.url),
             "utf8",
         );
 
-        expect(source).not.toMatch(/(?:agent|pi)\//i);
-        expect(source).not.toContain("PiClient");
+        expect(source).not.toMatch(/(?:agent|codex)\//i);
+        expect(source).not.toContain("CodexClient");
     });
 
     test("validates the needs-attention decision contract", async () => {

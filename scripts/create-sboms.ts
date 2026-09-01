@@ -859,9 +859,9 @@ export const createSboms = async ({
 const isRecord = (value: unknown): value is Record<string, unknown> =>
     typeof value === "object" && value !== null;
 
-const spdxValidator = new Ajv({ allErrors: true, strict: true }).compile(
-    spdxSchema,
-);
+const spdxValidator = new Ajv({
+    allErrors: true,
+} as unknown as ConstructorParameters<typeof Ajv>[0]).compile(spdxSchema);
 const spdxIdentifierPattern = /^SPDXRef-[A-Za-z0-9.-]+$/;
 
 const assertSpdxIdentifiers = (value: unknown): void => {
@@ -884,7 +884,11 @@ const validateSpdxSchema = (document: unknown): void => {
     if (!spdxValidator(document)) {
         const error = spdxValidator.errors?.[0];
         throw new Error(
-            `SBOM does not conform to the SPDX 2.3 schema${error?.instancePath ?? ""}.`,
+            `SBOM does not conform to the SPDX 2.3 schema${
+                error !== undefined && "instancePath" in error
+                    ? String(error.instancePath ?? "")
+                    : ""
+            }.`,
         );
     }
     assertSpdxIdentifiers(document);

@@ -9,11 +9,11 @@ import {
     IssueLinkStrategy,
 } from "../../src/github/issue-task.ts";
 import {
-    PiSessionContext,
-    type PiSessionPurpose,
+    CodexSessionContext,
+    type CodexSessionPurpose,
     type StructuredOutputName,
 } from "../../src/agent/session.ts";
-import { DEFAULT_PI_AGENT } from "../../src/agent/model.ts";
+import { DEFAULT_CODEX_AGENT } from "../../src/agent/model.ts";
 import { ComplexityLevel, ReviewVerdict } from "../../src/issues/decisions.ts";
 import {
     IssuePipelineLive,
@@ -59,8 +59,8 @@ const makePlan = () =>
         issue: issues[0]!,
         repositoryPath: "/workspace/repository",
         targetBranch: "main",
-        pi: {
-            agent: DEFAULT_PI_AGENT,
+        codex: {
+            agent: DEFAULT_CODEX_AGENT,
         },
     });
 
@@ -69,12 +69,12 @@ describe("issue pipeline", () => {
         const plan = await makePlan();
 
         expect(plan.targetBranch).toBe("main");
-        expect(plan.pi).toEqual({
-            agent: DEFAULT_PI_AGENT,
+        expect(plan.codex).toEqual({
+            agent: DEFAULT_CODEX_AGENT,
         });
         expect(plan).not.toHaveProperty("issueBranch");
         expect(plan.assessment).toEqual({
-            kind: "pi-session",
+            kind: "codex-session",
             purpose: "assess-complexity",
             output: "complexity-decision",
         });
@@ -96,7 +96,7 @@ describe("issue pipeline", () => {
                 output: GitIssueOutput,
             },
             {
-                kind: "pi-session",
+                kind: "codex-session",
                 purpose: "implement",
             },
             {
@@ -117,19 +117,19 @@ describe("issue pipeline", () => {
                     action: "stage-all",
                 },
                 review: {
-                    kind: "pi-session",
+                    kind: "codex-session",
                     purpose: "review-diff",
                     output: "review-decision",
                 },
                 onChangesRequested: {
-                    kind: "pi-session",
+                    kind: "codex-session",
                     purpose: "address-review",
-                    context: PiSessionContext,
+                    context: CodexSessionContext,
                     input: "review-decision",
                 },
             },
             {
-                kind: "pi-session",
+                kind: "codex-session",
                 purpose: "generate-commit-message",
                 output: "commit-message-decision",
             },
@@ -155,7 +155,7 @@ describe("issue pipeline", () => {
         }
         expect(selectWorkflow(plan, 4)?.stages).toEqual([
             {
-                kind: "pi-session",
+                kind: "codex-session",
                 purpose: "decompose-issue",
                 output: "issue-breakdown-decision",
             },
