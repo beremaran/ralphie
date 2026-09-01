@@ -87,6 +87,68 @@ const validateStructuredOutput = <Output>(
         : { success: false, error: z.prettifyError(parsed.error) };
 };
 
+/** Codex requires an object root and rejects JSON Schema `oneOf`. */
+const codexOutputSchema = (schema: unknown): unknown => {
+    if (Array.isArray(schema)) return schema.map(codexOutputSchema);
+    if (typeof schema !== "object" || schema === null) return schema;
+    const record = schema as Record<string, unknown>;
+    if (Array.isArray(record.oneOf)) {
+        const variants = record.oneOf.filter(
+            (value): value is Record<string, unknown> =>
+                typeof value === "object" && value !== null,
+        );
+        const properties = Object.assign(
+            {},
+            ...variants.map((variant) => variant.properties ?? {}),
+        );
+        const nullableProperties = Object.fromEntries(
+            Object.entries(properties).map(([key, value]) => [
+                key,
+                nullableSchema(value),
+            ]),
+        );
+        return {
+            type: "object",
+            properties: codexOutputSchema(nullableProperties),
+            required: Object.keys(properties),
+            additionalProperties: false,
+        };
+    }
+    return Object.fromEntries(
+        Object.entries(record).map(([key, value]) => [
+            key,
+            codexOutputSchema(value),
+        ]),
+    );
+};
+
+const nullableSchema = (schema: unknown): unknown => {
+    if (
+        typeof schema !== "object" ||
+        schema === null ||
+        Array.isArray(schema)
+    ) {
+        return schema;
+    }
+    const record = schema as Record<string, unknown>;
+    if (Array.isArray(record.enum))
+        return { ...record, enum: [...record.enum, null] };
+    if (typeof record.type === "string") {
+        return { ...record, type: [record.type, "null"] };
+    }
+    return record;
+};
+
+const removeNullProperties = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(removeNullProperties);
+    if (typeof value !== "object" || value === null) return value;
+    return Object.fromEntries(
+        Object.entries(value as Record<string, unknown>)
+            .filter(([, child]) => child !== null)
+            .map(([key, child]) => [key, removeNullProperties(child)]),
+    );
+};
+
 const promptInput = <Output>(
     request: StructuredOutputRequest<Output>,
     sessionID: string,
@@ -97,7 +159,7 @@ const promptInput = <Output>(
     ...(request.variant === undefined ? {} : { variant: request.variant }),
     format: {
         type: "json_schema" as const,
-        schema: z.toJSONSchema(request.schema),
+        schema: codexOutputSchema(z.toJSONSchema(request.schema)),
         retryCount: request.retryCount ?? 2,
         validate: (value: unknown) =>
             validateStructuredOutput(request.schema, value),
@@ -159,7 +221,9 @@ const promptForStructuredOutput = async <Output>(
         });
     }
 
-    const parsed = request.schema.safeParse(response.data.info.structured);
+    const parsed = request.schema.safeParse(
+        removeNullProperties(response.data.info.structured),
+    );
     if (!parsed.success) {
         throw new Error(
             `Codex returned invalid structured output: ${z.prettifyError(parsed.error)}`,
