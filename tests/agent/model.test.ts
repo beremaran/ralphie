@@ -1,21 +1,21 @@
 import { describe, expect, test } from "bun:test";
 
 import {
-    DEFAULT_CODEX_AGENT,
-    codexAgentSchema,
-    codexModelSchema,
-    codexModelVariantSchema,
+    DEFAULT_PI_AGENT,
+    piAgentSchema,
+    piModelSchema,
+    piModelVariantSchema,
 } from "../../src/agent/model.ts";
 
-describe("Codex model selection", () => {
+describe("Pi model selection", () => {
     test("defaults the agent to build", () => {
-        expect(codexAgentSchema.parse(undefined)).toBe(DEFAULT_CODEX_AGENT);
-        expect(codexAgentSchema.parse(" reviewer ")).toBe("reviewer");
+        expect(piAgentSchema.parse(undefined)).toBe(DEFAULT_PI_AGENT);
+        expect(piAgentSchema.parse(" reviewer ")).toBe("reviewer");
     });
 
     test("splits provider from the complete model identifier", () => {
         expect(
-            codexModelSchema.parse("openrouter/anthropic/claude-sonnet"),
+            piModelSchema.parse("openrouter/anthropic/claude-sonnet"),
         ).toEqual({
             providerID: "openrouter",
             modelID: "anthropic/claude-sonnet",
@@ -23,13 +23,13 @@ describe("Codex model selection", () => {
     });
 
     test("rejects model identifiers without a provider", () => {
-        expect(codexModelSchema.safeParse("claude-sonnet").success).toBe(false);
+        expect(piModelSchema.safeParse("claude-sonnet").success).toBe(false);
     });
 
-    test("accepts only Codex thinking levels as model variants", () => {
-        expect(codexModelVariantSchema.parse("high")).toBe("high");
+    test("accepts only Pi thinking levels as model variants", () => {
+        expect(piModelVariantSchema.parse("high")).toBe("high");
         expect(
-            codexModelVariantSchema.safeParse("provider-specific").success,
+            piModelVariantSchema.safeParse("provider-specific").success,
         ).toBe(false);
     });
 });

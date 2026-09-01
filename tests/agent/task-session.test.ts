@@ -1,21 +1,21 @@
 import { describe, expect, test } from "bun:test";
 import type {
-    CodexAssistantMessage,
-    CodexClient,
-    CodexPart,
-} from "../../src/codex/client.ts";
+    PiAssistantMessage,
+    PiClient,
+    PiPart,
+} from "../../src/pi/client.ts";
 
 import {
-    createCodexTaskSession,
-    makeCodexTaskSessionService,
-    CODEX_SESSION_RETENTION_POLICY,
-    CodexSessionRetentionPolicy,
-    type CodexAssistantErrorKind,
-    CodexAssistantError,
-    CODEX_TASK_PERMISSION_POLICY,
-    makeCodexSessionDiagnostics,
-    runCodexTask,
-    toCodexAssistantError,
+    createPiTaskSession,
+    makePiTaskSessionService,
+    PI_SESSION_RETENTION_POLICY,
+    PiSessionRetentionPolicy,
+    type PiAssistantErrorKind,
+    PiAssistantError,
+    PI_TASK_PERMISSION_POLICY,
+    makePiSessionDiagnostics,
+    runPiTask,
+    toPiAssistantError,
     taskSessionPromptParameters,
 } from "../../src/agent/task-session.ts";
 
@@ -29,8 +29,8 @@ const selection = {
 };
 
 const assistantResponse = (
-    error?: CodexAssistantMessage["error"],
-): CodexAssistantMessage => ({
+    error?: PiAssistantMessage["error"],
+): PiAssistantMessage => ({
     id: "message-1",
     sessionID: "session-1",
     role: "assistant",
@@ -51,7 +51,7 @@ const assistantResponse = (
     },
 });
 
-const responseParts: ReadonlyArray<CodexPart> = [
+const responseParts: ReadonlyArray<PiPart> = [
     {
         id: "part-1",
         sessionID: "session-1",
@@ -61,11 +61,9 @@ const responseParts: ReadonlyArray<CodexPart> = [
     },
 ];
 
-describe("Codex task sessions", () => {
+describe("Pi task sessions", () => {
     test("retains successful sessions for inspection", () => {
-        expect(CODEX_SESSION_RETENTION_POLICY).toBe(
-            CodexSessionRetentionPolicy,
-        );
+        expect(PI_SESSION_RETENTION_POLICY).toBe(PiSessionRetentionPolicy);
     });
 
     test("creates a fresh session in the checkout with agent and model", async () => {
@@ -77,9 +75,9 @@ describe("Codex task sessions", () => {
                     return { data: { id: "session-1" } };
                 },
             },
-        } as unknown as CodexClient;
+        } as unknown as PiClient;
 
-        const result = await createCodexTaskSession(client, {
+        const result = await createPiTaskSession(client, {
             directory: "/workspace/repository",
             title: "Implement issue #42",
             selection,
@@ -95,7 +93,7 @@ describe("Codex task sessions", () => {
             title: "Implement issue #42",
             agent: "build",
             model: { providerID: "openrouter", id: "anthropic/claude-sonnet" },
-            permission: CODEX_TASK_PERMISSION_POLICY,
+            permission: PI_TASK_PERMISSION_POLICY,
         });
         expect(createParameters).not.toHaveProperty("variant");
     });
@@ -153,15 +151,15 @@ describe("Codex task sessions", () => {
                     },
                 }),
             },
-        } as unknown as CodexClient;
+        } as unknown as PiClient;
 
         await expect(
-            createCodexTaskSession(client, {
+            createPiTaskSession(client, {
                 directory: "/workspace/repository",
                 title: "Implement issue #42",
                 selection: { agent: "build" },
             }),
-        ).rejects.toThrow("Failed to create an Codex task session.");
+        ).rejects.toThrow("Failed to create an Pi task session.");
     });
 
     test("provides the run's existing client through the session service", async () => {
@@ -169,9 +167,9 @@ describe("Codex task sessions", () => {
             session: {
                 create: async () => ({ data: { id: "session-from-service" } }),
             },
-        } as unknown as CodexClient;
+        } as unknown as PiClient;
 
-        const sessions = makeCodexTaskSessionService(client);
+        const sessions = makePiTaskSessionService(client);
         const session = await sessions.create({
             directory: "/workspace/repository",
             title: "Task",
@@ -182,16 +180,16 @@ describe("Codex task sessions", () => {
     });
 
     test("records every created session under its run ID", async () => {
-        const diagnostics = makeCodexSessionDiagnostics(
+        const diagnostics = makePiSessionDiagnostics(
             () => "2026-08-24T00:00:00.000Z",
         );
         const client = {
             session: {
                 create: async () => ({ data: { id: "session-diagnostics" } }),
             },
-        } as unknown as CodexClient;
+        } as unknown as PiClient;
 
-        await createCodexTaskSession(client, {
+        await createPiTaskSession(client, {
             directory: "/workspace/repository",
             title: "Task",
             selection,
@@ -227,9 +225,9 @@ describe("Codex task sessions", () => {
                     };
                 },
             },
-        } as unknown as CodexClient;
+        } as unknown as PiClient;
 
-        const result = await runCodexTask(client, {
+        const result = await runPiTask(client, {
             directory: "/workspace/repository",
             title: "Implement issue #42",
             prompt: "Implement the issue and explain the result.",
@@ -279,9 +277,9 @@ describe("Codex task sessions", () => {
                     },
                 }),
             },
-        } as unknown as CodexClient;
+        } as unknown as PiClient;
 
-        const result = await runCodexTask(client, {
+        const result = await runPiTask(client, {
             directory: "/workspace/repository",
             title: "Implement issue #42",
             prompt: "Implement the issue.",
@@ -322,9 +320,9 @@ describe("Codex task sessions", () => {
                         },
                     }),
                 },
-            } as unknown as CodexClient;
+            } as unknown as PiClient;
 
-            const result = await runCodexTask(client, {
+            const result = await runPiTask(client, {
                 directory: "/workspace/repository",
                 title: "Implement issue #42",
                 prompt: "Implement the issue.",
@@ -344,9 +342,9 @@ describe("Codex task sessions", () => {
                     data: { info: assistantResponse(), parts: responseParts },
                 }),
             },
-        } as unknown as CodexClient;
+        } as unknown as PiClient;
 
-        await runCodexTask(client, {
+        await runPiTask(client, {
             directory: "/workspace/repository",
             title: "Implement issue #42",
             prompt: "Implement the issue.",
@@ -383,9 +381,9 @@ describe("Codex task sessions", () => {
                     };
                 },
             },
-        } as unknown as CodexClient;
+        } as unknown as PiClient;
 
-        await runCodexTask(client, {
+        await runPiTask(client, {
             directory: "/workspace/repository",
             title: "Implement issue #42",
             prompt: "Implement the issue.",
@@ -412,10 +410,10 @@ describe("Codex task sessions", () => {
                     },
                 }),
             },
-        } as unknown as CodexClient;
+        } as unknown as PiClient;
 
         await expect(
-            runCodexTask(client, {
+            runPiTask(client, {
                 directory: "/workspace/repository",
                 title: "Implement issue #42",
                 prompt: "Implement the issue.",
@@ -427,13 +425,13 @@ describe("Codex task sessions", () => {
                     stopPersisting: async () => {},
                 },
             }),
-        ).rejects.toThrow("Codex assistant failed");
+        ).rejects.toThrow("Pi assistant failed");
 
         expect(events).toEqual([
             {
                 stage: "implementation",
                 status: "failed",
-                message: expect.stringContaining("Codex task failed"),
+                message: expect.stringContaining("Pi task failed"),
                 details: {
                     directory: "/workspace/repository",
                     title: "Implement issue #42",
@@ -453,16 +451,16 @@ describe("Codex task sessions", () => {
                     throw new Error("connection reset");
                 },
             },
-        } as unknown as CodexClient;
+        } as unknown as PiClient;
 
         await expect(
-            runCodexTask(client, {
+            runPiTask(client, {
                 directory: "/workspace/repository",
                 title: "Implement issue #42",
                 prompt: "Implement the issue.",
                 selection,
             }),
-        ).rejects.toThrow("Failed to run an Codex task.");
+        ).rejects.toThrow("Failed to run an Pi task.");
     });
 
     test("fails when the assistant returns an error", async () => {
@@ -479,16 +477,16 @@ describe("Codex task sessions", () => {
                     },
                 }),
             },
-        } as unknown as CodexClient;
+        } as unknown as PiClient;
 
         await expect(
-            runCodexTask(client, {
+            runPiTask(client, {
                 directory: "/workspace/repository",
                 title: "Implement issue #42",
                 prompt: "Implement the issue.",
                 selection,
             }),
-        ).rejects.toThrow("Codex assistant failed");
+        ).rejects.toThrow("Pi assistant failed");
     });
 
     test.each([
@@ -511,8 +509,8 @@ describe("Codex task sessions", () => {
             },
         ],
     ])("classifies %s as %s", (_name, kind, sdkError) => {
-        const typedError = toCodexAssistantError(sdkError as never);
-        expect(typedError).toBeInstanceOf(CodexAssistantError);
-        expect(typedError.kind).toBe(kind as CodexAssistantErrorKind);
+        const typedError = toPiAssistantError(sdkError as never);
+        expect(typedError).toBeInstanceOf(PiAssistantError);
+        expect(typedError.kind).toBe(kind as PiAssistantErrorKind);
     });
 });

@@ -7,11 +7,11 @@ at the [documentation index](README.md) for other audience paths.
 
 ## Progress output
 
-Ralphie streams the complete Codex transcript while each task runs, including
+Ralphie streams the complete Pi transcript while each task runs, including
 thinking deltas, assistant text, tool calls, and tool results. Tasks and issues
 are intentionally processed sequentially so this output remains ordered.
 
-Human-readable transcript output groups each Codex session into a compact block:
+Human-readable transcript output groups each Pi session into a compact block:
 thinking and assistant text stream immediately, tool calls are shown as readable
 commands, and tool output is indented, de-duplicated, and bounded. Use
 `--output verbose` for a larger tool-output preview. JSON output remains the
@@ -19,11 +19,11 @@ lossless event stream for integrations.
 
 Ralphie adapts its progress renderer to its environment:
 
-- interactive terminals receive streamed Codex output plus one in-place status line
+- interactive terminals receive streamed Pi output plus one in-place status line
   for the active leaf stage, while completed milestones remain in the scrollback;
 - CI and redirected output receive durable, append-only lines;
 - `--output verbose` adds operational details;
-- `--output json` writes progress and `codex_event` objects one per line to stdout;
+- `--output json` writes progress and `pi_event` objects one per line to stdout;
   and
 - `--output quiet` suppresses routine progress but retains failures,
   needs-attention decisions, and handled stops.
@@ -43,8 +43,8 @@ and sensitive environment values are redacted at the reporting boundary.
 ## State and artifacts
 
 The workspace's `.ralphie` directory contains only repository checkouts and
-Ralphie's run state, events, and recovery artifacts. Codex configuration is kept
-in the default or explicitly supplied `--codex-dir`, or in a private temporary
+Ralphie's run state, events, and recovery artifacts. Pi configuration is kept
+in the default or explicitly supplied `--pi-dir`, or in a private temporary
 credential directory, never under this path.
 
 Run artifacts live under:
@@ -67,7 +67,7 @@ complexity decisions, checkpoints, review attempts, commit messages, created
 commits, resolution proof, decomposition decisions, and created child-number
 mappings.
 
-A successful or interrupted run uses this more detailed layout (Codex
+A successful or interrupted run uses this more detailed layout (Pi
 configuration is not stored in this tree):
 
 ```text
@@ -84,7 +84,7 @@ configuration is not stored in this tree):
 
 `state.json` is versioned, schema-validated, and atomically replaced. It
 contains the repository/branch/workflow, selected `onNeedsAttention` policy,
-notification settings and any pending notification intent, Codex selection,
+notification settings and any pending notification intent, Pi selection,
 budget, pending and completed queue numbers, processed count, outcomes, active
 issue/stage, checkout invariant, update time, and, for an active `pr`
 closure, the pull request number, observed head SHA, latest normalized check
@@ -109,7 +109,7 @@ stateDiagram-v2
 ```
 
 - One issue failure uses the current halt policy: Ralphie persists the active
-  issue, releases Codex, retains artifacts, and stops before later issues.
+  issue, releases Pi, retains artifacts, and stops before later issues.
 - A `pr` gate that is failed, cancelled, timed out, absent, unknown, closed,
   or unmergeable never merges and never closes the source issue: Ralphie
   retains the feature branch and pull request, persists the active
@@ -120,9 +120,9 @@ stateDiagram-v2
   green evidence against the current head, re-observes failed gates on a
   later rerun, and reconciles an already-merged PR without another merge
   call.
-- Codex is closed on success, failure, cancellation, and scoped defects. Ordinary
+- Pi is closed on success, failure, cancellation, and scoped defects. Ordinary
   failures set process exit code `1`.
-- Cancellation is checked before long-running boundaries and passed into Codex.
+- Cancellation is checked before long-running boundaries and passed into Pi.
   Ralphie attempts to restore the clean issue checkpoint, saves resumable state,
   skips cleanup, and exits `130`.
 - Successful completion persists `complete` before optional `--clean end`
@@ -224,7 +224,7 @@ The repository and branch must match the saved run. On `--resume`:
 4. the saved pending queue, completed numbers, outcomes, and artifacts are
    restored; and
 5. the next safe deterministic step continues without unnecessarily rerunning
-   Codex work.
+   Pi work.
 
 Examples of resumable boundaries:
 

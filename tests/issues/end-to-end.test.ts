@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { CodexClient } from "../../src/codex/client.ts";
+import type { PiClient } from "../../src/pi/client.ts";
 import type { Octokit } from "octokit";
 
 import {
@@ -30,7 +30,7 @@ import {
 import type { GitHubIssueMutationService } from "../../src/github/issue-mutations.ts";
 import type { GitHubIssuesService } from "../../src/github/issues.ts";
 import type { GitHubIssueRelationshipService } from "../../src/github/issue-relationships.ts";
-import { makeCodexSessionDiagnostics } from "../../src/agent/task-session.ts";
+import { makePiSessionDiagnostics } from "../../src/agent/task-session.ts";
 import {
     makeProgressRecorder,
     type ProgressUpdate,
@@ -60,7 +60,7 @@ const issue = (number: number, title: string, body = "Task body") => ({
 });
 
 const context = (
-    client: CodexClient,
+    client: PiClient,
     current = issue(42, "Complete task"),
 ): IssueExecutionContext => ({
     issue: current,
@@ -70,9 +70,9 @@ const context = (
     workspace: "/workspace",
     runId: "run-e2e",
     octokit: {} as Octokit,
-    codex: client,
-    codexSelection: { agent: "build" },
-    codexDiagnostics: makeCodexSessionDiagnostics(() => "now"),
+    pi: client,
+    piSelection: { agent: "build" },
+    piDiagnostics: makePiSessionDiagnostics(() => "now"),
     repositoryInvariant: {
         capture: async () => ({
             branch: checkpoint.branch,
@@ -101,7 +101,7 @@ const clientFor = (outputs: ReadonlyArray<unknown>) => {
                 };
             },
         },
-    } as unknown as CodexClient;
+    } as unknown as PiClient;
 };
 
 const reviewApproved = {

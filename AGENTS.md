@@ -7,11 +7,11 @@ Bun + TypeScript CLI (strict mode, `@types/bun`). Entry point: `index.ts`. Servi
 - Full local gate (same order as CI): `bun run check` = `format:check → lint → typecheck → test → build`. Run this before considering work done.
 - Focused test: `bun test tests/command.test.ts` (single file) or `bun test -t "<test name>" tests/integration/local-end-to-end.test.ts` (single test).
 - `bun run build` outputs `dist/cli` (native binary, gitignored).
-- `bun run probe:structured-output` exercises a real Codex structured-output call (needs Codex credentials on `PATH`/env).
+- `bun run probe:structured-output` exercises a real Pi structured-output call (needs Pi credentials on `PATH`/env).
 
 ## Tests
 
-- `bun run test` runs everything under `tests/`, including local e2e tests that build temporary git repos with a stubbed Codex client — no network or credentials required, safe to run.
+- `bun run test` runs everything under `tests/`, including local e2e tests that build temporary git repos with a stubbed Pi client — no network or credentials required, safe to run.
 - Real-network tests in `tests/integration/network-smoke.test.ts` are opt-in and self-skip: `RALPHIE_RUN_PI_COMPLEXITY_SMOKE=1`, `RALPHIE_RUN_PI_IMPLEMENTATION_SMOKE=1`, `RALPHIE_RUN_GITHUB_INTEGRATION=1`, `RALPHIE_RUN_GITHUB_SUB_ISSUES_SMOKE=1` (the GitHub ones additionally require `RALPHIE_GITHUB_TEST_REPOSITORY` pointing at a repo whose name matches test/sandbox/fixture/integration/smoke, or they refuse to run; the sub-issues one is mutating in that sandbox). Model selection via `RALPHIE_PI_SMOKE_MODEL` / `RALPHIE_PI_SMOKE_AGENT` / `RALPHIE_PI_SMOKE_VARIANT`.
 
 ## Conventions

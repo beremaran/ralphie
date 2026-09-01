@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { CodexClient } from "../../src/codex/client.ts";
+import type { PiClient } from "../../src/pi/client.ts";
 import type { Octokit } from "octokit";
 
 import {
@@ -40,7 +40,7 @@ import {
     type IssueWorkflowKind,
 } from "../../src/issues/stage.ts";
 import { RalphieError } from "../../src/shared/error.ts";
-import { makeCodexSessionDiagnostics } from "../../src/agent/task-session.ts";
+import { makePiSessionDiagnostics } from "../../src/agent/task-session.ts";
 import {
     makeProgressRecorder,
     type ProgressUpdate,
@@ -81,7 +81,7 @@ const implementation = {
 };
 
 const issueContext = (
-    codex: CodexClient,
+    pi: PiClient,
     verify: IssueExecutionContext["repositoryInvariant"]["verify"] = async () => {},
     head = checkpoint.sha,
 ): IssueExecutionContext => ({
@@ -100,16 +100,16 @@ const issueContext = (
     workspace: "/workspace",
     runId: "run-1",
     octokit: {} as Octokit,
-    codex,
-    codexSelection: { agent: "build" },
-    codexDiagnostics: makeCodexSessionDiagnostics(() => "now"),
+    pi,
+    piSelection: { agent: "build" },
+    piDiagnostics: makePiSessionDiagnostics(() => "now"),
     repositoryInvariant: {
         capture: async () => ({ branch: checkpoint.branch, head }),
         verify,
     },
 });
 
-const codexClient = (
+const piClient = (
     outputs: ReadonlyArray<unknown>,
     sessions?: string[],
     prompts?: Array<{
@@ -146,7 +146,7 @@ const codexClient = (
                 };
             },
         },
-    } as unknown as CodexClient;
+    } as unknown as PiClient;
 };
 
 type ServiceOptions = {
@@ -228,7 +228,7 @@ const services = (options: ServiceOptions = {}) => {
 };
 
 const run = async (
-    client: CodexClient,
+    client: PiClient,
     artifacts: IssueArtifactStore,
     setup: ReturnType<typeof services>,
     verify?: IssueExecutionContext["repositoryInvariant"]["verify"],
@@ -271,7 +271,7 @@ describe("implementation executor", () => {
                 },
             });
             const sessions: string[] = [];
-            const client = codexClient([implementation], sessions);
+            const client = piClient([implementation], sessions);
 
             const reused = await setup.executor.execute({
                 context: issueContext(client),
@@ -301,7 +301,7 @@ describe("implementation executor", () => {
         const setup = services({ safetyInputs });
         const artifacts = await makeIssueArtifactStore(42);
         const result = await run(
-            codexClient([
+            piClient([
                 implementation,
                 review("approved"),
                 { subject: "fix token refresh" },
@@ -342,7 +342,7 @@ describe("implementation executor", () => {
         }> = [];
         const result = await services({}).executor.execute({
             context: issueContext(
-                codexClient(
+                piClient(
                     [
                         implementation,
                         review("approved"),
@@ -385,7 +385,7 @@ describe("implementation executor", () => {
         });
         const artifacts = await makeIssueArtifactStore(42);
         await expect(
-            run(codexClient([implementation]), artifacts, setup),
+            run(piClient([implementation]), artifacts, setup),
         ).rejects.toThrow("bun run check failed");
         expect(commitCalled).toBe(false);
     });
@@ -409,7 +409,7 @@ describe("implementation executor", () => {
         };
         const artifacts = await makeIssueArtifactStore(42);
         const outcome = await run(
-            codexClient([
+            piClient([
                 implementation,
                 review("approved"),
                 review("approved"),
@@ -468,7 +468,7 @@ describe("implementation executor", () => {
         });
         const sessions: string[] = [];
         const outcome = await run(
-            codexClient(
+            piClient(
                 [
                     implementation,
                     undefined,
@@ -517,7 +517,7 @@ describe("implementation executor", () => {
         });
         const sessions: string[] = [];
         const outcome = await run(
-            codexClient(
+            piClient(
                 [
                     implementation,
                     undefined,
@@ -547,7 +547,7 @@ describe("implementation executor", () => {
 
     test("refuses unsafe direct pushes before starting an agent session", async () => {
         let prompted = false;
-        const client = codexClient([]);
+        const client = piClient([]);
         client.session.prompt = (async () => {
             prompted = true;
             return { data: { info: {}, parts: [] } };
@@ -587,7 +587,7 @@ describe("implementation executor", () => {
             treeSha: "tree-1",
         });
         const result = await run(
-            codexClient([]),
+            piClient([]),
             artifacts,
             setup,
             undefined,
@@ -604,7 +604,7 @@ describe("implementation executor", () => {
         const sessions: string[] = [];
         const artifacts = await makeIssueArtifactStore(42);
         const result = await run(
-            codexClient(
+            piClient(
                 [
                     implementation,
                     review("changes_requested"),
@@ -630,7 +630,7 @@ describe("implementation executor", () => {
     test("completes without a commit when fresh verification proves the issue resolved", async () => {
         let commitCalled = false;
         const artifacts = await makeIssueArtifactStore(42);
-        const client = codexClient([
+        const client = piClient([
             implementation,
             {
                 status: IssueResolutionStatus.Resolved,
@@ -666,7 +666,7 @@ describe("implementation executor", () => {
             evidence: ["targeted test still fails"],
         };
         const result = await run(
-            codexClient([
+            piClient([
                 implementation,
                 unresolved,
                 implementation,
@@ -695,7 +695,7 @@ describe("implementation executor", () => {
             summary: "Work remains.",
             evidence: ["targeted test fails"],
         };
-        const client = codexClient(
+        const client = piClient(
             [
                 implementation,
                 unresolved,
@@ -721,7 +721,7 @@ describe("implementation executor", () => {
                     providerID: "openai",
                     modelID: "gpt-5.6-sol",
                 },
-                codexStageVariants: { implementation: "medium" },
+                piStageVariants: { implementation: "medium" },
             },
             artifacts: await makeIssueArtifactStore(42),
         });
@@ -752,17 +752,17 @@ describe("implementation executor", () => {
                     },
                 }),
             },
-        } as unknown as CodexClient;
+        } as unknown as PiClient;
         await expect(
             run(client, await makeIssueArtifactStore(42), services()),
-        ).rejects.toThrow("Codex assistant failed");
+        ).rejects.toThrow("Pi assistant failed");
     });
 
     test("fails when a review response is invalid", async () => {
         const artifacts = await makeIssueArtifactStore(42);
         await expect(
             run(
-                codexClient([implementation, { verdict: "invalid" }]),
+                piClient([implementation, { verdict: "invalid" }]),
                 artifacts,
                 services(),
             ),
@@ -784,7 +784,7 @@ describe("implementation executor", () => {
         });
         await expect(
             run(
-                codexClient([
+                piClient([
                     implementation,
                     review("approved"),
                     { subject: "fix" },
@@ -812,7 +812,7 @@ describe("implementation executor", () => {
         const artifacts = await makeIssueArtifactStore(42);
         await expect(
             run(
-                codexClient([
+                piClient([
                     implementation,
                     review("approved"),
                     { subject: "fix" },
@@ -849,7 +849,7 @@ describe("implementation executor", () => {
                 },
             },
         });
-        const client = codexClient([
+        const client = piClient([
             implementation,
             review("changes_requested", "Fix blocker one."),
             undefined,

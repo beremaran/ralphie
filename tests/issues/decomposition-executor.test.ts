@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { CodexClient } from "../../src/codex/client.ts";
+import type { PiClient } from "../../src/pi/client.ts";
 import type { Octokit } from "octokit";
 
 import {
@@ -24,7 +24,7 @@ import type {
     GitHubIssuesService,
 } from "../../src/github/issues.ts";
 import type { GitHubIssueRelationshipService } from "../../src/github/issue-relationships.ts";
-import { makeCodexSessionDiagnostics } from "../../src/agent/task-session.ts";
+import { makePiSessionDiagnostics } from "../../src/agent/task-session.ts";
 import { makeProgressRecorder } from "../../src/progress/progress.ts";
 
 const breakdown = {
@@ -68,10 +68,7 @@ const issueResponse = (
     },
 });
 
-const context = (
-    codex: CodexClient,
-    octokit: Octokit,
-): IssueExecutionContext => ({
+const context = (pi: PiClient, octokit: Octokit): IssueExecutionContext => ({
     issue: {
         number: 42,
         title: "Modernize the API",
@@ -85,16 +82,16 @@ const context = (
     workspace: "/workspace",
     runId: "run-1",
     octokit,
-    codex,
-    codexSelection: { agent: "build" },
-    codexDiagnostics: makeCodexSessionDiagnostics(),
+    pi,
+    piSelection: { agent: "build" },
+    piDiagnostics: makePiSessionDiagnostics(),
     repositoryInvariant: {
         capture: async () => ({ branch: "main", head: "abc123" }),
         verify: async () => {},
     },
 });
 
-const codexClient = (capturePrompt?: (prompt: string) => void) =>
+const piClient = (capturePrompt?: (prompt: string) => void) =>
     ({
         session: {
             create: async () => ({ data: { id: "decomposition-session" } }),
@@ -105,7 +102,7 @@ const codexClient = (capturePrompt?: (prompt: string) => void) =>
                 return { data: { info: { structured: breakdown }, parts: [] } };
             },
         },
-    }) as unknown as CodexClient;
+    }) as unknown as PiClient;
 
 const plainIssue = (number: number): GitHubIssue => ({
     number,
@@ -183,7 +180,7 @@ const relationshipStub = (log: Array<Record<string, unknown>> = []) => {
 };
 
 const run = async (
-    codex: CodexClient,
+    pi: PiClient,
     octokit: Octokit,
     artifacts: IssueArtifactStore,
     discoveredChildren: ReadonlyArray<GitHubDecompositionChild> = [],
@@ -201,7 +198,7 @@ const run = async (
         relationships,
         makeProgressRecorder([]),
     );
-    return executor.execute({ context: context(codex, octokit), artifacts });
+    return executor.execute({ context: context(pi, octokit), artifacts });
 };
 
 describe("decomposition executor", () => {
@@ -244,7 +241,7 @@ describe("decomposition executor", () => {
         } as unknown as Octokit;
         const artifacts = await makeIssueArtifactStore(42);
         await run(
-            codexClient((value) => (prompt = value)),
+            piClient((value) => (prompt = value)),
             octokit,
             artifacts,
             [],
@@ -324,7 +321,7 @@ describe("decomposition executor", () => {
             },
         } as unknown as Octokit;
         await run(
-            codexClient((value) => (prompt = value)),
+            piClient((value) => (prompt = value)),
             octokit,
             artifacts,
         );
@@ -381,7 +378,7 @@ describe("decomposition executor", () => {
             },
         } as unknown as Octokit;
         const outcome = await run(
-            codexClient(),
+            piClient(),
             octokit,
             artifacts,
             discoveredChildren,
@@ -452,11 +449,11 @@ describe("decomposition executor", () => {
         } as unknown as Octokit;
         const artifacts = await makeIssueArtifactStore(42);
         await expect(
-            run(codexClient(), octokit, artifacts, [], state.relationships),
+            run(piClient(), octokit, artifacts, [], state.relationships),
         ).rejects.toThrow("recovery is required");
         expect(originalUpdated).toBe(false);
         failLink = false;
-        await run(codexClient(), octokit, artifacts, [], state.relationships);
+        await run(piClient(), octokit, artifacts, [], state.relationships);
         expect(createCount).toBe(2);
         expect(originalUpdated).toBe(true);
         expect(
@@ -497,7 +494,7 @@ describe("decomposition executor", () => {
                 },
             },
         } as unknown as Octokit;
-        await run(codexClient(), octokit, artifacts, [], state.relationships);
+        await run(piClient(), octokit, artifacts, [], state.relationships);
         expect(state.log.filter((entry) => entry.method === "attach")).toEqual(
             [],
         );
@@ -536,7 +533,7 @@ describe("decomposition executor", () => {
             },
         } as unknown as Octokit;
         await expect(
-            run(codexClient(), octokit, artifacts, [], state.relationships),
+            run(piClient(), octokit, artifacts, [], state.relationships),
         ).rejects.toThrow("recovery is required");
     });
 
@@ -583,7 +580,7 @@ describe("decomposition executor", () => {
             addBlockedBy: async () => {},
         };
         await expect(
-            run(codexClient(), octokit, artifacts, [], nativeConflict),
+            run(piClient(), octokit, artifacts, [], nativeConflict),
         ).rejects.toThrow("ambiguous");
     });
 });

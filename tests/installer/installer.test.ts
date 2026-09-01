@@ -332,7 +332,7 @@ async function expectSuccessfulInstallation(
     expect(binary).toEqual({ exitCode: 0, stdout: "0.1.0\n", stderr: "" });
 }
 
-async function runCodexnnedVersion(version: string): Promise<string[]> {
+async function runPinnedVersion(version: string): Promise<string[]> {
     return withFixture({ version }, async (fixture) => {
         const result = runInstaller(fixture);
         expect(result.exitCode).toBe(0);
@@ -395,8 +395,8 @@ describe("standalone installer", () => {
 
     test("normalizes pinned versions without calling the latest API", async () => {
         const urls = [
-            await runCodexnnedVersion("0.1.0"),
-            await runCodexnnedVersion("v0.1.0"),
+            await runPinnedVersion("0.1.0"),
+            await runPinnedVersion("v0.1.0"),
         ];
 
         expect(urls).toEqual([

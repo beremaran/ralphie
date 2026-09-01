@@ -1,40 +1,37 @@
 import { z } from "zod";
 
-export type CodexModel = {
-    /** Retained only to deserialize pre-migration test fixtures; ignored. */
-    readonly providerID?: string;
+export type PiModel = {
+    readonly providerID: string;
     readonly modelID: string;
 };
 
-export type CodexSelection = {
-    /** Deprecated internal field; Codex CLI has no agent selection. */
-    readonly agent?: string;
-    readonly model?: CodexModel;
+export type PiSelection = {
+    readonly agent: string;
+    readonly model?: PiModel;
     readonly variant?: string;
 };
 
-export const codexModelSchema = z
+export const DEFAULT_PI_AGENT = "build";
+
+export const piModelSchema = z
     .string()
     .trim()
-    .min(1, "Model must be a non-empty Codex model ID.")
-    .transform((value): CodexModel => {
+    .regex(/^[^/\s]+\/[^\s]+$/, "Model must use Pi's provider/model format.")
+    .transform((value): PiModel => {
+        const separator = value.indexOf("/");
         return {
-            modelID: value,
+            providerID: value.slice(0, separator),
+            modelID: value.slice(separator + 1),
         };
     });
 
-export const codexModelVariantSchema = z.enum([
+export const piModelVariantSchema = z.enum([
+    "off",
     "minimal",
     "low",
     "medium",
     "high",
     "xhigh",
+    "max",
 ]);
-/** @deprecated Codex CLI has no internal Ralphie agent setting. */
-export const DEFAULT_CODEX_AGENT = "codex";
-/** @deprecated Codex CLI has no internal Ralphie agent setting. */
-export const codexAgentSchema = z
-    .string()
-    .trim()
-    .min(1)
-    .default(DEFAULT_CODEX_AGENT);
+export const piAgentSchema = z.string().trim().min(1).default(DEFAULT_PI_AGENT);

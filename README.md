@@ -1,11 +1,11 @@
 # Ralphie
 
-**Turn a GitHub issue queue into reviewed commits with Codex.**
+**Turn a GitHub issue queue into reviewed commits with Pi.**
 
 [![CI](https://github.com/beremaran/ralphie/actions/workflows/ci.yml/badge.svg)](https://github.com/beremaran/ralphie/actions/workflows/ci.yml)
 
 Ralphie is an opinionated, resumable CLI that reads open GitHub issues, asks
-[Codex](https://github.com/earendil-works/codex) for schema-validated decisions, and
+[Pi](https://github.com/earendil-works/pi) for schema-validated decisions, and
 routes each issue to either focused implementation or dependency-aware
 decomposition. Agents handle reasoning and code changes; Ralphie keeps Git,
 GitHub, run state, recovery, and safety checks deterministic.
@@ -26,7 +26,7 @@ For task-oriented details, start with the [documentation index](./docs/README.md
 - **Structured agent decisions** — complexity, reviews, decompositions, and
   commit messages are validated against explicit schemas.
 - **Fresh-context review loops** — implementation, review, and review-fix work
-  run in separate Codex sessions to reduce context bias.
+  run in separate Pi sessions to reduce context bias.
 - **Deterministic delivery** — Ralphie stages, inspects, commits, and pushes the
   resulting changes itself; agents do not own the delivery protocol. In `pr`
   mode, merged delivery is a **check gate**: the pull request is merged only
@@ -51,11 +51,11 @@ Ralphie has three runtime forms with different local dependencies:
   `bunx @beremaran/ralphie` or `bun run index.ts`, and to build Ralphie from
   source.
 - **Docker image:** the published image runs the native binary and does not
-  include Bun at runtime. It includes the GitHub CLI, Git, a POSIX shell, Codex's
+  include Bun at runtime. It includes the GitHub CLI, Git, a POSIX shell, Pi's
   shell/search tools, and CA certificates.
 
 Every repository workflow also needs GitHub CLI, Git, a shell, and model
-credentials supported by Codex. The target repository's verification command is a
+credentials supported by Pi. The target repository's verification command is a
 separate dependency boundary: install whatever that command uses (for example,
 Bun, Node.js, or a project compiler) in the selected runtime. The default
 `bun run check` is therefore a target-repository requirement, not a standalone
@@ -74,7 +74,7 @@ gh --version
 
 For unattended runs, provide `GH_TOKEN` (preferred) or `GITHUB_TOKEN` to the
 process instead; credentials are inputs and need not be printed or exposed.
-Configure Codex in `~/.codex/agent/auth.json` or with `--codex-dir`. For an
+Configure Pi in `~/.pi/agent/auth.json` or with `--pi-dir`. For an
 OpenAI-compatible endpoint, use `RALPHIE_MODEL_BASE_URL` and, when required,
 `RALPHIE_MODEL_API_KEY`. See [Getting started](./docs/getting-started.md) for
 the complete installation, authentication, container, and source-checkout
@@ -127,7 +127,7 @@ the [OCI image](https://ghcr.io/beremaran/ralphie), the
 the [MIT license](https://github.com/beremaran/ralphie/blob/main/LICENSE).
 Public artifacts do not require GitHub credentials. Operating on a private target
 repository still requires a GitHub account or runtime token with the necessary
-permissions; Codex model credentials are also required when Ralphie asks Codex to make
+permissions; Pi model credentials are also required when Ralphie asks Pi to make
 a decision.
 
 ## Docker runtime
@@ -138,9 +138,9 @@ The image contains no credentials or credential-bearing defaults. Supply all
 credentials and configuration at runtime:
 
 - `GH_TOKEN` (preferred) or `GITHUB_TOKEN` for noninteractive GitHub CLI access;
-- either a Codex directory mounted at `/home/nonroot/.codex/agent` and passed with
-  `--codex-dir`, or `RALPHIE_MODEL_BASE_URL` and, when required,
-  `RALPHIE_MODEL_API_KEY` so Ralphie can create private temporary Codex config;
+- either a Pi directory mounted at `/home/nonroot/.pi/agent` and passed with
+  `--pi-dir`, or `RALPHIE_MODEL_BASE_URL` and, when required,
+  `RALPHIE_MODEL_API_KEY` so Ralphie can create private temporary Pi config;
 - a writable `/home/nonroot/.ralphie` volume for checkouts, state, and recovery
   artifacts.
 
@@ -152,16 +152,16 @@ docker run --rm --env GH_TOKEN --entrypoint gh \
   ghcr.io/beremaran/ralphie:latest auth status
 ```
 
-A complete first-run preview keeps the state and Codex configuration separate:
+A complete first-run preview keeps the state and Pi configuration separate:
 
 ```bash
 docker run --rm \
   --env GH_TOKEN \
   --mount type=volume,source=ralphie-state,target=/home/nonroot/.ralphie \
-  --mount type=bind,source="$HOME/.codex/agent",target=/home/nonroot/.codex/agent \
+  --mount type=bind,source="$HOME/.pi/agent",target=/home/nonroot/.pi/agent \
   ghcr.io/beremaran/ralphie:latest owner/repository \
   --workspace /home/nonroot/.ralphie \
-  --codex-dir /home/nonroot/.codex/agent \
+  --pi-dir /home/nonroot/.pi/agent \
   --dry-run --max-issues 1
 ```
 
@@ -174,18 +174,18 @@ for the full contract.
 ## Output contract
 
 `--output` selects `default`, `verbose`, `quiet`, or `json`. In an interactive,
-non-CI terminal, the default is a Codex transcript with an in-place sticky footer.
+non-CI terminal, the default is a Pi transcript with an in-place sticky footer.
 The footer is refreshed periodically and describes the active leaf stage and
 activity—for example, `› Reviewing changes › Using bash`—rather than a global
-step count. Completed progress milestones remain in scrollback. Codex sessions
+step count. Completed progress milestones remain in scrollback. Pi sessions
 start with contextual headers such as:
 
 ```text
-╭─ Codex · Task · session-1 · owner/repo · issue 2/4 · #56 · Reviewing changes · attempt 1/3
+╭─ Pi · Task · session-1 · owner/repo · issue 2/4 · #56 · Reviewing changes · attempt 1/3
 ```
 
 Human-readable output also records lifecycle breadcrumbs for events such as
-context compaction and Codex retries. Tool output is bounded for terminal use:
+context compaction and Pi retries. Tool output is bounded for terminal use:
 `LIVE_OUTPUT_LIMIT` is the rendered-output threshold, measured in characters,
 with a default of `2,400` per tool call. Final human previews use the `maxLines`/`maxCharacters` limits of 12
 lines/2,400 characters by default, or 40 lines/8,000 characters with
@@ -195,7 +195,7 @@ Outside an interactive terminal—including CI—plain output is append-only and
 uses no ANSI cursor controls. Quiet output reports failures and handled
 needs-attention stops only. JSON output is
 JSON Lines on stdout: each line is a parseable progress record or a lossless
-`codex_event` record, without
+`pi_event` record, without
 human breadcrumb lines. The redacted durable progress-event log remains at
 `<workspace>/.ralphie/runs/<run-id>/events.jsonl` independently of the selected
 renderer. Credentials, sensitive environment values, terminal controls, and
@@ -270,7 +270,7 @@ GitHub mutation; dry runs never notify.
 
 `--dry-run` grounds every issue, reports all three routes, and performs no
 implementation, checkout mutation, Git or GitHub mutation, issue closure, or PR
-delivery. Codex sessions never close issues, create or merge pull requests, or
+delivery. Pi sessions never close issues, create or merge pull requests, or
 push: every Git and GitHub mutation is performed by Ralphie's deterministic
 domain services, and agent sessions are denied mutating Git and GitHub
 commands.
@@ -311,7 +311,7 @@ The main references are:
 `ralphie --version` prints only the release version. For automation,
 `ralphie --version --output json` prints a stable object containing `version`
 and `commitSha`. Both forms work without a repository, GitHub credentials, or
-Codex configuration. Release builds embed the immutable commit SHA supplied by
+Pi configuration. Release builds embed the immutable commit SHA supplied by
 the build entry point; local builds use the documented `local` commit sentinel
 when no release SHA is supplied. See the [CLI reference](./docs/cli-reference.md)
 for the complete command surface.

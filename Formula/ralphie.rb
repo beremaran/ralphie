@@ -1,5 +1,5 @@
 class Ralphie < Formula
-  desc "Turn a GitHub issue queue into reviewed commits with Codex"
+  desc "Turn a GitHub issue queue into reviewed commits with Pi"
   homepage "https://github.com/beremaran/ralphie"
   license "MIT"
   # BEGIN RALPHIE GENERATED RELEASE METADATA

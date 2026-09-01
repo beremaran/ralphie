@@ -1,6 +1,6 @@
 import { buildDecompositionPrompt } from "../agent/prompts.ts";
 import { requestStructuredOutput } from "../agent/structured-output.ts";
-import type { CodexNeedsAttentionRequest } from "../agent/task-session.ts";
+import type { PiNeedsAttentionRequest } from "../agent/task-session.ts";
 import {
     nextDecompositionLineage,
     type DecompositionLineage,
@@ -28,7 +28,7 @@ export type DecompositionPlanResult =
       }
     | {
           readonly kind: "needs-attention";
-          readonly request: CodexNeedsAttentionRequest;
+          readonly request: PiNeedsAttentionRequest;
       };
 
 export type DecompositionPlannerService = {
@@ -59,7 +59,7 @@ export const makeDecompositionPlannerService = (
                 message: `Decomposition requires branch ${context.targetBranch}, but checkout is on ${invariant.branch}.`,
             });
         }
-        const result = await requestStructuredOutput(context.codex, {
+        const result = await requestStructuredOutput(context.pi, {
             directory: context.repositoryPath,
             title: `Plan the decomposition of issue #${context.issue.number}`,
             prompt: buildDecompositionPrompt({
@@ -69,11 +69,11 @@ export const makeDecompositionPlannerService = (
                 failedReviewSummaries: [],
             }),
             schema: issueBreakdownDecisionSchema,
-            agent: context.codexSelection.agent,
-            model: context.codexSelection.model,
-            variant: context.codexSelection.variant,
+            agent: context.piSelection.agent,
+            model: context.piSelection.model,
+            variant: context.piSelection.variant,
             runId: context.runId,
-            diagnostics: context.codexDiagnostics,
+            diagnostics: context.piDiagnostics,
             verifyAfter: () =>
                 context.repositoryInvariant.verify(
                     context.repositoryPath,

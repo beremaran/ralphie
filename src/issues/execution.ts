@@ -1,10 +1,10 @@
 import type { Octokit } from "octokit";
-import type { CodexClient } from "../codex/client.ts";
+import type { PiClient } from "../pi/client.ts";
 
 import type { GitHubIssue } from "../github/issues.ts";
 import type { NeedsAttentionReason } from "./decisions.ts";
-import type { CodexModel, CodexSelection } from "../agent/model.ts";
-import type { CodexSessionDiagnostics } from "../agent/task-session.ts";
+import type { PiModel, PiSelection } from "../agent/model.ts";
+import type { PiSessionDiagnostics } from "../agent/task-session.ts";
 import type { GitRepositoryInvariantService } from "../git/repository-invariant.ts";
 import type { NeedsAttentionPolicy } from "../options.ts";
 
@@ -109,7 +109,7 @@ export type IssueExecutionOutcome =
  * dry-run decision services inspect it without mutation. Workspace is retained
  * separately because it owns run artifacts and cleanup. The clients
  * are passed in from the workflow runtime so an issue executor does not need
- * to perform authentication or start another Codex runtime.
+ * to perform authentication or start another Pi runtime.
  */
 export type IssueExecutionContext = {
     readonly issue: GitHubIssue;
@@ -122,9 +122,9 @@ export type IssueExecutionContext = {
     readonly workspace: string;
     readonly runId: string;
     readonly octokit: Octokit;
-    readonly codex: CodexClient;
-    readonly codexSelection: CodexSelection;
-    readonly codexStageVariants?: {
+    readonly pi: PiClient;
+    readonly piSelection: PiSelection;
+    readonly piStageVariants?: {
         readonly implementation?: string;
         readonly grounding?: string;
         readonly complexity?: string;
@@ -132,8 +132,8 @@ export type IssueExecutionContext = {
         readonly commitMessage?: string;
     };
     readonly implementationAttempts?: number;
-    readonly implementationFallbackModel?: CodexModel;
-    readonly codexDiagnostics: CodexSessionDiagnostics;
+    readonly implementationFallbackModel?: PiModel;
+    readonly piDiagnostics: PiSessionDiagnostics;
     readonly repositoryInvariant: GitRepositoryInvariantService;
     readonly verificationCommands?: ReadonlyArray<string>;
     readonly signal?: AbortSignal;

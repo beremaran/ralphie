@@ -39,8 +39,8 @@ command schema.
 | `--max-decomposition-depth <count>` | `3` | Positive maximum generated-child lineage depth. Reaching the ceiling leaves the issue open, records needs attention, and continues independent work. |
 | `--issue-label <label>` | none | Require a label; repeat the flag to require multiple labels. |
 | `--issue-sort <sort>` | `created` | Sort by `created`, `updated`, or `comments`, optionally `:asc` or `:desc`. |
-| `--model <provider/model>` | Codex default | Override Codex's model selection. |
-| `--thinking <level>` | Codex default | Codex thinking level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. |
+| `--model <provider/model>` | Pi default | Override Pi's model selection. |
+| `--thinking <level>` | Pi default | Pi thinking level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. |
 | `--grounding-thinking <level>` | `low` | Thinking level for issue grounding/readiness. |
 | `--implementation-thinking <level>` | `high` | Thinking level for implementation sessions, independent of the global level. |
 | `--implementation-attempts <count>` | `3` | Positive number of implementation attempts allowed when sessions leave an unresolved empty diff. |
@@ -51,7 +51,7 @@ command schema.
 | `--verify-command <command>` | discovered `bun run check` | Deterministic verification command; repeat to run multiple commands in order. |
 | `--max-attempts <count>` | `3` | Positive pipeline attempt count in `get-pipelines-green` mode. |
 | `--pipeline-timeout <duration>` | none | Positive integer duration (`s`, `m`, or `h`) for `get-pipelines-green` mode. |
-| `--codex-dir <path>` | Codex default | Existing operator-owned Codex agent directory outside the workspace; it is never removed. |
+| `--pi-dir <path>` | Pi default | Existing operator-owned Pi agent directory outside the workspace; it is never removed. |
 | `--workspace <path>` | `~/.ralphie` | Root directory for repository checkouts and run artifacts. |
 | `--dry-run` | off | Assess and route issues without implementation, GitHub, or delivery mutations. |
 | `--resume <state.json>` | none | Continue a compatible saved run. |
@@ -96,7 +96,7 @@ Model credentials are read from environment variables:
 | --- | --- |
 | `GH_TOKEN` | GitHub.com token for noninteractive `gh` authentication (preferred). |
 | `GITHUB_TOKEN` | Fallback GitHub.com token alias for `gh`. |
-| `RALPHIE_MODEL_BASE_URL` | OpenAI-compatible model base URL; enables a private temporary Codex configuration when `--codex-dir` is absent. |
+| `RALPHIE_MODEL_BASE_URL` | OpenAI-compatible model base URL; enables a private temporary Pi configuration when `--pi-dir` is absent. |
 | `RALPHIE_MODEL_API_KEY` | Model API key for that temporary configuration; supply it only through the environment. |
 
 For interactive `github.com` use, authenticate with `gh auth login` and verify
@@ -112,8 +112,8 @@ container setup.
 ### Preview one issue
 
 This performs authentication and Git preflight, prepares a clean checkout,
-discovers issues, and asks Codex for a complexity decision. It may create or reset
-the local workspace and write run artifacts, but it does not ask Codex to edit the
+discovers issues, and asks Pi for a complexity decision. It may create or reset
+the local workspace and write run artifacts, but it does not ask Pi to edit the
 repository, create commits, push, or mutate GitHub.
 
 ```bash
@@ -140,7 +140,7 @@ bunx @beremaran/ralphie owner/repository \
   --max-issues 10
 ```
 
-Require multiple labels and let Codex choose its configured model:
+Require multiple labels and let Pi choose its configured model:
 
 ```bash
 bunx @beremaran/ralphie owner/repository \
@@ -148,7 +148,7 @@ bunx @beremaran/ralphie owner/repository \
   --issue-label backend
 ```
 
-Select a Codex model and thinking level explicitly:
+Select a Pi model and thinking level explicitly:
 
 ```bash
 bunx @beremaran/ralphie owner/repository \
@@ -234,6 +234,6 @@ mutation-enabled examples.
 `ralphie --version` prints only the release version. For automation,
 `ralphie --version --output json` prints a stable object containing `version`
 and `commitSha`. Both forms work without a repository, GitHub credentials, or
-Codex configuration. Release builds embed the immutable commit SHA supplied by
+Pi configuration. Release builds embed the immutable commit SHA supplied by
 the build entry point; local builds use the documented `local` commit sentinel
 when no release SHA is supplied.

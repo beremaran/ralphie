@@ -13,18 +13,15 @@ import {
 import { makeGitHubIssueMutationsService } from "../../src/github/issue-mutations.ts";
 import { makeGitHubIssueRelationshipService } from "../../src/github/issue-relationships.ts";
 import { makeParentCompletionService } from "../../src/github/parent-completion.ts";
-import { makeCodexService, type CodexRuntime } from "../../src/codex/server.ts";
-import {
-    codexModelSchema,
-    codexModelVariantSchema,
-} from "../../src/agent/model.ts";
+import { makePiService, type PiRuntime } from "../../src/pi/server.ts";
+import { piModelSchema, piModelVariantSchema } from "../../src/agent/model.ts";
 import {
     buildComplexityPrompt,
     buildImplementationPrompt,
     buildReviewPrompt,
 } from "../../src/agent/prompts.ts";
 import { requestStructuredOutput } from "../../src/agent/structured-output.ts";
-import { runCodexTask } from "../../src/agent/task-session.ts";
+import { runPiTask } from "../../src/agent/task-session.ts";
 import {
     complexityDecisionSchema,
     reviewDecisionSchema,
@@ -44,27 +41,25 @@ const defineOptInTest = (
 const modelSelection = () => {
     const rawModel = process.env.RALPHIE_PI_SMOKE_MODEL;
     const parsedModel =
-        rawModel === undefined ? undefined : codexModelSchema.parse(rawModel);
+        rawModel === undefined ? undefined : piModelSchema.parse(rawModel);
     return {
         agent: process.env.RALPHIE_PI_SMOKE_AGENT?.trim() || "build",
         ...(parsedModel === undefined ? {} : { model: parsedModel }),
         ...(process.env.RALPHIE_PI_SMOKE_VARIANT === undefined
             ? {}
             : {
-                  variant: codexModelVariantSchema.parse(
+                  variant: piModelVariantSchema.parse(
                       process.env.RALPHIE_PI_SMOKE_VARIANT,
                   ),
               }),
     };
 };
 
-const startPi = async (): Promise<CodexRuntime> =>
-    makeCodexService({ workspace: tmpdir() }).start();
+const startPi = async (): Promise<PiRuntime> =>
+    makePiService({ workspace: tmpdir() }).start();
 
 const createDisposableRepository = async (): Promise<string> => {
-    const repositoryPath = await mkdtemp(
-        join(tmpdir(), "ralphie-codex-smoke-"),
-    );
+    const repositoryPath = await mkdtemp(join(tmpdir(), "ralphie-pi-smoke-"));
     const git = simpleGit(repositoryPath);
     await git.init(["-b", "main"]);
     await git.addConfig("user.email", "ralphie-smoke@example.test");
@@ -85,10 +80,8 @@ const smokeIssue = {
     body: "Add greeting.txt containing exactly `Hello from Ralphie!`.",
     labels: ["smoke-test"],
 } as const;
-const codexComplexityEnabled = envFlag("RALPHIE_RUN_PI_COMPLEXITY_SMOKE");
-const codexImplementationEnabled = envFlag(
-    "RALPHIE_RUN_PI_IMPLEMENTATION_SMOKE",
-);
+const piComplexityEnabled = envFlag("RALPHIE_RUN_PI_COMPLEXITY_SMOKE");
+const piImplementationEnabled = envFlag("RALPHIE_RUN_PI_IMPLEMENTATION_SMOKE");
 const githubRepository = process.env.RALPHIE_GITHUB_TEST_REPOSITORY?.trim();
 const safeGithubRepository =
     githubRepository !== undefined &&
@@ -103,11 +96,11 @@ const pause = (milliseconds: number): Promise<void> =>
 
 describe("opt-in network smoke tests", () => {
     defineOptInTest(
-        codexComplexityEnabled,
-        "gets a real structured complexity assessment from Codex",
+        piComplexityEnabled,
+        "gets a real structured complexity assessment from Pi",
         async () => {
             const repositoryPath = await createDisposableRepository();
-            let server: CodexRuntime | undefined;
+            let server: PiRuntime | undefined;
             try {
                 server = await startPi();
                 const result = await requestStructuredOutput(server.client, {
@@ -136,15 +129,15 @@ describe("opt-in network smoke tests", () => {
     );
 
     defineOptInTest(
-        codexImplementationEnabled,
-        "runs real Codex implementation and structured review in a disposable repository",
+        piImplementationEnabled,
+        "runs real Pi implementation and structured review in a disposable repository",
         async () => {
             const repositoryPath = await createDisposableRepository();
-            let server: CodexRuntime | undefined;
+            let server: PiRuntime | undefined;
             try {
                 server = await startPi();
                 const selection = modelSelection();
-                const implementation = await runCodexTask(server.client, {
+                const implementation = await runPiTask(server.client, {
                     directory: repositoryPath,
                     title: "Smoke-test implementation",
                     selection,

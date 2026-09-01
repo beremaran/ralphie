@@ -8,7 +8,7 @@ export type StructuredOutputName =
     | "commit-message-decision"
     | "issue-breakdown-decision";
 
-export type CodexSessionPurpose =
+export type PiSessionPurpose =
     | "implement"
     | "address-review"
     | "assess-complexity"
@@ -18,22 +18,22 @@ export type CodexSessionPurpose =
     | "generate-commit-message"
     | "decompose-issue";
 
-export const CodexSessionContext = "fresh" as const;
-export type CodexSessionContext = typeof CodexSessionContext;
+export const PiSessionContext = "fresh" as const;
+export type PiSessionContext = typeof PiSessionContext;
 
-export type CodexSessionStage =
+export type PiSessionStage =
     | {
-          readonly kind: "codex-session";
+          readonly kind: "pi-session";
           readonly purpose: "implement";
       }
     | {
-          readonly kind: "codex-session";
+          readonly kind: "pi-session";
           readonly purpose: "address-review";
-          readonly context: CodexSessionContext;
+          readonly context: PiSessionContext;
           readonly input: "review-decision";
       }
     | {
-          readonly kind: "codex-session";
+          readonly kind: "pi-session";
           readonly purpose:
               | "assess-complexity"
               | "assess-grounding"

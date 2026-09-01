@@ -1,7 +1,7 @@
 export type IssueStageKind =
     | "git-task"
     | "github-task"
-    | "codex-session"
+    | "pi-session"
     | "review-loop";
 
 export type IssueWorkflowKind = "implementation" | "decomposition";

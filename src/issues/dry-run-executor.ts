@@ -23,7 +23,7 @@ import type {
 } from "./execution.ts";
 import type { GroundingAssessmentService } from "./grounding.ts";
 import type { ProgressReporterService } from "../progress/progress.ts";
-import type { CodexNeedsAttentionRequest } from "../agent/task-session.ts";
+import type { PiNeedsAttentionRequest } from "../agent/task-session.ts";
 import type { DecompositionPlannerService } from "./decomposition-planner.ts";
 import type { DecompositionOperationPlan } from "./decomposition-plan.ts";
 import { DecompositionDepthLimitError } from "../github/decomposition-markdown.ts";
@@ -274,15 +274,15 @@ const needsAttentionOutcome = (
         : outcome;
 };
 
-const CODEX_REASON_TO_NEEDS_ATTENTION: Readonly<
+const PI_REASON_TO_NEEDS_ATTENTION: Readonly<
     Record<string, NeedsAttentionReason>
 > = Object.fromEntries(
     Object.values(NeedsAttentionReason).map((reason) => [reason, reason]),
 );
 
-/** Codex signal reasons and decision reasons share the same value set. */
+/** Pi signal reasons and decision reasons share the same value set. */
 const needsAttentionReasonFor = (reason: string): NeedsAttentionReason =>
-    CODEX_REASON_TO_NEEDS_ATTENTION[reason] ??
+    PI_REASON_TO_NEEDS_ATTENTION[reason] ??
     NeedsAttentionReason.MissingInformation;
 
 /**
@@ -292,7 +292,7 @@ const needsAttentionReasonFor = (reason: string): NeedsAttentionReason =>
  */
 const decompositionSignalOutcome = (
     context: IssueExecutionContext,
-    request: CodexNeedsAttentionRequest,
+    request: PiNeedsAttentionRequest,
 ): IssueExecutionOutcome => {
     const summary =
         request.message ?? "The decomposition session requested attention.";
@@ -314,7 +314,7 @@ const decompositionSignalOutcome = (
 const reportDecompositionSignal = async (
     context: IssueExecutionContext,
     progress: ProgressReporterService,
-    request: CodexNeedsAttentionRequest,
+    request: PiNeedsAttentionRequest,
 ): Promise<void> => {
     await progress.emit({
         issue: {

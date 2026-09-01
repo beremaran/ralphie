@@ -18,7 +18,7 @@ import {
     buildVerificationFixPrompt,
 } from "../../src/agent/prompts.ts";
 
-describe("Codex prompts", () => {
+describe("Pi prompts", () => {
     test("builds a read-only readiness prompt with a dependency escape hatch", () => {
         const prompt = buildGroundingPrompt({
             issue: {

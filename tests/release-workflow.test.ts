@@ -304,7 +304,7 @@ describe("release container metadata contract", () => {
             "ACTIONS_ID_TOKEN",
             "OPENAI_API_KEY",
             "ANTHROPIC_API_KEY",
-            "CODEX_CREDENTIAL",
+            "PI_CREDENTIAL",
             "--mount=type=secret",
         ]) {
             expect(dockerfile).not.toContain(forbidden);

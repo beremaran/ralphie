@@ -20,18 +20,18 @@ import {
     DEFAULT_MAX_DECOMPOSITION_DEPTH,
 } from "./options.ts";
 import { IssueOrder, IssueSort } from "./github/issues.ts";
-import { codexModelSchema, codexModelVariantSchema } from "./agent/model.ts";
+import { piModelSchema, piModelVariantSchema } from "./agent/model.ts";
 import {
     makeProgressCoordinator,
     type ProgressCoordinator,
     type ProgressCoordinatorOptions,
 } from "./progress/coordinator.ts";
 import { type ProgressRenderMode } from "./progress/progress.ts";
-import { type CodexProviderConfig } from "./codex/server.ts";
-import { makeCodexService } from "./codex/server.ts";
+import { type PiProviderConfig } from "./pi/config.ts";
+import { makePiService } from "./pi/server.ts";
 import { makeLiveRuntime, type RalphieRuntime } from "./runtime.ts";
-import type { CodexService } from "./codex/server.ts";
-import type { CodexEventListener } from "./codex/client.ts";
+import type { PiService } from "./pi/server.ts";
+import type { PiEventListener } from "./pi/client.ts";
 import {
     exitCodeForError,
     isNeedsAttentionStop,
@@ -74,7 +74,7 @@ const cliOptions = {
     "complexity-thinking": { type: "string" },
     "review-thinking": { type: "string" },
     "commit-thinking": { type: "string" },
-    "codex-dir": { type: "string" },
+    "pi-dir": { type: "string" },
     workspace: { type: "string" },
     "dry-run": { type: "boolean" },
     clean: { type: "string" },
@@ -130,9 +130,7 @@ const parseThinking = (
     name: string,
 ): string | undefined => {
     const value = asNonEmptyString(values, name);
-    return value === undefined
-        ? undefined
-        : codexModelVariantSchema.parse(value);
+    return value === undefined ? undefined : piModelVariantSchema.parse(value);
 };
 
 const parseNeedsAttentionPolicy = (
@@ -155,7 +153,7 @@ const parseIssueFailurePolicy = (
 
 const parseModel = (values: Record<string, unknown>, name: string) => {
     const value = asNonEmptyString(values, name);
-    return value === undefined ? undefined : codexModelSchema.parse(value);
+    return value === undefined ? undefined : piModelSchema.parse(value);
 };
 
 const cleanWhenSchema = z.enum(["start", "end", "both"]);
@@ -271,7 +269,7 @@ const parseCliOptions = (
         thinking:
             thinkingValue === undefined
                 ? undefined
-                : codexModelVariantSchema.parse(thinkingValue),
+                : piModelVariantSchema.parse(thinkingValue),
         groundingThinking: parseThinking(values, "grounding-thinking"),
         implementationThinking: parseThinking(
             values,
@@ -285,7 +283,7 @@ const parseCliOptions = (
         complexityThinking: parseThinking(values, "complexity-thinking"),
         reviewThinking: parseThinking(values, "review-thinking"),
         commitThinking: parseThinking(values, "commit-thinking"),
-        codexDir: asNonEmptyString(values, "codex-dir"),
+        piDir: asNonEmptyString(values, "pi-dir"),
         workspace: asNonEmptyString(values, "workspace"),
         clean:
             cleanValue === undefined
@@ -321,10 +319,12 @@ export const parseCliArgs = (args: ReadonlyArray<string>): ParsedCli => {
     };
 };
 
-const resolveCodexConfig = (
-    _config: ResolvedRalphieConfig,
-): CodexProviderConfig => ({
-    docker: process.env.RALPHIE_RUNNING_IN_DOCKER === "1",
+const resolvePiConfig = (config: ResolvedRalphieConfig): PiProviderConfig => ({
+    workspace: config.workspace,
+    modelBaseUrl: config.modelBaseUrl,
+    modelApiKey: config.modelApiKey,
+    model: config.model,
+    agentDir: config.piDir,
 });
 
 export type CliTerminalInfo = {
@@ -354,7 +354,7 @@ const resolveProgressMode = (
 
 export const HELP_TEXT = `Usage: ralphie <owner/repository> [options]
 
-Run an issue queue, maintain issues, or get-pipelines-green through Codex.
+Run an issue queue, maintain issues, or get-pipelines-green through Pi.
 
 Options:
   -b, --branch <name>          Branch to operate on
@@ -377,8 +377,8 @@ Options:
       --verify-command <cmd>   Deterministic pre-commit gate (repeatable)
       --max-attempts <n>       Pipeline attempts (positive; default 3)
       --pipeline-timeout <t>  Pipeline timeout: e.g. 30s, 10m, or 2h
-      --model <provider/model> Codex model selection
-      --thinking <level>       Codex thinking level: off, minimal, low, medium, high, xhigh, or max
+      --model <provider/model> Pi model selection
+      --thinking <level>       Pi thinking level: off, minimal, low, medium, high, xhigh, or max
       --grounding-thinking <level> Readiness reasoning (default low)
       --implementation-thinking <level> Implementation reasoning (default high)
       --implementation-attempts <n> Empty implementation retries (default 3)
@@ -387,7 +387,7 @@ Options:
       --complexity-thinking <level> Complexity reasoning (default medium)
       --review-thinking <level> Review reasoning (default high)
       --commit-thinking <level> Commit-message reasoning (default low)
-      --codex-dir <path>          Operator-owned Codex directory outside workspace
+      --pi-dir <path>          Operator-owned Pi directory outside workspace
       --workspace <path>       Workspace directory
       --dry-run                Assess without mutations
       --resume <path>          Resume saved run state
@@ -412,12 +412,12 @@ export type CommandFactories = {
     readonly makeCoordinator?: (
         options: ProgressCoordinatorOptions,
     ) => ProgressCoordinator;
-    readonly makeCodex?: (
-        config: CodexProviderConfig,
-        listener: CodexEventListener,
-    ) => CodexService;
+    readonly makePi?: (
+        config: PiProviderConfig,
+        listener: PiEventListener,
+    ) => PiService;
     readonly makeRuntime?: (input: {
-        readonly codex: CodexService;
+        readonly pi: PiService;
         readonly progress: ProgressCoordinator["progress"];
     }) => CommandRuntime;
     readonly runWorkflow?: typeof workflow;
@@ -447,7 +447,7 @@ const resolveCommandFactories = (
     factories: CommandFactories = {},
 ): Required<CommandFactories> => ({
     makeCoordinator: factories.makeCoordinator ?? makeProgressCoordinator,
-    makeCodex: factories.makeCodex ?? makeCodexService,
+    makePi: factories.makePi ?? makePiService,
     makeRuntime: factories.makeRuntime ?? makeLiveRuntime,
     runWorkflow: factories.runWorkflow ?? workflow,
     runMaintenance: factories.runMaintenance ?? maintainIssues,
@@ -564,7 +564,7 @@ const workflowOptionsFor = (
     },
     model: config.model,
     modelVariant: config.thinking,
-    codexStageVariants: {
+    piStageVariants: {
         grounding: config.groundingThinking ?? "low",
         implementation: config.implementationThinking ?? "high",
         complexity: config.complexityThinking ?? "medium",
@@ -659,7 +659,6 @@ const disposeCommandResources = async (
 export const runCommand = async (
     args: ReadonlyArray<string> = Bun.argv.slice(2),
     input: RunCommandInput = {},
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: command lifecycle owns coordinated cleanup.
 ): Promise<void> => {
     const output = commandOutput(input.output);
     const parsed = parseCliArgs(args);
@@ -703,12 +702,12 @@ export const runCommand = async (
             factories.makeCoordinator,
             output,
         );
-        const codex = factories.makeCodex(
-            resolveCodexConfig(config),
-            coordinator.codexListener ?? coordinator.listener,
+        const pi = factories.makePi(
+            resolvePiConfig(config),
+            coordinator.piListener,
         );
         runtime = factories.makeRuntime({
-            codex,
+            pi,
             progress: coordinator.progress,
         });
         await dispatchCommand(

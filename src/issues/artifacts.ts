@@ -6,8 +6,8 @@ import { z } from "zod";
 import type { IssueCheckpoint } from "../git/issue-checkpoint.ts";
 import type { GitHubIssue } from "../github/issues.ts";
 import {
-    codexNeedsAttentionRequestSchema,
-    type CodexNeedsAttentionRequest,
+    piNeedsAttentionRequestSchema,
+    type PiNeedsAttentionRequest,
 } from "../agent/task-session.ts";
 import { RalphieError } from "../shared/error.ts";
 import { resolveWorkspacePath } from "../workspace/workspace.ts";
@@ -95,7 +95,7 @@ export type IssueResolutionDecisionArtifact = {
 export type NeedsAttentionArtifact = NeedsAttentionDecisionArtifact;
 
 export type NeedsAttentionHandoffArtifact = {
-    readonly request: CodexNeedsAttentionRequest;
+    readonly request: PiNeedsAttentionRequest;
     readonly fingerprint: IssueFreshnessFingerprint;
     readonly checkpoint: IssueCheckpoint;
 };
@@ -261,7 +261,7 @@ export const issueResolutionDecisionArtifactSchema = z
 
 export const needsAttentionHandoffArtifactSchema = z
     .object({
-        request: codexNeedsAttentionRequestSchema,
+        request: piNeedsAttentionRequestSchema,
         fingerprint: issueFreshnessFingerprintSchema,
         checkpoint: issueCheckpointSchema,
     })

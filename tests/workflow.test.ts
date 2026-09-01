@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Octokit } from "octokit";
-import type { CodexClient } from "../src/codex/client.ts";
+import type { PiClient } from "../src/pi/client.ts";
 
 import { CommandRunnerLive } from "../src/process/command-runner.ts";
 import type { GitRepositoryService } from "../src/git/repository.ts";
@@ -42,8 +42,8 @@ import {
     type IssueArtifactStoreService,
     makeIssueArtifactStore,
 } from "../src/issues/artifacts.ts";
-import { DEFAULT_CODEX_AGENT } from "../src/agent/model.ts";
-import type { CodexService } from "../src/codex/server.ts";
+import { DEFAULT_PI_AGENT } from "../src/agent/model.ts";
+import type { PiService } from "../src/pi/server.ts";
 import {
     makeProgressRecorder,
     type ProgressReporterService,
@@ -118,10 +118,10 @@ type TestRuntimeOptions = {
     readonly removeFailure?: RalphieError;
     readonly closeFailure?: RalphieError;
     readonly abortOnExecute?: AbortController;
-    readonly abortAt?: "github" | "repository" | "issues" | "codex" | "between";
+    readonly abortAt?: "github" | "repository" | "issues" | "pi" | "between";
     readonly abortController?: AbortController;
     readonly captureStart?: number;
-    readonly failCodexReadyProgress?: boolean;
+    readonly failPiReadyProgress?: boolean;
     readonly executionContexts?: IssueExecutionContext[];
     readonly executeGate?: (context: IssueExecutionContext) => Promise<void>;
     readonly issueExecutor?: IssueExecutorService;
@@ -362,7 +362,7 @@ const testRuntime = (
             if (options.executeGate !== undefined)
                 await options.executeGate(context);
             calls.push(
-                `executeIssue:${context.issue.number}:${context.repositoryPath}:${context.targetBranch}:${context.codexSelection.agent}`,
+                `executeIssue:${context.issue.number}:${context.repositoryPath}:${context.targetBranch}:${context.piSelection.agent}`,
             );
             if (options.abortOnExecute !== undefined) {
                 options.abortOnExecute.abort();
@@ -388,14 +388,14 @@ const testRuntime = (
             );
         },
     };
-    const codex: CodexService = {
+    const pi: PiService = {
         start: async () => {
             if (options.startFailure) throw options.startFailure;
             calls.push("startServer");
-            if (options.abortAt === "codex") options.abortController?.abort();
+            if (options.abortAt === "pi") options.abortController?.abort();
             return {
                 url: "http://127.0.0.1:4096",
-                client: {} as CodexClient,
+                client: {} as PiClient,
                 close: async () => {
                     calls.push("closeRuntime");
                 },
@@ -422,15 +422,15 @@ const testRuntime = (
         },
     };
     const progressRecorder = makeProgressRecorder(progressEvents);
-    const progress: ProgressReporterService = options.failCodexReadyProgress
+    const progress: ProgressReporterService = options.failPiReadyProgress
         ? {
               ...progressRecorder,
               emit: async (update) => {
                   if (
-                      update.stage === "codex-runtime" &&
+                      update.stage === "pi-runtime" &&
                       update.status === "succeeded"
                   ) {
-                      throw new Error("Codex ready progress emission failed");
+                      throw new Error("Pi ready progress emission failed");
                   }
                   await progressRecorder.emit(update);
               },
@@ -524,7 +524,7 @@ const testRuntime = (
         issueExecutor,
         issueRecovery: {} as never,
         needsAttentionRouter: {} as never,
-        codex,
+        pi,
         progress,
         runStateStore: stateStore,
         workspace,
@@ -681,7 +681,7 @@ const baseOptions = {
         sort: IssueSort.Created,
         order: IssueOrder.Ascending,
     },
-    agent: DEFAULT_CODEX_AGENT,
+    agent: DEFAULT_PI_AGENT,
     workspace: "/tmp/ralphie",
     cleanup: false,
     startClean: false,
@@ -690,7 +690,7 @@ const baseOptions = {
 } as const;
 
 describe("workflow", () => {
-    test("executes an issue, persists completion, releases Codex, and cleans up", async () => {
+    test("executes an issue, persists completion, releases Pi, and cleans up", async () => {
         const calls: string[] = [];
         const states: RunState[] = [];
         const events: ProgressUpdate[] = [];
@@ -1197,7 +1197,7 @@ describe("workflow", () => {
             onNeedsAttention: NeedsAttentionPolicy.Continue,
             dryRun: false,
             notificationsEnabled: false,
-            selection: { agent: DEFAULT_CODEX_AGENT },
+            selection: { agent: DEFAULT_PI_AGENT },
             maxIssues: 1,
             queue: {
                 pending: [{ ...firstIssue, labels: [...firstIssue.labels] }],
@@ -1253,7 +1253,7 @@ describe("workflow", () => {
             onNeedsAttention: NeedsAttentionPolicy.Continue,
             dryRun: false,
             notificationsEnabled: false,
-            selection: { agent: DEFAULT_CODEX_AGENT },
+            selection: { agent: DEFAULT_PI_AGENT },
             maxIssues: 1,
             queue: {
                 pending: [{ ...firstIssue, labels: [...firstIssue.labels] }],
@@ -1639,7 +1639,7 @@ describe("workflow", () => {
             onNeedsAttention: NeedsAttentionPolicy.Continue,
             dryRun: false,
             notificationsEnabled: false,
-            selection: { agent: DEFAULT_CODEX_AGENT },
+            selection: { agent: DEFAULT_PI_AGENT },
             maxIssues: 1,
             queue: {
                 pending: [{ ...firstIssue, labels: [...firstIssue.labels] }],
@@ -1815,7 +1815,7 @@ describe("workflow", () => {
                     workflow: WorkflowMode.Lgtm,
                     onNeedsAttention: NeedsAttentionPolicy.Continue,
                     dryRun: true,
-                    selection: { agent: DEFAULT_CODEX_AGENT },
+                    selection: { agent: DEFAULT_PI_AGENT },
                     maxIssues: 1,
                     queue: {
                         pending: [
@@ -2334,7 +2334,7 @@ describe("workflow", () => {
         });
     });
 
-    test("keeps notification recovery distinct and retries the saved outcome without Codex work", async () => {
+    test("keeps notification recovery distinct and retries the saved outcome without Pi work", async () => {
         const firstStates: RunState[] = [];
         let attempts = 0;
         const notification: GitHubNeedsAttentionNotificationService = {
@@ -2420,7 +2420,7 @@ describe("workflow", () => {
             onNeedsAttention: NeedsAttentionPolicy.Continue,
             dryRun: false,
             notificationsEnabled: false,
-            selection: { agent: DEFAULT_CODEX_AGENT },
+            selection: { agent: DEFAULT_PI_AGENT },
             maxIssues: 1,
             queue: {
                 pending: [{ ...firstIssue, labels: [...firstIssue.labels] }],
@@ -2668,7 +2668,7 @@ describe("workflow", () => {
         },
     );
 
-    test("halts, persists the active issue, and releases Codex on failure", async () => {
+    test("halts, persists the active issue, and releases Pi on failure", async () => {
         const calls: string[] = [];
         const states: RunState[] = [];
         await expect(
@@ -2726,17 +2726,17 @@ describe("workflow", () => {
         expect(calls).toContain("restoreCheckout");
     });
 
-    test("closes Codex if ready progress reporting fails after startup", async () => {
+    test("closes Pi if ready progress reporting fails after startup", async () => {
         const calls: string[] = [];
         const states: RunState[] = [];
         await expect(
             workflow(
                 baseOptions,
                 testRuntime(calls, states, {
-                    failCodexReadyProgress: true,
+                    failPiReadyProgress: true,
                 }),
             ),
-        ).rejects.toThrow("Codex ready progress emission failed");
+        ).rejects.toThrow("Pi ready progress emission failed");
         expect(calls).toContain("closeRuntime");
     });
 
@@ -2974,7 +2974,7 @@ describe("workflow", () => {
         },
     );
 
-    test("cancels after Codex starts, closes the server, and saves active state", async () => {
+    test("cancels after Pi starts, closes the server, and saves active state", async () => {
         const calls: string[] = [];
         const states: RunState[] = [];
         const controller = new AbortController();
@@ -2982,7 +2982,7 @@ describe("workflow", () => {
             workflow(
                 { ...baseOptions, cleanup: true, signal: controller.signal },
                 testRuntime(calls, states, {
-                    abortAt: "codex",
+                    abortAt: "pi",
                     abortController: controller,
                 }),
             ),

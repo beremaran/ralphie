@@ -53,9 +53,9 @@ Tracked modifications and untracked, non-ignored files inside that checkout are
 discarded. Keep unrelated work outside Ralphie's workspace.
 
 The workspace's `.ralphie` directory contains only repository checkouts and
-Ralphie's run state, events, and recovery artifacts. Codex configuration is kept
-in the default or explicitly supplied `--codex-dir`, or in a private temporary
-credential directory, never under this path. An explicitly supplied `--codex-dir`
+Ralphie's run state, events, and recovery artifacts. Pi configuration is kept
+in the default or explicitly supplied `--pi-dir`, or in a private temporary
+credential directory, never under this path. An explicitly supplied `--pi-dir`
 is operator-owned and is never removed; mount it outside the workspace.
 
 `--clean start` and `--clean end` recursively delete the workspace after
@@ -92,7 +92,7 @@ Structured decision sessions deny edits/writes and mutating Git/GitHub commands.
 The implementation agent may edit the checkout, but it is denied commits,
 pushes, branch/reset/clean operations, and `gh` commands. Ralphie stages,
 verifies, commits, pushes, and mutates GitHub through deterministic domain
-services. Every decision task is schema-validated; invalid output or Codex
+services. Every decision task is schema-validated; invalid output or Pi
 failure becomes a failed issue outcome without proceeding to the next operation.
 
 Verification commands are run against the staged tree and their evidence is

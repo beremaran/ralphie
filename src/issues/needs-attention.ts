@@ -1,7 +1,7 @@
 import type { IssueCheckpoint } from "../git/issue-checkpoint.ts";
 import { buildGroundingPrompt } from "../agent/prompts.ts";
 import { requestStructuredOutput } from "../agent/structured-output.ts";
-import type { CodexNeedsAttentionRequest } from "../agent/task-session.ts";
+import type { PiNeedsAttentionRequest } from "../agent/task-session.ts";
 import { RalphieError } from "../shared/error.ts";
 import {
     IssueArtifactKind,
@@ -25,7 +25,7 @@ import type { IssueRecoveryService } from "./recovery.ts";
 export type NeedsAttentionRouteInput = {
     readonly context: IssueExecutionContext;
     readonly artifacts: IssueArtifactStore;
-    readonly request?: CodexNeedsAttentionRequest;
+    readonly request?: PiNeedsAttentionRequest;
     readonly checkpoint?: IssueCheckpoint;
 };
 
@@ -58,7 +58,7 @@ export const issueFreshnessFingerprint = (
 
 const verificationPrompt = (
     context: IssueExecutionContext,
-    request: CodexNeedsAttentionRequest,
+    request: PiNeedsAttentionRequest,
 ): string => `${buildGroundingPrompt({
     issue: context.issue,
     repositoryPath: context.repositoryPath,
@@ -114,18 +114,17 @@ const verifyHandoff = async (
         return (await artifacts.read(IssueArtifactKind.NeedsAttentionDecision))
             .decision;
     }
-    const verified = await requestStructuredOutput(context.codex, {
+    const verified = await requestStructuredOutput(context.pi, {
         directory: context.repositoryPath,
         title: `Verify needs-attention request for issue #${context.issue.number}`,
         prompt: verificationPrompt(context, handoff.request),
         schema: groundingDecisionSchema,
-        agent: context.codexSelection.agent,
-        model: context.codexSelection.model,
+        agent: context.piSelection.agent,
+        model: context.piSelection.model,
         variant:
-            context.codexStageVariants?.grounding ??
-            context.codexSelection.variant,
+            context.piStageVariants?.grounding ?? context.piSelection.variant,
         runId: context.runId,
-        diagnostics: context.codexDiagnostics,
+        diagnostics: context.piDiagnostics,
         repositoryInvariant: {
             branch: handoff.checkpoint.branch,
             head: handoff.checkpoint.sha,

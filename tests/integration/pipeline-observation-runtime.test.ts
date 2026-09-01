@@ -68,9 +68,9 @@ const makeRuntime = () => {
     const sleeps: number[] = [];
     const signals: AbortSignal[] = [];
     const runtime = makeLiveRuntime({
-        codex: {
+        pi: {
             start: async () => {
-                throw new Error("Codex must not start while observing");
+                throw new Error("Pi must not start while observing");
             },
         },
         progress: makeProgressRecorder([]),

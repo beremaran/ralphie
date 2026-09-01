@@ -14,7 +14,7 @@ export type ProgressStage =
     | "repository-discovery"
     | "repository-preparation"
     | "issue-discovery"
-    | "codex-runtime"
+    | "pi-runtime"
     | "issue-planning"
     | "issue-execution"
     | "issue-queue"
@@ -175,7 +175,7 @@ const clipToWidth = (text: string, width: number): string => {
     return `${clipped}…`;
 };
 
-/** Create the single line-aware sink shared by progress and Codex output. */
+/** Create the single line-aware sink shared by progress and Pi output. */
 export const makeProgressOutput = ({
     mode,
     write = mode === "json"
@@ -425,10 +425,10 @@ export {
     initialDisplayState,
     progressStageLabel,
     reduceDisplayState,
-    reduceCodexSessionEvent,
+    reducePiSessionEvent,
     reduceProgressUpdate,
     updateDisplayState,
-    updateDisplayStateFromCodex,
+    updateDisplayStateFromPi,
     updateDisplayStateFromProgress,
 } from "./display-state.ts";
 export type {

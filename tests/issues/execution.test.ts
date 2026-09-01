@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { makeCodexSessionDiagnostics } from "../../src/agent/task-session.ts";
+import { makePiSessionDiagnostics } from "../../src/agent/task-session.ts";
 
 import {
     type IssueCompletionKind,
@@ -84,11 +84,11 @@ describe("issue execution domain types", () => {
             workspace: "/tmp/workspace",
             runId: "run-42",
             octokit: {} as IssueExecutionContext["octokit"],
-            codex: {} as IssueExecutionContext["codex"],
-            codexSelection: {
+            pi: {} as IssueExecutionContext["pi"],
+            piSelection: {
                 agent: "build",
             },
-            codexDiagnostics: makeCodexSessionDiagnostics(),
+            piDiagnostics: makePiSessionDiagnostics(),
             repositoryInvariant: {
                 capture: async () => ({
                     branch: "main",
@@ -104,6 +104,6 @@ describe("issue execution domain types", () => {
         expect(context.targetBranch).toBe("main");
         expect(context.workspace).toBe("/tmp/workspace");
         expect(context.runId).toBe("run-42");
-        expect(context.codexSelection.agent).toBe("build");
+        expect(context.piSelection.agent).toBe("build");
     });
 });

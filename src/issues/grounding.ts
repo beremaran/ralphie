@@ -7,12 +7,12 @@ import {
     groundingDecisionSchema,
 } from "./decisions.ts";
 import type { IssueExecutionContext } from "./execution.ts";
-import type { CodexNeedsAttentionRequest } from "../agent/task-session.ts";
+import type { PiNeedsAttentionRequest } from "../agent/task-session.ts";
 
 export type GroundingAssessmentResult = {
     readonly decision: GroundingDecision;
     readonly sessionID: string;
-    readonly needsAttention?: CodexNeedsAttentionRequest;
+    readonly needsAttention?: PiNeedsAttentionRequest;
 };
 
 export type GroundingAssessmentService = {
@@ -48,7 +48,7 @@ export const makeGroundingAssessmentService = (
                     message: `Issue grounding requires branch ${context.targetBranch}, but checkout is on ${checkpoint.branch}.`,
                 });
             }
-            const result = await requestStructuredOutput(context.codex, {
+            const result = await requestStructuredOutput(context.pi, {
                 directory: context.repositoryPath,
                 title: `Check readiness of issue #${context.issue.number}`,
                 prompt: buildGroundingPrompt({
@@ -57,13 +57,13 @@ export const makeGroundingAssessmentService = (
                     targetBranch: context.targetBranch,
                 }),
                 schema: groundingDecisionSchema,
-                agent: context.codexSelection.agent,
-                model: context.codexSelection.model,
+                agent: context.piSelection.agent,
+                model: context.piSelection.model,
                 variant:
-                    context.codexStageVariants?.grounding ??
-                    context.codexSelection.variant,
+                    context.piStageVariants?.grounding ??
+                    context.piSelection.variant,
                 runId: context.runId,
-                diagnostics: context.codexDiagnostics,
+                diagnostics: context.piDiagnostics,
                 repositoryInvariant: checkpoint,
                 verifyRepositoryInvariant: context.repositoryInvariant.verify,
                 progress,

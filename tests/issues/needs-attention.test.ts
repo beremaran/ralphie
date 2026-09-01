@@ -2,10 +2,10 @@ import { describe, expect, test } from "bun:test";
 import type { Octokit } from "octokit";
 
 import {
-    CODEX_DECISION_PERMISSION_POLICY,
-    makeCodexSessionDiagnostics,
+    PI_DECISION_PERMISSION_POLICY,
+    makePiSessionDiagnostics,
 } from "../../src/agent/task-session.ts";
-import type { CodexClient } from "../../src/codex/client.ts";
+import type { PiClient } from "../../src/pi/client.ts";
 import {
     IssueArtifactKind,
     makeIssueArtifactStore,
@@ -35,10 +35,10 @@ const decision = {
 } as const;
 
 const context = (
-    codex: CodexClient,
+    pi: PiClient,
     updatedAt = "2026-08-28T00:00:00.000Z",
     invariantChecks: unknown[] = [],
-    diagnostics = makeCodexSessionDiagnostics(),
+    diagnostics = makePiSessionDiagnostics(),
 ): IssueExecutionContext => ({
     issue: {
         number: 42,
@@ -55,14 +55,14 @@ const context = (
     workspace: "/workspace",
     runId: "run-1",
     octokit: {} as Octokit,
-    codex,
-    codexSelection: {
+    pi,
+    piSelection: {
         agent: "build",
         model: { providerID: "openai", modelID: "grounding-model" },
         variant: "base-variant",
     },
-    codexStageVariants: { grounding: "grounding-variant" },
-    codexDiagnostics: diagnostics,
+    piStageVariants: { grounding: "grounding-variant" },
+    piDiagnostics: diagnostics,
     repositoryInvariant: {
         capture: async () => ({ branch: "main", head: checkpoint.sha }),
         verify: async (repositoryPath, expected) => {
@@ -76,7 +76,7 @@ const client = (
     sessions: string[],
     permissions: unknown[],
     prompts: unknown[] = [],
-): CodexClient => {
+): PiClient => {
     let output = 0;
     return {
         session: {
@@ -98,7 +98,7 @@ const client = (
                 };
             },
         },
-    } as unknown as CodexClient;
+    } as unknown as PiClient;
 };
 
 const recovery = (
@@ -123,7 +123,7 @@ describe("needs-attention router", () => {
         const permissions: unknown[] = [];
         const prompts: unknown[] = [];
         const invariantChecks: unknown[] = [];
-        const diagnostics = makeCodexSessionDiagnostics();
+        const diagnostics = makePiSessionDiagnostics();
         diagnostics.record("run-1", {
             sessionID: "originating-session",
             directory: "/workspace/repo",
@@ -161,7 +161,7 @@ describe("needs-attention router", () => {
         expect(
             diagnostics.list("run-1").map(({ sessionID }) => sessionID),
         ).toEqual(["originating-session", "verifier-1"]);
-        expect(permissions).toEqual([CODEX_DECISION_PERMISSION_POLICY]);
+        expect(permissions).toEqual([PI_DECISION_PERMISSION_POLICY]);
         expect(prompts).toHaveLength(1);
         expect(prompts[0]).toMatchObject({
             sessionID: "verifier-1",
@@ -327,7 +327,7 @@ describe("needs-attention router", () => {
                     throw new Error("verifier interrupted");
                 },
             },
-        } as unknown as CodexClient;
+        } as unknown as PiClient;
         const recoveryCalls: string[] = [];
         const router = makeNeedsAttentionRouterService(recovery(recoveryCalls));
 

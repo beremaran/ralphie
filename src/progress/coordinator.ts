@@ -1,8 +1,8 @@
 import type {
-    CodexEventContext,
-    CodexEventListener,
-    CodexSessionEvent,
-} from "../codex/client.ts";
+    PiEventContext,
+    PiEventListener,
+    PiSessionEvent,
+} from "../pi/client.ts";
 import {
     arbitrateBreadcrumbCandidates,
     breadcrumbCandidateFor,
@@ -17,13 +17,13 @@ import {
 } from "./breadcrumb-label.ts";
 import {
     createDisplayState,
-    reduceCodexSessionEvent,
+    reducePiSessionEvent,
     reduceProgressUpdate,
     type DisplayState,
 } from "./display-state.ts";
 import {
-    makeCodexTranscriptRenderer,
-    type CodexTranscriptRenderer,
+    makePiTranscriptRenderer,
+    type PiTranscriptRenderer,
 } from "./transcript.ts";
 import {
     makeProgressOutput,
@@ -44,7 +44,7 @@ import {
     type TerminalResizeSubscription,
 } from "./terminal-controller.ts";
 
-/** Options for the shared progress/Codex output coordinator. */
+/** Options for the shared progress/Pi output coordinator. */
 export type ProgressCoordinatorOptions = Omit<
     ProgressRendererOptions,
     "output"
@@ -77,12 +77,12 @@ export type ProgressCoordinatorOptions = Omit<
  */
 export type ProgressCoordinator = {
     readonly progress: ProgressReporterService;
-    /** Listener to pass to the Codex service. */
-    readonly codexListener?: CodexEventListener;
+    /** Listener to pass to the Pi service. */
+    readonly piListener: PiEventListener;
     /** Compatibility alias for callers that use the generic listener name. */
-    readonly listener: CodexEventListener;
+    readonly listener: PiEventListener;
     /** Explicit event-listener alias for dependency wiring. */
-    readonly codexEventListener?: CodexEventListener;
+    readonly piEventListener: PiEventListener;
     /** Insert an approved breadcrumb through the transcript boundary. */
     readonly insertBreadcrumb?: (
         candidate: BreadcrumbLabelCandidate,
@@ -96,9 +96,9 @@ const transcriptFor = (
     output: ProgressOutput,
     getDisplayState: () => DisplayState,
     onSessionStart: () => void,
-): CodexTranscriptRenderer | undefined => {
+): PiTranscriptRenderer | undefined => {
     if (options.mode === "quiet") return undefined;
-    return makeCodexTranscriptRenderer({
+    return makePiTranscriptRenderer({
         write: output.writeTranscript,
         colors: options.colors,
         json: options.mode === "json",
@@ -109,7 +109,7 @@ const transcriptFor = (
     });
 };
 
-const lifecycleBreadcrumbEvent = (event: CodexSessionEvent): boolean => {
+const lifecycleBreadcrumbEvent = (event: PiSessionEvent): boolean => {
     switch (event.type) {
         case "tool_execution_end":
         case "compaction_start":
@@ -127,7 +127,7 @@ const lifecycleBreadcrumbEvent = (event: CodexSessionEvent): boolean => {
     }
 };
 
-const closesTranscriptSession = (event: CodexSessionEvent): boolean =>
+const closesTranscriptSession = (event: PiSessionEvent): boolean =>
     event.type === "agent_end" || event.type === "agent_settled";
 
 const policyCandidateFor = (
@@ -140,7 +140,7 @@ const policyCandidateFor = (
 
 const considerBreadcrumbEvent = (input: {
     readonly policy: BreadcrumbPolicy;
-    readonly transcript: CodexTranscriptRenderer;
+    readonly transcript: PiTranscriptRenderer;
     /** Candidate describing the state after the lifecycle event. */
     readonly candidate: BreadcrumbLabelCandidate;
     /** Candidate pending from the state before the lifecycle event. */
@@ -174,7 +174,7 @@ const considerBreadcrumbEvent = (input: {
 
 const considerClosingBreadcrumb = (input: {
     readonly policy: BreadcrumbPolicy;
-    readonly transcript: CodexTranscriptRenderer | undefined;
+    readonly transcript: PiTranscriptRenderer | undefined;
     readonly candidate: BreadcrumbLabelCandidate | undefined;
     readonly periodicCandidate: BreadcrumbLabelCandidate | undefined;
     readonly before: number;
@@ -202,7 +202,7 @@ const considerClosingBreadcrumb = (input: {
 
 const considerRenderedBreadcrumb = (input: {
     readonly policy: BreadcrumbPolicy;
-    readonly transcript: CodexTranscriptRenderer | undefined;
+    readonly transcript: PiTranscriptRenderer | undefined;
     readonly candidate: BreadcrumbLabelCandidate | undefined;
     readonly periodicCandidate: BreadcrumbLabelCandidate | undefined;
     readonly eventOutputBaseline: number;
@@ -229,7 +229,7 @@ const considerRenderedBreadcrumb = (input: {
     });
 };
 
-/** Construct the ordered progress and Codex presentation services for a run. */
+/** Construct the ordered progress and Pi presentation services for a run. */
 export const makeProgressCoordinator = (
     options: ProgressCoordinatorOptions,
 ) => {
@@ -280,7 +280,7 @@ export const makeProgressCoordinator = (
             : { renderedLineThreshold: options.renderedLineThreshold }),
     });
     let eventOutputBaseline = 0;
-    let transcript: CodexTranscriptRenderer | undefined;
+    let transcript: PiTranscriptRenderer | undefined;
     transcript = transcriptFor(
         options,
         output,
@@ -292,7 +292,7 @@ export const makeProgressCoordinator = (
     );
     let disposed = false;
 
-    const codexListener: CodexEventListener = (event, context) => {
+    const piListener: PiEventListener = (event, context) => {
         if (disposed) return;
         const before = transcript?.getVisibleLineCount() ?? 0;
         eventOutputBaseline = before;
@@ -301,7 +301,7 @@ export const makeProgressCoordinator = (
             transcript === undefined
                 ? undefined
                 : breadcrumbCandidateFor(state);
-        state = reduceCodexSessionEvent(state, event, context, now);
+        state = reducePiSessionEvent(state, event, context, now);
         controller?.invalidate();
         transcript?.interruptLine();
         const candidate =
@@ -359,9 +359,9 @@ export const makeProgressCoordinator = (
 
     return {
         progress,
-        codexListener,
-        listener: codexListener,
-        codexEventListener: codexListener,
+        piListener,
+        listener: piListener,
+        piEventListener: piListener,
         insertBreadcrumb,
         getDisplayState: () => state,
         dispose: async () => {
@@ -376,5 +376,5 @@ export const makeProgressCoordinator = (
 /** Explicit alias for callers that name the service by its display role. */
 export const makeDisplayCoordinator = makeProgressCoordinator;
 
-export type { CodexEventContext, CodexSessionEvent };
+export type { PiEventContext, PiSessionEvent };
 export type { ProgressRenderMode };

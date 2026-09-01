@@ -1,16 +1,16 @@
-import type { CodexClient, CodexPermissionRuleset } from "../codex/client.ts";
+import type { PiClient, PiPermissionRuleset } from "../pi/client.ts";
 import { z } from "zod";
 
 import { RalphieError } from "../shared/error.ts";
-import type { CodexModel } from "./model.ts";
+import type { PiModel } from "./model.ts";
 import {
-    CODEX_DECISION_PERMISSION_POLICY,
-    type CodexRepositoryInvariant,
-    type CodexSessionDiagnostics,
-    parseCodexNeedsAttentionRequest,
-    reportCodexFailure,
-    toCodexAssistantError,
-    type CodexNeedsAttentionRequest,
+    PI_DECISION_PERMISSION_POLICY,
+    type PiRepositoryInvariant,
+    type PiSessionDiagnostics,
+    parsePiNeedsAttentionRequest,
+    reportPiFailure,
+    toPiAssistantError,
+    type PiNeedsAttentionRequest,
 } from "./task-session.ts";
 import {
     type ProgressStage,
@@ -25,16 +25,16 @@ export type StructuredOutputRequest<Output> = {
     readonly schema: z.ZodType<Output>;
     readonly retryCount?: number;
     readonly agent?: string;
-    readonly permission?: CodexPermissionRuleset;
-    readonly model?: CodexModel;
+    readonly permission?: PiPermissionRuleset;
+    readonly model?: PiModel;
     readonly variant?: string;
     readonly runId?: string;
-    readonly diagnostics?: CodexSessionDiagnostics;
+    readonly diagnostics?: PiSessionDiagnostics;
     readonly signal?: AbortSignal;
-    readonly repositoryInvariant?: CodexRepositoryInvariant;
+    readonly repositoryInvariant?: PiRepositoryInvariant;
     readonly verifyRepositoryInvariant?: (
         repositoryPath: string,
-        expected: CodexRepositoryInvariant,
+        expected: PiRepositoryInvariant,
     ) => Promise<void>;
     readonly verifyAfter?: () => Promise<void>;
     readonly progress?: ProgressReporterService;
@@ -45,7 +45,7 @@ export type StructuredOutputRequest<Output> = {
 export type StructuredOutputResult<Output> = {
     readonly sessionID: string;
     readonly output: Output;
-    readonly needsAttention?: CodexNeedsAttentionRequest;
+    readonly needsAttention?: PiNeedsAttentionRequest;
 };
 
 const describeApiError = (error: unknown): string => {
@@ -56,7 +56,7 @@ const describeApiError = (error: unknown): string => {
         readonly data?: { readonly message?: unknown };
     };
     const name =
-        typeof candidate.name === "string" ? candidate.name : "CodexError";
+        typeof candidate.name === "string" ? candidate.name : "PiError";
     const message =
         typeof candidate.data?.message === "string"
             ? candidate.data.message
@@ -73,7 +73,8 @@ const createSessionInput = <Output>(
 ) => ({
     directory: request.directory,
     title: request.title,
-    sandbox: request.permission ?? CODEX_DECISION_PERMISSION_POLICY,
+    ...(request.agent === undefined ? {} : { agent: request.agent }),
+    permission: request.permission ?? PI_DECISION_PERMISSION_POLICY,
 });
 
 const validateStructuredOutput = <Output>(
@@ -92,6 +93,7 @@ const promptInput = <Output>(
 ) => ({
     sessionID,
     directory: request.directory,
+    ...(request.agent === undefined ? {} : { agent: request.agent }),
     ...(request.model === undefined ? {} : { model: request.model }),
     ...(request.variant === undefined ? {} : { variant: request.variant }),
     format: {
@@ -114,6 +116,7 @@ const recordSessionDiagnostics = <Output>(
     request.diagnostics.record(request.runId, {
         sessionID,
         directory: request.directory,
+        ...(request.agent === undefined ? {} : { agent: request.agent }),
         ...(request.model === undefined ? {} : { model: request.model }),
         ...(request.variant === undefined ? {} : { variant: request.variant }),
     });
@@ -135,7 +138,7 @@ const verifyStructuredOutputRequest = async <Output>(
 };
 
 const promptForStructuredOutput = async <Output>(
-    client: CodexClient,
+    client: PiClient,
     request: StructuredOutputRequest<Output>,
     sessionID: string,
 ): Promise<StructuredOutputResult<Output>> => {
@@ -146,14 +149,14 @@ const promptForStructuredOutput = async <Output>(
 
     if (response.error !== undefined || response.data === undefined) {
         throw new Error(
-            `Codex prompt failed: ${describeApiError(response.error)}`,
+            `Pi prompt failed: ${describeApiError(response.error)}`,
         );
     }
 
     if (response.data.info.error !== undefined) {
-        const assistantError = toCodexAssistantError(response.data.info.error);
+        const assistantError = toPiAssistantError(response.data.info.error);
         throw new RalphieError({
-            message: `Codex assistant failed (${assistantError.kind}): ${assistantError.message}`,
+            message: `Pi assistant failed (${assistantError.kind}): ${assistantError.message}`,
             cause: assistantError,
         });
     }
@@ -161,19 +164,23 @@ const promptForStructuredOutput = async <Output>(
     const parsed = request.schema.safeParse(response.data.info.structured);
     if (!parsed.success) {
         throw new Error(
-            `Codex returned invalid structured output: ${z.prettifyError(parsed.error)}`,
+            `Pi returned invalid structured output: ${z.prettifyError(parsed.error)}`,
         );
     }
 
     await verifyStructuredOutputRequest(request);
+    const needsAttention = parsePiNeedsAttentionRequest(
+        response.data.needsAttention,
+    );
     return {
         sessionID,
         output: parsed.data,
+        ...(needsAttention === undefined ? {} : { needsAttention }),
     };
 };
 
 export const requestStructuredOutput = async <Output>(
-    client: CodexClient,
+    client: PiClient,
     request: StructuredOutputRequest<Output>,
 ): Promise<StructuredOutputResult<Output>> => {
     try {
@@ -184,7 +191,7 @@ export const requestStructuredOutput = async <Output>(
 
         if (session.error !== undefined || session.data === undefined) {
             throw new Error(
-                `Could not create Codex session: ${describeApiError(session.error)}`,
+                `Could not create Pi session: ${describeApiError(session.error)}`,
             );
         }
 
@@ -200,10 +207,10 @@ export const requestStructuredOutput = async <Output>(
             cause instanceof RalphieError
                 ? cause
                 : new RalphieError({
-                      message: "Failed to get structured output from Codex.",
+                      message: "Failed to get structured output from Pi.",
                       cause,
                   });
-        await reportCodexFailure(request, error);
+        await reportPiFailure(request, error);
         throw error;
     }
 };

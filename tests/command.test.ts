@@ -238,9 +238,7 @@ describe("native CLI parser", () => {
                         getDisplayState: () => ({}) as never,
                         dispose: async () => {},
                     }),
-                    makeCodex: () => ({
-                        start: async () => undefined as never,
-                    }),
+                    makePi: () => ({ start: async () => undefined as never }),
                     makeRuntime: () => ({}) as never,
                     runWorkflow: async (options) => {
                         workflowOptions = options as Record<string, unknown>;
