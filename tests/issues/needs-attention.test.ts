@@ -37,6 +37,8 @@ const decision = {
 const context = (
     pi: PiClient,
     updatedAt = "2026-08-28T00:00:00.000Z",
+    invariantChecks: unknown[] = [],
+    diagnostics = makePiSessionDiagnostics(),
 ): IssueExecutionContext => ({
     issue: {
         number: 42,
@@ -54,11 +56,18 @@ const context = (
     runId: "run-1",
     octokit: {} as Octokit,
     pi,
-    piSelection: { agent: "build" },
-    piDiagnostics: makePiSessionDiagnostics(),
+    piSelection: {
+        agent: "build",
+        model: { providerID: "openai", modelID: "grounding-model" },
+        variant: "base-variant",
+    },
+    piStageVariants: { grounding: "grounding-variant" },
+    piDiagnostics: diagnostics,
     repositoryInvariant: {
         capture: async () => ({ branch: "main", head: checkpoint.sha }),
-        verify: async () => {},
+        verify: async (repositoryPath, expected) => {
+            invariantChecks.push({ repositoryPath, expected });
+        },
     },
 });
 
@@ -66,6 +75,7 @@ const client = (
     outputs: ReadonlyArray<unknown>,
     sessions: string[],
     permissions: unknown[],
+    prompts: unknown[] = [],
 ): PiClient => {
     let output = 0;
     return {
@@ -76,13 +86,17 @@ const client = (
                 permissions.push(input.permission);
                 return { data: { id } };
             },
-            prompt: async () => ({
-                data: {
-                    info: { structured: outputs[output++] },
-                    parts: [],
-                    needsAttention: request,
-                },
-            }),
+            prompt: async (input: unknown) => {
+                prompts.push(input);
+                return {
+                    data: {
+                        info: { structured: outputs[output++] },
+                        parts: [],
+                        // A verifier-emitted signal is deliberately ignored.
+                        needsAttention: request,
+                    },
+                };
+            },
         },
     } as unknown as PiClient;
 };
@@ -90,11 +104,13 @@ const client = (
 const recovery = (
     calls: string[],
     fail = { value: false },
+    beforeRecovery: () => void = () => {},
 ): IssueRecoveryService => ({
     handleReviewExhaustion: async () => {
         throw new Error("unused");
     },
     handleNeedsAttention: async (input) => {
+        beforeRecovery();
         calls.push(input.decision.summary);
         if (fail.value) throw new Error("recovery interrupted");
         return { diagnosticsPath: "/workspace/diagnostics" };
@@ -105,12 +121,32 @@ describe("needs-attention router", () => {
     test("uses one fresh read-only verifier and persists confirmation before recovery", async () => {
         const sessions: string[] = [];
         const permissions: unknown[] = [];
+        const prompts: unknown[] = [];
+        const invariantChecks: unknown[] = [];
+        const diagnostics = makePiSessionDiagnostics();
+        diagnostics.record("run-1", {
+            sessionID: "originating-session",
+            directory: "/workspace/repo",
+            agent: "build",
+        });
         const artifacts = await makeIssueArtifactStore(42);
         const recoveryCalls: string[] = [];
-        const router = makeNeedsAttentionRouterService(recovery(recoveryCalls));
+        let decisionExistedBeforeRecovery = false;
+        const router = makeNeedsAttentionRouterService(
+            recovery(recoveryCalls, { value: false }, () => {
+                decisionExistedBeforeRecovery = artifacts.has(
+                    IssueArtifactKind.NeedsAttentionDecision,
+                );
+            }),
+        );
 
         const result = await router.route({
-            context: context(client([decision], sessions, permissions)),
+            context: context(
+                client([decision], sessions, permissions, prompts),
+                "2026-08-28T00:00:00.000Z",
+                invariantChecks,
+                diagnostics,
+            ),
             artifacts,
             request,
             checkpoint,
@@ -122,7 +158,28 @@ describe("needs-attention router", () => {
             diagnosticsPath: "/workspace/diagnostics",
         });
         expect(sessions).toEqual(["verifier-1"]);
+        expect(
+            diagnostics.list("run-1").map(({ sessionID }) => sessionID),
+        ).toEqual(["originating-session", "verifier-1"]);
         expect(permissions).toEqual([PI_DECISION_PERMISSION_POLICY]);
+        expect(prompts).toHaveLength(1);
+        expect(prompts[0]).toMatchObject({
+            sessionID: "verifier-1",
+            directory: "/workspace/repo",
+            agent: "build",
+            model: {
+                providerID: "openai",
+                modelID: "grounding-model",
+            },
+            variant: "grounding-variant",
+        });
+        expect(invariantChecks).toEqual([
+            {
+                repositoryPath: "/workspace/repo",
+                expected: { branch: "main", head: checkpoint.sha },
+            },
+        ]);
+        expect(decisionExistedBeforeRecovery).toBe(true);
         expect(recoveryCalls).toEqual([decision.summary]);
         expect(artifacts.has(IssueArtifactKind.NeedsAttentionDecision)).toBe(
             true,
@@ -130,6 +187,36 @@ describe("needs-attention router", () => {
         expect(artifacts.has(IssueArtifactKind.NeedsAttentionHandoff)).toBe(
             false,
         );
+    });
+
+    test("freshly verifies a new request even when a current confirmation exists", async () => {
+        const artifacts = await makeIssueArtifactStore(42);
+        await artifacts.write(IssueArtifactKind.NeedsAttentionDecision, {
+            decision: {
+                ...decision,
+                summary: "An older request was confirmed.",
+            },
+            fingerprint: {
+                updatedAt: "2026-08-28T00:00:00.000Z",
+                commentCount: 0,
+            },
+        });
+        const sessions: string[] = [];
+        const recoveryCalls: string[] = [];
+
+        await makeNeedsAttentionRouterService(recovery(recoveryCalls)).route({
+            context: context(client([decision], sessions, [])),
+            artifacts,
+            request,
+            checkpoint,
+        });
+
+        expect(sessions).toEqual(["verifier-1"]);
+        expect(recoveryCalls).toEqual([decision.summary]);
+        expect(
+            (await artifacts.read(IssueArtifactKind.NeedsAttentionDecision))
+                .decision,
+        ).toEqual(decision);
     });
 
     test.each([
@@ -152,6 +239,45 @@ describe("needs-attention router", () => {
         expect(artifacts.has(IssueArtifactKind.NeedsAttentionHandoff)).toBe(
             false,
         );
+    });
+
+    test("does not recursively route a verifier-emitted signal", async () => {
+        const artifacts = await makeIssueArtifactStore(42);
+        const sessions: string[] = [];
+        const result = await makeNeedsAttentionRouterService(
+            recovery([]),
+        ).route({
+            context: context(
+                client(
+                    [{ disposition: GroundingDisposition.Actionable }],
+                    sessions,
+                    [],
+                ),
+            ),
+            artifacts,
+            request,
+            checkpoint,
+        });
+
+        expect(result).toBeUndefined();
+        expect(sessions).toEqual(["verifier-1"]);
+        expect(artifacts.has(IssueArtifactKind.NeedsAttentionHandoff)).toBe(
+            false,
+        );
+    });
+
+    test("does nothing when no request or recoverable handoff exists", async () => {
+        const artifacts = await makeIssueArtifactStore(42);
+        const sessions: string[] = [];
+        const result = await makeNeedsAttentionRouterService(
+            recovery([]),
+        ).route({
+            context: context(client([], sessions, [])),
+            artifacts,
+        });
+
+        expect(result).toBeUndefined();
+        expect(sessions).toEqual([]);
     });
 
     test("resumes recovery without a second verifier after interruption", async () => {
@@ -228,6 +354,35 @@ describe("needs-attention router", () => {
         expect(resumed?.kind).toBe(IssueExecutionOutcomeKind.NeedsAttention);
         expect(sessions).toEqual(["verifier-1"]);
         expect(recoveryCalls).toHaveLength(1);
+    });
+
+    test("retains the handoff when verifier output is rejected", async () => {
+        const artifacts = await makeIssueArtifactStore(42);
+        const sessions: string[] = [];
+        const router = makeNeedsAttentionRouterService(recovery([]));
+
+        await expect(
+            router.route({
+                context: context(
+                    client(
+                        [{ disposition: GroundingDisposition.NeedsAttention }],
+                        sessions,
+                        [],
+                    ),
+                ),
+                artifacts,
+                request,
+                checkpoint,
+            }),
+        ).rejects.toThrow("Failed to get structured output");
+
+        expect(sessions).toEqual(["verifier-1"]);
+        expect(artifacts.has(IssueArtifactKind.NeedsAttentionHandoff)).toBe(
+            true,
+        );
+        expect(artifacts.has(IssueArtifactKind.NeedsAttentionDecision)).toBe(
+            false,
+        );
     });
 
     test("invalidates a pending handoff when issue freshness changes", async () => {

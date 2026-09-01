@@ -88,24 +88,19 @@ const loadHandoff = async (
 ): Promise<NeedsAttentionHandoffArtifact | undefined> => {
     const { artifacts, request, checkpoint } = input;
     await artifacts.invalidateStaleNeedsAttentionDecision(fingerprint);
-    if (
-        !artifacts.has(IssueArtifactKind.NeedsAttentionHandoff) &&
-        request === undefined
-    ) {
-        return undefined;
-    }
-    if (!artifacts.has(IssueArtifactKind.NeedsAttentionHandoff)) {
+    if (request !== undefined) {
         if (checkpoint === undefined) {
             throw new RalphieError({
                 message:
                     "Needs-attention routing requires the original request and clean checkpoint.",
             });
         }
-        await artifacts.write(IssueArtifactKind.NeedsAttentionHandoff, {
-            request: request!,
-            checkpoint,
-            fingerprint,
-        });
+        const handoff = { request, checkpoint, fingerprint };
+        await artifacts.beginNeedsAttentionHandoff(handoff);
+        return handoff;
+    }
+    if (!artifacts.has(IssueArtifactKind.NeedsAttentionHandoff)) {
+        return undefined;
     }
     return await artifacts.read(IssueArtifactKind.NeedsAttentionHandoff);
 };
@@ -141,7 +136,7 @@ const verifyHandoff = async (
         await artifacts.clearNeedsAttentionHandoff();
         return undefined;
     }
-    await artifacts.write(IssueArtifactKind.NeedsAttentionDecision, {
+    await artifacts.recordNeedsAttentionDecision({
         decision: verified.output,
         fingerprint: handoff.fingerprint,
     });

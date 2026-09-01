@@ -133,6 +133,14 @@ export type IssueArtifactStore = {
     readonly recordResolutionDecision: (
         value: IssueResolutionDecisionArtifact,
     ) => Promise<void>;
+    /** Start verification of a newly detected request and discard an older confirmation. */
+    readonly beginNeedsAttentionHandoff: (
+        value: NeedsAttentionHandoffArtifact,
+    ) => Promise<void>;
+    /** Persist the latest verifier confirmation before recovery begins. */
+    readonly recordNeedsAttentionDecision: (
+        value: NeedsAttentionDecisionArtifact,
+    ) => Promise<void>;
     readonly appendReview: (review: ReviewAttempt) => Promise<void>;
     readonly appendPullRequestReview: (
         review: PullRequestReviewAttempt,
@@ -846,6 +854,29 @@ const makeStore = (
             );
             const nextValues = new Map(values);
             nextValues.set(IssueArtifactKind.IssueResolutionDecision, value);
+            await save(nextValues);
+        },
+
+        beginNeedsAttentionHandoff: async (value) => {
+            validateArtifactValue(
+                issueNumber,
+                IssueArtifactKind.NeedsAttentionHandoff,
+                value,
+            );
+            const nextValues = new Map(values);
+            nextValues.delete(IssueArtifactKind.NeedsAttentionDecision);
+            nextValues.set(IssueArtifactKind.NeedsAttentionHandoff, value);
+            await save(nextValues);
+        },
+
+        recordNeedsAttentionDecision: async (value) => {
+            validateArtifactValue(
+                issueNumber,
+                IssueArtifactKind.NeedsAttentionDecision,
+                value,
+            );
+            const nextValues = new Map(values);
+            nextValues.set(IssueArtifactKind.NeedsAttentionDecision, value);
             await save(nextValues);
         },
 
