@@ -49,6 +49,7 @@ export type StructuredOutputResult<Output> = {
 };
 
 const describeApiError = (error: unknown): string => {
+    if (error instanceof Error) return error.message;
     if (typeof error !== "object" || error === null) return String(error);
 
     const candidate = error as {

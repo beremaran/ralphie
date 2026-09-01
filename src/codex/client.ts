@@ -183,7 +183,7 @@ const run = async (input: {
     readonly environment?: Readonly<Record<string, string | undefined>>;
     readonly docker: boolean;
     readonly signal?: AbortSignal;
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: process cleanup and failure normalization share one resource scope.
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: process cleanup and failure normalization share one resource scope.
 }): Promise<{
     readonly info: CodexAssistantMessage;
     readonly parts: ReadonlyArray<CodexPart>;

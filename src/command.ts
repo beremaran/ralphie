@@ -659,7 +659,7 @@ const disposeCommandResources = async (
 export const runCommand = async (
     args: ReadonlyArray<string> = Bun.argv.slice(2),
     input: RunCommandInput = {},
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: command lifecycle owns coordinated cleanup.
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: command lifecycle owns coordinated cleanup.
 ): Promise<void> => {
     const output = commandOutput(input.output);
     const parsed = parseCliArgs(args);
