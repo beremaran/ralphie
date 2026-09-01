@@ -14,7 +14,10 @@ import {
     type GitRemoteSafetyService,
 } from "../../src/git/remote-safety.ts";
 import { makeGitRepositoryInvariantService } from "../../src/git/repository-invariant.ts";
-import { makeIssueArtifactStoreService } from "../../src/issues/artifacts.ts";
+import {
+    issueArtifactPath,
+    makeIssueArtifactStoreService,
+} from "../../src/issues/artifacts.ts";
 import { makeComplexityAssessmentService } from "../../src/issues/complexity.ts";
 import {
     ComplexityLevel,
@@ -321,7 +324,7 @@ describe("local implementation end-to-end", () => {
         }
     });
 
-    test("verifies an implementation signal and restores before any Git mutation", async () => {
+    test("persists and reuses a verified implementation signal before any Git mutation", async () => {
         const root = await mkdtemp(join(tmpdir(), "ralphie-local-attention-"));
         const repositoryPath = join(root, "repository");
         const workspace = join(root, "workspace");
@@ -492,6 +495,47 @@ describe("local implementation end-to-end", () => {
                 kind: IssueExecutionOutcomeKind.NeedsAttention,
                 summary: "The generated fixture is required.",
             });
+            if (
+                outcome.kind !== IssueExecutionOutcomeKind.NeedsAttention ||
+                outcome.diagnosticsPath === undefined
+            ) {
+                throw new Error("Expected needs-attention diagnostics");
+            }
+            expect(
+                await Bun.file(
+                    join(outcome.diagnosticsPath, "metadata.json"),
+                ).exists(),
+            ).toBe(true);
+            expect(
+                await Bun.file(
+                    issueArtifactPath(
+                        {
+                            workspace,
+                            runId: "local-needs-attention-e2e",
+                            repository: "owner/repository",
+                        },
+                        17,
+                    ),
+                ).exists(),
+            ).toBe(true);
+            expect(sessions).toHaveLength(3);
+            const promptCount = prompt;
+
+            const resumedOutcome = await executor.execute(
+                makeContext(
+                    repositoryPath,
+                    pi,
+                    workspace,
+                    "local-needs-attention-e2e",
+                    invariant,
+                ),
+            );
+
+            expect(resumedOutcome).toMatchObject({
+                kind: IssueExecutionOutcomeKind.NeedsAttention,
+                summary: "The generated fixture is required.",
+            });
+            expect(prompt).toBe(promptCount);
             expect(sessions).toHaveLength(3);
             expect(git(repositoryPath, ["rev-parse", "HEAD"])).toBe(initialSha);
             expect(git(repositoryPath, ["status", "--porcelain=v1"])).toBe("");

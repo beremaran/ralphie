@@ -2361,15 +2361,27 @@ export const workflow = async (
             await persistState(RunStateStatus.Active);
         };
 
+        const recordIssueOutcome = (
+            issueNumber: number,
+            outcome: IssueExecutionOutcome,
+        ): void => {
+            const entry = { issueNumber, outcome };
+            const existingIndex = outcomes.findIndex(
+                (existing) => existing.issueNumber === issueNumber,
+            );
+            if (existingIndex === -1) {
+                outcomes.push(entry);
+                return;
+            }
+            outcomes.splice(existingIndex, 1, entry);
+        };
+
         const finalizeIssue = async (
             issueContext: WorkflowIssueContext,
             outcome: IssueExecutionOutcome,
         ): Promise<void> => {
             if (issueContext.resumedClosureOutcome === undefined) {
-                outcomes.push({
-                    issueNumber: issueContext.issue.number,
-                    outcome,
-                });
+                recordIssueOutcome(issueContext.issue.number, outcome);
             }
             if (outcome.kind === IssueExecutionOutcomeKind.Failed) {
                 await handleFailedIssue(issueContext, outcome);

@@ -37,8 +37,11 @@ import {
     type IssueExecutorService,
 } from "../src/issues/executor.ts";
 import type { DryRunIssueExecutorService } from "../src/issues/dry-run-executor.ts";
-import type { IssueArtifactStoreService } from "../src/issues/artifacts.ts";
-import { makeIssueArtifactStore } from "../src/issues/artifacts.ts";
+import {
+    IssueArtifactKind,
+    type IssueArtifactStoreService,
+    makeIssueArtifactStore,
+} from "../src/issues/artifacts.ts";
 import { DEFAULT_PI_AGENT } from "../src/agent/model.ts";
 import type { PiService } from "../src/pi/server.ts";
 import {
@@ -594,8 +597,17 @@ const groundedRouteExecutor = (
             const existing = stores.get(issueNumber);
             if (existing !== undefined) return existing;
             const created = await makeIssueArtifactStore(issueNumber);
-            stores.set(issueNumber, created);
-            return created;
+            const tracked = {
+                ...created,
+                write: async (kind, value) => {
+                    await created.write(kind, value);
+                    calls.push(`artifact:${issueNumber}:${kind}`);
+                },
+            } satisfies Awaited<
+                ReturnType<IssueArtifactStoreService["forIssue"]>
+            >;
+            stores.set(issueNumber, tracked);
+            return tracked;
         },
     };
     return makeIssueExecutorService(
@@ -924,14 +936,31 @@ describe("workflow", () => {
             expect(
                 needsAttention.outcomes.map(({ issueNumber }) => issueNumber),
             ).toEqual([42, 43]);
-            expect(
-                needsAttention.counts[IssueExecutionOutcomeKind.NeedsAttention],
-            ).toBe(1);
+            expect(needsAttention.counts).toEqual({
+                completed: 1,
+                decomposed: 0,
+                escalated: 0,
+                "needs-attention": 1,
+                skipped: 0,
+                failed: 0,
+            });
             const finalNeedsAttentionState = needsAttentionStates.at(-1);
             expect(
                 finalNeedsAttentionState?.queue.completedIssueNumbers,
             ).toEqual([43]);
-            expect(finalNeedsAttentionState?.queue.processedCount).toBe(2);
+            expect(finalNeedsAttentionState).toMatchObject({
+                status: RunStateStatus.Complete,
+                queue: {
+                    pending: [],
+                    completedIssueNumbers: [43],
+                    processedCount: 2,
+                },
+            });
+            expect(
+                finalNeedsAttentionState?.outcomes.map(
+                    ({ issueNumber }) => issueNumber,
+                ),
+            ).toEqual([42, 43]);
             expect(
                 finalNeedsAttentionState?.outcomes.find(
                     ({ issueNumber }) => issueNumber === 42,
@@ -1993,6 +2022,186 @@ describe("workflow", () => {
         );
         expect(calls).not.toContain("closeIssue:42");
     });
+
+    test.each([
+        { name: "lgtm", workflowMode: WorkflowMode.Lgtm },
+        { name: "pr", workflowMode: WorkflowMode.Pr },
+    ])(
+        "persists halt recovery in $name mode after its artifact and reuses grounding on resume",
+        async ({ workflowMode }) => {
+            const calls: string[] = [];
+            const states: RunState[] = [];
+            const events: ProgressUpdate[] = [];
+            const executor = groundedRouteExecutor(calls, {
+                42: "needs-attention",
+                43: "actionable",
+            });
+            let savedOutcome = false;
+
+            await expect(
+                workflow(
+                    {
+                        ...baseOptions,
+                        maxIssues: 2,
+                        onNeedsAttention: undefined,
+                        workflow: workflowMode,
+                    },
+                    testRuntime(
+                        calls,
+                        states,
+                        {
+                            issueLists: [[firstIssue, secondIssue]],
+                            issueExecutor: executor,
+                            onStateSave: (state) => {
+                                if (
+                                    !savedOutcome &&
+                                    state.activeIssue?.issueNumber === 42 &&
+                                    state.checkout?.head === "head-1" &&
+                                    state.queue.pending
+                                        .map(({ number }) => number)
+                                        .join(",") === "42,43" &&
+                                    state.outcomes.some(
+                                        ({ issueNumber, outcome }) =>
+                                            issueNumber === 42 &&
+                                            outcome.kind ===
+                                                IssueExecutionOutcomeKind.NeedsAttention,
+                                    )
+                                ) {
+                                    savedOutcome = true;
+                                    calls.push("save:needs-attention");
+                                }
+                            },
+                        },
+                        events,
+                    ),
+                ),
+            ).rejects.toMatchObject({ _tag: "NeedsAttentionStop" });
+
+            const haltState = states.at(-1);
+            if (haltState === undefined)
+                throw new Error("Missing halted state");
+            expect(haltState).toMatchObject({
+                status: RunStateStatus.Active,
+                runId: "test-run",
+                onNeedsAttention: NeedsAttentionPolicy.Halt,
+                activeIssue: { issueNumber: 42, stage: "grounding" },
+                checkout: { branch: "develop", head: "head-1" },
+                queue: {
+                    pending: [
+                        { number: 42, state: "open" },
+                        { number: 43, state: "open" },
+                    ],
+                    completedIssueNumbers: [],
+                    processedCount: 0,
+                },
+            });
+            expect(haltState.outcomes).toHaveLength(1);
+            expect(haltState.outcomes[0]).toMatchObject({
+                issueNumber: 42,
+                outcome: {
+                    kind: IssueExecutionOutcomeKind.NeedsAttention,
+                },
+            });
+            expect(
+                haltState.outcomes[0]?.outcome.kind ===
+                    IssueExecutionOutcomeKind.NeedsAttention &&
+                    "artifactPath" in haltState.outcomes[0].outcome &&
+                    haltState.outcomes[0].outcome.artifactPath,
+            ).toBeString();
+            expectCallOrder(calls, [
+                `artifact:42:${IssueArtifactKind.NeedsAttentionDecision}`,
+                "save:needs-attention",
+                "closeRuntime",
+            ]);
+            expect(calls).not.toContain("grounding:43");
+            expect(
+                events.some(({ status }) => status === "failed"),
+            ).toBeFalse();
+            expect(events).toContainEqual(
+                expect.objectContaining({
+                    stage: "run",
+                    status: "needs-attention",
+                    details: expect.objectContaining({
+                        handled: true,
+                        counts: {
+                            completed: 0,
+                            decomposed: 0,
+                            escalated: 0,
+                            "needs-attention": 1,
+                            skipped: 0,
+                            failed: 0,
+                        },
+                    }),
+                }),
+            );
+
+            const resumedStates: RunState[] = [];
+            const resumedEvents: ProgressUpdate[] = [];
+            await expect(
+                workflow(
+                    {
+                        ...baseOptions,
+                        maxIssues: 2,
+                        resumeState: haltState,
+                        workflow: workflowMode,
+                    },
+                    testRuntime(
+                        calls,
+                        resumedStates,
+                        {
+                            issueLists: [[firstIssue, secondIssue]],
+                            issueExecutor: executor,
+                            captureStart: 1,
+                        },
+                        resumedEvents,
+                    ),
+                ),
+            ).rejects.toMatchObject({ _tag: "NeedsAttentionStop" });
+
+            expect(
+                calls.filter((call) => call === "grounding:42"),
+            ).toHaveLength(1);
+            expect(calls).not.toContain("grounding:43");
+            expect(
+                calls.filter((call) => call === "closeRuntime"),
+            ).toHaveLength(2);
+            expect(calls).not.toContain("directPush:42:develop");
+            expect(calls).not.toContain("pushBranch:ralphie/issue-42");
+            expect(calls).not.toContain("closeIssue:42");
+            expect(calls).not.toContainEqual(
+                expect.stringContaining("createPullRequest:"),
+            );
+            expect(calls).not.toContainEqual(
+                expect.stringContaining("publishReviews:"),
+            );
+            expect(calls).not.toContainEqual(
+                expect.stringContaining("mergePullRequest:"),
+            );
+            expect(resumedStates.at(-1)).toMatchObject({
+                status: RunStateStatus.Active,
+                runId: haltState.runId,
+                activeIssue: { issueNumber: 42, stage: "grounding" },
+                queue: {
+                    pending: [{ number: 42 }, { number: 43 }],
+                    completedIssueNumbers: [],
+                    processedCount: 0,
+                },
+            });
+            expect(resumedStates.at(-1)?.outcomes).toHaveLength(1);
+            expect(resumedEvents).toContainEqual(
+                expect.objectContaining({
+                    stage: "run",
+                    status: "needs-attention",
+                    details: expect.objectContaining({
+                        counts: expect.objectContaining({
+                            "needs-attention": 1,
+                            failed: 0,
+                        }),
+                    }),
+                }),
+            );
+        },
+    );
 
     test("persists the needs-attention outcome before notification and clears the intent after success", async () => {
         const calls: string[] = [];
