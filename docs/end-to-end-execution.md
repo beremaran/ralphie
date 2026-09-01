@@ -127,8 +127,15 @@ flowchart TD
     T -->|no| M["Record durable skip; complete queue item"]
     T -->|yes| G["Charge budget; mark active"]
     G --> H["Use prepared checkout; create local PR branch when needed"]
-    H --> I["Ground issue, then route outcome"]
-    I --> J{"Outcome"}
+    H --> I["Read-only grounding"]
+    I -->|actionable| U["Validated or cached complexity 0–5"]
+    I -->|already resolved| V["Fresh read-only resolution verifier"]
+    I -->|needs attention| J{"Outcome"}
+    U -->|0–3| W["Implementation and review"]
+    U -->|4–5| X["Decomposition"]
+    V --> J
+    W --> J
+    X --> J
     J -->|completed| K["Issue closure / PR delivery"]
     J -->|decomposed or escalated| L["Mark complete; refresh open issue queue"]
     J -->|skipped| M["Record skip; continue until budget/queue ends"]
@@ -146,23 +153,20 @@ flowchart TD
     N --> S
 ```
 
-For each dequeued issue, the worker:
+The per-issue stages execute in this order:
 
-1. Refreshes the issue and its bounded comments from GitHub. Refresh failures
-   halt without stale execution. Closed issues and issues missing any configured
-   label are recorded as skipped and removed from pending work without branch,
-   Pi, implementation, closure, or pull-request mutations.
-2. Replaces the queued snapshot with the refreshed title, body, labels,
-   comments, and freshness metadata, then saves the current checkout invariant
-   (`branch` and `HEAD`) and active issue in run state.
-3. In `pr` (but not dry-run), creates or resumes the local
-   `ralphie/issue-<number>` checkout. It does not push the branch unless
-   actionable work completes with a commit.
-4. Passes the refreshed issue, concrete repository path, target branch, Octokit client,
-   shared Pi client, model selection, diagnostics, invariant service, and
-   AbortSignal to the selected issue executor.
-5. Persists the outcome, performs delivery/closure only for completed outcomes, marks successful transitions
-   in the queue, refreshes after decomposition, and continues.
+| Order | Stage | Operation and boundary |
+| --- | --- | --- |
+| 1 | Live refresh gate | Refresh the issue and bounded comments. A refresh failure halts without stale execution; a closed issue or one missing a required label is durably skipped without consuming the issue budget. |
+| 2 | Active checkout | Replace the queued snapshot, charge the budget, save the active issue and checkout invariant, and, in non-dry-run `pr` mode, create or resume the local `ralphie/issue-<number>` branch. This branch is not pushed merely because it was prepared. |
+| 3 | Read-only grounding | Assess the refreshed issue before consulting cached complexity or invoking an implementation/decomposition workflow. A matching fingerprinted needs-attention decision may be reused; stale decisions are invalidated. |
+| 4 | Disposition route | `actionable` alone proceeds to the 0–5 complexity decision (**0–3** implementation, **4–5** decomposition). `already_resolved` runs a separate fresh read-only verifier. `needs_attention` records the fingerprinted deferral and never enters complexity. |
+| 5 | Outcome finalization | Delivery or closure is reachable only from a completed outcome. Decomposition refreshes the queue; needs-attention leaves the source issue pending and may continue the queue by policy; failed verification retains recoverable state as a non-completion failure. |
+
+The issue executor receives the refreshed issue, concrete repository path,
+target branch, Octokit client, shared Pi client, model selection, diagnostics,
+invariant service, and `AbortSignal`. The worker persists its outcome and the
+resulting checkout/queue transition before moving to another item.
 
 The workspace `.ralphie` tree contains repositories plus Ralphie's run state,
 events, and recovery artifacts only. Pi configuration is kept in the default
@@ -215,12 +219,13 @@ decision with its policy and complete evidence, questions, and artifact path; a
 matching persisted decision is reported as reused with agent work skipped. A
 new run discovers the still-open issue and assesses it again.
 
-An unresolved already-resolved verification corrects the tentative grounding
-route to `actionable`, carries the verifier summary and evidence into the first
-implementation session, and continues through complexity assessment. The
-unresolved decision is not persisted as terminal resolution proof. An
-uncertain, malformed, or failed verification still fails closed and leaves the
-source issue open under the normal failure policy.
+A verifier decision other than `resolved` is a non-completion failure. An
+`unresolved` decision is recorded with its freshness fingerprint for audit but
+does not fall through to complexity or implementation. Verifier uncertainty,
+a needs-attention signal, malformed output, or a verifier error also returns a
+failed outcome. Every such path leaves the source issue open under the normal
+failure policy; none automatically closes it or converts it into a
+needs-attention deferral.
 
 For an actionable disposition, `IssueExecutor` reuses a persisted complexity
 decision when its freshness fingerprint matches the live issue. Otherwise
@@ -249,8 +254,7 @@ flowchart LR
     C -->|4-5| G["DecompositionExecutor"]
     F -->|review exhaustion| G
     D -->|resolved with evidence| H["Completed: already-resolved"]
-    D -->|unresolved| C
-    D -->|invalid or failed| I["Failed; leave open"]
+    D -->|unresolved, uncertain, invalid, or failed| I["Non-completion failure; leave open"]
 ```
 
 Structured decision sessions deny edits/writes and mutating Git/GitHub
@@ -400,12 +404,15 @@ the queue.
 | `--dry-run` | Prepared normal checkout | Ground the issue, then assess complexity and report implementation or decomposition when actionable; report already-resolved and needs-attention routes otherwise. A decomposition dry run also performs the read-only breakdown session and reports the intended native sub-issue hierarchy, children to create or reuse, and dependency edges. No implementation, decomposition, delivery, commit, push, checkout, issue, or PR mutation | No issue is closed. The result is `skipped` except needs-attention, which remains a needs-attention outcome. |
 
 Only a `completed` outcome enters delivery or source-issue closure. A
-needs-attention outcome is retained in run state but is not added to completed
-issue numbers: `lgtm` does not close it, and `pr` does not push its feature
-branch, create or review a pull request, merge, or close it. The base checkout
-is restored before the queue continues. A verifier-proven `already-resolved`
-completion may close directly in either delivery mode because it has no commit
-to deliver.
+needs-attention outcome is retained in run state, and its fingerprinted decision
+is retained in the per-issue artifacts, but the issue is not added to completed
+numbers: `lgtm` does not close it, and `pr` does not push its feature branch,
+create or review a pull request, merge, or close it. The source issue stays open, the base
+checkout is restored, and the queue continues only when policy permits. A
+verifier-proven `already-resolved` completion may close directly in either
+delivery mode because it has no commit to deliver. Unresolved, uncertain,
+malformed, or failed verification is a failed outcome, so it never reaches
+this delivery/closure boundary.
 
 In `pr` mode the merged delivery is gated: after the feature branch is pushed
 and the matching pull request is created or found, its number and head SHA are
@@ -565,6 +572,9 @@ Examples of resumable boundaries:
   reused;
 - a saved needs-attention decision is reused only while its issue-update and
   comment fingerprint still matches the refreshed issue;
+- an unresolved resolution decision remains audit evidence rather than cached
+  completion; retry starts from live refresh and requires fresh grounding and
+  verification before any already-resolved closure;
 - a checkpoint plus created commit can finish a push without rerunning the
   implementation/review loop;
 - an active `issue-closure` with a completed outcome resumes closure without

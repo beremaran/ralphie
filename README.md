@@ -215,12 +215,18 @@ routine gate milestones while still reporting gate failures.
 
 ## How issue routing works
 
-Every selected open issue is refreshed from GitHub, then receives a read-only
-grounding decision:
+Every dequeued issue passes a live refresh gate before issue work consumes the
+budget: Ralphie refreshes the issue and bounded comments, halts rather than use
+stale data if refresh fails, and durably skips an issue that is now closed or
+missing a required label. The refreshed issue then receives a read-only
+grounding decision; only an actionable decision reaches complexity routing:
 
 ```mermaid
 flowchart TD
-    A[Refreshed live issue] --> G[Read-only grounding]
+    A[Dequeued issue] --> R[Live refresh gate]
+    R -->|refresh failed| E[Halt without stale execution]
+    R -->|closed or required label missing| S[Durable skip]
+    R -->|eligible refreshed issue| G[Read-only grounding]
     G -->|actionable| C[Complexity 0-5]
     G -->|already_resolved| V[Fresh read-only resolution verifier]
     G -->|needs_attention| D{--on-needs-attention}
@@ -237,15 +243,17 @@ flowchart TD
   and implementation that exhausts its review budget, enter decomposition into
   linked child issues.
 - **Already-resolved** issues close only after a separate fresh verifier
-  returns a nonblank summary and concrete evidence; unresolved or uncertain
-  verification fails safely without closing or deferring the issue.
+  returns a nonblank summary and concrete evidence. Unresolved or uncertain
+  verification is an ordinary non-completion failure—not an automatic closure,
+  actionable fallback, or needs-attention decision—and leaves the issue open.
 - **Needs attention** issues are never closed, marked complete, or delivered:
   Ralphie persists the decision with its reason, summary, evidence, questions,
   and an issue-freshness fingerprint (`updatedAt`, comment count, and comment
   version) in the per-issue artifact store, and progress events carry the same
   fields plus the artifact path, policy, and queue position. Complexity,
-  difficulty, size, or uncertainty are never valid needs-attention reasons, and
-  the source issue always remains open.
+  difficulty, size, or uncertainty are never valid needs-attention reasons.
+  The source issue always remains open; with `continue`, the queue may proceed,
+  but neither `lgtm` closure nor feature-branch push or PR delivery occurs.
 - Recursive splitting defaults to three levels and can be changed with
   `--max-decomposition-depth`. Reaching that ceiling leaves the issue open and
   continues independent queue work instead of aborting the run.
