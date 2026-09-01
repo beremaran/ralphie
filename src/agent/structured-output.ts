@@ -81,62 +81,133 @@ const validateStructuredOutput = <Output>(
     schema: z.ZodType<Output>,
     value: unknown,
 ): { readonly success: boolean; readonly error?: string } => {
-    const parsed = schema.safeParse(value);
+    const parsed = schema.safeParse(
+        normalizeStructuredOutput(value, z.toJSONSchema(schema)),
+    );
     return parsed.success
         ? { success: true }
         : { success: false, error: z.prettifyError(parsed.error) };
 };
 
-/** Codex requires an object root and rejects JSON Schema `oneOf`. */
+type JsonSchema = Record<string, unknown>;
+
+const isJsonSchema = (value: unknown): value is JsonSchema =>
+    typeof value === "object" && value !== null && !Array.isArray(value);
+
+const schemaRequiredKeys = (schema: JsonSchema): ReadonlySet<string> =>
+    new Set(
+        Array.isArray(schema.required)
+            ? schema.required.filter(
+                  (key): key is string => typeof key === "string",
+              )
+            : [],
+    );
+
+const nullableSchema = (schema: unknown): unknown => {
+    if (!isJsonSchema(schema)) return schema;
+    const type = Array.isArray(schema.type)
+        ? [...new Set([...schema.type, "null"])]
+        : typeof schema.type === "string"
+          ? [schema.type, "null"]
+          : schema.type;
+    if (schema.const !== undefined) {
+        const { const: constant, ...rest } = schema;
+        return { ...rest, type, enum: [constant, null] };
+    }
+    return {
+        ...schema,
+        ...(type === undefined ? {} : { type }),
+        ...(Array.isArray(schema.enum)
+            ? { enum: [...new Set([...schema.enum, null])] }
+            : {}),
+    };
+};
+
+const mergeVariantProperty = (schemas: ReadonlyArray<JsonSchema>): unknown => {
+    const constants = schemas.map((schema) => schema.const);
+    const type = schemas[0]?.type;
+    if (
+        constants.every((constant) => constant !== undefined) &&
+        schemas.every((schema) => schema.type === type)
+    ) {
+        return { type, enum: [...new Set(constants)] };
+    }
+    return schemas[0];
+};
+
+const unionProperties = (
+    variants: ReadonlyArray<JsonSchema>,
+): Record<string, unknown> => {
+    const propertyMaps = variants.map((variant) =>
+        isJsonSchema(variant.properties) ? variant.properties : {},
+    );
+    const keys = [...new Set(propertyMaps.flatMap(Object.keys))];
+    return Object.fromEntries(
+        keys.map((key) => {
+            const schemas = propertyMaps
+                .map((properties) => properties[key])
+                .filter(isJsonSchema);
+            const requiredInEveryVariant = variants.every(
+                (variant, index) =>
+                    schemaRequiredKeys(variant).has(key) &&
+                    propertyMaps[index]?.[key] !== undefined,
+            );
+            const merged = codexOutputSchema(mergeVariantProperty(schemas));
+            return [
+                key,
+                requiredInEveryVariant ? merged : nullableSchema(merged),
+            ];
+        }),
+    );
+};
+
+const normalizeObjectSchema = (schema: JsonSchema): JsonSchema => {
+    if (!isJsonSchema(schema.properties)) return schema;
+    const required = schemaRequiredKeys(schema);
+    const properties = Object.fromEntries(
+        Object.entries(schema.properties).map(([key, property]) => {
+            const normalized = codexOutputSchema(property);
+            return [
+                key,
+                required.has(key) ? normalized : nullableSchema(normalized),
+            ];
+        }),
+    );
+    return { ...schema, properties, required: Object.keys(properties) };
+};
+
+const normalizeObjectUnion = (schema: JsonSchema): JsonSchema => {
+    const variants = Array.isArray(schema.oneOf)
+        ? schema.oneOf.filter(isJsonSchema)
+        : [];
+    if (variants.length === 0) {
+        throw new Error("Codex output schema contains an unsupported union.");
+    }
+    const { oneOf: _oneOf, ...metadata } = schema;
+    const properties = unionProperties(variants);
+    return {
+        ...metadata,
+        type: "object",
+        properties,
+        required: Object.keys(properties),
+        additionalProperties: false,
+    };
+};
+
+/** Convert Zod JSON Schema to the strict subset accepted by Codex. */
 const codexOutputSchema = (schema: unknown): unknown => {
     if (Array.isArray(schema)) return schema.map(codexOutputSchema);
-    if (typeof schema !== "object" || schema === null) return schema;
-    const record = schema as Record<string, unknown>;
-    if (Array.isArray(record.oneOf)) {
-        const variants = record.oneOf.filter(
-            (value): value is Record<string, unknown> =>
-                typeof value === "object" && value !== null,
-        );
-        const properties = Object.assign(
-            {},
-            ...variants.map((variant) => variant.properties ?? {}),
-        );
-        const nullableProperties = Object.fromEntries(
-            Object.entries(properties).map(([key, value]) => [
-                key,
-                nullableSchema(value),
-            ]),
-        );
-        return {
-            type: "object",
-            properties: codexOutputSchema(nullableProperties),
-            required: Object.keys(properties),
-            additionalProperties: false,
-        };
-    }
-    return Object.fromEntries(
-        Object.entries(record).map(([key, value]) => [
+    if (!isJsonSchema(schema)) return schema;
+    if (Array.isArray(schema.oneOf)) return normalizeObjectUnion(schema);
+    const normalized = Object.fromEntries(
+        Object.entries(schema).map(([key, value]) => [
             key,
             codexOutputSchema(value),
         ]),
     );
-};
-
-const nullableSchema = (schema: unknown): unknown => {
-    if (
-        typeof schema !== "object" ||
-        schema === null ||
-        Array.isArray(schema)
-    ) {
-        return schema;
-    }
-    const record = schema as Record<string, unknown>;
-    if (Array.isArray(record.enum))
-        return { ...record, enum: [...record.enum, null] };
-    if (typeof record.type === "string") {
-        return { ...record, type: [record.type, "null"] };
-    }
-    return record;
+    return normalized.type === "object"
+        ? normalizeObjectSchema(normalized)
+        : normalized;
 };
 
 const removeNullProperties = (value: unknown): unknown => {
@@ -147,6 +218,79 @@ const removeNullProperties = (value: unknown): unknown => {
             .filter(([, child]) => child !== null)
             .map(([key, child]) => [key, removeNullProperties(child)]),
     );
+};
+
+const matchesSchemaConstants = (
+    value: Record<string, unknown>,
+    schema: JsonSchema,
+): boolean => {
+    if (!isJsonSchema(schema.properties)) return false;
+    return Object.entries(schema.properties).every((entry) => {
+        const [key, property] = entry;
+        return (
+            !isJsonSchema(property) ||
+            property.const === undefined ||
+            value[key] === property.const
+        );
+    });
+};
+
+const selectedUnionVariant = (
+    value: Record<string, unknown>,
+    schema: JsonSchema,
+): JsonSchema | undefined =>
+    Array.isArray(schema.oneOf)
+        ? schema.oneOf
+              .filter(isJsonSchema)
+              .find((variant) => matchesSchemaConstants(value, variant))
+        : undefined;
+
+const projectObjectToSchema = (
+    value: Record<string, unknown>,
+    schema: JsonSchema,
+): Record<string, unknown> => {
+    if (!isJsonSchema(schema.properties)) return value;
+    return Object.fromEntries(
+        Object.entries(schema.properties)
+            .filter(([key]) => value[key] !== undefined)
+            .map(([key, property]) => [
+                key,
+                normalizeStructuredOutput(value[key], property),
+            ]),
+    );
+};
+
+const normalizeObjectProperties = (
+    value: Record<string, unknown>,
+    schema: JsonSchema,
+): Record<string, unknown> => {
+    const properties = isJsonSchema(schema.properties) ? schema.properties : {};
+    return Object.fromEntries(
+        Object.entries(value).map(([key, child]) => [
+            key,
+            normalizeStructuredOutput(child, properties[key]),
+        ]),
+    );
+};
+
+const normalizeStructuredOutput = (
+    value: unknown,
+    schema: unknown,
+): unknown => {
+    const withoutNulls = removeNullProperties(value);
+    if (Array.isArray(withoutNulls)) {
+        const itemSchema = isJsonSchema(schema) ? schema.items : undefined;
+        return withoutNulls.map((item) =>
+            normalizeStructuredOutput(item, itemSchema),
+        );
+    }
+    if (!isJsonSchema(withoutNulls) || !isJsonSchema(schema)) {
+        return withoutNulls;
+    }
+    const selected = selectedUnionVariant(withoutNulls, schema);
+    return selected === undefined
+        ? normalizeObjectProperties(withoutNulls, schema)
+        : projectObjectToSchema(withoutNulls, selected);
 };
 
 const promptInput = <Output>(
@@ -222,7 +366,10 @@ const promptForStructuredOutput = async <Output>(
     }
 
     const parsed = request.schema.safeParse(
-        removeNullProperties(response.data.info.structured),
+        normalizeStructuredOutput(
+            response.data.info.structured,
+            z.toJSONSchema(request.schema),
+        ),
     );
     if (!parsed.success) {
         throw new Error(

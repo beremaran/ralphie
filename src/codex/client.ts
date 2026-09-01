@@ -183,7 +183,7 @@ const errorEventDetail = (
     return JSON.stringify(errors.at(-1)).slice(0, STDERR_LIMIT);
 };
 
-const run = async (input: {
+type RunInput = {
     readonly command: string;
     readonly request: PromptInput;
     readonly session: PendingSession;
@@ -191,11 +191,14 @@ const run = async (input: {
     readonly environment?: Readonly<Record<string, string | undefined>>;
     readonly docker: boolean;
     readonly signal?: AbortSignal;
-    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: process cleanup and failure normalization share one resource scope.
-}): Promise<{
+};
+type RunResult = {
     readonly info: CodexAssistantMessage;
     readonly parts: ReadonlyArray<CodexPart>;
-}> => {
+};
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: process cleanup and failure normalization share one resource scope.
+const run = async (input: RunInput): Promise<RunResult> => {
     const schema =
         input.request.format === undefined
             ? undefined
