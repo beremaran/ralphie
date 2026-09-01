@@ -30,12 +30,15 @@ Ralphie adapts its progress renderer to its environment:
 
 JSON events use a stable operational vocabulary and include `runId`,
 `timestamp`, `stage`, `status`, and `message`. Grounding events identify
-whether agent work was skipped. A `needs-attention` event includes its reason,
-summary, evidence, questions, diagnostic or artifact path, and selected policy;
-verbose and JSON output retain those complete details. Depending on the event,
-they may also include the repository, issue position, review attempt, session
-ID, commit SHA, created issue numbers, or diagnostic paths. Credentials and
-sensitive environment values are redacted at the reporting boundary.
+whether agent work was skipped. Human-readable needs-attention decisions name
+the issue number and title and show the current/total queue position. A
+`needs-attention` event includes its reason, summary, evidence, questions,
+diagnostic or artifact path, selected policy, and issue budget; verbose and
+JSON output retain those complete details. A handled halt emits a final
+needs-attention event with `handled: true` and every outcome count before exit.
+Depending on the event, it may also include the repository, review attempt,
+session ID, commit SHA, created issue numbers, or diagnostic paths. Credentials
+and sensitive environment values are redacted at the reporting boundary.
 
 ## State and artifacts
 

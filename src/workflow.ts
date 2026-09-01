@@ -1223,14 +1223,16 @@ export const workflow = async (
             return await captureCheckout();
         };
 
+        const queueTotalFor = (current: number): number =>
+            resumeState?.maxIssues ??
+            maxIssues ??
+            current + queue.pendingCount();
+
         const prepareIssue = async (
             issue: GitHubIssue,
         ): Promise<WorkflowIssueContext> => {
             const current = queue.processedCount();
-            const total =
-                resumeState?.maxIssues ??
-                maxIssues ??
-                current + queue.pendingCount();
+            const total = queueTotalFor(current);
             const resumedClosureOutcome = resumedClosureOutcomeFor(
                 resumeState,
                 issue.number,
@@ -2138,14 +2140,23 @@ export const workflow = async (
         };
 
         const emitHandledNeedsAttention = async (
-            issueNumber: number,
+            issueContext: Pick<
+                WorkflowIssueContext,
+                "issue" | "current" | "total"
+            >,
+            outcome: NeedsAttentionOutcome,
         ): Promise<void> => {
+            const { issue, current, total } = issueContext;
             const summary = summarize(actualRunId, outcomes);
+            const policy = outcome.policy ?? onNeedsAttention;
             await progress.emit({
                 stage: "run",
                 status: "needs-attention",
+                issue: { number: issue.number, title: issue.title },
+                current,
+                total,
                 message: summaryMessage(
-                    `Run halted after issue #${issueNumber} needs attention`,
+                    `Run halted after issue #${issue.number} needs attention`,
                     summary.counts,
                 ),
                 details: {
@@ -2153,9 +2164,17 @@ export const workflow = async (
                     counts: summary.counts,
                     routes: routeSummary(summary.outcomes),
                     statePath,
-                    issueNumber,
-                    policy: onNeedsAttention,
-                    budget: resumeState?.maxIssues ?? maxIssues ?? "unlimited",
+                    issueNumber: issue.number,
+                    issueTitle: issue.title,
+                    queuePosition: current,
+                    queueTotal: total,
+                    ...needsAttentionProgressDetails({
+                        outcome,
+                        policy,
+                        dryRun: effectiveDryRun,
+                        current,
+                        budget: resumeState?.maxIssues ?? maxIssues,
+                    }),
                     handled: true,
                 },
             });
@@ -2315,7 +2334,7 @@ export const workflow = async (
                     stage: "grounding",
                 });
             }
-            await emitHandledNeedsAttention(issueContext.issue.number);
+            await emitHandledNeedsAttention(issueContext, outcome);
             throw new NeedsAttentionStop({
                 issueNumber: issueContext.issue.number,
                 summary: outcome.summary,
@@ -2457,7 +2476,15 @@ export const workflow = async (
             await publishPendingNotification(issue.number, pending);
             if (onNeedsAttention === NeedsAttentionPolicy.Halt) {
                 await clearHaltedNeedsAttention(issue.number);
-                await emitHandledNeedsAttention(issue.number);
+                const current = queue.processedCount();
+                await emitHandledNeedsAttention(
+                    {
+                        issue,
+                        current,
+                        total: queueTotalFor(current),
+                    },
+                    pending.outcome,
+                );
                 throw new NeedsAttentionStop({
                     issueNumber: issue.number,
                     summary: pending.outcome.summary,

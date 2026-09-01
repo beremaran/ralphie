@@ -139,12 +139,14 @@ describe("command/runtime display harness", () => {
             await expect(pending).rejects.toThrow("operation was aborted");
             expect(process.exitCode).toBe(130);
             expect(harness.stderr.join("")).toContain("still streaming");
-            expect(harness.disposalCalls).toMatchObject({
+            expect(harness.disposalCalls).toEqual({
                 runtime: 1,
                 coordinator: 1,
                 piRuntime: 1,
                 output: 1,
             });
+            expect(harness.lifecycle).toContain("pi.client.close");
+            expect(harness.writesAfterCleanup).toEqual([]);
         } finally {
             await harness.cleanup();
             process.exitCode = previousExitCode ?? 0;
@@ -256,28 +258,250 @@ describe("command/runtime display harness", () => {
         }
     });
 
-    test("handles a needs-attention stop with its distinct exit code", async () => {
+    test("writes complete needs-attention JSON Lines to stdout", async () => {
         const previousExitCode = process.exitCode;
+        const harness = makeCommandRuntimeHarness({
+            steps: [
+                {
+                    kind: "progress",
+                    event: {
+                        stage: "grounding",
+                        status: "needs-attention",
+                        message:
+                            "Issue #42 needs attention (external_dependency): missing prerequisite.",
+                        issue: {
+                            number: 42,
+                            title: "Missing prerequisite",
+                        },
+                        current: 1,
+                        total: 3,
+                        details: {
+                            reason: "external_dependency",
+                            summary: "missing prerequisite.",
+                            evidence: ["The upstream issue remains open."],
+                            questions: ["When will the upstream issue close?"],
+                            diagnosticsPath: "/tmp/issue-42/metadata.json",
+                            policy: "continue",
+                            queuePosition: 1,
+                            budget: 3,
+                        },
+                    },
+                },
+            ],
+        });
         try {
-            const harness = makeCommandRuntimeHarness();
-            try {
-                harness.failWith(
-                    new NeedsAttentionStop({
-                        issueNumber: 42,
-                        summary: "missing prerequisite",
-                    }),
-                );
+            await harness.run([
+                "owner/repository",
+                "--dry-run",
+                "--on-needs-attention",
+                "continue",
+                "--max-issues",
+                "3",
+                "--output",
+                "json",
+            ]);
 
-                await harness.run();
-
-                expect(process.exitCode).toBe(2);
-                expect(harness.stderr.join(" ")).not.toContain("failed");
-                expect(harness.lifecycle).toContain("runtime.dispose");
-                expect(harness.lifecycle).toContain("coordinator.dispose");
-            } finally {
-                await harness.cleanup();
-            }
+            expect(harness.stderr).toEqual([]);
+            const lines = harness.stdout
+                .join("")
+                .trimEnd()
+                .split("\n")
+                .map((line) => JSON.parse(line));
+            expect(lines).toHaveLength(1);
+            expect(lines[0]).toMatchObject({
+                stage: "grounding",
+                status: "needs-attention",
+                issue: { number: 42, title: "Missing prerequisite" },
+                current: 1,
+                total: 3,
+                details: {
+                    reason: "external_dependency",
+                    summary: "missing prerequisite.",
+                    evidence: ["The upstream issue remains open."],
+                    questions: ["When will the upstream issue close?"],
+                    diagnosticsPath: "/tmp/issue-42/metadata.json",
+                    policy: "continue",
+                    queuePosition: 1,
+                    budget: 3,
+                },
+            });
+            expect(process.exitCode).toBe(0);
         } finally {
+            await harness.cleanup();
+            process.exitCode = previousExitCode ?? 0;
+        }
+    });
+
+    test("maps a handled needs-attention stop to exit 2 after complete disposal", async () => {
+        const previousExitCode = process.exitCode;
+        const issue = { number: 42, title: "Missing prerequisite" };
+        const steps = [
+            {
+                kind: "progress",
+                event: {
+                    stage: "grounding",
+                    status: "needs-attention",
+                    message:
+                        "Issue #42 needs attention (external_dependency): missing prerequisite.",
+                    issue,
+                    current: 1,
+                    total: 3,
+                    details: {
+                        reason: "external_dependency",
+                        summary: "missing prerequisite.",
+                        evidence: ["The upstream issue remains open."],
+                        questions: ["When will the upstream issue close?"],
+                        artifactPath: "/tmp/issue-42/artifacts.json",
+                        policy: "halt",
+                        queuePosition: 1,
+                        budget: 3,
+                    },
+                },
+            },
+            {
+                kind: "progress",
+                event: {
+                    stage: "run",
+                    status: "needs-attention",
+                    message:
+                        "Run halted after issue #42 needs attention: 0 completed, 0 decomposed, 0 escalated, 1 needs-attention, 0 skipped, 0 failed.",
+                    issue,
+                    current: 1,
+                    total: 3,
+                    details: {
+                        handled: true,
+                        policy: "halt",
+                        budget: 3,
+                        counts: {
+                            completed: 0,
+                            decomposed: 0,
+                            escalated: 0,
+                            "needs-attention": 1,
+                            skipped: 0,
+                            failed: 0,
+                        },
+                    },
+                },
+            },
+            {
+                kind: "failure",
+                error: new NeedsAttentionStop({
+                    issueNumber: 42,
+                    summary: "missing prerequisite",
+                }),
+            },
+        ] satisfies ReadonlyArray<CommandRuntimeHarnessStep>;
+        const harness = makeCommandRuntimeHarness({ steps });
+        try {
+            await harness.run([
+                "owner/repository",
+                "--dry-run",
+                "--max-issues",
+                "3",
+                "--output",
+                "quiet",
+            ]);
+
+            const output = harness.stderr.join("");
+            expect(process.exitCode).toBe(2);
+            expect(output).toContain("#42 Missing prerequisite");
+            expect(output).toContain("Run halted after issue #42");
+            expect(output).not.toContain("✗");
+            expect(harness.disposalCalls).toEqual({
+                runtime: 1,
+                coordinator: 1,
+                piRuntime: 1,
+                output: 1,
+            });
+            expect(harness.lifecycle).toContain("pi.client.close");
+            expect(harness.writesAfterCleanup).toEqual([]);
+        } finally {
+            await harness.cleanup();
+            process.exitCode = previousExitCode ?? 0;
+        }
+    });
+
+    test("maps a drained continued run to 0 and ordinary failure to 1 after disposal", async () => {
+        const previousExitCode = process.exitCode;
+        const success = makeCommandRuntimeHarness({
+            steps: [
+                {
+                    kind: "progress",
+                    event: {
+                        stage: "grounding",
+                        status: "needs-attention",
+                        message:
+                            "Issue #42 needs attention (external_dependency): missing prerequisite.",
+                        issue: {
+                            number: 42,
+                            title: "Missing prerequisite",
+                        },
+                        current: 1,
+                        total: 1,
+                        details: { policy: "continue", budget: 1 },
+                    },
+                },
+                {
+                    kind: "progress",
+                    event: {
+                        stage: "run",
+                        status: "succeeded",
+                        message:
+                            "Run completed: 0 completed, 0 decomposed, 0 escalated, 1 needs-attention, 0 skipped, 0 failed.",
+                        details: {
+                            policy: "continue",
+                            budget: 1,
+                            counts: {
+                                completed: 0,
+                                decomposed: 0,
+                                escalated: 0,
+                                "needs-attention": 1,
+                                skipped: 0,
+                                failed: 0,
+                            },
+                        },
+                    },
+                },
+            ],
+        });
+        try {
+            await success.run([
+                "owner/repository",
+                "--dry-run",
+                "--on-needs-attention",
+                "continue",
+                "--max-issues",
+                "1",
+            ]);
+            expect(process.exitCode).toBe(0);
+            expect(success.stderr.join("")).toContain("Run completed:");
+            expect(success.stderr.join("")).toContain("1 needs-attention");
+            expect(success.disposalCalls).toEqual({
+                runtime: 1,
+                coordinator: 1,
+                piRuntime: 1,
+                output: 1,
+            });
+        } finally {
+            await success.cleanup();
+        }
+
+        const failure = makeCommandRuntimeHarness({
+            steps: [{ kind: "failure", error: new Error("ordinary failure") }],
+        });
+        try {
+            await expect(failure.run()).rejects.toThrow("ordinary failure");
+            expect(process.exitCode).toBe(1);
+            expect(failure.disposalCalls).toEqual({
+                runtime: 1,
+                coordinator: 1,
+                piRuntime: 1,
+                output: 1,
+            });
+            expect(failure.lifecycle).toContain("pi.client.close");
+            expect(failure.writesAfterCleanup).toEqual([]);
+        } finally {
+            await failure.cleanup();
             process.exitCode = previousExitCode ?? 0;
         }
     });

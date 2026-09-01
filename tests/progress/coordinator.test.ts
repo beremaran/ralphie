@@ -488,7 +488,7 @@ describe("progress output coordinator", () => {
         expect(surface.footers).toHaveLength(1);
     });
 
-    test("keeps plain append-only and quiet failures-only", async () => {
+    test("keeps plain append-only and quiet decisions-only", async () => {
         let plainOutput = "";
         const plain = makeProgressCoordinator({
             mode: "plain",
@@ -530,15 +530,36 @@ describe("progress output coordinator", () => {
         await quiet.progress.emit({
             stage: "implementation",
             status: "succeeded",
-            message: "Done.",
+            message: "Routine progress.",
         });
         await quiet.progress.emit({
-            stage: "implementation",
-            status: "failed",
-            message: "Failed.",
+            stage: "grounding",
+            status: "needs-attention",
+            message:
+                "Issue #279 needs attention (missing_information): choose a stream.",
+            issue: { number: 279, title: "Progress contract" },
+            current: 2,
+            total: 5,
+        });
+        await quiet.progress.emit({
+            stage: "run",
+            status: "needs-attention",
+            message:
+                "Run halted: 0 completed, 0 decomposed, 0 escalated, 1 needs-attention, 0 skipped, 0 failed.",
+            issue: { number: 279, title: "Progress contract" },
+            current: 2,
+            total: 5,
+            details: { handled: true },
         });
 
-        expect(quietOutput).toBe("✗ Failed.\n");
+        expect(quietOutput).not.toContain("Routine progress");
+        expect(quietOutput).toContain(
+            "⚠ [2/5] #279 Progress contract — Issue #279 needs attention",
+        );
+        expect(quietOutput).toContain(
+            "⚠ [2/5] #279 Progress contract — Run halted:",
+        );
+        expect(quietOutput).toContain("1 needs-attention");
     });
 
     test("tracks line state across colored transcript chunks", async () => {
@@ -587,9 +608,51 @@ describe("progress output coordinator", () => {
         });
 
         await coordinator.progress.emit({
+            stage: "grounding",
+            status: "needs-attention",
+            message:
+                "Issue #279 needs attention (missing_information): choose a stream.",
+            issue: { number: 279, title: "Progress contract" },
+            current: 2,
+            total: 5,
+            details: {
+                reason: "missing_information",
+                summary: "choose a stream.",
+                evidence: ["The issue names multiple streams."],
+                questions: ["Which stream is authoritative?"],
+                diagnosticsPath: "/tmp/needs-attention/metadata.json",
+                policy: "halt",
+                queuePosition: 2,
+                budget: 5,
+            },
+        });
+        await coordinator.progress.emit({
             stage: "run",
-            status: "info",
-            message: "started",
+            status: "needs-attention",
+            message:
+                "Run halted: 0 completed, 0 decomposed, 0 escalated, 1 needs-attention, 0 skipped, 0 failed.",
+            issue: { number: 279, title: "Progress contract" },
+            current: 2,
+            total: 5,
+            details: {
+                handled: true,
+                reason: "missing_information",
+                summary: "choose a stream.",
+                evidence: ["The issue names multiple streams."],
+                questions: ["Which stream is authoritative?"],
+                diagnosticsPath: "/tmp/needs-attention/metadata.json",
+                policy: "halt",
+                queuePosition: 2,
+                budget: 5,
+                counts: {
+                    completed: 0,
+                    decomposed: 0,
+                    escalated: 0,
+                    "needs-attention": 1,
+                    skipped: 0,
+                    failed: 0,
+                },
+            },
         });
         coordinator.listener(event({ type: "turn_start" }), context);
 
@@ -597,10 +660,42 @@ describe("progress output coordinator", () => {
             .trimEnd()
             .split("\n")
             .map((line) => JSON.parse(line));
-        expect(lines).toHaveLength(2);
+        expect(lines).toHaveLength(3);
         expect(lines[0]).not.toHaveProperty("type");
-        expect(lines[0]).toMatchObject({ stage: "run" });
+        expect(lines[0]).toMatchObject({
+            stage: "grounding",
+            status: "needs-attention",
+            issue: { number: 279, title: "Progress contract" },
+            current: 2,
+            total: 5,
+            details: {
+                reason: "missing_information",
+                summary: "choose a stream.",
+                evidence: ["The issue names multiple streams."],
+                questions: ["Which stream is authoritative?"],
+                diagnosticsPath: "/tmp/needs-attention/metadata.json",
+                policy: "halt",
+                queuePosition: 2,
+                budget: 5,
+            },
+        });
         expect(lines[1]).toMatchObject({
+            stage: "run",
+            status: "needs-attention",
+            details: {
+                handled: true,
+                reason: "missing_information",
+                summary: "choose a stream.",
+                evidence: ["The issue names multiple streams."],
+                questions: ["Which stream is authoritative?"],
+                diagnosticsPath: "/tmp/needs-attention/metadata.json",
+                policy: "halt",
+                queuePosition: 2,
+                budget: 5,
+                counts: { "needs-attention": 1, failed: 0 },
+            },
+        });
+        expect(lines[2]).toMatchObject({
             type: "pi_event",
             event: { type: "turn_start" },
         });

@@ -145,6 +145,15 @@ const formatDetails = (
     details: Readonly<Record<string, unknown>> | undefined,
 ): string => (details === undefined ? "" : ` ${JSON.stringify(details)}`);
 
+type ProgressStyle = (render: (text: string) => string, text: string) => string;
+
+const formatIssue = (event: ProgressEvent, style: ProgressStyle): string => {
+    if (event.issue === undefined) return "";
+    const number = style(cyan, `#${event.issue.number}`);
+    if (event.status !== "needs-attention") return ` ${number}`;
+    return ` ${number} ${style(dim, event.issue.title)} —`;
+};
+
 const CLEAR_LIVE_LINE = "\r\x1b[2K";
 const ANSI_ESCAPE =
     /\u001b(?:\][^\u0007]*(?:\u0007|\u001b\\)|\[[0-?]*[ -/]*[@-~])/g;
@@ -281,9 +290,7 @@ export const makeProgressReporter = ({
         const scope = event.repository
             ? ` ${style(dim, `[${event.repository}]`)}`
             : "";
-        const issue = event.issue
-            ? ` ${style(cyan, `#${event.issue.number}`)}`
-            : "";
+        const issue = formatIssue(event, style);
         const position =
             event.current !== undefined && event.total !== undefined
                 ? ` ${style(dim, `[${event.current}/${event.total}]`)}`

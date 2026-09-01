@@ -2005,9 +2005,21 @@ describe("workflow", () => {
             expect.objectContaining({
                 stage: "run",
                 status: "needs-attention",
+                issue: { number: 42, title: firstIssue.title },
+                current: 1,
+                total: 1,
                 message: expect.stringContaining("needs-attention"),
                 details: expect.objectContaining({
                     handled: true,
+                    reason: NeedsAttentionReason.ExternalDependency,
+                    summary: "A prerequisite is still open.",
+                    evidence: ["The prerequisite is unresolved."],
+                    questions: ["When will it be available?"],
+                    artifactPath: "/tmp/needs-attention.json",
+                    issueNumber: 42,
+                    issueTitle: firstIssue.title,
+                    queuePosition: 1,
+                    queueTotal: 1,
                     policy: NeedsAttentionPolicy.Halt,
                     counts: {
                         completed: 0,

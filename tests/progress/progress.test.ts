@@ -161,12 +161,16 @@ describe("progress reporting", () => {
                 questions: ["Which target should be used?"],
                 artifactPath: "/tmp/artifacts.json",
                 policy: "halt",
+                queuePosition: 1,
+                budget: 2,
             },
         };
         await defaultProgress.emit(update);
         expect(defaultOutput).toBe(
-            "⚠ [1/2] #42 Issue #42 needs attention (missing_information): clarify the target.\n",
+            "⚠ [1/2] #42 Fix issue — Issue #42 needs attention (missing_information): clarify the target.\n",
         );
+        expect(defaultOutput).toContain("[1/2]");
+        expect(defaultOutput).toContain("#42 Fix issue");
 
         let verboseOutput = "";
         const verboseProgress = makeProgressReporter({
@@ -178,12 +182,17 @@ describe("progress reporting", () => {
             },
         });
         await verboseProgress.emit(update);
+        expect(verboseOutput).toContain("#42 Fix issue");
+        expect(verboseOutput).toContain('"reason":"missing_information"');
+        expect(verboseOutput).toContain('"summary":"clarify the target."');
         expect(verboseOutput).toContain('"evidence":["The target is absent."]');
         expect(verboseOutput).toContain(
             '"questions":["Which target should be used?"]',
         );
         expect(verboseOutput).toContain('"artifactPath":"/tmp/artifacts.json"');
         expect(verboseOutput).toContain('"policy":"halt"');
+        expect(verboseOutput).toContain('"queuePosition":1');
+        expect(verboseOutput).toContain('"budget":2');
 
         let jsonOutput = "";
         const jsonProgress = makeProgressReporter({
@@ -198,6 +207,9 @@ describe("progress reporting", () => {
         expect(JSON.parse(jsonOutput)).toMatchObject({
             stage: "grounding",
             status: "needs-attention",
+            issue: { number: 42, title: "Fix issue" },
+            current: 1,
+            total: 2,
             details: update.details,
         });
     });
@@ -307,7 +319,7 @@ describe("progress reporting", () => {
         });
 
         expect(output).toBe(
-            "◐ #42 Checking issue readiness...\r\x1b[2K⚠ #42 Issue #42 needs attention: clarify the target. (1.0s)\n",
+            "◐ #42 Checking issue readiness...\r\x1b[2K⚠ #42 Fix issue — Issue #42 needs attention: clarify the target. (1.0s)\n",
         );
     });
 
@@ -368,11 +380,12 @@ describe("progress reporting", () => {
         );
     });
 
-    test("quiet mode only emits failures", async () => {
+    test("quiet mode suppresses routine progress but retains decisions and handled stops", async () => {
         let output = "";
         const progress = makeProgressReporter({
             mode: "quiet",
             verbose: false,
+            colors: false,
             write: (text) => {
                 output += text;
             },
@@ -381,19 +394,41 @@ describe("progress reporting", () => {
         await progress.emit({
             stage: "run",
             status: "succeeded",
-            message: "Done.",
+            message: "Routine completion.",
         });
         await progress.emit({
             stage: "grounding",
             status: "needs-attention",
-            message: "Needs attention.",
+            message:
+                "Issue #42 needs attention (missing_information): clarify the target.",
+            issue: { number: 42, title: "Fix issue" },
+            current: 1,
+            total: 2,
+        });
+        await progress.emit({
+            stage: "run",
+            status: "needs-attention",
+            message:
+                "Run halted after issue #42 needs attention: 0 completed, 0 decomposed, 0 escalated, 1 needs-attention, 0 skipped, 0 failed.",
+            issue: { number: 42, title: "Fix issue" },
+            current: 1,
+            total: 2,
+            details: { handled: true },
         });
         await progress.emit({
             stage: "run",
             status: "failed",
-            message: "Failed.",
+            message: "Ordinary failure.",
         });
-        expect(output).toBe("⚠ Needs attention.\n✗ Failed.\n");
+        expect(output).not.toContain("Routine completion");
+        expect(output).toContain(
+            "⚠ [1/2] #42 Fix issue — Issue #42 needs attention",
+        );
+        expect(output).toContain(
+            "⚠ [1/2] #42 Fix issue — Run halted after issue #42 needs attention",
+        );
+        expect(output).toContain("1 needs-attention");
+        expect(output).toContain("✗ Ordinary failure.\n");
     });
 
     test("quiet mode suppresses unchanged pr-gate polls but reports gate failures", async () => {
