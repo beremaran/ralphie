@@ -61,6 +61,10 @@ describe("native CLI parser", () => {
             parseCliArgs(["owner/repository"]).options.onNeedsAttention,
         ).toBeUndefined();
         expect(
+            parseCliArgs(["owner/repository", "--on-needs-attention", "halt"])
+                .options.onNeedsAttention,
+        ).toBe(NeedsAttentionPolicy.Halt);
+        expect(
             parseCliArgs([
                 "owner/repository",
                 "--on-needs-attention",
@@ -244,6 +248,7 @@ describe("native CLI parser", () => {
             });
 
             expect(workflowOptions).toMatchObject({
+                onNeedsAttention: NeedsAttentionPolicy.Halt,
                 notificationsEnabled: true,
                 needsAttentionLabel: "saved-label",
             });

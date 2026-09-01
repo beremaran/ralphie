@@ -4,7 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+    ISSUE_ARTIFACT_VERSION,
     IssueArtifactKind,
+    issueArtifactPath,
     issueFreshnessFingerprint,
     makeIssueArtifactStoreService,
 } from "../../src/issues/artifacts.ts";
@@ -165,10 +167,188 @@ describe("IssueExecutor", () => {
     ] as const)(
         "invalidates a stale needs-attention artifact when %s changes",
         async (_field, change) => {
+            const workspace = await mkdtemp(
+                join(tmpdir(), "ralphie-grounding-"),
+            );
+            const scope = {
+                workspace,
+                runId: "run-1",
+                repository: "owner/repo",
+            };
+            try {
+                let groundingCalls = 0;
+                const stores = makeIssueArtifactStoreService();
+                const executor = makeIssueExecutorService(
+                    stores,
+                    {
+                        assess: async () => {
+                            throw new Error("unused");
+                        },
+                    },
+                    {
+                        execute: async () => {
+                            throw new Error("unused");
+                        },
+                    },
+                    {
+                        execute: async () => {
+                            throw new Error("unused");
+                        },
+                    },
+                    {
+                        assess: async () => {
+                            groundingCalls += 1;
+                            if (groundingCalls === 2) {
+                                const artifacts = await stores.forIssue(
+                                    42,
+                                    scope,
+                                );
+                                expect(
+                                    artifacts.has(
+                                        IssueArtifactKind.NeedsAttentionDecision,
+                                    ),
+                                ).toBeFalse();
+                                expect(
+                                    await artifacts.read(
+                                        IssueArtifactKind.IssueCheckpoint,
+                                    ),
+                                ).toEqual({ branch: "main", sha: "abc123" });
+                                const persisted = await Bun.file(
+                                    issueArtifactPath(scope, 42),
+                                ).json();
+                                expect(persisted.artifacts).not.toHaveProperty(
+                                    IssueArtifactKind.NeedsAttentionDecision,
+                                );
+                                expect(persisted.artifacts).toHaveProperty(
+                                    IssueArtifactKind.IssueCheckpoint,
+                                );
+                            }
+                            return {
+                                sessionID: `grounding-${groundingCalls}`,
+                                decision: {
+                                    disposition:
+                                        GroundingDisposition.NeedsAttention,
+                                    reason: NeedsAttentionReason.MissingInformation,
+                                    summary: `Grounding ${groundingCalls}`,
+                                    evidence: ["The target is unspecified."],
+                                    questions: [
+                                        "Which target should be supported?",
+                                    ],
+                                },
+                            };
+                        },
+                    },
+                    unusedResolutionVerification,
+                );
+                const base = {
+                    ...context(42),
+                    issue: {
+                        number: 42,
+                        title: "Needs clarification",
+                        url: "issue/42",
+                        body: "Clarify the target.",
+                        labels: [],
+                        updatedAt: "2026-08-28T00:00:00.000Z",
+                        commentCount: 1,
+                        commentVersion: "2026-08-28T00:00:00.000Z",
+                    },
+                    ...scope,
+                } as IssueExecutionContext;
+
+                await executor.execute(base);
+                const reused = await executor.execute(base);
+                expect(groundingCalls).toBe(1);
+                expect(reused).toMatchObject({
+                    kind: IssueExecutionOutcomeKind.NeedsAttention,
+                    summary: "Grounding 1",
+                });
+                const artifacts = await stores.forIssue(42, scope);
+                await artifacts.write(IssueArtifactKind.IssueCheckpoint, {
+                    branch: "main",
+                    sha: "abc123",
+                });
+
+                const changedFingerprint = issueFreshnessFingerprint({
+                    ...base.issue,
+                    ...change,
+                });
+                const result = await executor.execute({
+                    ...base,
+                    issue: { ...base.issue, ...change },
+                });
+
+                expect(groundingCalls).toBe(2);
+                expect(result).toMatchObject({
+                    kind: IssueExecutionOutcomeKind.NeedsAttention,
+                    summary: "Grounding 2",
+                });
+                const reloaded = await makeIssueArtifactStoreService().forIssue(
+                    42,
+                    scope,
+                );
+                expect(
+                    await reloaded.read(
+                        IssueArtifactKind.NeedsAttentionDecision,
+                    ),
+                ).toEqual({
+                    decision: {
+                        disposition: GroundingDisposition.NeedsAttention,
+                        reason: NeedsAttentionReason.MissingInformation,
+                        summary: "Grounding 2",
+                        evidence: ["The target is unspecified."],
+                        questions: ["Which target should be supported?"],
+                    },
+                    fingerprint: changedFingerprint,
+                });
+                expect(
+                    await reloaded.read(IssueArtifactKind.IssueCheckpoint),
+                ).toEqual({ branch: "main", sha: "abc123" });
+            } finally {
+                await rm(workspace, { recursive: true, force: true });
+            }
+        },
+    );
+
+    test("invalidates malformed persisted freshness before grounding", async () => {
+        const workspace = await mkdtemp(join(tmpdir(), "ralphie-grounding-"));
+        const scope = {
+            workspace,
+            runId: "invalid-freshness",
+            repository: "owner/repo",
+        };
+        const path = issueArtifactPath(scope, 42);
+        try {
+            await mkdir(join(path, ".."), { recursive: true });
+            await writeFile(
+                path,
+                JSON.stringify({
+                    version: ISSUE_ARTIFACT_VERSION,
+                    issueNumber: 42,
+                    repository: scope.repository,
+                    artifacts: {
+                        [IssueArtifactKind.IssueCheckpoint]: {
+                            branch: "main",
+                            sha: "abc123",
+                        },
+                        [IssueArtifactKind.NeedsAttentionDecision]: {
+                            decision: {
+                                disposition:
+                                    GroundingDisposition.NeedsAttention,
+                                reason: NeedsAttentionReason.MissingInformation,
+                                summary: "Stale malformed decision.",
+                                evidence: ["The old fingerprint is invalid."],
+                                questions: ["Should this be reassessed?"],
+                            },
+                            fingerprint: {
+                                updatedAt: "2026-08-28T00:00:00.000Z",
+                            },
+                        },
+                    },
+                }),
+            );
             let groundingCalls = 0;
-            const stores = makeIssueArtifactStoreService();
             const executor = makeIssueExecutorService(
-                stores,
+                makeIssueArtifactStoreService(),
                 {
                     assess: async () => {
                         throw new Error("unused");
@@ -187,74 +367,59 @@ describe("IssueExecutor", () => {
                 {
                     assess: async () => {
                         groundingCalls += 1;
+                        const persisted = await Bun.file(path).json();
+                        expect(persisted.artifacts).not.toHaveProperty(
+                            IssueArtifactKind.NeedsAttentionDecision,
+                        );
+                        expect(persisted.artifacts).toHaveProperty(
+                            IssueArtifactKind.IssueCheckpoint,
+                        );
                         return {
-                            sessionID: `grounding-${groundingCalls}`,
+                            sessionID: "fresh-grounding",
                             decision: {
                                 disposition:
                                     GroundingDisposition.NeedsAttention,
                                 reason: NeedsAttentionReason.MissingInformation,
-                                summary: `Grounding ${groundingCalls}`,
-                                evidence: ["The target is unspecified."],
-                                questions: [
-                                    "Which target should be supported?",
-                                ],
+                                summary: "Fresh grounding decision.",
+                                evidence: ["The target is still unspecified."],
+                                questions: ["Which target should be changed?"],
                             },
                         };
                     },
                 },
                 unusedResolutionVerification,
             );
-            const base = {
-                ...context(42),
-                issue: {
-                    number: 42,
-                    title: "Needs clarification",
-                    url: "issue/42",
-                    body: "Clarify the target.",
-                    labels: [],
-                    updatedAt: "2026-08-28T00:00:00.000Z",
-                    commentCount: 1,
-                    commentVersion: "2026-08-28T00:00:00.000Z",
-                },
-                repository: "owner/repo",
-                workspace: `/tmp/ralphie-grounding-${crypto.randomUUID()}`,
-                runId: "run-1",
-            } as IssueExecutionContext;
-
-            await executor.execute(base);
-            const reused = await executor.execute(base);
-            expect(groundingCalls).toBe(1);
-            expect(reused).toMatchObject({
-                kind: IssueExecutionOutcomeKind.NeedsAttention,
-                summary: "Grounding 1",
-            });
 
             const result = await executor.execute({
-                ...base,
-                issue: { ...base.issue, ...change },
+                ...context(42),
+                ...scope,
             });
 
-            expect(groundingCalls).toBe(2);
+            expect(groundingCalls).toBe(1);
             expect(result).toMatchObject({
                 kind: IssueExecutionOutcomeKind.NeedsAttention,
-                summary: "Grounding 2",
+                summary: "Fresh grounding decision.",
             });
-            const artifacts = await stores.forIssue(42, {
-                workspace: base.workspace,
-                runId: base.runId,
-                repository: base.repository,
-            });
+            const reloaded = await makeIssueArtifactStoreService().forIssue(
+                42,
+                scope,
+            );
             expect(
-                await artifacts.read(IssueArtifactKind.NeedsAttentionDecision),
+                await reloaded.read(IssueArtifactKind.IssueCheckpoint),
+            ).toEqual({ branch: "main", sha: "abc123" });
+            expect(
+                await reloaded.read(IssueArtifactKind.NeedsAttentionDecision),
             ).toMatchObject({
-                decision: { summary: "Grounding 2" },
-                fingerprint: issueFreshnessFingerprint({
-                    ...base.issue,
-                    ...change,
-                }),
+                decision: { summary: "Fresh grounding decision." },
+                fingerprint: {
+                    updatedAt: "2026-08-28T00:00:00.000Z",
+                    commentCount: 0,
+                },
             });
-        },
-    );
+        } finally {
+            await rm(workspace, { recursive: true, force: true });
+        }
+    });
 
     test("defers a dependency-blocked issue before complexity or implementation", async () => {
         let routed = false;

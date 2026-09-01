@@ -145,20 +145,54 @@ describe("run state store", () => {
         }
     });
 
-    test("migrates version 3 state without a policy to halt", async () => {
+    test("migrates version 3 state without a policy while preserving recovery context", async () => {
         const directory = await mkdtemp(
             join(tmpdir(), "ralphie-state-legacy-"),
         );
         const path = join(directory, "state.json");
         try {
-            const legacy = { ...state, version: 3 };
+            const legacy = {
+                ...structuredClone(state),
+                version: 3,
+                checkout: { branch: "main", head: "abc123" },
+                queue: {
+                    ...state.queue,
+                    processedCount: 37,
+                },
+                outcomes: [
+                    ...state.outcomes,
+                    {
+                        issueNumber: 2,
+                        outcome: {
+                            kind: IssueExecutionOutcomeKind.NeedsAttention as const,
+                            reason: NeedsAttentionReason.MissingInformation,
+                            summary: "The target runtime is unspecified.",
+                            evidence: ["The issue names multiple runtimes."],
+                            questions: ["Which runtime should be changed?"],
+                            artifactPath: "/tmp/needs-attention/artifacts.json",
+                        },
+                    },
+                ],
+            };
             const { onNeedsAttention: _policy, ...withoutPolicy } = legacy;
             await writeFile(path, JSON.stringify(withoutPolicy));
+
             const loaded = await RunStateStoreLive.load(path);
+
             expect(loaded.onNeedsAttention).toBe(NeedsAttentionPolicy.Halt);
-            expect(
-                JSON.parse(await readFile(path, "utf8")).onNeedsAttention,
-            ).toBe(NeedsAttentionPolicy.Halt);
+            expect(loaded.activeIssue).toEqual(withoutPolicy.activeIssue);
+            expect(loaded.checkout).toEqual(withoutPolicy.checkout);
+            expect(loaded.queue).toEqual(withoutPolicy.queue);
+            expect(loaded.queue.processedCount).toBe(
+                withoutPolicy.queue.processedCount,
+            );
+            expect(loaded.outcomes).toEqual(withoutPolicy.outcomes);
+            expect(loaded.outcomes[1]?.outcome).toMatchObject({
+                evidence: ["The issue names multiple runtimes."],
+                questions: ["Which runtime should be changed?"],
+                artifactPath: "/tmp/needs-attention/artifacts.json",
+            });
+            expect(JSON.parse(await readFile(path, "utf8"))).toEqual(loaded);
         } finally {
             await rm(directory, { recursive: true, force: true });
         }
@@ -224,6 +258,8 @@ describe("run state store", () => {
                             ],
                             questions: ["When will the service be available?"],
                             artifactPath: "/tmp/needs-attention/artifacts.json",
+                            route: "needs-attention",
+                            policy: NeedsAttentionPolicy.Continue,
                         },
                     },
                 ],

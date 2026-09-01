@@ -166,7 +166,13 @@ describe("run-state reconciliation", () => {
             now: new Date("2026-08-25T00:00:00.000Z"),
             maxAgeMs: 60_000,
         });
-        expect(result.status).toBe("stale");
+        expect(result).toEqual({
+            compatible: false,
+            status: "stale",
+            reasons: [
+                "saved state was last updated at 2026-08-24T00:00:00.000Z",
+            ],
+        });
     });
 
     test("exposes reconciliation as an async service", async () => {
