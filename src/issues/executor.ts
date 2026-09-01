@@ -197,20 +197,12 @@ export const makeIssueExecutorService = (
     const assessOrReadDecision = async (
         context: IssueExecutionContext,
         artifacts: Awaited<ReturnType<IssueArtifactStoreService["forIssue"]>>,
-    ): Promise<ComplexityDecision | IssueExecutionOutcome> => {
+    ): Promise<ComplexityDecision> => {
         if (artifacts.has(IssueArtifactKind.ComplexityDecision)) {
             return (await artifacts.read(IssueArtifactKind.ComplexityDecision))
                 .decision;
         }
         const assessed = await complexityAssessment.assess(context);
-        if (assessed.needsAttention !== undefined) {
-            const routed = await routeSignal(
-                context,
-                artifacts,
-                assessed.needsAttention,
-            );
-            if (routed !== undefined) return routed;
-        }
         const { decision } = assessed;
         await artifacts.write(IssueArtifactKind.ComplexityDecision, {
             decision,
@@ -247,7 +239,6 @@ export const makeIssueExecutorService = (
         const groundingOutcome = await assessGrounding(context, artifacts);
         if (groundingOutcome !== undefined) return groundingOutcome;
         const assessed = await assessOrReadDecision(context, artifacts);
-        if (!("complexity" in assessed)) return assessed;
         return await executeAssessedIssue(context, artifacts, assessed);
     };
 

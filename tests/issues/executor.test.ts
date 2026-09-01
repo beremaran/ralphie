@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import {
     IssueArtifactKind,
+    issueFreshnessFingerprint,
     makeIssueArtifactStoreService,
 } from "../../src/issues/artifacts.ts";
 import type { ComplexityAssessmentService } from "../../src/issues/complexity.ts";
@@ -58,7 +59,7 @@ const unusedResolutionVerification = {
 };
 
 describe("IssueExecutor", () => {
-    test("reuses matching grounding across a durable resumed run", async () => {
+    test("reuses a same-fingerprint needs-attention artifact across a durable resumed run", async () => {
         const workspace = await mkdtemp(join(tmpdir(), "ralphie-grounding-"));
         try {
             let groundingCalls = 0;
@@ -135,6 +136,23 @@ describe("IssueExecutor", () => {
                     details: { agentWorkSkipped: true },
                 }),
             );
+            const artifacts = await makeIssueArtifactStoreService().forIssue(
+                42,
+                {
+                    workspace,
+                    runId: "resume-run",
+                    repository: "owner/repo",
+                },
+            );
+            expect(
+                await artifacts.read(IssueArtifactKind.NeedsAttentionDecision),
+            ).toMatchObject({
+                decision: { summary: "The issue needs clarification." },
+                fingerprint: {
+                    updatedAt: "2026-08-28T00:00:00.000Z",
+                    commentCount: 1,
+                },
+            });
         } finally {
             await rm(workspace, { recursive: true, force: true });
         }
@@ -144,79 +162,99 @@ describe("IssueExecutor", () => {
         ["updatedAt", { updatedAt: "2026-08-29T00:00:00.000Z" }],
         ["commentCount", { commentCount: 2 }],
         ["commentVersion", { commentVersion: "2026-08-29T00:00:00.000Z" }],
-    ] as const)("regrounds when %s changes", async (_field, change) => {
-        let groundingCalls = 0;
-        const stores = makeIssueArtifactStoreService();
-        const executor = makeIssueExecutorService(
-            stores,
-            {
-                assess: async () => {
-                    throw new Error("unused");
+    ] as const)(
+        "invalidates a stale needs-attention artifact when %s changes",
+        async (_field, change) => {
+            let groundingCalls = 0;
+            const stores = makeIssueArtifactStoreService();
+            const executor = makeIssueExecutorService(
+                stores,
+                {
+                    assess: async () => {
+                        throw new Error("unused");
+                    },
                 },
-            },
-            {
-                execute: async () => {
-                    throw new Error("unused");
+                {
+                    execute: async () => {
+                        throw new Error("unused");
+                    },
                 },
-            },
-            {
-                execute: async () => {
-                    throw new Error("unused");
+                {
+                    execute: async () => {
+                        throw new Error("unused");
+                    },
                 },
-            },
-            {
-                assess: async () => {
-                    groundingCalls += 1;
-                    return {
-                        sessionID: `grounding-${groundingCalls}`,
-                        decision: {
-                            disposition: GroundingDisposition.NeedsAttention,
-                            reason: NeedsAttentionReason.MissingInformation,
-                            summary: `Grounding ${groundingCalls}`,
-                            evidence: ["The target is unspecified."],
-                            questions: ["Which target should be supported?"],
-                        },
-                    };
+                {
+                    assess: async () => {
+                        groundingCalls += 1;
+                        return {
+                            sessionID: `grounding-${groundingCalls}`,
+                            decision: {
+                                disposition:
+                                    GroundingDisposition.NeedsAttention,
+                                reason: NeedsAttentionReason.MissingInformation,
+                                summary: `Grounding ${groundingCalls}`,
+                                evidence: ["The target is unspecified."],
+                                questions: [
+                                    "Which target should be supported?",
+                                ],
+                            },
+                        };
+                    },
                 },
-            },
-            unusedResolutionVerification,
-        );
-        const base = {
-            ...context(42),
-            issue: {
-                number: 42,
-                title: "Needs clarification",
-                url: "issue/42",
-                body: "Clarify the target.",
-                labels: [],
-                updatedAt: "2026-08-28T00:00:00.000Z",
-                commentCount: 1,
-                commentVersion: "2026-08-28T00:00:00.000Z",
-            },
-            repository: "owner/repo",
-            workspace: `/tmp/ralphie-grounding-${crypto.randomUUID()}`,
-            runId: "run-1",
-        } as IssueExecutionContext;
+                unusedResolutionVerification,
+            );
+            const base = {
+                ...context(42),
+                issue: {
+                    number: 42,
+                    title: "Needs clarification",
+                    url: "issue/42",
+                    body: "Clarify the target.",
+                    labels: [],
+                    updatedAt: "2026-08-28T00:00:00.000Z",
+                    commentCount: 1,
+                    commentVersion: "2026-08-28T00:00:00.000Z",
+                },
+                repository: "owner/repo",
+                workspace: `/tmp/ralphie-grounding-${crypto.randomUUID()}`,
+                runId: "run-1",
+            } as IssueExecutionContext;
 
-        await executor.execute(base);
-        const reused = await executor.execute(base);
-        expect(groundingCalls).toBe(1);
-        expect(reused).toMatchObject({
-            kind: IssueExecutionOutcomeKind.NeedsAttention,
-            summary: "Grounding 1",
-        });
+            await executor.execute(base);
+            const reused = await executor.execute(base);
+            expect(groundingCalls).toBe(1);
+            expect(reused).toMatchObject({
+                kind: IssueExecutionOutcomeKind.NeedsAttention,
+                summary: "Grounding 1",
+            });
 
-        const result = await executor.execute({
-            ...base,
-            issue: { ...base.issue, ...change },
-        });
+            const result = await executor.execute({
+                ...base,
+                issue: { ...base.issue, ...change },
+            });
 
-        expect(groundingCalls).toBe(2);
-        expect(result).toMatchObject({
-            kind: IssueExecutionOutcomeKind.NeedsAttention,
-            summary: "Grounding 2",
-        });
-    });
+            expect(groundingCalls).toBe(2);
+            expect(result).toMatchObject({
+                kind: IssueExecutionOutcomeKind.NeedsAttention,
+                summary: "Grounding 2",
+            });
+            const artifacts = await stores.forIssue(42, {
+                workspace: base.workspace,
+                runId: base.runId,
+                repository: base.repository,
+            });
+            expect(
+                await artifacts.read(IssueArtifactKind.NeedsAttentionDecision),
+            ).toMatchObject({
+                decision: { summary: "Grounding 2" },
+                fingerprint: issueFreshnessFingerprint({
+                    ...base.issue,
+                    ...change,
+                }),
+            });
+        },
+    );
 
     test("defers a dependency-blocked issue before complexity or implementation", async () => {
         let routed = false;
@@ -278,6 +316,8 @@ describe("IssueExecutor", () => {
             kind: IssueExecutionOutcomeKind.NeedsAttention,
             reason: NeedsAttentionReason.ExternalDependency,
             summary: "Issue #41 must be completed first.",
+            evidence: ["The issue declares a dependency on #41."],
+            questions: ["Complete issue #41, then retry this issue."],
         });
         expect(routed).toBe(false);
         const artifact = await stores.forIssue(42, {
@@ -285,9 +325,21 @@ describe("IssueExecutor", () => {
             runId: "run-1",
             repository: "owner/repo",
         });
-        expect(artifact.has(IssueArtifactKind.NeedsAttentionDecision)).toBe(
-            true,
-        );
+        expect(
+            await artifact.read(IssueArtifactKind.NeedsAttentionDecision),
+        ).toEqual({
+            decision: {
+                disposition: GroundingDisposition.NeedsAttention,
+                reason: NeedsAttentionReason.ExternalDependency,
+                summary: "Issue #41 must be completed first.",
+                evidence: ["The issue declares a dependency on #41."],
+                questions: ["Complete issue #41, then retry this issue."],
+            },
+            fingerprint: {
+                updatedAt: "2026-08-28T00:00:00.000Z",
+                commentCount: 0,
+            },
+        });
     });
 
     test("executes through an explicitly supplied service", async () => {
@@ -365,16 +417,18 @@ describe("IssueExecutor", () => {
         });
     }
 
-    test("reuses a persisted complexity decision when retrying an issue", async () => {
+    test("grounds before assessing or reusing complexity and running workflow", async () => {
         let assessmentCalls = 0;
         let groundingCalls = 0;
         let implementationCalls = 0;
+        const calls: string[] = [];
         const stores = makeIssueArtifactStoreService();
         const executor = makeIssueExecutorService(
             stores,
             {
                 assess: async () => {
                     assessmentCalls += 1;
+                    calls.push("complexity");
                     return {
                         decision: {
                             complexity: ComplexityLevel.Level2,
@@ -387,6 +441,7 @@ describe("IssueExecutor", () => {
             {
                 execute: async () => {
                     implementationCalls += 1;
+                    calls.push("implementation");
                     return {
                         kind: IssueExecutionOutcomeKind.Skipped,
                         reason: "test retry",
@@ -402,6 +457,7 @@ describe("IssueExecutor", () => {
             {
                 assess: async () => {
                     groundingCalls += 1;
+                    calls.push("grounding");
                     return {
                         sessionID: `grounding-${groundingCalls}`,
                         decision: {
@@ -417,6 +473,13 @@ describe("IssueExecutor", () => {
         expect(assessmentCalls).toBe(1);
         expect(groundingCalls).toBe(2);
         expect(implementationCalls).toBe(2);
+        expect(calls).toEqual([
+            "grounding",
+            "complexity",
+            "implementation",
+            "grounding",
+            "implementation",
+        ]);
     });
 
     test.each([
@@ -619,6 +682,84 @@ describe("IssueExecutor", () => {
 
         expect(outcome.kind).toBe(IssueExecutionOutcomeKind.NeedsAttention);
         expect(implementationCalls).toBe(0);
+    });
+
+    test("does not route complexity needs-attention signals", async () => {
+        const calls: string[] = [];
+        let routerCalls = 0;
+        const outcome = await makeIssueExecutorService(
+            makeIssueArtifactStoreService(),
+            {
+                assess: async () => {
+                    calls.push("complexity");
+                    return {
+                        decision: {
+                            complexity: ComplexityLevel.Level2,
+                            rationale:
+                                "The actionable issue can be implemented.",
+                        },
+                        sessionID: "complexity-session",
+                        needsAttention: {
+                            reason: "missing_information" as const,
+                            message:
+                                "A complexity-stage signal must be ignored.",
+                        },
+                    };
+                },
+            },
+            {
+                execute: async () => {
+                    calls.push("implementation");
+                    return {
+                        kind: IssueExecutionOutcomeKind.Completed,
+                        completion: "pushed-commit",
+                        commitSha: "implementation-sha",
+                    } as const;
+                },
+            },
+            {
+                execute: async () => {
+                    calls.push("decomposition");
+                    throw new Error("must not decompose");
+                },
+            },
+            {
+                assess: async () => {
+                    calls.push("grounding");
+                    return {
+                        sessionID: "grounding-session",
+                        decision: {
+                            disposition: GroundingDisposition.Actionable,
+                        },
+                    };
+                },
+            },
+            unusedResolutionVerification,
+            undefined,
+            {
+                route: async () => {
+                    routerCalls += 1;
+                    throw new Error(
+                        "complexity must not route needs attention",
+                    );
+                },
+            },
+        ).execute({
+            ...context(42),
+            repositoryPath: "/workspace/repository",
+            repositoryInvariant: {
+                capture: async () => ({ branch: "main", head: "abc123" }),
+                verify: async () => {},
+            },
+        } as IssueExecutionContext);
+
+        expect(calls).toEqual(["grounding", "complexity", "implementation"]);
+        expect(routerCalls).toBe(0);
+        expect(outcome).toEqual({
+            kind: IssueExecutionOutcomeKind.Completed,
+            completion: "pushed-commit",
+            commitSha: "implementation-sha",
+        });
     });
 
     test("turns a missing complexity decision into a failed outcome", async () => {
@@ -987,50 +1128,78 @@ describe("IssueExecutor", () => {
             verify: async () => ({
                 sessionID: "verification-session",
                 decision: {
-                    status: "uncertain",
-                    summary: "No conclusion.",
+                    status: "invalid",
+                    summary: "Malformed conclusion.",
                     evidence: [],
                 },
             }),
+            message: expect.stringContaining(
+                "Fresh resolution verification failed:",
+            ),
         },
         {
             name: "thrown",
             verify: async () => {
                 throw new Error("verifier unavailable");
             },
+            message:
+                "Fresh resolution verification failed: verifier unavailable",
         },
     ])(
-        "fails closed for $name already-resolved verification",
-        async ({ verify }) => {
+        "fails closed for $name already-resolved verification without running a workflow",
+        async ({ verify, message }) => {
+            const calls: string[] = [];
+            const stores = makeIssueArtifactStoreService();
             const outcome = await makeIssueExecutorService(
-                makeIssueArtifactStoreService(),
+                stores,
                 {
                     assess: async () => {
+                        calls.push("complexity");
                         throw new Error("must not assess complexity");
                     },
                 },
                 {
                     execute: async () => {
+                        calls.push("implementation");
                         throw new Error("must not implement");
                     },
                 },
                 {
                     execute: async () => {
+                        calls.push("decomposition");
                         throw new Error("must not decompose");
                     },
                 },
                 {
-                    assess: async () => ({
-                        sessionID: "grounding-session",
-                        decision: {
-                            disposition: GroundingDisposition.AlreadyResolved,
-                        },
-                    }),
+                    assess: async () => {
+                        calls.push("grounding");
+                        return {
+                            sessionID: "grounding-session",
+                            decision: {
+                                disposition:
+                                    GroundingDisposition.AlreadyResolved,
+                            },
+                        };
+                    },
                 },
-                { verify } as never,
+                {
+                    verify: async () => {
+                        calls.push("verification");
+                        return await verify();
+                    },
+                } as never,
             ).execute(context(42));
 
-            expect(outcome.kind).toBe(IssueExecutionOutcomeKind.Failed);
+            expect(calls).toEqual(["grounding", "verification"]);
+            expect(outcome).toEqual({
+                kind: IssueExecutionOutcomeKind.Failed,
+                message,
+            });
+            expect(
+                (await stores.forIssue(42)).has(
+                    IssueArtifactKind.IssueResolutionDecision,
+                ),
+            ).toBe(false);
         },
     );
 });
