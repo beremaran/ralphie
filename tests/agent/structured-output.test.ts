@@ -4,6 +4,10 @@ import { z } from "zod";
 
 import { requestStructuredOutput } from "../../src/agent/structured-output.ts";
 import {
+    groundingDecisionSchema,
+    GroundingDisposition,
+} from "../../src/issues/decisions.ts";
+import {
     PI_DECISION_PERMISSION_POLICY,
     type PiAssistantErrorKind,
     makePiSessionDiagnostics,
@@ -167,6 +171,51 @@ describe("Pi structured output", () => {
                 modelID: "anthropic/claude-sonnet",
             },
             variant: "high",
+        });
+    });
+
+    test("flattens discriminated-union schemas for the tool contract", async () => {
+        let promptParameters: unknown;
+        const client = {
+            session: {
+                create: async () => ({ data: { id: "session-1" } }),
+                prompt: async (parameters: unknown) => {
+                    promptParameters = parameters;
+                    return {
+                        data: {
+                            info: assistantInfo({ disposition: "actionable" }),
+                            parts: [],
+                        },
+                    };
+                },
+            },
+        } as unknown as PiClient;
+
+        const result = await requestStructuredOutput(client, {
+            directory: "/workspace",
+            title: "Grounding decision",
+            prompt: "Decide.",
+            schema: groundingDecisionSchema,
+        });
+
+        expect(result.output).toEqual({
+            disposition: GroundingDisposition.Actionable,
+        });
+        const format = (
+            promptParameters as {
+                format: { schema: Record<string, unknown> };
+            }
+        ).format;
+        expect(format.schema).not.toHaveProperty("oneOf");
+        expect(format.schema).toMatchObject({
+            type: "object",
+            required: ["disposition"],
+            properties: {
+                disposition: {
+                    type: "string",
+                    enum: ["actionable", "already_resolved", "needs_attention"],
+                },
+            },
         });
     });
 

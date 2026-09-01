@@ -2,6 +2,7 @@ import type { PiClient, PiPermissionRuleset } from "../pi/client.ts";
 import { z } from "zod";
 
 import { RalphieError } from "../shared/error.ts";
+import { flattenDiscriminatedUnionForTool } from "./json-schema.ts";
 import type { PiModel } from "./model.ts";
 import {
     PI_DECISION_PERMISSION_POLICY,
@@ -98,7 +99,9 @@ const promptInput = <Output>(
     ...(request.variant === undefined ? {} : { variant: request.variant }),
     format: {
         type: "json_schema" as const,
-        schema: z.toJSONSchema(request.schema),
+        schema: flattenDiscriminatedUnionForTool(
+            z.toJSONSchema(request.schema),
+        ),
         retryCount: request.retryCount ?? 2,
         validate: (value: unknown) =>
             validateStructuredOutput(request.schema, value),

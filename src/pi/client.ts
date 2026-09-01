@@ -10,10 +10,16 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { randomUUID } from "node:crypto";
 
+import { stripExplicitNulls } from "../agent/json-schema.ts";
 import {
     PI_NEEDS_ATTENTION_MESSAGE_LIMIT,
     PI_NEEDS_ATTENTION_REASONS,
 } from "../agent/task-session.ts";
+import { RalphieError } from "../shared/error.ts";
+import {
+    makeSubmitResultGuard,
+    type SubmitResultGuard,
+} from "./submit-result-guard.ts";
 
 export type PiModel = {
     readonly providerID: string;
@@ -344,6 +350,7 @@ const makeNeedsAttentionTool = (
 const makeStructuredResultTool = (
     format: PromptFormat,
     setStructured: (value: unknown) => void,
+    guard: SubmitResultGuard,
 ): AnyToolDefinition =>
     ({
         name: "submit_result",
@@ -356,18 +363,27 @@ const makeStructuredResultTool = (
             strict: "prefer",
         },
         executionMode: "sequential",
+        prepareArguments: (args: unknown) => {
+            guard.beginAttempt(args);
+            return args;
+        },
         execute: async (_toolCallId, params) => {
+            const candidate = stripExplicitNulls(params);
             if (format.validate !== undefined) {
-                const validation = format.validate(params);
+                const validation = format.validate(candidate);
                 if (!validation.success) {
-                    throw new Error(
+                    const failure =
                         validation.error === undefined
-                            ? "Structured result failed Ralphie's schema validation. Correct the arguments and call submit_result again."
-                            : `Structured result failed Ralphie's schema validation:\n${validation.error}\nCorrect the arguments and call submit_result again.`,
+                            ? "Structured result failed Ralphie's schema validation."
+                            : `Structured result failed Ralphie's schema validation:\n${validation.error}`;
+                    guard.recordFailure(failure);
+                    throw new Error(
+                        `${failure}\nCorrect the arguments and call submit_result again.`,
                     );
                 }
             }
-            setStructured(params);
+            guard.recordSuccess();
+            setStructured(candidate);
             return {
                 content: [
                     {
@@ -446,6 +462,7 @@ const makePromptTools = (
     created: PendingSession,
     setStructured: (value: unknown) => void,
     setNeedsAttention: (value: unknown) => void,
+    guard: SubmitResultGuard,
 ): PromptTools => {
     const readOnly =
         created.permission?.some(
@@ -460,7 +477,9 @@ const makePromptTools = (
     customTools.push(makeNeedsAttentionTool(setNeedsAttention));
     activeTools.push("request_needs_attention");
     if (input.format !== undefined) {
-        customTools.push(makeStructuredResultTool(input.format, setStructured));
+        customTools.push(
+            makeStructuredResultTool(input.format, setStructured, guard),
+        );
         activeTools.push("submit_result");
     }
     return { activeTools, customTools };
@@ -562,6 +581,7 @@ export const makePiClient = (
 
                 let structured: unknown;
                 let needsAttention: unknown;
+                const guard = makeSubmitResultGuard();
                 const tools = makePromptTools(
                     input,
                     created,
@@ -571,6 +591,7 @@ export const makePiClient = (
                     (value) => {
                         needsAttention ??= value;
                     },
+                    guard,
                 );
                 const session = await createPromptSession(
                     modelRuntime,
@@ -580,6 +601,7 @@ export const makePiClient = (
                     agentDir,
                 );
                 active.add(session);
+                guard.onTrip(() => void session.abort());
                 const unsubscribe =
                     eventListener === undefined
                         ? undefined
@@ -605,6 +627,16 @@ export const makePiClient = (
                         prompt,
                         () => structured,
                     );
+                    const tripReason = guard.tripReason();
+                    if (tripReason !== undefined) {
+                        throw new RalphieError({
+                            message: `${tripReason}.${
+                                input.model === undefined
+                                    ? ""
+                                    : ` Model: ${input.model.providerID}/${input.model.modelID}.`
+                            }`,
+                        });
+                    }
                     return makePromptResponse(
                         input,
                         assistant,

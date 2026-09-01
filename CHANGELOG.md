@@ -16,6 +16,20 @@ All notable changes to Ralphie are documented here. The project follows
 - Build each native release binary with its explicit Bun target and validate its
   executable header and architecture before emitting checksums.
 
+### Fixed
+
+- Structured decision tools now hand providers a flattened single-object schema
+  for discriminated-union decisions (issue grounding, needs attention), and
+  explicit `null` arguments are stripped before validation. Providers and models
+  that silently drop tool-call arguments for root-level `oneOf` tool schemas
+  (for example, GLM relays failing every `submit_result` with empty arguments)
+  can now comply, while branch-strict requirements remain enforced by the Zod
+  decision validation.
+- Repeated `submit_result` attempts that never produce a schema-valid result now
+  trip a circuit breaker that aborts the Pi session after five consecutive
+  failures and reports the likely cause (including dropped tool-call arguments)
+  instead of letting the model retry until the prompt-attempt budget expires.
+
 ### Changed
 
 - The protected native release publisher now gates on every validated build
@@ -84,6 +98,10 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Added
 
+- `bun run probe:structured-output` accepts `--union` to pre-flight a model
+  against the exact grounding decision contract (flattened as production sends
+  it) plus `--model provider/model`, `--agent`, and `--variant` for targeting a
+  specific model before a run.
 - The `pr` gate now streams dedicated `pr-gate` progress events for
   registration (pull-request number and exact head SHA), poll progress only
   for meaningful check transitions (registration, checks registering,

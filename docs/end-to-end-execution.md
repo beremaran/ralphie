@@ -264,6 +264,19 @@ mutation. Every decision task is schema-validated; invalid output or Pi
 failure becomes a failed issue outcome without proceeding to the next
 operation.
 
+Decision schemas that are discriminated unions (issue grounding and its
+needs-attention route) are flattened into a single object schema for the
+`submit_result` tool contract: the disposition literal becomes an enum, the
+branch-specific fields stay declared but optional, and the authoritative Zod
+validation still enforces each branch exactly. Some models and providers
+silently drop tool-call arguments for root-level `oneOf` schemas, and the
+flattened shape keeps those providers compliant; explicit `null` argument
+values are likewise treated as absent before validation. Calls that still
+never produce a schema-valid result are bounded by a circuit breaker: after
+five consecutive failed `submit_result` attempts, the session is aborted and
+the decision fails fast with a diagnostic naming the likely cause instead of
+letting the model retry until the prompt-attempt budget is exhausted.
+
 ## 5. Implementation path: complexity 0–3
 
 ```mermaid
