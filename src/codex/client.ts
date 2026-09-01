@@ -175,14 +175,6 @@ const agentText = (event: Record<string, unknown>): string | undefined => {
         : undefined;
 };
 
-const errorEventDetail = (
-    events: ReadonlyArray<Record<string, unknown>>,
-): string | undefined => {
-    const errors = events.filter((event) => event.type === "error");
-    if (errors.length === 0) return undefined;
-    return JSON.stringify(errors.at(-1)).slice(0, STDERR_LIMIT);
-};
-
 const run = async (input: {
     readonly command: string;
     readonly request: PromptInput;
@@ -286,12 +278,8 @@ const run = async (input: {
                 });
             }
             if (exitCode !== 0) {
-                const detail =
-                    stderr.slice(0, STDERR_LIMIT).trim() ||
-                    errorEventDetail(events) ||
-                    "no diagnostics";
                 throw new RalphieError({
-                    message: `Codex exited with status ${exitCode}: ${detail}`,
+                    message: `Codex exited with status ${exitCode}: ${stderr.slice(0, STDERR_LIMIT).trim() || "no stderr"}`,
                 });
             }
             if (threadID === undefined || finalText === undefined) {
