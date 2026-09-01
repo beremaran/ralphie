@@ -515,6 +515,29 @@ const testRuntime = (
     };
 };
 
+const issueWorkCallPrefixes = [
+    "prepareFeatureBranch:",
+    "executeIssue:",
+    "dryRunIssue:",
+    "pushBranch:",
+    "closeIssue:",
+    "createPullRequest:",
+    "publishReviews:",
+    "observePrGate",
+    "readPullRequest:",
+    "mergePullRequest:",
+    "restoreBase:",
+    "restoreCheckout",
+] as const;
+
+const expectNoIssueWork = (calls: ReadonlyArray<string>): void => {
+    expect(
+        calls.filter((call) =>
+            issueWorkCallPrefixes.some((prefix) => call.startsWith(prefix)),
+        ),
+    ).toEqual([]);
+};
+
 const baseOptions = {
     repo: "owner/repo",
     branch: "develop",
@@ -2437,8 +2460,15 @@ describe("workflow", () => {
         );
 
         expect(contexts[0]?.issue).toEqual(refreshed);
-        expect(calls.indexOf("refreshIssue:42")).toBeLessThan(
+        const refreshIndex = calls.indexOf("refreshIssue:42");
+        expect(
+            calls.indexOf("listIssues:owner/repo:bug:created:asc"),
+        ).toBeLessThan(refreshIndex);
+        expect(refreshIndex).toBeLessThan(
             calls.indexOf("prepareFeatureBranch:ralphie/issue-42:develop"),
+        );
+        expect(refreshIndex).toBeLessThan(
+            calls.indexOf("pushBranch:ralphie/issue-42"),
         );
     });
 
@@ -2456,52 +2486,160 @@ describe("workflow", () => {
             ),
         ).rejects.toThrow("refresh failed");
 
-        expect(calls).not.toContainEqual(
-            expect.stringContaining("executeIssue"),
-        );
-        expect(calls).not.toContainEqual(
-            expect.stringContaining("prepareFeatureBranch"),
-        );
+        expect(
+            calls.indexOf("listIssues:owner/repo:bug:created:asc"),
+        ).toBeLessThan(calls.indexOf("refreshIssue:42"));
+        expectNoIssueWork(calls);
+        expect(states.at(-1)).toMatchObject({
+            status: RunStateStatus.Active,
+            queue: { processedCount: 0 },
+        });
         expect(
             states.at(-1)?.queue.pending.map(({ number }) => number),
         ).toEqual([42]);
     });
 
     test.each([
-        ["closed", { ...firstIssue, state: "closed" as const }],
-        ["missing required labels", { ...firstIssue, labels: ["ready"] }],
-    ])("skips %s live issues and continues", async (_name, ineligible) => {
-        const calls: string[] = [];
-        const states: RunState[] = [];
-        const summary = await workflow(
-            baseOptions,
-            testRuntime(calls, states, {
-                issueLists: [[firstIssue, secondIssue]],
-                refreshIssues: [ineligible, secondIssue],
-            }),
-        );
+        {
+            name: "closed",
+            ineligible: { ...firstIssue, state: "closed" as const },
+            reason: "Live reconciliation found that the issue is no longer open.",
+        },
+        {
+            name: "missing required labels",
+            ineligible: { ...firstIssue, labels: ["ready"] },
+            reason: "Live reconciliation found that the issue no longer has every required label.",
+        },
+    ])(
+        "skips $name live issues, persists the reason, and continues",
+        async ({ ineligible, reason }) => {
+            const calls: string[] = [];
+            const states: RunState[] = [];
+            const skippedOutcome = {
+                kind: IssueExecutionOutcomeKind.Skipped,
+                reason,
+            } as const;
+            const summary = await workflow(
+                baseOptions,
+                testRuntime(calls, states, {
+                    issueLists: [[firstIssue, secondIssue]],
+                    refreshIssues: [ineligible, secondIssue],
+                }),
+            );
 
-        expect(summary.outcomes[0]).toMatchObject({
-            issueNumber: 42,
-            outcome: { kind: IssueExecutionOutcomeKind.Skipped },
-        });
-        expect(summary.outcomes[1]).toMatchObject({
-            issueNumber: 43,
-            outcome: { kind: IssueExecutionOutcomeKind.Completed },
-        });
-        expect(calls).not.toContainEqual(
-            expect.stringContaining("executeIssue:42"),
-        );
-        expect(calls).not.toContain("closeIssue:42");
-        expect(calls).toContainEqual(
-            expect.stringContaining("executeIssue:43"),
-        );
-        expect(states.at(-1)?.queue.pending).toEqual([]);
-        expect(states.at(-1)?.queue.completedIssueNumbers).toEqual([42, 43]);
-        expect(states.at(-1)?.outcomes[0]?.outcome.kind).toBe(
-            IssueExecutionOutcomeKind.Skipped,
-        );
-    });
+            expect(summary.outcomes).toEqual([
+                { issueNumber: 42, outcome: skippedOutcome },
+                {
+                    issueNumber: 43,
+                    outcome: expect.objectContaining({
+                        kind: IssueExecutionOutcomeKind.Completed,
+                    }),
+                },
+            ]);
+            expect(summary.counts.skipped).toBe(1);
+            expect(calls).not.toContainEqual(
+                expect.stringContaining("executeIssue:42"),
+            );
+            expect(calls).not.toContain("closeIssue:42");
+            expect(calls).toContainEqual(
+                expect.stringContaining("executeIssue:43"),
+            );
+            expect(calls.indexOf("refreshIssue:42")).toBeLessThan(
+                calls.indexOf("refreshIssue:43"),
+            );
+            expect(calls.indexOf("refreshIssue:43")).toBeLessThan(
+                calls.findIndex((call) => call.startsWith("executeIssue:43")),
+            );
+            const skippedState = states.find(({ outcomes }) =>
+                outcomes.some(
+                    ({ issueNumber, outcome }) =>
+                        issueNumber === 42 &&
+                        outcome.kind === IssueExecutionOutcomeKind.Skipped,
+                ),
+            );
+            expect(skippedState?.outcomes[0]).toEqual({
+                issueNumber: 42,
+                outcome: skippedOutcome,
+            });
+            expect(
+                skippedState?.queue.pending.map(({ number }) => number),
+            ).not.toContain(42);
+            expect(states.at(-1)).toMatchObject({
+                status: RunStateStatus.Complete,
+                queue: {
+                    pending: [],
+                    completedIssueNumbers: [42, 43],
+                    processedCount: 1,
+                },
+            });
+        },
+    );
+
+    test.each([
+        {
+            name: "closed",
+            ineligible: { ...firstIssue, state: "closed" as const },
+            reason: "Live reconciliation found that the issue is no longer open.",
+        },
+        {
+            name: "missing its configured label",
+            ineligible: { ...firstIssue, labels: ["ready"] },
+            reason: "Live reconciliation found that the issue no longer has every required label.",
+        },
+    ])(
+        "does no issue or mutation work when a PR-mode snapshot is $name",
+        async ({ ineligible, reason }) => {
+            const calls: string[] = [];
+            const states: RunState[] = [];
+            const summary = await workflow(
+                { ...baseOptions, workflow: WorkflowMode.Pr },
+                testRuntime(calls, states, {
+                    issueLists: [[firstIssue]],
+                    refreshIssues: [ineligible],
+                }),
+            );
+
+            expect(summary.outcomes).toEqual([
+                {
+                    issueNumber: 42,
+                    outcome: {
+                        kind: IssueExecutionOutcomeKind.Skipped,
+                        reason,
+                    },
+                },
+            ]);
+            expectNoIssueWork(calls);
+            const completedState = states.at(-1);
+            expect(completedState).toMatchObject({
+                status: RunStateStatus.Complete,
+                queue: {
+                    pending: [],
+                    completedIssueNumbers: [42],
+                    processedCount: 0,
+                },
+            });
+            expect(completedState?.activeIssue).toBeUndefined();
+            if (completedState === undefined)
+                throw new Error("Missing completed state");
+
+            const resumedCalls: string[] = [];
+            const resumedStates: RunState[] = [];
+            const resumed = await workflow(
+                {
+                    ...baseOptions,
+                    workflow: WorkflowMode.Pr,
+                    resumeState: completedState,
+                },
+                testRuntime(resumedCalls, resumedStates, {
+                    issueLists: [[]],
+                }),
+            );
+            expect(resumed.outcomes).toEqual(summary.outcomes);
+            expect(resumedCalls).not.toContain("refreshIssue:42");
+            expectNoIssueWork(resumedCalls);
+            expect(resumedStates.at(-1)?.queue.pending).toEqual([]);
+        },
+    );
 
     test("completes a decomposed parent whose sub-issues all closed earlier", async () => {
         const calls: string[] = [];

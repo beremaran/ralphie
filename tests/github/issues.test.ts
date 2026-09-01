@@ -216,45 +216,57 @@ describe("GitHub issues", () => {
         );
     });
 
-    test("maps issue refresh failures into the domain error", async () => {
+    test("maps issue get failures without attempting comment pagination", async () => {
+        const calls: string[] = [];
         const client = {
             rest: {
                 issues: {
                     get: async () => {
+                        calls.push("get");
                         throw new Error("issue unavailable");
                     },
                     listComments: Symbol("listComments"),
                 },
+            },
+            paginate: async () => {
+                calls.push("comments");
+                return [];
             },
         } as unknown as Octokit;
 
         await expect(
             makeGitHubIssuesService().refresh(client, "owner/repository", 12),
         ).rejects.toThrow("Failed to refresh issue #12");
+        expect(calls).toEqual(["get"]);
     });
 
-    test("maps comment refresh failures into the domain error", async () => {
+    test("maps comment pagination failures after the issue get", async () => {
+        const calls: string[] = [];
         const listComments = Symbol("listComments");
         const client = {
             rest: {
                 issues: {
-                    get: async () => ({
-                        data: {
-                            number: 12,
-                            title: "Issue",
-                            html_url:
-                                "https://github.com/owner/repository/issues/12",
-                            body: null,
-                            state: "open",
-                            updated_at: "2026-08-28T00:00:00.000Z",
-                            comments: 1,
-                            labels: [],
-                        },
-                    }),
+                    get: async () => {
+                        calls.push("get");
+                        return {
+                            data: {
+                                number: 12,
+                                title: "Issue",
+                                html_url:
+                                    "https://github.com/owner/repository/issues/12",
+                                body: null,
+                                state: "open",
+                                updated_at: "2026-08-28T00:00:00.000Z",
+                                comments: 1,
+                                labels: [],
+                            },
+                        };
+                    },
                     listComments,
                 },
             },
             paginate: async () => {
+                calls.push("comments");
                 throw new Error("comments unavailable");
             },
         } as unknown as Octokit;
@@ -262,5 +274,6 @@ describe("GitHub issues", () => {
         await expect(
             makeGitHubIssuesService().refresh(client, "owner/repository", 12),
         ).rejects.toThrow("Failed to refresh issue #12");
+        expect(calls).toEqual(["get", "comments"]);
     });
 });
