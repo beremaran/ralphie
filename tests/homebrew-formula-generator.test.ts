@@ -108,6 +108,16 @@ describe("Homebrew formula generator", () => {
                 ),
             }),
         ).toThrow("64 lowercase hexadecimal");
+        expect(() =>
+            parseHomebrewReleaseMetadata({
+                ...metadata,
+                assets: metadata.assets.map((asset, index) =>
+                    index === 1
+                        ? { ...asset, sha256: checksums["darwin-arm64"] }
+                        : asset,
+                ),
+            }),
+        ).toThrow("copied between assets");
     });
 
     test("fails closed when formula markers are not a single ordered pair", async () => {

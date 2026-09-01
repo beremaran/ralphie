@@ -68,6 +68,7 @@ const validateAssets = (
     );
 
     const names = new Set<string>();
+    const checksums = new Set<string>();
     const assets: HomebrewReleaseAsset[] = [];
     for (const [index, rawAsset] of value.entries()) {
         const asset = asRecord(rawAsset, `Release metadata asset ${index + 1}`);
@@ -96,6 +97,11 @@ const validateAssets = (
             !/^0+$/.test(sha256),
             `Invalid SHA-256 for asset '${name}'; placeholder values are not allowed.`,
         );
+        assert(
+            !checksums.has(sha256),
+            `Release metadata contains a checksum copied between assets: '${sha256}'.`,
+        );
+        checksums.add(sha256);
         assets.push({ name, sha256 });
     }
 
