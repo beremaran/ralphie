@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -199,6 +199,13 @@ describe("IssueExecutor", () => {
         } as IssueExecutionContext;
 
         await executor.execute(base);
+        const reused = await executor.execute(base);
+        expect(groundingCalls).toBe(1);
+        expect(reused).toMatchObject({
+            kind: IssueExecutionOutcomeKind.NeedsAttention,
+            summary: "Grounding 1",
+        });
+
         const result = await executor.execute({
             ...base,
             issue: { ...base.issue, ...change },
@@ -453,6 +460,95 @@ describe("IssueExecutor", () => {
         });
 
         expect(assessmentCalls).toBe(2);
+    });
+
+    test("migrates an unfingerprinted complexity decision before assessing fresh work", async () => {
+        const workspace = await mkdtemp(join(tmpdir(), "ralphie-legacy-"));
+        try {
+            const path = join(
+                workspace,
+                ".ralphie",
+                "runs",
+                "legacy-run",
+                "issues",
+                "42",
+                "artifacts.json",
+            );
+            await mkdir(join(path, ".."), { recursive: true });
+            await writeFile(
+                path,
+                JSON.stringify({
+                    version: 2,
+                    issueNumber: 42,
+                    repository: "owner/repo",
+                    artifacts: {
+                        [IssueArtifactKind.ComplexityDecision]: {
+                            complexity: ComplexityLevel.Level5,
+                            rationale: "Legacy unfingerprinted decision.",
+                        },
+                    },
+                }),
+            );
+            let assessmentCalls = 0;
+            let implementationCalls = 0;
+            let decompositionCalls = 0;
+            const executor = makeIssueExecutorService(
+                makeIssueArtifactStoreService(),
+                {
+                    assess: async () => ({
+                        decision: {
+                            complexity: ComplexityLevel.Level2,
+                            rationale: `Fresh assessment ${++assessmentCalls}.`,
+                        },
+                        sessionID: "fresh-complexity",
+                    }),
+                },
+                {
+                    execute: async () => {
+                        implementationCalls += 1;
+                        return {
+                            kind: IssueExecutionOutcomeKind.Skipped,
+                            reason: "fresh implementation route",
+                        } as const;
+                    },
+                },
+                {
+                    execute: async () => {
+                        decompositionCalls += 1;
+                        return {
+                            kind: IssueExecutionOutcomeKind.Decomposed,
+                            childIssueNumbers: [],
+                        } as const;
+                    },
+                },
+                actionableGrounding,
+                unusedResolutionVerification,
+            );
+
+            await executor.execute({
+                ...context(42),
+                repository: "owner/repo",
+                workspace,
+                runId: "legacy-run",
+            });
+
+            expect(assessmentCalls).toBe(1);
+            expect(implementationCalls).toBe(1);
+            expect(decompositionCalls).toBe(0);
+            const persisted = await Bun.file(path).json();
+            expect(persisted.version).toBe(4);
+            expect(
+                persisted.artifacts[IssueArtifactKind.ComplexityDecision],
+            ).toMatchObject({
+                decision: { complexity: ComplexityLevel.Level2 },
+                fingerprint: {
+                    updatedAt: "2026-08-28T00:00:00.000Z",
+                    commentCount: 0,
+                },
+            });
+        } finally {
+            await rm(workspace, { recursive: true, force: true });
+        }
     });
 
     test("routes a pending handoff before a cached complexity decision", async () => {

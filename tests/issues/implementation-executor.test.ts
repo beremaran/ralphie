@@ -240,54 +240,61 @@ const run = async (
     });
 
 describe("implementation executor", () => {
-    test("reuses only a matching resolution decision", async () => {
-        const artifacts = await makeIssueArtifactStore(42);
-        const decision = {
-            status: IssueResolutionStatus.Resolved,
-            summary: "The issue is already resolved.",
-            evidence: ["Focused verification passed."],
-        };
-        await artifacts.write(IssueArtifactKind.IssueResolutionDecision, {
-            decision,
-            fingerprint: {
-                updatedAt: "2026-08-28T00:00:00.000Z",
-                commentCount: 0,
-            },
-        });
-        let verificationCalls = 0;
-        const setup = services({
-            operations: { hasStagedChanges: async () => false },
-            resolutionVerification: {
-                verify: async () => {
-                    verificationCalls += 1;
-                    return { sessionID: "resolution", decision };
+    test.each([
+        ["updatedAt", { updatedAt: "2026-08-29T00:00:00.000Z" }],
+        ["commentCount", { commentCount: 1 }],
+        ["commentVersion", { commentVersion: "2026-08-29T00:00:00.000Z" }],
+    ] as const)(
+        "reuses a matching resolution decision and reverifies after %s changes",
+        async (_field, change) => {
+            const artifacts = await makeIssueArtifactStore(42);
+            const decision = {
+                status: IssueResolutionStatus.Resolved,
+                summary: "The issue is already resolved.",
+                evidence: ["Focused verification passed."],
+            };
+            await artifacts.write(IssueArtifactKind.IssueResolutionDecision, {
+                decision,
+                fingerprint: {
+                    updatedAt: "2026-08-28T00:00:00.000Z",
+                    commentCount: 0,
                 },
-            },
-        });
-        const sessions: string[] = [];
-        const client = piClient([implementation], sessions);
-
-        const reused = await setup.executor.execute({
-            context: issueContext(client),
-            artifacts,
-        });
-        const changed = issueContext(client);
-        const refreshed = await setup.executor.execute({
-            context: {
-                ...changed,
-                issue: {
-                    ...changed.issue,
-                    commentVersion: "2026-08-29T00:00:00.000Z",
+            });
+            let verificationCalls = 0;
+            const setup = services({
+                operations: { hasStagedChanges: async () => false },
+                resolutionVerification: {
+                    verify: async () => {
+                        verificationCalls += 1;
+                        return { sessionID: "resolution", decision };
+                    },
                 },
-            },
-            artifacts,
-        });
+            });
+            const sessions: string[] = [];
+            const client = piClient([implementation], sessions);
 
-        expect(reused).toMatchObject({ completion: "already-resolved" });
-        expect(refreshed).toMatchObject({ completion: "already-resolved" });
-        expect(verificationCalls).toBe(1);
-        expect(sessions).toHaveLength(1);
-    });
+            const reused = await setup.executor.execute({
+                context: issueContext(client),
+                artifacts,
+            });
+            const changed = issueContext(client);
+            const refreshed = await setup.executor.execute({
+                context: {
+                    ...changed,
+                    issue: { ...changed.issue, ...change },
+                },
+                artifacts,
+            });
+
+            expect(reused).toMatchObject({ completion: "already-resolved" });
+            expect(refreshed).toMatchObject({ completion: "already-resolved" });
+            expect(verificationCalls).toBe(1);
+            expect(sessions).toHaveLength(1);
+            expect(
+                await artifacts.read(IssueArtifactKind.IssueResolutionDecision),
+            ).toMatchObject({ fingerprint: change });
+        },
+    );
 
     test("implements, reviews, commits, and pushes after first-pass approval", async () => {
         const safetyInputs: GitRemoteSafetyInput[] = [];

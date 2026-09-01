@@ -440,71 +440,194 @@ describe("per-issue artifact store", () => {
         }
     });
 
-    test("invalidates only issue-derived decisions when freshness changes", async () => {
-        const store = await makeIssueArtifactStore(42);
-        await store.write(
-            IssueArtifactKind.ComplexityDecision,
-            complexityArtifact({
+    test("durably invalidates only stale issue-derived decisions", async () => {
+        const workspace = await mkdtemp(join(tmpdir(), "ralphie-artifacts-"));
+        try {
+            const scope = {
+                workspace,
+                runId: "run-decision-freshness",
+                repository: "owner/repo",
+            };
+            const complexity = complexityArtifact({
                 complexity: ComplexityLevel.Level2,
                 rationale: "Previously assessed.",
-            }),
-        );
-        await store.write(IssueArtifactKind.IssueResolutionDecision, {
-            decision: {
-                status: IssueResolutionStatus.Resolved,
-                summary: "The issue was already resolved.",
-                evidence: ["Focused verification passed."],
-            },
-            fingerprint,
-        });
-        await store.write(IssueArtifactKind.NeedsAttentionDecision, {
-            decision: {
-                disposition: GroundingDisposition.NeedsAttention,
-                reason: NeedsAttentionReason.MissingInformation,
-                summary: "The target is unspecified.",
-                evidence: ["No target is named."],
-                questions: ["Which target should change?"],
-            },
-            fingerprint,
-        });
-        await store.write(IssueArtifactKind.IssueCheckpoint, checkpoint);
-        await store.appendReview(review(1));
-        await store.write(IssueArtifactKind.CreatedCommit, {
-            sha: "commit-sha",
-            treeSha: "tree-sha",
-        });
-        await store.recordCreatedIssue("child", 101);
+            });
+            const resolution = {
+                decision: {
+                    status: IssueResolutionStatus.Resolved,
+                    summary: "The issue was already resolved.",
+                    evidence: ["Focused verification passed."],
+                },
+                fingerprint,
+            };
+            const needsAttention = {
+                decision: {
+                    disposition: GroundingDisposition.NeedsAttention as const,
+                    reason: NeedsAttentionReason.MissingInformation,
+                    summary: "The target is unspecified.",
+                    evidence: ["No target is named."],
+                    questions: ["Which target should change?"],
+                },
+                fingerprint,
+            };
+            const handoff = {
+                request: {
+                    reason: "missing_information" as const,
+                    message: "The target is unspecified.",
+                },
+                fingerprint,
+                checkpoint,
+            };
+            const breakdown = {
+                rationale: "Split the independent work.",
+                issues: [
+                    {
+                        key: "child",
+                        title: "Implement the child task",
+                        body: "Implement the child task.",
+                        estimatedComplexity:
+                            ImplementationComplexityLevel.Level2,
+                        dependsOn: [],
+                    },
+                    {
+                        key: "dependent",
+                        title: "Implement the dependent task",
+                        body: "Implement the dependent task.",
+                        estimatedComplexity:
+                            ImplementationComplexityLevel.Level2,
+                        dependsOn: ["child"],
+                    },
+                ],
+            };
+            const pullRequestEvidence = pullRequestReview(1);
+            const first = await makeDurableIssueArtifactStore(42, scope);
+            await first.write(IssueArtifactKind.ComplexityDecision, complexity);
+            await first.write(
+                IssueArtifactKind.IssueResolutionDecision,
+                resolution,
+            );
+            await first.write(
+                IssueArtifactKind.NeedsAttentionDecision,
+                needsAttention,
+            );
+            await first.write(IssueArtifactKind.NeedsAttentionHandoff, handoff);
+            await first.write(IssueArtifactKind.IssueCheckpoint, checkpoint);
+            await first.appendReview(review(1));
+            await first.appendPullRequestReview(pullRequestEvidence);
+            await first.write(
+                IssueArtifactKind.ApprovedPullRequestReviewEvidence,
+                pullRequestEvidence,
+            );
+            await first.write(IssueArtifactKind.CommitMessageDecision, {
+                subject: "Implement the child task",
+                body: "Preserve recovery evidence.",
+            });
+            await first.write(IssueArtifactKind.CreatedCommit, {
+                sha: "commit-sha",
+                treeSha: "tree-sha",
+            });
+            await first.write(
+                IssueArtifactKind.IssueBreakdownDecision,
+                breakdown,
+            );
+            await first.recordCreatedIssue("child", 101);
+            await first.recordCreatedIssue("dependent", 102);
+            await first.write(IssueArtifactKind.CreatedIssueDependencies, {
+                child: [],
+                dependent: [101],
+            });
 
-        expect(await store.invalidateStaleIssueDecisions(fingerprint)).toBe(
-            false,
-        );
-        expect(
-            await store.invalidateStaleIssueDecisions({
-                ...fingerprint,
-                commentVersion: "2026-08-29T00:00:00.000Z",
-            }),
-        ).toBe(true);
+            const matching = await makeDurableIssueArtifactStore(42, scope);
+            expect(
+                await matching.read(IssueArtifactKind.ComplexityDecision),
+            ).toEqual(complexity);
+            expect(
+                await matching.read(IssueArtifactKind.IssueResolutionDecision),
+            ).toEqual(resolution);
+            expect(
+                await matching.read(IssueArtifactKind.NeedsAttentionDecision),
+            ).toEqual(needsAttention);
+            expect(
+                await matching.invalidateStaleIssueDecisions(fingerprint),
+            ).toBe(false);
 
-        expect(store.has(IssueArtifactKind.ComplexityDecision)).toBe(false);
-        expect(store.has(IssueArtifactKind.IssueResolutionDecision)).toBe(
-            false,
-        );
-        expect(store.has(IssueArtifactKind.NeedsAttentionDecision)).toBe(false);
-        expect(await store.read(IssueArtifactKind.IssueCheckpoint)).toEqual(
-            checkpoint,
-        );
-        expect(await store.read(IssueArtifactKind.ReviewAttempts)).toEqual([
-            review(1),
-        ]);
-        expect(await store.read(IssueArtifactKind.CreatedCommit)).toEqual({
-            sha: "commit-sha",
-            treeSha: "tree-sha",
-        });
-        expect(await store.read(IssueArtifactKind.CreatedIssueNumbers)).toEqual(
-            {
-                child: 101,
-            },
-        );
+            const matchedReload = await makeDurableIssueArtifactStore(
+                42,
+                scope,
+            );
+            expect(
+                await matchedReload.read(IssueArtifactKind.ComplexityDecision),
+            ).toEqual(complexity);
+            expect(
+                await matchedReload.read(
+                    IssueArtifactKind.IssueResolutionDecision,
+                ),
+            ).toEqual(resolution);
+            expect(
+                await matchedReload.read(
+                    IssueArtifactKind.NeedsAttentionDecision,
+                ),
+            ).toEqual(needsAttention);
+            expect(
+                await matchedReload.invalidateStaleIssueDecisions({
+                    ...fingerprint,
+                    commentVersion: "2026-08-29T00:00:00.000Z",
+                }),
+            ).toBe(true);
+
+            const reloaded = await makeDurableIssueArtifactStore(42, scope);
+            expect(reloaded.has(IssueArtifactKind.ComplexityDecision)).toBe(
+                false,
+            );
+            expect(
+                reloaded.has(IssueArtifactKind.IssueResolutionDecision),
+            ).toBe(false);
+            expect(reloaded.has(IssueArtifactKind.NeedsAttentionDecision)).toBe(
+                false,
+            );
+            expect(
+                await reloaded.read(IssueArtifactKind.IssueCheckpoint),
+            ).toEqual(checkpoint);
+            expect(
+                await reloaded.read(IssueArtifactKind.ReviewAttempts),
+            ).toEqual([review(1)]);
+            expect(
+                await reloaded.read(
+                    IssueArtifactKind.PullRequestReviewAttempts,
+                ),
+            ).toEqual([pullRequestEvidence]);
+            expect(
+                await reloaded.read(
+                    IssueArtifactKind.ApprovedPullRequestReviewEvidence,
+                ),
+            ).toEqual(pullRequestEvidence);
+            expect(
+                await reloaded.read(IssueArtifactKind.NeedsAttentionHandoff),
+            ).toEqual(handoff);
+            expect(
+                await reloaded.read(IssueArtifactKind.CommitMessageDecision),
+            ).toEqual({
+                subject: "Implement the child task",
+                body: "Preserve recovery evidence.",
+            });
+            expect(
+                await reloaded.read(IssueArtifactKind.CreatedCommit),
+            ).toEqual({
+                sha: "commit-sha",
+                treeSha: "tree-sha",
+            });
+            expect(
+                await reloaded.read(IssueArtifactKind.IssueBreakdownDecision),
+            ).toEqual(breakdown);
+            expect(
+                await reloaded.read(IssueArtifactKind.CreatedIssueNumbers),
+            ).toEqual({ child: 101, dependent: 102 });
+            expect(
+                await reloaded.read(IssueArtifactKind.CreatedIssueDependencies),
+            ).toEqual({ child: [], dependent: [101] });
+        } finally {
+            await rm(workspace, { recursive: true, force: true });
+        }
     });
 
     test("atomically removes legacy and invalid issue decisions on load", async () => {
