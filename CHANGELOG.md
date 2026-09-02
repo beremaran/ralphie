@@ -5,6 +5,22 @@ All notable changes to Ralphie are documented here. The project follows
 
 ## [Unreleased]
 
+- Add the deterministic Homebrew branch/pull-request reconciliation seam
+  around the guarded formula candidate (`scripts/reconcile-homebrew-update.ts`,
+  run as `reconcile:homebrew-update`): starting from a fresh fetch of `main`
+  it derives the guarded candidate through the exact generator, permits only
+  `Formula/ralphie.rb` changes inside the generated marker region, uses the
+  deterministic `automation/homebrew-v<version>` branch and
+  `Update Homebrew formula for v<version>` pull request per release, reuses an
+  existing branch and a single matching open pull request, fails on multiple
+  matches, unrelated edits, an unexpected base, or a concurrent head change
+  (never resetting, force-pushing, deleting, or recreating a branch),
+  resolves to `main-current` with zero mutations when `main` already has the
+  verified metadata, and keeps GitHub mutations behind an injected API (fake
+  in tests, GitHub REST adapter over fetch in `createHomebrewUpdateApi`). Add
+  deterministic temporary-git-repository/fake-GitHub coverage under
+  `tests/homebrew-update-reconcile.test.ts`.
+
 - Add the deterministic, fail-closed Homebrew formula change guard
   (`scripts/prepare-homebrew-formula.ts`, run as `prepare:homebrew-formula`):
   it consumes the exact-tag verifier's `ralphie.homebrew-asset-manifest.v1`

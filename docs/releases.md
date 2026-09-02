@@ -383,6 +383,55 @@ The validator also rejects wrong asset names or release versions, malformed
 hashes, and values that differ from the canonical manifest. Never copy one
 platform's checksum to another branch or use a placeholder.
 
+### One guarded branch and pull request per release
+
+The mutation layer around the guarded formula candidate is the deterministic
+seam `scripts/reconcile-homebrew-update.ts` (run as `reconcile:homebrew-update`,
+with `--owner --repo --version --tag --manifest --checkout`). It starts from a
+fresh clone of the tap, runs an ordinary `git fetch origin`, re-derives the
+guarded candidate from the fetched `main` formula through the exact generator,
+and reconciles exactly one branch and one pull request on the fixed `main`
+base:
+
+- the branch is the deterministic `automation/homebrew-v<version>`;
+- the pull-request title is the deterministic
+  `Update Homebrew formula for v<version>`;
+- the pull-request body records the exact tag/version and the verified
+  manifest checksums with no timestamps and no download reference other than
+  the exact `v<tag>` release URLs; and
+- the commit is created with plain plumbing (`hash-object`, `mktree`,
+  `commit-tree`) so the working tree is never touched, reset, cleaned, or
+  force-checked-out.
+
+The candidate is accepted only when `Formula/ralphie.rb` is the sole changed
+path and every change lies inside the generated marker region. An existing
+branch is reused only when it is based on the current `main`; otherwise the
+step fails closed as an unexpected base. A retry updates the branch only when
+the guarded generated content differs and then only through an ordinary
+non-force fast-forward push preceded by an exact remote-head read; a push that
+turns out to be a non-fast-forward (a concurrent head change) fails instead of
+overwriting anything, and the branch is never reset, force-pushed, deleted, or
+recreated. Zero matching open pull requests permits creation only when the
+formula actually changes, one matching open pull request is reused, and
+multiple matching pull requests fail instead of creating a duplicate. A
+`main` that already contains the desired verified metadata resolves to
+`main-current` with zero branch or pull-request mutations. Fetch, push, and
+pull-request conflicts never happen after a mutation; every failure leaves the
+remote untouched. The seam takes GitHub mutations through the injected
+`HomebrewUpdateApi` (deterministic in-memory fake in tests, GitHub REST
+adapter over fetch in `createHomebrewUpdateApi`) and never puts them in
+formula-generation code.
+
+```bash
+bun run reconcile:homebrew-update -- \
+  --owner beremaran \
+  --repo ralphie \
+  --version 0.1.2 \
+  --tag v0.1.2 \
+  --manifest release-bundle/homebrew-assets.json \
+  --checkout .
+```
+
 ## Release checksum trust policy
 
 Downstream consumers must accept a checksum manifest only when its bundle

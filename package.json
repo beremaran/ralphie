@@ -79,6 +79,7 @@
     "prepack": "bun run build:package",
     "prepare:homebrew-formula": "bun scripts/prepare-homebrew-formula.ts",
     "probe:structured-output": "bun run scripts/probe-structured-output.ts",
+    "reconcile:homebrew-update": "bun scripts/reconcile-homebrew-update.ts",
     "test": "bun test tests",
     "typecheck": "bunx tsc --noEmit",
     "validate:homebrew-formula": "bun scripts/validate-homebrew-formula.ts",
