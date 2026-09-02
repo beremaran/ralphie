@@ -282,7 +282,7 @@ describe("Pi stream lifecycle command/runtime contract", () => {
             expect(display).toContain(retryHeader);
             expectInOrder(display, [
                 firstHeader,
-                "│    partial transcript\n",
+                "│  ✦ assistant partial transcript\n",
                 "• [owner/repository?token=[REDACTED]",
                 "│     resumed\n",
                 "CUMULATIVE-TOOL-CHUNK [REDACTED]",
@@ -316,12 +316,12 @@ describe("Pi stream lifecycle command/runtime contract", () => {
             expect(breadcrumbLabels(highThresholdDisplay)).toEqual([]);
 
             const boundaryDisplay = await displayAtThreshold(
-                5,
+                4,
                 thresholdBoundarySteps(),
                 200,
             );
             const aboveBoundaryDisplay = await displayAtThreshold(
-                6,
+                5,
                 thresholdBoundarySteps(),
                 200,
             );
@@ -332,7 +332,7 @@ describe("Pi stream lifecycle command/runtime contract", () => {
             );
             expect(boundaryHeaderEnd).toBeGreaterThanOrEqual(0);
             expect(boundaryCompaction).toBeGreaterThan(boundaryHeaderEnd);
-            expect(boundaryCompaction - boundaryHeaderEnd).toBe(5);
+            expect(boundaryCompaction - boundaryHeaderEnd).toBe(4);
             expect(boundaryLines[boundaryCompaction + 1]).toBe(
                 "│  › Compacting context",
             );
@@ -347,7 +347,7 @@ describe("Pi stream lifecycle command/runtime contract", () => {
             const aboveBoundaryCompaction = aboveBoundaryLines.indexOf(
                 "│  ↻ compacting context · boundary",
             );
-            expect(aboveBoundaryCompaction - aboveBoundaryHeaderEnd).toBe(5);
+            expect(aboveBoundaryCompaction - aboveBoundaryHeaderEnd).toBe(4);
             expect(breadcrumbLabels(aboveBoundaryDisplay)).toEqual([]);
 
             const activityStates = plain.displayStates.map(

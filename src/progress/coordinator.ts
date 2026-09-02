@@ -109,6 +109,29 @@ const transcriptFor = (
     });
 };
 
+/**
+ * Incremental stream deltas append to an already-open transcript line. They
+ * must never force the line closed, otherwise every token renders on its own
+ * `│    `-prefixed row instead of streaming inline (see issue #409).
+ */
+const incrementalStreamEvent = (event: PiSessionEvent): boolean => {
+    switch (event.type) {
+        case "tool_execution_update":
+        case "bash_execution_update":
+            return true;
+        case "message_update": {
+            const type = event.assistantMessageEvent.type;
+            return (
+                type === "thinking_delta" ||
+                type === "text_delta" ||
+                type === "toolcall_delta"
+            );
+        }
+        default:
+            return false;
+    }
+};
+
 const lifecycleBreadcrumbEvent = (event: PiSessionEvent): boolean => {
     switch (event.type) {
         case "tool_execution_end":
@@ -303,7 +326,7 @@ export const makeProgressCoordinator = (
                 : breadcrumbCandidateFor(state);
         state = reducePiSessionEvent(state, event, context, now);
         controller?.invalidate();
-        transcript?.interruptLine();
+        if (!incrementalStreamEvent(event)) transcript?.interruptLine();
         const candidate =
             transcript === undefined
                 ? undefined

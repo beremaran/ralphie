@@ -17,7 +17,11 @@ All notable changes to Ralphie are documented here. The project follows
   executable header and architecture before emitting checksums.
 
 ### Fixed
-
+- Live Pi transcript streaming renders every `thinking_delta` / `text_delta`
+  (and tool output update) inline on the already-open `⋯ thinking` / `✦ assistant`
+  row instead of forcing one token per `│`-prefixed line; incremental deltas no
+  longer break the open stream, so interactive output wraps naturally at the
+  terminal width and durable progress/breadcrumb lines still interleave cleanly.
 - Structured decision tools now hand providers a flattened single-object schema
   for discriminated-union decisions (issue grounding, needs attention), and
   explicit `null` arguments are stripped before validation. Providers and models

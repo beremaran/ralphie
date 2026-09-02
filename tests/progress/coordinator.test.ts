@@ -211,6 +211,119 @@ describe("progress output coordinator", () => {
         expect(output).not.toContain("◐ Implementing...");
     });
 
+    test("streams incremental thinking and assistant deltas inline through the coordinator", () => {
+        let output = "";
+        const coordinator = makeProgressCoordinator({
+            mode: "plain",
+            verbose: false,
+            colors: false,
+            write: (text) => {
+                output += text;
+            },
+        });
+
+        const words = [
+            "Now ",
+            "I ",
+            "understand ",
+            "the ",
+            "wiring. ",
+            "In ",
+            "practice, ",
+            "at ",
+            "runtime, ",
+            "who ",
+            "calls ",
+            "`writeRaw`? ",
+            "The ",
+            "harness ",
+            "does ",
+            "for ",
+            "tests. ",
+            "And ",
+            "live ",
+            "—",
+        ];
+        coordinator.listener(event({ type: "agent_start" }), context);
+        coordinator.listener(
+            event({
+                type: "message_update",
+                message: { role: "assistant" },
+                assistantMessageEvent: {
+                    type: "thinking_start",
+                    contentIndex: 0,
+                },
+            }),
+            context,
+        );
+        for (const delta of words) {
+            coordinator.listener(
+                event({
+                    type: "message_update",
+                    message: { role: "assistant" },
+                    assistantMessageEvent: {
+                        type: "thinking_delta",
+                        contentIndex: 0,
+                        delta,
+                    },
+                }),
+                context,
+            );
+        }
+        coordinator.listener(
+            event({
+                type: "message_update",
+                message: { role: "assistant" },
+                assistantMessageEvent: {
+                    type: "thinking_end",
+                    contentIndex: 0,
+                },
+            }),
+            context,
+        );
+        coordinator.listener(
+            event({
+                type: "message_update",
+                message: { role: "assistant" },
+                assistantMessageEvent: { type: "text_start", contentIndex: 1 },
+            }),
+            context,
+        );
+        coordinator.listener(
+            event({
+                type: "message_update",
+                message: { role: "assistant" },
+                assistantMessageEvent: {
+                    type: "text_delta",
+                    contentIndex: 1,
+                    delta: "Making the change.",
+                },
+            }),
+            context,
+        );
+        coordinator.listener(
+            event({
+                type: "message_update",
+                message: { role: "assistant" },
+                assistantMessageEvent: { type: "text_end", contentIndex: 1 },
+            }),
+            context,
+        );
+        coordinator.listener(
+            event({ type: "agent_end", willRetry: false }),
+            context,
+        );
+
+        const thinkingText = words.join("");
+        expect(output).toContain(`│  ⋯ thinking ${thinkingText}\n`);
+        expect(output).toContain("│  ✦ assistant Making the change.\n");
+        // Regression (#409): deltas must append inline, not open their own
+        // `│    `-prefixed row per token.
+        expect(output).not.toMatch(/⋯ thinking\n/);
+        expect(output).not.toContain("│  ⋯ thinking Now\n");
+        expect(output.match(/│    /g)).toBeNull();
+    });
+
     test("interrupts a partial Pi chunk before a subsequent event", async () => {
         let output = "";
         const coordinator = makeProgressCoordinator({
@@ -368,8 +481,9 @@ describe("progress output coordinator", () => {
             activity: "waiting",
             activityLabel: "Waiting",
         });
-        expect(surface.content.join("")).toContain("partial ");
-        expect(surface.content.join("")).toContain("│    token");
+        expect(surface.content.join("")).toContain(
+            "│  ✦ assistant partial token",
+        );
         expect(
             surface.footers.some((line) =>
                 line.startsWith(
