@@ -539,6 +539,31 @@ export {
     makeDisplayCoordinator,
     makeProgressCoordinator,
 } from "./coordinator.ts";
+export {
+    ACTIVITY_REGISTRY_LIMIT,
+    ACTIVITY_SNAPSHOT_ROWS,
+    MAX_FAILURE_DETAIL_LENGTH,
+    activityKindForTool,
+    activitySnapshotOperations,
+    activityTargetForTool,
+    createActivityState,
+    findActivityOperation,
+    formatActivityOperation,
+    reduceActivityEvent,
+    reduceActivityUpdate,
+    renderActivitySnapshot,
+    updateActivityFromProgress,
+} from "./activity.ts";
+export type {
+    ActivityClock,
+    ActivityKind,
+    ActivityOperation,
+    ActivityRenderOptions,
+    ActivityState,
+    ActivityStateOptions,
+    ActivityStatus,
+    ActivityUpdate,
+} from "./activity.ts";
 export type {
     ProgressCoordinator,
     ProgressCoordinatorOptions,
