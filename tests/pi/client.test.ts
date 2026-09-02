@@ -10,7 +10,10 @@ import {
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { z } from "zod";
 
+import { flattenDiscriminatedUnionForTool } from "../../src/agent/json-schema.ts";
+import { groundingDecisionSchema } from "../../src/issues/decisions.ts";
 import {
     buildPiAttemptPrompt,
     isPiTaskCommandAllowed,
@@ -329,6 +332,128 @@ describe("Pi client review sessions", () => {
             await cleaned;
             expect(abortCalls).toBe(1);
             expect(disposeCalls).toBe(1);
+        } finally {
+            client.close?.();
+            await rm(directory, { recursive: true, force: true });
+        }
+    });
+});
+
+describe("Pi client structured results", () => {
+    test("accepts null-materialized union arguments through the real submit_result pipeline", async () => {
+        const directory = await mkdtemp(join(tmpdir(), "ralphie-union-"));
+        await mkdir(join(directory, ".pi"), { recursive: true });
+        const model = {
+            id: "union-model",
+            name: "Union model",
+            api: "test-api",
+            provider: "test-provider",
+            baseUrl: "https://example.test",
+            reasoning: false,
+            input: ["text"],
+            cost: {
+                input: 0,
+                output: 0,
+                cacheRead: 0,
+                cacheWrite: 0,
+            },
+            contextWindow: 8_000,
+            maxTokens: 1_000,
+        };
+        const argumentsFor = (): unknown => ({
+            disposition: "actionable",
+            reason: "null",
+            summary: null,
+            evidence: null,
+            questions: null,
+        });
+        const modelRuntime = {
+            getModel: () => model,
+            hasConfiguredAuth: () => true,
+            streamSimple: () => {
+                const stream = createAssistantMessageEventStream();
+                const content: AssistantMessage["content"] = [
+                    {
+                        type: "toolCall",
+                        id: "submit-attempt",
+                        name: "submit_result",
+                        arguments: argumentsFor() as Record<string, unknown>,
+                    },
+                ];
+                const message: AssistantMessage = {
+                    role: "assistant",
+                    content,
+                    api: "test-api",
+                    provider: "test-provider",
+                    model: "union-model",
+                    usage: {
+                        input: 0,
+                        output: 0,
+                        cacheRead: 0,
+                        cacheWrite: 0,
+                        totalTokens: 0,
+                        cost: {
+                            input: 0,
+                            output: 0,
+                            cacheRead: 0,
+                            cacheWrite: 0,
+                            total: 0,
+                        },
+                    },
+                    stopReason: "toolUse",
+                    timestamp: Date.now(),
+                };
+                queueMicrotask(() =>
+                    stream.push({
+                        type: "done",
+                        reason: "toolUse",
+                        message,
+                    }),
+                );
+                return stream;
+            },
+        };
+        const client = makePiClient(
+            modelRuntime as never,
+            undefined,
+            directory,
+            (async (options: CreateAgentSessionOptions) => {
+                return await createAgentSession(options);
+            }) as never,
+        );
+
+        try {
+            const created = await client.session.create({
+                directory,
+                title: "Grounding decision",
+                model: { providerID: "test-provider", id: "union-model" },
+            });
+            const response = await client.session.prompt({
+                sessionID: created.data!.id,
+                directory,
+                format: {
+                    type: "json_schema",
+                    schema: flattenDiscriminatedUnionForTool(
+                        z.toJSONSchema(groundingDecisionSchema),
+                    ),
+                    validate: (value: unknown) => {
+                        const parsed = groundingDecisionSchema.safeParse(value);
+                        return parsed.success
+                            ? { success: true }
+                            : {
+                                  success: false,
+                                  error: z.prettifyError(parsed.error),
+                              };
+                    },
+                },
+                parts: [{ type: "text", text: "Assess the issue." }],
+            });
+
+            expect(response.error).toBeUndefined();
+            expect(response.data?.info.error).toBeUndefined();
+            expect(response.data?.info.structured).toEqual({
+                disposition: "actionable",
+            });
         } finally {
             client.close?.();
             await rm(directory, { recursive: true, force: true });

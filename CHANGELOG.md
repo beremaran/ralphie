@@ -39,6 +39,16 @@ All notable changes to Ralphie are documented here. The project follows
   trip a circuit breaker that aborts the Pi session after five consecutive
   failures and reports the likely cause (including dropped tool-call arguments)
   instead of letting the model retry until the prompt-attempt budget expires.
+- Flattened decision schemas now declare every branch-only property explicitly
+  nullable (scalar fields as `anyOf` unions with a null variant, object/array
+  fields with a widened `type`) and annotate each with the dispositions it
+  applies to, so strict constrained samplers that materialize every property
+  can express "not applicable" as a real `null` instead of forcing invalid
+  values; the literal string `"null"` that some samplers emit for enum-typed
+  fields is normalized to a real null before tool validation. These cross the
+  tool boundary as absents, so a grounding or needs-attention decision can no
+  longer get stuck in the `submit_result` retry loop when the provider fills
+  every flattened field.
 
 ### Changed
 

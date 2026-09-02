@@ -9,6 +9,17 @@
  * flat object so the widest set of providers can comply; the authoritative
  * Zod validation still runs on arrival, so branch-strict requirements are
  * enforced exactly as before (violations are reported back to the model).
+ *
+ * Flattened branch-only properties are optional, so strict constrained
+ * samplers materialize every property of the flattened object (OpenAI-style
+ * strict mode treats an optional property without a null admission as
+ * required). The flattener therefore declares each combined property
+ * explicitly nullable: scalar properties become `anyOf` unions with a null
+ * variant (Pi's strict-schema conversion rejects object/array unions inside
+ * `anyOf`, and TypeBox rejects `null` for a type-array whose `enum` does not
+ * contain it), while object/array properties widen their `type` array with
+ * `"null"`. The tool boundary treats "present but null" as "absent" before
+ * the Zod validation runs.
  */
 
 type JsonObject = Record<string, unknown>;
@@ -115,18 +126,27 @@ const mergeBranchProperty = (
 const mergeBranchProperties = (
     branches: readonly JsonObject[],
     discriminatorKey: string,
-): JsonObject | undefined => {
+):
+    | {
+          readonly merged: JsonObject;
+          readonly memberOf: Map<string, ReadonlyArray<number>>;
+      }
+    | undefined => {
     const merged: JsonObject = {};
-    for (const branch of branches) {
+    const memberOf = new Map<string, number[]>();
+    for (const [index, branch] of branches.entries()) {
         const properties = objectBranchProperties(branch);
         if (properties === undefined) return undefined;
         for (const [key, schema] of Object.entries(properties)) {
             if (!mergeBranchProperty(merged, discriminatorKey, key, schema)) {
                 return undefined;
             }
+            const members = memberOf.get(key);
+            if (members === undefined) memberOf.set(key, [index]);
+            else members.push(index);
         }
     }
-    return merged;
+    return { merged, memberOf };
 };
 
 const discriminatorProperty = (
@@ -149,16 +169,85 @@ const discriminatorProperty = (
     return property;
 };
 
+const propertyTypesOf = (schema: JsonObject): readonly string[] | undefined => {
+    const type = schema.type;
+    if (typeof type === "string") return [type];
+    if (
+        Array.isArray(type) &&
+        type.every((entry) => typeof entry === "string")
+    ) {
+        return type as readonly string[];
+    }
+    return undefined;
+};
+
+/**
+ * Declare an optional merged property explicitly nullable.
+ *
+ * Scalar properties become `anyOf` unions because TypeBox rejects `null` for
+ * a type-array whose `enum` does not contain it, and Pi's strict-schema
+ * conversion rejects object and array unions inside `anyOf`, so object and
+ * array properties widen their `type` array with `"null"` instead.
+ */
+const nullablePropertySchema = (schema: JsonObject): JsonObject | undefined => {
+    const types = propertyTypesOf(schema);
+    if (types === undefined) return undefined;
+    if (types.includes("null")) return schema;
+    if (types.some((entry) => entry === "object" || entry === "array")) {
+        return { ...schema, type: [...types, "null"] };
+    }
+    return { anyOf: [schema, { type: "null" }] };
+};
+
+const describeBranchApplicability = (
+    discriminator: Discriminator,
+    memberOf: readonly number[],
+    branchCount: number,
+): string | undefined => {
+    if (memberOf.length === 0 || memberOf.length === branchCount) {
+        return undefined;
+    }
+    const options = memberOf
+        .map((index) => discriminator.values[index])
+        .map((value) => `"${value}"`)
+        .join(" or ");
+    return `Only applicable when ${discriminator.key} is ${options}; omit this property or set it to null for the other options.`;
+};
+
+const combinedProperties = (
+    branches: readonly JsonObject[],
+    discriminator: Discriminator,
+    merged: JsonObject,
+    memberOf: Map<string, ReadonlyArray<number>>,
+): JsonObject => {
+    const properties: JsonObject = {
+        [discriminator.key]: discriminatorProperty(branches, discriminator),
+    };
+    for (const [name, rawSchema] of Object.entries(merged)) {
+        const description = describeBranchApplicability(
+            discriminator,
+            memberOf.get(name) ?? [],
+            branches.length,
+        );
+        const propertySchema = isJsonObject(rawSchema) ? rawSchema : {};
+        const property =
+            nullablePropertySchema(propertySchema) ?? propertySchema;
+        properties[name] =
+            description === undefined ? property : { ...property, description };
+    }
+    return properties;
+};
+
 /**
  * Flatten a root-level discriminated union into a single object schema.
  *
  * The union's shared `const` discriminator becomes a string enum, every other
- * branch property is declared optional, and only the discriminator stays
- * required: JSON Schema cannot express the per-branch requirements without
- * constructs (`if`/`then`, conditional `required`) that providers handle even
- * less reliably than unions. Branch-specific rules keep being enforced by the
- * request's Zod validation. Anything the flattener cannot express with
- * confidence is returned unchanged.
+ * branch property is declared optional and explicitly nullable, and only the
+ * discriminator stays required: JSON Schema cannot express the per-branch
+ * requirements without constructs (`if`/`then`, conditional `required`) that
+ * providers handle even less reliably than unions. Branch-specific rules keep
+ * being enforced by the request's Zod validation. Anything the flattener
+ * cannot express with confidence is returned unchanged.
  */
 export const flattenDiscriminatedUnionForTool = (schema: unknown): unknown => {
     const branches = unionBranchesOf(schema);
@@ -170,8 +259,8 @@ export const flattenDiscriminatedUnionForTool = (schema: unknown): unknown => {
     }
     const discriminator = findDiscriminator(branches);
     if (discriminator === undefined) return schema;
-    const merged = mergeBranchProperties(branches, discriminator.key);
-    if (merged === undefined) return schema;
+    const mergedStatus = mergeBranchProperties(branches, discriminator.key);
+    if (mergedStatus === undefined) return schema;
     const root = schema as JsonObject;
     return {
         ...(typeof root.$schema === "string" ? { $schema: root.$schema } : {}),
@@ -179,10 +268,12 @@ export const flattenDiscriminatedUnionForTool = (schema: unknown): unknown => {
             ? { description: root.description }
             : {}),
         type: "object",
-        properties: {
-            [discriminator.key]: discriminatorProperty(branches, discriminator),
-            ...merged,
-        },
+        properties: combinedProperties(
+            branches,
+            discriminator,
+            mergedStatus.merged,
+            mergedStatus.memberOf,
+        ),
         required: [discriminator.key],
         additionalProperties: false,
     };
@@ -208,3 +299,90 @@ export const stripExplicitNulls = (value: unknown): unknown => {
     }
     return stripped;
 };
+
+const enumValuesOf = (
+    schema: JsonObject,
+): ReadonlyArray<string> | undefined => {
+    const candidates: unknown[] = [schema];
+    if (Array.isArray(schema.anyOf)) candidates.push(...schema.anyOf);
+    if (Array.isArray(schema.oneOf)) candidates.push(...schema.oneOf);
+    for (const candidate of candidates) {
+        if (!isJsonObject(candidate)) continue;
+        if (
+            !Array.isArray(candidate.enum) ||
+            !candidate.enum.every(
+                (value): value is string => typeof value === "string",
+            )
+        ) {
+            continue;
+        }
+        return candidate.enum;
+    }
+    return undefined;
+};
+
+/**
+ * Replace the literal string `"null"` with a real `null` for enum-typed
+ * properties.
+ *
+ * A constrained sampler that must materialize every flattened property has no
+ * way to express "not applicable" for an enum-typed field whose schema only
+ * admits enum strings, and some of them emit the literal string `"null"`
+ * instead. The string can never be a legitimate enum member, so the tool
+ * boundary converts it to the sanctioned null representation before the
+ * provider-side tool validation runs.
+ */
+export const normalizeEnumNullLiterals = (
+    schema: unknown,
+    value: unknown,
+): unknown => {
+    if (!isJsonObject(schema)) return value;
+    if (Array.isArray(value)) return normalizeEnumNullArray(schema, value);
+    if (isJsonObject(value)) return normalizeEnumNullObject(schema, value);
+    return normalizeEnumNullScalar(schema, value);
+};
+
+const normalizeEnumNullArray = (
+    schema: JsonObject,
+    value: unknown[],
+): unknown[] => {
+    const items = isJsonObject(schema.items) ? schema.items : {};
+    const mapped = value.map((entry) =>
+        normalizeEnumNullLiterals(items, entry),
+    );
+    return mapped.every((entry, index) => entry === value[index])
+        ? value
+        : mapped;
+};
+
+const normalizeEnumNullObject = (
+    schema: JsonObject,
+    value: JsonObject,
+): JsonObject => {
+    const properties = isJsonObject(schema.properties) ? schema.properties : {};
+    let changed = false;
+    const normalized: JsonObject = {};
+    for (const [name, entry] of Object.entries(value)) {
+        const propertySchema = isJsonObject(properties[name])
+            ? properties[name]
+            : undefined;
+        const nested = normalizeEnumNullLiterals(propertySchema ?? {}, entry);
+        normalized[name] = nested;
+        if (nested !== entry) changed = true;
+    }
+    return changed ? normalized : value;
+};
+
+const normalizeEnumNullScalar = (
+    schema: JsonObject,
+    value: unknown,
+): unknown =>
+    value === "null"
+        ? normalizeEnumNullLiteral(value, enumValuesOf(schema))
+        : value;
+
+const normalizeEnumNullLiteral = (
+    value: string,
+    options: ReadonlyArray<string> | undefined,
+): unknown =>
+    options !== undefined && !options.includes("null") ? null : value;

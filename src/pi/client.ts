@@ -10,7 +10,10 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { randomUUID } from "node:crypto";
 
-import { stripExplicitNulls } from "../agent/json-schema.ts";
+import {
+    normalizeEnumNullLiterals,
+    stripExplicitNulls,
+} from "../agent/json-schema.ts";
 import {
     PI_NEEDS_ATTENTION_MESSAGE_LIMIT,
     PI_NEEDS_ATTENTION_REASONS,
@@ -379,7 +382,7 @@ const makeStructuredResultTool = (
         executionMode: "sequential",
         prepareArguments: (args: unknown) => {
             guard.beginAttempt(args);
-            return args;
+            return normalizeEnumNullLiterals(format.schema, args);
         },
         execute: async (_toolCallId, params) => {
             const candidate = stripExplicitNulls(params);
