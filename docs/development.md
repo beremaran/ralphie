@@ -21,7 +21,7 @@ Useful individual commands:
 
 | Command | Purpose |
 | --- | --- |
-| `bun run test` | Run the unit and disposable integration test suite. |
+| `bun run test` | Run the unit and disposable integration test suite, including the standalone binary smoke that compiles a fresh native executable with fixture release metadata and launches it from an isolated directory with no Bun on `PATH`. |
 | `bun run typecheck` | Type-check without emitting JavaScript. |
 | `bun run format` | Format the repository with Biome. |
 | `bun run format:check` | Verify formatting without modifying files. |
