@@ -343,8 +343,34 @@ Only the region between the `BEGIN RALPHIE GENERATED RELEASE METADATA` and
 `END RALPHIE GENERATED RELEASE METADATA` markers is replaced. The generator
 fails when the markers are missing, duplicated, or out of order, preserving the
 description, homepage, install behavior, and smoke test outside that region.
-Validate the generated formula against the same release manifest before
-submitting the formula change:
+
+The deterministic preparation step guards the formula change before anything
+is applied to the tap branch. It consumes the exact-tag verifier's manifest
+(`ralphie.homebrew-asset-manifest.v1`) plus the validated tag and version,
+feeds that manifest to the generator in a temporary output, requires a fresh
+target-branch checkout to be clean, and then applies the update only when it
+satisfies the change guard:
+
+```bash
+bun run prepare:homebrew-formula -- \
+  --manifest release-bundle/homebrew-assets.json \
+  --tag v0.1.2 \
+  --version 0.1.2 \
+  --formula Formula/ralphie.rb \
+  --checkout .
+```
+
+The guard requires exactly one ordered BEGIN/END marker pair and byte-for-byte
+identity between the original and candidate formula outside the generated
+region. It rejects a changed path other than `Formula/ralphie.rb`, any pending
+edit outside the marked region, malformed or unmarked formula content, a
+tag/version mismatch, and any manifest that is not exactly
+`ralphie.homebrew-asset-manifest.v1`; it never uses `git reset`, `git clean`, a
+destructive checkout, or a force operation. The step reports an explicit
+`homebrew_formula_result=changed` or `unchanged` outcome (also returned as a
+`changed`/`unchanged` result) so callers can skip a commit when the desired
+metadata is already present. Validate the generated formula against the same
+release manifest before submitting the formula change:
 
 ```bash
 bun run validate:homebrew-formula -- \

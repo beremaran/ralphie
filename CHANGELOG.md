@@ -5,6 +5,18 @@ All notable changes to Ralphie are documented here. The project follows
 
 ## [Unreleased]
 
+- Add the deterministic, fail-closed Homebrew formula change guard
+  (`scripts/prepare-homebrew-formula.ts`, run as `prepare:homebrew-formula`):
+  it consumes the exact-tag verifier's `ralphie.homebrew-asset-manifest.v1`
+  manifest plus the validated tag/version, renders the candidate formula in a
+  temporary output through the existing generator, requires a fresh
+  target-branch checkout to be clean, rejects any changed path other than
+  `Formula/ralphie.rb`, any pending edit outside the generated region,
+  malformed or unmarked formula content, a tag/version mismatch, or an
+  unexpected manifest, and returns an explicit `changed`/`unchanged` result so
+  callers can skip a commit when the desired metadata is already present.
+  Add focused temporary-fixture tests under `tests/homebrew-formula-guard.test.ts`.
+
 - Extract the release-context and npm-publication validation gates into
   executable seams used directly by `.github/workflows/release.yml`:
   `scripts/validate-release-context.ts` enforces the stable

@@ -77,6 +77,7 @@
     "package:inspect": "bun run scripts/package-smoke.ts --dry-run",
     "package:stage": "bun run scripts/stage-release-package.ts",
     "prepack": "bun run build:package",
+    "prepare:homebrew-formula": "bun scripts/prepare-homebrew-formula.ts",
     "probe:structured-output": "bun run scripts/probe-structured-output.ts",
     "test": "bun test tests",
     "typecheck": "bunx tsc --noEmit",
