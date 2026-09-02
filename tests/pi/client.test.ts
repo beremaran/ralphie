@@ -1,8 +1,21 @@
 import { describe, expect, test } from "bun:test";
+import {
+    createAssistantMessageEventStream,
+    type AssistantMessage,
+} from "@earendil-works/pi-ai";
+import {
+    createAgentSession,
+    type CreateAgentSessionOptions,
+} from "@earendil-works/pi-coding-agent";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
     buildPiAttemptPrompt,
     isPiTaskCommandAllowed,
+    makePiClient,
+    PiSessionProfile,
 } from "../../src/pi/client.ts";
 
 describe("Pi task shell policy", () => {
@@ -44,6 +57,281 @@ describe("Pi task shell policy", () => {
             "cd /workspace && gh issue close 12",
         ]) {
             expect(isPiTaskCommandAllowed(command)).toBe(false);
+        }
+    });
+});
+
+describe("Pi client review sessions", () => {
+    test("exposes only side-channel tools and rejects repository tool attempts", async () => {
+        const directory = await mkdtemp(join(tmpdir(), "ralphie-review-"));
+        const marker = "mutable project instructions must not be loaded";
+        const outputPath = join(directory, "diff-output.txt");
+        const secretPath = join(directory, "secret.txt");
+        await mkdir(join(directory, ".pi"), { recursive: true });
+        await writeFile(join(directory, "AGENTS.md"), marker);
+        await writeFile(join(directory, "SYSTEM.md"), marker);
+        await writeFile(join(directory, "APPEND_SYSTEM.md"), marker);
+        await writeFile(join(directory, ".pi", "SYSTEM.md"), marker);
+        await writeFile(join(directory, ".pi", "APPEND_SYSTEM.md"), marker);
+        await writeFile(secretPath, "mutable checkout content");
+
+        const model = {
+            id: "review-model",
+            name: "Review model",
+            api: "test-api",
+            provider: "test-provider",
+            baseUrl: "https://example.test",
+            reasoning: false,
+            input: ["text"],
+            cost: {
+                input: 0,
+                output: 0,
+                cacheRead: 0,
+                cacheWrite: 0,
+            },
+            contextWindow: 8_000,
+            maxTokens: 1_000,
+        };
+        let streamCalls = 0;
+        const modelRuntime = {
+            getModel: () => model,
+            hasConfiguredAuth: () => true,
+            streamSimple: () => {
+                const stream = createAssistantMessageEventStream();
+                const content: AssistantMessage["content"] =
+                    streamCalls++ === 0
+                        ? [
+                              {
+                                  type: "toolCall",
+                                  id: "bash-attempt",
+                                  name: "bash",
+                                  arguments: {
+                                      command: `git diff --output ${outputPath}`,
+                                  },
+                              },
+                              {
+                                  type: "toolCall",
+                                  id: "read-attempt",
+                                  name: "read",
+                                  arguments: { path: secretPath },
+                              },
+                          ]
+                        : [
+                              {
+                                  type: "toolCall",
+                                  id: "submit-attempt",
+                                  name: "submit_result",
+                                  arguments: {},
+                              },
+                          ];
+                const message: AssistantMessage = {
+                    role: "assistant",
+                    content,
+                    api: "test-api",
+                    provider: "test-provider",
+                    model: "review-model",
+                    usage: {
+                        input: 0,
+                        output: 0,
+                        cacheRead: 0,
+                        cacheWrite: 0,
+                        totalTokens: 0,
+                        cost: {
+                            input: 0,
+                            output: 0,
+                            cacheRead: 0,
+                            cacheWrite: 0,
+                            total: 0,
+                        },
+                    },
+                    stopReason: "toolUse",
+                    timestamp: Date.now(),
+                };
+                queueMicrotask(() =>
+                    stream.push({
+                        type: "done",
+                        reason: "toolUse",
+                        message,
+                    }),
+                );
+                return stream;
+            },
+        };
+        let realSession:
+            | Awaited<ReturnType<typeof createAgentSession>>["session"]
+            | undefined;
+        const events: unknown[] = [];
+        const client = makePiClient(
+            modelRuntime as never,
+            (event) => events.push(event),
+            directory,
+            (async (options: CreateAgentSessionOptions) => {
+                const result = await createAgentSession(options);
+                realSession = result.session;
+                return result;
+            }) as never,
+        );
+
+        try {
+            const created = await client.session.create({
+                directory,
+                title: "Review",
+                model: { providerID: "test-provider", id: "review-model" },
+                profile: PiSessionProfile.Review,
+                permission: [
+                    { permission: "bash", pattern: "*", action: "allow" },
+                ],
+            });
+            await client.session.prompt({
+                sessionID: created.data!.id,
+                directory,
+                profile: PiSessionProfile.Review,
+                format: {
+                    type: "json_schema",
+                    schema: { type: "object" },
+                    validate: () => ({ success: true }),
+                },
+                parts: [{ type: "text", text: "Review the patch." }],
+            });
+
+            expect(realSession?.getActiveToolNames()).toEqual([
+                "request_needs_attention",
+                "submit_result",
+            ]);
+            expect(
+                realSession?.resourceLoader.getAgentsFiles().agentsFiles,
+            ).toEqual([]);
+            expect(
+                realSession?.resourceLoader.getSystemPrompt(),
+            ).toBeUndefined();
+            expect(realSession?.resourceLoader.getAppendSystemPrompt()).toEqual(
+                [],
+            );
+            expect(realSession?.systemPrompt).not.toContain(marker);
+            for (const repositoryTool of [
+                "read",
+                "grep",
+                "find",
+                "ls",
+                "bash",
+                "edit",
+                "write",
+            ]) {
+                expect(
+                    realSession?.getToolDefinition(repositoryTool),
+                ).toBeUndefined();
+            }
+            expect(events).toEqual(
+                expect.arrayContaining([
+                    expect.objectContaining({
+                        type: "tool_execution_end",
+                        toolName: "bash",
+                        isError: true,
+                    }),
+                    expect.objectContaining({
+                        type: "tool_execution_end",
+                        toolName: "read",
+                        isError: true,
+                    }),
+                ]),
+            );
+            expect(await Bun.file(outputPath).exists()).toBe(false);
+        } finally {
+            client.close?.();
+            await rm(directory, { recursive: true, force: true });
+        }
+    });
+
+    test("gives every created session a distinct id", async () => {
+        const client = makePiClient({} as never);
+        const first = await client.session.create({
+            directory: "/workspace",
+            title: "First",
+        });
+        const second = await client.session.create({
+            directory: "/workspace",
+            title: "Second",
+        });
+
+        expect(first.data?.id).toBeString();
+        expect(second.data?.id).toBeString();
+        expect(first.data?.id).not.toBe(second.data?.id);
+        client.close?.();
+    });
+
+    test("aborts and disposes a session that finishes constructing after cancellation", async () => {
+        const directory = await mkdtemp(join(tmpdir(), "ralphie-abort-"));
+        let constructionStarted!: () => void;
+        let releaseConstruction!: () => void;
+        const started = new Promise<void>((resolve) => {
+            constructionStarted = resolve;
+        });
+        const construction = new Promise<void>((resolve) => {
+            releaseConstruction = resolve;
+        });
+        let abortCalls = 0;
+        let disposeCalls = 0;
+        let markCleaned!: () => void;
+        const cleaned = new Promise<void>((resolve) => {
+            markCleaned = resolve;
+        });
+        const session = {
+            messages: [],
+            prompt: async () => {},
+            subscribe: () => () => {},
+            abort: async () => {
+                abortCalls += 1;
+            },
+            dispose: () => {
+                disposeCalls += 1;
+                markCleaned();
+            },
+        };
+        const client = makePiClient(
+            {} as never,
+            undefined,
+            directory,
+            (async () => {
+                constructionStarted();
+                await construction;
+                return { session };
+            }) as never,
+        );
+        const controller = new AbortController();
+        const created = await client.session.create({
+            directory,
+            title: "Abort construction",
+        });
+        const prompting = client.session.prompt(
+            {
+                sessionID: created.data!.id,
+                directory,
+                parts: [{ type: "text", text: "Run." }],
+            },
+            { signal: controller.signal },
+        );
+
+        try {
+            await started;
+            const reason = new Error("cancelled");
+            controller.abort(reason);
+            await expect(prompting).rejects.toBe(reason);
+            expect(
+                (
+                    await client.session.prompt({
+                        sessionID: created.data!.id,
+                        directory,
+                        parts: [{ type: "text", text: "Again." }],
+                    })
+                ).error,
+            ).toBeInstanceOf(Error);
+            releaseConstruction();
+            await cleaned;
+            expect(abortCalls).toBe(1);
+            expect(disposeCalls).toBe(1);
+        } finally {
+            client.close?.();
+            await rm(directory, { recursive: true, force: true });
         }
     });
 });

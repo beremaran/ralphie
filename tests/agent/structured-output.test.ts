@@ -3,6 +3,7 @@ import type { PiClient } from "../../src/pi/client.ts";
 import { z } from "zod";
 
 import { requestStructuredOutput } from "../../src/agent/structured-output.ts";
+import { PiSessionProfile } from "../../src/pi/client.ts";
 import {
     groundingDecisionSchema,
     GroundingDisposition,
@@ -118,6 +119,47 @@ describe("Pi structured output", () => {
             permission: "bash",
             pattern: "git ls-files*",
             action: "allow",
+        });
+    });
+
+    test("forwards an explicit session profile to creation and prompting", async () => {
+        let createParameters: unknown;
+        let promptParameters: unknown;
+        const client = {
+            session: {
+                create: async (parameters: unknown) => {
+                    createParameters = parameters;
+                    return { data: { id: "session-review" } };
+                },
+                prompt: async (parameters: unknown) => {
+                    promptParameters = parameters;
+                    return {
+                        data: {
+                            info: assistantInfo({
+                                decision: ProbeDecision.Proceed,
+                                confidence: 1,
+                                reason: "The condition is true.",
+                            }),
+                            parts: [],
+                        },
+                    };
+                },
+            },
+        } as unknown as PiClient;
+
+        await requestStructuredOutput(client, {
+            directory: "/workspace",
+            title: "Review decision",
+            prompt: "Review the patch.",
+            schema: decisionSchema,
+            profile: PiSessionProfile.Review,
+        });
+
+        expect(createParameters).toMatchObject({
+            profile: PiSessionProfile.Review,
+        });
+        expect(promptParameters).toMatchObject({
+            profile: PiSessionProfile.Review,
         });
     });
 

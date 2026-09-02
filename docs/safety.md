@@ -89,11 +89,16 @@ dry run remains a dry run.
 ## Agent and mutation boundaries
 
 Structured decision sessions deny edits/writes and mutating Git/GitHub commands.
-The implementation agent may edit the checkout, but it is denied commits,
-pushes, branch/reset/clean operations, and `gh` commands. Ralphie stages,
-verifies, commits, pushes, and mutates GitHub through deterministic domain
-services. Every decision task is schema-validated; invalid output or Pi
-failure becomes a failed issue outcome without proceeding to the next operation.
+PR-review sessions use an explicit immutable profile: the staged patch and
+verification evidence are supplied in the prompt, and only `submit_result` and
+the non-repository `request_needs_attention` side channel are active. They
+cannot inspect the checkout or run shell/Git/GitHub commands. The implementation
+agent may edit the checkout, but it is denied commits, pushes, branch/reset/clean
+operations, and `gh` commands. Ralphie stages, verifies, commits, pushes, and
+mutates GitHub through deterministic domain services. Every decision task is
+schema-validated at both the tool and response boundaries; invalid output or
+Pi failure becomes a failed issue outcome without proceeding to the next
+operation.
 
 Verification commands are run against the staged tree and their evidence is
 bound to that tree before review or commit. A non-zero command exit is treated

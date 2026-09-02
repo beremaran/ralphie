@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { PiClient } from "../../src/pi/client.ts";
+import { PiSessionProfile, type PiClient } from "../../src/pi/client.ts";
 import type { Octokit } from "octokit";
 
 import {
@@ -115,6 +115,7 @@ const piClient = (
     prompts?: Array<{
         readonly model?: unknown;
         readonly variant?: unknown;
+        readonly profile?: unknown;
         readonly parts?: ReadonlyArray<{ readonly text?: string }>;
     }>,
 ) => {
@@ -131,6 +132,7 @@ const piClient = (
                 format?: unknown;
                 model?: unknown;
                 variant?: unknown;
+                profile?: unknown;
                 parts?: ReadonlyArray<{ readonly text?: string }>;
             }) => {
                 prompts?.push(parameters);
@@ -298,14 +300,19 @@ describe("implementation executor", () => {
 
     test("implements, reviews, commits, and pushes after first-pass approval", async () => {
         const safetyInputs: GitRemoteSafetyInput[] = [];
+        const prompts: Array<{ readonly profile?: unknown }> = [];
         const setup = services({ safetyInputs });
         const artifacts = await makeIssueArtifactStore(42);
         const result = await run(
-            piClient([
-                implementation,
-                review("approved"),
-                { subject: "fix token refresh" },
-            ]),
+            piClient(
+                [
+                    implementation,
+                    review("approved"),
+                    { subject: "fix token refresh" },
+                ],
+                undefined,
+                prompts,
+            ),
             artifacts,
             setup,
         );
@@ -321,6 +328,7 @@ describe("implementation executor", () => {
         expect(
             safetyInputs.map(({ expectedCommitSha }) => expectedCommitSha),
         ).toEqual([undefined, "commit-1"]);
+        expect(prompts[1]?.profile).toBe(PiSessionProfile.Review);
     });
 
     test("clears unresolved proof and seeds implementation with verifier evidence", async () => {

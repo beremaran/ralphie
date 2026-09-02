@@ -1,4 +1,8 @@
-import type { PiClient, PiPermissionRuleset } from "../pi/client.ts";
+import {
+    PiSessionProfile,
+    type PiClient,
+    type PiPermissionRuleset,
+} from "../pi/client.ts";
 import { z } from "zod";
 
 import { RalphieError } from "../shared/error.ts";
@@ -27,6 +31,7 @@ export type StructuredOutputRequest<Output> = {
     readonly retryCount?: number;
     readonly agent?: string;
     readonly permission?: PiPermissionRuleset;
+    readonly profile?: PiSessionProfile;
     readonly model?: PiModel;
     readonly variant?: string;
     readonly runId?: string;
@@ -76,6 +81,7 @@ const createSessionInput = <Output>(
     title: request.title,
     ...(request.agent === undefined ? {} : { agent: request.agent }),
     permission: request.permission ?? PI_DECISION_PERMISSION_POLICY,
+    ...(request.profile === undefined ? {} : { profile: request.profile }),
 });
 
 const validateStructuredOutput = <Output>(
@@ -97,6 +103,7 @@ const promptInput = <Output>(
     ...(request.agent === undefined ? {} : { agent: request.agent }),
     ...(request.model === undefined ? {} : { model: request.model }),
     ...(request.variant === undefined ? {} : { variant: request.variant }),
+    ...(request.profile === undefined ? {} : { profile: request.profile }),
     format: {
         type: "json_schema" as const,
         schema: flattenDiscriminatedUnionForTool(
@@ -187,6 +194,7 @@ export const requestStructuredOutput = async <Output>(
     request: StructuredOutputRequest<Output>,
 ): Promise<StructuredOutputResult<Output>> => {
     try {
+        request.signal?.throwIfAborted();
         const session = await client.session.create(
             createSessionInput(request),
             signalOptions(request.signal),

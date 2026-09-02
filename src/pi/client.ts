@@ -32,6 +32,16 @@ export type PiPermissionRuleset = ReadonlyArray<{
     readonly action: "allow" | "deny";
 }>;
 
+export const PiSessionProfile = {
+    Default: "default",
+    Review: "review",
+} as const;
+
+export type PiSessionProfile =
+    (typeof PiSessionProfile)[keyof typeof PiSessionProfile];
+
+export const PI_REVIEW_SESSION_PROFILE = PiSessionProfile.Review;
+
 export type PiAssistantError = {
     readonly name: string;
     readonly data?: {
@@ -78,6 +88,7 @@ type CreateSessionInput = {
               readonly id: string;
           };
     readonly permission?: PiPermissionRuleset;
+    readonly profile?: PiSessionProfile;
 };
 
 type PromptInput = {
@@ -86,6 +97,7 @@ type PromptInput = {
     readonly agent?: string;
     readonly model?: PiModel;
     readonly variant?: string;
+    readonly profile?: PiSessionProfile;
     readonly parts: ReadonlyArray<{
         readonly type: "text";
         readonly text: string;
@@ -295,7 +307,9 @@ const modelFor = (
 };
 
 type PromptFormat = NonNullable<PromptInput["format"]>;
-type PiSession = Awaited<ReturnType<typeof createAgentSession>>["session"];
+type CreateAgentSession = typeof createAgentSession;
+type CreateAgentSessionResult = Awaited<ReturnType<CreateAgentSession>>;
+type PiSession = CreateAgentSessionResult["session"];
 
 const needsAttentionToolParameters = {
     type: "object",
@@ -464,16 +478,19 @@ const makePromptTools = (
     setNeedsAttention: (value: unknown) => void,
     guard: SubmitResultGuard,
 ): PromptTools => {
-    const readOnly =
-        created.permission?.some(
-            (rule) => rule.permission === "edit" && rule.action === "deny",
-        ) ?? false;
-    const customTools: AnyToolDefinition[] = readOnly
+    const reviewProfile =
+        created.profile === PiSessionProfile.Review ||
+        input.profile === PiSessionProfile.Review;
+    const customTools: AnyToolDefinition[] = reviewProfile
         ? []
         : [makeBashTool(input.directory)];
-    const activeTools = readOnly
-        ? ["read", "grep", "find", "ls"]
-        : ["read", "bash", "edit", "write"];
+    const activeTools = reviewProfile
+        ? []
+        : created.permission?.some(
+                (rule) => rule.permission === "edit" && rule.action === "deny",
+            )
+          ? ["read", "grep", "find", "ls"]
+          : ["read", "bash", "edit", "write"];
     customTools.push(makeNeedsAttentionTool(setNeedsAttention));
     activeTools.push("request_needs_attention");
     if (input.format !== undefined) {
@@ -485,13 +502,62 @@ const makePromptTools = (
     return { activeTools, customTools };
 };
 
+const disposeAbortedSession = async (session: PiSession): Promise<void> => {
+    await session.abort().catch(() => undefined);
+    session.dispose();
+};
+
+const awaitWithAbort = async <Value>(
+    operation: () => PromiseLike<Value>,
+    signal: AbortSignal | undefined,
+): Promise<Value> => {
+    if (signal === undefined) return await operation();
+    signal.throwIfAborted();
+    return await new Promise<Value>((resolve, reject) => {
+        let settled = false;
+        const onAbort = () => {
+            if (settled) return;
+            settled = true;
+            signal.removeEventListener("abort", onAbort);
+            reject(signal.reason);
+        };
+        signal.addEventListener("abort", onAbort, { once: true });
+        if (signal.aborted) {
+            onAbort();
+            return;
+        }
+        Promise.resolve()
+            .then(operation)
+            .then(
+                (value) => {
+                    if (settled) return;
+                    settled = true;
+                    signal.removeEventListener("abort", onAbort);
+                    resolve(value);
+                },
+                (cause) => {
+                    if (settled) return;
+                    settled = true;
+                    signal.removeEventListener("abort", onAbort);
+                    reject(cause);
+                },
+            );
+    });
+};
+
 const createPromptSession = async (
     modelRuntime: ModelRuntime,
     input: PromptInput,
     created: PendingSession,
     tools: PromptTools,
     agentDir: string,
+    signal: AbortSignal | undefined,
+    createSession: CreateAgentSession,
 ): Promise<PiSession> => {
+    signal?.throwIfAborted();
+    const reviewProfile =
+        created.profile === PiSessionProfile.Review ||
+        input.profile === PiSessionProfile.Review;
     const resourceLoader = new DefaultResourceLoader({
         cwd: input.directory,
         agentDir,
@@ -499,21 +565,66 @@ const createPromptSession = async (
         noSkills: true,
         noPromptTemplates: true,
         noThemes: true,
+        ...(reviewProfile
+            ? {
+                  noContextFiles: true,
+                  systemPrompt: "",
+                  appendSystemPrompt: [],
+              }
+            : {}),
     });
-    await resourceLoader.reload();
-    const { session } = await createAgentSession({
-        cwd: input.directory,
-        modelRuntime,
-        model: modelFor(modelRuntime, input.model ?? created.model),
-        thinkingLevel: thinkingLevelFor(input.variant),
-        tools: tools.activeTools,
-        customTools: tools.customTools,
-        resourceLoader,
-        sessionManager: SessionManager.inMemory(input.directory, {
-            id: input.sessionID,
-        }),
-    });
-    return session;
+    let session: PiSession | undefined;
+    let abortedDuringConstruction = false;
+    const abortDuringConstruction = () => {
+        abortedDuringConstruction = true;
+    };
+    signal?.addEventListener("abort", abortDuringConstruction, { once: true });
+    try {
+        await awaitWithAbort(() => resourceLoader.reload(), signal);
+        const startConstruction = (): Promise<CreateAgentSessionResult> => {
+            const construction = Promise.resolve().then(() =>
+                createSession({
+                    cwd: input.directory,
+                    modelRuntime,
+                    model: modelFor(modelRuntime, input.model ?? created.model),
+                    thinkingLevel: thinkingLevelFor(input.variant),
+                    tools: tools.activeTools,
+                    customTools: tools.customTools,
+                    resourceLoader,
+                    sessionManager: SessionManager.inMemory(input.directory, {
+                        id: input.sessionID,
+                    }),
+                }),
+            );
+            void construction.then(
+                (result) => {
+                    if (abortedDuringConstruction || signal?.aborted) {
+                        void disposeAbortedSession(result.session).catch(
+                            () => undefined,
+                        );
+                    }
+                },
+                () => undefined,
+            );
+            return construction;
+        };
+        const result = await awaitWithAbort(startConstruction, signal);
+        session = result.session;
+        if (abortedDuringConstruction || signal?.aborted) {
+            await disposeAbortedSession(session);
+            session = undefined;
+            signal?.throwIfAborted();
+            throw new Error("Pi session construction was aborted.");
+        }
+        return session;
+    } catch (cause) {
+        if (session !== undefined) {
+            await disposeAbortedSession(session);
+        }
+        throw cause;
+    } finally {
+        signal?.removeEventListener("abort", abortDuringConstruction);
+    }
 };
 
 const makePromptResponse = (
@@ -547,21 +658,114 @@ const makePromptResponse = (
     };
 };
 
+type PromptOptions = {
+    readonly signal?: AbortSignal;
+};
+
+const runPiPrompt = async (
+    modelRuntime: ModelRuntime,
+    eventListener: PiEventListener | undefined,
+    active: Set<PiSession>,
+    pending: Map<string, PendingSession>,
+    input: PromptInput,
+    options: PromptOptions | undefined,
+    created: PendingSession,
+    agentDir: string,
+    createSession: CreateAgentSession,
+) => {
+    let session: PiSession | undefined;
+    let unsubscribe: (() => void) | undefined;
+    let abort: (() => void) | undefined;
+    try {
+        options?.signal?.throwIfAborted();
+        let structured: unknown;
+        let needsAttention: unknown;
+        const guard = makeSubmitResultGuard();
+        const tools = makePromptTools(
+            input,
+            created,
+            (value) => {
+                structured = value;
+            },
+            (value) => {
+                needsAttention ??= value;
+            },
+            guard,
+        );
+        session = await createPromptSession(
+            modelRuntime,
+            input,
+            created,
+            tools,
+            agentDir,
+            options?.signal,
+            createSession,
+        );
+        options?.signal?.throwIfAborted();
+        active.add(session);
+        guard.onTrip(() => void session?.abort());
+        unsubscribe =
+            eventListener === undefined
+                ? undefined
+                : session.subscribe((event) =>
+                      eventListener(event, {
+                          sessionID: input.sessionID,
+                          directory: input.directory,
+                          title: created.title,
+                      }),
+                  );
+        abort = () => void session?.abort();
+        options?.signal?.addEventListener("abort", abort, { once: true });
+        if (options?.signal?.aborted) abort();
+
+        const prompt = input.parts.map((part) => part.text).join("\n");
+        const { assistant } = await runPromptAttempts(
+            session,
+            input,
+            prompt,
+            () => structured,
+        );
+        const tripReason = guard.tripReason();
+        if (tripReason !== undefined) {
+            throw new RalphieError({
+                message: `${tripReason}.${
+                    input.model === undefined
+                        ? ""
+                        : ` Model: ${input.model.providerID}/${input.model.modelID}.`
+                }`,
+            });
+        }
+        return makePromptResponse(input, assistant, structured, needsAttention);
+    } finally {
+        unsubscribe?.();
+        if (abort !== undefined) {
+            options?.signal?.removeEventListener("abort", abort);
+        }
+        if (session !== undefined) {
+            active.delete(session);
+            session.dispose();
+        }
+        pending.delete(input.sessionID);
+    }
+};
+
 export const makePiClient = (
     modelRuntime: ModelRuntime,
     eventListener?: PiEventListener,
     agentDir = process.env.PI_CODING_AGENT_DIR ?? getAgentDir(),
+    createSession: CreateAgentSession = createAgentSession,
 ): PiClient => {
     const pending = new Map<string, PendingSession>();
-    const active = new Set<{
-        abort: () => Promise<void>;
-    }>();
+    const issuedSessionIDs = new Set<string>();
+    const active = new Set<PiSession>();
 
     return {
         session: {
             create: async (input, options) => {
                 if (options?.signal?.aborted) throw options.signal.reason;
-                const id = randomUUID();
+                let id = randomUUID();
+                while (issuedSessionIDs.has(id)) id = randomUUID();
+                issuedSessionIDs.add(id);
                 pending.set(id, input);
                 return {
                     data: {
@@ -578,78 +782,17 @@ export const makePiClient = (
                         ),
                     };
                 }
-
-                let structured: unknown;
-                let needsAttention: unknown;
-                const guard = makeSubmitResultGuard();
-                const tools = makePromptTools(
-                    input,
-                    created,
-                    (value) => {
-                        structured = value;
-                    },
-                    (value) => {
-                        needsAttention ??= value;
-                    },
-                    guard,
-                );
-                const session = await createPromptSession(
+                return await runPiPrompt(
                     modelRuntime,
+                    eventListener,
+                    active,
+                    pending,
                     input,
+                    options,
                     created,
-                    tools,
                     agentDir,
+                    createSession,
                 );
-                active.add(session);
-                guard.onTrip(() => void session.abort());
-                const unsubscribe =
-                    eventListener === undefined
-                        ? undefined
-                        : session.subscribe((event) =>
-                              eventListener(event, {
-                                  sessionID: input.sessionID,
-                                  directory: input.directory,
-                                  title: created.title,
-                              }),
-                          );
-                const abort = () => void session.abort();
-                options?.signal?.addEventListener("abort", abort, {
-                    once: true,
-                });
-
-                try {
-                    const prompt = input.parts
-                        .map((part) => part.text)
-                        .join("\n");
-                    const { assistant } = await runPromptAttempts(
-                        session,
-                        input,
-                        prompt,
-                        () => structured,
-                    );
-                    const tripReason = guard.tripReason();
-                    if (tripReason !== undefined) {
-                        throw new RalphieError({
-                            message: `${tripReason}.${
-                                input.model === undefined
-                                    ? ""
-                                    : ` Model: ${input.model.providerID}/${input.model.modelID}.`
-                            }`,
-                        });
-                    }
-                    return makePromptResponse(
-                        input,
-                        assistant,
-                        structured,
-                        needsAttention,
-                    );
-                } finally {
-                    unsubscribe?.();
-                    options?.signal?.removeEventListener("abort", abort);
-                    active.delete(session);
-                    pending.delete(input.sessionID);
-                    await session.dispose();
-                }
             },
         },
         close: () => {

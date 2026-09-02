@@ -260,9 +260,13 @@ flowchart LR
 Structured decision sessions deny edits/writes and mutating Git/GitHub
 commands, and Pi sessions cannot close issues, create or merge pull requests,
 or push: Ralphie's deterministic domain services perform every Git and GitHub
-mutation. Every decision task is schema-validated; invalid output or Pi
-failure becomes a failed issue outcome without proceeding to the next
-operation.
+mutation. PR reviews use an explicit immutable session profile whose only active
+tools are `submit_result` and the non-repository `request_needs_attention`
+side channel; the reviewer receives the exact staged patch and verification
+evidence in its prompt and cannot inspect the checkout or run shell/Git/GitHub
+commands. Every decision task is schema-validated at both the tool and response
+boundaries; invalid output or Pi failure becomes a failed issue outcome without
+proceeding to the next operation.
 
 Decision schemas that are discriminated unions (issue grounding and its
 needs-attention route) are flattened into a single object schema for the
@@ -319,11 +323,12 @@ Detailed behavior:
 - Staging is deterministic (`git add --all`). Ralphie reads the exact staged
   binary diff, runs every configured verification command, and records bounded
   stdout/stderr plus the exact staged-tree hash. The reviewer receives that
-  trusted evidence with the issue and diff. A non-zero command exit starts a
-  fresh, bounded verification-fix session with the failed command evidence and
-  staged diff; Ralphie restages and retries before review. Verification is
-  repeated after every fix and immediately before commit; a repaired or
-  otherwise changed tree invalidates approval and is reviewed again.
+  trusted evidence with the issue and diff in a fresh immutable review session;
+  it cannot inspect the checkout or run shell/Git/GitHub commands. A non-zero
+  command exit starts a fresh, bounded verification-fix session with the failed
+  command evidence and staged diff; Ralphie restages and retries before review.
+  Verification is repeated after every fix and immediately before commit; a
+  repaired or otherwise changed tree invalidates approval and is reviewed again.
   An approved review cannot contain blocking findings; a
   `changes_requested` review must contain one. Identical blocking findings
   repeated after a verified fix stop early rather than consuming the full loop.

@@ -17,6 +17,7 @@ import {
     buildVerificationFixPrompt,
 } from "../agent/prompts.ts";
 import { requestStructuredOutput } from "../agent/structured-output.ts";
+import { PiSessionProfile } from "../pi/client.ts";
 import {
     runPiTask,
     PI_TASK_PERMISSION_POLICY,
@@ -590,6 +591,7 @@ export const makeImplementationExecutorService = (
                         ),
                     }),
                     schema: reviewDecisionSchema,
+                    profile: PiSessionProfile.Review,
                     agent: context.piSelection.agent,
                     model: context.piSelection.model,
                     variant:
