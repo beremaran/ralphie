@@ -129,6 +129,28 @@ never build arguments, environment variables, labels, copied files, or build
 metadata inputs. Credentials are supplied only at runtime where needed. The
 version and commit remain the intentional public OCI labels.
 
+### Verified create-only manifest promotion
+
+Container promotion is exact and create-only. The reconciliation primitive in
+`src/release/registry-reconcile.ts` (HTTP client in `registry-http-client.ts`,
+fake registry in `registry-fixture.ts`) inspects every destination tag first
+and reuses it only when its complete serialized digest equals the intended
+digest; a missing tag is created through the OCI Distribution API with a
+server-enforced compare-and-swap (`If-None-Match: *`), and the tag is reread
+after the write. Any other digest, malformed response, or unexpected registry
+status is a conflict/failure, and an unconditional tag write is never used.
+
+Before any production tag write, `probeCreateOnlyPublishing` authenticates and
+proves the target registry is create-only: for each writable media type (OCI
+image manifest, Docker schema-2 manifest, OCI image index, Docker manifest
+list) it seeds referenced blobs and child manifests, creates a disposable,
+uniquely named probe tag, requires a competing second manifest to be rejected
+(412 or 409) with the original digest unchanged, and fails closed if the
+registry ignores `If-None-Match`, lacks a supported compare-and-swap
+operation, or accepts the competing write. A create race is accepted only
+after rereading the tag and finding the exact intended digest; authentication,
+blob upload, and manifest-push failures propagate.
+
 The dedicated `publish-npm` job is also limited to a validated `v*` tag and a
 non-dry-run release. It rechecks that removing the leading `v` from the tag
 produces the exact `package.json` version, then installs dependencies and runs

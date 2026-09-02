@@ -5,6 +5,17 @@ All notable changes to Ralphie are documented here. The project follows
 
 ## [Unreleased]
 
+- Add a verified create-only registry reconciliation primitive for exact
+  manifest promotion (`src/release/registry-reconcile.ts` with the OCI
+  Distribution HTTP client in `registry-http-client.ts` and the fake registry
+  in `registry-fixture.ts`): destination tags are inspected first and reused
+  only on an exact serialized-digest match, missing tags are created through
+  a server-enforced compare-and-swap (`If-None-Match: *`) with a mandatory
+  reread, an index with the same child digests but different bytes is
+  rejected, and a per-media-type capability probe proves the registry is
+  create-only against disposable probe tags (failing closed when
+  `If-None-Match` is ignored or unsupported) before any production tag write.
+
 - Resolve open dependencies on decomposed tracking parents transitively to
   their open leaf children in the issue queue, so a child depending on a
   decomposed-but-open container issue can never deadlock against a parent
