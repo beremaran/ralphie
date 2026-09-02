@@ -50,82 +50,17 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
       - name: Validate and resolve release context
         id: release-context
         env:
           RELEASE_VERSION: ${{ github.event_name == 'push' && github.ref_name || inputs.version }}
           RELEASE_REF: ${{ github.event_name == 'push' && github.sha || inputs.ref }}
           RELEASE_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
-        run: |
-          set -euo pipefail
-
-          # This is the deliberately narrow release grammar. Numeric
-          # components cannot have leading zeroes, and prerelease/build
-          # suffixes are not release versions.
-          if [[ ! "$RELEASE_VERSION" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-            echo "Unsupported release tag: $RELEASE_VERSION" >&2
-            echo 'Expected v<major>.<minor>.<patch>, for example v0.1.0.' >&2
-            exit 1
-          fi
-
-          if [[ "$RELEASE_DRY_RUN" != true && "$RELEASE_DRY_RUN" != false ]]; then
-            echo "dry_run must resolve to true or false" >&2
-            exit 1
-          fi
-
-          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
-            # A manual run must be started from the same protected tag it is
-            # releasing; the input SHA is then checked against that tag below.
-            if [[ "$GITHUB_REF" != "refs/tags/$RELEASE_VERSION" ]]; then
-              echo "workflow_dispatch must be run from the version tag $RELEASE_VERSION" >&2
-              exit 1
-            fi
-            if [[ ! "$RELEASE_REF" =~ ^[0-9a-f]{40}$ ]]; then
-              echo "workflow_dispatch ref must be a 40-character lowercase commit SHA" >&2
-              exit 1
-            fi
-          elif [[ "$GITHUB_REF" != "refs/tags/$RELEASE_VERSION" ]]; then
-            echo "The push ref is not the validated release tag" >&2
-            exit 1
-          fi
-
-          # This is the invariant that makes the validated commit stable
-          # through the build and publication jobs. A read-then-publish API
-          # check cannot close the race with a tag update.
-          package_version="$(jq -er '.version | select(type == "string")' package.json)"
-          expected_version="${RELEASE_VERSION#v}"
-          if [[ "$package_version" != "$expected_version" ]]; then
-            echo "Release tag $RELEASE_VERSION does not match package.json version $package_version" >&2
-            exit 1
-          fi
-
-          if [[ "$GITHUB_REF_PROTECTED" != true ]]; then
-            echo "The release tag must be protected against updates and deletions" >&2
-            exit 1
-          fi
-
-          tag_commit="$(git rev-parse --verify "refs/tags/$RELEASE_VERSION^{commit}" 2>/dev/null)" || {
-            echo "Release tag $RELEASE_VERSION does not exist in the checkout" >&2
-            exit 1
-          }
-          source_commit="$(git rev-parse --verify "${RELEASE_REF}^{commit}" 2>/dev/null)" || {
-            echo "Release ref $RELEASE_REF is not a commit" >&2
-            exit 1
-          }
-
-          if [[ "$source_commit" != "$tag_commit" ]]; then
-            echo "Release ref $RELEASE_REF does not target $RELEASE_VERSION ($tag_commit)" >&2
-            exit 1
-          fi
-
-          # Downstream jobs consume only these canonical values: the package
-          # version and the immutable commit targeted by the tag.
-          {
-            echo "version=$package_version"
-            echo "tag=$RELEASE_VERSION"
-            echo "source_ref=$tag_commit"
-            echo "dry_run=$RELEASE_DRY_RUN"
-          } >> "$GITHUB_OUTPUT"
+        run: bun scripts/validate-release-context.ts
 
   stage-package:
     name: Stage npm package and installer
@@ -607,50 +542,18 @@ jobs:
           path: package-staging
           merge-multiple: false
 
-      - name: Verify scoped package and release tag version
-        id: npm-context
-        env:
-          TAG: ${{ needs.validate.outputs.tag }}
-        run: |
-          set -euo pipefail
-
-          if [[ "$GITHUB_REF_TYPE" != tag || "$GITHUB_REF" != refs/tags/v* ]]; then
-            echo "Refusing npm publication: the workflow must run from a v* tag (got $GITHUB_REF)" >&2
-            exit 1
-          fi
-          if [[ "$TAG" != v* ]]; then
-            echo "Malformed npm release tag '$TAG': expected a tag beginning with v" >&2
-            exit 1
-          fi
-
-          TAG_VERSION="${TAG#v}"
-          # SemVer 2.0.0: numeric prerelease identifiers cannot have leading
-          # zeroes, and every dot-separated identifier must be non-empty.
-          SEMVER_REGEX='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*)|([0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))(\.((0|[1-9][0-9]*)|([0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)))*)?(\+([0-9A-Za-z-]+)(\.[0-9A-Za-z-]+)*)?$'
-          if [[ -z "$TAG_VERSION" || ! "$TAG_VERSION" =~ $SEMVER_REGEX ]]; then
-            echo "Malformed npm release tag '$TAG': expected a valid SemVer v<major>.<minor>.<patch> with optional prerelease/build metadata" >&2
-            exit 1
-          fi
-
-          PACKAGE_NAME="$(jq -er '.name | select(type == "string")' package.json)"
-          PACKAGE_VERSION="$(jq -er '.version | select(type == "string")' package.json)"
-          if [[ "$PACKAGE_NAME" != @beremaran/ralphie ]]; then
-            echo "Refusing npm publication for unscoped package $PACKAGE_NAME" >&2
-            exit 1
-          fi
-          if [[ "$TAG_VERSION" != "$PACKAGE_VERSION" ]]; then
-            echo "npm release tag $TAG resolves to $TAG_VERSION, but package.json declares $PACKAGE_VERSION; normal and prerelease versions must match exactly" >&2
-            exit 1
-          fi
-
-          echo "version=$TAG_VERSION" >> "$GITHUB_OUTPUT"
-
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: ${{ env.BUN_VERSION }}
 
       - name: Verify Bun version
         run: test "$(bun --version)" = "$BUN_VERSION"
+
+      - name: Verify scoped package and release tag version
+        id: npm-context
+        env:
+          TAG: ${{ needs.validate.outputs.tag }}
+        run: bun scripts/validate-npm-context.ts
 
       # npm trusted publishing requires a recent npm CLI and Node runtime.
       # Do not configure setup-node with a registry or auth file: npm obtains

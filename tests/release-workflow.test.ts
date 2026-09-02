@@ -63,14 +63,14 @@ describe("npm release publication contract", () => {
         expect(npmJob).toContain(
             "if: needs.validate.outputs.dry_run == 'false' && github.ref_type == 'tag' && startsWith(github.ref, 'refs/tags/v')",
         );
-        expect(npmJob).toContain('TAG_VERSION="${TAG#v}"');
-        expect(npmJob).toContain("Malformed npm release tag");
-        expect(npmJob).toContain("optional prerelease/build metadata");
-        expect(npmJob).toContain('PACKAGE_NAME="$(jq -er');
-        expect(npmJob).toContain('PACKAGE_VERSION="$(jq -er');
-        expect(npmJob).toContain(
-            'if [[ "$TAG_VERSION" != "$PACKAGE_VERSION" ]]; then',
-        );
+        // The scoped tag/version gate runs through the executable validation
+        // seam (tests/release/npm-context.test.ts), so the SemVer grammar
+        // lives in one production place instead of being inlined here and
+        // re-derived by another regex in the tests.
+        expect(npmJob).toContain("id: npm-context");
+        expect(npmJob).toContain("TAG: ${{ needs.validate.outputs.tag }}");
+        expect(npmJob).toContain("bun scripts/validate-npm-context.ts");
+        expect(npmJob).not.toMatch(/SEMVER_REGEX=|TAG_VERSION=|PACKAGE_NAME=/);
         expect(npmJob).toContain("contents: read");
         expect(npmJob).toContain("id-token: write");
         expect(npmJob).not.toContain("contents: write");
@@ -100,43 +100,48 @@ describe("npm release publication contract", () => {
         expect(smokeScript).toContain("mkdtemp(join(tmpdir(),");
         expect(smokeScript).toContain('cache: join(root, "npm-cache")');
         expect(smokeScript).toContain("expectedOutput");
+
+        // The production seam keeps the scoped-package and tag/version checks
+        // with the same failure strings the workflow step previously emitted.
+        const npmContextScript = await readRepositoryFile(
+            "scripts/validate-npm-context.ts",
+        );
+        expect(npmContextScript).toContain("Malformed npm release tag");
+        expect(npmContextScript).toContain(
+            "optional prerelease/build metadata",
+        );
+        expect(npmContextScript).toContain("@beremaran/ralphie");
+        expect(npmContextScript).toContain(
+            "normal and prerelease versions must match exactly",
+        );
+        expect(npmContextScript).not.toContain("npm publish");
+        expect(npmContextScript).not.toContain("GITHUB_TOKEN");
+        expect(npmContextScript).not.toContain("NPM_TOKEN");
     });
 
-    test("accepts normal and prerelease versions but rejects malformed tags", async () => {
+    test("delegates both grammars to executable seams rather than inlining regexes", async () => {
         const workflow = await readRepositoryFile(
             ".github/workflows/release.yml",
+        );
+        const validateJob = workflow.slice(
+            workflow.indexOf("  validate:"),
+            workflow.indexOf("  stage-package:"),
         );
         const npmJobStart = workflow.indexOf("  publish-npm:");
         const npmJobEnd = workflow.indexOf("  push-container:", npmJobStart);
         const npmJob = workflow.slice(npmJobStart, npmJobEnd);
-        const semverRegex = npmJob.match(/SEMVER_REGEX='([^']+)'/)?.[1];
-        if (semverRegex === undefined) {
-            throw new Error("npm release SemVer regex is missing");
-        }
 
-        const acceptsVersion = (version: string): boolean =>
-            Bun.spawnSync(["bash", "-c", '[[ "$VERSION" =~ $SEMVER_REGEX ]]'], {
-                env: {
-                    PATH: process.env.PATH ?? "/usr/bin:/bin",
-                    SEMVER_REGEX: semverRegex,
-                    VERSION: version,
-                },
-                stderr: "pipe",
-                stdout: "pipe",
-            }).exitCode === 0;
-
-        expect(acceptsVersion("1.2.3")).toBe(true);
-        expect(acceptsVersion("1.2.3-rc.1")).toBe(true);
-        expect(acceptsVersion("1.2.3+build.7")).toBe(true);
-        for (const malformedVersion of [
-            "1.2.3-01",
-            "1.2.3-foo..bar",
-            "1.2.3-",
-            "1.2.3-rc.",
-            "01.2.3",
-        ]) {
-            expect(acceptsVersion(malformedVersion)).toBe(false);
-        }
+        // The stable-only release grammar and the prerelease-capable npm
+        // grammar are two separate executable policies (the same tag value is
+        // a valid npm tag version but not a release version). Neither grammar
+        // may be re-inlined into the workflow where it could silently drift.
+        expect(validateJob).toContain(
+            "bun scripts/validate-release-context.ts",
+        );
+        expect(npmJob).toContain("bun scripts/validate-npm-context.ts");
+        expect(workflow).not.toMatch(
+            /SEMVER_REGEX=|TAG_VERSION=|"\$\{TAG#v\}"/,
+        );
     });
 
     test("documents the one-time npm trusted publisher binding", async () => {

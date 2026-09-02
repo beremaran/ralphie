@@ -23,6 +23,15 @@ must be started from the matching protected `version` tag and provide its full
 40-character lowercase commit `ref`. A mismatched ref fails before release or
 registry publication rather than falling back to the default branch.
 
+Both validation gates run through checked-in executable seams so the exact
+production checks can be exercised deterministically without GitHub or
+credentials: `scripts/validate-release-context.ts` enforces the stable-only
+grammar, protected-tag, and event/ref resolution above (outputting the
+validated `version`, `tag`, `source_ref`, and `dry_run`);
+`scripts/validate-npm-context.ts` enforces the prerelease-capable SemVer
+grammar plus the exact scoped `package.json` name/version match for npm
+publication. The gates are covered by `bun test tests/release`.
+
 The repository must enforce that binding with an active tag ruleset covering
 `v*`. Configure **Settings → Rules → Rulesets** to target tags matching `v*`,
 restrict both tag updates and deletions, and configure no bypass actors. The

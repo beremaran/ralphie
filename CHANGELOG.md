@@ -5,6 +5,19 @@ All notable changes to Ralphie are documented here. The project follows
 
 ## [Unreleased]
 
+- Extract the release-context and npm-publication validation gates into
+  executable seams used directly by `.github/workflows/release.yml`:
+  `scripts/validate-release-context.ts` enforces the stable
+  `v<major>.<minor>.<patch>` tag grammar, protected-tag and event/ref
+  resolution, and emits the canonical `version`/`tag`/`source_ref`/`dry_run`
+  outputs only for a valid context; `scripts/validate-npm-context.ts` enforces
+  the prerelease-capable SemVer grammar and the exact scoped package
+  name/version match for npm publication. Add deterministic tests under
+  `tests/release/` that exercise the same production entry points with
+  temporary package files and a temporary Git repository with real commits
+  and tags, asserting that every rejected context emits no validated outputs
+  and can never reach a publisher.
+
 - Add a verified create-only registry reconciliation primitive for exact
   manifest promotion (`src/release/registry-reconcile.ts` with the OCI
   Distribution HTTP client in `registry-http-client.ts` and the fake registry
