@@ -722,6 +722,7 @@ const emitRunSucceeded = async (
         message: summaryMessage("Run completed", summary.counts),
         details: {
             runId: summary.runId,
+            workflow: config.workflowMode,
             counts: summary.counts,
             routes: routeSummary(summary.outcomes),
             statePath: config.statePath,
@@ -772,7 +773,11 @@ const emitRunFailed = async (
         stage: "run",
         status: "failed",
         message: `Run failed: ${errorMessage(error)}`,
-        details: { runId: config.actualRunId, statePath: config.statePath },
+        details: {
+            runId: config.actualRunId,
+            workflow: config.workflowMode,
+            statePath: config.statePath,
+        },
     });
 };
 
@@ -2161,6 +2166,7 @@ export const workflow = async (
                 ),
                 details: {
                     runId: summary.runId,
+                    workflow: workflowMode,
                     counts: summary.counts,
                     routes: routeSummary(summary.outcomes),
                     statePath,

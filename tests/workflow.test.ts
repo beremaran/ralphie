@@ -36,11 +36,16 @@ import {
     makeIssueExecutorService,
     type IssueExecutorService,
 } from "../src/issues/executor.ts";
-import type { DryRunIssueExecutorService } from "../src/issues/dry-run-executor.ts";
+import {
+    makeDryRunIssueExecutorService,
+    type DryRunIssueExecutorService,
+} from "../src/issues/dry-run-executor.ts";
 import {
     IssueArtifactKind,
+    type IssueArtifactStore,
     type IssueArtifactStoreService,
     makeIssueArtifactStore,
+    makeIssueArtifactStoreService,
 } from "../src/issues/artifacts.ts";
 import { DEFAULT_PI_AGENT } from "../src/agent/model.ts";
 import type { PiService } from "../src/pi/server.ts";
@@ -125,6 +130,8 @@ type TestRuntimeOptions = {
     readonly executionContexts?: IssueExecutionContext[];
     readonly executeGate?: (context: IssueExecutionContext) => Promise<void>;
     readonly issueExecutor?: IssueExecutorService;
+    readonly dryRunIssueExecutor?: DryRunIssueExecutorService;
+    readonly artifactStore?: IssueArtifactStoreService;
     readonly refreshedIssues?: Readonly<Record<number, GitHubIssue>>;
     readonly needsAttentionNotification?: GitHubNeedsAttentionNotificationService;
     readonly dryRunOutcome?: IssueExecutionOutcome;
@@ -353,7 +360,7 @@ const testRuntime = (
             calls.push(`restoreBase:${branch}`);
         },
     };
-    const artifactStore: IssueArtifactStoreService = {
+    const artifactStore: IssueArtifactStoreService = options.artifactStore ?? {
         forIssue: (issueNumber) => makeIssueArtifactStore(issueNumber),
     };
     const issueExecutor: IssueExecutorService = options.issueExecutor ?? {
@@ -376,18 +383,19 @@ const testRuntime = (
             return result;
         },
     };
-    const dryRunIssueExecutor: DryRunIssueExecutorService = {
-        execute: async ({ issue }) => {
-            calls.push(`dryRunIssue:${issue.number}`);
-            return (
-                options.dryRunOutcome ?? {
-                    kind: IssueExecutionOutcomeKind.Skipped,
-                    route: "implementation",
-                    reason: "dry run",
-                }
-            );
-        },
-    };
+    const dryRunIssueExecutor: DryRunIssueExecutorService =
+        options.dryRunIssueExecutor ?? {
+            execute: async ({ issue }) => {
+                calls.push(`dryRunIssue:${issue.number}`);
+                return (
+                    options.dryRunOutcome ?? {
+                        kind: IssueExecutionOutcomeKind.Skipped,
+                        route: "implementation",
+                        reason: "dry run",
+                    }
+                );
+            },
+        };
     const pi: PiService = {
         start: async () => {
             if (options.startFailure) throw options.startFailure;
@@ -554,6 +562,40 @@ const expectNoIssueWork = (calls: ReadonlyArray<string>): void => {
     ).toEqual([]);
 };
 
+const artifactMutationMethods = new Set<PropertyKey>([
+    "write",
+    "recordResolutionDecision",
+    "beginNeedsAttentionHandoff",
+    "recordNeedsAttentionDecision",
+    "appendReview",
+    "appendPullRequestReview",
+    "recordCreatedIssue",
+    "resetImplementationAttempt",
+    "clearUnresolvedResolutionDecision",
+    "invalidateStaleIssueDecisions",
+    "invalidateStaleNeedsAttentionDecision",
+    "invalidateNeedsAttentionDecision",
+    "clearNeedsAttentionHandoff",
+]);
+
+const readOnlyArtifactSpy = (
+    store: IssueArtifactStore,
+    mutations: string[],
+): IssueArtifactStore =>
+    new Proxy(store, {
+        get(target, property, receiver) {
+            if (artifactMutationMethods.has(property)) {
+                return async () => {
+                    mutations.push(String(property));
+                    throw new Error(
+                        `dry run attempted artifact mutation: ${String(property)}`,
+                    );
+                };
+            }
+            return Reflect.get(target, property, receiver);
+        },
+    });
+
 const expectCallOrder = (
     calls: ReadonlyArray<string>,
     expected: ReadonlyArray<string>,
@@ -564,11 +606,16 @@ const expectCallOrder = (
     ]);
 };
 
-type GroundedRoute = "actionable" | "already-resolved" | "needs-attention";
+type GroundedRoute =
+    | "actionable"
+    | "decomposition"
+    | "already-resolved"
+    | "needs-attention";
 
 const groundingDecisionFor = (route: GroundedRoute): GroundingDecision => {
     switch (route) {
         case "actionable":
+        case "decomposition":
             return { disposition: GroundingDisposition.Actionable };
         case "already-resolved":
             return { disposition: GroundingDisposition.AlreadyResolved };
@@ -1838,6 +1885,341 @@ describe("workflow", () => {
             "executeIssue:42:/tmp/ralphie/repo:develop:build",
         );
     });
+
+    test.each([
+        { name: "lgtm", workflowMode: WorkflowMode.Lgtm },
+        { name: "pr", workflowMode: WorkflowMode.Pr },
+    ])(
+        "isolates every dry-run route in $name mode",
+        async ({ workflowMode }) => {
+            const routes: ReadonlyArray<GroundedRoute> = [
+                "actionable",
+                "decomposition",
+                "already-resolved",
+                "needs-attention",
+            ];
+            for (const route of routes) {
+                const calls: string[] = [];
+                const states: RunState[] = [];
+                const events: ProgressUpdate[] = [];
+                const artifactCalls: string[] = [];
+                const artifactMutations: string[] = [];
+                const storeService = makeIssueArtifactStoreService();
+                const artifactStore: IssueArtifactStoreService = {
+                    forIssue: async () => {
+                        artifactCalls.push("writable-loader");
+                        throw new Error("dry run used writable artifacts");
+                    },
+                    forIssueReadOnly: async (issueNumber, scope) => {
+                        artifactCalls.push("read-only-loader");
+                        return readOnlyArtifactSpy(
+                            await storeService.forIssueReadOnly!(
+                                issueNumber,
+                                scope,
+                            ),
+                            artifactMutations,
+                        );
+                    },
+                };
+                let groundingCalls = 0;
+                let complexityCalls = 0;
+                const dryRunExecutor = makeDryRunIssueExecutorService(
+                    artifactStore,
+                    {
+                        assess: async () => {
+                            complexityCalls += 1;
+                            if (
+                                route === "already-resolved" ||
+                                route === "needs-attention"
+                            ) {
+                                throw new Error(
+                                    "unexpected complexity assessment",
+                                );
+                            }
+                            return {
+                                sessionID: "dry-run-complexity",
+                                decision: {
+                                    complexity:
+                                        route === "actionable"
+                                            ? ComplexityLevel.Level2
+                                            : ComplexityLevel.Level4,
+                                    rationale: "Read-only route fixture.",
+                                },
+                            };
+                        },
+                    },
+                    makeProgressRecorder(events),
+                    {
+                        assess: async () => {
+                            groundingCalls += 1;
+                            return {
+                                sessionID: "dry-run-grounding",
+                                decision: groundingDecisionFor(route),
+                            };
+                        },
+                    },
+                );
+                const summary = await workflow(
+                    {
+                        ...baseOptions,
+                        workflow: workflowMode,
+                        dryRun: true,
+                        onNeedsAttention: NeedsAttentionPolicy.Continue,
+                    },
+                    testRuntime(
+                        calls,
+                        states,
+                        {
+                            artifactStore,
+                            dryRunIssueExecutor: dryRunExecutor,
+                            issueExecutor: {
+                                execute: async () => {
+                                    calls.push("executeIssue:unexpected");
+                                    throw new Error(
+                                        "mutation executor escaped dry run",
+                                    );
+                                },
+                            },
+                        },
+                        events,
+                    ),
+                );
+
+                expect(summary.outcomes[0]?.outcome).toMatchObject({
+                    route: route === "actionable" ? "implementation" : route,
+                });
+                expect(groundingCalls).toBe(1);
+                expect(complexityCalls).toBe(
+                    route === "already-resolved" || route === "needs-attention"
+                        ? 0
+                        : 1,
+                );
+                expect(artifactCalls).toEqual(["read-only-loader"]);
+                expect(artifactMutations).toEqual([]);
+                expectNoIssueWork(calls);
+                expect(calls).toEqual([
+                    "prepareWorkspace:/tmp/ralphie",
+                    "initializeGitHub",
+                    "verifyGitInstalled",
+                    "prepareRepository:owner/repo:develop:/tmp/ralphie",
+                    "listIssues:owner/repo:bug:created:asc",
+                    "startServer",
+                    "refreshIssue:42",
+                    "closeRuntime",
+                ]);
+                expect(firstIssue.state).toBe("open");
+                expect(events).toContainEqual(
+                    expect.objectContaining({
+                        stage: "run",
+                        status: "info",
+                        details: expect.objectContaining({
+                            workflow: workflowMode,
+                            dryRun: true,
+                        }),
+                    }),
+                );
+                expect(events).toContainEqual(
+                    expect.objectContaining({
+                        stage: "run",
+                        status: "succeeded",
+                        details: expect.objectContaining({
+                            workflow: workflowMode,
+                            routes: [
+                                {
+                                    issueNumber: 42,
+                                    route:
+                                        route === "actionable"
+                                            ? "implementation"
+                                            : route,
+                                },
+                            ],
+                        }),
+                    }),
+                );
+                expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
+            }
+        },
+    );
+
+    test.each([
+        {
+            name: "lgtm-actionable",
+            workflowMode: WorkflowMode.Lgtm,
+            route: "actionable" as const,
+        },
+        {
+            name: "lgtm-already-resolved",
+            workflowMode: WorkflowMode.Lgtm,
+            route: "already-resolved" as const,
+        },
+        {
+            name: "lgtm-needs-attention",
+            workflowMode: WorkflowMode.Lgtm,
+            route: "needs-attention" as const,
+        },
+        {
+            name: "pr-actionable",
+            workflowMode: WorkflowMode.Pr,
+            route: "actionable" as const,
+        },
+        {
+            name: "pr-already-resolved",
+            workflowMode: WorkflowMode.Pr,
+            route: "already-resolved" as const,
+        },
+        {
+            name: "pr-needs-attention",
+            workflowMode: WorkflowMode.Pr,
+            route: "needs-attention" as const,
+        },
+    ])(
+        "keeps a resumed dry run isolated in $name mode",
+        async ({ workflowMode, route }) => {
+            const calls: string[] = [];
+            const states: RunState[] = [];
+            const events: ProgressUpdate[] = [];
+            const artifactCalls: string[] = [];
+            const artifactMutations: string[] = [];
+            const storeService = makeIssueArtifactStoreService();
+            const artifactStore: IssueArtifactStoreService = {
+                forIssue: async () => {
+                    artifactCalls.push("writable-loader");
+                    throw new Error("resumed dry run used writable artifacts");
+                },
+                forIssueReadOnly: async (issueNumber, scope) => {
+                    artifactCalls.push("read-only-loader");
+                    return readOnlyArtifactSpy(
+                        await storeService.forIssueReadOnly!(
+                            issueNumber,
+                            scope,
+                        ),
+                        artifactMutations,
+                    );
+                },
+            };
+            const dryRunExecutor = makeDryRunIssueExecutorService(
+                artifactStore,
+                {
+                    assess: async () => ({
+                        sessionID: "resumed-complexity",
+                        decision: {
+                            complexity:
+                                route === "actionable"
+                                    ? ComplexityLevel.Level2
+                                    : ComplexityLevel.Level4,
+                            rationale: "Resumed read-only route fixture.",
+                        },
+                    }),
+                },
+                makeProgressRecorder(events),
+                {
+                    assess: async () => ({
+                        sessionID: "resumed-grounding",
+                        decision: groundingDecisionFor(route),
+                    }),
+                },
+            );
+            const summary = await workflow(
+                {
+                    ...baseOptions,
+                    workflow: workflowMode,
+                    dryRun: false,
+                    resumeState: {
+                        version: 4,
+                        status: RunStateStatus.Active,
+                        runId: `resumed-${workflowMode}`,
+                        repository: baseOptions.repo,
+                        branch: baseOptions.branch,
+                        workflow: workflowMode,
+                        onNeedsAttention: NeedsAttentionPolicy.Continue,
+                        dryRun: true,
+                        selection: { agent: DEFAULT_PI_AGENT },
+                        maxIssues: 1,
+                        queue: {
+                            pending: [
+                                {
+                                    ...firstIssue,
+                                    labels: [...firstIssue.labels],
+                                },
+                            ],
+                            completedIssueNumbers: [],
+                            processedCount: 0,
+                        },
+                        outcomes: [],
+                        checkout: {
+                            branch: baseOptions.branch,
+                            head: "head-0",
+                        },
+                        updatedAt: "2026-08-28T00:00:00.000Z",
+                    },
+                },
+                testRuntime(
+                    calls,
+                    states,
+                    {
+                        artifactStore,
+                        dryRunIssueExecutor: dryRunExecutor,
+                        issueExecutor: {
+                            execute: async () => {
+                                calls.push("executeIssue:unexpected");
+                                throw new Error(
+                                    "mutation executor escaped resume",
+                                );
+                            },
+                        },
+                    },
+                    events,
+                ),
+            );
+
+            expect(summary.outcomes[0]?.outcome).toMatchObject({
+                route: route === "actionable" ? "implementation" : route,
+            });
+            expect(artifactCalls).toEqual(["read-only-loader"]);
+            expect(artifactMutations).toEqual([]);
+            expectNoIssueWork(calls);
+            expect(calls).toEqual([
+                "prepareWorkspace:/tmp/ralphie",
+                "initializeGitHub",
+                "verifyGitInstalled",
+                "prepareRepository:owner/repo:develop:/tmp/ralphie",
+                "listIssues:owner/repo:bug:created:asc",
+                "startServer",
+                "refreshIssue:42",
+                "closeRuntime",
+            ]);
+            expect(firstIssue.state).toBe("open");
+            expect(events).toContainEqual(
+                expect.objectContaining({
+                    stage: "run",
+                    status: "info",
+                    details: expect.objectContaining({
+                        workflow: workflowMode,
+                        dryRun: true,
+                        resumed: true,
+                    }),
+                }),
+            );
+            expect(events).toContainEqual(
+                expect.objectContaining({
+                    stage: "run",
+                    status: "succeeded",
+                    details: expect.objectContaining({
+                        workflow: workflowMode,
+                        routes: [
+                            {
+                                issueNumber: 42,
+                                route:
+                                    route === "actionable"
+                                        ? "implementation"
+                                        : route,
+                            },
+                        ],
+                    }),
+                }),
+            );
+        },
+    );
 
     test("defers an issue needing attention and continues with the queue", async () => {
         const calls: string[] = [];

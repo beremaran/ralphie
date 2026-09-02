@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { Octokit } from "octokit";
@@ -394,6 +394,118 @@ describe("dry-run issue executor", () => {
             await rm(workspace, { recursive: true, force: true });
         }
     });
+
+    test.each([
+        {
+            name: "complexity",
+            kind: IssueArtifactKind.ComplexityDecision,
+            artifact: {
+                decision: { complexity: 99, rationale: "invalid" },
+                fingerprint: {
+                    updatedAt: "2026-08-28T00:00:00.000Z",
+                    commentCount: 1,
+                },
+            },
+        },
+        {
+            name: "needs-attention",
+            kind: IssueArtifactKind.NeedsAttentionDecision,
+            artifact: {
+                decision: {
+                    disposition: GroundingDisposition.NeedsAttention,
+                    reason: "not-a-valid-reason",
+                    summary: "invalid",
+                    evidence: ["invalid"],
+                    questions: ["invalid"],
+                },
+                fingerprint: {
+                    updatedAt: "2026-08-28T00:00:00.000Z",
+                    commentCount: 1,
+                },
+            },
+        },
+    ])(
+        "does not rewrite an invalid $name decision",
+        async ({ artifact, kind }) => {
+            const workspace = await mkdtemp(join(tmpdir(), "ralphie-dry-run-"));
+            try {
+                const path = join(
+                    workspace,
+                    ".ralphie",
+                    "runs",
+                    "invalid-decision",
+                    "issues",
+                    "42",
+                    "artifacts.json",
+                );
+                await mkdir(
+                    join(
+                        workspace,
+                        ".ralphie",
+                        "runs",
+                        "invalid-decision",
+                        "issues",
+                        "42",
+                    ),
+                    { recursive: true },
+                );
+                const encoded = `${JSON.stringify({
+                    version: 4,
+                    issueNumber: 42,
+                    repository: "owner/repository",
+                    artifacts: { [kind]: artifact },
+                })}\n`;
+                await writeFile(path, encoded);
+                const events: ProgressUpdate[] = [];
+                let assessments = 0;
+                const executor = makeDryRunIssueExecutorService(
+                    makeIssueArtifactStoreService(),
+                    {
+                        assess: async () => {
+                            assessments += 1;
+                            return {
+                                sessionID: "fresh-complexity",
+                                decision: {
+                                    complexity: ComplexityLevel.Level2,
+                                    rationale: "Fresh read-only assessment.",
+                                },
+                            };
+                        },
+                    },
+                    makeProgressRecorder(events),
+                    {
+                        assess: async () => ({
+                            sessionID: "fresh-grounding",
+                            decision: {
+                                disposition: GroundingDisposition.Actionable,
+                            },
+                        }),
+                    },
+                );
+                const before = await Bun.file(path).text();
+                const result = await executor.execute({
+                    ...groundedContext(42),
+                    workspace,
+                    runId: "invalid-decision",
+                });
+
+                expect(result).toMatchObject({ route: "implementation" });
+                expect(assessments).toBe(1);
+                expect(await Bun.file(path).text()).toBe(before);
+                expect(events).toContainEqual(
+                    expect.objectContaining({
+                        stage: "issue-planning",
+                        details: expect.objectContaining({
+                            dryRun: true,
+                            route: "implementation",
+                        }),
+                    }),
+                );
+            } finally {
+                await rm(workspace, { recursive: true, force: true });
+            }
+        },
+    );
 
     test("reuses matching grounding without fabricating a new artifact path", async () => {
         const workspace = await mkdtemp(join(tmpdir(), "ralphie-dry-run-"));

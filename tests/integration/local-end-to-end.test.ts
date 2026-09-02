@@ -17,8 +17,12 @@ import { makeGitRepositoryInvariantService } from "../../src/git/repository-inva
 import {
     issueArtifactPath,
     makeIssueArtifactStoreService,
+    type IssueArtifactStore,
+    type IssueArtifactStoreService,
 } from "../../src/issues/artifacts.ts";
+import { makeDryRunIssueExecutorService } from "../../src/issues/dry-run-executor.ts";
 import { makeComplexityAssessmentService } from "../../src/issues/complexity.ts";
+import { makeGroundingAssessmentService } from "../../src/issues/grounding.ts";
 import {
     ComplexityLevel,
     GroundingDisposition,
@@ -40,6 +44,11 @@ import {
     makeProgressRecorder,
     type ProgressUpdate,
 } from "../../src/progress/progress.ts";
+import { IssueOrder, IssueSort } from "../../src/github/issues.ts";
+import { NeedsAttentionPolicy, WorkflowMode } from "../../src/options.ts";
+import { RunStateStatus, type RunState } from "../../src/run/state.ts";
+import { makeLiveRuntime, type RalphieRuntime } from "../../src/runtime.ts";
+import { workflow } from "../../src/workflow.ts";
 
 const run = (
     command: string,
@@ -62,7 +71,111 @@ const run = (
 const git = (repositoryPath: string, args: ReadonlyArray<string>): string =>
     run("git", args, repositoryPath);
 
-const makePi = (repositoryPath: string) => {
+const artifactMutationMethods = new Set<PropertyKey>([
+    "write",
+    "recordResolutionDecision",
+    "beginNeedsAttentionHandoff",
+    "recordNeedsAttentionDecision",
+    "appendReview",
+    "appendPullRequestReview",
+    "recordCreatedIssue",
+    "resetImplementationAttempt",
+    "clearUnresolvedResolutionDecision",
+    "invalidateStaleIssueDecisions",
+    "invalidateStaleNeedsAttentionDecision",
+    "invalidateNeedsAttentionDecision",
+    "clearNeedsAttentionHandoff",
+]);
+
+const readOnlyArtifactSpy = (
+    store: IssueArtifactStore,
+    mutations: string[],
+): IssueArtifactStore =>
+    new Proxy(store, {
+        get(target, property, receiver) {
+            if (artifactMutationMethods.has(property)) {
+                return async () => {
+                    mutations.push(String(property));
+                    throw new Error(
+                        `dry run attempted artifact mutation: ${String(property)}`,
+                    );
+                };
+            }
+            return Reflect.get(target, property, receiver);
+        },
+    });
+
+const forbiddenCall = (calls: string[], operation: string): never => {
+    calls.push(operation);
+    throw new Error(`Unexpected dry-run mutation: ${operation}`);
+};
+
+type LocalDryRunRoute = "actionable" | "already-resolved" | "needs-attention";
+
+const dryRunGroundingDecision = (
+    route: LocalDryRunRoute,
+): Readonly<Record<string, unknown>> => {
+    switch (route) {
+        case "actionable":
+            return { disposition: GroundingDisposition.Actionable };
+        case "already-resolved":
+            return { disposition: GroundingDisposition.AlreadyResolved };
+        case "needs-attention":
+            return {
+                disposition: GroundingDisposition.NeedsAttention,
+                reason: NeedsAttentionReason.ExternalDependency,
+                summary: "The local prerequisite is still open.",
+                evidence: ["README.md documents the unresolved prerequisite."],
+                questions: ["When will the local prerequisite be complete?"],
+            };
+    }
+};
+
+const structuredPiResponse = (structured: unknown) => ({
+    data: { info: { structured }, parts: [] },
+});
+
+const localPiResponse = (
+    promptText: string,
+    structured: boolean,
+    promptCount: number,
+    dryRunRoute: LocalDryRunRoute,
+) => {
+    if (
+        structured &&
+        promptText.includes("Determine whether this GitHub issue")
+    ) {
+        return structuredPiResponse(dryRunGroundingDecision(dryRunRoute));
+    }
+    if (structured && promptText.includes("Assign exactly one complexity")) {
+        return structuredPiResponse({
+            complexity:
+                dryRunRoute === "actionable"
+                    ? ComplexityLevel.Level2
+                    : ComplexityLevel.Level4,
+            rationale: "A small isolated implementation change.",
+        });
+    }
+    if (structured && promptCount === 1) {
+        return structuredPiResponse({
+            complexity: ComplexityLevel.Level2,
+            rationale: "A small isolated implementation change.",
+        });
+    }
+    if (promptText.includes("Review the staged implementation")) {
+        return structuredPiResponse({
+            verdict: ReviewVerdict.Approved,
+            summary: "The implementation is correct.",
+            findings: [],
+        });
+    }
+    return structuredPiResponse({ subject: "implement local issue" });
+};
+
+const makePi = (
+    repositoryPath: string,
+    dryRunRoute: LocalDryRunRoute = "actionable",
+) => {
     let session = 0;
     let implementationWritten = false;
     const promptKinds: string[] = [];
@@ -76,11 +189,10 @@ const makePi = (repositoryPath: string) => {
                 readonly parts?: ReadonlyArray<{ readonly text: string }>;
             }) => {
                 const structured = parameters.format !== undefined;
+                const promptText = parameters.parts?.[0]?.text ?? "";
                 promptKinds.push(structured ? "structured" : "text");
                 if (
-                    parameters.parts?.[0]?.text.includes(
-                        "Address the GitHub issue",
-                    ) &&
+                    promptText.includes("Address the GitHub issue") &&
                     !implementationWritten
                 ) {
                     implementationWritten = true;
@@ -101,46 +213,12 @@ const makePi = (repositoryPath: string) => {
                         },
                     };
                 }
-                if (structured && promptKinds.length === 1) {
-                    return {
-                        data: {
-                            info: {
-                                structured: {
-                                    complexity: ComplexityLevel.Level2,
-                                    rationale:
-                                        "A small isolated implementation change.",
-                                },
-                            },
-                            parts: [],
-                        },
-                    };
-                }
-                if (
-                    parameters.parts?.[0]?.text.includes(
-                        "Review the staged implementation",
-                    )
-                ) {
-                    return {
-                        data: {
-                            info: {
-                                structured: {
-                                    verdict: ReviewVerdict.Approved,
-                                    summary: "The implementation is correct.",
-                                    findings: [],
-                                },
-                            },
-                            parts: [],
-                        },
-                    };
-                }
-                return {
-                    data: {
-                        info: {
-                            structured: { subject: "implement local issue" },
-                        },
-                        parts: [],
-                    },
-                };
+                return localPiResponse(
+                    promptText,
+                    structured,
+                    promptKinds.length,
+                    dryRunRoute,
+                );
             },
         },
     };
@@ -179,6 +257,470 @@ const makeContext = (
 });
 
 describe("local implementation end-to-end", () => {
+    test.each([
+        { name: "lgtm", workflowMode: WorkflowMode.Lgtm },
+        { name: "pr", workflowMode: WorkflowMode.Pr },
+    ])(
+        "keeps every dry-run route isolated in $name mode",
+        async ({ workflowMode }) => {
+            const root = await mkdtemp(
+                join(tmpdir(), "ralphie-local-dry-run-"),
+            );
+            const repositoryPath = join(root, "repository");
+            const workspace = join(root, "workspace");
+            await mkdir(repositoryPath, { recursive: true });
+            try {
+                run("git", ["init", "-b", "main"], repositoryPath);
+                git(repositoryPath, ["config", "user.name", "Ralphie Test"]);
+                git(repositoryPath, [
+                    "config",
+                    "user.email",
+                    "ralphie@example.test",
+                ]);
+                await writeFile(join(repositoryPath, "README.md"), "initial\n");
+                git(repositoryPath, ["add", "--all"]);
+                git(repositoryPath, ["commit", "-m", "initial commit"]);
+                const initialSha = git(repositoryPath, ["rev-parse", "HEAD"]);
+                const initialBranch = git(repositoryPath, [
+                    "branch",
+                    "--show-current",
+                ]);
+                const issue = {
+                    number: 17,
+                    title: "Implement local change",
+                    url: "https://github.com/owner/repository/issues/17",
+                    body: "Create the implementation file.",
+                    labels: ["bug"],
+                    state: "open" as const,
+                    updatedAt: "2026-08-28T00:00:00.000Z",
+                    comments: [],
+                    commentCount: 0,
+                    commentVersion: "2026-08-28T00:00:00.000Z",
+                };
+
+                for (const route of [
+                    "actionable",
+                    "already-resolved",
+                    "needs-attention",
+                ] as const) {
+                    const runId = `local-dry-run-${workflowMode}-${route}`;
+                    const events: ProgressUpdate[] = [];
+                    const piSetup = makePi(repositoryPath, route);
+                    const piCalls: string[] = [];
+                    const progress = makeProgressRecorder(events);
+                    const artifactLoads: string[] = [];
+                    const artifactMutations: string[] = [];
+                    const stores = makeIssueArtifactStoreService();
+                    const artifactStore: IssueArtifactStoreService = {
+                        forIssue: async () => {
+                            artifactLoads.push("writable-loader");
+                            throw new Error("dry run used writable artifacts");
+                        },
+                        forIssueReadOnly: async (issueNumber, scope) => {
+                            artifactLoads.push("read-only-loader");
+                            return readOnlyArtifactSpy(
+                                await stores.forIssueReadOnly!(
+                                    issueNumber,
+                                    scope,
+                                ),
+                                artifactMutations,
+                            );
+                        },
+                    };
+                    const gitPreparationCalls: string[] = [];
+                    const gitReadCalls: string[] = [];
+                    const gitMutationCalls: string[] = [];
+                    const gitRepository: RalphieRuntime["gitRepository"] = {
+                        verifyInstalled: async () => {
+                            gitPreparationCalls.push("verify-installed");
+                        },
+                        prepare: async (
+                            repository,
+                            branch,
+                            preparedWorkspace,
+                        ) => {
+                            gitPreparationCalls.push(
+                                `prepare:${repository}:${branch}:${preparedWorkspace}`,
+                            );
+                            return {
+                                path: repositoryPath,
+                                branch: branch ?? "main",
+                                cloned: false,
+                                branchChanged: false,
+                                cleaned: false,
+                            };
+                        },
+                    };
+                    const realInvariant =
+                        makeGitRepositoryInvariantService(CommandRunnerLive);
+                    const invariant: RalphieRuntime["gitRepositoryInvariant"] =
+                        {
+                            capture: async (path) => {
+                                gitReadCalls.push("capture");
+                                return await realInvariant.capture(path);
+                            },
+                            verify: async (path, expected) => {
+                                gitReadCalls.push("verify");
+                                await realInvariant.verify(path, expected);
+                            },
+                        };
+                    const gitIssueOperations: RalphieRuntime["gitIssueOperations"] =
+                        {
+                            stageAll: async () =>
+                                forbiddenCall(gitMutationCalls, "stage-all"),
+                            readStagedBinaryDiff: async () =>
+                                forbiddenCall(
+                                    gitMutationCalls,
+                                    "read-staged-diff",
+                                ),
+                            readCommittedBinaryDiff: async () =>
+                                forbiddenCall(
+                                    gitMutationCalls,
+                                    "read-committed-diff",
+                                ),
+                            hasStagedChanges: async () =>
+                                forbiddenCall(
+                                    gitMutationCalls,
+                                    "has-staged-changes",
+                                ),
+                            commit: async () =>
+                                forbiddenCall(gitMutationCalls, "commit"),
+                            push: async () =>
+                                forbiddenCall(gitMutationCalls, "push"),
+                            createOrCheckoutFeatureBranch: async () =>
+                                forbiddenCall(
+                                    gitMutationCalls,
+                                    "feature-branch",
+                                ),
+                            restoreBaseCheckout: async () =>
+                                forbiddenCall(gitMutationCalls, "restore-base"),
+                        };
+                    const githubReadCalls: string[] = [];
+                    const githubDeliveryCalls: string[] = [];
+                    const githubClient: RalphieRuntime["githubClient"] = {
+                        initialize: async () => {
+                            githubReadCalls.push("initialize");
+                            return {} as Octokit;
+                        },
+                    };
+                    const githubIssues: RalphieRuntime["githubIssues"] = {
+                        listOpen: async () => {
+                            githubReadCalls.push("list-open");
+                            return [issue];
+                        },
+                        refresh: async () => {
+                            githubReadCalls.push("refresh");
+                            return issue;
+                        },
+                        listDecompositionChildren: async () => {
+                            githubReadCalls.push("list-children");
+                            return [];
+                        },
+                    };
+                    const githubIssueMutations: RalphieRuntime["githubIssueMutations"] =
+                        {
+                            create: async () =>
+                                forbiddenCall(
+                                    githubDeliveryCalls,
+                                    "issue.create",
+                                ),
+                            update: async () =>
+                                forbiddenCall(
+                                    githubDeliveryCalls,
+                                    "issue.update",
+                                ),
+                            close: async () =>
+                                forbiddenCall(
+                                    githubDeliveryCalls,
+                                    "issue.close",
+                                ),
+                        };
+                    const githubPullRequests: RalphieRuntime["githubPullRequests"] =
+                        {
+                            createOrFind: async () =>
+                                forbiddenCall(
+                                    githubDeliveryCalls,
+                                    "pull-request.create",
+                                ),
+                            read: async () =>
+                                forbiddenCall(
+                                    githubDeliveryCalls,
+                                    "pull-request.read",
+                                ),
+                            readSnapshot: async () =>
+                                forbiddenCall(
+                                    githubDeliveryCalls,
+                                    "pull-request.read-snapshot",
+                                ),
+                            rereadMatchingSnapshot: async () =>
+                                forbiddenCall(
+                                    githubDeliveryCalls,
+                                    "pull-request.reread-snapshot",
+                                ),
+                            publishPullRequestReviewAttempts: async () =>
+                                forbiddenCall(
+                                    githubDeliveryCalls,
+                                    "pull-request.publish-head-reviews",
+                                ),
+                            publishReviewAttempts: async () =>
+                                forbiddenCall(
+                                    githubDeliveryCalls,
+                                    "pull-request.publish-reviews",
+                                ),
+                            merge: async () =>
+                                forbiddenCall(
+                                    githubDeliveryCalls,
+                                    "pull-request.merge",
+                                ),
+                        };
+                    const parentCompletion: RalphieRuntime["parentCompletion"] =
+                        {
+                            reconcileParent: async () =>
+                                forbiddenCall(
+                                    githubDeliveryCalls,
+                                    "parent.reconcile",
+                                ),
+                            reconcileAfterChildCompletion: async () =>
+                                forbiddenCall(
+                                    githubDeliveryCalls,
+                                    "parent.reconcile-child",
+                                ),
+                        };
+                    const pipelineObservation: RalphieRuntime["pipelineObservation"] =
+                        {
+                            observe: async () =>
+                                forbiddenCall(
+                                    githubDeliveryCalls,
+                                    "pipeline.observe",
+                                ),
+                        };
+                    const notification: RalphieRuntime["githubNeedsAttentionNotification"] =
+                        {
+                            notify: async () =>
+                                forbiddenCall(
+                                    githubDeliveryCalls,
+                                    "needs-attention.notify",
+                                ),
+                        };
+                    const implementationCalls: string[] = [];
+                    const implementationExecutor: RalphieRuntime["implementationExecutor"] =
+                        {
+                            execute: async () =>
+                                forbiddenCall(
+                                    implementationCalls,
+                                    "implementation.execute",
+                                ),
+                        };
+                    const decompositionCalls: string[] = [];
+                    const decompositionExecutor: RalphieRuntime["decompositionExecutor"] =
+                        {
+                            execute: async () =>
+                                forbiddenCall(
+                                    decompositionCalls,
+                                    "decomposition.execute",
+                                ),
+                        };
+                    const complexity =
+                        makeComplexityAssessmentService(progress);
+                    const grounding = makeGroundingAssessmentService(progress);
+                    const resolution = {
+                        verify: async () =>
+                            forbiddenCall(
+                                githubDeliveryCalls,
+                                "resolution.verify",
+                            ),
+                    } satisfies RalphieRuntime["resolutionVerification"];
+                    const normalExecutor = makeIssueExecutorService(
+                        artifactStore,
+                        complexity,
+                        implementationExecutor,
+                        decompositionExecutor,
+                        grounding,
+                        resolution,
+                        progress,
+                    );
+                    const normalIssueCalls: string[] = [];
+                    const issueExecutor: RalphieRuntime["issueExecutor"] = {
+                        execute: async (context) => {
+                            normalIssueCalls.push(
+                                `issue-${context.issue.number}`,
+                            );
+                            return await normalExecutor.execute(context);
+                        },
+                    };
+                    const dryRunIssueExecutor = makeDryRunIssueExecutorService(
+                        artifactStore,
+                        complexity,
+                        progress,
+                        grounding,
+                    );
+                    const savedStates: RunState[] = [];
+                    const runStateStore: RalphieRuntime["runStateStore"] = {
+                        load: async () => {
+                            throw new Error("unexpected state load");
+                        },
+                        save: async (_path, state) => {
+                            savedStates.push(structuredClone(state));
+                        },
+                    };
+                    const workspaceService: RalphieRuntime["workspace"] = {
+                        prepare: async (path) => {
+                            await mkdir(path, { recursive: true });
+                        },
+                        remove: async () => {
+                            throw new Error("unexpected workspace cleanup");
+                        },
+                    };
+                    const pi: RalphieRuntime["pi"] = {
+                        start: async () => {
+                            piCalls.push("start");
+                            return {
+                                url: "local://pi",
+                                client: piSetup.client,
+                                close: async () => {
+                                    piCalls.push("close");
+                                },
+                            };
+                        },
+                    };
+                    const runtime = {
+                        ...makeLiveRuntime({ pi, progress }),
+                        githubClient,
+                        githubIssues,
+                        githubIssueMutations,
+                        githubPullRequests,
+                        githubNeedsAttentionNotification: notification,
+                        gitRepository,
+                        gitRepositoryInvariant: invariant,
+                        gitIssueOperations,
+                        parentCompletion,
+                        pipelineObservation,
+                        issueArtifactStore: artifactStore,
+                        implementationExecutor,
+                        decompositionExecutor,
+                        issueExecutor,
+                        dryRunIssueExecutor,
+                        runStateStore,
+                        workspace: workspaceService,
+                    } satisfies RalphieRuntime;
+
+                    const summary = await workflow(
+                        {
+                            repo: "owner/repository",
+                            branch: "main",
+                            maxIssues: 1,
+                            issueFilters: {
+                                labels: ["bug"],
+                                sort: IssueSort.Created,
+                                order: IssueOrder.Ascending,
+                            },
+                            agent: "build",
+                            workspace,
+                            cleanup: false,
+                            startClean: false,
+                            runId,
+                            workflow: workflowMode,
+                            dryRun: true,
+                            onNeedsAttention: NeedsAttentionPolicy.Continue,
+                        },
+                        runtime,
+                    );
+
+                    const expectedRoute =
+                        route === "actionable" ? "implementation" : route;
+                    expect(summary.outcomes[0]?.outcome).toMatchObject({
+                        kind:
+                            route === "needs-attention"
+                                ? IssueExecutionOutcomeKind.NeedsAttention
+                                : IssueExecutionOutcomeKind.Skipped,
+                        route: expectedRoute,
+                    });
+                    expect(artifactLoads).toEqual(["read-only-loader"]);
+                    expect(artifactMutations).toEqual([]);
+                    expect(normalIssueCalls).toEqual([]);
+                    expect(implementationCalls).toEqual([]);
+                    expect(decompositionCalls).toEqual([]);
+                    expect(gitMutationCalls).toEqual([]);
+                    expect(githubReadCalls).toEqual([
+                        "initialize",
+                        "list-open",
+                        "refresh",
+                    ]);
+                    expect(githubDeliveryCalls).toEqual([]);
+                    expect(gitPreparationCalls).toEqual([
+                        "verify-installed",
+                        `prepare:owner/repository:main:${workspace}`,
+                    ]);
+                    expect(gitReadCalls.length).toBeGreaterThan(0);
+                    expect(piCalls).toEqual(["start", "close"]);
+                    expect(piSetup.promptKinds).toEqual(
+                        route === "actionable"
+                            ? ["structured", "structured"]
+                            : ["structured"],
+                    );
+                    expect(issue.state).toBe("open");
+                    expect(initialBranch).toBe("main");
+                    expect(
+                        git(repositoryPath, ["branch", "--show-current"]),
+                    ).toBe(initialBranch);
+                    expect(git(repositoryPath, ["rev-parse", "HEAD"])).toBe(
+                        initialSha,
+                    );
+                    expect(
+                        git(repositoryPath, ["status", "--porcelain=v1"]),
+                    ).toBe("");
+                    expect(
+                        await Bun.file(
+                            join(repositoryPath, "implemented.txt"),
+                        ).exists(),
+                    ).toBe(false);
+                    expect(
+                        await Bun.file(
+                            issueArtifactPath(
+                                {
+                                    workspace,
+                                    runId,
+                                    repository: "owner/repository",
+                                },
+                                17,
+                            ),
+                        ).exists(),
+                    ).toBe(false);
+                    expect(events).toContainEqual(
+                        expect.objectContaining({
+                            stage: "run",
+                            status: "info",
+                            details: expect.objectContaining({
+                                workflow: workflowMode,
+                                dryRun: true,
+                            }),
+                        }),
+                    );
+                    expect(events).toContainEqual(
+                        expect.objectContaining({
+                            stage: "run",
+                            status: "succeeded",
+                            details: expect.objectContaining({
+                                workflow: workflowMode,
+                                routes: [
+                                    {
+                                        issueNumber: 17,
+                                        route: expectedRoute,
+                                    },
+                                ],
+                            }),
+                        }),
+                    );
+                    expect(savedStates.at(-1)?.status).toBe(
+                        RunStateStatus.Complete,
+                    );
+                }
+            } finally {
+                await rm(root, { recursive: true, force: true });
+            }
+        },
+    );
+
     test("implements, reviews, commits, pushes, and leaves a clean checkout", async () => {
         const root = await mkdtemp(join(tmpdir(), "ralphie-local-e2e-"));
         const repositoryPath = join(root, "repository");
