@@ -550,8 +550,8 @@ The cross-mode guarantees are:
 | Interactive | Pi transcript scrollback plus one periodically refreshed sticky footer; completed milestones and lifecycle breadcrumbs remain durable rows. |
 | Plain and CI | Append-only human-readable lines. No ANSI cursor controls are emitted, so logs do not require terminal repainting. |
 | `--output quiet` | Failures and handled needs-attention stops only; routine progress and Pi transcript rows are suppressed. |
-| `--output json` | One parseable JSON object per line on stdout: progress records and lossless `pi_event` records (apart from credential redaction). Human headers, footers, and breadcrumb lines are not emitted. |
-| Durable event log | Redacted progress events are written independently to `events.jsonl` in the run directory, regardless of the renderer. |
+| `--output json` | One parseable JSON object per line on stdout: progress records and lossless `pi_event` records; progress values are preserved as supplied, while credential redaction still applies to `pi_event` records. Human headers, footers, and breadcrumb lines are not emitted. |
+| Durable event log | Progress events are written independently to `events.jsonl` in the run directory, preserving supplied values, regardless of the renderer. |
 
 For example, a JSON Lines consumer sees structured records rather than the
 human footer or `↻` lines:
@@ -561,11 +561,12 @@ human footer or `↻` lines:
 {"type":"pi_event","sessionID":"session-1","directory":"/workspace/repository","event":{"type":"turn_start"}}
 ```
 
-Progress and Pi records are redacted before reporting; sensitive environment
-values, credentials, terminal controls in human text, and unsafe display text
-are not allowed to leak into human output. JSON and the durable log preserve
-structured fields and raw Pi event shape, but credential redaction still
-applies. The durable log is at
+Pi records are redacted before reporting; progress events preserve supplied
+values. Sensitive environment values, credentials, terminal controls in human
+text, and unsafe display text are not allowed to leak into Pi transcript or
+breadcrumb output. JSON and the durable log preserve structured fields and raw
+Pi event shape; credential redaction still applies to Pi transcript records.
+The durable log is at
 `<workspace>/.ralphie/runs/<run-id>/events.jsonl` for new runs; a resumed run
 uses the directory containing its supplied state file. `--clean end` removes
 the successful run's workspace, including this log, while failed runs skip
@@ -632,10 +633,10 @@ tool-result events as they arrive. Human-readable Pi transcript output groups
 each session into a compact block: thinking and assistant text stream
 immediately, tool calls are shown as readable commands, and tool output is
 indented, de-duplicated, and bounded. Use `--output verbose` for a larger
-tool-output preview. Terminal control sequences are sanitized and sensitive
-values are redacted before terminal rendering. JSON mode emits redacted
-progress and `pi_event` JSON Lines to stdout; normal modes render to stderr,
-and quiet mode renders failures only.
+tool-output preview. Terminal control sequences are sanitized and Pi
+transcript values are redacted before terminal rendering. JSON mode emits
+progress and `pi_event` JSON Lines to stdout, preserving supplied progress
+values; normal modes render to stderr, and quiet mode renders failures only.
 Grounding events identify skipped agent work, while needs-attention details
 retain the reason, summary, evidence, questions, path, and policy. Event
 details can include issue positions, review attempts, session ids, commit SHAs,

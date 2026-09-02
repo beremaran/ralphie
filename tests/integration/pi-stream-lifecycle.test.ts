@@ -269,8 +269,15 @@ describe("Pi stream lifecycle command/runtime contract", () => {
             expect(display).toEndWith("\n");
             expect(structured).toEndWith("\n");
             expect(json.stderr).toEqual([]);
-            expect(display).not.toContain(SECRET);
-            expect(structured).not.toContain(SECRET);
+            // Progress events preserve supplied values, including repository
+            // query strings and secrets embedded in messages...
+            expect(display).toContain(`Implementing ${SECRET}`);
+            expect(display).toContain(`progress interrupts ${SECRET}`);
+            // ...while Pi transcript output is still redacted.
+            expect(display).not.toContain(`thinking ${SECRET}`);
+            expect(display).not.toContain(`CUMULATIVE-TOOL-CHUNK ${SECRET}`);
+            expect(structured).toContain(`"message":"Implementing ${SECRET}"`);
+            expect(structured).not.toContain(`"delta":"thinking ${SECRET}"`);
 
             const firstHeader =
                 "╭─ Pi · First Pi context [REDACTED] · pi-stream-first-session · " +
@@ -283,7 +290,7 @@ describe("Pi stream lifecycle command/runtime contract", () => {
             expectInOrder(display, [
                 firstHeader,
                 "│  ✦ assistant partial transcript\n",
-                "• [owner/repository?token=[REDACTED]",
+                "• [owner/repository?token=github_pat_pi_stream_contract_secret]",
                 "│     resumed\n",
                 "CUMULATIVE-TOOL-CHUNK [REDACTED]",
                 "✓ read done · 2 lines · truncated\n",
@@ -422,14 +429,12 @@ describe("Pi stream lifecycle command/runtime contract", () => {
                 "agent_settled",
             ]);
             expect(structuredRecords[0]).toMatchObject({
-                repository: "owner/repository?token=[REDACTED]",
-                issue: {
-                    title: "Implement the Pi stream contract [REDACTED]",
-                },
+                repository: REPOSITORY,
+                issue: ISSUE,
                 details: {
-                    repository: "owner/repository?token=[REDACTED]",
-                    issueTitle: "Implement the Pi stream contract [REDACTED]",
-                    secret: "[REDACTED]",
+                    repository: REPOSITORY,
+                    issueTitle: ISSUE.title,
+                    secret: SECRET,
                 },
             });
             const thinkingRecord = piRecords.find(
@@ -517,32 +522,28 @@ describe("Pi stream lifecycle command/runtime contract", () => {
 
             const durableLog = plain.eventLogContents ?? "";
             expect(durableLog).toEndWith("\n");
-            expect(durableLog).not.toContain(SECRET);
+            // Durable progress events preserve supplied values as-is.
+            expect(durableLog).toContain(`"secret":"${SECRET}"`);
             const durableRecords = parseJsonLines(durableLog);
             expect(durableRecords).toHaveLength(2);
             expect(durableRecords[0]).toMatchObject({
-                repository: "owner/repository?token=[REDACTED]",
-                issue: {
-                    number: 191,
-                    title: "Implement the Pi stream contract [REDACTED]",
-                },
+                repository: REPOSITORY,
+                issue: ISSUE,
                 details: {
-                    repository: "owner/repository?token=[REDACTED]",
-                    issueTitle: "Implement the Pi stream contract [REDACTED]",
-                    secret: "[REDACTED]",
+                    repository: REPOSITORY,
+                    issueTitle: ISSUE.title,
+                    secret: SECRET,
                 },
             });
             expect(durableRecords[1]).toMatchObject({
-                repository: "owner/repository?token=[REDACTED]",
-                issue: {
-                    title: "Implement the Pi stream contract [REDACTED]",
-                },
+                repository: REPOSITORY,
+                issue: ISSUE,
                 details: {
-                    repository: "owner/repository?token=[REDACTED]",
-                    issueTitle: "Implement the Pi stream contract [REDACTED]",
-                    secret: "[REDACTED]",
+                    repository: REPOSITORY,
+                    issueTitle: ISSUE.title,
+                    secret: SECRET,
                 },
-                message: "progress interrupts [REDACTED]",
+                message: `progress interrupts ${SECRET}`,
             });
         } finally {
             await harness.cleanup();

@@ -74,12 +74,20 @@ const expectPlainOutputContract = (capture: CommandRuntimeRunCapture): void => {
     ).toBe(true);
 };
 
-const expectSecretAbsentFromStreams = (
-    capture: CommandRuntimeRunCapture,
-): void => {
-    for (const stream of [capture.stdout, capture.stderr]) {
-        expect(stream.join("")).not.toContain(multiIssueRuntimeOracle.secret);
-    }
+const expectProgressPassThrough = (capture: CommandRuntimeRunCapture): void => {
+    const combined = capture.stdout.join("") + capture.stderr.join("");
+    // Progress events preserve supplied values, including secrets embedded
+    // in messages...
+    expect(combined).toContain(
+        `Review found a defect involving ${multiIssueRuntimeOracle.secret}`,
+    );
+    // ...while Pi transcript output remains redacted.
+    expect(combined).not.toContain(
+        `Reasoning with ${multiIssueRuntimeOracle.secret}`,
+    );
+    expect(combined).not.toContain(
+        `retrying ${multiIssueRuntimeOracle.secret}`,
+    );
 };
 
 type JsonRecord = Record<string, unknown>;
@@ -104,7 +112,7 @@ const scenarioTimestamp = "2026-01-02T03:04:05.000Z";
 
 const expectedProgressRecords = (runId: string): JsonRecord[] =>
     multiIssueRuntimeOracle.progressEvents.map((event) => ({
-        ...(redactSensitiveValue(event) as JsonRecord),
+        ...(event as unknown as JsonRecord),
         runId,
         timestamp: scenarioTimestamp,
     }));
@@ -125,7 +133,7 @@ const expectedJsonRecords = (runId: string): JsonRecord[] =>
     multiIssueRuntimeOracle.emissions.map((emission) =>
         emission.kind === "progress"
             ? {
-                  ...(redactSensitiveValue(emission.event) as JsonRecord),
+                  ...(emission.event as unknown as JsonRecord),
                   runId,
                   timestamp: scenarioTimestamp,
               }
@@ -138,7 +146,7 @@ const expectJsonOutputContract = (capture: CommandRuntimeRunCapture): void => {
     expect(stdout).toEndWith("\n");
     expect(capture.stderr).toEqual([]);
     expect(stderr).toBe("");
-    expectSecretAbsentFromStreams(capture);
+    expectProgressPassThrough(capture);
 
     const records = parseJsonLines(stdout);
     const progressRecords = records.filter(
@@ -400,14 +408,14 @@ describe("multi-issue command/runtime scenario oracle", () => {
                 expect(capture.piEvents).toEqual([
                     ...multiIssueRuntimeOracle.piEvents,
                 ]);
-                expectSecretAbsentFromStreams(capture);
+                expectProgressPassThrough(capture);
                 expect(capture.eventLogPath).toBeString();
                 expect(
                     await Bun.file(capture.eventLogPath ?? "").exists(),
                 ).toBe(true);
                 const log = await harness.readEventLog(capture.eventLogPath);
                 durableEvents.push(expectEventLogContract(log));
-                expect(log).not.toContain(multiIssueRuntimeOracle.secret);
+                expect(log).toContain(multiIssueRuntimeOracle.secret);
             }
 
             // Run identity and timestamps are per invocation; every persisted
@@ -439,12 +447,12 @@ describe("multi-issue command/runtime scenario oracle", () => {
             expect(ci!.stderr).toEqual(plain!.stderr);
 
             const expectedQuietOutput =
-                "✗ [owner/repository] [1/2] (1/2) #101 Review found a defect involving [REDACTED]\n" +
+                "✗ [owner/repository] [1/2] (1/2) #101 Review found a defect involving github_pat_runtime_scenario_secret\n" +
                 "✗ [owner/repository] [2/2] #102 Second queued issue failed verification.\n";
             expect(quiet!.stdout).toEqual([]);
             expect(quiet!.stderr.join("")).toBe(expectedQuietOutput);
             expect(quiet!.stderr.join("").trimEnd().split("\n")).toEqual([
-                "✗ [owner/repository] [1/2] (1/2) #101 Review found a defect involving [REDACTED]",
+                "✗ [owner/repository] [1/2] (1/2) #101 Review found a defect involving github_pat_runtime_scenario_secret",
                 "✗ [owner/repository] [2/2] #102 Second queued issue failed verification.",
             ]);
 

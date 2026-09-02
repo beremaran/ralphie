@@ -476,37 +476,82 @@ describe("progress reporting", () => {
         );
     });
 
-    test("redacts credentials from messages and nested JSON details", async () => {
-        let output = "";
+    test("preserves supplied values in JSON output and human rendering", async () => {
+        let jsonOutput = "";
         const progress = makeProgressReporter({
             mode: "json",
             verbose: true,
             write: (text) => {
-                output += text;
+                jsonOutput += text;
             },
             runId: "run-1",
         });
+        const details = {
+            token: "token-value",
+            password: "secret",
+            authorization: {
+                header: "Bearer private-value",
+                scopes: ["repo", "admin"],
+            },
+            credential: { user: "alice", password: "secret" },
+            apiKey: ["key-one", "key-two"],
+            nested: [{ password: "deep-secret" }],
+        };
         await progress.emit({
             stage: "run",
             status: "failed",
             message: "Request failed with Bearer private-value",
-            details: {
-                githubToken: "private-value",
-                nested: { password: "secret" },
-            },
+            repository: "owner/repo?token=query-secret",
+            details,
         });
-        expect(output).not.toContain("private-value");
-        expect(output).not.toContain('"secret"');
-        expect(output).toContain("[REDACTED]");
+        expect(JSON.parse(jsonOutput)).toEqual({
+            runId: "run-1",
+            timestamp: expect.any(String),
+            stage: "run",
+            status: "failed",
+            message: "Request failed with Bearer private-value",
+            repository: "owner/repo?token=query-secret",
+            details,
+        });
+        expect(jsonOutput).toContain("Bearer private-value");
+        expect(jsonOutput).toContain(
+            '"authorization":{"header":"Bearer private-value","scopes":["repo","admin"]}',
+        );
+        expect(jsonOutput).toContain('"nested":[{"password":"deep-secret"}]');
+        expect(jsonOutput).not.toContain("[REDACTED]");
+
+        let humanOutput = "";
+        const humanProgress = makeProgressReporter({
+            mode: "plain",
+            verbose: true,
+            colors: false,
+            write: (text) => {
+                humanOutput += text;
+            },
+            runId: "run-1",
+        });
+        await humanProgress.emit({
+            stage: "run",
+            status: "failed",
+            message: "Request failed with Bearer private-value",
+            repository: "owner/repo?token=query-secret",
+            details,
+        });
+        expect(humanOutput).toBe(
+            "✗ [owner/repo?token=query-secret] Request failed with Bearer private-value" +
+                ' {"token":"token-value","password":"secret",' +
+                '"authorization":{"header":"Bearer private-value","scopes":["repo","admin"]},' +
+                '"credential":{"user":"alice","password":"secret"},' +
+                '"apiKey":["key-one","key-two"],' +
+                '"nested":[{"password":"deep-secret"}]}\n',
+        );
+        expect(humanOutput).not.toContain("[REDACTED]");
     });
 
-    test("redacts GitHub auth tokens from progress and event output", async () => {
-        const token = "private-auth-token";
-        const previous = process.env.GH_TOKEN;
+    test("preserves repository query strings and bearer-like messages in durable output", async () => {
         const directory = await mkdtemp(join(tmpdir(), "ralphie-auth-output-"));
         const eventLogPath = join(directory, "events.jsonl");
         let output = "";
-        process.env.GH_TOKEN = token;
         try {
             const progress = makeProgressReporter({
                 mode: "json",
@@ -516,24 +561,32 @@ describe("progress reporting", () => {
                 },
                 eventLogPath,
             });
+            const token = "github_pat_supplied_token";
             await progress.emit({
                 stage: "github-authentication",
                 status: "failed",
-                message: `Authentication failed: ${token}`,
-                details: { stderr: token },
+                message: `Authentication failed: Bearer ${token}`,
+                repository: "owner/repo?ref=main&access_token=query-secret",
+                details: { stderr: `token ${token}` },
             });
 
             const events = await readFile(eventLogPath, "utf8");
-            expect(output).not.toContain(token);
-            expect(events).not.toContain(token);
+            expect(output).toContain(`Authentication failed: Bearer ${token}`);
+            expect(output).toContain(
+                "owner/repo?ref=main&access_token=query-secret",
+            );
+            expect(output).toContain(token);
+            expect(events).toContain(`Authentication failed: Bearer ${token}`);
+            expect(events).toContain(
+                "owner/repo?ref=main&access_token=query-secret",
+            );
+            expect(events).toContain(token);
         } finally {
-            if (previous === undefined) delete process.env.GH_TOKEN;
-            else process.env.GH_TOKEN = previous;
             await rm(directory, { recursive: true, force: true });
         }
     });
 
-    test("persists redacted JSON Lines independently of the renderer", async () => {
+    test("persists supplied values in JSON Lines independently of the renderer", async () => {
         const directory = await mkdtemp(join(tmpdir(), "ralphie-progress-"));
         const eventLogPath = join(directory, "run", "events.jsonl");
         try {
@@ -549,7 +602,11 @@ describe("progress reporting", () => {
                 stage: "commit",
                 status: "succeeded",
                 message: "Committed with Bearer private-value.",
-                details: { commitSha: "abc123", token: "private-value" },
+                details: {
+                    commitSha: "abc123",
+                    token: "private-value",
+                    password: ["p1", "p2"],
+                },
             });
             const events = (await readFile(eventLogPath, "utf8"))
                 .trim()
@@ -561,8 +618,12 @@ describe("progress reporting", () => {
                     timestamp: "2026-08-24T01:02:03.000Z",
                     stage: "commit",
                     status: "succeeded",
-                    message: "Committed with Bearer [REDACTED]",
-                    details: { commitSha: "abc123", token: "[REDACTED]" },
+                    message: "Committed with Bearer private-value.",
+                    details: {
+                        commitSha: "abc123",
+                        token: "private-value",
+                        password: ["p1", "p2"],
+                    },
                 },
             ]);
         } finally {

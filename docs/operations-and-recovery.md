@@ -37,8 +37,9 @@ diagnostic or artifact path, selected policy, and issue budget; verbose and
 JSON output retain those complete details. A handled halt emits a final
 needs-attention event with `handled: true` and every outcome count before exit.
 Depending on the event, it may also include the repository, review attempt,
-session ID, commit SHA, created issue numbers, or diagnostic paths. Credentials
-and sensitive environment values are redacted at the reporting boundary.
+session ID, commit SHA, created issue numbers, or diagnostic paths. Supplied
+progress-event values are preserved as-is; Pi transcripts and breadcrumbs
+remain redacted or sanitized at the reporting boundary.
 
 ## State and artifacts
 

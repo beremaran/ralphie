@@ -196,10 +196,11 @@ uses no ANSI cursor controls. Quiet output reports failures and handled
 needs-attention stops only. JSON output is
 JSON Lines on stdout: each line is a parseable progress record or a lossless
 `pi_event` record, without
-human breadcrumb lines. The redacted durable progress-event log remains at
+human breadcrumb lines. The durable progress-event log remains at
 `<workspace>/.ralphie/runs/<run-id>/events.jsonl` independently of the selected
-renderer. Credentials, sensitive environment values, terminal controls, and
-other unsafe display text are redacted or sanitized at the reporting boundary.
+renderer; supplied progress-event values are preserved as-is. Pi transcripts,
+terminal controls, and other unsafe display text are redacted or sanitized at
+the reporting boundary.
 See [Operations and recovery](./docs/operations-and-recovery.md) for output,
 resume, and cleanup details; successful `--clean end` removes the workspace
 and its log, while failed runs retain diagnostics for recovery.

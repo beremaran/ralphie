@@ -1,10 +1,7 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
-import {
-    redactSensitiveValue,
-    stripTerminalControls,
-} from "../shared/redaction.ts";
+import { stripTerminalControls } from "../shared/redaction.ts";
 import { cyan, dim, green, red, yellow } from "./colors.ts";
 
 export type ProgressStage =
@@ -107,7 +104,7 @@ export type ProgressRendererOptions = {
     readonly colors?: boolean;
     readonly now?: () => Date;
     readonly runId?: string;
-    /** Optional durable, redacted JSON Lines audit log. */
+    /** Optional durable JSON Lines audit log. */
     readonly eventLogPath?: string;
 };
 
@@ -259,7 +256,7 @@ const makeProgressEvent = (
     runId: string,
     timestamp: Date,
 ): ProgressEvent => ({
-    ...(redactSensitiveValue(update) as ProgressUpdate),
+    ...update,
     runId,
     timestamp: timestamp.toISOString(),
 });
