@@ -1,11 +1,13 @@
 import {
     createAgentSession,
     createBashToolDefinition,
+    createLocalBashOperations,
     DefaultResourceLoader,
     getAgentDir,
     ModelRuntime,
     SessionManager,
     type AgentSessionEvent,
+    type BashOperations,
     type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { randomUUID } from "node:crypto";
@@ -169,10 +171,62 @@ export const isPiTaskCommandAllowed = (command: string): boolean => {
     return trimmed.length > 0 && !deniedTaskCommand.test(trimmed);
 };
 
+/**
+ * Default shell deadline for a task command that does not declare its own.
+ * Pi's bash tool otherwise runs without any timeout, so a hung command would
+ * stall the unattended issue session indefinitely.
+ */
+export const PI_BASH_DEFAULT_TIMEOUT_SECONDS = 120;
+
+/**
+ * Ceiling for model-declared shell deadlines. Without a ceiling, the model
+ * could effectively disable the guardrail with a very large `timeout`.
+ */
+export const PI_BASH_MAX_TIMEOUT_SECONDS = 600;
+
+export type BashTimeoutPolicy = {
+    readonly defaultSeconds: number;
+    readonly maxSeconds: number;
+};
+
+const defaultBashTimeoutPolicy: BashTimeoutPolicy = {
+    defaultSeconds: PI_BASH_DEFAULT_TIMEOUT_SECONDS,
+    maxSeconds: PI_BASH_MAX_TIMEOUT_SECONDS,
+};
+
+/**
+ * Wrap Pi's local shell backend so every task command runs under a bounded
+ * deadline: an omitted `timeout` gets the default, and a declared timeout is
+ * clamped to the ceiling. A timed-out command fails the tool call with its
+ * partial output instead of hanging the session, and the agent can retry with
+ * an explicit timeout up to the maximum.
+ */
+export const makeTimedBashOperations = (
+    policy: BashTimeoutPolicy = defaultBashTimeoutPolicy,
+): BashOperations => {
+    const operations = createLocalBashOperations();
+    return {
+        exec: async (command, cwd, options) => {
+            const timeout =
+                options.timeout === undefined
+                    ? policy.defaultSeconds
+                    : Math.min(options.timeout, policy.maxSeconds);
+            return await operations.exec(command, cwd, {
+                ...options,
+                timeout,
+            });
+        },
+    };
+};
+
 type AnyToolDefinition = ToolDefinition<any, any, any>;
 
-const makeBashTool = (directory: string): AnyToolDefinition =>
-    createBashToolDefinition(directory, {
+const makeBashTool = (
+    directory: string,
+    bashTimeoutPolicy: BashTimeoutPolicy = defaultBashTimeoutPolicy,
+): AnyToolDefinition => {
+    const definition = createBashToolDefinition(directory, {
+        operations: makeTimedBashOperations(bashTimeoutPolicy),
         spawnHook: (context) => {
             if (!isPiTaskCommandAllowed(context.command)) {
                 throw new Error(
@@ -182,6 +236,11 @@ const makeBashTool = (directory: string): AnyToolDefinition =>
             return context;
         },
     });
+    return {
+        ...definition,
+        description: `${definition.description} Ralphie applies a ${PI_BASH_DEFAULT_TIMEOUT_SECONDS}s default timeout and a ${PI_BASH_MAX_TIMEOUT_SECONDS}s maximum so a hung command cannot stall the unattended session; pass an explicit timeout for slower commands.`,
+    } as AnyToolDefinition;
+};
 
 const thinkingLevelFor = (
     variant: string | undefined,
@@ -480,13 +539,14 @@ const makePromptTools = (
     setStructured: (value: unknown) => void,
     setNeedsAttention: (value: unknown) => void,
     guard: SubmitResultGuard,
+    bashTimeoutPolicy: BashTimeoutPolicy,
 ): PromptTools => {
     const reviewProfile =
         created.profile === PiSessionProfile.Review ||
         input.profile === PiSessionProfile.Review;
     const customTools: AnyToolDefinition[] = reviewProfile
         ? []
-        : [makeBashTool(input.directory)];
+        : [makeBashTool(input.directory, bashTimeoutPolicy)];
     const activeTools = reviewProfile
         ? []
         : created.permission?.some(
@@ -675,6 +735,7 @@ const runPiPrompt = async (
     created: PendingSession,
     agentDir: string,
     createSession: CreateAgentSession,
+    bashTimeoutPolicy: BashTimeoutPolicy,
 ) => {
     let session: PiSession | undefined;
     let unsubscribe: (() => void) | undefined;
@@ -694,6 +755,7 @@ const runPiPrompt = async (
                 needsAttention ??= value;
             },
             guard,
+            bashTimeoutPolicy,
         );
         session = await createPromptSession(
             modelRuntime,
@@ -757,6 +819,7 @@ export const makePiClient = (
     eventListener?: PiEventListener,
     agentDir = process.env.PI_CODING_AGENT_DIR ?? getAgentDir(),
     createSession: CreateAgentSession = createAgentSession,
+    bashTimeoutPolicy: BashTimeoutPolicy = defaultBashTimeoutPolicy,
 ): PiClient => {
     const pending = new Map<string, PendingSession>();
     const issuedSessionIDs = new Set<string>();
@@ -795,6 +858,7 @@ export const makePiClient = (
                     created,
                     agentDir,
                     createSession,
+                    bashTimeoutPolicy,
                 );
             },
         },

@@ -1,6 +1,13 @@
 import { RalphieError } from "../shared/error.ts";
 import { redactSensitiveText } from "../shared/redaction.ts";
 
+/**
+ * Hard deadline for any process Ralphie spawns on its own account. Without a
+ * bound, a hung `git fetch` or `gh` call would stall the whole run
+ * indefinitely; with it, the child is killed and the failure is reported.
+ */
+export const DEFAULT_PROCESS_COMMAND_TIMEOUT_MS = 10 * 60 * 1000;
+
 export type CommandResult = {
     readonly exitCode: number;
     readonly stdout: string;
@@ -12,6 +19,11 @@ export type CommandRunOptions = {
     readonly cwd?: string;
     /** Environment values overlaid on the live parent environment. */
     readonly env?: Readonly<Record<string, string | undefined>>;
+    /**
+     * Hard deadline for the spawned command in milliseconds. Omitted calls
+     * use {@link DEFAULT_PROCESS_COMMAND_TIMEOUT_MS}.
+     */
+    readonly timeoutMs?: number;
 };
 
 export type CommandRunnerService = {
@@ -22,8 +34,27 @@ export type CommandRunnerService = {
     ) => Promise<CommandResult>;
 };
 
+/** The spawned command exceeded its deadline and was killed by the runner. */
+export class CommandTimeoutError extends RalphieError {
+    override readonly _tag = "CommandTimeoutError" as const;
+    readonly timeoutMs: number;
+
+    constructor(input: {
+        readonly command: string;
+        readonly timeoutMs: number;
+    }) {
+        super({
+            message: `Command timed out after ${input.timeoutMs / 1000}s and was terminated: ${input.command}`,
+        });
+        this.name = "CommandTimeoutError";
+        this.timeoutMs = input.timeoutMs;
+    }
+}
+
 export const CommandRunnerLive: CommandRunnerService = {
     run: async (command, args, options) => {
+        const timeoutMs =
+            options?.timeoutMs ?? DEFAULT_PROCESS_COMMAND_TIMEOUT_MS;
         try {
             const result = Bun.spawnSync([command, ...args], {
                 cwd: options?.cwd,
@@ -33,7 +64,15 @@ export const CommandRunnerLive: CommandRunnerService = {
                         : { ...process.env, ...options.env },
                 stdout: "pipe",
                 stderr: "pipe",
+                timeout: timeoutMs,
             });
+
+            if (result.exitCode === null) {
+                throw new CommandTimeoutError({
+                    command: [command, ...args].join(" "),
+                    timeoutMs,
+                });
+            }
 
             return {
                 exitCode: result.exitCode,
@@ -44,6 +83,9 @@ export const CommandRunnerLive: CommandRunnerService = {
                 stderr: result.stderr.toString().trim(),
             };
         } catch (cause) {
+            if (cause instanceof CommandTimeoutError) {
+                throw cause;
+            }
             throw new RalphieError({
                 message: `Could not execute ${command}. Is it installed and available on PATH?`,
                 cause,

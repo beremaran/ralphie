@@ -7,6 +7,14 @@ import { RalphieError } from "../shared/error.ts";
 
 const OUTPUT_LIMIT = 8_000;
 
+/**
+ * Deadline for user-configured verification commands. These run the repository's
+ * own gate (for example a full `bun run check`), so they are deliberately more
+ * generous than the generic process timeout, but still bounded: a hung
+ * verification command fails the run instead of stalling it forever.
+ */
+export const VERIFICATION_COMMAND_TIMEOUT_MS = 30 * 60 * 1000;
+
 const bounded = (value: string): string =>
     value.length <= OUTPUT_LIMIT
         ? value
@@ -105,6 +113,7 @@ export const makeIssueVerificationService = (
                 const result = await runner.run("/bin/sh", ["-c", command], {
                     cwd: repositoryPath,
                     trimStdout: false,
+                    timeoutMs: VERIFICATION_COMMAND_TIMEOUT_MS,
                 });
                 const evidence = {
                     command,

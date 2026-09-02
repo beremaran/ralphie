@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import {
     createAssistantMessageEventStream,
     type AssistantMessage,
@@ -18,6 +18,7 @@ import {
     buildPiAttemptPrompt,
     isPiTaskCommandAllowed,
     makePiClient,
+    makeTimedBashOperations,
     PiSessionProfile,
 } from "../../src/pi/client.ts";
 
@@ -457,6 +458,213 @@ describe("Pi client structured results", () => {
         } finally {
             client.close?.();
             await rm(directory, { recursive: true, force: true });
+        }
+    });
+});
+
+describe("Pi task shell execution timeouts", () => {
+    let directory: string;
+
+    beforeAll(async () => {
+        directory = await mkdtemp(join(tmpdir(), "ralphie-bash-timeout-"));
+    });
+
+    afterAll(async () => {
+        await rm(directory, { recursive: true, force: true });
+    });
+
+    test("applies the default timeout when the command declares none", async () => {
+        const operations = makeTimedBashOperations({
+            defaultSeconds: 0.2,
+            maxSeconds: 1,
+        });
+
+        await expect(
+            operations.exec("sleep 2", directory, {
+                onData: () => {},
+                timeout: undefined,
+            }),
+        ).rejects.toThrow("timeout:0.2");
+    });
+
+    test("clamps a declared timeout to the policy ceiling", async () => {
+        const operations = makeTimedBashOperations({
+            defaultSeconds: 0.2,
+            maxSeconds: 0.5,
+        });
+
+        await expect(
+            operations.exec("sleep 2", directory, {
+                onData: () => {},
+                timeout: 10,
+            }),
+        ).rejects.toThrow("timeout:0.5");
+    });
+
+    test("lets a declared timeout below the ceiling pass through", async () => {
+        const operations = makeTimedBashOperations({
+            defaultSeconds: 1,
+            maxSeconds: 5,
+        });
+
+        const result = await operations.exec("sleep 0.05", directory, {
+            onData: () => {},
+            timeout: 0.5,
+        });
+
+        expect(result.exitCode).toBe(0);
+    });
+
+    test("surfaces a bash timeout to the model as a tool error and keeps the session alive", async () => {
+        const model = {
+            id: "timeout-model",
+            name: "Timeout model",
+            api: "test-api",
+            provider: "test-provider",
+            baseUrl: "https://example.test",
+            reasoning: false,
+            input: ["text"],
+            cost: {
+                input: 0,
+                output: 0,
+                cacheRead: 0,
+                cacheWrite: 0,
+            },
+            contextWindow: 8_000,
+            maxTokens: 1_000,
+        };
+        let streamCalls = 0;
+        const modelRuntime = {
+            getModel: () => model,
+            hasConfiguredAuth: () => true,
+            streamSimple: () => {
+                const stream = createAssistantMessageEventStream();
+                const content: AssistantMessage["content"] =
+                    streamCalls++ === 0
+                        ? [
+                              {
+                                  type: "toolCall",
+                                  id: "hanging-command",
+                                  name: "bash",
+                                  arguments: { command: "sleep 30" },
+                              },
+                          ]
+                        : [
+                              {
+                                  type: "toolCall",
+                                  id: "submit-attempt",
+                                  name: "submit_result",
+                                  arguments: {},
+                              },
+                          ];
+                const message: AssistantMessage = {
+                    role: "assistant",
+                    content,
+                    api: "test-api",
+                    provider: "test-provider",
+                    model: "timeout-model",
+                    usage: {
+                        input: 0,
+                        output: 0,
+                        cacheRead: 0,
+                        cacheWrite: 0,
+                        totalTokens: 0,
+                        cost: {
+                            input: 0,
+                            output: 0,
+                            cacheRead: 0,
+                            cacheWrite: 0,
+                            total: 0,
+                        },
+                    },
+                    stopReason: "toolUse",
+                    timestamp: Date.now(),
+                };
+                queueMicrotask(() =>
+                    stream.push({
+                        type: "done",
+                        reason: "toolUse",
+                        message,
+                    }),
+                );
+                return stream;
+            },
+        };
+        let realSession:
+            | Awaited<ReturnType<typeof createAgentSession>>["session"]
+            | undefined;
+        const events: unknown[] = [];
+        const client = makePiClient(
+            modelRuntime as never,
+            (event) => events.push(event),
+            directory,
+            (async (options: CreateAgentSessionOptions) => {
+                const result = await createAgentSession(options);
+                realSession = result.session;
+                return result;
+            }) as never,
+            { defaultSeconds: 0.2, maxSeconds: 1 },
+        );
+
+        try {
+            const created = await client.session.create({
+                directory,
+                title: "Timeout recovery",
+                model: { providerID: "test-provider", id: "timeout-model" },
+            });
+            const response = await client.session.prompt({
+                sessionID: created.data!.id,
+                directory,
+                format: {
+                    type: "json_schema",
+                    schema: { type: "object" },
+                    validate: () => ({ success: true }),
+                },
+                parts: [{ type: "text", text: "Run the command." }],
+            });
+
+            expect(response.error).toBeUndefined();
+            expect(response.data?.info.error).toBeUndefined();
+            expect(response.data?.info.structured).toEqual({});
+            expect(
+                events.some(
+                    (event) =>
+                        typeof event === "object" &&
+                        event !== null &&
+                        (event as { type?: string }).type ===
+                            "tool_execution_end" &&
+                        (event as { toolName?: string }).toolName === "bash" &&
+                        (event as { isError?: boolean }).isError === true,
+                ),
+            ).toBe(true);
+            expect(JSON.stringify(events)).toContain(
+                "Command timed out after 0.2 seconds",
+            );
+            const timeoutTextReachedTheModel = realSession?.messages.some(
+                (message) => {
+                    if ((message as { role?: unknown }).role !== "toolResult") {
+                        return false;
+                    }
+                    const content = (message as { content?: unknown }).content;
+                    return (
+                        Array.isArray(content) &&
+                        content.some(
+                            (part) =>
+                                typeof part === "object" &&
+                                part !== null &&
+                                (part as { type?: unknown }).type === "text" &&
+                                typeof (part as { text?: unknown }).text ===
+                                    "string" &&
+                                (part as { text: string }).text.includes(
+                                    "Command timed out after 0.2 seconds",
+                                ),
+                        )
+                    );
+                },
+            );
+            expect(timeoutTextReachedTheModel).toBe(true);
+        } finally {
+            client.close?.();
         }
     });
 });

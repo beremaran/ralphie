@@ -6,6 +6,7 @@ import type {
 } from "../../src/process/command-runner.ts";
 import {
     makeIssueVerificationService,
+    VERIFICATION_COMMAND_TIMEOUT_MS,
     VerificationCommandError,
 } from "../../src/issues/verification.ts";
 
@@ -25,7 +26,9 @@ describe("issue verification", () => {
         ];
         const runner: CommandRunnerService = {
             run: async (command, args, options) => {
-                calls.push(`${options?.cwd}:${command}:${args.join(" ")}`);
+                calls.push(
+                    `${options?.cwd}:${command}:${args.join(" ")}:${options?.timeoutMs}`,
+                );
                 return outputs.shift()!;
             },
         };
@@ -35,7 +38,10 @@ describe("issue verification", () => {
         );
         expect(evidence.stagedTreeSha).toBe("a".repeat(40));
         expect(evidence.commands[0]?.exitCode).toBe(0);
-        expect(calls).toContain("/repo:/bin/sh:-c bun run check");
+        expect(calls).toContain("/repo:git:write-tree:undefined");
+        expect(calls).toContain(
+            `/repo:/bin/sh:-c bun run check:${VERIFICATION_COMMAND_TIMEOUT_MS}`,
+        );
     });
 
     test("returns repairable evidence for a non-zero command", async () => {

@@ -109,3 +109,26 @@ hard safety stops. The direct-push path never uses force. See
 [Workflows](workflows.md) for the complete implementation and delivery sequence,
 and [Operations and recovery](operations-and-recovery.md) for what remains
 available after a safety stop.
+
+## Bounded command execution
+
+No command runs unbounded. Every process Ralphie spawns, and every shell
+command its implementation agent runs, carries a hard deadline so a hung
+process fails loudly instead of stalling an issue run:
+
+- **Agent shell commands** default to a 120-second timeout with a 600-second
+  maximum. An omitted `timeout` gets the default; a larger declared timeout is
+  clamped to the ceiling so the model cannot disable the guardrail. A timed-out
+  command returns to the agent as a tool error with its partial output, and the
+  agent may retry with an explicit `timeout` for genuinely slower commands.
+- **Ralphie-owned commands** (git and `gh` operations against the repository,
+  workspace preparation, authentication checks) default to a 10-minute timeout.
+- **Verification commands** (`--verify-command`, or the discovered
+  `bun run check`) run under a 30-minute timeout because they execute the
+  repository's full gate; they are the deliberate exception to the shorter
+  defaults.
+
+A timed-out command is killed (including its process tree) and reported as
+`CommandTimeoutError` with the deadline and command in the message. These
+deadlines are fail-closed bounds, not retry budgets: they turn an indefinitely
+stuck session into a recoverable, reported failure.

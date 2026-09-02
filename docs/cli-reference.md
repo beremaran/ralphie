@@ -48,7 +48,7 @@ command schema.
 | `--complexity-thinking <level>` | `medium` | Thinking level for complexity routing. |
 | `--review-thinking <level>` | `high` | Thinking level for staged-change reviews. |
 | `--commit-thinking <level>` | `low` | Thinking level for commit-message generation. |
-| `--verify-command <command>` | discovered `bun run check` | Deterministic verification command; repeat to run multiple commands in order. |
+| `--verify-command <command>` | discovered `bun run check` | Deterministic verification command; repeat to run multiple commands in order. Each command runs under a 30-minute deadline. |
 | `--max-attempts <count>` | `3` | Positive pipeline attempt count in `get-pipelines-green` mode. |
 | `--pipeline-timeout <duration>` | none | Positive integer duration (`s`, `m`, or `h`) for `get-pipelines-green` mode. |
 | `--pi-dir <path>` | Pi default | Existing operator-owned Pi agent directory outside the workspace; it is never removed. |

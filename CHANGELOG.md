@@ -5,6 +5,17 @@ All notable changes to Ralphie are documented here. The project follows
 
 ## [Unreleased]
 
+- Bound every command execution with a hard deadline so a hung process cannot
+  stall an unattended issue run: Pi task shell commands default to a
+  120-second timeout with a 600-second maximum (an omitted `timeout` gets the
+  default and a larger declared timeout is clamped), Ralphie-owned git/gh and
+  workspace commands default to a 10-minute timeout via `CommandRunnerLive`,
+  and deterministic verification commands run under a 30-minute timeout. A
+  timed-out command is killed and reported as `CommandTimeoutError` with the
+  deadline and command in the message; agent tool calls surface
+  `Command timed out after N seconds` with partial output and can retry with
+  an explicit timeout.
+
 - Attach SPDX SBOM and SLSA provenance attestations to every GHCR platform
   digest in the protected `push-container` job
   (`r218-container-attestation-generation`): after platform promotion and
