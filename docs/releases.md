@@ -76,7 +76,11 @@ uses the
 `ralphie.container-candidate.v1` contract and records the validated
 `source_ref`, platform, OCI archive name and SHA-256, BuildKit image
 manifest `digest`, and OCI version/revision labels; the final publisher
-must verify those fields before promotion. The canonical GHCR tag is the
+must verify those fields before promotion. Before the contract is written,
+staging also binds the recorded BuildKit digest to the OCI archive's own
+`index.json` entry: a single-platform export has exactly one manifest
+descriptor whose digest must be the same lowercase `sha256:<64 hex>` value,
+so the promotion input and the persisted digest cannot drift. The canonical GHCR tag is the
 normalized package version without `v` (for example, `0.1.0`). The publisher
 also emits exactly four deterministic SPDX 2.3 JSON SBOMs in `release-assets`:
 `ralphie-<target>.sbom.spdx.json`. The checked-in `scripts/create-sboms.ts`
@@ -173,6 +177,22 @@ digest; a missing tag is created through the OCI Distribution API with a
 server-enforced compare-and-swap (`If-None-Match: *`), and the tag is reread
 after the write. Any other digest, malformed response, or unexpected registry
 status is a conflict/failure, and an unconditional tag write is never used.
+
+The `push-container` publisher promotes the two staged OCI archives to their
+per-platform `ghcr.io/beremaran/ralphie:<version>-amd64|arm64` tags and then
+re-inspects each promoted image in GHCR: the registry digest must be a
+lowercase `sha256:<64 hex>` value equal to the candidate's recorded `.digest`,
+the platform must match, and the validated `version`/`source_ref` (and
+license) OCI labels must match the release-gate outputs. The post-promotion
+results are persisted as a `ralphie.publication-subjects.v1` map (immutable
+artifact `ralphie-publication-subjects-<version>`) containing exactly the
+`linux/amd64` and `linux/arm64` subjects; missing, duplicate, unsupported, or
+mismatched subjects fail closed. Platform promotion is a separate step from
+alias creation so attestation steps can later run in between, and every
+version/minor/`latest`/`sha-<revision>` manifest alias is created from the
+immutable `ghcr.io/beremaran/ralphie@sha256:<digest>` references rather than
+from the `${VERSION}-amd64`/`${VERSION}-arm64` tags; a digest mismatch stops
+the job before any alias is pushed.
 
 Before any production tag write, `probeCreateOnlyPublishing` authenticates and
 proves the target registry is create-only: for each writable media type (OCI

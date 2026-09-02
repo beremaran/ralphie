@@ -461,6 +461,15 @@ jobs:
           contract="ralphie-container-${ARCH}.metadata.json"
           test -s "$archive"
           digest="$(printf '%s\n' "$BUILD_DIGEST" | grep -E '^sha256:[0-9a-f]{64}$')"
+          # Bind the recorded digest to the archive's own OCI index entry
+          # before staging: a single-platform export has exactly one manifest
+          # descriptor, and its digest must equal the BuildKit digest above,
+          # so the promotion input and the persisted contract cannot drift.
+          index_digest="$(tar -xOf "$archive" index.json | jq -er '.manifests[0].digest')"
+          manifest_count="$(tar -xOf "$archive" index.json | jq -er '.manifests | length')"
+          test "$manifest_count" = 1
+          test "$index_digest" = "$(printf '%s\n' "$index_digest" | grep -E '^sha256:[0-9a-f]{64}$')"
+          test "$index_digest" = "$digest"
           archive_sha256="$(sha256sum "$archive" | cut -d ' ' -f1)"
           artifact="ralphie-container-candidate-${VERSION}-${ARCH}"
           image_license="$(docker image inspect "$IMAGE" --format '{{ index .Config.Labels "org.opencontainers.image.licenses" }}')"
@@ -771,9 +780,103 @@ jobs:
             type=raw,value=sha-${{ needs.validate.outputs.source_ref }}
 
       # Promote the inspected OCI archives, rather than rebuilding with a
-      # different ref. All version/revision inputs remain the release-gate
-      # outputs on retries.
-      - name: Push inspected container images
+      # different ref. Each promoted GHCR image is re-inspected immediately:
+      # the registry digest must be a lowercase `sha256:<64 hex>` value equal
+      # to the candidate contract's `.digest`, the platform must match, and
+      # the validated version/source_ref (and license) OCI labels must match
+      # the release-gate outputs. Every subject entry is derived from that
+      # post-promotion result and persisted in the
+      # `ralphie.publication-subjects.v1` map; a missing, duplicate,
+      # unsupported, or mismatched subject fails this step before any alias
+      # can be created.
+      - name: Promote platform images and persist publication subjects
+        env:
+          IMAGE: ghcr.io/beremaran/ralphie
+          VERSION: ${{ needs.validate.outputs.version }}
+          SOURCE_REF: ${{ needs.validate.outputs.source_ref }}
+        run: |
+          set -euo pipefail
+          authfile="$HOME/.docker/config.json"
+          test -s "$authfile"
+          subjects='[]'
+          for arch in amd64 arm64; do
+            case "$arch" in
+              amd64) platform="linux/amd64" ;;
+              arm64) platform="linux/arm64" ;;
+              *) echo "Unsupported container architecture: $arch" >&2; exit 1 ;;
+            esac
+            archive="container-candidates/ralphie-container-${arch}.oci.tar"
+            contract="container-candidates/ralphie-container-${arch}.metadata.json"
+            expected_digest="$(jq -er '.digest' "$contract")"
+            test "$expected_digest" = "$(printf '%s' "$expected_digest" | grep -E '^sha256:[0-9a-f]{64}$')"
+
+            skopeo copy --authfile "$authfile" --retry-times 3 \
+              "oci-archive:$archive" \
+              "docker://$IMAGE:${VERSION}-${arch}"
+
+            inspected="$(skopeo inspect --authfile "$authfile" --retry-times 3 \
+              --format '{{json .}}' "docker://$IMAGE:${VERSION}-${arch}")"
+            registry_digest="$(jq -er '.Digest' <<< "$inspected")"
+            registry_platform="$(jq -er '"\(.Os)/\(.Architecture)"' <<< "$inspected")"
+            license_label="$(jq -er '.Labels["org.opencontainers.image.licenses"]' <<< "$inspected")"
+            version_label="$(jq -er '.Labels["org.opencontainers.image.version"]' <<< "$inspected")"
+            revision_label="$(jq -er '.Labels["org.opencontainers.image.revision"]' <<< "$inspected")"
+            test "$registry_digest" = "$(printf '%s' "$registry_digest" | grep -E '^sha256:[0-9a-f]{64}$')"
+            test "$registry_digest" = "$expected_digest"
+            test "$registry_platform" = "$platform"
+            test "$license_label" = "MIT"
+            test "$version_label" = "$VERSION"
+            test "$revision_label" = "$SOURCE_REF"
+            subjects="$(jq \
+              --arg platform "$platform" \
+              --arg digest "$registry_digest" \
+              --arg reference "$IMAGE@$registry_digest" \
+              '. + [{platform: $platform, digest: $digest, reference: $reference}]' \
+              <<< "$subjects")"
+          done
+
+          # The publication subject map must contain exactly the linux/amd64
+          # and linux/arm64 promotions, each with a unique canonical digest
+          # and the `ghcr.io/beremaran/ralphie@sha256:<digest>` reference
+          # derived from the post-promotion inspection above.
+          jq -e \
+            --arg image "$IMAGE" \
+            '(length == 2) and
+             ([.[].platform] | sort) == ["linux/amd64", "linux/arm64"] and
+             ([.[].platform] | unique | length == 2) and
+             ([.[].digest] | unique | length == 2) and
+             (all(.[]; (.platform == "linux/amd64" or .platform == "linux/arm64") and
+                       (.digest | test("^sha256:[0-9a-f]{64}$")) and
+                       (.reference == ($image + "@" + .digest))))' \
+            <<< "$subjects" > /dev/null
+          jq -n \
+            --arg schema "ralphie.publication-subjects.v1" \
+            --arg image "$IMAGE" \
+            --arg version "$VERSION" \
+            --arg source_ref "$SOURCE_REF" \
+            --argjson subjects "$subjects" \
+            '{schema: $schema, image: $image, version: $version, source_ref: $source_ref, subjects: $subjects}' \
+            > publication-subjects.json
+
+      # Persist the verified subjects as an immutable artifact so later
+      # attestation steps and this job's alias step consume the same
+      # post-promotion digests.
+      - name: Upload verified publication subjects
+        uses: actions/upload-artifact@v4
+        with:
+          name: ralphie-publication-subjects-${{ needs.validate.outputs.version }}
+          path: publication-subjects.json
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 90
+
+      # Create every version/minor/latest/source-revision manifest alias from
+      # the immutable digest references of the verified subject map, never
+      # from the `$VERSION-amd64`/`$VERSION-arm64` platform tags. The
+      # persisted map is re-validated and each digest is crossed against the
+      # candidate contracts before the first alias write, so a digest
+      # mismatch stops the job before any alias is pushed.
+      - name: Create manifest aliases from immutable digests
         env:
           IMAGE: ghcr.io/beremaran/ralphie
           VERSION: ${{ needs.validate.outputs.version }}
@@ -781,22 +884,48 @@ jobs:
           IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
         run: |
           set -euo pipefail
+          jq -e \
+            --arg schema "ralphie.publication-subjects.v1" \
+            --arg image "$IMAGE" \
+            --arg version "$VERSION" \
+            --arg source_ref "$SOURCE_REF" \
+            '(.schema == $schema) and
+             (.image == $image) and
+             (.version == $version) and
+             (.source_ref == $source_ref) and
+             (.subjects | type == "array" and length == 2) and
+             ([.subjects[].platform] | sort) == ["linux/amd64", "linux/arm64"] and
+             ([.subjects[].platform] | unique | length == 2) and
+             ([.subjects[].digest] | unique | length == 2) and
+             (all(.subjects[]; (.platform == "linux/amd64" or .platform == "linux/arm64") and
+                               (.digest | test("^sha256:[0-9a-f]{64}$")) and
+                               (.reference == ($image + "@" + .digest))))' \
+            publication-subjects.json > /dev/null
+
+          # The persisted digests must still equal the candidate contract
+          # digests staged by the uncredentialed build.
           for arch in amd64 arm64; do
-            archive="container-candidates/ralphie-container-${arch}.oci.tar"
-            platform_tag="$IMAGE:${VERSION}-${arch}"
-            expected_digest="$(jq -er '.digest' "container-candidates/ralphie-container-${arch}.metadata.json")"
-            skopeo copy --authfile "$HOME/.docker/config.json" --retry-times 3 \
-              "oci-archive:$archive" "docker://$platform_tag"
-            actual_digest="$(skopeo inspect --authfile "$HOME/.docker/config.json" \
-              --retry-times 3 --format '{{.Digest}}' "docker://$platform_tag")"
-            test "$actual_digest" = "$expected_digest"
+            case "$arch" in
+              amd64) platform="linux/amd64" ;;
+              arm64) platform="linux/arm64" ;;
+              *) echo "Unsupported container architecture: $arch" >&2; exit 1 ;;
+            esac
+            subject_digest="$(jq -er --arg platform "$platform" \
+              '.subjects[] | select(.platform == $platform) | .digest' publication-subjects.json)"
+            contract_digest="$(jq -er '.digest' "container-candidates/ralphie-container-${arch}.metadata.json")"
+            test "$subject_digest" = "$contract_digest"
           done
+
+          amd64_reference="$(jq -er '.subjects[] | select(.platform == "linux/amd64") | .reference' publication-subjects.json)"
+          arm64_reference="$(jq -er '.subjects[] | select(.platform == "linux/arm64") | .reference' publication-subjects.json)"
+          test -n "$amd64_reference"
+          test -n "$arm64_reference"
 
           while IFS= read -r tag; do
             test -n "$tag"
             docker manifest create "$tag" \
-              "$IMAGE:${VERSION}-amd64" \
-              "$IMAGE:${VERSION}-arm64"
+              "$amd64_reference" \
+              "$arm64_reference"
             docker manifest push "$tag"
           done <<< "$IMAGE_TAGS"
 

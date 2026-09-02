@@ -329,6 +329,51 @@ describe("release container metadata contract", () => {
         expect(stageJob).not.toContain("provenance: true");
     });
 
+    test("binds the recorded digest to the OCI archive index before staging", async () => {
+        const workflow = await readRepositoryFile(
+            ".github/workflows/release.yml",
+        );
+        const stageStart = workflow.indexOf("  stage-container:");
+        const stageEnd = workflow.indexOf("  publish-npm:", stageStart);
+        const stageJob = workflow.slice(stageStart, stageEnd);
+
+        // The candidate contract is written only after the recorded BuildKit
+        // digest is bound to the archive's own OCI index entry, so the
+        // promotion input and the persisted digest cannot drift.
+        const contractStart = stageJob.indexOf(
+            "name: Write candidate digest and platform contract",
+        );
+        const uploadStart = stageJob.indexOf(
+            "name: Upload tested container candidate",
+        );
+        const contractStep = stageJob.slice(contractStart, uploadStart);
+        expect(contractStart).toBeGreaterThan(-1);
+        expect(uploadStart).toBeGreaterThan(contractStart);
+        expect(contractStep).toContain(
+            'index_digest="$(tar -xOf "$archive" index.json | jq -er \'.manifests[0].digest\')"',
+        );
+        expect(contractStep).toContain(
+            'manifest_count="$(tar -xOf "$archive" index.json | jq -er \'.manifests | length\')"',
+        );
+        // A single-platform export has exactly one manifest descriptor, the
+        // entry digest must itself be a lowercase `sha256:<64 hex>` value,
+        // and it must equal the recorded BuildKit digest.
+        expect(contractStep).toContain('test "$manifest_count" = 1');
+        expect(contractStep).toContain('test "$index_digest" = "$digest"');
+        expect(contractStep.indexOf("index_digest=")).toBeLessThan(
+            contractStep.indexOf('> "$contract"'),
+        );
+        // stage-container preserves its no-registry-write posture: read-only
+        // permissions and no credentials or registry client anywhere in the
+        // job.
+        expect(stageJob).toContain("permissions:");
+        expect(stageJob).toContain("contents: read");
+        expect(stageJob).not.toContain("packages: write");
+        expect(stageJob).not.toContain("github.token");
+        expect(stageJob).not.toContain("docker login");
+        expect(stageJob).not.toContain("skopeo copy");
+    });
+
     test("builds each native asset on a matching host architecture", async () => {
         const workflow = await readRepositoryFile(
             ".github/workflows/release.yml",
@@ -423,13 +468,234 @@ describe("release container metadata contract", () => {
         expect(
             pushJob.indexOf("name: Inspect OCI metadata before promotion"),
         ).toBeLessThan(
-            pushJob.indexOf("name: Push inspected container images"),
+            pushJob.indexOf(
+                "name: Promote platform images and persist publication subjects",
+            ),
         );
         expect(
             workflow.indexOf(
                 "name: Smoke-test entrypoint and inspect release metadata",
             ),
         ).toBeLessThan(pushJobStart);
+    });
+
+    test("promotes each platform to a verified digest subject before aliases", async () => {
+        const workflow = await readRepositoryFile(
+            ".github/workflows/release.yml",
+        );
+        const pushJobStart = workflow.indexOf("  push-container:");
+        const publishJobStart = workflow.indexOf("  publish:", pushJobStart);
+        const pushJob = workflow.slice(pushJobStart, publishJobStart);
+
+        const promotionStart = pushJob.indexOf(
+            "name: Promote platform images and persist publication subjects",
+        );
+        const aliasStart = pushJob.indexOf(
+            "name: Create manifest aliases from immutable digests",
+        );
+        expect(promotionStart).toBeGreaterThan(-1);
+        expect(aliasStart).toBeGreaterThan(promotionStart);
+        // Platform promotion is persisted before any alias can be created,
+        // so later attestation steps can run in between.
+        expect(pushJob).toContain("ralphie.publication-subjects.v1");
+        expect(pushJob).toContain("name: Upload verified publication subjects");
+        expect(
+            pushJob.indexOf("name: Upload verified publication subjects"),
+        ).toBeLessThan(aliasStart);
+        // Promotion re-inspects each GHCR image: the registry digest must be
+        // the lowercase `sha256:<64 hex>` value equal to the candidate
+        // `.digest`, and the platform and validated version/source_ref labels
+        // must match.
+        expect(pushJob).toContain(
+            'test "$registry_digest" = "$expected_digest"',
+        );
+        expect(pushJob).toContain('test "$registry_platform" = "$platform"');
+        expect(pushJob).toContain('test "$version_label" = "$VERSION"');
+        expect(pushJob).toContain('test "$revision_label" = "$SOURCE_REF"');
+        // Aliases come from immutable digest references, never from the
+        // `${VERSION}-amd64`/`${VERSION}-arm64` platform tags.
+        expect(pushJob).toContain('docker manifest create "$tag"');
+        expect(pushJob).toContain('"$amd64_reference"');
+        expect(pushJob).toContain('"$arm64_reference"');
+        expect(pushJob).not.toMatch(/\$IMAGE:\$\{VERSION\}-(?:amd64|arm64)/);
+    });
+
+    test("rejects missing, duplicate, unsupported, and mismatched subjects before aliases", async () => {
+        const workflow = await readRepositoryFile(
+            ".github/workflows/release.yml",
+        );
+        const pushJobStart = workflow.indexOf("  push-container:");
+        const publishJobStart = workflow.indexOf("  publish:", pushJobStart);
+        const pushJob = workflow.slice(pushJobStart, publishJobStart);
+
+        const promotionStart = pushJob.indexOf(
+            "name: Promote platform images and persist publication subjects",
+        );
+        const uploadStart = pushJob.indexOf(
+            "name: Upload verified publication subjects",
+        );
+        const aliasStart = pushJob.indexOf(
+            "name: Create manifest aliases from immutable digests",
+        );
+        const promotionStep = pushJob.slice(promotionStart, uploadStart);
+        const aliasStep = pushJob.slice(aliasStart);
+
+        // The map is persisted only after proving exactly two subjects over
+        // the supported platforms, each with a unique lowercase
+        // `sha256:<64 hex>` digest and the derived immutable
+        // `ghcr.io/beremaran/ralphie@sha256:<digest>` reference. Missing,
+        // duplicate, unsupported, or mismatched subjects fail promotion
+        // before the map (and thus any alias) can be created.
+        expect(promotionStep).toContain("(length == 2) and");
+        expect(promotionStep).toContain(
+            '([.[].platform] | sort) == ["linux/amd64", "linux/arm64"]',
+        );
+        expect(promotionStep).toContain(
+            "([.[].platform] | unique | length == 2)",
+        );
+        expect(promotionStep).toContain(
+            "([.[].digest] | unique | length == 2)",
+        );
+        expect(promotionStep).toContain(
+            '.digest | test("^sha256:[0-9a-f]{64}$")',
+        );
+        expect(promotionStep).toContain(
+            '(.reference == ($image + "@" + .digest))',
+        );
+
+        // The alias step re-validates the persisted map and crosses each
+        // subject digest with the candidate contracts before the first
+        // `docker manifest create`, so a digest mismatch stops the job with
+        // no alias pushed.
+        expect(aliasStep).toContain(".schema == $schema");
+        expect(aliasStep).toContain(
+            '(.subjects | type == "array" and length == 2)',
+        );
+        const firstCreate = aliasStep.indexOf('docker manifest create "$tag"');
+        expect(firstCreate).toBeGreaterThan(-1);
+        for (const gate of [
+            'test "$subject_digest" = "$contract_digest"',
+            'amd64_reference="$(jq -er',
+            'arm64_reference="$(jq -er',
+            'test -n "$amd64_reference"',
+            'test -n "$arm64_reference"',
+        ]) {
+            expect(aliasStep.indexOf(gate)).toBeGreaterThan(-1);
+            expect(aliasStep.indexOf(gate)).toBeLessThan(firstCreate);
+        }
+        // The alias loop consumes only the immutable digest references from
+        // the persisted map, never the `${VERSION}-amd64`/`${VERSION}-arm64`
+        // platform tags.
+        expect(aliasStep).not.toContain("$IMAGE:${VERSION}-amd64");
+        expect(aliasStep).not.toContain("$IMAGE:${VERSION}-arm64");
+        expect(aliasStep).not.toMatch(/docker manifest create [^"]*amd64/);
+    });
+
+    test("publication subject map gate rejects bad maps before any alias", async () => {
+        const image = "ghcr.io/beremaran/ralphie";
+        const digest1 =
+            "sha256:1111111111111111111111111111111111111111111111111111111111111111";
+        const digest2 =
+            "sha256:2222222222222222222222222222222222222222222222222222222222222222";
+        // Mirrors the promotion step's fail-closed jq gate (re-asserted in
+        // the alias step before any manifest write): exactly the two
+        // supported platforms, unique lowercase `sha256:<64 hex>` digests,
+        // and the reference derived as `<image>@<digest>`.
+        const predicate = [
+            "(length == 2) and",
+            '([.[].platform] | sort) == ["linux/amd64", "linux/arm64"] and',
+            "([.[].platform] | unique | length == 2) and",
+            "([.[].digest] | unique | length == 2) and",
+            '(all(.[]; (.platform == "linux/amd64" or .platform == "linux/arm64") and',
+            '(.digest | test("^sha256:[0-9a-f]{64}$")) and',
+            '(.reference == ($image + "@" + .digest))))',
+        ].join("\n");
+        const subjectMap = (subjects: unknown): string => {
+            const encoded = JSON.stringify(subjects).replaceAll("'", "'\\''");
+            const result = Bun.spawnSync(
+                [
+                    "bash",
+                    "-c",
+                    `set -euo pipefail
+subjects='${encoded}'
+jq -e --arg image "${image}" '${predicate}' <<< "$subjects" > /dev/null`,
+                ],
+                {
+                    stderr: "pipe",
+                    stdout: "pipe",
+                },
+            );
+            return `exit=${result.exitCode ?? "null"}`;
+        };
+        const valid = [
+            {
+                platform: "linux/amd64",
+                digest: digest1,
+                reference: `${image}@${digest1}`,
+            },
+            {
+                platform: "linux/arm64",
+                digest: digest2,
+                reference: `${image}@${digest2}`,
+            },
+        ];
+        // The exact linux/amd64 + linux/arm64 pair with unique digests and
+        // derived references is the only accepted map.
+        expect(subjectMap(valid)).toBe("exit=0");
+        // A missing subject, a duplicated platform, an unsupported platform,
+        // a duplicated digest, a reference that does not derive from the
+        // subject digest, and a malformed digest are each rejected.
+        expect(subjectMap([valid[0]])).toBe("exit=1");
+        expect(
+            subjectMap([
+                valid[0],
+                {
+                    platform: "linux/amd64",
+                    digest: digest2,
+                    reference: `${image}@${digest2}`,
+                },
+            ]),
+        ).toBe("exit=1");
+        expect(
+            subjectMap([
+                valid[0],
+                {
+                    platform: "linux/386",
+                    digest: digest2,
+                    reference: `${image}@${digest2}`,
+                },
+            ]),
+        ).toBe("exit=1");
+        expect(
+            subjectMap([
+                valid[0],
+                {
+                    platform: "linux/arm64",
+                    digest: digest1,
+                    reference: `${image}@${digest1}`,
+                },
+            ]),
+        ).toBe("exit=1");
+        expect(
+            subjectMap([
+                valid[0],
+                {
+                    platform: "linux/arm64",
+                    digest: digest2,
+                    reference: `${image}@${digest1}`,
+                },
+            ]),
+        ).toBe("exit=1");
+        expect(
+            subjectMap([
+                valid[0],
+                {
+                    platform: "linux/arm64",
+                    digest: digest2.toUpperCase(),
+                    reference: `${image}@${digest2}`,
+                },
+            ]),
+        ).toBe("exit=1");
     });
 
     test("gates the sole release publisher on every successful prerequisite", async () => {

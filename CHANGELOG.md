@@ -117,6 +117,19 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Changed
 
+- Refactor container promotion around immutable, verified platform digests
+  (`.github/workflows/release.yml`): `stage-container` now binds the recorded
+  BuildKit digest to the OCI archive's own index entry before staging, and
+  `push-container` splits platform promotion from alias creation — each
+  promoted GHCR image is re-inspected and must match the candidate `.digest`,
+  platform, and the validated `version`/`source_ref` labels; the
+  post-promotion results are persisted as a `ralphie.publication-subjects.v1`
+  map with exactly `linux/amd64` and `linux/arm64` (rejecting missing,
+  duplicate, unsupported, or mismatched subjects); and every
+  version/minor/`latest`/`sha-<revision>` manifest alias is created from the
+  immutable `ghcr.io/beremaran/ralphie@sha256:<digest>` references instead
+  of the `${VERSION}-amd64`/`${VERSION}-arm64` tags, so a digest mismatch
+  stops the job before any alias is pushed.
 - The protected native release publisher now gates on every validated build
   matrix result, regenerates `SHA256SUMS`, and creates or reuses a
   REST-validated release handle before any asset mutation, then reconciles an

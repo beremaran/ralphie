@@ -599,7 +599,8 @@ describe("release.yml job graph and publication gating", () => {
             ],
             [
                 "Log in to GitHub Container Registry",
-                "Push inspected container images",
+                "Promote platform images and persist publication subjects",
+                "Create manifest aliases from immutable digests",
             ],
         );
         expectMutationOrdering(
