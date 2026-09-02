@@ -89,6 +89,29 @@ the tracking parent as `completed`, and cleans up after itself. It requires a
 host with the native sub-issues and dependencies endpoints and a token with
 issue write permission.
 
+## Local GitHub REST fixture
+
+`src/github/rest-fixture.ts` provides a reusable, deterministic in-memory HTTP
+fixture serving the GitHub-shaped issue, comment, and native sub-issue and
+dependency endpoints used by `makeGitHubIssuesService`,
+`makeGitHubIssueMutationsService`, and
+`makeGitHubIssueRelationshipService`: list/paginate issues, read issues and
+comments, create/update/close issues (with lost-response reconciliation), and
+the `client.request` relationship routes. Start one with
+`startGitHubRestFixture()`, seed repository records and relationships, point a
+real Octokit client at `fixture.baseUrl` (pass it to the explicit
+`makeGitHubClientService` seam or set `RALPHIE_GITHUB_REST_FIXTURE_URL`), and
+drive the actual domain services against it.
+
+Per-operation response sequences (`fixture.enqueue`) can force controlled
+HTTP, malformed, or lost-response failures; every request is recorded as a
+method/path/body/authorization observation in fixture memory, outside the
+Ralphie state volume. Unknown or public-shaped paths are rejected with a loud
+HTTP 500 and are never proxied. Tests under `tests/github/rest-fixture.test.ts`
+prove the production default still targets `api.github.com` with the
+`x-github-api-version` header, that the explicit local path is selected only by
+the test setup, and that public or unexpected requests fail immediately.
+
 The normal `bun run test` suite includes local end-to-end tests that build
 temporary Git repositories with a stubbed Pi client; they do not need network
 access or credentials.

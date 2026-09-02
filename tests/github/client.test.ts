@@ -6,6 +6,8 @@ import { Octokit } from "octokit";
 
 import {
     GITHUB_REST_API_VERSION,
+    GITHUB_REST_FIXTURE_TOKEN_ENV,
+    GITHUB_REST_FIXTURE_URL_ENV,
     makeGitHubClientService,
 } from "../../src/github/client.ts";
 import type { CommandResult } from "../../src/process/command-runner.ts";
@@ -144,6 +146,180 @@ describe("GitHub client", () => {
             "GitHub CLI returned an empty authentication token",
         );
         expect(calls).toEqual(["gh auth status", "gh auth token"]);
+    });
+
+    test("keeps the public GitHub REST API by default with the version header", async () => {
+        const calls: string[] = [];
+        const client = await testService(calls, [
+            { exitCode: 0, stdout: "", stderr: "" },
+            { exitCode: 0, stdout: "default-token", stderr: "" },
+        ]).initialize();
+
+        const endpoint = client.rest.issues.get.endpoint({
+            owner: "owner",
+            repo: "repository",
+            issue_number: 7,
+        });
+        expect(endpoint.url).toBe(
+            "https://api.github.com/repos/owner/repository/issues/7",
+        );
+        expect(endpoint).toMatchObject({
+            request: {
+                headers: { "x-github-api-version": GITHUB_REST_API_VERSION },
+            },
+        });
+        // The production default still runs gh CLI authentication.
+        expect(calls).toEqual(["gh auth status", "gh auth token"]);
+    });
+
+    test("targets the explicit local fixture base URL only when the seam is configured", async () => {
+        const calls: string[] = [];
+        const runner = {
+            run: async () => {
+                calls.push("gh auth should never run in fixture mode");
+                return { exitCode: 0, stdout: "", stderr: "" };
+            },
+        };
+        const client = await makeGitHubClientService(runner, {
+            baseUrl: "http://127.0.0.1:43123",
+            authToken: "fixture-token",
+        }).initialize();
+
+        const endpoint = client.rest.issues.listForRepo.endpoint({
+            owner: "owner",
+            repo: "repository",
+        });
+        expect(endpoint.url).toBe(
+            "http://127.0.0.1:43123/repos/owner/repository/issues",
+        );
+        expect(calls).toEqual([]);
+    });
+
+    test("selects the local fixture path only from the test-only environment variables", async () => {
+        const original = {
+            [GITHUB_REST_FIXTURE_URL_ENV]:
+                process.env[GITHUB_REST_FIXTURE_URL_ENV],
+            [GITHUB_REST_FIXTURE_TOKEN_ENV]:
+                process.env[GITHUB_REST_FIXTURE_TOKEN_ENV],
+        };
+        const calls: string[] = [];
+        const runner = {
+            run: async () => {
+                calls.push("gh auth should never run in fixture mode");
+                return { exitCode: 0, stdout: "", stderr: "" };
+            },
+        };
+        try {
+            setEnvironmentValue(
+                GITHUB_REST_FIXTURE_URL_ENV,
+                "http://127.0.0.1:43124",
+            );
+            setEnvironmentValue(
+                GITHUB_REST_FIXTURE_TOKEN_ENV,
+                "env-fixture-token",
+            );
+            const client = await makeGitHubClientService(runner).initialize();
+
+            const endpoint = client.rest.issues.get.endpoint({
+                owner: "owner",
+                repo: "repository",
+                issue_number: 1,
+            });
+            expect(endpoint.url).toBe(
+                "http://127.0.0.1:43124/repos/owner/repository/issues/1",
+            );
+            expect(calls).toEqual([]);
+        } finally {
+            restoreEnvironment(original);
+        }
+    });
+
+    test("refuses public or non-loopback base URLs in the test seam", () => {
+        const invalidBaseUrls = [
+            "https://api.github.com",
+            "https://github.com",
+            "http://example.com",
+            "http://8.8.8.8",
+            "https://127.0.0.1:443",
+            "http://[::1]:1234",
+            "http://127.0.0.1/base/path",
+            "http://user:pass@127.0.0.1:9",
+        ];
+        for (const baseUrl of invalidBaseUrls) {
+            expect(() =>
+                makeGitHubClientService(
+                    {
+                        run: async () => ({
+                            exitCode: 0,
+                            stdout: "",
+                            stderr: "",
+                        }),
+                    },
+                    { baseUrl },
+                ),
+            ).toThrow();
+        }
+        expect(() =>
+            makeGitHubClientService(
+                {
+                    run: async () => ({
+                        exitCode: 0,
+                        stdout: "",
+                        stderr: "",
+                    }),
+                },
+                { baseUrl: "https://api.github.com" },
+            ),
+        ).toThrow("Refusing to redirect GitHub REST traffic");
+
+        for (const baseUrl of [
+            "http://localhost:1234",
+            "http://127.0.0.1:1234",
+        ]) {
+            expect(() =>
+                makeGitHubClientService(
+                    {
+                        run: async () => ({
+                            exitCode: 0,
+                            stdout: "",
+                            stderr: "",
+                        }),
+                    },
+                    { baseUrl },
+                ),
+            ).not.toThrow();
+        }
+    });
+
+    test("refuses a fixture auth token without a fixture URL", async () => {
+        expect(() =>
+            makeGitHubClientService(
+                {
+                    run: async () => ({
+                        exitCode: 0,
+                        stdout: "",
+                        stderr: "",
+                    }),
+                },
+                { authToken: "lonely-token" },
+            ),
+        ).toThrow("requires either a baseUrl");
+
+        const original = process.env[GITHUB_REST_FIXTURE_TOKEN_ENV];
+        try {
+            setEnvironmentValue(GITHUB_REST_FIXTURE_TOKEN_ENV, "lonely-token");
+            expect(() =>
+                makeGitHubClientService({
+                    run: async () => ({
+                        exitCode: 0,
+                        stdout: "",
+                        stderr: "",
+                    }),
+                }),
+            ).toThrow(`requires ${GITHUB_REST_FIXTURE_URL_ENV}`);
+        } finally {
+            setEnvironmentValue(GITHUB_REST_FIXTURE_TOKEN_ENV, original);
+        }
     });
 
     test("passes GitHub.com token aliases to both gh auth commands", async () => {

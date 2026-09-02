@@ -15,6 +15,12 @@ All notable changes to Ralphie are documented here. The project follows
   checksum-verified Homebrew asset manifest.
 - Build each native release binary with its explicit Bun target and validate its
   executable header and architecture before emitting checksums.
+- Add an explicit local Octokit test seam and a deterministic in-memory GitHub
+  REST fixture (`src/github/rest-fixture.ts`). The production client with no
+  test configuration still targets `api.github.com` with its existing `gh`
+  authentication and REST-version header; only an explicit loopback fixture URL
+  (option or `RALPHIE_GITHUB_REST_FIXTURE_URL`/`_TOKEN`) redirects REST traffic,
+  and the fixture rejects unknown/public-shaped paths instead of forwarding them.
 
 ### Fixed
 - Live Pi transcript streaming renders every `thinking_delta` / `text_delta`

@@ -98,6 +98,8 @@ Model credentials are read from environment variables:
 | `GITHUB_TOKEN` | Fallback GitHub.com token alias for `gh`. |
 | `RALPHIE_MODEL_BASE_URL` | OpenAI-compatible model base URL; enables a private temporary Pi configuration when `--pi-dir` is absent. |
 | `RALPHIE_MODEL_API_KEY` | Model API key for that temporary configuration; supply it only through the environment. |
+| `RALPHIE_GITHUB_REST_FIXTURE_URL` | Test-only local GitHub REST fixture base URL; must be an `http://` loopback URL. When set, Octokit targets the fixture instead of GitHub, `gh` authentication is replaced by a deterministic fixture token, and automatic retry/throttling are disabled. Never set in production. |
+| `RALPHIE_GITHUB_REST_FIXTURE_TOKEN` | Test-only Authorization token presented to that fixture; requires the fixture URL (`RALPHIE_GITHUB_REST_FIXTURE_URL`). |
 
 For interactive `github.com` use, authenticate with `gh auth login` and verify
 with `gh auth status`. For unattended use, provide `GH_TOKEN` (preferred) or
