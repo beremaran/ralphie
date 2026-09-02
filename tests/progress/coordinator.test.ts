@@ -602,6 +602,128 @@ describe("progress output coordinator", () => {
         expect(surface.footers).toHaveLength(1);
     });
 
+    test("sanitizes complete plain and verbose human lines before the sink", async () => {
+        let output = "";
+        const coordinator = makeProgressCoordinator({
+            mode: "plain",
+            verbose: true,
+            colors: false,
+            write: (text) => {
+                output += text;
+            },
+        });
+
+        await coordinator.progress.emit({
+            stage: "implementation",
+            status: "succeeded",
+            message:
+                "line1\r\nline2 \u001b[31mred\u001b[0m \u009b1;2H\u0007 tail",
+            repository: "owner/repo\u0007",
+            issue: { number: 3, title: "C1\u009b2J title" },
+            details: {
+                url: "https://x.example/a\u000d\u009b2J",
+                note: "n\u0007o",
+            },
+        });
+
+        // Message, repository, issue title, and verbose details all collapse
+        // into one clean append-only row with no terminal controls. C0 bytes
+        // become literal JSON escapes in details; C1 CSI (U+009B) is removed.
+        expect(output).toContain("✓ [owner/repo] #3 line1 line2 red tail");
+        expect(output).toContain('"url":"https://x.example/a\\r"');
+        expect(output).toContain('"note":"n\\u0007o"');
+        expect(output).toEndWith("}\n");
+        expect(output).not.toMatch(
+            /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u0080-\u009f]/,
+        );
+        expect(output).not.toContain("\u001b");
+        expect(output).not.toContain("\r");
+        expect(output).not.toContain("\u0007");
+    });
+
+    test("suppresses raw writes in quiet and JSON modes", async () => {
+        let quietOutput = "";
+        const quiet = makeProgressCoordinator({
+            mode: "quiet",
+            verbose: false,
+            write: (text) => {
+                quietOutput += text;
+            },
+        });
+        quiet.progress.writeRaw?.(`quiet raw \u001b[31mtext\u001b[0m`);
+        quiet.listener(
+            event({
+                type: "message_update",
+                assistantMessageEvent: {
+                    type: "text_delta",
+                    delta: "partial",
+                },
+            }),
+            context,
+        );
+        await quiet.dispose();
+
+        expect(quietOutput).toBe("");
+        expect(quietOutput).not.toContain("raw");
+        expect(quietOutput).not.toContain("partial");
+
+        let jsonOutput = "";
+        const json = makeProgressCoordinator({
+            mode: "json",
+            verbose: false,
+            write: (text) => {
+                jsonOutput += text;
+            },
+            runId: "run-1",
+        });
+        json.progress.writeRaw?.("{not-json}\u001b[31m");
+        json.listener(
+            event({
+                type: "message_update",
+                assistantMessageEvent: {
+                    type: "text_delta",
+                    delta: "partial",
+                },
+            }),
+            context,
+        );
+        await json.dispose();
+
+        expect(jsonOutput).not.toContain("not-json");
+        expect(jsonOutput).not.toContain("\u001b");
+        const lines = jsonOutput
+            .trimEnd()
+            .split("\n")
+            .filter((line) => line.length > 0);
+        expect(lines).toHaveLength(1);
+        expect(JSON.parse(lines[0] ?? "")).toMatchObject({
+            type: "pi_event",
+        });
+    });
+
+    test("sanitizes raw writes before they reach the human sink", async () => {
+        let output = "";
+        const plain = makeProgressCoordinator({
+            mode: "plain",
+            verbose: false,
+            colors: false,
+            write: (text) => {
+                output += text;
+            },
+        });
+
+        plain.progress.writeRaw?.(
+            "c1\u009b2J bell\u0007 \u001b[31mred\u001b[0m tail\nmore",
+        );
+        await plain.dispose();
+
+        expect(output).toBe("c1 bell red tail\nmore\n");
+        expect(output).not.toMatch(
+            /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u0080-\u009f]/,
+        );
+        expect(output).not.toContain("\u001b");
+    });
+
     test("keeps plain append-only and quiet decisions-only", async () => {
         let plainOutput = "";
         const plain = makeProgressCoordinator({

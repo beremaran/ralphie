@@ -1,7 +1,10 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
-import { redactSensitiveValue } from "../shared/redaction.ts";
+import {
+    redactSensitiveValue,
+    stripTerminalControls,
+} from "../shared/redaction.ts";
 import { cyan, dim, green, red, yellow } from "./colors.ts";
 
 export type ProgressStage =
@@ -143,7 +146,8 @@ const statusSymbol = (status: ProgressStatus, colors: boolean): string => {
 
 const formatDetails = (
     details: Readonly<Record<string, unknown>> | undefined,
-): string => (details === undefined ? "" : ` ${JSON.stringify(details)}`);
+): string =>
+    details === undefined ? "" : ` ${humanText(JSON.stringify(details))}`;
 
 type ProgressStyle = (render: (text: string) => string, text: string) => string;
 
@@ -151,12 +155,16 @@ const formatIssue = (event: ProgressEvent, style: ProgressStyle): string => {
     if (event.issue === undefined) return "";
     const number = style(cyan, `#${event.issue.number}`);
     if (event.status !== "needs-attention") return ` ${number}`;
-    return ` ${number} ${style(dim, event.issue.title)} —`;
+    return ` ${number} ${style(dim, humanText(event.issue.title))} —`;
 };
 
 const CLEAR_LIVE_LINE = "\r\x1b[2K";
 const ANSI_ESCAPE =
     /\u001b(?:\][^\u0007]*(?:\u0007|\u001b\\)|\[[0-?]*[ -/]*[@-~])/g;
+
+/** Collapse a single human progress line; controls never reach the sink. */
+const humanText = (text: string): string =>
+    stripTerminalControls(text).replace(/\s+/g, " ").trim();
 
 const clipToWidth = (text: string, width: number): string => {
     const available = Math.max(1, width - 1);
@@ -288,7 +296,7 @@ export const makeProgressReporter = ({
             text: string,
         ): string => (colors ? render(text) : text);
         const scope = event.repository
-            ? ` ${style(dim, `[${event.repository}]`)}`
+            ? ` ${style(dim, `[${humanText(event.repository)}]`)}`
             : "";
         const issue = formatIssue(event, style);
         const position =
@@ -301,7 +309,7 @@ export const makeProgressReporter = ({
                 : "";
         const details = verbose ? formatDetails(event.details) : "";
         const status = statusSymbol(event.status, colors);
-        return `${status}${scope}${position}${attempt}${issue} ${event.message}${details}`;
+        return `${status}${scope}${position}${attempt}${issue} ${humanText(event.message)}${details}`;
     };
 
     const appendLine = (line: string) => {
@@ -376,7 +384,10 @@ export const makeProgressReporter = ({
     };
 
     return {
-        writeRaw: output.writeTranscript,
+        writeRaw: (text) => {
+            if (mode === "quiet" || mode === "json") return;
+            output.writeTranscript(stripTerminalControls(text));
+        },
         emit: async (update) => {
             const emittedAt = now();
             const event = makeProgressEvent(update, runId, emittedAt);

@@ -6,6 +6,7 @@ import type {
 import {
     redactSensitiveText,
     redactSensitiveValue,
+    stripTerminalControls,
 } from "../shared/redaction.ts";
 import { cyan, dim, green, red, yellow } from "./colors.ts";
 import {
@@ -42,18 +43,9 @@ export type PiTranscriptRenderer = PiEventListener & {
 
 const plain = (text: string): string => text;
 
-const ANSI_ESCAPE =
-    /\u001b(?:\][^\u0007]*(?:\u0007|\u001b\\)|\[[0-?]*[ -/]*[@-~])/g;
-
 /** Keep model and tool output from changing the terminal's state. */
 const sanitizeTerminalText = (text: string): string =>
-    redactSensitiveText(
-        text
-            .replace(/\r\n?/g, "\n")
-            .replace(ANSI_ESCAPE, "")
-            .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "")
-            .replace(/\t/g, "    "),
-    );
+    redactSensitiveText(stripTerminalControls(text).replace(/\t/g, "    "));
 
 const oneLine = (text: string): string =>
     sanitizeTerminalText(text).replace(/\s+/g, " ").trim();

@@ -1,13 +1,13 @@
-import { redactSensitiveText } from "../shared/redaction.ts";
+import {
+    redactSensitiveText,
+    stripTerminalControls,
+} from "../shared/redaction.ts";
 import { dim } from "./colors.ts";
 import {
     DISPLAY_ACTIVITY_LABELS,
     progressStageLabel,
     type DisplayState,
 } from "./display-state.ts";
-
-const ANSI_ESCAPE =
-    /\u001b(?:\](?:[^\u0007]*\u0007|[^\u001b]*\u001b\\)|\[[0-?]*[ -/]*[@-~])/g;
 
 /**
  * Text that is safe to use as a human breadcrumb label.
@@ -19,15 +19,7 @@ const ANSI_ESCAPE =
 export const sanitizeBreadcrumbLabel = (value: unknown): string => {
     const text = typeof value === "string" ? value : "";
     return redactSensitiveText(
-        text
-            .replace(ANSI_ESCAPE, "")
-            .replace(/\r\n?/g, "\n")
-            .replace(
-                /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g,
-                "",
-            )
-            .replace(/\s+/g, " ")
-            .trim(),
+        stripTerminalControls(text).replace(/\s+/g, " ").trim(),
     );
 };
 

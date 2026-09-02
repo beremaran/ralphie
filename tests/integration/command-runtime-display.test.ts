@@ -230,6 +230,58 @@ describe("command/runtime display harness", () => {
         expect(await outputFor(100)).not.toContain("› Compacting context");
     });
 
+    test("resolves default output from the real stderr TTY, ignoring injected terminal info", async () => {
+        const previousExitCode = process.exitCode;
+        const previousTty = process.stderr.isTTY;
+        try {
+            const redirected = makeCommandRuntimeHarness();
+            try {
+                // Injected terminal claims interactivity, but stderr is not a
+                // real TTY here: default output must stay append-only plain.
+                Object.defineProperty(process.stderr, "isTTY", {
+                    value: false,
+                    configurable: true,
+                });
+                await redirected.run(["owner/repository", "--dry-run"], {
+                    isInteractive: true,
+                    isCI: false,
+                    width: 80,
+                });
+                const output = redirected.stderr.join("");
+                expect(output).toContain("Fake progress");
+                expect(output).toContain("fake Pi event");
+                expect(output).not.toContain("\u001b[");
+                expect(output).not.toContain("\r");
+            } finally {
+                await redirected.cleanup();
+            }
+
+            const live = makeCommandRuntimeHarness();
+            try {
+                Object.defineProperty(process.stderr, "isTTY", {
+                    value: true,
+                    configurable: true,
+                });
+                await live.run(["owner/repository", "--dry-run"], {
+                    isInteractive: true,
+                    isCI: false,
+                    width: 80,
+                });
+                const output = live.stderr.join("");
+                expect(output).toContain("\u001b[2K");
+                expect(output).toContain("Implementing changes");
+            } finally {
+                await live.cleanup();
+            }
+        } finally {
+            Object.defineProperty(process.stderr, "isTTY", {
+                value: previousTty,
+                configurable: true,
+            });
+            process.exitCode = previousExitCode ?? 0;
+        }
+    });
+
     test("uses the package version for plain and JSON version output", async () => {
         const plainHarness = makeCommandRuntimeHarness();
         try {

@@ -286,8 +286,11 @@ describe("display state", () => {
     test("removes terminal controls at the display-state boundary", () => {
         const state = reduceProgressUpdate(undefined, {
             ...baseProgress,
-            repository: "\u001b[31mowner/repo\u001b[0m\r\nforged",
-            issue: { number: 13, title: "title\u0007\nsecond line" },
+            repository: "\u001b[31mowner/repo\u001b[0m\r\nforged\u009b2J",
+            issue: {
+                number: 13,
+                title: "title\u0007\nsecond line\u009b3J",
+            },
         });
         const next = reducePiSessionEvent(
             state,
@@ -304,5 +307,7 @@ describe("display state", () => {
         expect(state.issue?.title).toBe("title second line");
         expect(next.activityLabel).toBe("Using read forged");
         expect(progressStageLabel(next.stage!)).toBe("Executing issue");
+        expect(state.repository).not.toContain("\u009b");
+        expect(state.issue?.title).not.toContain("\u009b");
     });
 });

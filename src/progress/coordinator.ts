@@ -366,6 +366,7 @@ export const makeProgressCoordinator = (
         },
         writeRaw: (text) => {
             if (disposed || text.length === 0) return;
+            if (options.mode === "quiet" || options.mode === "json") return;
             transcript?.interruptLine();
             progressRenderer.writeRaw?.(text);
         },

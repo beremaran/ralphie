@@ -1,5 +1,8 @@
 import type { PiEventContext, PiSessionEvent } from "../pi/client.ts";
-import { redactSensitiveText } from "../shared/redaction.ts";
+import {
+    redactSensitiveText,
+    stripTerminalControls,
+} from "../shared/redaction.ts";
 import type {
     ProgressEvent,
     ProgressStage,
@@ -120,18 +123,10 @@ const stringValue = (value: unknown): string | undefined =>
 const numberValue = (value: unknown): number | undefined =>
     typeof value === "number" && Number.isFinite(value) ? value : undefined;
 
-const ANSI_ESCAPE =
-    /\u001b(?:\][^\u0007]*(?:\u0007|\u001b\\)|\[[0-?]*[ -/]*[@-~])/g;
-
 /** Keep display text on the same redaction boundary as progress and transcripts. */
 const displayText = (value: string): string =>
     redactSensitiveText(
-        value
-            .replace(ANSI_ESCAPE, "")
-            .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "")
-            .replace(/[\r\n\t]+/g, " ")
-            .replace(/\s+/g, " ")
-            .trim(),
+        stripTerminalControls(value).replace(/\s+/g, " ").trim(),
     );
 
 const nonEmptyDisplayText = (value: string, fallback: string): string => {

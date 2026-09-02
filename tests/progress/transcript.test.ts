@@ -466,6 +466,50 @@ describe("Pi transcript rendering", () => {
         expect(output).not.toContain("\r");
     });
 
+    test("strips C1, cursor, and erase controls from streamed text and headers", () => {
+        let output = "";
+        const render = makePiTranscriptRenderer({
+            write: (text) => {
+                output += text;
+            },
+        });
+
+        render(
+            event({
+                type: "message_update",
+                message: { role: "assistant" },
+                assistantMessageEvent: {
+                    type: "text_delta",
+                    delta: "\u009b1;2Hup\u0007 bell \u001b[2Jclear",
+                },
+            }),
+            context,
+        );
+
+        expect(output).toBe(
+            "╭─ Pi · Implement issue #42 · session-1\n" +
+                "│\n" +
+                "│  ✦ assistant up bell clear",
+        );
+        expect(output).not.toMatch(
+            /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u0080-\u009f]/,
+        );
+        expect(output).not.toContain("\u001b");
+        expect(output).not.toContain("\u009b");
+
+        const withC1Header = makePiTranscriptRenderer({
+            write: (text) => {
+                output += text;
+            },
+        });
+        withC1Header(event({ type: "agent_start" }), {
+            ...context,
+            title: "C1\u009b2K title",
+        });
+        expect(output).toContain("· C1 title");
+        expect(output).not.toContain("\u009b");
+    });
+
     test("meters sanitized incremental output as visible terminal rows", () => {
         let output = "";
         let width = 4;
