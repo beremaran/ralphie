@@ -5,6 +5,19 @@ All notable changes to Ralphie are documented here. The project follows
 
 ## [Unreleased]
 
+- Resolve open dependencies on decomposed tracking parents transitively to
+  their open leaf children in the issue queue, so a child depending on a
+  decomposed-but-open container issue can never deadlock against a parent
+  that is never queued for execution.
+- Surface dependency-blocked end-of-run issues as explicit needs-attention
+  outcomes (reason `external_dependency`) with evidence naming each open
+  dependency, instead of failing the run with a bare "blocked by open
+  dependencies" error: `--on-needs-attention halt` stops with the handled
+  stop; `continue` completes the run with the preserved issues still pending,
+  and the opt-in notifier labels/comments each blocked issue idempotently.
+- Pin grounding and resolution-verification evidence to the exact
+  checked-out commit: the read-only prompts now name the checked-out SHA
+  alongside the repository path and target branch.
 - Correct the runtime documentation: verified standalone binaries and Docker
   images run without Bun, while Bun remains required for source and published
   JavaScript usage; target-repository verification commands keep their own

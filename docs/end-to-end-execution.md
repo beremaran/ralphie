@@ -120,7 +120,10 @@ keeps the live transcript ordered.
 flowchart TD
     A["Start embedded Pi runtime"] --> B{"Queue has a ready issue and budget?"}
     B -->|no| C{"Pending issues blocked by open dependencies?"}
-    C -->|yes| D["Persist active state and fail"]
+    C -->|yes| R2["Record needs-attention outcomes with open-dependency evidence"]
+    R2 --> Q2{"onNeedsAttention policy"}
+    Q2 -->|continue| E
+    Q2 -->|halt| N
     C -->|no| E["Persist complete state"]
     B -->|yes| F["Dequeue issue; refresh its live GitHub snapshot"]
     F --> T{"Still open with every required label?"}
@@ -149,7 +152,6 @@ flowchart TD
     P --> O
     O --> B
     E --> R["Close Pi runtime; optional successful cleanup; summarize"]
-    D --> S["Close Pi runtime; retain state and artifacts"]
     N --> S
 ```
 
@@ -159,9 +161,21 @@ The per-issue stages execute in this order:
 | --- | --- | --- |
 | 1 | Live refresh gate | Refresh the issue and bounded comments. A refresh failure halts without stale execution; a closed issue or one missing a required label is durably skipped without consuming the issue budget. |
 | 2 | Active checkout | Replace the queued snapshot, charge the budget, save the active issue and checkout invariant, and, in non-dry-run `pr` mode, create or resume the local `ralphie/issue-<number>` branch. This branch is not pushed merely because it was prepared. |
-| 3 | Read-only grounding | Assess the refreshed issue before consulting cached complexity or invoking an implementation/decomposition workflow. A matching fingerprinted needs-attention decision may be reused; stale decisions are invalidated. |
+| 3 | Read-only grounding | Assess the refreshed issue before consulting cached complexity or invoking an implementation/decomposition workflow. A matching fingerprinted needs-attention decision may be reused; stale decisions are invalidated. The grounding prompt pins the exact checked-out commit so evidence is never mistaken for a newer revision. |
 | 4 | Disposition route | `actionable` alone proceeds to the 0–5 complexity decision (**0–3** implementation, **4–5** decomposition). `already_resolved` runs a separate fresh read-only verifier. `needs_attention` records the fingerprinted deferral and never enters complexity. |
 | 5 | Outcome finalization | Delivery or closure is reachable only from a completed outcome. Decomposition refreshes the queue; needs-attention leaves the source issue pending and may continue the queue by policy; failed verification retains recoverable state as a non-completion failure. |
+
+When the queue drains to issues that depend on open or decomposed-but-open
+prerequisites, those issues are never handed to the executor. Instead of
+failing the run with a bare "blocked by open dependencies" error, Ralphie
+records one needs-attention outcome per blocked issue with evidence naming
+each open dependency, emits progress events, and (with the opt-in notifier)
+publishes an idempotent notification. The `--on-needs-attention` policy then
+applies: `halt` stops with the handled stops contract, `continue` completes
+the run with the blocked issues preserved pending for a later run. Open
+dependencies on decomposed tracking parents resolve transitively to their
+open leaf children, so a child can never deadlock on a container issue that
+is never queued.
 
 The issue executor receives the refreshed issue, concrete repository path,
 target branch, Octokit client, shared Pi client, model selection, diagnostics,

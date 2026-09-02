@@ -19,6 +19,7 @@ import {
     IssueExecutionOutcomeKind,
     type IssueExecutionOutcome,
 } from "./issues/execution.ts";
+import { NeedsAttentionReason } from "./issues/decisions.ts";
 import { IssueArtifactKind } from "./issues/artifacts.ts";
 import {
     createIssueQueue,
@@ -475,6 +476,165 @@ type WorkflowIssueContext = {
     readonly issueBaseCheckout: WorkflowCheckout;
     readonly issueRepositories: ReadonlyArray<RepositoryCheckout>;
     readonly resumedClosureOutcome?: IssueExecutionOutcome;
+};
+
+/**
+ * Dependency-blocked issues are never handed to the executor, so no agent
+ * session can report them. Surface them explicitly as needs-attention
+ * outcomes: evidence naming each open dependency, progress events,
+ * opt-in idempotent notifications, and the halt/continue policy, instead of
+ * failing the run with a bare "blocked by open dependencies" error. Blocked
+ * issues stay pending in the persisted queue and become ready when their
+ * dependencies complete. Returns whether any blocked issue was recorded.
+ */
+type DependencyBlockedHandlers = {
+    readonly queue: ReturnType<typeof createIssueQueue>;
+    readonly onNeedsAttention: NeedsAttentionPolicy;
+    readonly notificationsEnabled: boolean;
+    readonly effectiveDryRun: boolean;
+    readonly recordIssueOutcome: (
+        issueNumber: number,
+        outcome: IssueExecutionOutcome,
+    ) => void;
+    readonly emitNeedsAttentionEvent: (
+        issueContext: Pick<WorkflowIssueContext, "issue" | "current" | "total">,
+        outcome: NeedsAttentionOutcome,
+    ) => Promise<void>;
+    readonly savePendingNotification: (
+        issueNumber: number,
+        outcome: NeedsAttentionOutcome,
+    ) => Promise<NonNullable<RunState["pendingNotification"]>>;
+    readonly publishPendingNotification: (
+        issueNumber: number,
+        intent: NonNullable<RunState["pendingNotification"]>,
+    ) => Promise<void>;
+    readonly clearHaltedNeedsAttention: (issueNumber: number) => Promise<void>;
+    readonly emitHandledNeedsAttention: (
+        issueContext: Pick<WorkflowIssueContext, "issue" | "current" | "total">,
+        outcome: NeedsAttentionOutcome,
+    ) => Promise<void>;
+    readonly persistState: (
+        status: RunStateStatus,
+        currentIssue?: RunState["activeIssue"],
+    ) => Promise<void>;
+    readonly queueTotalFor: (current: number) => number;
+};
+
+const emitDependencyBlockedIssue = async (
+    handlers: Pick<
+        DependencyBlockedHandlers,
+        | "onNeedsAttention"
+        | "recordIssueOutcome"
+        | "emitNeedsAttentionEvent"
+        | "savePendingNotification"
+        | "publishPendingNotification"
+        | "clearHaltedNeedsAttention"
+        | "emitHandledNeedsAttention"
+        | "persistState"
+    > & {
+        readonly issue: GitHubIssue;
+        readonly openDependencies: ReadonlyArray<number>;
+        readonly current: number;
+        readonly total: number;
+        readonly shouldNotify: boolean;
+    },
+): Promise<void> => {
+    const {
+        onNeedsAttention,
+        recordIssueOutcome,
+        emitNeedsAttentionEvent,
+        savePendingNotification,
+        publishPendingNotification,
+        clearHaltedNeedsAttention,
+        emitHandledNeedsAttention,
+        persistState,
+        issue,
+        openDependencies,
+        current,
+        total,
+        shouldNotify,
+    } = handlers;
+    const dependencyList = openDependencies
+        .map((number) => `#${number}`)
+        .join(", ");
+    const outcome: NeedsAttentionOutcome = {
+        kind: IssueExecutionOutcomeKind.NeedsAttention,
+        reason: NeedsAttentionReason.ExternalDependency,
+        summary: `Issue #${issue.number} cannot start: open ${openDependencies.length === 1 ? "dependency" : "dependencies"} ${dependencyList} must complete first.`,
+        evidence: openDependencies.map(
+            (dependency) =>
+                `Dependency #${dependency} is open and was not completed in this run.`,
+        ),
+        questions: [
+            `Complete ${dependencyList} before this issue can be queued, or confirm the dependencies should be treated as satisfied.`,
+        ],
+        policy: onNeedsAttention,
+        route: "needs-attention",
+    };
+    recordIssueOutcome(issue.number, outcome);
+    const issueContext = { issue, current, total };
+    await emitNeedsAttentionEvent(issueContext, outcome);
+    if (shouldNotify) {
+        const intent = await savePendingNotification(issue.number, outcome);
+        await publishPendingNotification(issue.number, intent);
+    }
+    if (onNeedsAttention !== NeedsAttentionPolicy.Halt) return;
+    if (shouldNotify) {
+        await clearHaltedNeedsAttention(issue.number);
+    } else {
+        await persistState(RunStateStatus.Active, {
+            issueNumber: issue.number,
+            stage: "grounding",
+        });
+    }
+    await emitHandledNeedsAttention(issueContext, outcome);
+    throw new NeedsAttentionStop({
+        issueNumber: issue.number,
+        summary: outcome.summary,
+    });
+};
+
+/**
+ * Dependency-blocked issues are never handed to the executor, so no agent
+ * session can report them. Surface them explicitly as needs-attention
+ * outcomes: evidence naming each open dependency, progress events,
+ * opt-in idempotent notifications, and the halt/continue policy, instead of
+ * failing the run with a bare "blocked by open dependencies" error. Blocked
+ * issues stay pending in the persisted queue and become ready when their
+ * dependencies complete. Throws the fail-closed error only when the blocked
+ * state is spurious (no pending entry has an unmet dependency).
+ */
+const handleDependencyBlockedQueue = async (
+    handlers: DependencyBlockedHandlers,
+): Promise<void> => {
+    const { queue } = handlers;
+    const { pending, completedIssueNumbers } = queue.snapshot();
+    const completedSet = new Set(completedIssueNumbers);
+    let recorded = 0;
+    for (const { issue, dependsOn = [] } of pending) {
+        const openDependencies = [
+            ...new Set(
+                dependsOn.filter((dependency) => !completedSet.has(dependency)),
+            ),
+        ];
+        if (openDependencies.length === 0) continue;
+        const current = queue.processedCount() + recorded;
+        recorded += 1;
+        await emitDependencyBlockedIssue({
+            ...handlers,
+            issue,
+            openDependencies,
+            current,
+            total: handlers.queueTotalFor(current),
+            shouldNotify:
+                handlers.notificationsEnabled && !handlers.effectiveDryRun,
+        });
+    }
+    if (recorded === 0) {
+        throw new RalphieError({
+            message: `${queue.pendingCount()} pending issues are blocked by open dependencies.`,
+        });
+    }
 };
 
 type RepositoryCheckout = {
@@ -2116,7 +2276,10 @@ export const workflow = async (
         };
 
         const emitNeedsAttentionEvent = async (
-            issueContext: WorkflowIssueContext,
+            issueContext: Pick<
+                WorkflowIssueContext,
+                "issue" | "current" | "total"
+            >,
             outcome: NeedsAttentionOutcome,
         ): Promise<void> => {
             const policy = outcome.policy ?? onNeedsAttention;
@@ -2569,9 +2732,19 @@ export const workflow = async (
         }
 
         if (queue.state() === IssueQueueState.DependencyBlocked) {
-            await persistState(RunStateStatus.Active);
-            throw new RalphieError({
-                message: `${queue.pendingCount()} pending issues are blocked by open dependencies.`,
+            await handleDependencyBlockedQueue({
+                queue,
+                onNeedsAttention,
+                notificationsEnabled,
+                effectiveDryRun,
+                recordIssueOutcome,
+                emitNeedsAttentionEvent,
+                savePendingNotification,
+                publishPendingNotification,
+                clearHaltedNeedsAttention,
+                emitHandledNeedsAttention,
+                persistState,
+                queueTotalFor,
             });
         }
 

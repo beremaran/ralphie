@@ -2417,6 +2417,188 @@ describe("workflow", () => {
         expect(calls).not.toContain("closeIssue:42");
     });
 
+    test("surfaces dependency-blocked issues as needs-attention outcomes and halts", async () => {
+        const calls: string[] = [];
+        const states: RunState[] = [];
+        const events: ProgressUpdate[] = [];
+        const blockedIssue: GitHubIssue = {
+            ...firstIssue,
+            number: 44,
+            body: '<!-- ralphie:decomposition root=7 parent=35 key="blocked" depth=2 -->\n\nBlocked work.\n\n## Dependencies\n\n- #42 (prerequisite)',
+        };
+        await expect(
+            workflow(
+                {
+                    ...baseOptions,
+                    maxIssues: 2,
+                    onNeedsAttention: NeedsAttentionPolicy.Halt,
+                },
+                testRuntime(
+                    calls,
+                    states,
+                    {
+                        issueLists: [[firstIssue, blockedIssue]],
+                        outcomes: [
+                            {
+                                kind: IssueExecutionOutcomeKind.NeedsAttention,
+                                reason: NeedsAttentionReason.MissingInformation,
+                                summary: "The prerequisite needs an answer.",
+                                evidence: ["The prerequisite is unanswered."],
+                                questions: ["What is the answer?"],
+                                route: "needs-attention",
+                                policy: NeedsAttentionPolicy.Continue,
+                            },
+                        ],
+                    },
+                    events,
+                ),
+            ),
+        ).rejects.toMatchObject({ _tag: "NeedsAttentionStop" });
+
+        // The dependency never completed, so the blocked issue was never
+        // handed to the executor, never closed, and never notified unless the
+        // blocked path itself reports it. The halt stop names the blocked issue.
+        expect(calls).not.toContain("executeIssue:44");
+        expect(calls).not.toContain("closeIssue:42");
+        expect(calls).not.toContain("closeIssue:44");
+        expect(events.some(({ status }) => status === "failed")).toBe(false);
+        expect(events).toContainEqual(
+            expect.objectContaining({
+                stage: "grounding",
+                status: "needs-attention",
+                issue: { number: 44, title: firstIssue.title },
+                details: expect.objectContaining({
+                    reason: NeedsAttentionReason.ExternalDependency,
+                    summary: expect.stringContaining("#42"),
+                    policy: NeedsAttentionPolicy.Halt,
+                }),
+            }),
+        );
+        const blockedOutcome = states
+            .at(-1)
+            ?.outcomes.find((entry) => entry.issueNumber === 44)?.outcome;
+        if (blockedOutcome?.kind !== IssueExecutionOutcomeKind.NeedsAttention) {
+            throw new Error("Expected a needs-attention outcome for #44.");
+        }
+        expect(blockedOutcome.reason).toBe(
+            NeedsAttentionReason.ExternalDependency,
+        );
+        expect(
+            blockedOutcome.evidence.some((item) => item.includes("#42")),
+        ).toBe(true);
+        expect(states.at(-1)?.status).toBe(RunStateStatus.Active);
+        expect(states.at(-1)?.activeIssue?.issueNumber).toBe(44);
+    });
+
+    test("completes with dependency-blocked issues recorded and still pending when the policy continues", async () => {
+        const calls: string[] = [];
+        const states: RunState[] = [];
+        const blockedIssue: GitHubIssue = {
+            ...firstIssue,
+            number: 44,
+            body: '<!-- ralphie:decomposition root=7 parent=35 key="blocked" depth=2 -->\n\nBlocked work.\n\n## Dependencies\n\n- #42 (prerequisite)',
+        };
+        const summary = await workflow(
+            {
+                ...baseOptions,
+                maxIssues: 2,
+                onNeedsAttention: NeedsAttentionPolicy.Continue,
+            },
+            testRuntime(calls, states, {
+                issueLists: [[firstIssue, blockedIssue]],
+                outcomes: [
+                    {
+                        kind: IssueExecutionOutcomeKind.NeedsAttention,
+                        reason: NeedsAttentionReason.MissingInformation,
+                        summary: "The prerequisite needs an answer.",
+                        evidence: ["The prerequisite is unanswered."],
+                        questions: ["What is the answer?"],
+                        route: "needs-attention",
+                        policy: NeedsAttentionPolicy.Continue,
+                    },
+                ],
+            }),
+        );
+
+        expect(summary.counts[IssueExecutionOutcomeKind.Completed]).toBe(0);
+        expect(summary.counts[IssueExecutionOutcomeKind.NeedsAttention]).toBe(
+            2,
+        );
+        expect(summary.outcomes.map(({ issueNumber }) => issueNumber)).toEqual([
+            42, 44,
+        ]);
+        expect(calls).not.toContain("closeIssue:42");
+        expect(calls).not.toContain("closeIssue:44");
+        expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
+        expect(
+            states.at(-1)?.queue.pending.map(({ number }) => number),
+        ).toContain(44);
+    });
+
+    test("notifies the preserved issue when dependency-blocked issues are recorded", async () => {
+        const calls: string[] = [];
+        const states: RunState[] = [];
+        const blockedIssue: GitHubIssue = {
+            ...firstIssue,
+            number: 44,
+            body: '<!-- ralphie:decomposition root=7 parent=35 key="blocked" depth=2 -->\n\nBlocked work.\n\n## Dependencies\n\n- #42 (prerequisite)',
+        };
+        const summary = await workflow(
+            {
+                ...baseOptions,
+                maxIssues: 2,
+                notificationsEnabled: true,
+                needsAttentionLabel: "needs-attention",
+            },
+            testRuntime(calls, states, {
+                issueLists: [[firstIssue, blockedIssue]],
+                outcomes: [
+                    {
+                        kind: IssueExecutionOutcomeKind.NeedsAttention,
+                        reason: NeedsAttentionReason.MissingInformation,
+                        summary: "The prerequisite needs an answer.",
+                        evidence: ["The prerequisite is unanswered."],
+                        questions: ["What is the answer?"],
+                        route: "needs-attention",
+                        policy: NeedsAttentionPolicy.Continue,
+                    },
+                ],
+                needsAttentionNotification: {
+                    notify: async (
+                        _client,
+                        _repo,
+                        issueNumber,
+                        input,
+                        label,
+                    ) => {
+                        calls.push(`notifyNeedsAttention:${issueNumber}`);
+                        if (issueNumber === 44) {
+                            expect(input.reason).toBe(
+                                NeedsAttentionReason.ExternalDependency,
+                            );
+                            expect(
+                                input.evidence.some((item) =>
+                                    item.includes("#42"),
+                                ),
+                            ).toBe(true);
+                        }
+                        expect(label).toBe("needs-attention");
+                        return {
+                            comment: "created" as const,
+                            label: "applied" as const,
+                        };
+                    },
+                },
+            }),
+        );
+
+        expect(summary.counts[IssueExecutionOutcomeKind.NeedsAttention]).toBe(
+            2,
+        );
+        expect(calls).toContain("notifyNeedsAttention:44");
+        expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
+    });
+
     test.each([
         { name: "lgtm", workflowMode: WorkflowMode.Lgtm },
         { name: "pr", workflowMode: WorkflowMode.Pr },

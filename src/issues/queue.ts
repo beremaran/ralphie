@@ -129,12 +129,18 @@ export const createIssueQueue = (
 /**
  * Preserve GitHub ordering while attaching dependencies that are still open.
  * Decomposed parents are tracking issues kept open for native sub-issue
- * progress and are never queued for execution; only their children are.
+ * progress and are never queued for execution; only their children are. An
+ * open dependency on a decomposed parent resolves transitively to that
+ * parent's open leaf descendants so a child can never deadlock on a tracking
+ * issue that is never queued.
  */
 export const toQueuedIssues = (
     issues: ReadonlyArray<GitHubIssue>,
 ): ReadonlyArray<QueuedIssue> => {
     const openIssueNumbers = new Set(issues.map(({ number }) => number));
+    const openDecomposedParents = new Set(
+        issues.filter(isDecomposedParent).map(({ number }) => number),
+    );
     const openDescendants = new Map<number, number[]>();
     for (const issue of issues) {
         const lineage =
@@ -152,9 +158,28 @@ export const toQueuedIssues = (
         }
     }
 
+    /**
+     * Resolve a generated dependency to the concrete open issues that must
+     * complete first:
+     * - An open decomposed parent is a tracking issue that is never queued,
+     *   so its open children block instead; recurse so a chain of containers
+     *   always resolves to the leaf issues that are actually queued.
+     * - Any other open issue blocks directly.
+     * - A closed or unknown dependency blocks on its open descendants when
+     *   the batch re-decomposed it, and is treated as satisfied when the
+     *   batch cannot see it (its closure predates this queue view).
+     */
     const expandOpenDependency = (dependency: number): number[] => {
+        const expandDescendants = (): number[] => [
+            ...new Set(
+                (openDescendants.get(dependency) ?? []).flatMap(
+                    expandOpenDependency,
+                ),
+            ),
+        ];
+        if (openDecomposedParents.has(dependency)) return expandDescendants();
         if (openIssueNumbers.has(dependency)) return [dependency];
-        return [...(openDescendants.get(dependency) ?? [])];
+        return expandDescendants();
     };
 
     return issues

@@ -216,6 +216,52 @@ describe("refreshable issue queue", () => {
         ]);
     });
 
+    test("expands an open decomposed dependency to its open children", () => {
+        const container = {
+            ...issue(36),
+            body: "<!-- ralphie:decomposition original=36 depth=2 -->",
+        };
+        const child = {
+            ...issue(160),
+            body: '<!-- ralphie:decomposition root=7 parent=36 key="service" depth=2 -->',
+        };
+        const dependent = {
+            ...issue(37),
+            body: '<!-- ralphie:decomposition root=7 parent=35 key="consumer" depth=2 -->\n\n## Dependencies\n\n- #36 (notification)',
+        };
+
+        expect(toQueuedIssues([dependent, container, child])).toEqual([
+            { issue: dependent, dependsOn: [160] },
+            { issue: child, dependsOn: [] },
+        ]);
+    });
+
+    test("expands a chain of open decomposed containers transitively to leaf issues", () => {
+        const rootContainer = {
+            ...issue(41),
+            body: "<!-- ralphie:decomposition original=41 depth=1 -->",
+        };
+        const container = {
+            ...issue(287),
+            body: "<!-- ralphie:decomposition original=287 depth=2 -->\n\nThis issue was decomposed.",
+        };
+        const leaf = {
+            ...issue(401),
+            body: '<!-- ralphie:decomposition root=9 parent=287 key="contracts" depth=3 -->',
+        };
+        const dependent = {
+            ...issue(290),
+            body: '<!-- ralphie:decomposition root=9 parent=41 key="artifact" depth=2 -->\n\n## Dependencies\n\n- #287 (collector)',
+        };
+
+        expect(
+            toQueuedIssues([rootContainer, container, leaf, dependent]),
+        ).toEqual([
+            { issue: leaf, dependsOn: [] },
+            { issue: dependent, dependsOn: [401] },
+        ]);
+    });
+
     test("restores processing budget and completed dependencies from a snapshot", () => {
         const queue = createIssueQueue(
             [

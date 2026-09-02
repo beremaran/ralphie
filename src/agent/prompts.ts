@@ -13,6 +13,8 @@ export type ComplexityPromptInput = {
     readonly issue: GitHubIssue;
     readonly repositoryPath: string;
     readonly targetBranch: string;
+    /** Exact checked-out commit SHA, when known, for evidence pinning. */
+    readonly headSha?: string;
 };
 
 export type ImplementationPromptInput = ComplexityPromptInput;
@@ -166,8 +168,17 @@ const complexityRubric = [
 const checkoutContext = ({
     repositoryPath,
     targetBranch,
-}: Omit<ComplexityPromptInput, "issue">): string =>
-    `Repository path: ${JSON.stringify(repositoryPath)}\nTarget branch: ${JSON.stringify(targetBranch)}`;
+    headSha,
+}: Omit<ComplexityPromptInput, "issue">): string => {
+    const lines = [
+        `Repository path: ${JSON.stringify(repositoryPath)}`,
+        `Target branch: ${JSON.stringify(targetBranch)}`,
+    ];
+    if (headSha !== undefined) {
+        lines.push(`Checked-out commit: ${headSha}`);
+    }
+    return lines.join("\n");
+};
 
 const needsAttentionGuidance = `
 NEEDS-ATTENTION REQUEST CHANNEL:
@@ -182,6 +193,7 @@ export const buildGroundingPrompt = ({
     issue,
     repositoryPath,
     targetBranch,
+    headSha,
 }: GroundingPromptInput): string => `Determine whether this GitHub issue is ready to be worked on now.
 
 Inspect the checkout and issue text using read-only operations. Return exactly
@@ -212,7 +224,7 @@ those values. Do not edit files or write files. Do not run mutating shell comman
 mutating Git commands; do not stage changes, create commits, push, switch
 branches, create worktrees, or make GitHub mutations.
 
-${checkoutContext({ repositoryPath, targetBranch })}
+${checkoutContext({ repositoryPath, targetBranch, headSha })}
 ${issueBlock(issue)}`;
 
 export const buildComplexityPrompt = ({
@@ -292,6 +304,7 @@ export const buildResolutionVerificationPrompt = ({
     issue,
     repositoryPath,
     targetBranch,
+    headSha,
 }: ResolutionVerificationPromptInput): string => `Verify whether the GitHub issue below is already resolved by the current checkout.
 
 You are starting with fresh context to check a tentative resolution claim.
@@ -310,7 +323,7 @@ mutations. You may use read-only Git inspection commands such as git status,
 git diff, and git ls-files when repository or index state is relevant to the
 issue.
 
-${checkoutContext({ repositoryPath, targetBranch })}
+${checkoutContext({ repositoryPath, targetBranch, headSha })}
 ${issueBlock(issue)}`;
 
 export const buildReviewPrompt = ({

@@ -38,6 +38,25 @@ describe("Pi prompts", () => {
         expect(prompt).toContain("Depends on #40.");
     });
 
+    test("pins grounding evidence to the exact checked-out commit SHA", () => {
+        const prompt = buildGroundingPrompt({
+            issue: {
+                number: 42,
+                title: "Pinned evidence",
+                url: "issue/42",
+                body: "Fix refresh behavior.",
+                labels: [],
+            },
+            repositoryPath: "/workspace/repo",
+            targetBranch: "main",
+            headSha: "0123456789abcdef0123456789abcdef01234567",
+        });
+
+        expect(prompt).toContain(
+            "Checked-out commit: 0123456789abcdef0123456789abcdef01234567",
+        );
+    });
+
     test("builds a complexity prompt with the complete rubric and issue context", () => {
         const prompt = buildComplexityPrompt({
             issue: {

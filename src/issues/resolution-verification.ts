@@ -61,6 +61,7 @@ export const makeResolutionVerificationService = (
                     issue: context.issue,
                     repositoryPath: context.repositoryPath,
                     targetBranch: context.targetBranch,
+                    headSha: checkpoint.head,
                 }),
                 schema: resolutionVerificationDecisionSchema,
                 agent: context.piSelection.agent,

@@ -55,6 +55,7 @@ export const makeGroundingAssessmentService = (
                     issue: context.issue,
                     repositoryPath: context.repositoryPath,
                     targetBranch: context.targetBranch,
+                    headSha: checkpoint.head,
                 }),
                 schema: groundingDecisionSchema,
                 agent: context.piSelection.agent,
