@@ -194,6 +194,58 @@ immutable `ghcr.io/beremaran/ralphie@sha256:<digest>` references rather than
 from the `${VERSION}-amd64`/`${VERSION}-arm64` tags; a digest mismatch stops
 the job before any alias is pushed.
 
+### Container SBOM and provenance attestations
+
+Between the verified subject map and the mutable aliases, `push-container`
+attaches both attestation kinds to every immutable platform digest. It first
+re-validates the exact two-entry map and pins the Actions OIDC identity to the
+validated protected tag and its exact commit (`GITHUB_REF`, `GITHUB_SHA`, and
+`GITHUB_WORKFLOW_REF` must equal `refs/tags/<tag>`/`<commit>`/
+`<repository>/.github/workflows/release.yml@refs/tags/<tag>`; the run id and
+attempt are positive integers), so no attestation action can infer a default
+branch or a mutable tag. The derived `ralphie.container-attestation-subjects.v1`
+map records the canonical `subject-name` (`ghcr.io/beremaran/ralphie`), the
+exact `subject-digest`, the immutable reference, the workflow identity, and
+the deterministic SBOM output name for each platform.
+
+One SPDX 2.3 JSON SBOM per platform is generated with the pinned
+`anchore/sbom-action` by scanning the promoted digest itself
+(`ghcr.io/beremaran/ralphie@sha256:<digest>`), never an OCI archive or a
+mutable tag. The checked-in `scripts/validate-container-sboms.ts` seam then
+pins every document to the validated tag, version, commit, platform, digest,
+and workflow ref through an explicit `creationInfo.comment`, re-validates the
+annotated document against the checked-in SPDX 2.3 JSON schema, and records
+each final SBOM's SHA-256 and size in the subjects map. Every SBOM is attached
+with the pinned `actions/attest-sbom` action using the canonical
+`subject-name`, the exact `subject-digest`, the SBOM path, and
+`push-to-registry` (registry referrers) enabled; every platform also receives
+SLSA provenance-v1 build provenance through the same pinned
+`actions/attest-build-provenance` mechanism used for the native binaries,
+with the same subject digest and OCI registry/referrer push. All three actions
+run at immutable SHAs; a scan, pull, generation, validation, or attachment
+failure fails the job (`set -euo pipefail`, no `continue-on-error`, no
+swallowed errors, no fallback). Before any alias is created, a verification
+gate runs `gh attestation verify` for each platform against both predicate
+types, cryptographically validating every bundle against the
+`refs/tags/<tag>` workflow identity and commit. The immutable reference is
+passed in the documented `oci://ghcr.io/beremaran/ralphie@sha256:<digest>`
+form — a bare reference is treated by the CLI as a local file path — and the
+job token is materialized as an explicit `DOCKER_CONFIG` keychain entry for
+`ghcr.io` (the CLI's OCI verification resolves the digest by fetching the
+manifest through the Docker keychain, which also re-confirms the promoted
+digest still exists before any alias). The gate is presence-based rather
+than an exact record count: attestation records are keyed by bundle
+signature, so re-running an interrupted attempt leaves additional records
+for the same digest, and at least one verified attestation per predicate
+kind must match the exact run identity (including the SLSA `invocationId`),
+the exact annotated SBOM bytes (the attested SPDX predicate must equal the
+pinned document), and the SBOM SHA-256 the validator recorded; the exact
+subject-name, subject-digest, and release identity are checked on every
+accepted statement. The job grants only
+`packages: write`, `attestations: write`, and `id-token: write` (the GitHub
+OIDC signing path) and no unrelated write permission; `stage-container` keeps
+no credentials and stays read-only.
+
 Before any production tag write, `probeCreateOnlyPublishing` authenticates and
 proves the target registry is create-only: for each writable media type (OCI
 image manifest, Docker schema-2 manifest, OCI image index, Docker manifest
