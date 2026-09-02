@@ -78,10 +78,21 @@ All notable changes to Ralphie are documented here. The project follows
 
 - The protected native release publisher now gates on every validated build
   matrix result, regenerates `SHA256SUMS`, and creates or reuses a
-  REST-validated release handle before any asset mutation. Reruns verify
-  downloaded existing assets byte-for-byte, add only missing assets, and fail
-  closed on differing payloads; published releases are reconciled without
-  replacement.
+  REST-validated release handle before any asset mutation, then reconciles an
+  exact six-asset set (`ralphie-darwin-arm64/x64`, `ralphie-linux-arm64/x64`,
+  `SHA256SUMS`, `SHA256SUMS.sigstore.json`): the per-target `.sha256`
+  sidecars, `release-metadata.json`, the four SPDX documents, and
+  `attestation-subjects.json` stay staged as in-checkout/attestation evidence
+  but are no longer release assets, and any other remote asset is an explicit
+  conflict (never deleted, overwritten, or ignored). The checksum contract is
+  recomputed from the exact staged bytes before any remote mutation, and each
+  remote asset must match those bytes; a missing asset is repaired only on a
+  draft handle. Before the final `draft: false` update the exact release is
+  re-read by ID and its id, upload URL, tag, `target_commitish`, and still-
+  draft state are asserted; an already-published handle is reconciled
+  read-only (same tag/target, byte-identical generated notes, checksum
+  contents, and all six asset digests) and succeeds only when everything
+  matches.
 - Added `--max-decomposition-depth` (default `3`) and persisted it in run state.
   A direct or review-escalated decomposition beyond the configured ceiling now
   leaves the issue open as `decomposition_limit_reached` needs attention and

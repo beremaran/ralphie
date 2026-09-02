@@ -581,6 +581,8 @@ describe("release container metadata contract", () => {
         expect(releaseStep).toContain(
             'existing_count="$(jq -r --arg name "$asset_name" \\',
         );
+        // Mirrors the release step: a missing asset on a draft handle is
+        // repaired with an upload; on a published handle it is a conflict.
         const result = Bun.spawnSync(
             [
                 "bash",
@@ -608,6 +610,179 @@ printf 'upload\\n'`,
 
         expect(result.exitCode).toBe(0);
         expect(result.stdout.toString()).toBe("upload\n");
+    });
+
+    test("uploads exactly six release assets and rejects any extra asset", async () => {
+        const workflow = await readRepositoryFile(
+            ".github/workflows/release.yml",
+        );
+        const publishJob = workflow.slice(workflow.indexOf("  publish:"));
+        const releaseStep = publishJob.slice(
+            publishJob.indexOf(
+                "name: Upload assets and publish GitHub release",
+            ),
+        );
+
+        // The exact six-asset set is the whole upload/reconcile list.
+        for (const asset of [
+            "release-assets/ralphie-darwin-arm64",
+            "release-assets/ralphie-darwin-x64",
+            "release-assets/ralphie-linux-arm64",
+            "release-assets/ralphie-linux-x64",
+            "release-assets/SHA256SUMS",
+            "release-assets/SHA256SUMS.sigstore.json",
+        ]) {
+            expect(releaseStep).toContain(asset);
+        }
+        // Per-target .sha256 sidecars, release-metadata.json, the four SBOM
+        // documents, and attestation-subjects.json are no longer uploads.
+        for (const removed of [
+            "release-assets/ralphie-darwin-arm64.sha256",
+            "release-assets/release-metadata.json",
+            "release-assets/ralphie-darwin-arm64.sbom.spdx.json",
+            "release-assets/attestation-subjects.json",
+        ]) {
+            expect(releaseStep).not.toContain(removed);
+        }
+        // Any remote asset outside the six is an explicit conflict.
+        expect(releaseStep).toContain(
+            "assets outside the exact six-asset contract",
+        );
+        expect(releaseStep).toContain("extra asset:");
+        expect(releaseStep).toContain(
+            "refusing to delete, overwrite, ignore, or publish",
+        );
+        expect(releaseStep).not.toContain("gh api --method DELETE");
+    });
+
+    test("re-reads the exact release by ID before the draft:false mutation", async () => {
+        const workflow = await readRepositoryFile(
+            ".github/workflows/release.yml",
+        );
+        const publishJob = workflow.slice(workflow.indexOf("  publish:"));
+        const releaseStep = publishJob.slice(
+            publishJob.indexOf(
+                "name: Upload assets and publish GitHub release",
+            ),
+        );
+
+        expect(releaseStep).toContain(
+            '"repos/$GH_REPO/releases/$RELEASE_ID/assets?per_page=100"',
+        );
+        expect(releaseStep).toContain('"repos/$GH_REPO/releases/$RELEASE_ID"');
+        // The re-read by ID asserts the validated id, tag, source_ref, upload
+        // URL, and draft state before any finalization.
+        expect(releaseStep).toContain("(.id | tostring) == $id");
+        expect(releaseStep).toContain(".tag_name == $tag");
+        expect(releaseStep).toContain(".target_commitish == $ref");
+        expect(releaseStep).toContain(".upload_url | test($upload_regex)");
+        expect(releaseStep).toContain(".draft == $draft");
+        expect(releaseStep).toContain(
+            "SOURCE_REF: ${{ needs.validate.outputs.source_ref }}",
+        );
+        const reread = releaseStep.indexOf(
+            '"repos/$GH_REPO/releases/$RELEASE_ID"',
+        );
+        const finalize = releaseStep.indexOf("gh api --method PATCH");
+        const publishedExit = releaseStep.indexOf("no changes made");
+        expect(reread).toBeGreaterThan(-1);
+        expect(finalize).toBeGreaterThan(reread);
+        // The draft:false PATCH is the only finalization and it comes after
+        // the re-read; the published path succeeds before reaching it.
+        expect(publishedExit).toBeGreaterThan(-1);
+        expect(publishedExit).toBeLessThan(finalize);
+        expect(releaseStep).toContain("-F draft=false");
+        expect(releaseStep).toContain(
+            "final release-state change this job performs",
+        );
+    });
+
+    test("reconciles an already-published release read-only", async () => {
+        const workflow = await readRepositoryFile(
+            ".github/workflows/release.yml",
+        );
+        const publishJob = workflow.slice(workflow.indexOf("  publish:"));
+        const releaseStep = publishJob.slice(
+            publishJob.indexOf(
+                "name: Upload assets and publish GitHub release",
+            ),
+        );
+
+        // A published handle is reconciled read-only: verify the same
+        // tag/target, generated notes, checksum contents, and all six asset
+        // digests, and succeed only when everything matches.
+        expect(releaseStep).toContain("Read-only published reconciliation");
+        expect(releaseStep).toContain("assert_release_handle false");
+        expect(releaseStep).toContain("verify_release_notes");
+        expect(releaseStep).toContain(
+            "all six assets and notes match; no changes made",
+        );
+        expect(releaseStep).toContain(
+            "A missing asset on a published release is an explicit conflict",
+        );
+        const publishedExit = releaseStep.indexOf("no changes made");
+        const upload = releaseStep.indexOf("curl --fail");
+        const finalize = releaseStep.indexOf("gh api --method PATCH");
+        // The asset loop still runs (to verify the published bytes via the
+        // anonymous distribution URL), then the published path exits before
+        // the draft:false PATCH, which lives in the draft branch only.
+        expect(upload).toBeGreaterThan(-1);
+        expect(publishedExit).toBeGreaterThan(upload);
+        expect(finalize).toBeGreaterThan(publishedExit);
+        expect(releaseStep).toContain(
+            'if [[ "$RELEASE_STATE" == published ]]; then',
+        );
+    });
+
+    test("validates checksum, signature, and notes contents before finalizing", async () => {
+        const workflow = await readRepositoryFile(
+            ".github/workflows/release.yml",
+        );
+        const publishJob = workflow.slice(workflow.indexOf("  publish:"));
+        const releaseStep = publishJob.slice(
+            publishJob.indexOf(
+                "name: Upload assets and publish GitHub release",
+            ),
+        );
+
+        // rel20-release-contract checksum: exactly four binary entries in
+        // deterministic order, each "<64-lowercase-hex>  <filename>" (two
+        // spaces), recomputed from the exact staged bytes.
+        expect(releaseStep).toContain("SHA256SUMS.recomputed");
+        expect(releaseStep).toContain(
+            "SHA256SUMS does not match the exact staged binary digests",
+        );
+        expect(releaseStep).toContain(
+            "violates the '<64-lowercase-hex>  <filename>' contract",
+        );
+        expect(releaseStep).toContain(
+            "SHA256SUMS must contain exactly four entries",
+        );
+        // Signature contract: the Sigstore bundle shape plus a message digest
+        // binding exactly the SHA256SUMS bytes.
+        expect(releaseStep).toContain(
+            "SHA256SUMS.sigstore.json is not a valid Sigstore bundle",
+        );
+        expect(releaseStep).toContain(
+            "SHA256SUMS.sigstore.json signs a different manifest",
+        );
+        expect(releaseStep).toContain("messageDigest.digest");
+        // The digest binding must be portable: xxd is not guaranteed on
+        // GitHub-hosted runners, so the decoded digest is hex-encoded with
+        // coreutils (od/tr) and jq @base64d is not used for binary bytes.
+        expect(releaseStep).toContain(
+            "| base64 -d | od -An -tx1 -v | tr -d ' \\n')",
+        );
+        expect(releaseStep).not.toContain("xxd -p");
+        // Notes contract: non-empty and byte-identical to the notes GitHub
+        // generates for the validated tag, as handle content only.
+        expect(releaseStep).toContain("has empty or missing release notes");
+        expect(releaseStep).toContain(
+            "notes do not match the generated notes for tag",
+        );
+        expect(releaseStep).toContain("generate-notes");
+        expect(releaseStep).toContain("generate_notes: true");
+        expect(releaseStep).not.toContain("release-assets/notes");
     });
 
     test("signs and verifies the exact manifest before publishing its bundle", async () => {
@@ -639,11 +814,16 @@ printf 'upload\\n'`,
         expect(publishJob).toContain("release-assets/SHA256SUMS.sigstore.json");
     });
 
-    test("generates and publishes one SBOM for each final native asset", async () => {
+    test("generates and verifies one SBOM per native asset without uploading them", async () => {
         const workflow = await readRepositoryFile(
             ".github/workflows/release.yml",
         );
         const publishJob = workflow.slice(workflow.indexOf("  publish:"));
+        const releaseStep = publishJob.slice(
+            publishJob.indexOf(
+                "name: Upload assets and publish GitHub release",
+            ),
+        );
         const collectStart = publishJob.indexOf(
             "name: Collect binaries and create SHA256SUMS",
         );
@@ -674,13 +854,19 @@ printf 'upload\\n'`,
                 "name: Download verified release metadata bundle",
             ),
         );
+        // The four SPDX documents are still generated and pinned in
+        // release-assets as in-checkout evidence for the attestation gate,
+        // but they are no longer release assets: the release carries exactly
+        // the six-asset set and nothing else.
+        expect(publishJob).toContain("expected_sboms=$'");
         for (const target of [
             "darwin-arm64",
             "darwin-x64",
             "linux-arm64",
             "linux-x64",
         ]) {
-            expect(publishJob).toContain(
+            expect(publishJob).toContain(`ralphie-${target}.sbom.spdx.json`);
+            expect(releaseStep).not.toContain(
                 `release-assets/ralphie-${target}.sbom.spdx.json`,
             );
         }

@@ -1279,13 +1279,16 @@ jobs:
             core.setOutput("upload_url", release.upload_url);
             core.setOutput("state", state);
 
-      # Keep this explicit list in sync with the checksum collector. Existing
-      # release assets are reconciled by digest; no rerun may replace bytes.
+      # Rel20 exact release-handle and six-asset reconciliation. The release
+      # carries exactly these six assets and nothing else; any missing, extra,
+      # or mismatched asset or note is an explicit conflict. Draft retries
+      # repair only this validated handle; published handles are read-only.
       - name: Upload assets and publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.validate.outputs.tag }}
+          SOURCE_REF: ${{ needs.validate.outputs.source_ref }}
           RELEASE_ID: ${{ steps.release-handle.outputs.release_id }}
           UPLOAD_URL: ${{ steps.release-handle.outputs.upload_url }}
           RELEASE_STATE: ${{ steps.release-handle.outputs.state }}
@@ -1293,33 +1296,151 @@ jobs:
           set -euo pipefail
           test "$GITHUB_REF" = "refs/tags/$TAG"
           test "$RELEASE_STATE" = draft || test "$RELEASE_STATE" = published
-          test "$RELEASE_ID" =~ ^[1-9][0-9]*$
+          [[ "$RELEASE_ID" =~ ^[1-9][0-9]*$ ]]
           test -n "$UPLOAD_URL"
 
+          # The exact six-asset set (rel20-release-contract): the four native
+          # binaries plus the signed checksum manifest and its Sigstore
+          # bundle. Any other asset on the release is an explicit conflict;
+          # nothing is ever deleted, overwritten, ignored, or recreated.
           assets=(
             release-assets/ralphie-darwin-arm64
-            release-assets/ralphie-darwin-arm64.sha256
             release-assets/ralphie-darwin-x64
-            release-assets/ralphie-darwin-x64.sha256
             release-assets/ralphie-linux-arm64
-            release-assets/ralphie-linux-arm64.sha256
             release-assets/ralphie-linux-x64
-            release-assets/ralphie-linux-x64.sha256
             release-assets/SHA256SUMS
             release-assets/SHA256SUMS.sigstore.json
-            release-assets/release-metadata.json
-            release-assets/ralphie-darwin-arm64.sbom.spdx.json
-            release-assets/ralphie-darwin-x64.sbom.spdx.json
-            release-assets/ralphie-linux-arm64.sbom.spdx.json
-            release-assets/ralphie-linux-x64.sbom.spdx.json
-            release-assets/attestation-subjects.json
           )
+
+          # Re-read the exact release by ID and assert every validated handle
+          # invariant: numeric id, release ID in the upload URL, validated
+          # tag, validated source_ref, and a consistent draft/published state.
+          assert_release_handle() {
+            local expected_draft="$1" released
+            released="$(gh api "repos/$GH_REPO/releases/$RELEASE_ID")"
+            if ! jq -e \
+              --arg id "$RELEASE_ID" \
+              --arg tag "$TAG" \
+              --arg ref "$SOURCE_REF" \
+              --argjson draft "$expected_draft" \
+              --arg upload_regex "^https://uploads\\.github\\.com/repos/[^/]+/[^/]+/releases/${RELEASE_ID}/assets\\{\\?name,label\\}$" \
+              '(.id | tostring) == $id and
+               .tag_name == $tag and
+               .target_commitish == $ref and
+               (.upload_url | type == "string") and
+               (.upload_url | test($upload_regex)) and
+               .draft == $draft and
+               if $draft then .published_at == null else (.published_at | type == "string") end' \
+              <<< "$released" > /dev/null; then
+              echo "Release $RELEASE_ID re-read does not match the validated handle" >&2
+              jq -r '"  id=" + ((.id // "missing") | tostring) + " tag_name=" + (.tag_name // "missing") + " target_commitish=" + (.target_commitish // "missing") + " draft=" + ((.draft // "missing") | tostring) + " published_at=" + ((.published_at // "missing") | tostring)' \
+                <<< "$released" >&2
+              exit 1
+            fi
+            printf '%s' "$released"
+          }
+
+          # Verify the release notes as handle content (never an uploadable
+          # asset): non-empty and byte-identical to the notes GitHub generates
+          # for the validated tag (createRelease used generate_notes: true).
+          verify_release_notes() {
+            local released="$1" body generated
+            body="$(jq -er '.body | select(type == "string" and length > 0)' <<< "$released")" || {
+              echo "Release $RELEASE_ID has empty or missing release notes" >&2
+              exit 1
+            }
+            generated="$(gh api --method POST \
+              -H "Accept: application/vnd.github+json" \
+              -f tag_name="$TAG" \
+              "repos/$GH_REPO/releases/generate-notes" \
+              --jq '.body')"
+            if [[ "$body" != "$generated" ]]; then
+              echo "Release $RELEASE_ID notes do not match the generated notes for tag $TAG" >&2
+              echo '--- notes on the release handle ---' >&2
+              printf '%s\n' "$body" >&2
+              echo "--- generated notes for $TAG ---" >&2
+              printf '%s\n' "$generated" >&2
+              exit 1
+            fi
+          }
+
+          # rel20-release-contract checksum: SHA256SUMS is exactly four
+          # entries in deterministic order ralphie-darwin-arm64,
+          # ralphie-darwin-x64, ralphie-linux-arm64, ralphie-linux-x64; each
+          # line is "<64-lowercase-hex>  <filename>" (two spaces), recomputed
+          # from the exact staged binary bytes, with no sidecar, signature, or
+          # note lines in the manifest.
+          recomputed_manifest="$RUNNER_TEMP/SHA256SUMS.recomputed"
+          : > "$recomputed_manifest"
+          for asset in ralphie-darwin-arm64 ralphie-darwin-x64 ralphie-linux-arm64 ralphie-linux-x64; do
+            test -s "release-assets/$asset"
+            digest="$(sha256sum "release-assets/$asset" | awk '{print $1}')"
+            printf '%s  %s\n' "$digest" "$asset" >> "$recomputed_manifest"
+          done
+          if ! cmp --silent "$recomputed_manifest" release-assets/SHA256SUMS; then
+            echo "SHA256SUMS does not match the exact staged binary digests" >&2
+            diff -u "$recomputed_manifest" release-assets/SHA256SUMS >&2 || true
+            exit 1
+          fi
+          manifest_line_count=0
+          while IFS= read -r line; do
+            manifest_line_count=$((manifest_line_count + 1))
+            if [[ ! "$line" =~ ^[0-9a-f]{64}'  '(ralphie-darwin-arm64|ralphie-darwin-x64|ralphie-linux-arm64|ralphie-linux-x64)$ ]]; then
+              echo "SHA256SUMS line $manifest_line_count violates the '<64-lowercase-hex>  <filename>' contract" >&2
+              printf '  %s\n' "$line" >&2
+              exit 1
+            fi
+          done < release-assets/SHA256SUMS
+          if (( manifest_line_count != 4 )); then
+            echo "SHA256SUMS must contain exactly four entries, found $manifest_line_count" >&2
+            exit 1
+          fi
+
+          # rel20-release-contract signature: the Sigstore bundle signs
+          # exactly the SHA256SUMS bytes and keeps the canonical bundle shape.
+          # The pinned sigstore action already proved the OIDC cert identity
+          # and issuer when it produced and verified this bundle in this run.
+          bundle="release-assets/SHA256SUMS.sigstore.json"
+          test -s "$bundle"
+          if ! jq -e \
+            '(.mediaType | type == "string") and
+             (.messageSignature.messageDigest.algorithm == "SHA2_256") and
+             (.messageSignature.messageDigest.digest | type == "string") and
+             (.verificationMaterial | type == "object")' \
+            "$bundle" > /dev/null; then
+            echo "SHA256SUMS.sigstore.json is not a valid Sigstore bundle" >&2
+            exit 1
+          fi
+          # Hex-encode the decoded digest bytes with coreutils only (od/tr);
+          # xxd is not guaranteed on GitHub-hosted runners.
+          signed_digest="$(jq -er '.messageSignature.messageDigest.digest' "$bundle" | base64 -d | od -An -tx1 -v | tr -d ' \n')"
+          manifest_digest="$(sha256sum release-assets/SHA256SUMS | awk '{print $1}')"
+          if [[ "$signed_digest" != "$manifest_digest" ]]; then
+            echo "SHA256SUMS.sigstore.json signs a different manifest than the staged SHA256SUMS" >&2
+            echo "  expected $manifest_digest, bundle has $signed_digest" >&2
+            exit 1
+          fi
+
+          # Enumerate the assets on this exact release handle only. Any name
+          # outside the six-asset set is an explicit conflict: never delete,
+          # overwrite, ignore, or publish around it.
           upload_endpoint="${UPLOAD_URL%%\{*}"
           test "$upload_endpoint" != "$UPLOAD_URL"
-          existing_assets="$RUNNER_TEMP/release-assets.json"
+          remote_assets="$RUNNER_TEMP/release-assets.json"
           gh api --paginate --slurp \
             "repos/$GH_REPO/releases/$RELEASE_ID/assets?per_page=100" \
-            > "$existing_assets"
+            > "$remote_assets"
+          extra_assets="$(jq -r \
+            --argjson allowed '["ralphie-darwin-arm64","ralphie-darwin-x64","ralphie-linux-arm64","ralphie-linux-x64","SHA256SUMS","SHA256SUMS.sigstore.json"]' \
+            '[.[][] | .name] | map(select(. as $name | ($allowed | index($name)) | not)) | .[]' \
+            "$remote_assets")"
+          if [[ -n "$extra_assets" ]]; then
+            echo "Release $RELEASE_ID has assets outside the exact six-asset contract:" >&2
+            printf '%s\n' "$extra_assets" | sed 's/^/  extra asset: /' >&2
+            echo "An extra asset is an explicit conflict: refusing to delete, overwrite, ignore, or publish" >&2
+            exit 1
+          fi
+
           for asset in "${assets[@]}"; do
             test -f "$asset"
             asset_name="$(basename "$asset")"
@@ -1328,7 +1449,7 @@ jobs:
             # one: an existing asset is accepted only when its downloaded
             # bytes have exactly the same SHA-256 as the local bytes.
             existing_count="$(jq -r --arg name "$asset_name" \
-              '[.[][] | select(.name == $name)] | length' "$existing_assets")"
+              '[.[][] | select(.name == $name)] | length' "$remote_assets")"
             if (( existing_count > 1 )); then
               echo "Release contains duplicate assets named $asset_name" >&2
               exit 1
@@ -1336,10 +1457,10 @@ jobs:
 
             if (( existing_count == 1 )); then
               existing_id="$(jq -er --arg name "$asset_name" \
-                '[.[][] | select(.name == $name)][0].id' "$existing_assets")"
+                '[.[][] | select(.name == $name)][0].id' "$remote_assets")"
               existing_url="$(jq -er --arg name "$asset_name" \
-                '[.[][] | select(.name == $name)][0].browser_download_url' "$existing_assets")"
-              test "$existing_id" =~ ^[1-9][0-9]*$
+                '[.[][] | select(.name == $name)][0].browser_download_url' "$remote_assets")"
+              [[ "$existing_id" =~ ^[1-9][0-9]*$ ]]
               expected_url="https://github.com/$GH_REPO/releases/download/$TAG/$asset_name"
               test "$existing_url" = "$expected_url"
               downloaded="$RUNNER_TEMP/existing-$asset_name"
@@ -1361,14 +1482,23 @@ jobs:
               existing_digest="$(sha256sum "$downloaded" | awk '{print $1}')"
               if [[ "$local_digest" != "$existing_digest" ]]; then
                 echo "Existing release asset differs: $asset_name" >&2
+                echo "  expected $local_digest, release has $existing_digest" >&2
                 exit 1
               fi
               echo "Existing release asset matches: $asset_name"
               continue
             fi
 
-            # A missing asset may be added. A concurrent upload or any upload
-            # error fails closed; there is deliberately no overwrite path.
+            if [[ "$RELEASE_STATE" == published ]]; then
+              echo "Published release $RELEASE_ID is missing asset $asset_name" >&2
+              echo "A missing asset on a published release is an explicit conflict; refusing to upload, delete, or republish" >&2
+              exit 1
+            fi
+
+            # A missing asset on a draft handle may be repaired: an
+            # interrupted or partial upload is completed on this validated
+            # release handle only. A concurrent upload or any upload error
+            # fails closed; there is deliberately no overwrite path.
             curl --fail --silent --show-error --retry 3 \
               -X POST \
               -H "Accept: application/vnd.github+json" \
@@ -1378,15 +1508,28 @@ jobs:
               --data-binary "@$asset" \
               "$upload_endpoint?name=$asset_name" \
               > /dev/null
+            echo "Uploaded missing release asset: $asset_name"
           done
 
           if [[ "$RELEASE_STATE" == published ]]; then
-            echo "Release $RELEASE_ID is already published; all existing assets match"
+            # Read-only published reconciliation: re-read the exact release by
+            # ID, verify tag/target, generated notes, and (above) every asset
+            # digest, and succeed only when everything matches. No upload,
+            # delete, unpublish, or release creation ever runs for a
+            # published handle.
+            released="$(assert_release_handle false)"
+            verify_release_notes "$released"
+            echo "Release $RELEASE_ID is already published; all six assets and notes match; no changes made"
             exit 0
           fi
 
-          # Publishing is deliberately last. Any failure before this request
-          # leaves the release created by the handle as a draft.
+          # Draft finalization: re-read the exact release by ID immediately
+          # before the draft:false mutation and assert id, tag, source_ref,
+          # upload URL, and the still-draft state. Any error before this
+          # request leaves the release unpublished, and this PATCH is the
+          # final release-state change this job performs.
+          released="$(assert_release_handle true)"
+          verify_release_notes "$released"
           gh api --method PATCH \
             "repos/$GH_REPO/releases/$RELEASE_ID" \
             -F draft=false \
