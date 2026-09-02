@@ -113,8 +113,14 @@ const verifyArtifact = async (
     }
 
     const assetPath = join(artifactPath, assetName);
-    if ((await stat(assetPath)).size === 0) {
+    const assetStats = await stat(assetPath);
+    if (assetStats.size === 0) {
         throw new Error(`Release asset '${assetPath}' is empty.`);
+    }
+    // test -x equivalent: at least one execute bit must be set on the staged
+    // binary so a stripped-permission artifact can never reach publication.
+    if ((assetStats.mode & 0o111) === 0) {
+        throw new Error(`Release asset '${assetPath}' is not executable.`);
     }
     const digest = await sha256(assetPath);
     const checksum = (

@@ -1,5 +1,12 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+    chmod,
+    mkdir,
+    mkdtemp,
+    readFile,
+    rm,
+    writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
@@ -30,6 +37,7 @@ async function createArtifactFixture(
         const bytes = changes[target] ?? `binary for ${target}`;
         const digest = createHash("sha256").update(bytes).digest("hex");
         await writeFile(join(artifactDirectory, asset), bytes);
+        await chmod(join(artifactDirectory, asset), 0o755);
         await writeFile(
             join(artifactDirectory, `${asset}.sha256`),
             `${digest}  ${asset}\n`,
@@ -114,6 +122,31 @@ describe("release metadata aggregation", () => {
             ).rejects.toThrow("Release artifacts must be exactly");
         } finally {
             await rm(extraFixture, { recursive: true, force: true });
+        }
+    });
+
+    test("rejects non-executable staged binaries", async () => {
+        const fixture = await createArtifactFixture(version);
+        try {
+            await chmod(
+                join(
+                    fixture,
+                    `ralphie-${version}-linux-x64`,
+                    "ralphie-linux-x64",
+                ),
+                0o644,
+            );
+            await expect(
+                createReleaseMetadata({
+                    artifactDirectory: fixture,
+                    commitSha,
+                    outputDirectory: join(fixture, "bundle"),
+                    tag: `v${version}`,
+                    version,
+                }),
+            ).rejects.toThrow("is not executable");
+        } finally {
+            await rm(fixture, { recursive: true, force: true });
         }
     });
 });
