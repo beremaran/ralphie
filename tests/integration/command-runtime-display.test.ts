@@ -22,9 +22,12 @@ import type {
 } from "../../src/opencode/server.ts";
 import {
     makeProgressCoordinator,
+    type ProgressCoordinator,
     type ProgressCoordinatorOptions,
 } from "../../src/progress/coordinator.ts";
+import { breadcrumbCandidateFor } from "../../src/progress/breadcrumb.ts";
 import type { FooterTimer } from "../../src/progress/footer.ts";
+import type { ProgressRenderMode } from "../../src/progress/progress.ts";
 import type { RalphieRuntime } from "../../src/runtime.ts";
 import { stripTerminalControls } from "../../src/shared/terminal.ts";
 import type { WorkflowOptions } from "../../src/workflow.ts";
@@ -34,12 +37,29 @@ import {
     regionBytes,
     type RecordingStrategy,
 } from "../shared/physical-row-meter.ts";
+import {
+    ASSISTANT_DELTAS,
+    CREDENTIAL_RAW,
+    CREDENTIAL_TEXT,
+    INTERLEAVED_RAW,
+    INTERLEAVED_TEXT,
+    LONG_TEXT,
+    RESIZE_TARGET_WIDTH,
+    SCENARIO_NAMES,
+    UNSAFE_API_KEY,
+    UNSAFE_TOKEN,
+    VERIFICATION_FAILURE_MESSAGE,
+    WIDE_TEXT,
+    playScriptedScenario,
+    type ScenarioName,
+} from "../shared/scripted-scenarios.ts";
 
 /**
  * End-to-end display regression through the real command runtime
  * (`runCommand`): real coordinator wiring, real mode resolution, and a fake
- * Agent service replaying a scripted session. Physical rows are measured with a
- * terminal emulator, never from newline counts.
+ * Agent service replaying a deterministic, mode-parametric scripted scenario
+ * set. Physical rows are measured with a terminal emulator, never from
+ * newline counts.
  */
 
 const context: AgentEventContext = {
@@ -47,6 +67,9 @@ const context: AgentEventContext = {
     directory: "/workspace/owner/repository",
     title: "Task",
 };
+
+/** Fixed clock so every rendered duration and footer is byte-identical. */
+const FIXED_NOW = () => new Date("2026-01-01T00:00:00.000Z");
 
 const asEvent = (value: unknown): AgentSessionEvent =>
     value as AgentSessionEvent;
@@ -101,142 +124,6 @@ const makeFakeStderr = (initialWidth: number) => {
     return stream;
 };
 
-const toolStart = (toolCallId: string, toolName: string, args: unknown) =>
-    asEvent({
-        type: "tool_execution_start",
-        toolCallId,
-        toolName,
-        args,
-    });
-
-const toolUpdate = (toolCallId: string, toolName: string) =>
-    asEvent({
-        type: "tool_execution_update",
-        toolCallId,
-        toolName,
-        partialResult: { content: "intermediate tool output" },
-    });
-
-const toolEnd = (
-    toolCallId: string,
-    toolName: string,
-    result: unknown,
-    isError: boolean,
-) =>
-    asEvent({
-        type: "tool_execution_end",
-        toolCallId,
-        toolName,
-        result,
-        isError,
-    });
-
-const textDelta = (delta: string) =>
-    asEvent({
-        type: "message_update",
-        assistantMessageEvent: {
-            type: "text_delta",
-            contentIndex: 0,
-            delta,
-        },
-    });
-
-const ASSISTANT_DELTAS = [
-    "The first ",
-    "framework ",
-    "assembles ",
-    "services ",
-    "explicitly.",
-];
-
-/** Run one bounded bash + read cycle against the coordinator listener. */
-const runToolCycle = (
-    listener: AgentEventListener,
-    cycle: number,
-    command: string,
-): void => {
-    const id = `tool-${cycle}`;
-    listener(toolStart(id, "bash", { command }), context);
-    for (let index = 0; index < 5; index += 1) {
-        listener(toolUpdate(id, "bash"), context);
-    }
-    listener(
-        toolEnd(id, "bash", { content: `output ${cycle}` }, false),
-        context,
-    );
-    listener(
-        toolStart(`read-${cycle}`, "read", {
-            path: `/workspace/owner/repository/src/file-${cycle}.ts`,
-        }),
-        context,
-    );
-    listener(
-        toolEnd(`read-${cycle}`, "read", { content: "source" }, false),
-        context,
-    );
-};
-
-/** Deterministic agent session + progress script exercised identically in every mode. */
-const runScriptedSession = async (
-    listener: AgentEventListener,
-    progress: RalphieRuntime["progress"],
-    settle: (() => void) | undefined = undefined,
-): Promise<void> => {
-    listener(asEvent({ type: "agent_start" }), context);
-    listener(
-        asEvent({
-            type: "message_update",
-            assistantMessageEvent: {
-                type: "text_start",
-                contentIndex: 0,
-            },
-        }),
-        context,
-    );
-    for (const delta of ASSISTANT_DELTAS) {
-        listener(textDelta(delta), context);
-    }
-    for (let cycle = 0; cycle < 4; cycle += 1) {
-        settle?.();
-        runToolCycle(
-            listener,
-            cycle,
-            `echo cycle ${cycle} step ${"x".repeat(90)}`,
-        );
-    }
-    listener(toolStart("fail-1", "grep", { pattern: "needle" }), context);
-    listener(
-        toolEnd(
-            "fail-1",
-            "grep",
-            {
-                content:
-                    "error: no matches found in the repository tree at all",
-            },
-            true,
-        ),
-        context,
-    );
-    await progress.emit({
-        stage: "implementation",
-        status: "started",
-        message: "writing change",
-    });
-    await progress.emit({
-        stage: "implementation",
-        status: "succeeded",
-        message: "change written",
-    });
-    await progress.emit({
-        stage: "verification",
-        status: "failed",
-        message: "verification gate failed",
-        details: { verify: "bun run check" },
-    });
-    listener(asEvent({ type: "agent_settled" }), context);
-    settle?.();
-};
-
 const makeCapture = (): CommandOutput & {
     readonly stdoutBytes: () => string;
     readonly stderrBytes: () => string;
@@ -282,22 +169,43 @@ type DisplaySession = {
     readonly samples: number[];
 };
 
+const insertBreadcrumbFrom = (coordinator: ProgressCoordinator | undefined) => {
+    if (coordinator === undefined) return;
+    coordinator.insertBreadcrumb?.(
+        breadcrumbCandidateFor(coordinator.getDisplayState()),
+    );
+};
+
 /**
  * Interactive harness around the real command runtime: a fake TTY stderr
  * drives mode selection and resize while the coordinator routes its bytes
  * into a recording strategy so region rows and physical rows are observable.
+ * The harness starts at a caller-chosen width and can resize mid-run through
+ * the scripted `resize` step.
  */
 const runInteractiveCommand = async ({
     workspace,
+    scenario = "completion",
+    width = 80,
+    preAborted = false,
+    workflowError,
     onSession,
+    onDisposed,
 }: {
     readonly workspace: string;
-    readonly onSession: (session: DisplaySession) => Promise<void> | void;
-}): Promise<void> => {
+    readonly scenario?: ScenarioName;
+    readonly width?: number;
+    readonly preAborted?: boolean;
+    readonly workflowError?: Error;
+    readonly onSession?: (session: DisplaySession) => Promise<void> | void;
+    readonly onDisposed?: (strategy: RecordingStrategy) => void;
+}): Promise<{ readonly strategy: RecordingStrategy }> => {
     const strategy = makeRecordingStrategy();
     const timer = makeFakeTimer();
     const samples: number[] = [];
-    const fakeStderr = makeFakeStderr(80);
+    const fakeStderr = makeFakeStderr(width);
+    const abortController = new AbortController();
+    if (preAborted) abortController.abort();
     const originalDescriptor = Object.getOwnPropertyDescriptor(
         process,
         "stderr",
@@ -307,14 +215,19 @@ const runInteractiveCommand = async ({
         configurable: true,
     });
     let listener: AgentEventListener | undefined;
+    let coordinator: ProgressCoordinator | undefined;
     try {
         const factories: CommandFactories = {
-            makeCoordinator: (options: ProgressCoordinatorOptions) =>
-                makeProgressCoordinator({
+            makeCoordinator: (options: ProgressCoordinatorOptions) => {
+                const made = makeProgressCoordinator({
                     ...options,
                     strategy,
                     footer: { timer },
-                }),
+                    now: FIXED_NOW,
+                });
+                coordinator = made;
+                return made;
+            },
             makeOpenCode: (_config: OpenCodeProviderConfig, eventListener) => {
                 listener = eventListener;
                 return makeFakePi();
@@ -330,7 +243,20 @@ const runInteractiveCommand = async ({
                     timer.run();
                     samples.push(strategy.currentRegion().length);
                 };
-                await runScriptedSession(piListener, runtime.progress, settle);
+                await playScriptedScenario(scenario, "interactive", {
+                    listener: piListener,
+                    context,
+                    progress: runtime.progress,
+                    settle,
+                    insertBreadcrumb: () => insertBreadcrumbFrom(coordinator),
+                    resize: (newWidth) => {
+                        fakeStderr.setWidth(newWidth);
+                        fakeStderr.emitResize();
+                    },
+                    abort: () => abortController.abort(),
+                    signal: abortController.signal,
+                });
+                if (workflowError !== undefined) throw workflowError;
                 if (onSession !== undefined) {
                     await onSession({ strategy, timer, settle, samples });
                 }
@@ -341,10 +267,11 @@ const runInteractiveCommand = async ({
             terminal: {
                 isInteractive: true,
                 isCI: false,
-                width: 80,
+                width,
             } satisfies CliTerminalInfo,
             output: makeCapture(),
             factories,
+            signal: abortController.signal,
         });
     } finally {
         if (originalDescriptor !== undefined) {
@@ -352,23 +279,43 @@ const runInteractiveCommand = async ({
         } else {
             delete (process as { stderr?: unknown }).stderr;
         }
+        onDisposed?.(strategy);
     }
+    return { strategy };
 };
 
 /** Noninteractive harness: plain/CI, JSON, and quiet modes need no TTY. */
 const runNoninteractiveCommand = async ({
     args,
     terminal,
+    scenario = "completion",
+    preAborted = false,
+    workflowError,
 }: {
     readonly args: readonly string[];
     readonly terminal: CliTerminalInfo;
+    readonly scenario?: ScenarioName;
+    readonly preAborted?: boolean;
+    readonly workflowError?: Error;
 }): Promise<ReturnType<typeof makeCapture>> => {
     const capture = makeCapture();
+    const abortController = new AbortController();
+    if (preAborted) abortController.abort();
     let listener: AgentEventListener | undefined;
+    let coordinator: ProgressCoordinator | undefined;
     await runCommand([...args], {
         terminal,
         output: capture,
+        signal: abortController.signal,
         factories: {
+            makeCoordinator: (options: ProgressCoordinatorOptions) => {
+                const made = makeProgressCoordinator({
+                    ...options,
+                    now: FIXED_NOW,
+                });
+                coordinator = made;
+                return made;
+            },
             makeOpenCode: (_config, eventListener) => {
                 listener = eventListener;
                 return makeFakePi();
@@ -379,15 +326,77 @@ const runNoninteractiveCommand = async ({
                 _options: WorkflowOptions,
                 runtime: RalphieRuntime,
             ) => {
-                await runScriptedSession(
-                    listener as AgentEventListener,
-                    runtime.progress,
-                );
+                await playScriptedScenario(scenario, outputModeOf(args), {
+                    listener: listener as AgentEventListener,
+                    context,
+                    progress: runtime.progress,
+                    insertBreadcrumb: () => insertBreadcrumbFrom(coordinator),
+                    abort: () => abortController.abort(),
+                    signal: abortController.signal,
+                });
+                if (workflowError !== undefined) throw workflowError;
                 return noopSummary;
             },
         },
     });
     return capture;
+};
+
+type OutputMode = "default" | "verbose" | "quiet" | "json";
+
+const OUTPUT_MODES: readonly OutputMode[] = [
+    "default",
+    "verbose",
+    "quiet",
+    "json",
+];
+
+const NONINTERACTIVE_TERMINAL: CliTerminalInfo = {
+    isInteractive: false,
+    isCI: true,
+    width: 80,
+};
+
+const argsFor = (mode: OutputMode, workspace: string): string[] =>
+    mode === "default"
+        ? ["owner/repository", "--workspace", workspace]
+        : ["owner/repository", "--output", mode, "--workspace", workspace];
+
+const outputModeOf = (args: readonly string[]): ProgressRenderMode => {
+    const index = args.indexOf("--output");
+    if (index < 0) return "plain";
+    const value = args[index + 1];
+    if (value === "json" || value === "quiet") return value;
+    return "plain";
+};
+
+/** Durable transcript bytes only; region paints are excluded. */
+const durableBytes = (strategy: RecordingStrategy): string =>
+    strategy
+        .ops()
+        .filter((op) => op.kind === "write")
+        .map((op) => op.text)
+        .join("");
+
+/** Mask per-run JSON metadata so bytes are comparable across runs. */
+const maskRunMeta = (text: string): string =>
+    text
+        .replace(/"runId":"[^"]*"/g, '"runId":"<run>"')
+        .replace(/"timestamp":"[^"]*"/g, '"timestamp":"<at>"');
+
+/** Breadcrumb rows: `│  `-prefixed durable lines that are not content rows. */
+const isBreadcrumbRow = (line: string): boolean => {
+    if (!line.startsWith("│  ")) return false;
+    if (line.startsWith("│    ")) return false;
+    const content = line.slice(3);
+    return (
+        !content.startsWith("$ ") &&
+        !content.startsWith("✓ ") &&
+        !content.startsWith("✗ ") &&
+        !content.startsWith("✦ ") &&
+        !content.startsWith("↻ ") &&
+        !content.startsWith("› prompt ")
+    );
 };
 
 describe("command runtime display: interactive mode", () => {
@@ -419,7 +428,7 @@ describe("command runtime display: interactive mode", () => {
                         "✗ grep failed — error: no matches found in the repository",
                     );
                     expect(clean).toContain("change written");
-                    expect(clean).toContain("verification gate failed");
+                    expect(clean).toContain(VERIFICATION_FAILURE_MESSAGE);
 
                     // Newline counts would overstate the live region; the
                     // physical-row emulator keeps the in-progress surface at
@@ -441,16 +450,10 @@ describe("command runtime display: interactive mode", () => {
         try {
             await runInteractiveCommand({
                 workspace,
-                onSession: ({ strategy, settle }) => {
-                    const narrow = 12;
-                    const fakeStderr = process.stderr as unknown as {
-                        readonly setWidth: (width: number) => void;
-                        readonly emitResize: () => void;
-                    };
-                    fakeStderr.setWidth(narrow);
-                    fakeStderr.emitResize();
-                    settle();
-
+                scenario: "resize",
+                width: 80,
+                onSession: ({ strategy }) => {
+                    const narrow = RESIZE_TARGET_WIDTH;
                     const region = strategy.currentRegion();
                     expect(region.length).toBeLessThanOrEqual(3);
                     for (const row of region) {
@@ -464,6 +467,15 @@ describe("command runtime display: interactive mode", () => {
                         expect(meter.rows()).toBe(region.length);
                     }
                     expect(strategy.peakRegionRows()).toBeLessThanOrEqual(3);
+
+                    // Content before and after the mid-run resize survives
+                    // (the post-resize tool row is clipped to the new width).
+                    const durable = stripTerminalControls(
+                        durableBytes(strategy),
+                    );
+                    expect(durable).toContain("echo pre-resize");
+                    expect(durable).toContain("$ echo post");
+                    expect(durable.split("✓ bash done").length).toBe(3);
                 },
             });
         } finally {
@@ -473,23 +485,17 @@ describe("command runtime display: interactive mode", () => {
 });
 
 describe("command runtime display: noninteractive fallback", () => {
-    const terminal: CliTerminalInfo = {
-        isInteractive: false,
-        isCI: true,
-        width: 80,
-    };
-
     test("plain/CI output is deterministic, append-only, and control-free", async () => {
         const first = await mkdtemp(join(tmpdir(), "ralphie-plain-"));
         const second = await mkdtemp(join(tmpdir(), "ralphie-plain-"));
         try {
             const runOne = await runNoninteractiveCommand({
                 args: ["owner/repository", "--workspace", first],
-                terminal,
+                terminal: NONINTERACTIVE_TERMINAL,
             });
             const runTwo = await runNoninteractiveCommand({
                 args: ["owner/repository", "--workspace", second],
-                terminal,
+                terminal: NONINTERACTIVE_TERMINAL,
             });
 
             const text = runOne.stderrBytes();
@@ -515,14 +521,8 @@ describe("command runtime display: noninteractive fallback", () => {
         const workspace = await mkdtemp(join(tmpdir(), "ralphie-json-"));
         try {
             const result = await runNoninteractiveCommand({
-                args: [
-                    "owner/repository",
-                    "--output",
-                    "json",
-                    "--workspace",
-                    workspace,
-                ],
-                terminal,
+                args: argsFor("json", workspace),
+                terminal: NONINTERACTIVE_TERMINAL,
             });
 
             const stdout = result.stdoutBytes();
@@ -558,14 +558,8 @@ describe("command runtime display: noninteractive fallback", () => {
         const workspace = await mkdtemp(join(tmpdir(), "ralphie-quiet-"));
         try {
             const result = await runNoninteractiveCommand({
-                args: [
-                    "owner/repository",
-                    "--output",
-                    "quiet",
-                    "--workspace",
-                    workspace,
-                ],
-                terminal,
+                args: argsFor("quiet", workspace),
+                terminal: NONINTERACTIVE_TERMINAL,
             });
 
             const text = result.stderrBytes();
@@ -573,11 +567,437 @@ describe("command runtime display: noninteractive fallback", () => {
             expect(text).not.toContain(ASSISTANT_DELTAS.join(""));
             expect(text).not.toContain("change written");
             expect(text).toContain("✗");
-            expect(text).toContain("verification gate failed");
+            expect(text).toContain(VERIFICATION_FAILURE_MESSAGE);
             expect(text).not.toContain("\x1b");
             expect(result.stdoutBytes()).toBe("");
         } finally {
             await rm(workspace, { recursive: true, force: true });
         }
     });
+});
+
+describe("scripted scenarios: emit-order and dimension contracts", () => {
+    test("interleaved raw and agent streams preserve byte and emit order", async () => {
+        const workspace = await mkdtemp(join(tmpdir(), "ralphie-scn-"));
+        try {
+            const result = await runNoninteractiveCommand({
+                args: argsFor("default", workspace),
+                terminal: NONINTERACTIVE_TERMINAL,
+                scenario: "interleaved-streams",
+            });
+            const text = result.stderrBytes();
+            const order = [
+                INTERLEAVED_RAW[0],
+                INTERLEAVED_RAW[1],
+                INTERLEAVED_TEXT[0],
+                INTERLEAVED_RAW[2],
+                INTERLEAVED_TEXT[1],
+                INTERLEAVED_RAW[3],
+                INTERLEAVED_TEXT[2],
+                INTERLEAVED_RAW[4],
+            ];
+            const positions = order.map((part) => text.indexOf(part));
+            for (let index = 1; index < positions.length; index += 1) {
+                const previous = positions[index - 1] as number;
+                const current = positions[index] as number;
+                expect(previous).toBeGreaterThanOrEqual(0);
+                expect(current).toBeGreaterThan(previous);
+            }
+            // Consecutive raw chunks stay contiguous in the byte stream.
+            expect(text).toContain(
+                `${INTERLEAVED_RAW[0]}${INTERLEAVED_RAW[1]}`,
+            );
+            // Progress emits interleave between the raw chunks.
+            expect(text.indexOf("assembling")).toBeGreaterThan(
+                text.indexOf(INTERLEAVED_RAW[3]),
+            );
+            expect(text.indexOf("assembled")).toBeGreaterThan(
+                text.indexOf(INTERLEAVED_RAW[4]),
+            );
+        } finally {
+            await rm(workspace, { recursive: true, force: true });
+        }
+    });
+
+    test("thinking, assistant, toolcall, and tool execution streams interleave", async () => {
+        const workspace = await mkdtemp(join(tmpdir(), "ralphie-scn-"));
+        try {
+            const result = await runNoninteractiveCommand({
+                args: argsFor("default", workspace),
+                terminal: NONINTERACTIVE_TERMINAL,
+                scenario: "thinking-tools",
+            });
+            const text = result.stderrBytes();
+            expect(text).toContain(
+                "Let me look at the entry point and its imports.",
+            );
+            expect(text).toContain(" The module boundary looks clean.");
+            expect(text).toContain("│  find *.ts in /workspace");
+            // Streaming thinking is compact-surface only; it never lands in
+            // the human transcript.
+            expect(text).not.toContain("We need to inspect");
+        } finally {
+            await rm(workspace, { recursive: true, force: true });
+        }
+    });
+
+    test("lifecycle boundaries render in order and reopen the transcript session", async () => {
+        const workspace = await mkdtemp(join(tmpdir(), "ralphie-scn-"));
+        try {
+            const result = await runNoninteractiveCommand({
+                args: argsFor("default", workspace),
+                terminal: NONINTERACTIVE_TERMINAL,
+                scenario: "lifecycle",
+            });
+            const text = result.stderrBytes();
+            expect(text).toContain(
+                "↻ compacting context · context window nearing capacity",
+            );
+            expect(text).toContain("↻ context compaction done");
+            expect(text).toContain("↻ retrying OpenCode request · attempt 1/3");
+            expect(text).toContain("OpenCode retry failed");
+            expect(text).toContain("OpenCode retry succeeded");
+            expect(text).toContain("↻ retrying context summary · attempt 1/2");
+            expect(text).toContain("↻ retrying context summary");
+            expect(text).toContain("↻ context summary finished");
+            // `agent_end` with willRetry closes the session as retrying, and
+            // the next `agent_start` opens a fresh transcript session.
+            expect(text).toContain("╰─ retrying…");
+            expect(text).toContain("╰─ settled");
+            expect(text.split("╭─ OpenCode · Task · session-1")).toHaveLength(
+                3,
+            );
+        } finally {
+            await rm(workspace, { recursive: true, force: true });
+        }
+    });
+
+    test("repeated live progress refreshes leave completed breadcrumbs undisturbed", async () => {
+        const workspace = await mkdtemp(join(tmpdir(), "ralphie-scn-"));
+        try {
+            const { strategy } = await runInteractiveCommand({
+                workspace,
+                scenario: "breadcrumb-refresh",
+            });
+            const durable = stripTerminalControls(durableBytes(strategy));
+            const breadcrumbRows = durable
+                .split("\n")
+                .filter((line) => isBreadcrumbRow(line));
+            // The three explicit breadcrumbs survive exactly once each.
+            expect(breadcrumbRows).toHaveLength(3);
+            // The live region repainted repeatedly over the completed rows.
+            expect(strategy.clearCount()).toBeGreaterThanOrEqual(5);
+            expect(
+                strategy.ops().filter((op) => op.kind === "paint").length,
+            ).toBeGreaterThanOrEqual(10);
+        } finally {
+            await rm(workspace, { recursive: true, force: true });
+        }
+    });
+
+    test("long output is bounded in live rows and marked truncated", async () => {
+        const workspace = await mkdtemp(join(tmpdir(), "ralphie-scn-"));
+        try {
+            const result = await runNoninteractiveCommand({
+                args: argsFor("default", workspace),
+                terminal: NONINTERACTIVE_TERMINAL,
+                scenario: "long-output",
+            });
+            const text = result.stderrBytes();
+            expect(text).toContain(
+                `✦ assistant done · ${LONG_TEXT.length} chars · truncated`,
+            );
+            expect(text).toContain("long output handled");
+            const toolLine = text
+                .split("\n")
+                .find((line) => line.includes("$ echo"));
+            expect(toolLine).toBeDefined();
+            expect(toolLine).toContain("…");
+            expect((toolLine as string).length).toBeLessThanOrEqual(80);
+
+            const { strategy } = await runInteractiveCommand({
+                workspace,
+                scenario: "long-output",
+            });
+            expect(strategy.peakRegionRows()).toBeLessThanOrEqual(3);
+            expect(strategy.currentRegion().length).toBeLessThanOrEqual(3);
+        } finally {
+            await rm(workspace, { recursive: true, force: true });
+        }
+    });
+
+    test("narrow terminals with wide graphemes never split or wrap a row", async () => {
+        for (const width of [80, 40, 24, 12, 8]) {
+            const workspace = await mkdtemp(join(tmpdir(), "ralphie-scn-"));
+            try {
+                const { strategy } = await runInteractiveCommand({
+                    workspace,
+                    scenario: "wide-grapheme",
+                    width,
+                });
+                const region = strategy.currentRegion();
+                expect(region.length).toBeLessThanOrEqual(3);
+                for (const row of region) {
+                    expect(
+                        Bun.stringWidth(stripTerminalControls(row)),
+                    ).toBeLessThanOrEqual(width);
+                }
+                if (region.length > 0) {
+                    const meter = new PhysicalRowMeter(width);
+                    meter.feed(regionBytes(region));
+                    expect(meter.rows()).toBe(region.length);
+                }
+                expect(strategy.peakRegionRows()).toBeLessThanOrEqual(3);
+                // The wide-grapheme text survives intact in the transcript.
+                const durable = stripTerminalControls(durableBytes(strategy));
+                expect(durable).toContain(WIDE_TEXT);
+            } finally {
+                await rm(workspace, { recursive: true, force: true });
+            }
+        }
+    });
+
+    test("verbose mode surfaces unsafe detail values that plain mode omits", async () => {
+        const workspace = await mkdtemp(join(tmpdir(), "ralphie-scn-"));
+        try {
+            const verboseRun = await runNoninteractiveCommand({
+                args: argsFor("verbose", workspace),
+                terminal: NONINTERACTIVE_TERMINAL,
+                scenario: "verbose-unsafe",
+            });
+            expect(verboseRun.stderrBytes()).toContain(UNSAFE_API_KEY);
+            expect(verboseRun.stderrBytes()).toContain(UNSAFE_TOKEN);
+
+            const plainRun = await runNoninteractiveCommand({
+                args: argsFor("default", workspace),
+                terminal: NONINTERACTIVE_TERMINAL,
+                scenario: "verbose-unsafe",
+            });
+            expect(plainRun.stderrBytes()).not.toContain(UNSAFE_API_KEY);
+            expect(plainRun.stderrBytes()).not.toContain(UNSAFE_TOKEN);
+        } finally {
+            await rm(workspace, { recursive: true, force: true });
+        }
+    });
+
+    test("credential-like content split across chunk boundaries reassembles intact", async () => {
+        const workspace = await mkdtemp(join(tmpdir(), "ralphie-scn-"));
+        try {
+            const result = await runNoninteractiveCommand({
+                args: argsFor("default", workspace),
+                terminal: NONINTERACTIVE_TERMINAL,
+                scenario: "split-credentials",
+            });
+            const text = result.stderrBytes();
+            expect(text).toContain(`Bearer ${CREDENTIAL_TEXT}`);
+            expect(text).toContain(CREDENTIAL_RAW);
+
+            // Interactively the same tokens survive in the durable transcript.
+            const { strategy } = await runInteractiveCommand({
+                workspace,
+                scenario: "split-credentials",
+            });
+            const durable = stripTerminalControls(durableBytes(strategy));
+            expect(durable).toContain(`Bearer ${CREDENTIAL_TEXT}`);
+            expect(durable).toContain(CREDENTIAL_RAW);
+        } finally {
+            await rm(workspace, { recursive: true, force: true });
+        }
+    });
+
+    test("abort path disposes the coordinator cleanly without throwing", async () => {
+        const workspace = await mkdtemp(join(tmpdir(), "ralphie-scn-"));
+        try {
+            const { strategy } = await runInteractiveCommand({
+                workspace,
+                scenario: "abort",
+            });
+            // The scenario aborts its own run through the harness signal;
+            // the run still completes and the controller restores the
+            // terminal surface during disposal.
+            expect(strategy.output().length).toBeGreaterThan(0);
+            const kinds = strategy.ops().map((op) => op.kind);
+            expect(kinds).toContain("restore");
+        } finally {
+            await rm(workspace, { recursive: true, force: true });
+        }
+    });
+
+    test("pre-aborted input signal completes without throwing", async () => {
+        const workspace = await mkdtemp(join(tmpdir(), "ralphie-scn-"));
+        try {
+            const result = await runNoninteractiveCommand({
+                args: argsFor("default", workspace),
+                terminal: NONINTERACTIVE_TERMINAL,
+                scenario: "abort",
+                preAborted: true,
+            });
+            // Nothing was emitted before the aborted signal was observed.
+            expect(result.stderrBytes()).toBe("");
+            expect(result.stdoutBytes()).toBe("");
+        } finally {
+            await rm(workspace, { recursive: true, force: true });
+        }
+    });
+
+    test("a throwing fake workflow still disposes and propagates the original error", async () => {
+        const workspace = await mkdtemp(join(tmpdir(), "ralphie-scn-"));
+        let disposedKinds: readonly string[] = [];
+        try {
+            await expect(
+                runInteractiveCommand({
+                    workspace,
+                    scenario: "completion",
+                    workflowError: new Error("simulated workflow failure"),
+                    onDisposed: (strategy) => {
+                        disposedKinds = strategy.ops().map((op) => op.kind);
+                    },
+                }),
+            ).rejects.toThrow("simulated workflow failure");
+            // The coordinator still disposed the region cleanly.
+            expect(disposedKinds).toContain("restore");
+        } finally {
+            await rm(workspace, { recursive: true, force: true });
+        }
+    });
+});
+
+describe("scripted scenarios: determinism", () => {
+    test("human modes emit identical bytes for two independent runs of every scenario", async () => {
+        for (const scenario of SCENARIO_NAMES) {
+            const first = await mkdtemp(join(tmpdir(), "ralphie-det-"));
+            const second = await mkdtemp(join(tmpdir(), "ralphie-det-"));
+            try {
+                const runOne = await runNoninteractiveCommand({
+                    args: argsFor("default", first),
+                    terminal: NONINTERACTIVE_TERMINAL,
+                    scenario,
+                });
+                const runTwo = await runNoninteractiveCommand({
+                    args: argsFor("default", second),
+                    terminal: NONINTERACTIVE_TERMINAL,
+                    scenario,
+                });
+                expect(runOne.stderrBytes()).toBe(runTwo.stderrBytes());
+                expect(runOne.stderrBytes().length).toBeGreaterThan(0);
+                expect(runOne.stdoutBytes()).toBe("");
+            } finally {
+                await rm(first, { recursive: true, force: true });
+                await rm(second, { recursive: true, force: true });
+            }
+        }
+    });
+
+    test("verbose and quiet modes are byte-identical across runs", async () => {
+        for (const mode of ["verbose", "quiet"] as const) {
+            for (const scenario of SCENARIO_NAMES) {
+                const first = await mkdtemp(join(tmpdir(), "ralphie-det-"));
+                const second = await mkdtemp(join(tmpdir(), "ralphie-det-"));
+                try {
+                    const runOne = await runNoninteractiveCommand({
+                        args: argsFor(mode, first),
+                        terminal: NONINTERACTIVE_TERMINAL,
+                        scenario,
+                    });
+                    const runTwo = await runNoninteractiveCommand({
+                        args: argsFor(mode, second),
+                        terminal: NONINTERACTIVE_TERMINAL,
+                        scenario,
+                    });
+                    expect(runOne.stderrBytes()).toBe(runTwo.stderrBytes());
+                    expect(runOne.stderrBytes().length).toBeGreaterThan(0);
+                } finally {
+                    await rm(first, { recursive: true, force: true });
+                    await rm(second, { recursive: true, force: true });
+                }
+            }
+        }
+    });
+
+    test("interactive output is byte-identical across two runs of every scenario", async () => {
+        for (const scenario of SCENARIO_NAMES) {
+            const first = await mkdtemp(join(tmpdir(), "ralphie-det-"));
+            const second = await mkdtemp(join(tmpdir(), "ralphie-det-"));
+            try {
+                const runOne = await runInteractiveCommand({
+                    workspace: first,
+                    scenario,
+                });
+                const runTwo = await runInteractiveCommand({
+                    workspace: second,
+                    scenario,
+                });
+                expect(runOne.strategy.output()).toBe(runTwo.strategy.output());
+                expect(runOne.strategy.output().length).toBeGreaterThan(0);
+            } finally {
+                await rm(first, { recursive: true, force: true });
+                await rm(second, { recursive: true, force: true });
+            }
+        }
+    });
+
+    test("json mode differs only in the masked per-run metadata", async () => {
+        for (const scenario of SCENARIO_NAMES) {
+            const first = await mkdtemp(join(tmpdir(), "ralphie-det-"));
+            const second = await mkdtemp(join(tmpdir(), "ralphie-det-"));
+            try {
+                const runOne = await runNoninteractiveCommand({
+                    args: argsFor("json", first),
+                    terminal: NONINTERACTIVE_TERMINAL,
+                    scenario,
+                });
+                const runTwo = await runNoninteractiveCommand({
+                    args: argsFor("json", second),
+                    terminal: NONINTERACTIVE_TERMINAL,
+                    scenario,
+                });
+                expect(maskRunMeta(runOne.stdoutBytes())).toBe(
+                    maskRunMeta(runTwo.stdoutBytes()),
+                );
+                expect(runOne.stderrBytes()).toBe("");
+                expect(runTwo.stderrBytes()).toBe("");
+            } finally {
+                await rm(first, { recursive: true, force: true });
+                await rm(second, { recursive: true, force: true });
+            }
+        }
+    });
+});
+
+describe("scripted scenarios: smoke coverage through both harnesses", () => {
+    for (const scenario of SCENARIO_NAMES) {
+        test(`interactive smoke: ${scenario}`, async () => {
+            const workspace = await mkdtemp(join(tmpdir(), "ralphie-smoke-"));
+            try {
+                const { strategy } = await runInteractiveCommand({
+                    workspace,
+                    scenario,
+                });
+                expect(strategy.output().length).toBeGreaterThan(0);
+            } finally {
+                await rm(workspace, { recursive: true, force: true });
+            }
+        });
+
+        test(`noninteractive smoke: ${scenario} across every output mode`, async () => {
+            for (const mode of OUTPUT_MODES) {
+                const workspace = await mkdtemp(
+                    join(tmpdir(), "ralphie-smoke-"),
+                );
+                try {
+                    const result = await runNoninteractiveCommand({
+                        args: argsFor(mode, workspace),
+                        terminal: NONINTERACTIVE_TERMINAL,
+                        scenario,
+                    });
+                    expect(
+                        result.stdoutBytes().length +
+                            result.stderrBytes().length,
+                    ).toBeGreaterThan(0);
+                } finally {
+                    await rm(workspace, { recursive: true, force: true });
+                }
+            }
+        });
+    }
 });
