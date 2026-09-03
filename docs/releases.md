@@ -75,8 +75,13 @@ reconstructs release metadata or uses a broad native-asset glob. Its `ralphie-co
 uses the
 `ralphie.container-candidate.v1` contract and records the validated
 `source_ref`, platform, OCI archive name and SHA-256, BuildKit image
-manifest `digest`, and OCI version/revision labels; the final publisher
-must verify those fields before promotion. Before the contract is written,
+manifest `digest`, and OCI version/revision labels; the checked-in
+`scripts/validate-container-candidates.ts` seam requires exactly those
+fields before promotion — the protected `push-container` job downloads the
+two exact `ralphie-container-candidate-<version>-<arch>` artifacts, strictly
+parses every contract, recomputes each archive SHA-256 and each archive's
+actual image manifest content digest against the recorded BuildKit digest,
+and fails closed on any mismatch. Before the contract is written,
 staging also binds the recorded BuildKit digest to the OCI archive's own
 `index.json` entry: a single-platform export has exactly one manifest
 descriptor whose digest must be the same lowercase `sha256:<64 hex>` value,
@@ -179,7 +184,23 @@ after the write. Any other digest, malformed response, or unexpected registry
 status is a conflict/failure, and an unconditional tag write is never used.
 
 The `push-container` publisher promotes the two staged OCI archives to their
-per-platform `ghcr.io/beremaran/ralphie:<version>-amd64|arm64` tags and then
+per-platform `ghcr.io/beremaran/ralphie:<version>-amd64|arm64` tags. Before
+the first registry write, the
+`scripts/validate-container-candidates.ts` seam requires exactly the amd64
+and arm64 `ralphie-container-candidate-<version>-<arch>` artifact names
+(rejecting missing, duplicate, extra, and cross-release candidates and
+unexpected files), strictly parses every `ralphie.container-candidate.v1`
+contract (artifact, version, 40-character `source_ref`, platform,
+`format: oci-archive`, archive filename, lowercase archive SHA-256,
+lowercase `sha256:` BuildKit digest, and the MIT/version/revision labels),
+recomputes each archive SHA-256, and inspects each OCI archive's own
+`index.json` and actual image manifest — the recomputed manifest content
+digest must equal the recorded BuildKit digest, every referenced
+config/layer blob must exist with the exact recorded size and digest,
+archive paths may not contain traversal or absolute components, and nothing
+beyond the layout, index, and exactly the referenced blobs may be present.
+The validator is side-effect free and never logs in to GHCR, writes a tag,
+rebuilds an image, or continues after a validation error. It then
 re-inspects each promoted image in GHCR: the registry digest must be a
 lowercase `sha256:<64 hex>` value equal to the candidate's recorded `.digest`,
 the platform must match, and the validated `version`/`source_ref` (and

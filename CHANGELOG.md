@@ -5,6 +5,34 @@ All notable changes to Ralphie are documented here. The project follows
 
 ## [Unreleased]
 
+- Validate the exact staged container-candidate set in the protected
+  `push-container` job (`rel20-publisher-container-candidate-validation`)
+  with a new side-effect-free seam `scripts/validate-container-candidates.ts`
+  backed by `src/release/container-candidate.ts`: the publisher downloads the
+  two exact `ralphie-container-candidate-<version>-<arch>` artifact names
+  (instead of a broad merged glob) and the validator requires exactly that
+  amd64/arm64 pair for the validated version, rejecting missing, duplicate,
+  extra, and cross-release candidates, unexpected files, and artifacts that
+  do not contain exactly their `ralphie.container-candidate.v1` contract and
+  OCI archive. It strictly parses each contract (exact artifact name,
+  version, 40-character lowercase `source_ref`, expected platform,
+  `format: oci-archive`, expected archive filename, lowercase archive
+  SHA-256, lowercase `sha256:` BuildKit manifest digest, and the
+  MIT/version/revision image labels), recomputes the archive SHA-256, and
+  inspects each OCI archive's own `index.json` and actual image manifest,
+  requiring the recomputed manifest content digest to equal the recorded
+  BuildKit digest (labels, config, and child layer digests alone are
+  insufficient), every referenced config/layer blob to exist with the exact
+  recorded size and digest, safe relative archive paths (no traversal or
+  absolute components), and nothing beyond the OCI layout, index, and exactly
+  the referenced blobs. It returns the validated archive paths, exact
+  manifest bytes/descriptors, and expected digests for later index assembly,
+  never logs in to GHCR, writes a tag, rebuilds an image, or silently
+  continues after a validation error. Focused fixture tests cover
+  malformed/missing contract fields, wrong artifact/version/source/platform/
+  path, extra files, archive checksum mismatches, manifest digest mismatches,
+  missing/unreferenced blobs, and traversal/absolute archive entries.
+
 - Lock down the cross-mode display contract with end-to-end regression
   coverage: the interactive in-progress activity surface is measured in
   physical terminal rows (never newline counts) and stays within the shared

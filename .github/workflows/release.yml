@@ -669,6 +669,15 @@ jobs:
         needs.validate.outputs.dry_run == 'false'
       }}
     runs-on: ubuntu-latest
+    # The validated release context is job-level so every step that resolves
+    # the exact candidate artifact names (`Validate exact staged container
+    # candidate set`, `Inspect OCI metadata before promotion`, `Promote
+    # platform images...`, and `Create manifest aliases...`) interpolates
+    # the same version/commit, and so a future step split or reorder cannot
+    # silently lose the binding.
+    env:
+      VERSION: ${{ needs.validate.outputs.version }}
+      SOURCE_REF: ${{ needs.validate.outputs.source_ref }}
     # Container publication is separately downstream of the metadata check.
     # Its protected environment prevents a retry from bypassing validation.
     environment:
@@ -677,63 +686,58 @@ jobs:
     # The minimum permission set for digest promotion plus SBOM and SLSA
     # provenance attestations: `packages` for GHCR writes and referrer
     # attachments, `attestations` for attestation storage records, and
-    # `id-token` for the GitHub OIDC signing path. No other write permission
+    # `id-token` for the GitHub OIDC signing path. `contents: read` allows
+    # checking out the validated source that hosts the checked-in
+    # validation seams (`scripts/validate-container-candidates.ts` and
+    # `scripts/validate-container-sboms.ts`). No other write permission
     # is granted; `stage-container` stays credential-free and read-only.
     permissions:
+      contents: read
       packages: write
       attestations: write
       id-token: write
     steps:
-      - name: Download tested container candidates
+      - name: Check out validated source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.source_ref }}
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Verify Bun version
+        run: test "$(bun --version)" = "$BUN_VERSION"
+
+      # Use one exact artifact name per platform. This prevents an untrusted
+      # artifact matching a broad pattern from entering the promotion input.
+      - name: Download amd64 container candidate artifact
         uses: actions/download-artifact@v4
         with:
-          pattern: ralphie-container-candidate-${{ needs.validate.outputs.version }}-*
-          path: container-candidates
-          merge-multiple: true
+          name: ralphie-container-candidate-${{ needs.validate.outputs.version }}-amd64
+          path: container-candidates/ralphie-container-candidate-${{ needs.validate.outputs.version }}-amd64
+      - name: Download arm64 container candidate artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ralphie-container-candidate-${{ needs.validate.outputs.version }}-arm64
+          path: container-candidates/ralphie-container-candidate-${{ needs.validate.outputs.version }}-arm64
 
-      # Validate every candidate before the first registry write. The archive
-      # hash and the recorded image metadata bind the promotion input to the
-      # validated version and commit, even when this job is retried.
-      - name: Verify candidate metadata
-        env:
-          VERSION: ${{ needs.validate.outputs.version }}
-          SOURCE_REF: ${{ needs.validate.outputs.source_ref }}
+      # Validate every candidate before the first registry write. The checker
+      # requires exactly the amd64/arm64 candidate artifact names for the
+      # validated version, strictly parses each
+      # `ralphie.container-candidate.v1` contract, recomputes the archive
+      # SHA-256, and compares the archive's actual image manifest content
+      # digest with the recorded BuildKit digest; it never logs in to GHCR,
+      # writes a tag, rebuilds an image, or continues after a validation
+      # error.
+      - name: Validate exact staged container candidate set
         run: |
           set -euo pipefail
-          for arch in amd64 arm64; do
-            case "$arch" in
-              amd64) platform="linux/amd64" ;;
-              arm64) platform="linux/arm64" ;;
-              *) echo "Unsupported container architecture: $arch" >&2; exit 1 ;;
-            esac
-
-            contract="container-candidates/ralphie-container-${arch}.metadata.json"
-            archive="ralphie-container-${arch}.oci.tar"
-            jq -e \
-              --arg schema "ralphie.container-candidate.v1" \
-              --arg artifact "ralphie-container-candidate-${VERSION}-${arch}" \
-              --arg version "$VERSION" \
-              --arg source_ref "$SOURCE_REF" \
-              --arg platform "$platform" \
-              --arg archive "$archive" \
-              '(.schema == $schema) and
-               (.artifact == $artifact) and
-               (.version == $version) and
-               (.source_ref == $source_ref) and
-               (.platform == $platform) and
-               (.format == "oci-archive") and
-               (.archive == $archive) and
-               (.image_license == "MIT") and
-               (.image_version == $version) and
-               (.image_revision == $source_ref) and
-               (.digest | strings | test("^sha256:[0-9a-f]{64}$")) and
-               (.archive_sha256 | strings | test("^[0-9a-f]{64}$"))' \
-              "$contract" > /dev/null
-            test -s "container-candidates/$archive"
-            expected_sha256="$(jq -er '.archive_sha256' "$contract")"
-            actual_sha256="$(sha256sum "container-candidates/$archive" | cut -d ' ' -f1)"
-            test "$actual_sha256" = "$expected_sha256"
-          done
+          bun scripts/validate-container-candidates.ts \
+            --candidates-dir container-candidates \
+            --version "$VERSION" \
+            --source-ref "$SOURCE_REF"
 
       - name: Install skopeo
         run: |
@@ -744,14 +748,11 @@ jobs:
           fi
 
       - name: Inspect OCI metadata before promotion
-        env:
-          VERSION: ${{ needs.validate.outputs.version }}
-          SOURCE_REF: ${{ needs.validate.outputs.source_ref }}
         run: |
           set -euo pipefail
           for arch in amd64 arm64; do
-            archive="container-candidates/ralphie-container-${arch}.oci.tar"
-            contract="container-candidates/ralphie-container-${arch}.metadata.json"
+            archive="container-candidates/ralphie-container-candidate-${VERSION}-${arch}/ralphie-container-${arch}.oci.tar"
+            contract="container-candidates/ralphie-container-candidate-${VERSION}-${arch}/ralphie-container-${arch}.metadata.json"
             expected_digest="$(jq -er '.digest' "$contract")"
             actual_digest="$(skopeo inspect --format '{{.Digest}}' "oci-archive:$archive")"
             license_label="$(skopeo inspect --format '{{ index .Labels "org.opencontainers.image.licenses" }}' "oci-archive:$archive")"
@@ -799,8 +800,6 @@ jobs:
       - name: Promote platform images and persist publication subjects
         env:
           IMAGE: ghcr.io/beremaran/ralphie
-          VERSION: ${{ needs.validate.outputs.version }}
-          SOURCE_REF: ${{ needs.validate.outputs.source_ref }}
         run: |
           set -euo pipefail
           authfile="$HOME/.docker/config.json"
@@ -812,8 +811,8 @@ jobs:
               arm64) platform="linux/arm64" ;;
               *) echo "Unsupported container architecture: $arch" >&2; exit 1 ;;
             esac
-            archive="container-candidates/ralphie-container-${arch}.oci.tar"
-            contract="container-candidates/ralphie-container-${arch}.metadata.json"
+            archive="container-candidates/ralphie-container-candidate-${VERSION}-${arch}/ralphie-container-${arch}.oci.tar"
+            contract="container-candidates/ralphie-container-candidate-${VERSION}-${arch}/ralphie-container-${arch}.metadata.json"
             expected_digest="$(jq -er '.digest' "$contract")"
             test "$expected_digest" = "$(printf '%s' "$expected_digest" | grep -E '^sha256:[0-9a-f]{64}$')"
 
@@ -897,8 +896,6 @@ jobs:
         env:
           IMAGE: ghcr.io/beremaran/ralphie
           TAG: ${{ needs.validate.outputs.tag }}
-          VERSION: ${{ needs.validate.outputs.version }}
-          SOURCE_REF: ${{ needs.validate.outputs.source_ref }}
         run: |
           set -euo pipefail
           # The signing identity must be the protected release tag and its
@@ -1030,8 +1027,6 @@ jobs:
       - name: Validate and pin container SBOMs to release identity
         env:
           TAG: ${{ needs.validate.outputs.tag }}
-          VERSION: ${{ needs.validate.outputs.version }}
-          SOURCE_REF: ${{ needs.validate.outputs.source_ref }}
         run: |
           set -euo pipefail
           bun_version="$(bun --version)"
@@ -1097,8 +1092,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.validate.outputs.tag }}
-          VERSION: ${{ needs.validate.outputs.version }}
-          SOURCE_REF: ${{ needs.validate.outputs.source_ref }}
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = "refs/tags/$TAG"
@@ -1240,8 +1233,6 @@ jobs:
       - name: Create manifest aliases from immutable digests
         env:
           IMAGE: ghcr.io/beremaran/ralphie
-          VERSION: ${{ needs.validate.outputs.version }}
-          SOURCE_REF: ${{ needs.validate.outputs.source_ref }}
           IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
         run: |
           set -euo pipefail
@@ -1273,7 +1264,7 @@ jobs:
             esac
             subject_digest="$(jq -er --arg platform "$platform" \
               '.subjects[] | select(.platform == $platform) | .digest' publication-subjects.json)"
-            contract_digest="$(jq -er '.digest' "container-candidates/ralphie-container-${arch}.metadata.json")"
+            contract_digest="$(jq -er '.digest' "container-candidates/ralphie-container-candidate-${VERSION}-${arch}/ralphie-container-${arch}.metadata.json")"
             test "$subject_digest" = "$contract_digest"
           done
 
