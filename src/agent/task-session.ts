@@ -29,7 +29,7 @@ export type AgentTaskRequest = AgentTaskSessionRequest & {
     readonly prompt: string;
     readonly repositoryInvariant?: AgentRepositoryInvariant;
     readonly verifyRepositoryInvariant?: AgentRepositoryInvariantVerifier;
-    readonly verifyAfter?: () => Promise<void>;
+    readonly verifyAfter?: (signal?: AbortSignal) => Promise<void>;
     readonly progress?: ProgressReporterService;
     readonly progressStage?: ProgressStage;
     readonly progressIssue?: ProgressIssue;
@@ -121,6 +121,7 @@ export type AgentRepositoryInvariant = {
 export type AgentRepositoryInvariantVerifier = (
     repositoryPath: string,
     expected: AgentRepositoryInvariant,
+    signal?: AbortSignal,
 ) => Promise<void>;
 
 export type AgentSessionDiagnostic = {
@@ -307,9 +308,12 @@ const verifyAgentTaskRequest = async (
         await request.verifyRepositoryInvariant(
             request.directory,
             request.repositoryInvariant,
+            request.signal,
         );
     }
-    if (request.verifyAfter !== undefined) await request.verifyAfter();
+    if (request.verifyAfter !== undefined) {
+        await request.verifyAfter(request.signal);
+    }
 };
 
 const promptAgentTask = async (

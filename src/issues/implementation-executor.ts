@@ -284,6 +284,7 @@ export const makeImplementationExecutorService = (
         );
         const actual = await context.repositoryInvariant.capture(
             context.repositoryPath,
+            context.signal,
         );
         if (actual.head.toLowerCase() === createdCommit.sha.toLowerCase()) {
             await remoteSafety.verifyDirectPush({
@@ -334,6 +335,7 @@ export const makeImplementationExecutorService = (
         await context.repositoryInvariant.verify(
             context.repositoryPath,
             invariant,
+            context.signal,
         );
         await stage(
             progress,

@@ -99,6 +99,7 @@ export const makeIssueExecutorService = (
     const checkpoint = async (context: IssueExecutionContext) => {
         const captured = await context.repositoryInvariant.capture(
             context.repositoryPath,
+            context.signal,
         );
         return { branch: captured.branch, sha: captured.head };
     };

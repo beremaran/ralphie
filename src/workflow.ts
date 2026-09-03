@@ -1148,7 +1148,7 @@ export const workflow = async (
                 },
             ];
             const captureCheckout = () =>
-                invariantService.capture(prepared.path);
+                invariantService.capture(prepared.path, signal);
             checkout = await captureCheckout();
             verifyResumeState(branch, checkout, discoveredIssues);
             const initialIssues = refreshedResumeIssues(discoveredIssues);

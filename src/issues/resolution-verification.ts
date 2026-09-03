@@ -48,6 +48,7 @@ export const makeResolutionVerificationService = (
         try {
             const checkpoint = await context.repositoryInvariant.capture(
                 context.repositoryPath,
+                context.signal,
             );
             if (checkpoint.branch !== context.targetBranch) {
                 throw new RalphieError({

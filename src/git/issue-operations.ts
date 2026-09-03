@@ -62,6 +62,7 @@ export type GitIssueOperationsService = {
         repositoryPath: string,
         baseSha: string,
         headSha: string,
+        signal?: AbortSignal,
     ) => Promise<string>;
     /** Check whether the index contains any staged changes. */
     readonly hasStagedChanges: (repositoryPath: string) => Promise<boolean>;
@@ -406,7 +407,12 @@ export const makeGitIssueOperationsService = (
                 false,
             ),
 
-        readCommittedBinaryDiff: async (repositoryPath, baseSha, headSha) => {
+        readCommittedBinaryDiff: async (
+            repositoryPath,
+            baseSha,
+            headSha,
+            signal,
+        ) => {
             if (!validGitSha.test(baseSha) || !validGitSha.test(headSha)) {
                 throw new RalphieError({
                     message:
@@ -419,6 +425,7 @@ export const makeGitIssueOperationsService = (
                 ["diff", "--binary", "--no-ext-diff", `${baseSha}..${headSha}`],
                 "Failed to read the committed pull request diff",
                 false,
+                signal,
             );
             const bytes = Buffer.byteLength(patch, "utf8");
             if (bytes > MAX_COMMITTED_DIFF_BYTES) {

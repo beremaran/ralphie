@@ -53,6 +53,7 @@ export const makeDecompositionPlannerService = (
         );
         const invariant = await context.repositoryInvariant.capture(
             context.repositoryPath,
+            context.signal,
         );
         if (invariant.branch !== context.targetBranch) {
             throw new RalphieError({
@@ -74,10 +75,11 @@ export const makeDecompositionPlannerService = (
             variant: context.agentSelection.variant,
             runId: context.runId,
             diagnostics: context.agentDiagnostics,
-            verifyAfter: () =>
+            verifyAfter: (signal) =>
                 context.repositoryInvariant.verify(
                     context.repositoryPath,
                     invariant,
+                    signal,
                 ),
             progress,
             progressStage: "decomposition",

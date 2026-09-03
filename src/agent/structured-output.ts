@@ -39,8 +39,9 @@ export type StructuredOutputRequest<Output> = {
     readonly verifyRepositoryInvariant?: (
         repositoryPath: string,
         expected: AgentRepositoryInvariant,
+        signal?: AbortSignal,
     ) => Promise<void>;
-    readonly verifyAfter?: () => Promise<void>;
+    readonly verifyAfter?: (signal?: AbortSignal) => Promise<void>;
     readonly progress?: ProgressReporterService;
     readonly progressStage?: ProgressStage;
     readonly progressIssue?: ProgressIssue;
@@ -156,9 +157,12 @@ const verifyStructuredOutputRequest = async <Output>(
         await request.verifyRepositoryInvariant(
             request.directory,
             request.repositoryInvariant,
+            request.signal,
         );
     }
-    if (request.verifyAfter !== undefined) await request.verifyAfter();
+    if (request.verifyAfter !== undefined) {
+        await request.verifyAfter(request.signal);
+    }
 };
 
 const promptForStructuredOutput = async <Output>(

@@ -7,9 +7,11 @@ export const runGit = async (
     args: ReadonlyArray<string>,
     failureMessage: string,
     trimStdout = true,
+    signal?: AbortSignal,
 ): Promise<string> => {
     const result = await runner.run("git", ["-C", repositoryPath, ...args], {
         trimStdout,
+        ...(signal === undefined ? {} : { signal }),
     });
     if (result.exitCode !== 0) {
         const detail = result.stderr ? ` ${result.stderr}` : "";

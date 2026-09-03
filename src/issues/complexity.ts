@@ -48,6 +48,7 @@ export const makeComplexityAssessmentService = (
         try {
             const checkpoint = await context.repositoryInvariant.capture(
                 context.repositoryPath,
+                context.signal,
             );
             if (checkpoint.branch !== context.targetBranch) {
                 throw new RalphieError({
@@ -71,10 +72,11 @@ export const makeComplexityAssessmentService = (
                     context.agentSelection.variant,
                 runId: context.runId,
                 diagnostics: context.agentDiagnostics,
-                verifyAfter: () =>
+                verifyAfter: (signal) =>
                     context.repositoryInvariant.verify(
                         context.repositoryPath,
                         checkpoint,
+                        signal,
                     ),
                 progress,
                 progressStage: "complexity-assessment",

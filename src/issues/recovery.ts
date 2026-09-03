@@ -75,6 +75,8 @@ export type NeedsAttentionRecoveryInput = {
     readonly agentRequest?: NeedsAttentionRequest;
     /** May be supplied by callers when the service was assembled without one. */
     readonly repositoryInvariant?: GitRepositoryInvariantService;
+    /** Caller cancellation observed by the invariant verification. */
+    readonly signal?: AbortSignal;
 };
 
 export type NeedsAttentionRecoveryResult = {
@@ -361,10 +363,14 @@ export const makeIssueRecoveryService = (
         });
         try {
             await git.restore(input.repositoryPath, input.checkpoint);
-            await invariant.verify(input.repositoryPath, {
-                branch: input.checkpoint.branch,
-                head: input.checkpoint.sha,
-            });
+            await invariant.verify(
+                input.repositoryPath,
+                {
+                    branch: input.checkpoint.branch,
+                    head: input.checkpoint.sha,
+                },
+                input.signal,
+            );
         } catch (cause) {
             await progress.emit({
                 ...issueContext,

@@ -13,28 +13,35 @@ export type GitRepositoryInvariant = {
 export type GitRepositoryInvariantService = {
     readonly capture: (
         repositoryPath: string,
+        signal?: AbortSignal,
     ) => Promise<GitRepositoryInvariant>;
     readonly verify: (
         repositoryPath: string,
         expected: GitRepositoryInvariant,
+        signal?: AbortSignal,
     ) => Promise<void>;
 };
 
 const readInvariant = async (
     runner: CommandRunnerService,
     repositoryPath: string,
+    signal?: AbortSignal,
 ): Promise<GitRepositoryInvariant> => {
     const branch = await runGit(
         runner,
         repositoryPath,
         ["rev-parse", "--abbrev-ref", "HEAD"],
         "Failed to read the repository branch",
+        true,
+        signal,
     );
     const head = await runGit(
         runner,
         repositoryPath,
         ["rev-parse", "HEAD"],
         "Failed to read the repository HEAD",
+        true,
+        signal,
     );
 
     if (!branch || !head) {
@@ -50,9 +57,10 @@ const readInvariant = async (
 export const makeGitRepositoryInvariantService = (
     runner: CommandRunnerService = CommandRunnerLive,
 ): GitRepositoryInvariantService => ({
-    capture: (repositoryPath) => readInvariant(runner, repositoryPath),
-    verify: async (repositoryPath, expected) => {
-        const actual = await readInvariant(runner, repositoryPath);
+    capture: (repositoryPath, signal) =>
+        readInvariant(runner, repositoryPath, signal),
+    verify: async (repositoryPath, expected, signal) => {
+        const actual = await readInvariant(runner, repositoryPath, signal);
         if (actual.branch !== expected.branch) {
             throw new RalphieError({
                 message: `Repository branch changed from ${expected.branch} to ${actual.branch}.`,

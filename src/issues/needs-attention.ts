@@ -161,6 +161,7 @@ const recoverHandoff = async (
         decision,
         request: handoff.request,
         repositoryInvariant: context.repositoryInvariant,
+        signal: context.signal,
     });
     await artifacts.clearNeedsAttentionHandoff();
     return outcome(decision, recovered.diagnosticsPath);

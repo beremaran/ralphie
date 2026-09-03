@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+    CommandAbortedError,
+    CommandRunnerLive,
+    CommandTimeoutError,
+    PROCESS_TERMINATION_ESCALATION_MS,
     requireSuccess,
     type CommandResult,
     type CommandRunnerService,
@@ -69,5 +73,92 @@ describe("requireSuccess", () => {
         } finally {
             delete process.env.GH_TOKEN;
         }
+    });
+});
+
+describe("CommandRunnerLive abortable subprocess", () => {
+    test("runs a command normally and returns its captured output", async () => {
+        const result = await CommandRunnerLive.run("printf", ["ok"], {
+            trimStdout: false,
+        });
+
+        expect(result.exitCode).toBe(0);
+        expect(result.stdout).toBe("ok");
+        expect(result.stderr).toBe("");
+    });
+
+    test("aborts an in-flight subprocess promptly with CommandAbortedError", async () => {
+        const controller = new AbortController();
+        const started = Date.now();
+        const outcome = CommandRunnerLive.run("sleep", ["30"], {
+            signal: controller.signal,
+        }).catch((error: unknown) => error);
+        setTimeout(() => controller.abort(), 60);
+        const result = await outcome;
+        const elapsed = Date.now() - started;
+
+        expect(result).toBeInstanceOf(CommandAbortedError);
+        expect((result as Error).message).toContain("sleep 30");
+        // The 30s child was terminated rather than allowed to finish.
+        expect(elapsed).toBeLessThan(10_000);
+    });
+
+    test("rejects a pre-aborted run with CommandAbortedError", async () => {
+        const controller = new AbortController();
+        controller.abort();
+
+        await expect(
+            CommandRunnerLive.run("sleep", ["30"], {
+                signal: controller.signal,
+            }),
+        ).rejects.toBeInstanceOf(CommandAbortedError);
+    });
+
+    test("keeps the timeout failure distinct from an abort", async () => {
+        const controller = new AbortController();
+        const started = Date.now();
+        const result = await CommandRunnerLive.run("sleep", ["30"], {
+            timeoutMs: 150,
+            signal: controller.signal,
+        }).catch((error: unknown) => error);
+        const elapsed = Date.now() - started;
+
+        expect(result).toBeInstanceOf(CommandTimeoutError);
+        expect(result).not.toBeInstanceOf(CommandAbortedError);
+        expect(elapsed).toBeLessThan(10_000);
+    });
+
+    test("escalates to SIGKILL when the child ignores the termination signal", async () => {
+        const controller = new AbortController();
+        const started = Date.now();
+        const outcome = CommandRunnerLive.run(
+            "/bin/sh",
+            ["-c", "trap '' TERM; exec sleep 30"],
+            { signal: controller.signal },
+        ).catch((error: unknown) => error);
+        setTimeout(() => controller.abort(), 60);
+        const result = await outcome;
+        const elapsed = Date.now() - started;
+
+        expect(result).toBeInstanceOf(CommandAbortedError);
+        // SIGTERM is ignored by the child, so only the SIGKILL escalation
+        // could end it; that requires the full escalation grace period.
+        expect(elapsed).toBeGreaterThan(PROCESS_TERMINATION_ESCALATION_MS / 2);
+        expect(elapsed).toBeLessThan(PROCESS_TERMINATION_ESCALATION_MS * 5);
+    });
+
+    test("distinguishes an aborted live run from a failed one", async () => {
+        const controller = new AbortController();
+        const failed = await CommandRunnerLive.run("false", [], {
+            signal: controller.signal,
+        });
+        expect(failed.exitCode).not.toBe(0);
+
+        controller.abort();
+        await expect(
+            CommandRunnerLive.run("sleep", ["30"], {
+                signal: controller.signal,
+            }),
+        ).rejects.toBeInstanceOf(CommandAbortedError);
     });
 });
