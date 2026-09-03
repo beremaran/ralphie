@@ -243,12 +243,17 @@ const runLifecycleScenario = async (
 
         // Positive control: the live footer painted (the region exists before
         // the run settles), synchronized on the live-only progress message.
-        await session.waitFor(LIFECYCLE_MESSAGES.groundingStarted);
-        const liveScreen = session.screen();
-        expect(
-            liveScreen.some((row) => row.includes("◐")),
-            "live footer was never painted",
-        ).toBe(true);
+        // The grounding message only ever reaches the PTY as a painted region
+        // row, and every region paint also carries the ◐ status row, so the
+        // cumulative raw stream proves the region was painted. Checking the
+        // live screen instead would race: the region is cleared as soon as the
+        // transcript stream opens, so the paint bytes and the clear bytes can
+        // surface inside one chunk and the instantaneous screen may already be
+        // empty even though the footer was painted.
+        const rawWithGrounding = await session.waitFor(
+            LIFECYCLE_MESSAGES.groundingStarted,
+        );
+        expect(rawWithGrounding).toContain("◐");
 
         // The agent transcript stream is open: sync on its first delta, which
         // only exists in the streamed transcript bytes.

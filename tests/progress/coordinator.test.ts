@@ -474,6 +474,55 @@ describe("coordinator activity wiring", () => {
     });
 });
 
+describe("coordinator dispose safety", () => {
+    test("double dispose is harmless and emit/listener become no-ops", async () => {
+        const { coordinator, strategy, settle, fallback } =
+            makeInteractiveHarness();
+        coordinator.listener(asEvent({ type: "agent_start" }), context);
+        coordinator.listener(
+            toolStart("t1", "bash", { command: "echo hi" }),
+            context,
+        );
+        coordinator.listener(
+            toolEnd("t1", "bash", { content: "hi" }, false),
+            context,
+        );
+        settle();
+        expect(strategy.output()).toContain("│  $ echo hi");
+        expect(strategy.finalRegion().length).toBeGreaterThan(0);
+
+        await coordinator.dispose();
+        expect(strategy.finalRegion()).toEqual([]);
+        const afterDispose = strategy.output();
+
+        // A second dispose resolves without throwing or writing more bytes.
+        await expect(coordinator.dispose()).resolves.toBeUndefined();
+        expect(strategy.output()).toBe(afterDispose);
+
+        // After dispose, progress.emit and the piListener are no-ops that
+        // cannot write to the injected sink.
+        await coordinator.progress.emit({
+            stage: "implementation",
+            status: "started",
+            message: "stale progress",
+        });
+        coordinator.piListener(textDelta("stale text"), context);
+        coordinator.listener(
+            toolStart("t2", "bash", { command: "echo stale" }),
+            context,
+        );
+        await coordinator.progress.emit({
+            stage: "implementation",
+            status: "succeeded",
+            message: "stale done",
+        });
+        settle();
+        expect(strategy.output()).toBe(afterDispose);
+        expect(strategy.finalRegion()).toEqual([]);
+        expect(fallback()).toBe("");
+    });
+});
+
 describe("coordinator mode-specific contracts", () => {
     test("plain mode stays append-only with no cursor controls", async () => {
         const { coordinator, output } = makeBoundedCapture("plain");

@@ -4,22 +4,30 @@ import {
     INTERACTIVE_REGION_MAX_ROWS,
     makeTerminalOutputController,
 } from "../../src/progress/terminal-controller.ts";
-import type { TerminalOutputStrategy } from "../../src/progress/terminal-controller.ts";
+import type {
+    TerminalOutputStrategy,
+    TerminalResizeSubscription,
+} from "../../src/progress/terminal-controller.ts";
 import type { FooterTimer } from "../../src/progress/footer.ts";
 
 const CLEAR = "\r\x1b[2K";
 const UP = "\x1b[1A";
 
-type FakeTimer = FooterTimer & { readonly run: () => void };
+type FakeTimer = FooterTimer & {
+    readonly run: () => void;
+    readonly cancelCount: () => number;
+};
 
 const makeFakeTimer = (): FakeTimer => {
     let scheduled: (() => void) | undefined;
+    let cancelled = 0;
     return {
         schedule: (callback) => {
             scheduled = callback;
             return scheduled;
         },
         cancel: () => {
+            cancelled += 1;
             scheduled = undefined;
         },
         run: () => {
@@ -27,6 +35,7 @@ const makeFakeTimer = (): FakeTimer => {
             scheduled = undefined;
             callback?.();
         },
+        cancelCount: () => cancelled,
     };
 };
 
@@ -373,6 +382,124 @@ describe("terminal output controller region", () => {
     });
 });
 
+describe("dispose safety", () => {
+    test("double dispose is harmless: no bytes, no throw, later updates never repaint", () => {
+        const { controller, output, timer, settle, setFooter } = makeHarness();
+        setFooter("live");
+        settle();
+        expect(output()).toBe("live");
+        expect(controller.isFooterVisible()).toBe(true);
+
+        controller.dispose();
+        expect(controller.isFooterVisible()).toBe(false);
+        const afterFirstDispose = output();
+
+        // The second dispose throws nothing and writes no additional bytes.
+        expect(() => controller.dispose()).not.toThrow();
+        expect(output()).toBe(afterFirstDispose);
+        expect(controller.isFooterVisible()).toBe(false);
+
+        // Every later update path is inert for the region: durable lines may
+        // flow, but the replaceable region can never be painted again.
+        setFooter("stale");
+        controller.invalidate();
+        controller.writeLine("durable after dispose");
+        controller.writeTranscript("stream after dispose");
+        controller.beginLive("live after dispose");
+        controller.appendLine("append after dispose", "live after dispose");
+        timer.run();
+        expect(controller.isFooterVisible()).toBe(false);
+        expect(output()).toBe(afterFirstDispose);
+    });
+
+    test("a pending footer timer is cancelled on dispose and cannot repaint", () => {
+        const { controller, output, timer, settle, setFooter } = makeHarness();
+        setFooter("live");
+        settle();
+        expect(output()).toBe("live");
+
+        // A repaint is pending when dispose runs: dispose cancels exactly
+        // the one pending handle.
+        controller.invalidate();
+        const cancelsBeforeDispose = timer.cancelCount();
+        controller.dispose();
+        expect(timer.cancelCount()).toBe(cancelsBeforeDispose + 1);
+        const afterDispose = output();
+
+        // Firing the pending timer after dispose writes nothing more.
+        timer.run();
+        expect(output()).toBe(afterDispose);
+        expect(controller.isFooterVisible()).toBe(false);
+        expect(timer.cancelCount()).toBe(cancelsBeforeDispose + 1);
+    });
+
+    test("an injected resize subscription is detached exactly once on dispose", () => {
+        const listeners: Array<() => void> = [];
+        let unsubscribeCalls = 0;
+        const resize: TerminalResizeSubscription & {
+            readonly emit: () => void;
+        } = {
+            subscribe: (listener) => {
+                listeners.push(listener);
+                return () => {
+                    unsubscribeCalls += 1;
+                    const index = listeners.indexOf(listener);
+                    if (index >= 0) listeners.splice(index, 1);
+                };
+            },
+            emit: () => {
+                for (const listener of [...listeners]) listener();
+            },
+        };
+        const strategy = makeFakeStrategy();
+        const timer = makeFakeTimer();
+        const controller = makeTerminalOutputController({
+            mode: "interactive",
+            strategy,
+            footer: { timer },
+            resize,
+        });
+        // Paint a visible region so a stale resize would be observable.
+        controller.setFooter("live");
+        timer.run();
+        expect(strategy.output()).toBe("live");
+        resize.emit();
+        expect(strategy.output()).toBe(`live${CLEAR}live`);
+        expect(listeners).toHaveLength(1);
+
+        controller.dispose();
+        expect(unsubscribeCalls).toBe(1);
+        expect(listeners).toHaveLength(0);
+        expect(controller.isFooterVisible()).toBe(false);
+        const afterDispose = strategy.output();
+
+        // The second dispose does not unsubscribe again.
+        controller.dispose();
+        expect(unsubscribeCalls).toBe(1);
+
+        // Emitting resize after dispose writes nothing: the listener is gone.
+        resize.emit();
+        expect(strategy.output()).toBe(afterDispose);
+    });
+
+    test("the default resize listener is removed from process.stderr on dispose", () => {
+        const before = process.stderr.listenerCount("resize");
+        const strategy = makeFakeStrategy();
+        const controller = makeTerminalOutputController({
+            mode: "interactive",
+            strategy,
+            footer: { timer: makeFakeTimer() },
+        });
+        expect(process.stderr.listenerCount("resize")).toBe(before + 1);
+
+        controller.dispose();
+        expect(process.stderr.listenerCount("resize")).toBe(before);
+
+        controller.dispose();
+        expect(process.stderr.listenerCount("resize")).toBe(before);
+    });
+});
+
 describe("append-only surfaces emit no cursor controls", () => {
     for (const mode of ["plain", "json", "quiet"] as const) {
         test(`${mode} mode stays append-only even through region calls`, () => {
@@ -423,5 +550,7 @@ describe("region visibility", () => {
         expect(strategy.output()).toBe("");
         timer.run();
         expect(strategy.output()).toBe("direct");
+        // Dispose detaches the default process.stderr resize listener.
+        controller.dispose();
     });
 });
