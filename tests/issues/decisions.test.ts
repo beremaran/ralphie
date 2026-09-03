@@ -11,7 +11,7 @@ describe("grounding decision schema", () => {
         const parsed = groundingDecisionSchema.safeParse(
             stripExplicitNulls({
                 disposition: GroundingDisposition.Actionable,
-                summary: "The redaction calls remain.",
+                summary: "The grounded evidence remains.",
                 evidence: ["src/cli.ts:3"],
                 questions: ["What is missing?"],
             }),
