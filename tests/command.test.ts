@@ -3,7 +3,10 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
+import { runCli } from "../src/cli.ts";
 import { HELP_TEXT, parseCliArgs, runCommand } from "../src/command.ts";
+import { RalphieExitCode } from "../src/process/exit-code.ts";
+import { RalphieError } from "../src/shared/error.ts";
 import {
     DuplicateAction,
     ExecutionMode,
@@ -253,6 +256,95 @@ describe("native CLI parser", () => {
                 needsAttentionLabel: "saved-label",
             });
         } finally {
+            await rm(directory, { recursive: true, force: true });
+        }
+    });
+
+    test("keeps sensitive values verbatim in wrapped command errors", async () => {
+        process.env.GH_TOKEN = "private-auth-token";
+        try {
+            const failure = new RalphieError({
+                message:
+                    "Failed: Bearer private-value at https://example.test/api?token=query-secret; " +
+                    "environment token private-auth-token leaked.",
+            });
+            const error = await runCommand(["owner/repository"], {
+                factories: {
+                    makeCoordinator: () => ({
+                        progress: makeProgressRecorder([]),
+                        piListener: () => {},
+                        listener: () => {},
+                        piEventListener: () => {},
+                        getDisplayState: () => ({}) as never,
+                        dispose: async () => {},
+                    }),
+                    makePi: () => ({ start: async () => undefined as never }),
+                    makeRuntime: () => ({}) as never,
+                    runWorkflow: async () => {
+                        throw failure;
+                    },
+                },
+            }).then(
+                () => {
+                    throw new Error("expected runCommand to reject");
+                },
+                (caught: unknown) => caught as Error,
+            );
+            expect(error.message).toContain("Bearer private-value");
+            expect(error.message).toContain("query-secret");
+            expect(error.message).toContain("private-auth-token");
+            expect(error.message).not.toContain("[REDACTED]");
+            expect(error.cause).toBe(failure);
+        } finally {
+            process.exitCode = 0;
+            delete process.env.GH_TOKEN;
+        }
+    });
+
+    test("emits thrown error text verbatim on stderr", async () => {
+        const directory = await mkdtemp(join(tmpdir(), "ralphie-command-"));
+        const path = join(directory, "state.json");
+        const originalWrite = process.stderr.write.bind(process.stderr);
+        const written: string[] = [];
+        try {
+            await writeFile(
+                path,
+                JSON.stringify({
+                    version: RUN_STATE_VERSION,
+                    status: RunStateStatus.Active,
+                    runId: "Bearer private-value",
+                    repository: "owner/repository",
+                    branch: "main",
+                    onNeedsAttention: NeedsAttentionPolicy.Continue,
+                    selection: { agent: "build" },
+                    queue: {
+                        pending: [],
+                        completedIssueNumbers: [],
+                        processedCount: 0,
+                    },
+                    outcomes: [],
+                    updatedAt: "2026-08-24T00:00:00.000Z",
+                }),
+            );
+            process.stderr.write = ((text: string) => {
+                written.push(text);
+                return true;
+            }) as typeof process.stderr.write;
+            process.exitCode = 0;
+            await runCli([
+                "owner/repository",
+                "--resume",
+                path,
+                "--on-needs-attention",
+                "halt",
+            ]);
+            const output = written.join("");
+            expect(output).toContain("Cannot resume run Bearer private-value");
+            expect(output).not.toContain("[REDACTED]");
+            expect(process.exitCode).toBe(RalphieExitCode.Failure);
+        } finally {
+            process.stderr.write = originalWrite;
+            process.exitCode = 0;
             await rm(directory, { recursive: true, force: true });
         }
     });

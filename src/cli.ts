@@ -1,6 +1,5 @@
 import { runCommand } from "./command.ts";
 import { exitCodeForError, isNeedsAttentionStop } from "./process/exit-code.ts";
-import { redactSensitiveText } from "./shared/redaction.ts";
 
 /** Start the CLI with a native AbortSignal rather than a framework context. */
 export const runCli = async (
@@ -14,11 +13,8 @@ export const runCli = async (
     } catch (error) {
         process.exitCode = exitCodeForError(error, controller.signal);
         if (isNeedsAttentionStop(error)) return;
-        const message =
-            error instanceof Error
-                ? error.message
-                : redactSensitiveText(String(error));
-        process.stderr.write(`${redactSensitiveText(message)}\n`);
+        const message = error instanceof Error ? error.message : String(error);
+        process.stderr.write(`${message}\n`);
     } finally {
         process.removeListener("SIGINT", onInterrupt);
     }

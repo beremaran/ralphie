@@ -1,5 +1,4 @@
 import { RalphieError } from "../shared/error.ts";
-import { redactSensitiveText } from "../shared/redaction.ts";
 
 /**
  * Hard deadline for any process Ralphie spawns on its own account. Without a
@@ -106,9 +105,7 @@ export const requireSuccess = async (
             ? await runner.run(command, args)
             : await runner.run(command, args, options);
     if (result.exitCode !== 0) {
-        const detail = result.stderr
-            ? `\n${redactSensitiveText(result.stderr)}`
-            : "";
+        const detail = result.stderr ? `\n${result.stderr}` : "";
         throw new RalphieError({
             message: `${failureMessage}${detail}`,
         });

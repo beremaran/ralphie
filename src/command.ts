@@ -42,7 +42,6 @@ import {
     maintainIssues,
     type MaintainIssuesOptions,
 } from "./maintain-issues.ts";
-import { redactSensitiveText } from "./shared/redaction.ts";
 import { BUILD_INFO } from "./build-info.ts";
 import { type RunState, RunStateStoreLive } from "./run/state.ts";
 import { reconcileRunState } from "./run/reconciliation.ts";
@@ -627,10 +626,7 @@ const commandErrorFor = (
             : RalphieExitCode.NeedsAttention;
         return undefined;
     }
-    const message =
-        error instanceof Error
-            ? redactSensitiveText(error.message)
-            : String(error);
+    const message = error instanceof Error ? error.message : String(error);
     process.exitCode = exitCodeForError(error, signal);
     return new Error(message, { cause: error });
 };
