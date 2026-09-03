@@ -47,7 +47,7 @@ effects and validate their invariants at the boundary.
 | `src/progress/` | Typed events, audit persistence, redaction, and terminal/JSON renderers. |
 | `src/run/` | Versioned state, artifacts, reconciliation, and resume behavior. |
 | `src/workspace/` | Path expansion and protected workspace removal. |
-| `src/targets/` | Canonical standalone release target manifest, typed parser/loader, and read-only target query API. |
+| `src/targets/` | Canonical standalone release target manifest, typed parser/loader, read-only target query API, and deterministic catalog/GitHub Actions matrix JSON serializers. |
 | `src/process/` | External command execution and process exit semantics. |
 
 `src/workflow.ts` orchestrates the domain services. `src/runtime.ts` assembles
@@ -121,7 +121,7 @@ and [Safety](safety.md). For state transitions and reconciliation, see
 | Git checkpoints, safety, and branches | `src/git/` |
 | Durable state and reconciliation | `src/run/`, `src/issues/artifacts.ts` |
 | Progress, redaction, and exit semantics | `src/progress/`, `src/shared/redaction.ts`, `src/process/exit-code.ts` |
-| Standalone release target manifest and read-only query API | `src/targets/`, `targets/standalone-targets.json` |
+| Standalone release target manifest, read-only query API, and deterministic catalog/matrix JSON serializers | `src/targets/`, `targets/standalone-targets.json` |
 
 The source-level trigger-to-exit path is maintained in the [end-to-end
 execution trace](end-to-end-execution.md), which cross-references these
