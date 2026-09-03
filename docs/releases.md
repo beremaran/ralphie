@@ -85,8 +85,11 @@ and fails closed on any mismatch. Before the contract is written,
 staging also binds the recorded BuildKit digest to the OCI archive's own
 `index.json` entry: a single-platform export has exactly one manifest
 descriptor whose digest must be the same lowercase `sha256:<64 hex>` value,
-so the promotion input and the persisted digest cannot drift. The canonical GHCR tag is the
-normalized package version without `v` (for example, `0.1.0`). The publisher
+so the promotion input and the persisted digest cannot drift. The canonical
+GHCR tag and every alias come from the deterministic semver-aware tag plan
+(see [Deterministic GHCR tag plan](#deterministic-ghcr-tag-plan) below); the
+publisher never derives aliases with shell truncation or
+`docker/metadata-action`. The publisher
 also emits exactly four deterministic SPDX 2.3 JSON SBOMs in `release-assets`:
 `ralphie-<target>.sbom.spdx.json`. The checked-in `scripts/create-sboms.ts`
 wrapper runs only after the final renamed binaries and checksum manifest are
@@ -116,7 +119,7 @@ created. Attestation and signing complete before the publisher creates a
 release handle; any missing or failed attestation stops publication.
 The minor
 version, `latest` for stable releases only, and `sha-<commit>` are explicit
-aliases. A dry run skips GitHub Release and GHCR publication. A normal tag
+aliases derived by the deterministic tag plan described below. A dry run skips GitHub Release and GHCR publication. A normal tag
 push is not a dry run and runs release and container publication in the
 protected GitHub `release` environment. The native publisher targets the
 canonical repository explicitly, creates or reuses a validated draft release
@@ -156,6 +159,52 @@ Repository administrators must configure that environment in **Settings →
 Environments → release** with the required reviewer(s); approval is required
 before the final publisher can write release assets or packages.
 
+### Deterministic GHCR tag plan
+
+Container tag names are computed by the checked-in semver-aware planner
+(`planContainerTags` in `src/release/container-tags.ts`, driven by
+`scripts/derive-container-tags.ts` in the "Derive container tag plan" step of
+`push-container`). The planner consumes the already validated release version
+and `source_ref` and emits the exact `ralphie.container-tag-plan.v1`
+document; it never truncates with shell patterns such as `${VERSION%.*}` and
+never delegates tag inference to `docker/metadata-action`. The policy is:
+
+- the leading `v` is removed;
+- a prerelease suffix is retained (`1.2.3-rc.1` stays `1.2.3-rc.1`);
+- the minor alias is derived from the parsed numeric major/minor fields
+  (`1.2.3-rc.1` yields the alias `1.2`);
+- `latest` is included only when the SemVer has no prerelease identifier;
+- `sha-<source_ref>` is always included;
+- the release-index tag list is exactly ordered and deduplicated:
+  `1.2.3` yields `1.2.3`, `1.2`, `latest`, `sha-<source_ref>`, while
+  `1.2.3-rc.1` yields `1.2.3-rc.1`, `1.2`, `sha-<source_ref>` (never
+  `latest`). No alias outside this documented list is ever emitted.
+
+OCI/Docker tags cannot contain `+`, so build metadata is the
+release-contract handoff: the planner accepts a full SemVer such as
+`1.2.3+build.7` and normalizes the build metadata out of every emitted tag
+(`1.2.3+build.7` produces the OCI-safe tag `1.2.3`, and `1.2.3-rc.1+build.7`
+produces `1.2.3-rc.1`), while the full validated version (including the build
+metadata) is retained in the plan's `version` field and continues to be
+written into the `ralphie.container-candidate.v1` contract and the
+`org.opencontainers.image.version` label. A raw value such as
+`1.2.3+build.7` is therefore never passed to a registry. Malformed SemVer, an
+invalid 40-character `source_ref`, or any derived tag that would not be a
+valid OCI tag name fails closed (`ContainerTagPlanError`, non-zero exit) and
+no plan is produced.
+
+The plan document records `version`, `source_ref`, `version_tag`,
+`minor_tag`, `latest`, `source_tag`, `platform_tag_base`, `platform_tags`
+(`<version_tag>-amd64` and `<version_tag>-arm64`), and `index_tags`. The
+`push-container` job re-validates the persisted document with a jq gate
+(schema, exact order, deduplication, `latest` policy, `sha-` tag, and OCI tag
+safety) before any registry write. Platform promotion targets the
+`<platform_tag_base>-<arch>` names, and every manifest alias is created from
+the `index_tags` list joined with the image reference; the persisted
+`ralphie.publication-subjects.v1` map and the exact-digest reconciliation in
+`registry-reconcile.ts` are unchanged. Focused unit coverage lives in
+`tests/release/container-tags.test.ts`.
+
 ### Container build input boundary
 
 The `stage-container` job uses the repository root as its Docker context, but
@@ -184,7 +233,8 @@ after the write. Any other digest, malformed response, or unexpected registry
 status is a conflict/failure, and an unconditional tag write is never used.
 
 The `push-container` publisher promotes the two staged OCI archives to their
-per-platform `ghcr.io/beremaran/ralphie:<version>-amd64|arm64` tags. Before
+per-platform `ghcr.io/beremaran/ralphie:<platform_tag_base>-amd64|arm64` tags
+(where `<platform_tag_base>` is the plan's OCI-safe version tag). Before
 the first registry write, the
 `scripts/validate-container-candidates.ts` seam requires exactly the amd64
 and arm64 `ralphie-container-candidate-<version>-<arch>` artifact names

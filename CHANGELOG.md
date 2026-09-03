@@ -5,6 +5,36 @@ All notable changes to Ralphie are documented here. The project follows
 
 ## [Unreleased]
 
+- Implement the explicit semver-aware GHCR tag plan
+  (`rel20-publisher-container-tag-plan`) with a deterministic,
+  testable planner `src/release/container-tags.ts` driven by the new
+  executable seam `scripts/derive-container-tags.ts`, replacing the
+  `docker/metadata-action` inference and shell truncation in the
+  `push-container` job of `release.yml` (steps "Derive container tag
+  plan", "Promote platform images and persist publication subjects", and
+  "Create manifest aliases from immutable digests"). The planner consumes
+  the already validated release version and source commit and emits the
+  exact `ralphie.container-tag-plan.v1` document: the leading `v` is
+  removed, a prerelease suffix is retained, the minor alias comes from the
+  parsed numeric major/minor fields, `latest` is present only for SemVer
+  without a prerelease identifier, `sha-<source_ref>` is always present,
+  and the release-index list is exactly ordered and deduplicated
+  (`1.2.3-rc.1` → `1.2.3-rc.1`, `1.2`, `sha-...`; `1.2.3` → `1.2.3`,
+  `1.2`, `latest`, `sha-...`). Build metadata is the documented
+  release-contract handoff: `+` cannot appear in an OCI/Docker tag, so it
+  is normalized out of every emitted tag (`1.2.3+build.7` → `1.2.3`)
+  while the full validated version is retained in the plan and the
+  candidate/image metadata, and a raw value such as `1.2.3+build.7` is
+  never passed to a registry. Malformed SemVer, an invalid source ref, or
+  any derived tag that is not a valid OCI tag name fails closed
+  (`ContainerTagPlanError`) with no unlisted aliases emitted. Platform
+  promotion now uses the plan's `<platform_tag_base>-<arch>` names and
+  manifest aliases are created from the plan's `index_tags`; the persisted
+  plan is re-validated with a jq gate before any registry write. Unit
+  coverage in `tests/release/container-tags.test.ts` and the release
+  contract is documented in `docs/releases.md` under "Deterministic GHCR
+  tag plan".
+
 - Validate the exact staged container-candidate set in the protected
   `push-container` job (`rel20-publisher-container-candidate-validation`)
   with a new side-effect-free seam `scripts/validate-container-candidates.ts`
