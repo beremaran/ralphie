@@ -15,6 +15,13 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Changed
 
+- Dependency-blocked issues (open queue prerequisites) are recorded as
+  needs-attention outcomes but no longer publish a needs-attention GitHub
+  comment or label: the opt-in notifier is reserved for agent-reported
+  blockers that need a human decision, while queue-order blocks resolve by
+  completing the open dependencies. The `--on-needs-attention` halt/continue
+  policy and run-level progress events are unchanged.
+
 - Progress detail, activity rows, and short JSON snapshots are no longer
   redacted. The reporting boundary now preserves supplied values verbatim
   (`src/progress/activity.ts` sanitizes only terminal control sequences),

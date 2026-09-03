@@ -167,8 +167,12 @@ handled stop leaves the issue open and the run resumable with exit status 2.
 Notifications are disabled unless `--notify-needs-attention` is supplied; a
 label by itself is rejected. When opted in, Ralphie first persists the
 structured outcome and notification label intent, then publishes through the
-GitHub notification service. A failed or uncertain notification remains at an
-explicit notification-recovery boundary; resume preserves the saved
+GitHub notification service. Notification applies only to agent-reported
+needs-attention blockers: issues held back by open queue dependencies are
+recorded as needs-attention outcomes but never notified or labeled, because
+their blocker resolves by queue completion rather than by a human decision.
+A failed or uncertain notification remains at an explicit
+notification-recovery boundary; resume preserves the saved
 notification intent and label, reconciles the stable marker, and retries
 without rerunning agent work or closing the issue. Dry runs report
 needs-attention outcomes but never publish notifications. With

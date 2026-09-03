@@ -161,10 +161,13 @@ When the queue drains to issues that depend on open or decomposed-but-open
 prerequisites, those issues are never handed to the executor. Instead of
 failing the run with a bare "blocked by open dependencies" error, Ralphie
 records one needs-attention outcome per blocked issue with evidence naming
-each open dependency, emits progress events, and (with the opt-in notifier)
-publishes an idempotent notification. The `--on-needs-attention` policy then
-applies: `halt` stops with the handled stops contract, `continue` completes
-the run with the blocked issues preserved pending for a later run. Open
+each open dependency and emits progress events. This queue-order block never
+publishes a needs-attention notification or label: the opt-in notifier is
+reserved for agent-reported blockers that need a human decision, while an
+issue waiting on open queue items resolves purely by completing them. The
+`--on-needs-attention` policy then applies: `halt` stops with the handled
+stops contract, `continue` completes the run with the blocked issues
+preserved pending for a later run. Open
 dependencies on decomposed tracking parents resolve transitively to their
 open leaf children, so a child can never deadlock on a container issue that
 is never queued.

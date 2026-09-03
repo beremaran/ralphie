@@ -2690,7 +2690,7 @@ describe("workflow", () => {
         ).toContain(44);
     });
 
-    test("notifies the preserved issue when dependency-blocked issues are recorded", async () => {
+    test("does not notify dependency-blocked issues; notifies genuine needs-attention outcomes", async () => {
         const calls: string[] = [];
         const states: RunState[] = [];
         const blockedIssue: GitHubIssue = {
@@ -2727,16 +2727,10 @@ describe("workflow", () => {
                         label,
                     ) => {
                         calls.push(`notifyNeedsAttention:${issueNumber}`);
-                        if (issueNumber === 44) {
-                            expect(input.reason).toBe(
-                                NeedsAttentionReason.ExternalDependency,
-                            );
-                            expect(
-                                input.evidence.some((item) =>
-                                    item.includes("#42"),
-                                ),
-                            ).toBe(true);
-                        }
+                        expect(issueNumber).toBe(firstIssue.number);
+                        expect(input.reason).toBe(
+                            NeedsAttentionReason.MissingInformation,
+                        );
                         expect(label).toBe("needs-attention");
                         return {
                             comment: "created" as const,
@@ -2750,7 +2744,12 @@ describe("workflow", () => {
         expect(summary.counts[IssueExecutionOutcomeKind.NeedsAttention]).toBe(
             2,
         );
-        expect(calls).toContain("notifyNeedsAttention:44");
+        // The dependency-blocked issue (#44) is recorded but never notified:
+        // open queue dependencies resolve by queue completion, not by human
+        // attention. Only the agent-reported blocker (#firstIssue) notifies.
+        expect(
+            calls.filter((call) => call.startsWith("notifyNeedsAttention:")),
+        ).toEqual([`notifyNeedsAttention:${firstIssue.number}`]);
         expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
     });
 

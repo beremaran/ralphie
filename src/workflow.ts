@@ -482,17 +482,15 @@ type WorkflowIssueContext = {
 /**
  * Dependency-blocked issues are never handed to the executor, so no agent
  * session can report them. Surface them explicitly as needs-attention
- * outcomes: evidence naming each open dependency, progress events,
- * opt-in idempotent notifications, and the halt/continue policy, instead of
- * failing the run with a bare "blocked by open dependencies" error. Blocked
- * issues stay pending in the persisted queue and become ready when their
- * dependencies complete. Returns whether any blocked issue was recorded.
+ * outcomes: evidence naming each open dependency, and the halt/continue
+ * policy, instead of failing the run with a bare "blocked by open
+ * dependencies" error. Blocked issues stay pending in the persisted queue
+ * and become ready when their dependencies complete. Returns whether any
+ * blocked issue was recorded.
  */
 type DependencyBlockedHandlers = {
     readonly queue: ReturnType<typeof createIssueQueue>;
     readonly onNeedsAttention: NeedsAttentionPolicy;
-    readonly notificationsEnabled: boolean;
-    readonly effectiveDryRun: boolean;
     readonly recordIssueOutcome: (
         issueNumber: number,
         outcome: IssueExecutionOutcome,
@@ -501,15 +499,6 @@ type DependencyBlockedHandlers = {
         issueContext: Pick<WorkflowIssueContext, "issue" | "current" | "total">,
         outcome: NeedsAttentionOutcome,
     ) => Promise<void>;
-    readonly savePendingNotification: (
-        issueNumber: number,
-        outcome: NeedsAttentionOutcome,
-    ) => Promise<NonNullable<RunState["pendingNotification"]>>;
-    readonly publishPendingNotification: (
-        issueNumber: number,
-        intent: NonNullable<RunState["pendingNotification"]>,
-    ) => Promise<void>;
-    readonly clearHaltedNeedsAttention: (issueNumber: number) => Promise<void>;
     readonly emitHandledNeedsAttention: (
         issueContext: Pick<WorkflowIssueContext, "issue" | "current" | "total">,
         outcome: NeedsAttentionOutcome,
@@ -527,9 +516,6 @@ const emitDependencyBlockedIssue = async (
         | "onNeedsAttention"
         | "recordIssueOutcome"
         | "emitNeedsAttentionEvent"
-        | "savePendingNotification"
-        | "publishPendingNotification"
-        | "clearHaltedNeedsAttention"
         | "emitHandledNeedsAttention"
         | "persistState"
     > & {
@@ -537,23 +523,18 @@ const emitDependencyBlockedIssue = async (
         readonly openDependencies: ReadonlyArray<number>;
         readonly current: number;
         readonly total: number;
-        readonly shouldNotify: boolean;
     },
 ): Promise<void> => {
     const {
         onNeedsAttention,
         recordIssueOutcome,
         emitNeedsAttentionEvent,
-        savePendingNotification,
-        publishPendingNotification,
-        clearHaltedNeedsAttention,
         emitHandledNeedsAttention,
         persistState,
         issue,
         openDependencies,
         current,
         total,
-        shouldNotify,
     } = handlers;
     const dependencyList = openDependencies
         .map((number) => `#${number}`)
@@ -575,19 +556,11 @@ const emitDependencyBlockedIssue = async (
     recordIssueOutcome(issue.number, outcome);
     const issueContext = { issue, current, total };
     await emitNeedsAttentionEvent(issueContext, outcome);
-    if (shouldNotify) {
-        const intent = await savePendingNotification(issue.number, outcome);
-        await publishPendingNotification(issue.number, intent);
-    }
     if (onNeedsAttention !== NeedsAttentionPolicy.Halt) return;
-    if (shouldNotify) {
-        await clearHaltedNeedsAttention(issue.number);
-    } else {
-        await persistState(RunStateStatus.Active, {
-            issueNumber: issue.number,
-            stage: "grounding",
-        });
-    }
+    await persistState(RunStateStatus.Active, {
+        issueNumber: issue.number,
+        stage: "grounding",
+    });
     await emitHandledNeedsAttention(issueContext, outcome);
     throw new NeedsAttentionStop({
         issueNumber: issue.number,
@@ -598,12 +571,15 @@ const emitDependencyBlockedIssue = async (
 /**
  * Dependency-blocked issues are never handed to the executor, so no agent
  * session can report them. Surface them explicitly as needs-attention
- * outcomes: evidence naming each open dependency, progress events,
- * opt-in idempotent notifications, and the halt/continue policy, instead of
- * failing the run with a bare "blocked by open dependencies" error. Blocked
- * issues stay pending in the persisted queue and become ready when their
- * dependencies complete. Throws the fail-closed error only when the blocked
- * state is spurious (no pending entry has an unmet dependency).
+ * outcomes with evidence naming each open dependency, instead of
+ * failing the run with a bare "blocked by open dependencies" error. This
+ * deterministic queue-order block never publishes a needs-attention
+ * notification or label: an issue waiting on open queue items resolves by
+ * queue completion, not by human attention, so the opt-in notifier is
+ * reserved for agent-reported blockers. Blocked issues stay pending in the
+ * persisted queue, the halt/continue policy still governs the run, and the
+ * fail-closed error is thrown only when the blocked state is spurious (no
+ * pending entry has an unmet dependency).
  */
 const handleDependencyBlockedQueue = async (
     handlers: DependencyBlockedHandlers,
@@ -627,8 +603,6 @@ const handleDependencyBlockedQueue = async (
             openDependencies,
             current,
             total: handlers.queueTotalFor(current),
-            shouldNotify:
-                handlers.notificationsEnabled && !handlers.effectiveDryRun,
         });
     }
     if (recorded === 0) {
@@ -2765,13 +2739,8 @@ export const workflow = async (
             await handleDependencyBlockedQueue({
                 queue,
                 onNeedsAttention,
-                notificationsEnabled,
-                effectiveDryRun,
                 recordIssueOutcome,
                 emitNeedsAttentionEvent,
-                savePendingNotification,
-                publishPendingNotification,
-                clearHaltedNeedsAttention,
                 emitHandledNeedsAttention,
                 persistState,
                 queueTotalFor,
