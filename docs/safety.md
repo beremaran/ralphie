@@ -37,6 +37,27 @@ missing remote branch beyond the first delivery, an unanchored feature head,
 or a force push halts the revision instead of following or resetting over the
 expected head.
 
+Managed feature-branch revisions are delivered as one deterministic
+operation that runs those safety checks before staging/commit, creates exactly
+one commit from the allowed staged tree, re-checks the local branch/parent and
+the remote feature/PR head immediately before the push, and pushes only with
+Git's non-force mode to the explicit `HEAD:refs/heads/<branch>` destination
+ref. After both a successful push and a push/transport error the operation
+reads the authoritative remote branch with `git ls-remote`; it never infers
+success from a local tracking ref or from the push command's response alone.
+The discriminated, typed outcome tells a coordinator exactly what happened:
+`confirmed` when the remote equals the new commit and the checkout is clean
+(including a lost push response reconciled to success by the remote read),
+`external-movement` when the remote no longer equals the expected prior head
+(halt without retrying or overwriting; the created commit is retained), or
+`ambiguous` when the remote read cannot prove whether the new commit arrived
+(the created clean commit is retained and requires safe reconciliation).
+Movement detected before staging/commit prevents the commit from being
+created; movement detected before or during delivery is never followed, reset
+over, or force-pushed over. Cancellation is checked at every mutation
+boundary, the push is attempted at most once, and failures and cancellations
+leave a clean, recoverable checkout.
+
 Implementation agents may use normal shell composition, pipes, redirection,
 and language runtimes. Ralphie's shell hook rejects explicit agent requests for
 orchestration-owned Git/GitHub mutations such as commits, pushes, branch

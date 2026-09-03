@@ -253,6 +253,16 @@ The direct-push path never uses force. A push rejection is authoritative: the
 created commit and artifacts are retained, the run halts, and resume can
 reconcile a commit that may already have reached the remote.
 
+Managed feature-branch revisions (follow-up deliveries to an existing `pr`
+feature branch) are delivered with the same non-force boundary, an exact-tree
+revision commit, and an authoritative post-push `git ls-remote` read. Delivery
+is `confirmed` only when the remote equals the new commit and the checkout is
+clean; a lost push response is reconciled to success by that read. When the
+remote no longer equals the expected prior head the outcome is
+`external-movement` and Ralphie halts without retrying or force-pushing, and
+when the remote read cannot prove whether the new commit arrived the outcome
+is `ambiguous`, retaining the created clean commit for safe reconciliation.
+
 The `pr` delivery is gated: once the matching pull request is created or
 found, its number and head SHA are persisted, review attempts are published
 idempotently, and the read-only check observer polls checks for that exact SHA

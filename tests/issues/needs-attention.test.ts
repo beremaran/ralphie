@@ -605,6 +605,19 @@ const makeImplementationHarness = async (
                 pushMode: "non-force",
             };
         },
+        verifyManagedRevisionPrePush: async () => {
+            trace.push("ops:remoteSafety:managed:prePush");
+            return {
+                repository: "owner/repo",
+                branch: "develop",
+                origin: "origin",
+                baseSha: CHECKPOINT.sha,
+                expectedPriorHeadSha: CHECKPOINT.sha,
+                commitsBehindBase: 0,
+                commitsAheadBase: 0,
+                pushMode: "non-force",
+            };
+        },
     };
     const verification: IssueVerificationService = {
         stagedTreeSha: async () => TREE_SHA,

@@ -260,6 +260,21 @@ to five times. Only repair exhaustion or a non-repairable verification fault
 (for example missing configuration or a command changing the staged tree)
 reaches the ordinary halt boundary.
 
+A managed feature-branch revision delivery ends in one of three ways, each
+persisted for resume. A `confirmed` outcome means the authoritative remote
+read proved the remote equals the new commit with a clean checkout, including
+a lost push response reconciled to success; the revision is delivered. An
+`external-movement` outcome means the remote no longer equals the expected
+prior head; the created clean commit is retained locally and resume must not
+retry, force-push, or reset over the moved remote. An `ambiguous` outcome
+means the remote read could not prove whether the new commit arrived; the
+created clean commit is retained, and resume re-reads the authoritative remote
+branch to reconcile: a remote still at the expected prior head can be safely
+re-pushed non-force, a remote already at the retained commit is treated as
+confirmed, and a remote that moved elsewhere halts again. A cancellation or
+failure before the first mutation leaves the untouched clean checkout; after
+the exact-tree commit is created, it is retained for the same reconciliation.
+
 ## Cleanup
 
 `--clean end` removes the entire workspace after success, including completed

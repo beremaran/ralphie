@@ -5,6 +5,24 @@ All notable changes to Ralphie are documented here. The project follows
 
 ## [Unreleased]
 
+- Deliver managed feature-branch revisions as one deterministic operation
+  with authoritative remote reconciliation: the revision safety checks run
+  before staging/commit and again immediately before the push, the exact-tree
+  revision commit is created from the allowed staged tree, the push uses only
+  Git's non-force mode to the explicit `HEAD:refs/heads/<branch>` destination
+  ref, and the outcome is classified from the authoritative post-push
+  `git ls-remote` read (never from a tracking ref or command response alone).
+  The discriminated, typed outcome distinguishes `confirmed` delivery (remote
+  equals the new commit with a clean checkout, including a lost push response
+  reconciled to success), `external-movement` (remote no longer equals the
+  expected prior head: halt without retry or force), and `ambiguous` delivery
+  (remote read cannot prove whether the new commit arrived; the created clean
+  commit is retained for safe reconciliation). Movement detected before
+  staging/commit prevents the commit from being created, cancellation is
+  checked at every mutation boundary, the push is attempted at most once, and
+  the `lgtm` direct-push path and its shared, regression-tested helpers are
+  unchanged.
+
 - Tighten human transcript bounds to 3 lines/140 characters: tool incremental
   output uses `LIVE_OUTPUT_LIMIT=140`, thinking/assistant streams use the same
   140-character bound, and final previews truncate to 3 lines/140 characters

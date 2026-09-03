@@ -19,6 +19,14 @@ import {
     type GitRemoteSafetyService,
 } from "./git/remote-safety.ts";
 import {
+    makeGitRevisionCommitService,
+    type GitRevisionCommitService,
+} from "./git/revision-commit.ts";
+import {
+    makeGitRevisionDeliveryService,
+    type GitRevisionDeliveryService,
+} from "./git/revision-delivery.ts";
+import {
     makeGitRepositoryInvariantService,
     type GitRepositoryInvariantService,
 } from "./git/repository-invariant.ts";
@@ -133,6 +141,8 @@ export type RalphieRuntime = {
     readonly gitIssueOperations: GitIssueOperationsService;
     readonly gitIssuePreparation: GitIssuePreparationService;
     readonly gitRemoteSafety: GitRemoteSafetyService;
+    readonly gitRevisionCommit: GitRevisionCommitService;
+    readonly gitRevisionDelivery: GitRevisionDeliveryService;
     readonly issueArtifactStore: IssueArtifactStoreService;
     readonly complexityAssessment: ComplexityAssessmentService;
     readonly groundingAssessment: GroundingAssessmentService;
@@ -191,6 +201,12 @@ export const makeLiveRuntime = ({
     const gitIssueCheckpoint = makeGitIssueCheckpointService(commandRunner);
     const gitIssueOperations = makeGitIssueOperationsService(commandRunner);
     const gitRemoteSafety = makeGitRemoteSafetyService(commandRunner);
+    const gitRevisionCommit = makeGitRevisionCommitService(commandRunner);
+    const gitRevisionDelivery = makeGitRevisionDeliveryService(
+        commandRunner,
+        gitRevisionCommit,
+        gitRemoteSafety,
+    );
     const issueArtifactStore = makeIssueArtifactStoreService();
     const actualGitIssuePreparation = makeGitIssuePreparationService(
         gitIssueCheckpoint,
@@ -261,6 +277,8 @@ export const makeLiveRuntime = ({
         gitIssueOperations,
         gitIssuePreparation: actualGitIssuePreparation,
         gitRemoteSafety,
+        gitRevisionCommit,
+        gitRevisionDelivery,
         issueArtifactStore,
         complexityAssessment,
         groundingAssessment,

@@ -31,6 +31,10 @@ describe("runtime factory", () => {
         );
         expect(runtime.pipelineObservation).toBeDefined();
         expect(runtime.pipelineObservation.observe).toBeFunction();
+        expect(runtime.gitRevisionCommit).toBeDefined();
+        expect(runtime.gitRevisionCommit.commitRevision).toBeFunction();
+        expect(runtime.gitRevisionDelivery).toBeDefined();
+        expect(runtime.gitRevisionDelivery.deliverRevision).toBeFunction();
     });
 
     test("lets consumers observe one exact SHA with an abort signal and bounded settings", async () => {

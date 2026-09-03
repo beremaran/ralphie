@@ -98,7 +98,8 @@ const validCommitMessage = (message: CommitMessageDecision): boolean =>
     message.subject.length <= 72 &&
     (message.body === undefined || message.body.trim().length > 0);
 
-const isNonFastForward = (output: string): boolean =>
+/** Detect a rejected non-fast-forward push from the raw Git response. Shared by every push path. */
+export const isNonFastForward = (output: string): boolean =>
     /non-fast-forward|fetch first|remote contains work|tip of your current branch is behind/i.test(
         output,
     );

@@ -22,6 +22,8 @@ type RunnerOptions = {
     readonly origin?: string;
     readonly branch?: string;
     readonly head?: string;
+    /** Parent the created revision is observed to carry via `rev-parse HEAD^`. */
+    readonly commitParent?: string;
     /** Raw `git ls-remote` output for refs/heads/<branch>. */
     readonly remote?: string;
     /** Raw `git rev-list --left-right --count` output. */
@@ -44,6 +46,9 @@ const respond = (
     }
     if (joined.includes("symbolic-ref --short HEAD")) {
         return result(options.branch ?? "develop");
+    }
+    if (joined.endsWith("rev-parse HEAD^")) {
+        return result(options.commitParent ?? PRIOR_HEAD);
     }
     if (joined.includes("rev-parse HEAD")) {
         return result(options.head ?? PRIOR_HEAD);
@@ -354,6 +359,215 @@ describe("managed feature-branch revision safety", () => {
                 _tag: "GitManagedRevisionSafetyError",
                 kind: "invalid-push-mode",
                 policy: "non-force-only",
+            }),
+        );
+    });
+});
+
+describe("managed revision pre-push re-check", () => {
+    test("accepts the created revision head, its prior parent, and an unchanged remote head", async () => {
+        const { run, commands } = makeRunner({
+            branch: "ralphie/issue-42",
+            head: EXPECTED_COMMIT,
+            remote: remoteAt(PRIOR_HEAD, "ralphie/issue-42"),
+            counts: "0 1",
+        });
+        const service = makeGitRemoteSafetyService({ run });
+        const report = await service.verifyManagedRevisionPrePush({
+            repository: REPOSITORY,
+            repositoryPath: REPOSITORY_PATH,
+            branch: "ralphie/issue-42",
+            baseSha: BASE,
+            expectedPriorHeadSha: PRIOR_HEAD,
+            expectedLocalHeadSha: EXPECTED_COMMIT,
+            isFirstDelivery: false,
+        });
+
+        expect(report).toMatchObject({
+            expectedPriorHeadSha: PRIOR_HEAD,
+            commitsBehindBase: 0,
+            commitsAheadBase: 1,
+            pushMode: "non-force",
+        });
+        expect(
+            commands.some((command) => command.endsWith("rev-parse HEAD^")),
+        ).toBe(true);
+    });
+
+    test("allows the missing remote branch only for the first delivery at the re-check", async () => {
+        const { run } = makeRunner({
+            branch: "ralphie/issue-42",
+            head: EXPECTED_COMMIT,
+            counts: "0 1",
+        });
+        const service = makeGitRemoteSafetyService({ run });
+        await expect(
+            service.verifyManagedRevisionPrePush({
+                repository: REPOSITORY,
+                repositoryPath: REPOSITORY_PATH,
+                branch: "ralphie/issue-42",
+                baseSha: BASE,
+                expectedPriorHeadSha: PRIOR_HEAD,
+                expectedLocalHeadSha: EXPECTED_COMMIT,
+                isFirstDelivery: true,
+            }),
+        ).resolves.toMatchObject({
+            expectedPriorHeadSha: PRIOR_HEAD,
+        });
+    });
+
+    test("refuses a local HEAD that is not the created revision before pushing", async () => {
+        const { run, commands } = makeRunner({
+            branch: "ralphie/issue-42",
+            head: OTHER,
+            remote: remoteAt(PRIOR_HEAD, "ralphie/issue-42"),
+            counts: "0 1",
+        });
+        const service = makeGitRemoteSafetyService({ run });
+        await expect(
+            service.verifyManagedRevisionPrePush({
+                repository: REPOSITORY,
+                repositoryPath: REPOSITORY_PATH,
+                branch: "ralphie/issue-42",
+                baseSha: BASE,
+                expectedPriorHeadSha: PRIOR_HEAD,
+                expectedLocalHeadSha: EXPECTED_COMMIT,
+                isFirstDelivery: false,
+            }),
+        ).rejects.toEqual(
+            expect.objectContaining({
+                _tag: "GitManagedRevisionSafetyError",
+                kind: "stale-prior-head",
+                policy: "require-expected-prior-head",
+            }),
+        );
+        expect(
+            commands.some((command) =>
+                /reset|checkout|fetch|pull/.test(command),
+            ),
+        ).toBe(false);
+    });
+
+    test("refuses a revision whose parent is not the expected prior head", async () => {
+        const { run } = makeRunner({
+            branch: "ralphie/issue-42",
+            head: EXPECTED_COMMIT,
+            commitParent: OTHER,
+            remote: remoteAt(PRIOR_HEAD, "ralphie/issue-42"),
+            counts: "0 1",
+        });
+        const service = makeGitRemoteSafetyService({ run });
+        await expect(
+            service.verifyManagedRevisionPrePush({
+                repository: REPOSITORY,
+                repositoryPath: REPOSITORY_PATH,
+                branch: "ralphie/issue-42",
+                baseSha: BASE,
+                expectedPriorHeadSha: PRIOR_HEAD,
+                expectedLocalHeadSha: EXPECTED_COMMIT,
+                isFirstDelivery: false,
+            }),
+        ).rejects.toEqual(
+            expect.objectContaining({
+                _tag: "GitManagedRevisionSafetyError",
+                kind: "stale-prior-head",
+            }),
+        );
+    });
+
+    test("refuses a moved remote head at the re-check before pushing", async () => {
+        const { run } = makeRunner({
+            branch: "ralphie/issue-42",
+            head: EXPECTED_COMMIT,
+            remote: remoteAt(OTHER, "ralphie/issue-42"),
+            counts: "0 1",
+        });
+        const service = makeGitRemoteSafetyService({ run });
+        await expect(
+            service.verifyManagedRevisionPrePush({
+                repository: REPOSITORY,
+                repositoryPath: REPOSITORY_PATH,
+                branch: "ralphie/issue-42",
+                baseSha: BASE,
+                expectedPriorHeadSha: PRIOR_HEAD,
+                expectedLocalHeadSha: EXPECTED_COMMIT,
+                isFirstDelivery: false,
+            }),
+        ).rejects.toEqual(
+            expect.objectContaining({
+                _tag: "GitManagedRevisionSafetyError",
+                kind: "remote-moved",
+                policy: "require-expected-remote-head",
+            }),
+        );
+    });
+
+    test("refuses a missing remote branch at the re-check for a later revision", async () => {
+        const { run } = makeRunner({
+            branch: "ralphie/issue-42",
+            head: EXPECTED_COMMIT,
+            counts: "0 1",
+        });
+        const service = makeGitRemoteSafetyService({ run });
+        await expect(
+            service.verifyManagedRevisionPrePush({
+                repository: REPOSITORY,
+                repositoryPath: REPOSITORY_PATH,
+                branch: "ralphie/issue-42",
+                baseSha: BASE,
+                expectedPriorHeadSha: PRIOR_HEAD,
+                expectedLocalHeadSha: EXPECTED_COMMIT,
+                isFirstDelivery: false,
+            }),
+        ).rejects.toEqual(
+            expect.objectContaining({
+                _tag: "GitManagedRevisionSafetyError",
+                kind: "remote-moved",
+            }),
+        );
+    });
+
+    test("refuses a force push mode at the re-check", async () => {
+        const { run } = makeRunner();
+        const service = makeGitRemoteSafetyService({ run });
+        await expect(
+            service.verifyManagedRevisionPrePush({
+                repository: REPOSITORY,
+                repositoryPath: REPOSITORY_PATH,
+                branch: "ralphie/issue-42",
+                baseSha: BASE,
+                expectedPriorHeadSha: PRIOR_HEAD,
+                expectedLocalHeadSha: EXPECTED_COMMIT,
+                isFirstDelivery: false,
+                pushMode: "force",
+            }),
+        ).rejects.toEqual(
+            expect.objectContaining({
+                _tag: "GitManagedRevisionSafetyError",
+                kind: "invalid-push-mode",
+                policy: "non-force-only",
+            }),
+        );
+    });
+
+    test("refuses an invalid created head sha at the re-check", async () => {
+        const { run } = makeRunner();
+        const service = makeGitRemoteSafetyService({ run });
+        await expect(
+            service.verifyManagedRevisionPrePush({
+                repository: REPOSITORY,
+                repositoryPath: REPOSITORY_PATH,
+                branch: "ralphie/issue-42",
+                baseSha: BASE,
+                expectedPriorHeadSha: PRIOR_HEAD,
+                expectedLocalHeadSha: "not-a-sha",
+                isFirstDelivery: false,
+            }),
+        ).rejects.toEqual(
+            expect.objectContaining({
+                _tag: "GitManagedRevisionSafetyError",
+                kind: "invalid-managed-checkout",
+                policy: "require-valid-managed-checkout",
             }),
         );
     });

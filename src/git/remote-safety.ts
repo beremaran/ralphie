@@ -105,6 +105,15 @@ export type GitManagedRevisionInput = {
     readonly pushMode?: GitPushMode;
 };
 
+export type GitManagedRevisionPrePushInput = GitManagedRevisionInput & {
+    /**
+     * The exact new feature-head commit created locally for delivery. The
+     * re-check requires local HEAD to be exactly this commit and its parent
+     * to be the expected prior feature head before the non-force push.
+     */
+    readonly expectedLocalHeadSha: string;
+};
+
 export type GitManagedRevisionReport = {
     readonly repository: string;
     readonly branch: string;
@@ -131,6 +140,19 @@ export type GitRemoteSafetyService = {
     readonly verifyManagedRevisionPush: (
         input: GitManagedRevisionInput,
     ) => Promise<GitManagedRevisionReport>;
+    /**
+     * Re-check the revision invariants immediately before pushing a created
+     * revision: the local branch and HEAD must still be the managed feature
+     * branch at exactly the created revision commit whose parent is the
+     * expected prior feature head, and the remote feature/PR head must still
+     * sit at the expected prior head (absent only for the explicit first
+     * delivery). A moved remote, a drifted local head, a changed revision
+     * parent, or a force push halts the check; the created commit is retained
+     * for reconciliation and is never force-pushed or reset over.
+     */
+    readonly verifyManagedRevisionPrePush: (
+        input: GitManagedRevisionPrePushInput,
+    ) => Promise<GitManagedRevisionReport>;
 };
 
 const fail = (
@@ -141,6 +163,8 @@ const fail = (
 ): never => {
     throw new GitRemoteSafetyError({ kind, policy, message, cause });
 };
+
+const validGitSha = /^[0-9a-f]{40}([0-9a-f]{24})?$/i;
 
 const failManaged = (
     kind: GitManagedRevisionFailureKind,
@@ -415,6 +439,52 @@ const verifyManagedBaseAncestry = async (
     return counts;
 };
 
+const verifyManagedRevisionPrePushInput = (
+    input: GitManagedRevisionPrePushInput,
+): string => {
+    const slug = verifyManagedRevisionPushInput(input);
+    if (!validGitSha.test(input.expectedLocalHeadSha)) {
+        failManaged(
+            "invalid-managed-checkout",
+            "require-valid-managed-checkout",
+            `Refusing to push a revision with an invalid created head: ${input.expectedLocalHeadSha}.`,
+        );
+    }
+    return slug;
+};
+
+const verifyManagedLocalCreatedHead = (
+    input: GitManagedRevisionPrePushInput,
+    head: string,
+): void => {
+    if (head.toLowerCase() !== input.expectedLocalHeadSha.toLowerCase()) {
+        failManaged(
+            "stale-prior-head",
+            "require-expected-prior-head",
+            `Local HEAD ${head} is not the created revision ${input.expectedLocalHeadSha}; refusing to push a drifted checkout.`,
+        );
+    }
+};
+
+const verifyManagedRevisionParent = async (
+    runner: CommandRunnerService,
+    input: GitManagedRevisionPrePushInput,
+): Promise<void> => {
+    const parent = await runGit(
+        runner,
+        input.repositoryPath,
+        ["rev-parse", "HEAD^"],
+        "Failed to read the created revision parent.",
+    );
+    if (parent.toLowerCase() !== input.expectedPriorHeadSha.toLowerCase()) {
+        failManaged(
+            "stale-prior-head",
+            "require-expected-prior-head",
+            `Created revision parent ${parent} does not match expected prior head ${input.expectedPriorHeadSha}; refusing to push.`,
+        );
+    }
+};
+
 const verifyManagedRevisionPushInput = (
     input: GitManagedRevisionInput,
 ): string => {
@@ -526,6 +596,49 @@ export const makeGitRemoteSafetyService = (
             "Failed to read the local HEAD.",
         );
         verifyManagedLocalHead(input, head);
+
+        const remote = await runGit(
+            runner,
+            input.repositoryPath,
+            ["ls-remote", "origin", `refs/heads/${input.branch}`],
+            `Failed to read origin/${input.branch}.`,
+        );
+        verifyManagedRemoteHead(input, remote);
+
+        const [behind, ahead] = await verifyManagedBaseAncestry(runner, input);
+
+        return {
+            repository: slug,
+            branch: input.branch,
+            origin,
+            baseSha: input.baseSha,
+            expectedPriorHeadSha: input.expectedPriorHeadSha,
+            commitsBehindBase: behind,
+            commitsAheadBase: ahead,
+            pushMode: "non-force",
+        };
+    },
+
+    verifyManagedRevisionPrePush: async (input) => {
+        const slug = verifyManagedRevisionPrePushInput(input);
+        const origin = await readAndVerifyManagedOrigin(runner, input, slug);
+
+        const localBranch = await runGit(
+            runner,
+            input.repositoryPath,
+            ["symbolic-ref", "--short", "HEAD"],
+            "Failed to read the checked-out branch.",
+        );
+        verifyManagedBranch(input, localBranch);
+
+        const head = await runGit(
+            runner,
+            input.repositoryPath,
+            ["rev-parse", "HEAD"],
+            "Failed to read the local HEAD.",
+        );
+        verifyManagedLocalCreatedHead(input, head);
+        await verifyManagedRevisionParent(runner, input);
 
         const remote = await runGit(
             runner,

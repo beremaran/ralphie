@@ -522,6 +522,8 @@ const testRuntime = (
         gitIssueOperations: operations,
         gitIssuePreparation: {} as never,
         gitRemoteSafety: {} as never,
+        gitRevisionCommit: {} as never,
+        gitRevisionDelivery: {} as never,
         issueArtifactStore: artifactStore,
         complexityAssessment: {} as never,
         groundingAssessment: {} as never,
