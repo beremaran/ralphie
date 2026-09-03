@@ -2292,6 +2292,80 @@ describe("workflow", () => {
         expect(calls).toContain("closeIssue:43");
     });
 
+    test("keeps a confirmed needs-attention recovery outcome open with its diagnostics path and no Git or GitHub mutations", async () => {
+        const calls: string[] = [];
+        const states: RunState[] = [];
+        const events: ProgressUpdate[] = [];
+        const diagnosticsPath =
+            "/tmp/.ralphie/runs/run-1/issues/42/needs-attention-abc/changes.patch";
+        const summary = await workflow(
+            { ...baseOptions, maxIssues: 2 },
+            testRuntime(
+                calls,
+                states,
+                {
+                    issueLists: [[firstIssue, secondIssue]],
+                    outcomes: [
+                        {
+                            kind: IssueExecutionOutcomeKind.NeedsAttention,
+                            reason: NeedsAttentionReason.MissingInformation,
+                            summary: "A prerequisite is still open.",
+                            evidence: [
+                                "Issue body links the open prerequisite.",
+                            ],
+                            questions: [
+                                "Complete the prerequisite, then retry.",
+                            ],
+                            diagnosticsPath,
+                        },
+                        {
+                            kind: IssueExecutionOutcomeKind.Completed,
+                            completion: "pushed-commit",
+                            commitSha: "second-sha",
+                        },
+                    ],
+                },
+                events,
+            ),
+        );
+
+        expect(summary.outcomes[0]?.outcome).toMatchObject({
+            kind: IssueExecutionOutcomeKind.NeedsAttention,
+            reason: NeedsAttentionReason.MissingInformation,
+            summary: "A prerequisite is still open.",
+            evidence: ["Issue body links the open prerequisite."],
+            questions: ["Complete the prerequisite, then retry."],
+            diagnosticsPath,
+        });
+        const needsAttention = events.find(
+            ({ status }) => status === "needs-attention",
+        );
+        expect(needsAttention).toMatchObject({
+            details: {
+                reason: NeedsAttentionReason.MissingInformation,
+                summary: "A prerequisite is still open.",
+                evidence: ["Issue body links the open prerequisite."],
+                questions: ["Complete the prerequisite, then retry."],
+                diagnosticsPath,
+                policy: NeedsAttentionPolicy.Continue,
+            },
+        });
+        expect(states.at(-1)?.outcomes).toContainEqual(
+            expect.objectContaining({
+                issueNumber: 42,
+                outcome: expect.objectContaining({
+                    kind: IssueExecutionOutcomeKind.NeedsAttention,
+                    diagnosticsPath,
+                }),
+            }),
+        );
+        expect(states.at(-1)?.queue.completedIssueNumbers).toEqual([43]);
+        expect(calls).not.toContain("closeIssue:42");
+        expect(calls).not.toContain("prepareFeatureBranch:");
+        expect(calls).not.toContain("pushBranch:");
+        expect(calls).toContain("closeIssue:43");
+    });
+
     test("continues after the decomposition ceiling even when needs-attention defaults to halt", async () => {
         const calls: string[] = [];
         const states: RunState[] = [];

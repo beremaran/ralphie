@@ -887,6 +887,10 @@ describe("needs-attention router", () => {
         expect(outcome).toMatchObject({
             kind: IssueExecutionOutcomeKind.NeedsAttention,
             diagnosticsPath: "/diag/needs-attention",
+            reason: NeedsAttentionReason.MissingInformation,
+            summary: "A prerequisite is still open.",
+            evidence: ["Issue body links the open prerequisite."],
+            questions: ["Complete the prerequisite, then retry."],
         });
         const verifierPrompts = verifierPromptsOf(prompts);
         expect(verifierPrompts).toHaveLength(1);
@@ -1061,6 +1065,9 @@ describe("issue executor needs-attention routing", () => {
             kind: IssueExecutionOutcomeKind.NeedsAttention,
             diagnosticsPath: "/diag/needs-attention",
             reason: NeedsAttentionReason.MissingInformation,
+            summary: "A prerequisite is still open.",
+            evidence: ["Issue body links the open prerequisite."],
+            questions: ["Complete the prerequisite, then retry."],
         });
         const verifierPrompts = verifierPromptsOf(harness.prompts);
         expect(verifierPrompts).toHaveLength(1);
@@ -1382,6 +1389,7 @@ describe("issue executor needs-attention routing", () => {
         const failed = await executor.execute(context);
         expect(failed).toMatchObject({
             kind: IssueExecutionOutcomeKind.Failed,
+            message: "needs-attention recovery failed",
         });
         expect(store.has(IssueArtifactKind.NeedsAttentionDecision)).toBe(true);
         expect(store.has(IssueArtifactKind.NeedsAttentionHandoff)).toBe(true);
@@ -1990,6 +1998,152 @@ describe("needs-attention recovery diagnostics", () => {
             expect(
                 trace.filter((entry) => entry === "createPatch"),
             ).toHaveLength(2);
+        } finally {
+            rmSync(workspace, { recursive: true, force: true });
+        }
+    });
+
+    test("reports diagnostic capture failure as recoverable and never restores", async () => {
+        const workspace = mkdtempSync(join(tmpdir(), "ralphie-recovery-"));
+        try {
+            const trace: string[] = [];
+            const events: ProgressUpdate[] = [];
+            const progress = makeProgressRecorder(events);
+            const git: GitIssueCheckpointService = {
+                capture: async () => CHECKPOINT,
+                createPatch: async () => {
+                    trace.push("createPatch");
+                    throw new Error("git diff failed");
+                },
+                restore: async () => {
+                    trace.push("restore");
+                },
+            };
+            const recovery = makeIssueRecoveryService(
+                git,
+                progress,
+                makeInvariant([]),
+            );
+            const input: NeedsAttentionRecoveryInput = {
+                runId: "run-1",
+                repository: "owner/repo",
+                workspace,
+                repositoryPath: "/work/repository",
+                issue,
+                checkpoint: CHECKPOINT,
+                fingerprint: currentFingerprint,
+                decision: attentionDecision,
+                request: attentionRequest,
+            };
+            await expect(
+                recovery.handleNeedsAttention(input),
+            ).rejects.toMatchObject({
+                _tag: "RalphieError",
+                message: expect.stringContaining(
+                    "Failed to capture needs-attention diagnostics",
+                ),
+            });
+            expect(trace).not.toContain("restore");
+        } finally {
+            rmSync(workspace, { recursive: true, force: true });
+        }
+    });
+
+    test("reports restoration failure as recoverable and emits a failed checkout-restore event", async () => {
+        const workspace = mkdtempSync(join(tmpdir(), "ralphie-recovery-"));
+        try {
+            const trace: string[] = [];
+            const events: ProgressUpdate[] = [];
+            const progress = makeProgressRecorder(events);
+            const git: GitIssueCheckpointService = {
+                capture: async () => CHECKPOINT,
+                createPatch: async () => "--- a/x\n+++ b/x\n",
+                restore: async () => {
+                    trace.push("restore");
+                    throw new Error("git clean failed");
+                },
+            };
+            const verifyCalls: Array<{ branch: string; head: string }> = [];
+            const recovery = makeIssueRecoveryService(
+                git,
+                progress,
+                makeInvariant(verifyCalls),
+            );
+            const input: NeedsAttentionRecoveryInput = {
+                runId: "run-1",
+                repository: "owner/repo",
+                workspace,
+                repositoryPath: "/work/repository",
+                issue,
+                checkpoint: CHECKPOINT,
+                fingerprint: currentFingerprint,
+                decision: attentionDecision,
+                request: attentionRequest,
+            };
+            await expect(
+                recovery.handleNeedsAttention(input),
+            ).rejects.toMatchObject({
+                _tag: "RalphieError",
+                message: expect.stringContaining(
+                    "Failed to restore the clean checkout",
+                ),
+            });
+            expect(trace).toContain("restore");
+            expect(verifyCalls).toEqual([]);
+            expect(events).toContainEqual(
+                expect.objectContaining({
+                    stage: "checkout-restore",
+                    status: "failed",
+                }),
+            );
+        } finally {
+            rmSync(workspace, { recursive: true, force: true });
+        }
+    });
+
+    test("reports invariant verification failure as recoverable rather than successful", async () => {
+        const workspace = mkdtempSync(join(tmpdir(), "ralphie-recovery-"));
+        try {
+            const events: ProgressUpdate[] = [];
+            const progress = makeProgressRecorder(events);
+            const git: GitIssueCheckpointService = {
+                capture: async () => CHECKPOINT,
+                createPatch: async () => "--- a/x\n+++ b/x\n",
+                restore: async () => {},
+            };
+            const invariant: GitRepositoryInvariantService = {
+                capture: async () => INVARIANT,
+                verify: async () => {
+                    throw new RalphieError({
+                        message:
+                            "Repository branch changed from develop to main.",
+                    });
+                },
+            };
+            const recovery = makeIssueRecoveryService(git, progress, invariant);
+            const input: NeedsAttentionRecoveryInput = {
+                runId: "run-1",
+                repository: "owner/repo",
+                workspace,
+                repositoryPath: "/work/repository",
+                issue,
+                checkpoint: CHECKPOINT,
+                fingerprint: currentFingerprint,
+                decision: attentionDecision,
+                request: attentionRequest,
+            };
+            await expect(
+                recovery.handleNeedsAttention(input),
+            ).rejects.toMatchObject({
+                _tag: "RalphieError",
+                message: expect.stringContaining("branch changed"),
+            });
+            expect(events).toContainEqual(
+                expect.objectContaining({
+                    stage: "checkout-restore",
+                    status: "failed",
+                }),
+            );
         } finally {
             rmSync(workspace, { recursive: true, force: true });
         }

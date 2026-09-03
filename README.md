@@ -269,6 +269,34 @@ opt-in (with optional `--needs-attention-label`) publishes one idempotent
 structured comment and label per issue, saved as resumable intent before any
 GitHub mutation; dry runs never notify.
 
+**Needs-attention recovery contract.** Every Pi session is a bounded
+`request_needs_attention` signal channel for repository-backed blockers. The
+signal is a schema-validated `{ reason, message }` object whose `reason` is one
+of `outdated_premise`, `conflicting_requirements`, `missing_information`,
+`external_dependency`, or `cannot_reproduce`, with an optional message capped
+at 2,000 characters; it is a request to the caller, never a final
+implementation or review decision, and the prompt guidance forbids it for work
+that is merely hard, large, slow, or uncertain. Only structured decision and
+task sessions (grounding, complexity, implementation, review-fix,
+commit-message, review, and decomposition) can raise it, and only through
+Ralphie's Pi task/decision gate. Each signal is confirmed by exactly one
+fresh, read-only verifier session before any further artifact, Git, or GitHub
+mutation. A confirmed `needs_attention` disposition persists the structured
+decision with its summary, evidence, questions, and issue-freshness
+fingerprint, leaves the source issue open, performs no GitHub mutation and no
+commit or push, and restores the exact clean checkpoint (`git reset --hard`
+plus `git clean -fd`), removing every staged, unstaged, and untracked agent
+change before reporting. A verifier rejection (`actionable` or
+`already_resolved`) clears the handoff and resumes the original attempt, so at
+most one fresh verifier is consumed per signal; a persisted confirmed decision
+is reused without a fresh verifier when recovery retries on resume. Recovery
+writes a bounded binary-safe patch and decision metadata to
+`<workspace>/.ralphie/runs/<run-id>/issues/<issue-number>/needs-attention-<id>/`
+(`changes.patch` and `metadata.json`), keyed by fingerprint so a stale decision
+can never reuse another issue's diagnostics. Diagnostic, restoration, or
+repository-invariant failures are recoverable failures: the issue stays pending
+with the handoff retained for resume, never reported as successfully handled.
+
 `--dry-run` grounds every issue, reports all three routes, and performs no
 implementation, checkout mutation, Git or GitHub mutation, issue closure, or PR
 delivery. Pi sessions never close issues, create or merge pull requests, or

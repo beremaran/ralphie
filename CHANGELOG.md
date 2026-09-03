@@ -5,6 +5,27 @@ All notable changes to Ralphie are documented here. The project follows
 
 ## [Unreleased]
 
+- Add the needs-attention recovery contract across the Pi boundary, issue
+  executor, recovery service, and local end-to-end path: bounded
+  `request_needs_attention` signals (`reason` one of `outdated_premise`,
+  `conflicting_requirements`, `missing_information`, `external_dependency`, or
+  `cannot_reproduce`, plus an optional message capped at 2,000 characters)
+  reach the caller only through the schema-validated Pi side channel from
+  grounding, complexity, implementation, review-fix, commit-message, review,
+  and decomposition sessions; each signal is confirmed by exactly one fresh
+  read-only verifier session before any further artifact, Git, or GitHub
+  mutation. A confirmed `needs_attention` disposition persists the structured
+  decision with its summary, evidence, questions, and issue-freshness
+  fingerprint, leaves the source issue open, performs no GitHub mutation and
+  no commit or push, and restores the clean checkpoint by removing staged,
+  unstaged, and untracked agent changes; verifier rejection continues the
+  original attempt, and diagnostic, restoration, or repository-invariant
+  failures are reported as recoverable rather than successful. Recovery
+  diagnostics live under
+  `runs/<run-id>/issues/<issue-number>/needs-attention-<id>/` with
+  `changes.patch` and `metadata.json`, keyed by fingerprint and reused only on
+  exact matches.
+
 - Bound every command execution with a hard deadline so a hung process cannot
   stall an unattended issue run: Pi task shell commands default to a
   120-second timeout with a 600-second maximum (an omitted `timeout` gets the

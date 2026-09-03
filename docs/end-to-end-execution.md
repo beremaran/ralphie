@@ -241,6 +241,40 @@ failed outcome. Every such path leaves the source issue open under the normal
 failure policy; none automatically closes it or converts it into a
 needs-attention deferral.
 
+The needs-attention recovery contract bounds the agent side channel. Every
+structured task/decision session provides the `request_needs_attention` tool;
+the signal is a schema-validated `{ reason, message }` object whose `reason`
+is one of `outdated_premise`, `conflicting_requirements`,
+`missing_information`, `external_dependency`, or `cannot_reproduce`, with an
+optional message capped at 2,000 characters. It is a bounded request to the
+caller — never a final implementation, review, or decision verdict — and the
+prompt guidance forbids it for work that is merely hard, large, slow, or
+uncertain. Grounding, complexity, implementation, review-fix,
+commit-message, review, and decomposition sessions may raise it; the Pi task
+gate parses and Zod-validates the side channel, so an invalid value is
+ignored rather than trusted, and no session can raise it outside Ralphie's
+own gate.
+
+A raised signal is confirmed by exactly one fresh, read-only verifier session
+before the next artifact, Git, or GitHub mutation. The verifier re-reads the
+original bounded request against the pinned clean checkpoint; a
+`needs_attention` disposition persists the confirmed structured decision
+(reason, summary, evidence, questions) with its issue-freshness fingerprint,
+then recovery writes a bounded binary-safe patch plus decision metadata under
+the fingerprinted `needs-attention-<id>/` directory (`changes.patch` and
+`metadata.json`) and restores the exact clean checkpoint — `git reset --hard`
+followed by `git clean -fd`, removing every staged, unstaged, and untracked
+agent change — and verifies branch and HEAD before reporting the recovered
+outcome. A verifier rejection (`actionable` or `already_resolved`) discards
+the handoff and resumes the original attempt, so at most one fresh verifier is
+consumed per signal; a persisted confirmed decision is reused without a fresh
+verifier when recovery retries on resume. Matching fingerprint diagnostics are
+reused atomically; a stale fingerprint invalidates both the decision and
+handoff before routing continues. Diagnostic capture, checkout restoration, or
+repository-invariant failures are recoverable failures: the issue stays open
+and pending with the handoff retained so resume can retry, rather than
+reporting the issue as successfully handled.
+
 For an actionable disposition, `IssueExecutor` reuses a persisted complexity
 decision when its freshness fingerprint matches the live issue. Otherwise
 `ComplexityAssessment`:
@@ -582,6 +616,9 @@ stored in this tree):
 └── issues/
     └── <issue-number>/
         ├── artifacts.json
+        ├── needs-attention-<id>/
+        │   ├── changes.patch
+        │   └── metadata.json
         └── review-exhaustion/
             ├── changes.patch
             └── metadata.json
