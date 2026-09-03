@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Octokit } from "octokit";
-import type { PiClient } from "../src/pi/client.ts";
+import type { AgentClient } from "../src/opencode/client.ts";
 
 import { CommandRunnerLive } from "../src/process/command-runner.ts";
 import type { GitRepositoryService } from "../src/git/repository.ts";
@@ -47,8 +47,8 @@ import {
     makeIssueArtifactStore,
     makeIssueArtifactStoreService,
 } from "../src/issues/artifacts.ts";
-import { DEFAULT_PI_AGENT } from "../src/agent/model.ts";
-import type { PiService } from "../src/pi/server.ts";
+import { DEFAULT_AGENT } from "../src/agent/model.ts";
+import type { OpenCodeService } from "../src/opencode/server.ts";
 import {
     makeProgressRecorder,
     type ProgressReporterService,
@@ -123,7 +123,12 @@ type TestRuntimeOptions = {
     readonly removeFailure?: RalphieError;
     readonly closeFailure?: RalphieError;
     readonly abortOnExecute?: AbortController;
-    readonly abortAt?: "github" | "repository" | "issues" | "pi" | "between";
+    readonly abortAt?:
+        | "github"
+        | "repository"
+        | "issues"
+        | "opencode"
+        | "between";
     readonly abortController?: AbortController;
     readonly captureStart?: number;
     readonly failPiReadyProgress?: boolean;
@@ -369,7 +374,7 @@ const testRuntime = (
             if (options.executeGate !== undefined)
                 await options.executeGate(context);
             calls.push(
-                `executeIssue:${context.issue.number}:${context.repositoryPath}:${context.targetBranch}:${context.piSelection.agent}`,
+                `executeIssue:${context.issue.number}:${context.repositoryPath}:${context.targetBranch}:${context.agentSelection.agent}`,
             );
             if (options.abortOnExecute !== undefined) {
                 options.abortOnExecute.abort();
@@ -396,14 +401,15 @@ const testRuntime = (
                 );
             },
         };
-    const pi: PiService = {
+    const opencode: OpenCodeService = {
         start: async () => {
             if (options.startFailure) throw options.startFailure;
             calls.push("startServer");
-            if (options.abortAt === "pi") options.abortController?.abort();
+            if (options.abortAt === "opencode")
+                options.abortController?.abort();
             return {
                 url: "http://127.0.0.1:4096",
-                client: {} as PiClient,
+                client: {} as AgentClient,
                 close: async () => {
                     calls.push("closeRuntime");
                 },
@@ -435,7 +441,7 @@ const testRuntime = (
               ...progressRecorder,
               emit: async (update) => {
                   if (
-                      update.stage === "pi-runtime" &&
+                      update.stage === "opencode-runtime" &&
                       update.status === "succeeded"
                   ) {
                       throw new Error("Pi ready progress emission failed");
@@ -534,7 +540,7 @@ const testRuntime = (
         issueExecutor,
         issueRecovery: {} as never,
         needsAttentionRouter: {} as never,
-        pi,
+        opencode,
         progress,
         runStateStore: stateStore,
         workspace,
@@ -730,7 +736,7 @@ const baseOptions = {
         sort: IssueSort.Created,
         order: IssueOrder.Ascending,
     },
-    agent: DEFAULT_PI_AGENT,
+    agent: DEFAULT_AGENT,
     workspace: "/tmp/ralphie",
     cleanup: false,
     startClean: false,
@@ -1246,7 +1252,7 @@ describe("workflow", () => {
             onNeedsAttention: NeedsAttentionPolicy.Continue,
             dryRun: false,
             notificationsEnabled: false,
-            selection: { agent: DEFAULT_PI_AGENT },
+            selection: { agent: DEFAULT_AGENT },
             maxIssues: 1,
             queue: {
                 pending: [{ ...firstIssue, labels: [...firstIssue.labels] }],
@@ -1302,7 +1308,7 @@ describe("workflow", () => {
             onNeedsAttention: NeedsAttentionPolicy.Continue,
             dryRun: false,
             notificationsEnabled: false,
-            selection: { agent: DEFAULT_PI_AGENT },
+            selection: { agent: DEFAULT_AGENT },
             maxIssues: 1,
             queue: {
                 pending: [{ ...firstIssue, labels: [...firstIssue.labels] }],
@@ -1688,7 +1694,7 @@ describe("workflow", () => {
             onNeedsAttention: NeedsAttentionPolicy.Continue,
             dryRun: false,
             notificationsEnabled: false,
-            selection: { agent: DEFAULT_PI_AGENT },
+            selection: { agent: DEFAULT_AGENT },
             maxIssues: 1,
             queue: {
                 pending: [{ ...firstIssue, labels: [...firstIssue.labels] }],
@@ -1864,7 +1870,7 @@ describe("workflow", () => {
                     workflow: WorkflowMode.Lgtm,
                     onNeedsAttention: NeedsAttentionPolicy.Continue,
                     dryRun: true,
-                    selection: { agent: DEFAULT_PI_AGENT },
+                    selection: { agent: DEFAULT_AGENT },
                     maxIssues: 1,
                     queue: {
                         pending: [
@@ -2135,7 +2141,7 @@ describe("workflow", () => {
                         workflow: workflowMode,
                         onNeedsAttention: NeedsAttentionPolicy.Continue,
                         dryRun: true,
-                        selection: { agent: DEFAULT_PI_AGENT },
+                        selection: { agent: DEFAULT_AGENT },
                         maxIssues: 1,
                         queue: {
                             pending: [
@@ -3060,7 +3066,7 @@ describe("workflow", () => {
             onNeedsAttention: NeedsAttentionPolicy.Continue,
             dryRun: false,
             notificationsEnabled: false,
-            selection: { agent: DEFAULT_PI_AGENT },
+            selection: { agent: DEFAULT_AGENT },
             maxIssues: 1,
             queue: {
                 pending: [{ ...firstIssue, labels: [...firstIssue.labels] }],
@@ -3622,7 +3628,7 @@ describe("workflow", () => {
             workflow(
                 { ...baseOptions, cleanup: true, signal: controller.signal },
                 testRuntime(calls, states, {
-                    abortAt: "pi",
+                    abortAt: "opencode",
                     abortController: controller,
                 }),
             ),

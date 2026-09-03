@@ -7,11 +7,11 @@ at the [documentation index](README.md) for other audience paths.
 
 ## Progress output
 
-Ralphie streams the complete Pi transcript while each task runs, including
+Ralphie streams the complete OpenCode transcript while each task runs, including
 thinking deltas, assistant text, tool calls, and tool results. Tasks and issues
 are intentionally processed sequentially so this output remains ordered.
 
-Human-readable transcript output groups each Pi session into a compact block:
+Human-readable transcript output groups each OpenCode session into a compact block:
 thinking and assistant text stream immediately within a 140-character bound,
 tool calls are shown as readable commands, and tool output is indented,
 de-duplicated, and bounded to 3 lines/140 characters. Truncated streams still
@@ -20,7 +20,7 @@ lossless event stream for integrations.
 
 Ralphie adapts its progress renderer to its environment:
 
-- interactive terminals receive the streamed Pi transcript plus one replaceable
+- interactive terminals receive the streamed OpenCode transcript plus one replaceable
   interactive region: the sticky stage/status line and the bounded activity
   rows run together in a single region of at most three physical terminal rows
   (the cap is measured in rows actually painted, never newline counts), each
@@ -35,7 +35,7 @@ Ralphie adapts its progress renderer to its environment:
   carriage-return bytes;
 - `--output verbose` adds operational details without expanding the
   interactive region beyond its three-row cap;
-- `--output json` writes progress and `pi_event` objects one per line to
+- `--output json` writes progress and `opencode_event` objects one per line to
   stdout; and
 - `--output quiet` suppresses routine progress but retains failures,
   needs-attention decisions, and handled stops.
@@ -50,14 +50,14 @@ JSON output retain those complete details. A handled halt emits a final
 needs-attention event with `handled: true` and every outcome count before exit.
 Depending on the event, it may also include the repository, review attempt,
 session ID, commit SHA, created issue numbers, or diagnostic paths. Supplied
-progress-event values are preserved as-is; Pi transcripts and breadcrumbs
+progress-event values are preserved as-is; OpenCode transcripts and breadcrumbs
 remain redacted or sanitized at the reporting boundary.
 
 ## State and artifacts
 
 The workspace's `.ralphie` directory contains only repository checkouts and
-Ralphie's run state, events, and recovery artifacts. Pi configuration is kept
-in the default or explicitly supplied `--pi-dir`, or in a private temporary
+Ralphie's run state, events, and recovery artifacts. OpenCode configuration is kept
+in the default or explicitly supplied `--opencode-url`, or in a private temporary
 credential directory, never under this path.
 
 Run artifacts live under:
@@ -80,7 +80,7 @@ complexity decisions, checkpoints, review attempts, commit messages, created
 commits, resolution proof, decomposition decisions, and created child-number
 mappings.
 
-A successful or interrupted run uses this more detailed layout (Pi
+A successful or interrupted run uses this more detailed layout (OpenCode
 configuration is not stored in this tree):
 
 ```text
@@ -97,7 +97,7 @@ configuration is not stored in this tree):
 
 `state.json` is versioned, schema-validated, and atomically replaced. It
 contains the repository/branch/workflow, selected `onNeedsAttention` policy,
-notification settings and any pending notification intent, Pi selection,
+notification settings and any pending notification intent, OpenCode selection,
 budget, pending and completed queue numbers, processed count, outcomes, active
 issue/stage, checkout invariant, update time, and, for an active `pr`
 closure, the pull request number, observed head SHA, latest normalized check
@@ -122,7 +122,7 @@ stateDiagram-v2
 ```
 
 - One issue failure uses the current halt policy: Ralphie persists the active
-  issue, releases Pi, retains artifacts, and stops before later issues.
+  issue, releases OpenCode, retains artifacts, and stops before later issues.
 - A `pr` gate that is failed, cancelled, timed out, absent, unknown, closed,
   or unmergeable never merges and never closes the source issue: Ralphie
   retains the feature branch and pull request, persists the active
@@ -133,9 +133,9 @@ stateDiagram-v2
   green evidence against the current head, re-observes failed gates on a
   later rerun, and reconciles an already-merged PR without another merge
   call.
-- Pi is closed on success, failure, cancellation, and scoped defects. Ordinary
+- OpenCode is closed on success, failure, cancellation, and scoped defects. Ordinary
   failures set process exit code `1`.
-- Cancellation is checked before long-running boundaries and passed into Pi.
+- Cancellation is checked before long-running boundaries and passed into OpenCode.
   Ralphie attempts to restore the clean issue checkpoint, saves resumable state,
   skips cleanup, and exits `130`.
 - Successful completion persists `complete` before optional `--clean end`
@@ -237,7 +237,7 @@ The repository and branch must match the saved run. On `--resume`:
 4. the saved pending queue, completed numbers, outcomes, and artifacts are
    restored; and
 5. the next safe deterministic step continues without unnecessarily rerunning
-   Pi work.
+   OpenCode work.
 
 Examples of resumable boundaries:
 

@@ -182,12 +182,18 @@ const checkoutContext = ({
 
 const needsAttentionGuidance = `
 NEEDS-ATTENTION REQUEST CHANNEL:
-Use the request_needs_attention tool only to report a repository-backed blocker
-that prevents safe progress: outdated_premise, conflicting_requirements,
-missing_information, external_dependency, or cannot_reproduce. Include a
-concise explanation when useful. This is a request to the caller, not the final
-implementation or review decision. Do not use it for work that is merely hard,
-large, slow, or uncertain.`;
+When a repository-backed blocker prevents safe progress (outdated_premise,
+conflicting_requirements, missing_information, external_dependency, or
+cannot_reproduce), include a fenced block:
+
+\`\`\`needs-attention
+{"reason": "<one of the values above>", "message": "<concise explanation>"}
+\`\`\`
+
+This is a request to the caller, not the final implementation or review
+decision. Do not use it for work that is merely hard, large, slow, or
+uncertain. For structured tasks, still return the required \`\`\`json result
+block alongside it.`;
 
 export const buildGroundingPrompt = ({
     issue,

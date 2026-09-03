@@ -14,9 +14,12 @@ import type {
     PiEventContext,
     PiEventListener,
     PiSessionEvent,
-} from "../../src/pi/client.ts";
-import type { PiProviderConfig } from "../../src/pi/config.ts";
-import type { PiRuntime, PiService } from "../../src/pi/server.ts";
+} from "../../src/opencode/client.ts";
+import type { OpenCodeProviderConfig } from "../../src/opencode/config.ts";
+import type {
+    OpenCodeRuntime,
+    OpenCodeService,
+} from "../../src/opencode/server.ts";
 import {
     makeProgressCoordinator,
     type ProgressCoordinatorOptions,
@@ -254,9 +257,9 @@ const makeCapture = (): CommandOutput & {
 const noopSummary = undefined as never;
 
 /** Fake Pi service whose session replay is scripted by the fake workflow. */
-const makeFakePi = (): PiService => {
+const makeFakePi = (): OpenCodeService => {
     const runtime = {
-        url: "embedded://test",
+        url: "http://127.0.0.1:1",
         client: {
             session: {
                 create: async () => ({ data: { id: context.sessionID } }),
@@ -265,7 +268,7 @@ const makeFakePi = (): PiService => {
             close: () => {},
         },
         close: async () => {},
-    } as unknown as PiRuntime;
+    } as unknown as OpenCodeRuntime;
     return {
         start: async () => runtime,
     };
@@ -311,12 +314,12 @@ const runInteractiveCommand = async ({
                     strategy,
                     footer: { timer },
                 }),
-            makePi: (_config: PiProviderConfig, eventListener) => {
+            makeOpenCode: (_config: OpenCodeProviderConfig, eventListener) => {
                 listener = eventListener;
                 return makeFakePi();
             },
-            makeRuntime: ({ pi, progress }) =>
-                ({ pi, progress }) as unknown as CommandRuntime,
+            makeRuntime: ({ opencode, progress }) =>
+                ({ opencode, progress }) as unknown as CommandRuntime,
             runWorkflow: async (
                 _options: WorkflowOptions,
                 runtime: RalphieRuntime,
@@ -365,12 +368,12 @@ const runNoninteractiveCommand = async ({
         terminal,
         output: capture,
         factories: {
-            makePi: (_config, eventListener) => {
+            makeOpenCode: (_config, eventListener) => {
                 listener = eventListener;
                 return makeFakePi();
             },
-            makeRuntime: ({ pi, progress }) =>
-                ({ pi, progress }) as unknown as CommandRuntime,
+            makeRuntime: ({ opencode, progress }) =>
+                ({ opencode, progress }) as unknown as CommandRuntime,
             runWorkflow: async (
                 _options: WorkflowOptions,
                 runtime: RalphieRuntime,
@@ -491,7 +494,7 @@ describe("command runtime display: noninteractive fallback", () => {
             const text = runOne.stderrBytes();
             expect(text).not.toContain("\x1b");
             expect(text).not.toContain("\r");
-            expect(text).toContain("╭─ Pi · Task · session-1");
+            expect(text).toContain("╭─ OpenCode · Task · session-1");
             expect(text).toContain(ASSISTANT_DELTAS.join(""));
             expect(text).toContain("│  $ echo cycle 0");
             expect(text).toContain("✓ bash done");
@@ -528,7 +531,8 @@ describe("command runtime display: noninteractive fallback", () => {
             for (const line of lines) {
                 const record = JSON.parse(line);
                 expect(
-                    record.type === "pi_event" || record.stage !== undefined,
+                    record.type === "opencode_event" ||
+                        record.stage !== undefined,
                 ).toBe(true);
                 if (record.runId !== undefined) runIds.add(record.runId);
             }

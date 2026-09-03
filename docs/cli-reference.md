@@ -39,19 +39,20 @@ command schema.
 | `--max-decomposition-depth <count>` | `3` | Positive maximum generated-child lineage depth. Reaching the ceiling leaves the issue open, records needs attention, and continues independent work. |
 | `--issue-label <label>` | none | Require a label; repeat the flag to require multiple labels. |
 | `--issue-sort <sort>` | `created` | Sort by `created`, `updated`, or `comments`, optionally `:asc` or `:desc`. |
-| `--model <provider/model>` | Pi default | Override Pi's model selection. |
-| `--thinking <level>` | Pi default | Pi thinking level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. |
-| `--grounding-thinking <level>` | `low` | Thinking level for issue grounding/readiness. |
-| `--implementation-thinking <level>` | `high` | Thinking level for implementation sessions, independent of the global level. |
+| `--model <provider/model>` | OpenCode default | Override the OpenCode model selection. |
+| `--thinking <variant>` | OpenCode default | OpenCode model variant (for example `low`, `medium`, `high`). |
+| `--grounding-thinking <variant>` | `low` | Model variant for issue grounding/readiness. |
+| `--implementation-thinking <variant>` | `high` | Model variant for implementation sessions, independent of the global variant. |
 | `--implementation-attempts <count>` | `3` | Positive number of implementation attempts allowed when sessions leave an unresolved empty diff. |
 | `--implementation-fallback-model <provider/model>` | none | Optional model used after the first unresolved empty implementation attempt. |
-| `--complexity-thinking <level>` | `medium` | Thinking level for complexity routing. |
-| `--review-thinking <level>` | `high` | Thinking level for staged-change reviews. |
-| `--commit-thinking <level>` | `low` | Thinking level for commit-message generation. |
+| `--complexity-thinking <variant>` | `medium` | Model variant for complexity routing. |
+| `--review-thinking <variant>` | `high` | Model variant for staged-change reviews. |
+| `--commit-thinking <variant>` | `low` | Model variant for commit-message generation. |
 | `--verify-command <command>` | discovered `bun run check` | Deterministic verification command; repeat to run multiple commands in order. Each command runs under a 30-minute deadline. |
 | `--max-attempts <count>` | `3` | Positive pipeline attempt count in `get-pipelines-green` mode. |
 | `--pipeline-timeout <duration>` | none | Positive integer duration (`s`, `m`, or `h`) for `get-pipelines-green` mode. |
-| `--pi-dir <path>` | Pi default | Existing operator-owned Pi agent directory outside the workspace; it is never removed. |
+| `--opencode-url <url>` | discovered service | OpenCode server URL (defaults to the local background service). |
+| `--opencode-token <token>` | service auth | OpenCode server token (defaults to background-service auth). |
 | `--workspace <path>` | `~/.ralphie` | Root directory for repository checkouts and run artifacts. |
 | `--dry-run` | off | Assess and route issues without implementation, GitHub, or delivery mutations. |
 | `--resume <state.json>` | none | Continue a compatible saved run. |
@@ -96,8 +97,8 @@ Model credentials are read from environment variables:
 | --- | --- |
 | `GH_TOKEN` | GitHub.com token for noninteractive `gh` authentication (preferred). |
 | `GITHUB_TOKEN` | Fallback GitHub.com token alias for `gh`. |
-| `RALPHIE_MODEL_BASE_URL` | OpenAI-compatible model base URL; enables a private temporary Pi configuration when `--pi-dir` is absent. |
-| `RALPHIE_MODEL_API_KEY` | Model API key for that temporary configuration; supply it only through the environment. |
+| `OPENCODE_URL` | OpenCode server URL (used when `--opencode-url` is absent). |
+| `OPENCODE_TOKEN` | OpenCode server token; supply it only through the environment. |
 | `RALPHIE_GITHUB_REST_FIXTURE_URL` | Test-only local GitHub REST fixture base URL; must be an `http://` loopback URL. When set, Octokit targets the fixture instead of GitHub, `gh` authentication is replaced by a deterministic fixture token, and automatic retry/throttling are disabled. Never set in production. |
 | `RALPHIE_GITHUB_REST_FIXTURE_TOKEN` | Test-only Authorization token presented to that fixture; requires the fixture URL (`RALPHIE_GITHUB_REST_FIXTURE_URL`). |
 
@@ -114,8 +115,8 @@ container setup.
 ### Preview one issue
 
 This performs authentication and Git preflight, prepares a clean checkout,
-discovers issues, and asks Pi for a complexity decision. It may create or reset
-the local workspace and write run artifacts, but it does not ask Pi to edit the
+discovers issues, and asks OpenCode for a complexity decision. It may create or reset
+the local workspace and write run artifacts, but it does not ask OpenCode to edit the
 repository, create commits, push, or mutate GitHub.
 
 ```bash
@@ -142,7 +143,7 @@ bunx @beremaran/ralphie owner/repository \
   --max-issues 10
 ```
 
-Require multiple labels and let Pi choose its configured model:
+Require multiple labels and let OpenCode choose its configured model:
 
 ```bash
 bunx @beremaran/ralphie owner/repository \
@@ -150,7 +151,7 @@ bunx @beremaran/ralphie owner/repository \
   --issue-label backend
 ```
 
-Select a Pi model and thinking level explicitly:
+Select a OpenCode model and thinking level explicitly:
 
 ```bash
 bunx @beremaran/ralphie owner/repository \
@@ -236,6 +237,6 @@ mutation-enabled examples.
 `ralphie --version` prints only the release version. For automation,
 `ralphie --version --output json` prints a stable object containing `version`
 and `commitSha`. Both forms work without a repository, GitHub credentials, or
-Pi configuration. Release builds embed the immutable commit SHA supplied by
+OpenCode server. Release builds embed the immutable commit SHA supplied by
 the build entry point; local builds use the documented `local` commit sentinel
 when no release SHA is supplied.

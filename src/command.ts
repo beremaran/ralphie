@@ -20,18 +20,18 @@ import {
     DEFAULT_MAX_DECOMPOSITION_DEPTH,
 } from "./options.ts";
 import { IssueOrder, IssueSort } from "./github/issues.ts";
-import { piModelSchema, piModelVariantSchema } from "./agent/model.ts";
+import { agentModelSchema, agentModelVariantSchema } from "./agent/model.ts";
 import {
     makeProgressCoordinator,
     type ProgressCoordinator,
     type ProgressCoordinatorOptions,
 } from "./progress/coordinator.ts";
 import { type ProgressRenderMode } from "./progress/progress.ts";
-import { type PiProviderConfig } from "./pi/config.ts";
-import { makePiService } from "./pi/server.ts";
+import { type OpenCodeProviderConfig } from "./opencode/config.ts";
+import { makeOpenCodeService } from "./opencode/server.ts";
 import { makeLiveRuntime, type RalphieRuntime } from "./runtime.ts";
-import type { PiService } from "./pi/server.ts";
-import type { PiEventListener } from "./pi/client.ts";
+import type { OpenCodeService } from "./opencode/server.ts";
+import type { AgentEventListener } from "./opencode/client.ts";
 import {
     exitCodeForError,
     isNeedsAttentionStop,
@@ -73,7 +73,8 @@ const cliOptions = {
     "complexity-thinking": { type: "string" },
     "review-thinking": { type: "string" },
     "commit-thinking": { type: "string" },
-    "pi-dir": { type: "string" },
+    "opencode-url": { type: "string" },
+    "opencode-token": { type: "string" },
     workspace: { type: "string" },
     "dry-run": { type: "boolean" },
     clean: { type: "string" },
@@ -129,7 +130,9 @@ const parseThinking = (
     name: string,
 ): string | undefined => {
     const value = asNonEmptyString(values, name);
-    return value === undefined ? undefined : piModelVariantSchema.parse(value);
+    return value === undefined
+        ? undefined
+        : agentModelVariantSchema.parse(value);
 };
 
 const parseNeedsAttentionPolicy = (
@@ -152,7 +155,7 @@ const parseIssueFailurePolicy = (
 
 const parseModel = (values: Record<string, unknown>, name: string) => {
     const value = asNonEmptyString(values, name);
-    return value === undefined ? undefined : piModelSchema.parse(value);
+    return value === undefined ? undefined : agentModelSchema.parse(value);
 };
 
 const cleanWhenSchema = z.enum(["start", "end", "both"]);
@@ -268,7 +271,7 @@ const parseCliOptions = (
         thinking:
             thinkingValue === undefined
                 ? undefined
-                : piModelVariantSchema.parse(thinkingValue),
+                : agentModelVariantSchema.parse(thinkingValue),
         groundingThinking: parseThinking(values, "grounding-thinking"),
         implementationThinking: parseThinking(
             values,
@@ -282,7 +285,8 @@ const parseCliOptions = (
         complexityThinking: parseThinking(values, "complexity-thinking"),
         reviewThinking: parseThinking(values, "review-thinking"),
         commitThinking: parseThinking(values, "commit-thinking"),
-        piDir: asNonEmptyString(values, "pi-dir"),
+        opencodeUrl: asNonEmptyString(values, "opencode-url"),
+        opencodeToken: asNonEmptyString(values, "opencode-token"),
         workspace: asNonEmptyString(values, "workspace"),
         clean:
             cleanValue === undefined
@@ -318,12 +322,13 @@ export const parseCliArgs = (args: ReadonlyArray<string>): ParsedCli => {
     };
 };
 
-const resolvePiConfig = (config: ResolvedRalphieConfig): PiProviderConfig => ({
+const resolveOpenCodeConfig = (
+    config: ResolvedRalphieConfig,
+): OpenCodeProviderConfig => ({
     workspace: config.workspace,
-    modelBaseUrl: config.modelBaseUrl,
-    modelApiKey: config.modelApiKey,
+    baseUrl: config.opencodeUrl,
+    token: config.opencodeToken,
     model: config.model,
-    agentDir: config.piDir,
 });
 
 export type CliTerminalInfo = {
@@ -353,7 +358,7 @@ const resolveProgressMode = (
 
 export const HELP_TEXT = `Usage: ralphie <owner/repository> [options]
 
-Run an issue queue, maintain issues, or get-pipelines-green through Pi.
+Run an issue queue, maintain issues, or get-pipelines-green through OpenCode.
 
 Options:
   -b, --branch <name>          Branch to operate on
@@ -376,17 +381,18 @@ Options:
       --verify-command <cmd>   Deterministic pre-commit gate (repeatable)
       --max-attempts <n>       Pipeline attempts (positive; default 3)
       --pipeline-timeout <t>  Pipeline timeout: e.g. 30s, 10m, or 2h
-      --model <provider/model> Pi model selection
-      --thinking <level>       Pi thinking level: off, minimal, low, medium, high, xhigh, or max
-      --grounding-thinking <level> Readiness reasoning (default low)
-      --implementation-thinking <level> Implementation reasoning (default high)
+      --model <provider/model> OpenCode model selection
+      --thinking <variant>     OpenCode model variant (for example low, medium, high)
+      --grounding-thinking <variant> Readiness reasoning (default low)
+      --implementation-thinking <variant> Implementation reasoning (default high)
       --implementation-attempts <n> Empty implementation retries (default 3)
       --implementation-fallback-model <provider/model>
                                Model used after the first empty implementation
-      --complexity-thinking <level> Complexity reasoning (default medium)
-      --review-thinking <level> Review reasoning (default high)
-      --commit-thinking <level> Commit-message reasoning (default low)
-      --pi-dir <path>          Operator-owned Pi directory outside workspace
+      --complexity-thinking <variant> Complexity reasoning (default medium)
+      --review-thinking <variant> Review reasoning (default high)
+      --commit-thinking <variant> Commit-message reasoning (default low)
+      --opencode-url <url>     OpenCode server URL (defaults to discovered background service)
+      --opencode-token <token> OpenCode server token (defaults to service auth)
       --workspace <path>       Workspace directory
       --dry-run                Assess without mutations
       --resume <path>          Resume saved run state
@@ -399,8 +405,8 @@ Environment:
   GH_TOKEN                     GitHub.com token for gh (preferred)
   GITHUB_TOKEN                 Fallback GitHub.com token alias for gh
                                Interactive \`gh auth login\` or a mounted GitHub CLI profile is not required
-  RALPHIE_MODEL_BASE_URL       OpenAI-compatible URL; uses private temporary config
-  RALPHIE_MODEL_API_KEY        Model API key (environment only)
+  OPENCODE_URL                 OpenCode server URL (used when --opencode-url is absent)
+  OPENCODE_TOKEN               OpenCode server token (environment only)
 `;
 
 export type CommandRuntime = RalphieRuntime & {
@@ -411,12 +417,12 @@ export type CommandFactories = {
     readonly makeCoordinator?: (
         options: ProgressCoordinatorOptions,
     ) => ProgressCoordinator;
-    readonly makePi?: (
-        config: PiProviderConfig,
-        listener: PiEventListener,
-    ) => PiService;
+    readonly makeOpenCode?: (
+        config: OpenCodeProviderConfig,
+        listener: AgentEventListener,
+    ) => OpenCodeService;
     readonly makeRuntime?: (input: {
-        readonly pi: PiService;
+        readonly opencode: OpenCodeService;
         readonly progress: ProgressCoordinator["progress"];
     }) => CommandRuntime;
     readonly runWorkflow?: typeof workflow;
@@ -446,7 +452,7 @@ const resolveCommandFactories = (
     factories: CommandFactories = {},
 ): Required<CommandFactories> => ({
     makeCoordinator: factories.makeCoordinator ?? makeProgressCoordinator,
-    makePi: factories.makePi ?? makePiService,
+    makeOpenCode: factories.makeOpenCode ?? makeOpenCodeService,
     makeRuntime: factories.makeRuntime ?? makeLiveRuntime,
     runWorkflow: factories.runWorkflow ?? workflow,
     runMaintenance: factories.runMaintenance ?? maintainIssues,
@@ -563,7 +569,7 @@ const workflowOptionsFor = (
     },
     model: config.model,
     modelVariant: config.thinking,
-    piStageVariants: {
+    agentStageVariants: {
         grounding: config.groundingThinking ?? "low",
         implementation: config.implementationThinking ?? "high",
         complexity: config.complexityThinking ?? "medium",
@@ -698,12 +704,12 @@ export const runCommand = async (
             factories.makeCoordinator,
             output,
         );
-        const pi = factories.makePi(
-            resolvePiConfig(config),
+        const opencode = factories.makeOpenCode(
+            resolveOpenCodeConfig(config),
             coordinator.piListener,
         );
         runtime = factories.makeRuntime({
-            pi,
+            opencode,
             progress: coordinator.progress,
         });
         await dispatchCommand(

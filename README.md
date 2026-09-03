@@ -1,11 +1,11 @@
 # Ralphie
 
-**Turn a GitHub issue queue into reviewed commits with Pi.**
+**Turn a GitHub issue queue into reviewed commits with OpenCode.**
 
 [![CI](https://github.com/beremaran/ralphie/actions/workflows/ci.yml/badge.svg)](https://github.com/beremaran/ralphie/actions/workflows/ci.yml)
 
 Ralphie is an opinionated, resumable CLI that reads open GitHub issues, asks
-[Pi](https://github.com/earendil-works/pi) for schema-validated decisions, and
+[OpenCode](https://opencode.ai/v2/docs/) for schema-validated decisions, and
 routes each issue to either focused implementation or dependency-aware
 decomposition. Agents handle reasoning and code changes; Ralphie keeps Git,
 GitHub, run state, recovery, and safety checks deterministic.
@@ -26,7 +26,7 @@ For task-oriented details, start with the [documentation index](./docs/README.md
 - **Structured agent decisions** — complexity, reviews, decompositions, and
   commit messages are validated against explicit schemas.
 - **Fresh-context review loops** — implementation, review, and review-fix work
-  run in separate Pi sessions to reduce context bias.
+  run in separate OpenCode sessions to reduce context bias.
 - **Deterministic delivery** — Ralphie stages, inspects, commits, and pushes the
   resulting changes itself; agents do not own the delivery protocol. In `pr`
   mode, merged delivery is a **check gate**: the pull request is merged only
@@ -51,11 +51,10 @@ Ralphie has three runtime forms with different local dependencies:
   `bunx @beremaran/ralphie` or `bun run index.ts`, and to build Ralphie from
   source.
 - **Docker image:** the published image runs the native binary and does not
-  include Bun at runtime. It includes the GitHub CLI, Git, a POSIX shell, Pi's
-  shell/search tools, and CA certificates.
+  include Bun at runtime. It includes the GitHub CLI, Git, a POSIX shell, and CA certificates.
 
 Every repository workflow also needs GitHub CLI, Git, a shell, and model
-credentials supported by Pi. The target repository's verification command is a
+an OpenCode server with model credentials. The target repository's verification command is a
 separate dependency boundary: install whatever that command uses (for example,
 Bun, Node.js, or a project compiler) in the selected runtime. The default
 `bun run check` is therefore a target-repository requirement, not a standalone
@@ -74,9 +73,7 @@ gh --version
 
 For unattended runs, provide `GH_TOKEN` (preferred) or `GITHUB_TOKEN` to the
 process instead; credentials are inputs and need not be printed or exposed.
-Configure Pi in `~/.pi/agent/auth.json` or with `--pi-dir`. For an
-OpenAI-compatible endpoint, use `RALPHIE_MODEL_BASE_URL` and, when required,
-`RALPHIE_MODEL_API_KEY`. See [Getting started](./docs/getting-started.md) for
+Start an OpenCode server (`opencode2 serve`) before running Ralphie. By default Ralphie discovers the local background service; use `--opencode-url` (or `OPENCODE_URL`) for an explicit server and `--opencode-token` (or `OPENCODE_TOKEN`) when it requires a token. See [Getting started](./docs/getting-started.md) for
 the complete installation, authentication, container, and source-checkout
 contract.
 
@@ -127,7 +124,7 @@ the [OCI image](https://ghcr.io/beremaran/ralphie), the
 the [MIT license](https://github.com/beremaran/ralphie/blob/main/LICENSE).
 Public artifacts do not require GitHub credentials. Operating on a private target
 repository still requires a GitHub account or runtime token with the necessary
-permissions; Pi model credentials are also required when Ralphie asks Pi to make
+permissions; OpenCode model credentials are also required when Ralphie asks OpenCode to make
 a decision.
 
 ## Docker runtime
@@ -138,9 +135,7 @@ The image contains no credentials or credential-bearing defaults. Supply all
 credentials and configuration at runtime:
 
 - `GH_TOKEN` (preferred) or `GITHUB_TOKEN` for noninteractive GitHub CLI access;
-- either a Pi directory mounted at `/home/nonroot/.pi/agent` and passed with
-  `--pi-dir`, or `RALPHIE_MODEL_BASE_URL` and, when required,
-  `RALPHIE_MODEL_API_KEY` so Ralphie can create private temporary Pi config;
+- `OPENCODE_URL` (or `--opencode-url`) for the external OpenCode server, and `OPENCODE_TOKEN` (or `--opencode-token`) when it requires a token;
 - a writable `/home/nonroot/.ralphie` volume for checkouts, state, and recovery
   artifacts.
 
@@ -152,16 +147,15 @@ docker run --rm --env GH_TOKEN --entrypoint gh \
   ghcr.io/beremaran/ralphie:latest auth status
 ```
 
-A complete first-run preview keeps the state and Pi configuration separate:
+A complete first-run preview:
 
 ```bash
 docker run --rm \
   --env GH_TOKEN \
+  --env OPENCODE_URL \
   --mount type=volume,source=ralphie-state,target=/home/nonroot/.ralphie \
-  --mount type=bind,source="$HOME/.pi/agent",target=/home/nonroot/.pi/agent \
   ghcr.io/beremaran/ralphie:latest owner/repository \
   --workspace /home/nonroot/.ralphie \
-  --pi-dir /home/nonroot/.pi/agent \
   --dry-run --max-issues 1
 ```
 
@@ -174,22 +168,22 @@ for the full contract.
 ## Output contract
 
 `--output` selects `default`, `verbose`, `quiet`, or `json`. In an interactive,
-non-CI terminal, the default streams the Pi transcript with one replaceable
+non-CI terminal, the default streams the OpenCode transcript with one replaceable
 interactive region below it: the sticky stage/status line plus the bounded
 activity rows together occupy at most three physical terminal rows (measured
 by the rows actually painted, not by newline counts), repainted in place and
 clipped before wrap at the current width. The footer is refreshed
 periodically and describes the active leaf stage and
 activity—for example, `› Reviewing changes › Using bash`—rather than a global
-step count. Completed progress milestones remain in scrollback. Pi sessions
+step count. Completed progress milestones remain in scrollback. OpenCode sessions
 start with contextual headers such as:
 
 ```text
-╭─ Pi · Task · session-1 · owner/repo · issue 2/4 · #56 · Reviewing changes · attempt 1/3
+╭─ OpenCode · Task · session-1 · owner/repo · issue 2/4 · #56 · Reviewing changes · attempt 1/3
 ```
 
 Human-readable output also records lifecycle breadcrumbs for events such as
-context compaction and Pi retries. Intermediate work stays in the compact
+context compaction and OpenCode retries. Intermediate work stays in the compact
 activity surface: tool-call deltas, tool execution updates, bash execution
 updates, streamed thinking, compaction/retry lifecycle, and active progress
 changes render as bounded rows in the replaceable interactive region rather
@@ -204,10 +198,10 @@ output is the deterministic, append-only noninteractive fallback and uses no
 ANSI cursor controls and no carriage-return bytes. Quiet output reports
 failures and handled needs-attention stops only. JSON output is
 JSON Lines on stdout: each line is a parseable progress record or a lossless
-`pi_event` record, without
+`opencode_event` record, without
 human breadcrumb lines. The durable progress-event log remains at
 `<workspace>/.ralphie/runs/<run-id>/events.jsonl` independently of the selected
-renderer; supplied progress-event values are preserved as-is. Pi transcripts,
+renderer; supplied progress-event values are preserved as-is. OpenCode transcripts,
 terminal controls, and other unsafe display text are redacted or sanitized at
 the reporting boundary.
 See [Operations and recovery](./docs/operations-and-recovery.md) for output,
@@ -278,7 +272,7 @@ opt-in (with optional `--needs-attention-label`) publishes one idempotent
 structured comment and label per issue, saved as resumable intent before any
 GitHub mutation; dry runs never notify.
 
-**Needs-attention recovery contract.** Every Pi session is a bounded
+**Needs-attention recovery contract.** Every OpenCode session is a bounded
 `request_needs_attention` signal channel for repository-backed blockers. The
 signal is a schema-validated `{ reason, message }` object whose `reason` is one
 of `outdated_premise`, `conflicting_requirements`, `missing_information`,
@@ -288,7 +282,7 @@ implementation or review decision, and the prompt guidance forbids it for work
 that is merely hard, large, slow, or uncertain. Only structured decision and
 task sessions (grounding, complexity, implementation, review-fix,
 commit-message, review, and decomposition) can raise it, and only through
-Ralphie's Pi task/decision gate. Each signal is confirmed by exactly one
+Ralphie's OpenCode task/decision gate. Each signal is confirmed by exactly one
 fresh, read-only verifier session before any further artifact, Git, or GitHub
 mutation. A confirmed `needs_attention` disposition persists the structured
 decision with its summary, evidence, questions, and issue-freshness
@@ -308,7 +302,7 @@ with the handoff retained for resume, never reported as successfully handled.
 
 `--dry-run` grounds every issue, reports all three routes, and performs no
 implementation, checkout mutation, Git or GitHub mutation, issue closure, or PR
-delivery. Pi sessions never close issues, create or merge pull requests, or
+delivery. OpenCode sessions never close issues, create or merge pull requests, or
 push: every Git and GitHub mutation is performed by Ralphie's deterministic
 domain services, and agent sessions are denied mutating Git and GitHub
 commands.
@@ -349,7 +343,7 @@ The main references are:
 `ralphie --version` prints only the release version. For automation,
 `ralphie --version --output json` prints a stable object containing `version`
 and `commitSha`. Both forms work without a repository, GitHub credentials, or
-Pi configuration. Release builds embed the immutable commit SHA supplied by
+OpenCode configuration. Release builds embed the immutable commit SHA supplied by
 the build entry point; local builds use the documented `local` commit sentinel
 when no release SHA is supplied. See the [CLI reference](./docs/cli-reference.md)
 for the complete command surface.

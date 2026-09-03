@@ -243,7 +243,7 @@ repository metadata are excluded.
 
 No private build input is required. The container build receives only the
 validated public version and commit values as `RALPHIE_VERSION` and
-`RALPHIE_COMMIT_SHA`; GitHub tokens, OIDC tokens, and Pi/model credentials are
+`RALPHIE_COMMIT_SHA`; GitHub tokens, OIDC tokens, and OpenCode/model credentials are
 never build arguments, environment variables, labels, copied files, or build
 metadata inputs. Credentials are supplied only at runtime where needed. The
 version and commit remain the intentional public OCI labels.

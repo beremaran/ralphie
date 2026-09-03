@@ -1,23 +1,23 @@
 import { z } from "zod";
 
-export type PiModel = {
+export type AgentModel = {
     readonly providerID: string;
     readonly modelID: string;
 };
 
-export type PiSelection = {
+export type AgentSelection = {
     readonly agent: string;
-    readonly model?: PiModel;
+    readonly model?: AgentModel;
     readonly variant?: string;
 };
 
-export const DEFAULT_PI_AGENT = "build";
+export const DEFAULT_AGENT = "build";
 
-export const piModelSchema = z
+export const agentModelSchema = z
     .string()
     .trim()
-    .regex(/^[^/\s]+\/[^\s]+$/, "Model must use Pi's provider/model format.")
-    .transform((value): PiModel => {
+    .regex(/^[^/\s]+\/[^\s]+$/, "Model must use provider/model format.")
+    .transform((value): AgentModel => {
         const separator = value.indexOf("/");
         return {
             providerID: value.slice(0, separator),
@@ -25,13 +25,13 @@ export const piModelSchema = z
         };
     });
 
-export const piModelVariantSchema = z.enum([
-    "off",
-    "minimal",
-    "low",
-    "medium",
-    "high",
-    "xhigh",
-    "max",
-]);
-export const piAgentSchema = z.string().trim().min(1).default(DEFAULT_PI_AGENT);
+export const agentModelVariantSchema = z.string().trim().min(1);
+export const agentSchema = z.string().trim().min(1).default(DEFAULT_AGENT);
+
+// Legacy Pi-era aliases (removed in the final cutover; kept for migration).
+export type PiModel = AgentModel;
+export type PiSelection = AgentSelection;
+export const DEFAULT_PI_AGENT = DEFAULT_AGENT;
+export const piModelSchema = agentModelSchema;
+export const piModelVariantSchema = agentModelVariantSchema;
+export const piAgentSchema = agentSchema;

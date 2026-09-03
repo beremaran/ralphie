@@ -54,7 +54,7 @@ export const makeResolutionVerificationService = (
                     message: `Resolution verification requires branch ${context.targetBranch}, but checkout is on ${checkpoint.branch}.`,
                 });
             }
-            const result = await requestStructuredOutput(context.pi, {
+            const result = await requestStructuredOutput(context.agent, {
                 directory: context.repositoryPath,
                 title: `Verify resolution of issue #${context.issue.number}`,
                 prompt: buildResolutionVerificationPrompt({
@@ -64,11 +64,11 @@ export const makeResolutionVerificationService = (
                     headSha: checkpoint.head,
                 }),
                 schema: resolutionVerificationDecisionSchema,
-                agent: context.piSelection.agent,
-                model: context.piSelection.model,
-                variant: context.piSelection.variant,
+                agent: context.agentSelection.agent,
+                model: context.agentSelection.model,
+                variant: context.agentSelection.variant,
                 runId: context.runId,
-                diagnostics: context.piDiagnostics,
+                diagnostics: context.agentDiagnostics,
                 repositoryInvariant: checkpoint,
                 verifyRepositoryInvariant: context.repositoryInvariant.verify,
                 progress,

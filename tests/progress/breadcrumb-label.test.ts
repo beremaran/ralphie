@@ -9,7 +9,7 @@ import {
     renderBreadcrumbLine,
 } from "../../src/progress/breadcrumb-label.ts";
 import type { BreadcrumbLabelCandidate } from "../../src/progress/breadcrumb-label.ts";
-import type { PiSessionEvent } from "../../src/pi/client.ts";
+import type { PiSessionEvent } from "../../src/opencode/client.ts";
 import { makePiTranscriptRenderer } from "../../src/progress/transcript.ts";
 
 const context = {
@@ -169,7 +169,7 @@ describe("breadcrumb transcript insertion", () => {
 
         expect(prepared.canonicalKey).toBe("› Using Bearer super-secret");
         expect(output).toBe(
-            "╭─ Pi · Task · session-1\n" +
+            "╭─ OpenCode · Task · session-1\n" +
                 "│\n" +
                 "│  ✦ assistant before\n" +
                 "│  › Using Bearer super-secret\n" +

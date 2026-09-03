@@ -48,7 +48,7 @@ export const makeGroundingAssessmentService = (
                     message: `Issue grounding requires branch ${context.targetBranch}, but checkout is on ${checkpoint.branch}.`,
                 });
             }
-            const result = await requestStructuredOutput(context.pi, {
+            const result = await requestStructuredOutput(context.agent, {
                 directory: context.repositoryPath,
                 title: `Check readiness of issue #${context.issue.number}`,
                 prompt: buildGroundingPrompt({
@@ -58,13 +58,13 @@ export const makeGroundingAssessmentService = (
                     headSha: checkpoint.head,
                 }),
                 schema: groundingDecisionSchema,
-                agent: context.piSelection.agent,
-                model: context.piSelection.model,
+                agent: context.agentSelection.agent,
+                model: context.agentSelection.model,
                 variant:
-                    context.piStageVariants?.grounding ??
-                    context.piSelection.variant,
+                    context.agentStageVariants?.grounding ??
+                    context.agentSelection.variant,
                 runId: context.runId,
-                diagnostics: context.piDiagnostics,
+                diagnostics: context.agentDiagnostics,
                 repositoryInvariant: checkpoint,
                 verifyRepositoryInvariant: context.repositoryInvariant.verify,
                 progress,

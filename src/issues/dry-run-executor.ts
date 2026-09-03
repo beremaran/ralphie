@@ -274,15 +274,15 @@ const needsAttentionOutcome = (
         : outcome;
 };
 
-const PI_REASON_TO_NEEDS_ATTENTION: Readonly<
+const AGENT_REASON_TO_NEEDS_ATTENTION: Readonly<
     Record<string, NeedsAttentionReason>
 > = Object.fromEntries(
     Object.values(NeedsAttentionReason).map((reason) => [reason, reason]),
 );
 
-/** Pi signal reasons and decision reasons share the same value set. */
+/** Agent signal reasons and decision reasons share the same value set. */
 const needsAttentionReasonFor = (reason: string): NeedsAttentionReason =>
-    PI_REASON_TO_NEEDS_ATTENTION[reason] ??
+    AGENT_REASON_TO_NEEDS_ATTENTION[reason] ??
     NeedsAttentionReason.MissingInformation;
 
 /**

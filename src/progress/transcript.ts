@@ -2,7 +2,7 @@ import type {
     PiEventContext,
     PiEventListener,
     PiSessionEvent,
-} from "../pi/client.ts";
+} from "../opencode/client.ts";
 import { stripTerminalControls } from "../shared/redaction.ts";
 import { cyan, dim, green, red, yellow } from "./colors.ts";
 import {
@@ -138,7 +138,7 @@ const safeJson = (value: unknown): string => {
 
 const eventJson = (event: PiSessionEvent, context: PiEventContext): string =>
     safeJson({
-        type: "pi_event",
+        type: "opencode_event",
         sessionID: context.sessionID,
         directory: context.directory,
         ...(context.title === undefined ? {} : { title: context.title }),
@@ -334,11 +334,12 @@ const makeTranscriptWriter = (
     const beginSession = (context: PiEventContext): void => {
         if (sessionOpen) finishSession("interrupted");
         resetLineMeter?.();
-        const title = oneLine(context.title ?? "Pi task") || "Pi task";
+        const title =
+            oneLine(context.title ?? "OpenCode task") || "OpenCode task";
         const session = oneLine(context.sessionID);
         const workflow = workflowHeader(getDisplayState?.());
         write(
-            `╭─ ${styles.assistant("Pi")} · ${title}${session === "" ? "" : ` · ${styles.event(session)}`}${styles.event(workflow)}\n│\n`,
+            `╭─ ${styles.assistant("OpenCode")} · ${title}${session === "" ? "" : ` · ${styles.event(session)}`}${styles.event(workflow)}\n│\n`,
         );
         sessionOpen = true;
         hasBlock = false;
@@ -611,7 +612,7 @@ const renderMessageUpdate = (
             const message =
                 update.error.errorMessage ??
                 update.reason ??
-                "Pi response failed.";
+                "OpenCode response failed.";
             writer.line(
                 `${styles.error("✗ assistant error")} ${sanitizeTerminalText(message)}`,
             );
@@ -704,12 +705,12 @@ const renderLifecycleEvent = (
         }
         case "auto_retry_start":
             writer.line(
-                `${styles.event("↻")} retrying Pi request · attempt ${event.attempt}/${event.maxAttempts}`,
+                `${styles.event("↻")} retrying OpenCode request · attempt ${event.attempt}/${event.maxAttempts}`,
             );
             return;
         case "auto_retry_end":
             writer.line(
-                `${styles.event("↻")} Pi retry ${event.success ? "succeeded" : "failed"}`,
+                `${styles.event("↻")} OpenCode retry ${event.success ? "succeeded" : "failed"}`,
             );
             return;
         case "summarization_retry_scheduled":

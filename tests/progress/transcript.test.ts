@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { makePiTranscriptRenderer } from "../../src/progress/transcript.ts";
-import type { PiEventContext, PiSessionEvent } from "../../src/pi/client.ts";
+import type {
+    PiEventContext,
+    PiSessionEvent,
+} from "../../src/opencode/client.ts";
 
 const context: PiEventContext = {
     sessionID: "session-1",
@@ -392,7 +395,7 @@ describe("transcript is lossless for sensitive-looking text", () => {
             },
         );
         const output = chunks.join("");
-        expect(output).toContain('"type":"pi_event"');
+        expect(output).toContain('"type":"opencode_event"');
         expect(output).toContain('"token":"sk-json-nested"');
         expect(output).toContain('"apiKey":"ghp_JSONKEYVALUESECRET"');
         expect(output).toContain("ghp_JSONTITLESECRET");

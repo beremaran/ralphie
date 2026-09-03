@@ -2,8 +2,8 @@ import { IssueOrder, IssueSort } from "./github/issues.ts";
 import { DEFAULT_MAX_DECOMPOSITION_DEPTH } from "./github/decomposition-markdown.ts";
 export { DEFAULT_MAX_DECOMPOSITION_DEPTH } from "./github/decomposition-markdown.ts";
 import { parseRepositorySlug } from "./github/repository.ts";
-import { MODEL_API_KEY_ENV, MODEL_BASE_URL_ENV } from "./pi/config.ts";
-import { DEFAULT_PI_AGENT, type PiModel } from "./agent/model.ts";
+import { OPENCODE_TOKEN_ENV, OPENCODE_URL_ENV } from "./opencode/config.ts";
+import { DEFAULT_AGENT, type AgentModel } from "./agent/model.ts";
 import { RalphieError } from "./shared/error.ts";
 
 export const DEFAULT_WORKSPACE = "~/.ralphie";
@@ -118,16 +118,17 @@ export type RalphieCliOptions = {
     readonly maxAttempts?: number;
     readonly pipelineTimeout?: PipelineTimeout;
     readonly duplicateAction?: DuplicateAction;
-    readonly model?: PiModel;
+    readonly model?: AgentModel;
     readonly thinking?: string;
     readonly groundingThinking?: string;
     readonly implementationThinking?: string;
     readonly implementationAttempts?: number;
-    readonly implementationFallbackModel?: PiModel;
+    readonly implementationFallbackModel?: AgentModel;
     readonly complexityThinking?: string;
     readonly reviewThinking?: string;
     readonly commitThinking?: string;
-    readonly piDir?: string;
+    readonly opencodeUrl?: string;
+    readonly opencodeToken?: string;
     readonly workspace?: string;
     readonly clean?: CleanWhen;
     readonly dryRun?: boolean;
@@ -140,11 +141,10 @@ export type RalphieCliOptions = {
 type SharedRalphieConfig = {
     readonly repo: string;
     readonly branch?: string;
-    readonly model?: PiModel;
+    readonly model?: AgentModel;
     readonly thinking?: string;
-    readonly piDir?: string;
-    readonly modelBaseUrl?: string;
-    readonly modelApiKey?: string;
+    readonly opencodeUrl?: string;
+    readonly opencodeToken?: string;
     readonly agent: string;
     readonly workspace: string;
     readonly cleanStart: boolean;
@@ -174,7 +174,7 @@ export type IssueRalphieConfig = SharedRalphieConfig &
         readonly groundingThinking?: string;
         readonly implementationThinking?: string;
         readonly implementationAttempts: number;
-        readonly implementationFallbackModel?: PiModel;
+        readonly implementationFallbackModel?: AgentModel;
         readonly complexityThinking?: string;
         readonly reviewThinking?: string;
         readonly commitThinking?: string;
@@ -440,10 +440,15 @@ const commonResolvedConfig = (
     ...optionalProperty("branch", options.branch),
     ...optionalProperty("model", options.model),
     ...optionalProperty("thinking", options.thinking),
-    ...optionalProperty("piDir", options.piDir),
-    ...optionalProperty("modelBaseUrl", process.env[MODEL_BASE_URL_ENV]),
-    ...optionalProperty("modelApiKey", process.env[MODEL_API_KEY_ENV]),
-    agent: DEFAULT_PI_AGENT,
+    ...optionalProperty(
+        "opencodeUrl",
+        options.opencodeUrl ?? process.env[OPENCODE_URL_ENV],
+    ),
+    ...optionalProperty(
+        "opencodeToken",
+        options.opencodeToken ?? process.env[OPENCODE_TOKEN_ENV],
+    ),
+    agent: DEFAULT_AGENT,
     workspace: options.workspace ?? DEFAULT_WORKSPACE,
     cleanStart: options.clean === "start" || options.clean === "both",
     cleanEnd: options.clean === "end" || options.clean === "both",

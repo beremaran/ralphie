@@ -116,7 +116,10 @@ import {
     makeNeedsAttentionRouterService,
     type NeedsAttentionRouterService,
 } from "./issues/needs-attention.ts";
-import { makePiService, type PiService } from "./pi/server.ts";
+import {
+    makeOpenCodeService,
+    type OpenCodeService,
+} from "./opencode/server.ts";
 import { type ProgressReporterService } from "./progress/progress.ts";
 import { RunStateStoreLive, type RunStateStoreService } from "./run/state.ts";
 import { WorkspaceLive, type WorkspaceService } from "./workspace/workspace.ts";
@@ -154,14 +157,14 @@ export type RalphieRuntime = {
     readonly issueExecutor: IssueExecutorService;
     readonly issueRecovery: IssueRecoveryService;
     readonly needsAttentionRouter: NeedsAttentionRouterService;
-    readonly pi: PiService;
+    readonly opencode: OpenCodeService;
     readonly progress: ProgressReporterService;
     readonly runStateStore: RunStateStoreService;
     readonly workspace: WorkspaceService;
 };
 
 export type RuntimeOverrides = {
-    readonly pi: PiService;
+    readonly opencode: OpenCodeService;
     readonly progress: ProgressReporterService;
     /** Optional deterministic seams for the read-only pipeline observer. */
     readonly pipelineObservationDependencies?: PipelineObservationServiceDependencies;
@@ -172,7 +175,7 @@ export type RuntimeOverrides = {
 
 /** Assemble the small object graph for one run. */
 export const makeLiveRuntime = ({
-    pi,
+    opencode,
     progress,
     commandRunner = CommandRunnerLive,
     runStateStore = RunStateStoreLive,
@@ -289,7 +292,7 @@ export const makeLiveRuntime = ({
         issueExecutor,
         issueRecovery,
         needsAttentionRouter,
-        pi,
+        opencode,
         progress,
         runStateStore,
         workspace,
@@ -298,4 +301,4 @@ export const makeLiveRuntime = ({
 
 export const LiveRuntime = makeLiveRuntime;
 
-export { makePiService };
+export { makeOpenCodeService };

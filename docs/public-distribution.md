@@ -43,7 +43,7 @@ workflow token permission remains read-only; publication jobs in
 
 The public repository metadata is part of the same canonical identity:
 
-- description: `Turn a GitHub issue queue into reviewed commits with Pi.`;
+- description: `Turn a GitHub issue queue into reviewed commits with OpenCode.`;
 - homepage: <https://github.com/beremaran/ralphie#readme>; and
 - topics: `ai`, `automation`, `bun`, `cli`, `github`, `github-actions`,
   `github-issues`, `homebrew`, `oci`, and `pi`.
@@ -113,7 +113,7 @@ particular, users do not need repository credentials to read the source,
 installer, formula, release page, or published artifacts.
 
 User-owned data remains outside this public distribution topology: GitHub and
-Pi credentials, local Ralphie run state and workspaces, and any private target
+OpenCode credentials, local Ralphie run state and workspaces, and any private target
 repositories operated on by Ralphie are not published by this repository.
 Access to a private target repository still requires that target's own GitHub
 credentials; this does not make any Ralphie component private.

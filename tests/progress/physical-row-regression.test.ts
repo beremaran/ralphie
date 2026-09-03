@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 
-import type { PiEventContext, PiSessionEvent } from "../../src/pi/client.ts";
+import type {
+    PiEventContext,
+    PiSessionEvent,
+} from "../../src/opencode/client.ts";
 import { makeProgressCoordinator } from "../../src/progress/coordinator.ts";
 import type { FooterTimer } from "../../src/progress/footer.ts";
 import { INTERACTIVE_REGION_MAX_ROWS } from "../../src/progress/terminal-controller.ts";

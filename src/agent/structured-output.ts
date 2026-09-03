@@ -1,21 +1,15 @@
-import {
-    PiSessionProfile,
-    type PiClient,
-    type PiPermissionRuleset,
-} from "../pi/client.ts";
+import { AgentSessionProfile, type AgentClient } from "../opencode/client.ts";
 import { z } from "zod";
 
 import { RalphieError } from "../shared/error.ts";
-import { flattenDiscriminatedUnionForTool } from "./json-schema.ts";
-import type { PiModel } from "./model.ts";
+import type { AgentModel } from "./model.ts";
 import {
-    PI_DECISION_PERMISSION_POLICY,
-    type PiRepositoryInvariant,
-    type PiSessionDiagnostics,
-    parsePiNeedsAttentionRequest,
-    reportPiFailure,
-    toPiAssistantError,
-    type PiNeedsAttentionRequest,
+    type AgentRepositoryInvariant,
+    type AgentSessionDiagnostics,
+    parseNeedsAttentionRequest,
+    reportAgentFailure,
+    toAgentAssistantError,
+    type NeedsAttentionRequest,
 } from "./task-session.ts";
 import {
     type ProgressStage,
@@ -30,17 +24,21 @@ export type StructuredOutputRequest<Output> = {
     readonly schema: z.ZodType<Output>;
     readonly retryCount?: number;
     readonly agent?: string;
-    readonly permission?: PiPermissionRuleset;
-    readonly profile?: PiSessionProfile;
-    readonly model?: PiModel;
+    readonly permission?: ReadonlyArray<{
+        readonly permission: string;
+        readonly pattern: string;
+        readonly action: "allow" | "deny";
+    }>;
+    readonly profile?: AgentSessionProfile;
+    readonly model?: AgentModel;
     readonly variant?: string;
     readonly runId?: string;
-    readonly diagnostics?: PiSessionDiagnostics;
+    readonly diagnostics?: AgentSessionDiagnostics;
     readonly signal?: AbortSignal;
-    readonly repositoryInvariant?: PiRepositoryInvariant;
+    readonly repositoryInvariant?: AgentRepositoryInvariant;
     readonly verifyRepositoryInvariant?: (
         repositoryPath: string,
-        expected: PiRepositoryInvariant,
+        expected: AgentRepositoryInvariant,
     ) => Promise<void>;
     readonly verifyAfter?: () => Promise<void>;
     readonly progress?: ProgressReporterService;
@@ -51,7 +49,7 @@ export type StructuredOutputRequest<Output> = {
 export type StructuredOutputResult<Output> = {
     readonly sessionID: string;
     readonly output: Output;
-    readonly needsAttention?: PiNeedsAttentionRequest;
+    readonly needsAttention?: NeedsAttentionRequest;
 };
 
 const describeApiError = (error: unknown): string => {
@@ -62,7 +60,7 @@ const describeApiError = (error: unknown): string => {
         readonly data?: { readonly message?: unknown };
     };
     const name =
-        typeof candidate.name === "string" ? candidate.name : "PiError";
+        typeof candidate.name === "string" ? candidate.name : "OpenCodeError";
     const message =
         typeof candidate.data?.message === "string"
             ? candidate.data.message
@@ -80,8 +78,9 @@ const createSessionInput = <Output>(
     directory: request.directory,
     title: request.title,
     ...(request.agent === undefined ? {} : { agent: request.agent }),
-    permission: request.permission ?? PI_DECISION_PERMISSION_POLICY,
     ...(request.profile === undefined ? {} : { profile: request.profile }),
+    ...(request.model === undefined ? {} : { model: request.model }),
+    ...(request.variant === undefined ? {} : { variant: request.variant }),
 });
 
 const validateStructuredOutput = <Output>(
@@ -106,9 +105,7 @@ const promptInput = <Output>(
     ...(request.profile === undefined ? {} : { profile: request.profile }),
     format: {
         type: "json_schema" as const,
-        schema: flattenDiscriminatedUnionForTool(
-            z.toJSONSchema(request.schema),
-        ),
+        schema: z.toJSONSchema(request.schema),
         retryCount: request.retryCount ?? 2,
         validate: (value: unknown) =>
             validateStructuredOutput(request.schema, value),
@@ -148,7 +145,7 @@ const verifyStructuredOutputRequest = async <Output>(
 };
 
 const promptForStructuredOutput = async <Output>(
-    client: PiClient,
+    client: AgentClient,
     request: StructuredOutputRequest<Output>,
     sessionID: string,
 ): Promise<StructuredOutputResult<Output>> => {
@@ -159,14 +156,14 @@ const promptForStructuredOutput = async <Output>(
 
     if (response.error !== undefined || response.data === undefined) {
         throw new Error(
-            `Pi prompt failed: ${describeApiError(response.error)}`,
+            `OpenCode prompt failed: ${describeApiError(response.error)}`,
         );
     }
 
     if (response.data.info.error !== undefined) {
-        const assistantError = toPiAssistantError(response.data.info.error);
+        const assistantError = toAgentAssistantError(response.data.info.error);
         throw new RalphieError({
-            message: `Pi assistant failed (${assistantError.kind}): ${assistantError.message}`,
+            message: `OpenCode assistant failed (${assistantError.kind}): ${assistantError.message}`,
             cause: assistantError,
         });
     }
@@ -174,12 +171,12 @@ const promptForStructuredOutput = async <Output>(
     const parsed = request.schema.safeParse(response.data.info.structured);
     if (!parsed.success) {
         throw new Error(
-            `Pi returned invalid structured output: ${z.prettifyError(parsed.error)}`,
+            `OpenCode returned invalid structured output: ${z.prettifyError(parsed.error)}`,
         );
     }
 
     await verifyStructuredOutputRequest(request);
-    const needsAttention = parsePiNeedsAttentionRequest(
+    const needsAttention = parseNeedsAttentionRequest(
         response.data.needsAttention,
     );
     return {
@@ -190,7 +187,7 @@ const promptForStructuredOutput = async <Output>(
 };
 
 export const requestStructuredOutput = async <Output>(
-    client: PiClient,
+    client: AgentClient,
     request: StructuredOutputRequest<Output>,
 ): Promise<StructuredOutputResult<Output>> => {
     try {
@@ -202,7 +199,7 @@ export const requestStructuredOutput = async <Output>(
 
         if (session.error !== undefined || session.data === undefined) {
             throw new Error(
-                `Could not create Pi session: ${describeApiError(session.error)}`,
+                `Could not create OpenCode session: ${describeApiError(session.error)}`,
             );
         }
 
@@ -218,10 +215,10 @@ export const requestStructuredOutput = async <Output>(
             cause instanceof RalphieError
                 ? cause
                 : new RalphieError({
-                      message: "Failed to get structured output from Pi.",
+                      message: "Failed to get structured output from OpenCode.",
                       cause,
                   });
-        await reportPiFailure(request, error);
+        await reportAgentFailure(request, error);
         throw error;
     }
 };

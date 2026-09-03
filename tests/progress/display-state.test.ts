@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 
-import type { PiEventContext, PiSessionEvent } from "../../src/pi/client.ts";
+import type {
+    PiEventContext,
+    PiSessionEvent,
+} from "../../src/opencode/client.ts";
 import {
     DISPLAY_ACTIVITY_LABELS,
     PROGRESS_STAGE_LABELS,

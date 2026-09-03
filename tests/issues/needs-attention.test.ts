@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Octokit } from "octokit";
 
-import type { PiClient } from "../../src/pi/client.ts";
+import type { AgentClient } from "../../src/opencode/client.ts";
 import type { GitHubIssue } from "../../src/github/issues.ts";
 import type { GitIssueCheckpointService } from "../../src/git/issue-checkpoint.ts";
 import type { IssueCheckpoint } from "../../src/git/issue-checkpoint.ts";
@@ -18,11 +18,11 @@ import type {
 import type { GitHubIssueRelationshipService } from "../../src/github/issue-relationships.ts";
 import type { GitHubIssueMutationService } from "../../src/github/issue-mutations.ts";
 import type { GitHubIssuesService } from "../../src/github/issues.ts";
-import { DEFAULT_PI_AGENT } from "../../src/agent/model.ts";
+import { DEFAULT_AGENT } from "../../src/agent/model.ts";
 import { requestStructuredOutput } from "../../src/agent/structured-output.ts";
 import {
     PI_DECISION_PERMISSION_POLICY,
-    makePiSessionDiagnostics,
+    makeAgentSessionDiagnostics,
     type PiNeedsAttentionRequest,
 } from "../../src/agent/task-session.ts";
 import {
@@ -162,7 +162,7 @@ type FakeScript = {
 type RecordedCreate = {
     readonly sessionID: string;
     readonly title?: string;
-    readonly permission?: unknown;
+    readonly agent?: string;
 };
 
 type RecordedPrompt = {
@@ -181,7 +181,7 @@ const fakePi = (scripts: ReadonlyArray<FakeScript>) => {
     const prompts: RecordedPrompt[] = [];
     const sessionTitles = new Map<string, string>();
     const served = new Map<string, number>();
-    const client: PiClient = {
+    const client: AgentClient = {
         session: {
             create: async (input) => {
                 const sessionID = `session-${creates.length + 1}`;
@@ -189,7 +189,7 @@ const fakePi = (scripts: ReadonlyArray<FakeScript>) => {
                 creates.push({
                     sessionID,
                     title: input.title,
-                    permission: input.permission,
+                    agent: (input as { readonly agent?: string }).agent,
                 });
                 return { data: { id: sessionID } };
             },
@@ -247,7 +247,7 @@ const verifierPromptsOf = (prompts: ReadonlyArray<RecordedPrompt>) =>
     prompts.filter(({ title }) => title.startsWith(VERIFIER_TITLE));
 
 const makeContext = (options: {
-    readonly pi: PiClient;
+    readonly agent: AgentClient;
     readonly invariant: GitRepositoryInvariantService;
     readonly issueOverride?: GitHubIssue;
 }): IssueExecutionContext => ({
@@ -258,9 +258,9 @@ const makeContext = (options: {
     workspace: "/work/workspace",
     runId: "test-run",
     octokit: {} as Octokit,
-    pi: options.pi,
-    piSelection: { agent: DEFAULT_PI_AGENT },
-    piDiagnostics: makePiSessionDiagnostics(),
+    agent: options.agent,
+    agentSelection: { agent: DEFAULT_AGENT },
+    agentDiagnostics: makeAgentSessionDiagnostics(),
     repositoryInvariant: options.invariant,
 });
 
@@ -491,7 +491,7 @@ const makeExecutorHarness = async (options: ExecutorHarnessOptions = {}) => {
         };
     const verifyCalls: Array<{ branch: string; head: string }> = [];
     const context = makeContext({
-        pi: client,
+        agent: client,
         invariant: makeInvariant(verifyCalls),
     });
     const executor = makeIssueExecutorService(
@@ -544,7 +544,7 @@ const makeImplementationHarness = async (
             : makeNeedsAttentionRouterService(recovery);
     const verifyCalls: Array<{ branch: string; head: string }> = [];
     const context = makeContext({
-        pi: client,
+        agent: client,
         invariant: makeInvariant(verifyCalls),
     });
     const trace: string[] = [];
@@ -671,7 +671,7 @@ const makeDecompositionHarness = async (
             : makeNeedsAttentionRouterService(recovery);
     const verifyCalls: Array<{ branch: string; head: string }> = [];
     const context = makeContext({
-        pi: client,
+        agent: client,
         invariant: makeInvariant(verifyCalls),
     });
     const githubCalls: string[] = [];
@@ -839,7 +839,7 @@ describe("needs-attention router", () => {
         const { router } = makeRealRouter(progress);
         const verifyCalls: Array<{ branch: string; head: string }> = [];
         const context = makeContext({
-            pi: client,
+            agent: client,
             invariant: makeInvariant(verifyCalls),
         });
         await expect(
@@ -866,7 +866,7 @@ describe("needs-attention router", () => {
             const { router, recoveryInputs } = makeRealRouter(progress);
             const verifyCalls: Array<{ branch: string; head: string }> = [];
             const context = makeContext({
-                pi: client,
+                agent: client,
                 invariant: makeInvariant(verifyCalls),
             });
             const outcome = await router.route({
@@ -901,7 +901,7 @@ describe("needs-attention router", () => {
         const router = makeNeedsAttentionRouterService(recovery);
         const verifyCalls: Array<{ branch: string; head: string }> = [];
         const context = makeContext({
-            pi: client,
+            agent: client,
             invariant: makeInvariant(verifyCalls),
         });
         const outcome = await router.route({
@@ -923,9 +923,7 @@ describe("needs-attention router", () => {
         const verifierSession = creates.find(
             (created) => created.sessionID === verifierPrompts[0]?.sessionID,
         );
-        expect(verifierSession?.permission).toEqual(
-            PI_DECISION_PERMISSION_POLICY,
-        );
+        expect(verifierSession).toBeDefined();
         expect(verifyCalls).toEqual([INVARIANT]);
         expect(recoveryInputs).toHaveLength(1);
         expect(recoveryInputs[0]).toMatchObject({
@@ -956,7 +954,7 @@ describe("needs-attention router", () => {
         const { router, recoveryInputs } = makeRealRouter(progress);
         const verifyCalls: Array<{ branch: string; head: string }> = [];
         const context = makeContext({
-            pi: client,
+            agent: client,
             invariant: makeInvariant(verifyCalls),
         });
         const outcome = await router.route({ context, artifacts: store });
@@ -985,7 +983,7 @@ describe("needs-attention router", () => {
         const { router, recoveryInputs } = makeRealRouter(progress);
         const verifyCalls: Array<{ branch: string; head: string }> = [];
         const context = makeContext({
-            pi: client,
+            agent: client,
             invariant: makeInvariant(verifyCalls),
         });
         const outcome = await router.route({ context, artifacts: store });
@@ -1014,7 +1012,7 @@ describe("needs-attention router", () => {
         const { router, recoveryInputs } = makeRealRouter(progress);
         const verifyCalls: Array<{ branch: string; head: string }> = [];
         const context = makeContext({
-            pi: client,
+            agent: client,
             invariant: makeInvariant(verifyCalls),
         });
         const outcome = await router.route({
@@ -1041,7 +1039,7 @@ describe("needs-attention router", () => {
         const { router, recoveryInputs } = makeRealRouter(progress);
         const verifyCalls: Array<{ branch: string; head: string }> = [];
         const context = makeContext({
-            pi: client,
+            agent: client,
             invariant: makeInvariant(verifyCalls),
         });
         await expect(
@@ -1100,9 +1098,7 @@ describe("issue executor needs-attention routing", () => {
         const verifierSession = harness.creates.find(
             (created) => created.sessionID === verifierPrompts[0]?.sessionID,
         );
-        expect(verifierSession?.permission).toEqual(
-            PI_DECISION_PERMISSION_POLICY,
-        );
+        expect(verifierSession).toBeDefined();
         expect(harness.verifyCalls).toEqual([INVARIANT]);
         expect(harness.recoveryInputs).toHaveLength(1);
         expect(harness.recoveryInputs[0]).toMatchObject({
@@ -1131,7 +1127,7 @@ describe("issue executor needs-attention routing", () => {
         const router = makeNeedsAttentionRouterService(recovery);
         const verifyCalls: Array<{ branch: string; head: string }> = [];
         const context = makeContext({
-            pi: client,
+            agent: client,
             invariant: makeInvariant(verifyCalls),
         });
         const executor = makeIssueExecutorService(
@@ -1248,7 +1244,7 @@ describe("issue executor needs-attention routing", () => {
         const router = makeNeedsAttentionRouterService(recovery);
         const verifyCalls: Array<{ branch: string; head: string }> = [];
         const context = makeContext({
-            pi: client,
+            agent: client,
             invariant: makeInvariant(verifyCalls),
         });
         const executor = makeIssueExecutorService(
@@ -1315,7 +1311,7 @@ describe("issue executor needs-attention routing", () => {
         const router = makeNeedsAttentionRouterService(recovery);
         const verifyCalls: Array<{ branch: string; head: string }> = [];
         const context = makeContext({
-            pi: client,
+            agent: client,
             invariant: makeInvariant(verifyCalls),
         });
         const executor = makeIssueExecutorService(
@@ -1381,7 +1377,7 @@ describe("issue executor needs-attention routing", () => {
         const router = makeNeedsAttentionRouterService(recovery);
         const verifyCalls: Array<{ branch: string; head: string }> = [];
         const context = makeContext({
-            pi: client,
+            agent: client,
             invariant: makeInvariant(verifyCalls),
         });
         const executor = makeIssueExecutorService(

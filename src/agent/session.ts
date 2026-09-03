@@ -8,7 +8,7 @@ export type StructuredOutputName =
     | "commit-message-decision"
     | "issue-breakdown-decision";
 
-export type PiSessionPurpose =
+export type AgentSessionPurpose =
     | "implement"
     | "address-review"
     | "assess-complexity"
@@ -18,9 +18,36 @@ export type PiSessionPurpose =
     | "generate-commit-message"
     | "decompose-issue";
 
-export const PiSessionContext = "fresh" as const;
-export type PiSessionContext = typeof PiSessionContext;
+export const AgentSessionContext = "fresh" as const;
+export type AgentSessionContext = typeof AgentSessionContext;
 
+export type AgentSessionStage =
+    | {
+          readonly kind: "agent-session";
+          readonly purpose: "implement";
+      }
+    | {
+          readonly kind: "agent-session";
+          readonly purpose: "address-review";
+          readonly context: AgentSessionContext;
+          readonly input: "review-decision";
+      }
+    | {
+          readonly kind: "agent-session";
+          readonly purpose:
+              | "assess-complexity"
+              | "assess-grounding"
+              | "verify-resolution"
+              | "review-diff"
+              | "generate-commit-message"
+              | "decompose-issue";
+          readonly output: StructuredOutputName;
+      };
+
+// Legacy aliases.
+export type PiSessionPurpose = AgentSessionPurpose;
+export const PiSessionContext = AgentSessionContext;
+export type PiSessionContext = AgentSessionContext;
 export type PiSessionStage =
     | {
           readonly kind: "pi-session";

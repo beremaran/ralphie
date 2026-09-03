@@ -1,25 +1,9 @@
 /**
- * Wire-format helpers for the JSON schemas Ralphie hands to Pi tools.
+ * JSON helpers for OpenCode's fenced-JSON decisions.
  *
- * Pi validates every tool call against the tool's parameter schema and sends
- * that same schema to the model provider. Providers disagree on how much JSON
- * Schema they honor for tool parameters: some models and relays silently
- * mishandle root-level `oneOf` unions and emit tool calls with empty
- * arguments. The flattener below reshapes discriminated unions into a single
- * flat object so the widest set of providers can comply; the authoritative
- * Zod validation still runs on arrival, so branch-strict requirements are
- * enforced exactly as before (violations are reported back to the model).
- *
- * Flattened branch-only properties are optional, so strict constrained
- * samplers materialize every property of the flattened object (OpenAI-style
- * strict mode treats an optional property without a null admission as
- * required). The flattener therefore declares each combined property
- * explicitly nullable: scalar properties become `anyOf` unions with a null
- * variant (Pi's strict-schema conversion rejects object/array unions inside
- * `anyOf`, and TypeBox rejects `null` for a type-array whose `enum` does not
- * contain it), while object/array properties widen their `type` array with
- * `"null"`. The tool boundary treats "present but null" as "absent" before
- * the Zod validation runs.
+ * The flattener is retained for discriminated unions and null-stripping;
+ * authoritative Zod validation runs on arrival and violations are fed back
+ * to the model with a follow-up prompt.
  */
 
 type JsonObject = Record<string, unknown>;
@@ -185,7 +169,7 @@ const propertyTypesOf = (schema: JsonObject): readonly string[] | undefined => {
  * Declare an optional merged property explicitly nullable.
  *
  * Scalar properties become `anyOf` unions because TypeBox rejects `null` for
- * a type-array whose `enum` does not contain it, and Pi's strict-schema
+ * a type-array whose `enum` does not contain it, and strict-schema
  * conversion rejects object and array unions inside `anyOf`, so object and
  * array properties widen their `type` array with `"null"` instead.
  */

@@ -1,4 +1,4 @@
-import type { PiSessionEvent } from "../pi/client.ts";
+import type { PiSessionEvent } from "../opencode/client.ts";
 import {
     redactSensitiveText,
     redactSensitiveValue,
@@ -622,7 +622,7 @@ const lifecycleRetry = (
                 {
                     id: "retry",
                     kind: "lifecycle",
-                    label: "Retrying Pi request",
+                    label: "Retrying OpenCode request",
                     target: `attempt ${event.attempt}/${event.maxAttempts}`,
                     status: "running",
                 },
@@ -634,7 +634,7 @@ const lifecycleRetry = (
                 {
                     id: "retry",
                     kind: "lifecycle",
-                    label: "Retrying Pi request",
+                    label: "Retrying OpenCode request",
                     status: event.success ? "succeeded" : "failed",
                     ...(event.success || event.finalError === undefined
                         ? {}

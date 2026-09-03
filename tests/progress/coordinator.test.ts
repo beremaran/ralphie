@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 
-import type { PiEventContext, PiSessionEvent } from "../../src/pi/client.ts";
+import type {
+    PiEventContext,
+    PiSessionEvent,
+} from "../../src/opencode/client.ts";
 import { makeProgressCoordinator } from "../../src/progress/coordinator.ts";
 import type { FooterTimer } from "../../src/progress/footer.ts";
 import { INTERACTIVE_REGION_MAX_ROWS } from "../../src/progress/terminal-controller.ts";
@@ -488,7 +491,7 @@ describe("coordinator mode-specific contracts", () => {
         await coordinator.dispose();
 
         const text = output();
-        expect(text).toContain("╭─ Pi · Task · session-1");
+        expect(text).toContain("╭─ OpenCode · Task · session-1");
         expect(text).toContain("hello world");
         expect(text).toContain("│  $ echo hi");
         expect(text).toContain("│  ✓ bash done");
@@ -519,7 +522,7 @@ describe("coordinator mode-specific contracts", () => {
         expect(records.length).toBeGreaterThan(0);
         for (const record of records) {
             expect(
-                record.type === "pi_event" || record.stage !== undefined,
+                record.type === "opencode_event" || record.stage !== undefined,
             ).toBe(true);
         }
         // No human transcript rows and no cursor controls.

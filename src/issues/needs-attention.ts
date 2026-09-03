@@ -67,8 +67,7 @@ const verificationPrompt = (
 
 An earlier agent made this bounded needs-attention request:
 <needs-attention-request>${JSON.stringify(request)}</needs-attention-request>
-Independently verify the request. Do not use the request_needs_attention tool;
-return the grounding disposition only.`;
+Independently verify the request. Return the grounding disposition as a fenced json block only.`;
 
 const outcome = (
     decision: NeedsAttentionDecision,
@@ -114,17 +113,18 @@ const verifyHandoff = async (
         return (await artifacts.read(IssueArtifactKind.NeedsAttentionDecision))
             .decision;
     }
-    const verified = await requestStructuredOutput(context.pi, {
+    const verified = await requestStructuredOutput(context.agent, {
         directory: context.repositoryPath,
         title: `Verify needs-attention request for issue #${context.issue.number}`,
         prompt: verificationPrompt(context, handoff.request),
         schema: groundingDecisionSchema,
-        agent: context.piSelection.agent,
-        model: context.piSelection.model,
+        agent: context.agentSelection.agent,
+        model: context.agentSelection.model,
         variant:
-            context.piStageVariants?.grounding ?? context.piSelection.variant,
+            context.agentStageVariants?.grounding ??
+            context.agentSelection.variant,
         runId: context.runId,
-        diagnostics: context.piDiagnostics,
+        diagnostics: context.agentDiagnostics,
         repositoryInvariant: {
             branch: handoff.checkpoint.branch,
             head: handoff.checkpoint.sha,

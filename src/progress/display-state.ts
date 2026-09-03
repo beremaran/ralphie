@@ -1,4 +1,4 @@
-import type { PiEventContext, PiSessionEvent } from "../pi/client.ts";
+import type { PiEventContext, PiSessionEvent } from "../opencode/client.ts";
 import { stripTerminalControls } from "../shared/redaction.ts";
 import type {
     ProgressEvent,
@@ -62,7 +62,7 @@ export const PROGRESS_STAGE_LABELS: Readonly<Record<ProgressStage, string>> = {
     "repository-discovery": "Discovering repository",
     "repository-preparation": "Preparing repository",
     "issue-discovery": "Discovering issues",
-    "pi-runtime": "Starting Pi",
+    "opencode-runtime": "Starting OpenCode",
     "issue-planning": "Planning issue",
     "issue-execution": "Executing issue",
     "issue-queue": "Updating issue queue",

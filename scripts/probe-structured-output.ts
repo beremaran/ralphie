@@ -1,10 +1,12 @@
-import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { z } from "zod";
 
-import { piModelSchema, piModelVariantSchema } from "../src/agent/model.ts";
+import {
+    agentModelSchema,
+    agentModelVariantSchema,
+} from "../src/agent/model.ts";
 import { requestStructuredOutput } from "../src/agent/structured-output.ts";
 import { groundingDecisionSchema } from "../src/issues/decisions.ts";
-import { makePiClient } from "../src/pi/client.ts";
+import { makeOpenCodeService } from "../src/opencode/server.ts";
 
 enum ProbeDecision {
     Proceed = "proceed",
@@ -30,11 +32,11 @@ function usage(): never {
             "",
             "Options:",
             "  --union               Probe with the grounding decision schema (the",
-            "                        discriminated union behind issue readiness),",
-            "                        flattened exactly as production sends it.",
-            "  --model provider/id   Target a specific Pi model.",
-            "  --agent name          Target a specific Pi agent.",
-            "  --variant level       Pi thinking level (off..max).",
+            "                        discriminated union behind issue readiness).",
+            "  --model provider/id   Target a specific OpenCode model.",
+            "  --agent name          Target a specific OpenCode agent.",
+            "  --variant name        OpenCode model variant.",
+            "  --url <url>           OpenCode server URL (defaults to discovered service).",
         ].join("\n"),
     );
     process.exit(2);
@@ -45,11 +47,12 @@ type ProbeOptions = {
     model?: string;
     agent?: string;
     variant?: string;
+    url?: string;
 };
 
 const valueFlagKey = (
     flag: string,
-): "model" | "agent" | "variant" | undefined => {
+): "model" | "agent" | "variant" | "url" | undefined => {
     switch (flag) {
         case "--model":
             return "model";
@@ -57,6 +60,8 @@ const valueFlagKey = (
             return "agent";
         case "--variant":
             return "variant";
+        case "--url":
+            return "url";
         default:
             return undefined;
     }
@@ -84,7 +89,12 @@ const parseProbeOptions = (argv: readonly string[]): ProbeOptions => {
 };
 
 const options = parseProbeOptions(process.argv.slice(2));
-const client = makePiClient(await ModelRuntime.create());
+const service = makeOpenCodeService({
+    workspace: process.cwd(),
+    ...(options.url === undefined ? {} : { baseUrl: options.url }),
+});
+const runtime = await service.start();
+const client = runtime.client;
 
 const runProbe = async <Output>(
     label: string,
@@ -98,11 +108,11 @@ const runProbe = async <Output>(
         schema,
         ...(options.model === undefined
             ? {}
-            : { model: piModelSchema.parse(options.model) }),
+            : { model: agentModelSchema.parse(options.model) }),
         ...(options.agent === undefined ? {} : { agent: options.agent }),
         ...(options.variant === undefined
             ? {}
-            : { variant: piModelVariantSchema.parse(options.variant) }),
+            : { variant: agentModelVariantSchema.parse(options.variant) }),
     });
 
     console.log(`Probe schema: ${label}`);
@@ -112,7 +122,7 @@ const runProbe = async <Output>(
 try {
     if (options.union) {
         await runProbe(
-            "grounding decision union (flattened for the wire, as production sends it)",
+            "grounding decision union",
             groundingDecisionSchema,
             'Return the grounding decision for work that can start right now: use disposition "actionable".',
         );
@@ -125,4 +135,5 @@ try {
     }
 } finally {
     client.close?.();
+    await runtime.close();
 }

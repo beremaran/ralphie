@@ -85,9 +85,9 @@ Tracked modifications and untracked, non-ignored files inside that checkout are
 discarded. Keep unrelated work outside Ralphie's workspace.
 
 The workspace's `.ralphie` directory contains only repository checkouts and
-Ralphie's run state, events, and recovery artifacts. Pi configuration is kept
-in the default or explicitly supplied `--pi-dir`, or in a private temporary
-credential directory, never under this path. An explicitly supplied `--pi-dir`
+Ralphie's run state, events, and recovery artifacts. OpenCode configuration is kept
+in the default or explicitly supplied `--opencode-url`, or in a private temporary
+credential directory, never under this path. An explicitly supplied `--opencode-url`
 is operator-owned and is never removed; mount it outside the workspace.
 
 `--clean start` and `--clean end` recursively delete the workspace after
@@ -129,7 +129,7 @@ agent may edit the checkout, but it is denied commits, pushes, branch/reset/clea
 operations, and `gh` commands. Ralphie stages, verifies, commits, pushes, and
 mutates GitHub through deterministic domain services. Every decision task is
 schema-validated at both the tool and response boundaries; invalid output or
-Pi failure becomes a failed issue outcome without proceeding to the next
+OpenCode failure becomes a failed issue outcome without proceeding to the next
 operation.
 
 Verification commands are run against the staged tree and their evidence is

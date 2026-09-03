@@ -13,7 +13,7 @@ import {
     type PiSessionPurpose,
     type StructuredOutputName,
 } from "../../src/agent/session.ts";
-import { DEFAULT_PI_AGENT } from "../../src/agent/model.ts";
+import { DEFAULT_AGENT } from "../../src/agent/model.ts";
 import { ComplexityLevel, ReviewVerdict } from "../../src/issues/decisions.ts";
 import {
     IssuePipelineLive,
@@ -60,7 +60,7 @@ const makePlan = () =>
         repositoryPath: "/workspace/repository",
         targetBranch: "main",
         pi: {
-            agent: DEFAULT_PI_AGENT,
+            agent: DEFAULT_AGENT,
         },
     });
 
@@ -70,7 +70,7 @@ describe("issue pipeline", () => {
 
         expect(plan.targetBranch).toBe("main");
         expect(plan.pi).toEqual({
-            agent: DEFAULT_PI_AGENT,
+            agent: DEFAULT_AGENT,
         });
         expect(plan).not.toHaveProperty("issueBranch");
         expect(plan.assessment).toEqual({

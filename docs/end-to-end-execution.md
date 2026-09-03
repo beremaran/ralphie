@@ -40,18 +40,15 @@ flowchart TD
    `resolveRalphieConfig`.
 3. `resolveRalphieConfig` parses an `owner/repository` slug or GitHub clone URL
    and resolves defaults:
-   `lgtm`, one issue at a time, created/ascending issue sort, the `build` Pi
+   `lgtm`, one issue at a time, created/ascending issue sort, the `build` OpenCode
    agent, `~/.ralphie`, and no clean, dry-run, or alternate output mode.
    For `github.com`, interactively authenticate with `gh auth login` and verify
    with `gh auth status`; unattended runs may provide `GH_TOKEN` (preferred) or
-   `GITHUB_TOKEN` (fallback) as environment inputs. Model credentials come from the
-   `RALPHIE_MODEL_BASE_URL` and `RALPHIE_MODEL_API_KEY` environment variables.
-   One `--output` flag selects
-   `default`, `verbose`, `quiet`, or `json`, so `json` and `quiet` cannot be
-   combined. Pi credentials are either read from the default Pi directory, an
-   explicitly supplied `--pi-dir`, or a private temporary directory generated
-   from the model environment variables; they are not part of workspace
-   state.
+   `GITHUB_TOKEN` (fallback) as environment inputs. The OpenCode server is
+   discovered from the local background service or an explicitly supplied
+   `--opencode-url` (with `OPENCODE_TOKEN` when auth is required); it is not
+   part of workspace state. One `--output` flag selects `default`, `verbose`,
+   `quiet`, or `json`, so `json` and `quiet` cannot be combined.
 4. With `--resume`, the command loads and Zod-validates the requested state
    file before starting the workflow. A supplied branch/repository must be
    compatible with that state. A resumed run reuses its saved run id.
@@ -60,7 +57,7 @@ flowchart TD
    `<workspace>/.ralphie/runs/<run-id>/events.jsonl`; resumed runs use the
    directory containing the supplied state file.
 6. The command assembles the live services in `src/runtime.ts`, configures the
-   Pi service from the model flags, connects its event stream to the transcript
+   OpenCode service from the model flags, connects its event stream to the transcript
    renderer, and then executes `workflow` with the explicit runtime object.
 
 ## 2. Workflow preflight
@@ -78,7 +75,7 @@ order:
 | 5 | Repository | Clone with `gh repo clone` when absent; otherwise verify the checkout and `origin`, fetch existing repositories, select the requested branch or `main`/`master`, and prepare the checkout. |
 | 6 | Issue discovery | Paginate open GitHub issues, apply labels/sort/order, and exclude pull requests. |
 | 7 | Resume reconciliation | On resume, compare saved repository, branch, checkout HEAD, and pending issues with live Git/GitHub state. |
-| 8 | Run state | Build the refreshable queue and atomically persist an `active` state before Pi starts. |
+| 8 | Run state | Build the refreshable queue and atomically persist an `active` state before OpenCode starts. |
 
 Every tracked stage emits started, succeeded, or failed progress; grounding
 may also emit a skipped or needs-attention terminal status. The repository path
@@ -97,28 +94,23 @@ succeeds. A live-reconciliation skip does not consume that budget. A refresh
 after decomposition adds newly discovered issues without duplicating known or
 completed numbers.
 
-## 3. Pi runtime and issue loop
+## 3. OpenCode runtime and issue loop
 
-After the initial state save, Ralphie starts one embedded Pi runtime and keeps
-it alive for the queue. `makePiService` chooses one of three agent configurations:
+After the initial state save, Ralphie connects to one external OpenCode server
+and keeps it for the queue. `makeOpenCodeService` resolves the endpoint as:
 
-- an explicitly supplied `--pi-dir`;
-- a private system-temporary `0700` directory containing generated
-  `models.json` and `auth.json` (both `0600`) when
-  `RALPHIE_MODEL_BASE_URL` is used; or
-- Pi's default agent directory.
+- an explicitly supplied `--opencode-url` (or `OPENCODE_URL`), with
+  `--opencode-token` (or `OPENCODE_TOKEN`) when the server requires auth; or
+- the local OpenCode background service discovered automatically
+  (`opencode2 serve` must already be running; Ralphie never starts it).
 
-The temporary directory is outside the workspace, removed when the runtime
-is closed, and also removed if runtime startup fails. An explicit `--pi-dir` is
-operator-owned and is never removed; mount it outside the workspace. A
-read-only mount is suitable only for a fully provisioned static configuration;
-use a read-write mount when Pi needs to update `auth.json`, `models.json`, or
-its model store. Pi sessions and issues are processed sequentially, which
-keeps the live transcript ordered.
+Ralphie performs a health check on connect and fails fast with a clear error
+when no server is reachable. OpenCode sessions and issues are processed
+sequentially, which keeps the live transcript ordered.
 
 ```mermaid
 flowchart TD
-    A["Start embedded Pi runtime"] --> B{"Queue has a ready issue and budget?"}
+    A["Start embedded OpenCode runtime"] --> B{"Queue has a ready issue and budget?"}
     B -->|no| C{"Pending issues blocked by open dependencies?"}
     C -->|yes| R2["Record needs-attention outcomes with open-dependency evidence"]
     R2 --> Q2{"onNeedsAttention policy"}
@@ -151,7 +143,7 @@ flowchart TD
     M --> O
     P --> O
     O --> B
-    E --> R["Close Pi runtime; optional successful cleanup; summarize"]
+    E --> R["Close OpenCode runtime; optional successful cleanup; summarize"]
     N --> S
 ```
 
@@ -178,13 +170,13 @@ open leaf children, so a child can never deadlock on a container issue that
 is never queued.
 
 The issue executor receives the refreshed issue, concrete repository path,
-target branch, Octokit client, shared Pi client, model selection, diagnostics,
+target branch, Octokit client, shared OpenCode client, model selection, diagnostics,
 invariant service, and `AbortSignal`. The worker persists its outcome and the
 resulting checkout/queue transition before moving to another item.
 
 The workspace `.ralphie` tree contains repositories plus Ralphie's run state,
-events, and recovery artifacts only. Pi configuration is kept in the default
-or explicitly supplied `--pi-dir`, or in a private temporary credential
+events, and recovery artifacts only. OpenCode configuration is kept in the default
+or explicitly supplied `--opencode-url`, or in a private temporary credential
 directory outside the workspace.
 
 Dry-run issue execution uses a read-only view of existing per-issue artifacts.
@@ -250,7 +242,7 @@ optional message capped at 2,000 characters. It is a bounded request to the
 caller — never a final implementation, review, or decision verdict — and the
 prompt guidance forbids it for work that is merely hard, large, slow, or
 uncertain. Grounding, complexity, implementation, review-fix,
-commit-message, review, and decomposition sessions may raise it; the Pi task
+commit-message, review, and decomposition sessions may raise it; the OpenCode task
 gate parses and Zod-validates the side channel, so an invalid value is
 ignored rather than trusted, and no session can raise it outside Ralphie's
 own gate.
@@ -280,7 +272,7 @@ decision when its freshness fingerprint matches the live issue. Otherwise
 `ComplexityAssessment`:
 
 1. captures the repository invariant and confirms the expected branch;
-2. creates a fresh read-only Pi session;
+2. creates a fresh read-only OpenCode session;
 3. sends the issue and repository context with the 0–5 complexity rubric;
 4. requires a `complexityDecisionSchema` result through the terminating
    `submit_result` tool; and
@@ -306,14 +298,14 @@ flowchart LR
 ```
 
 Structured decision sessions deny edits/writes and mutating Git/GitHub
-commands, and Pi sessions cannot close issues, create or merge pull requests,
+commands, and OpenCode sessions cannot close issues, create or merge pull requests,
 or push: Ralphie's deterministic domain services perform every Git and GitHub
 mutation. PR reviews use an explicit immutable session profile whose only active
 tools are `submit_result` and the non-repository `request_needs_attention`
 side channel; the reviewer receives the exact staged patch and verification
 evidence in its prompt and cannot inspect the checkout or run shell/Git/GitHub
 commands. Every decision task is schema-validated at both the tool and response
-boundaries; invalid output or Pi failure becomes a failed issue outcome without
+boundaries; invalid output or OpenCode failure becomes a failed issue outcome without
 proceeding to the next operation.
 
 Decision schemas that are discriminated unions (issue grounding and its
@@ -340,7 +332,7 @@ exhausted.
 ```mermaid
 flowchart TD
     A["Capture clean issue-base checkpoint"] --> B["Verify branch/HEAD and direct-push safety"]
-    B --> C["Fresh Pi implementation session"]
+    B --> C["Fresh OpenCode implementation session"]
     C --> D["Verify invariant; git add --all"]
     D --> E{"Staged changes?"}
     E -->|no| F["Fresh read-only resolution verification"]
@@ -366,7 +358,7 @@ flowchart TD
 Detailed behavior:
 
 - `GitIssuePreparation` captures a clean branch/commit checkpoint before the
-  first mutating Pi session and persists it. A dirty checkout or branch mismatch
+  first mutating OpenCode session and persists it. A dirty checkout or branch mismatch
   stops the issue before agent work.
 - `GitRemoteSafety` checks the repository origin, selected branch, local HEAD,
   remote base, ahead/behind counts, and non-force policy before implementation
@@ -398,7 +390,7 @@ Detailed behavior:
   resolution session must return `resolved` plus concrete evidence. An
   unresolved decision starts a fresh bounded implementation retry with that
   evidence; the issue fails only after the configured attempts are exhausted.
-- After approval, Pi generates a schema-valid subject (maximum 72 characters)
+- After approval, OpenCode generates a schema-valid subject (maximum 72 characters)
   and optional body. Git commits the staged tree, verifies the resulting tree
   and clean checkout, then pushes and verifies the expected remote SHA.
 - The review budget is five attempts. On the fifth rejection, Ralphie writes
@@ -408,7 +400,7 @@ Detailed behavior:
   restoration cannot be verified, it halts without guessing.
 
 A successful implementation returns either `completed/pushed-commit` or
-`completed/already-resolved`. A failed Git, Pi, review, commit, or push step
+`completed/already-resolved`. A failed Git, OpenCode, review, commit, or push step
 returns a failed outcome and leaves the active issue pending for recovery.
 
 ## 6. Decomposition path: complexity 4–5 or escalation
@@ -430,7 +422,7 @@ flowchart TD
     L --> M["Refetch open issues and refresh dependency-aware queue"]
 ```
 
-The decomposition Pi session is read-only and returns an
+The decomposition OpenCode session is read-only and returns an
 `issueBreakdownDecisionSchema` result containing at least two independently
 actionable 0–3 children, stable keys, and an acyclic dependency graph. The
 breakdown is persisted before the first GitHub mutation.
@@ -544,7 +536,7 @@ output. `--output verbose` keeps the same mode selection and never expands the
 live interactive region's row cap (always at most three terminal rows); it only
 enriches durable progress rows with structured details.
 
-Interactive output has two coordinated surfaces: Pi transcript rows remain in
+Interactive output has two coordinated surfaces: OpenCode transcript rows remain in
 scrollback, and one replaceable region holds the sticky stage/status line plus
 the bounded activity view rows (running tools, reads/searches, thinking, and
 lifecycle work) for the active leaf stage. The whole region is at most three
@@ -561,18 +553,18 @@ representative region is:
 
 The footer's stage is the current leaf operation (`Reviewing changes` in this
 example), not a global workflow step count. The `[2/4]` value is the issue's
-queue position and `Review 1/3` is the review-attempt context. Each Pi session
+queue position and `Review 1/3` is the review-attempt context. Each OpenCode session
 opens with the same contextual snapshot, for example:
 
 ```text
-╭─ Pi · Task · session-1 · owner/repo · issue 2/4 · #56 · Reviewing changes · attempt 1/3
+╭─ OpenCode · Task · session-1 · owner/repo · issue 2/4 · #56 · Reviewing changes · attempt 1/3
 ```
 
 Human transcript output also emits lifecycle breadcrumbs, such as:
 
 ```text
 │  ↻ compacting context · threshold
-│  ↻ retrying Pi request · attempt 1/3
+│  ↻ retrying OpenCode request · attempt 1/3
 │  • thinking level · high
 ```
 
@@ -586,7 +578,7 @@ and, on completion, exactly one concise line: `✓ <tool> done`, or a single
 sanitized, bounded failure line with enough error detail to act on (for
 example `✗ grep failed — error: no matches for …`). Streamed assistant text
 remains bounded to the same 140-character stream limit used before, and the
-structured Pi records stay complete (subject to reporting-boundary
+structured OpenCode records stay complete (subject to reporting-boundary
 redaction). The compact activity area only ever paints the replaceable region
 through the stream-boundary tracker, so it can never clear or corrupt
 assistant response bytes. The three-row cap is a cap on physical terminal
@@ -601,10 +593,10 @@ The cross-mode guarantees are:
 
 | Mode or sink | Contract |
 | --- | --- |
-| Interactive | Pi transcript scrollback plus one replaceable region of at most three terminal rows (stage/status line plus bounded activity rows), repainted in place; completed milestones and lifecycle breadcrumbs remain durable rows. |
+| Interactive | OpenCode transcript scrollback plus one replaceable region of at most three terminal rows (stage/status line plus bounded activity rows), repainted in place; completed milestones and lifecycle breadcrumbs remain durable rows. |
 | Plain and CI | Append-only human-readable lines. No ANSI cursor controls are emitted, so logs do not require terminal repainting. |
-| `--output quiet` | Failures and handled needs-attention stops only; routine progress and Pi transcript rows are suppressed. |
-| `--output json` | One parseable JSON object per line on stdout: progress records and lossless `pi_event` records; progress values are preserved as supplied, while credential redaction still applies to `pi_event` records. Human headers, footers, and breadcrumb lines are not emitted. |
+| `--output quiet` | Failures and handled needs-attention stops only; routine progress and OpenCode transcript rows are suppressed. |
+| `--output json` | One parseable JSON object per line on stdout: progress records and lossless `opencode_event` records; progress values are preserved as supplied, while credential redaction still applies to `opencode_event` records. Human headers, footers, and breadcrumb lines are not emitted. |
 | Durable event log | Progress events are written independently to `events.jsonl` in the run directory, preserving supplied values, regardless of the renderer. |
 
 For example, a JSON Lines consumer sees structured records rather than the
@@ -612,21 +604,21 @@ human footer or `↻` lines:
 
 ```jsonl
 {"runId":"run-1","timestamp":"2026-08-24T01:02:03.000Z","stage":"review","status":"succeeded","message":"Review approved."}
-{"type":"pi_event","sessionID":"session-1","directory":"/workspace/repository","event":{"type":"turn_start"}}
+{"type":"opencode_event","sessionID":"session-1","directory":"/workspace/repository","event":{"type":"turn_start"}}
 ```
 
-Pi records are redacted before reporting; progress events preserve supplied
+OpenCode records are redacted before reporting; progress events preserve supplied
 values. Sensitive environment values, credentials, terminal controls in human
-text, and unsafe display text are not allowed to leak into Pi transcript or
+text, and unsafe display text are not allowed to leak into OpenCode transcript or
 breadcrumb output. JSON and the durable log preserve structured fields and raw
-Pi event shape; credential redaction still applies to Pi transcript records.
+OpenCode event shape; credential redaction still applies to OpenCode transcript records.
 The durable log is at
 `<workspace>/.ralphie/runs/<run-id>/events.jsonl` for new runs; a resumed run
 uses the directory containing its supplied state file. `--clean end` removes
 the successful run's workspace, including this log, while failed runs skip
 cleanup so their state and diagnostics remain available.
 
-A successful or interrupted run uses this layout (Pi configuration is not
+A successful or interrupted run uses this layout (OpenCode configuration is not
 stored in this tree):
 
 ```text
@@ -646,7 +638,7 @@ stored in this tree):
 
 `state.json` is versioned, schema-validated, and atomically replaced. It
 contains the repository/branch/workflow, selected `onNeedsAttention` policy,
-notification settings and any pending notification intent, Pi selection, budget,
+notification settings and any pending notification intent, OpenCode selection, budget,
 pending and completed queue numbers, processed count, outcomes, active
 issue/stage, checkout invariant, and update time. State is
 saved before the queue starts, when an issue becomes active, after outcomes and
@@ -660,7 +652,7 @@ On `--resume`:
 4. the saved pending queue, completed numbers, outcomes, and artifacts are
    restored; and
 5. the next safe deterministic step continues without unnecessarily rerunning
-   Pi work.
+   OpenCode work.
 
 Examples of resumable boundaries:
 
@@ -684,15 +676,15 @@ Progress events include `runId`, timestamp, stage, status, and message. An
 active PR closure additionally streams `pr-gate` events with the pull-request
 number, exact observed head SHA, transition details, and terminal events whose
 verbose/JSON payloads carry the structured check snapshot, elapsed time, poll
-count, and terminal reason. The normal output also streams Pi `text_delta`, tool-call, and
-tool-result events as they arrive. Human-readable Pi transcript output groups
+count, and terminal reason. The normal output also streams OpenCode text, tool-call, and
+tool-result events as they arrive. Human-readable OpenCode transcript output groups
 each session into a compact block: assistant text streams immediately, tool
 calls are shown as readable commands, and live/final tool output plus streamed
 thinking stay in the compact activity surface rather than scrollback — each
 tool completion or failure is summarized as a single line, so `--output
 verbose` cannot expand the live row count. Terminal control sequences are
-sanitized and Pi transcript values are redacted before terminal rendering.
-JSON mode emits progress and `pi_event` JSON Lines to stdout, preserving
+sanitized and OpenCode transcript values are redacted before terminal rendering.
+JSON mode emits progress and `opencode_event` JSON Lines to stdout, preserving
 supplied progress values; normal modes render to stderr, and quiet mode
 renders failures only.
 Grounding events identify skipped agent work, while needs-attention details
@@ -717,10 +709,10 @@ stateDiagram-v2
 ```
 
 - One issue failure uses the current halt policy: Ralphie persists the active
-  issue, releases Pi, retains artifacts, and stops before later issues.
+  issue, releases OpenCode, retains artifacts, and stops before later issues.
 - A needs-attention outcome uses `--on-needs-attention halt` by default. Ralphie
   persists the active run, emits a handled-stop summary with all outcome counts,
-  releases Pi, and handles the stop with exit code `2` rather than reporting an
+  releases OpenCode, and handles the stop with exit code `2` rather than reporting an
   ordinary issue failure. Notifications require the explicit
   `--notify-needs-attention` opt-in; `--needs-attention-label` is rejected
   without it, and dry runs never notify. When enabled, the outcome and label
@@ -728,9 +720,9 @@ stateDiagram-v2
   `notification-recovery` and retains the original needs-attention outcome for
   resume. `continue` drains the queue; a drained run completes with exit code
   `0`.
-- Pi is closed on success, failure, cancellation, and scoped defects. Ordinary
+- OpenCode is closed on success, failure, cancellation, and scoped defects. Ordinary
   failures set process exit code `1`.
-- Cancellation is checked before long-running boundaries and passed into Pi.
+- Cancellation is checked before long-running boundaries and passed into OpenCode.
   Ralphie attempts to restore the clean issue checkpoint, saves resumable state,
   skips cleanup, and exits `130`. An in-flight PR gate aborts its observation,
   records `aborted` (or the observer's caller-cancellation outcome) in the
@@ -749,7 +741,7 @@ stateDiagram-v2
 | Complexity routing | `src/issues/executor.ts`, `src/issues/complexity.ts` |
 | Implementation/review/delivery | `src/issues/implementation-executor.ts` |
 | Decomposition and GitHub mutations | `src/issues/decomposition-executor.ts`, `src/github/` |
-| Pi sessions and structured results | `src/agent/`, `src/pi/` |
+| OpenCode sessions and structured results | `src/agent/`, `src/opencode/` |
 | Git checkpoints, safety, and branches | `src/git/` |
 | Durable state and reconciliation | `src/run/`, `src/issues/artifacts.ts` |
 | Progress, redaction, and exit semantics | `src/progress/`, `src/shared/redaction.ts`, `src/process/exit-code.ts` |

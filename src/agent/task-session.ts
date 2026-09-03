@@ -1,9 +1,4 @@
-import type {
-    PiAssistantMessage,
-    PiClient,
-    PiPart,
-    PiPermissionRuleset,
-} from "../pi/client.ts";
+import type { AgentAssistantMessage, AgentClient } from "../opencode/client.ts";
 import { z } from "zod";
 
 import {
@@ -13,34 +8,34 @@ import {
     type ProgressReporterService,
 } from "../progress/progress.ts";
 import { RalphieError } from "../shared/error.ts";
-import type { PiModel, PiSelection } from "./model.ts";
+import type { AgentModel, AgentSelection } from "./model.ts";
 
-export type PiTaskSessionRequest = {
+export type AgentTaskSessionRequest = {
     readonly directory: string;
     readonly title: string;
-    readonly selection: PiSelection;
+    readonly selection: AgentSelection;
     readonly runId?: string;
-    readonly diagnostics?: PiSessionDiagnostics;
+    readonly diagnostics?: AgentSessionDiagnostics;
     readonly signal?: AbortSignal;
 };
 
-export type PiTaskSession = {
+export type AgentTaskSession = {
     readonly sessionID: string;
     readonly directory: string;
-    readonly selection: PiSelection;
+    readonly selection: AgentSelection;
 };
 
-export type PiTaskRequest = PiTaskSessionRequest & {
+export type AgentTaskRequest = AgentTaskSessionRequest & {
     readonly prompt: string;
-    readonly repositoryInvariant?: PiRepositoryInvariant;
-    readonly verifyRepositoryInvariant?: PiRepositoryInvariantVerifier;
+    readonly repositoryInvariant?: AgentRepositoryInvariant;
+    readonly verifyRepositoryInvariant?: AgentRepositoryInvariantVerifier;
     readonly verifyAfter?: () => Promise<void>;
     readonly progress?: ProgressReporterService;
     readonly progressStage?: ProgressStage;
     readonly progressIssue?: ProgressIssue;
 };
 
-export const PI_NEEDS_ATTENTION_REASONS = [
+export const NEEDS_ATTENTION_REASONS = [
     "outdated_premise",
     "conflicting_requirements",
     "missing_information",
@@ -48,19 +43,19 @@ export const PI_NEEDS_ATTENTION_REASONS = [
     "cannot_reproduce",
 ] as const;
 
-export type PiNeedsAttentionReason =
-    (typeof PI_NEEDS_ATTENTION_REASONS)[number];
+export type NeedsAttentionReasonValue =
+    (typeof NEEDS_ATTENTION_REASONS)[number];
 
-export const PI_NEEDS_ATTENTION_MESSAGE_LIMIT = 2_000;
+export const NEEDS_ATTENTION_MESSAGE_LIMIT = 2_000;
 
 /** A bounded request to defer work; this is not a final workflow decision. */
-export const piNeedsAttentionRequestSchema = z
+export const needsAttentionRequestSchema = z
     .object({
-        reason: z.enum(PI_NEEDS_ATTENTION_REASONS),
+        reason: z.enum(NEEDS_ATTENTION_REASONS),
         message: z
             .string()
             .min(1)
-            .max(PI_NEEDS_ATTENTION_MESSAGE_LIMIT)
+            .max(NEEDS_ATTENTION_MESSAGE_LIMIT)
             .refine((value) => value.trim().length > 0, {
                 message: "Expected a non-blank message.",
             })
@@ -68,96 +63,99 @@ export const piNeedsAttentionRequestSchema = z
     })
     .strict();
 
-export type PiNeedsAttentionRequest = z.infer<
-    typeof piNeedsAttentionRequestSchema
->;
+export type NeedsAttentionRequest = z.infer<typeof needsAttentionRequestSchema>;
 
-export type NeedsAttentionRequest = PiNeedsAttentionRequest;
-
-/** Parse only the structured Pi side channel; invalid values are ignored. */
-export const parsePiNeedsAttentionRequest = (
+/** Parse only the structured side channel; invalid values are ignored. */
+export const parseNeedsAttentionRequest = (
     value: unknown,
-): PiNeedsAttentionRequest | undefined => {
-    const parsed = piNeedsAttentionRequestSchema.safeParse(value);
+): NeedsAttentionRequest | undefined => {
+    const parsed = needsAttentionRequestSchema.safeParse(value);
     return parsed.success ? parsed.data : undefined;
 };
 
-export type PiTaskResult = {
-    readonly session: PiTaskSession;
-    readonly response: PiAssistantMessage;
-    readonly parts: ReadonlyArray<PiPart>;
-    readonly needsAttention?: PiNeedsAttentionRequest;
+export type AgentTaskResult = {
+    readonly session: AgentTaskSession;
+    readonly response: AgentAssistantMessage;
+    readonly parts: ReadonlyArray<{
+        readonly type: string;
+        readonly text?: string;
+    }>;
+    readonly needsAttention?: NeedsAttentionRequest;
+    readonly text?: string;
 };
 
-export type PiAssistantErrorKind =
+export type AgentAssistantErrorKind =
     | "aborted"
     | "output-length-exceeded"
     | "structured-output-retry-exhausted"
     | "other";
 
-export class PiAssistantError extends Error {
-    readonly _tag = "PiAssistantError";
-    readonly kind: PiAssistantErrorKind;
+export class AgentAssistantError extends Error {
+    readonly _tag = "AgentAssistantError";
+    readonly kind: AgentAssistantErrorKind;
     readonly errorName: string;
     readonly retries?: number;
-    readonly sdkError: NonNullable<PiAssistantMessage["error"]>;
+    readonly agentError: NonNullable<AgentAssistantMessage["error"]>;
 
     constructor(input: {
-        readonly kind: PiAssistantErrorKind;
+        readonly kind: AgentAssistantErrorKind;
         readonly message: string;
         readonly errorName: string;
         readonly retries?: number;
-        readonly sdkError: NonNullable<PiAssistantMessage["error"]>;
+        readonly agentError: NonNullable<AgentAssistantMessage["error"]>;
     }) {
         super(input.message);
-        this.name = "PiAssistantError";
+        this.name = "AgentAssistantError";
         this.kind = input.kind;
         this.errorName = input.errorName;
         this.retries = input.retries;
-        this.sdkError = input.sdkError;
+        this.agentError = input.agentError;
     }
 }
 
-export type PiRepositoryInvariant = {
+export type AgentRepositoryInvariant = {
     readonly branch: string;
     readonly head: string;
 };
 
-export type PiRepositoryInvariantVerifier = (
+export type AgentRepositoryInvariantVerifier = (
     repositoryPath: string,
-    expected: PiRepositoryInvariant,
+    expected: AgentRepositoryInvariant,
 ) => Promise<void>;
 
-export type PiSessionDiagnostic = {
+export type AgentSessionDiagnostic = {
     readonly runId: string;
     readonly sessionID: string;
     readonly directory: string;
     readonly agent?: string;
-    readonly model?: PiModel;
+    readonly model?: AgentModel;
     readonly variant?: string;
     readonly recordedAt: string;
 };
 
-export type PiSessionDiagnosticInput = Omit<
-    PiSessionDiagnostic,
+export type AgentSessionDiagnosticInput = Omit<
+    AgentSessionDiagnostic,
     "runId" | "recordedAt"
 >;
 
 /** Successful sessions remain available for post-run inspection. */
-export const PiSessionRetentionPolicy = "retain" as const;
-export type PiSessionRetentionPolicy = typeof PiSessionRetentionPolicy;
+export const AgentSessionRetentionPolicy = "retain" as const;
+export type AgentSessionRetentionPolicy = typeof AgentSessionRetentionPolicy;
 
-export const PI_SESSION_RETENTION_POLICY = PiSessionRetentionPolicy;
+export const AGENT_SESSION_RETENTION_POLICY = AgentSessionRetentionPolicy;
 
-export type PiSessionDiagnostics = {
-    readonly record: (runId: string, session: PiSessionDiagnosticInput) => void;
-    readonly list: (runId: string) => ReadonlyArray<PiSessionDiagnostic>;
+export type AgentSessionDiagnostics = {
+    readonly record: (
+        runId: string,
+        session: AgentSessionDiagnosticInput,
+    ) => void;
+    readonly list: (runId: string) => ReadonlyArray<AgentSessionDiagnostic>;
 };
 
-export const makePiSessionDiagnostics = (
+export const makeAgentSessionDiagnostics = (
     now: () => string = () => new Date().toISOString(),
-): PiSessionDiagnostics => {
-    const sessions = new Map<string, PiSessionDiagnostic[]>();
+): AgentSessionDiagnostics => {
+    const sessions = new Map<string, AgentSessionDiagnostic[]>();
 
     return {
         record: (runId, session) => {
@@ -169,42 +167,10 @@ export const makePiSessionDiagnostics = (
     };
 };
 
-/**
- * Pi permission rules for task agents. The agent may inspect and edit
- * files, but deterministic Ralphie steps retain ownership of commits, pushes,
- * branch changes, worktrees, resets/cleanups, and GitHub mutations.
- */
-export const PI_TASK_PERMISSION_POLICY: PiPermissionRuleset = [
-    { permission: "bash", pattern: "git commit*", action: "deny" },
-    { permission: "bash", pattern: "git push*", action: "deny" },
-    { permission: "bash", pattern: "git branch*", action: "deny" },
-    { permission: "bash", pattern: "git checkout*", action: "deny" },
-    { permission: "bash", pattern: "git switch*", action: "deny" },
-    { permission: "bash", pattern: "git worktree*", action: "deny" },
-    { permission: "bash", pattern: "git reset*", action: "deny" },
-    { permission: "bash", pattern: "git clean*", action: "deny" },
-    { permission: "bash", pattern: "gh *", action: "deny" },
-];
+type AgentPromptParameters = Parameters<AgentClient["session"]["prompt"]>[0];
 
-/**
- * Structured decision sessions may inspect repository files and read Git state,
- * but cannot mutate the checkout. Pi permission rules use the last matching
- * rule, so the narrow read-only allowances must follow the catch-all denial.
- */
-export const PI_DECISION_PERMISSION_POLICY: PiPermissionRuleset = [
-    { permission: "edit", pattern: "*", action: "deny" },
-    { permission: "write", pattern: "*", action: "deny" },
-    { permission: "bash", pattern: "*", action: "deny" },
-    ...PI_TASK_PERMISSION_POLICY,
-    { permission: "bash", pattern: "git status*", action: "allow" },
-    { permission: "bash", pattern: "git diff*", action: "allow" },
-    { permission: "bash", pattern: "git ls-files*", action: "allow" },
-];
-
-type PiPromptParameters = Parameters<PiClient["session"]["prompt"]>[0];
-
-export type PiTaskPromptInput = Omit<
-    PiPromptParameters,
+export type AgentTaskPromptInput = Omit<
+    AgentPromptParameters,
     "sessionID" | "directory" | "agent" | "model" | "variant"
 >;
 
@@ -216,7 +182,7 @@ const describeApiError = (error: unknown): string => {
         readonly data?: { readonly message?: unknown };
     };
     const name =
-        typeof candidate.name === "string" ? candidate.name : "PiError";
+        typeof candidate.name === "string" ? candidate.name : "OpenCodeError";
     const message =
         typeof candidate.data?.message === "string"
             ? candidate.data.message
@@ -225,9 +191,9 @@ const describeApiError = (error: unknown): string => {
     return `${name}: ${message}`;
 };
 
-export const toPiAssistantError = (
-    error: NonNullable<PiAssistantMessage["error"]>,
-): PiAssistantError => {
+export const toAgentAssistantError = (
+    error: NonNullable<AgentAssistantMessage["error"]>,
+): AgentAssistantError => {
     const kind =
         error.name === "MessageAbortedError"
             ? "aborted"
@@ -237,7 +203,7 @@ export const toPiAssistantError = (
                 ? "structured-output-retry-exhausted"
                 : "other";
 
-    return new PiAssistantError({
+    return new AgentAssistantError({
         kind,
         message: describeApiError(error),
         errorName: error.name,
@@ -245,22 +211,22 @@ export const toPiAssistantError = (
         error.data?.retries !== undefined
             ? { retries: error.data.retries }
             : {}),
-        sdkError: error,
+        agentError: error,
     });
 };
 
 const assistantFailure = (
     prefix: string,
-    error: NonNullable<PiAssistantMessage["error"]>,
+    error: NonNullable<AgentAssistantMessage["error"]>,
 ): RalphieError => {
-    const typedError = toPiAssistantError(error);
+    const typedError = toAgentAssistantError(error);
     return new RalphieError({
         message: `${prefix} (${typedError.kind}): ${typedError.message}`,
         cause: typedError,
     });
 };
 
-export const reportPiFailure = async (
+export const reportAgentFailure = async (
     request: {
         readonly directory: string;
         readonly title: string;
@@ -273,7 +239,7 @@ export const reportPiFailure = async (
     if (request.progress === undefined) return;
 
     const assistantError =
-        error.cause instanceof PiAssistantError ? error.cause : undefined;
+        error.cause instanceof AgentAssistantError ? error.cause : undefined;
     const causeMessage = (() => {
         let cause: unknown = error.cause;
         for (let depth = 0; depth < 4 && cause !== undefined; depth += 1) {
@@ -299,7 +265,7 @@ export const reportPiFailure = async (
             ...(request.progressIssue === undefined
                 ? {}
                 : { issue: request.progressIssue }),
-            message: `Pi task failed: ${error.message}`,
+            message: `OpenCode task failed: ${error.message}`,
             details: {
                 directory: request.directory,
                 title: request.title,
@@ -319,19 +285,21 @@ export const reportPiFailure = async (
             },
         });
     } catch {
-        // Reporting must never hide the original Pi failure.
+        // Reporting must never hide the original failure.
     }
 };
 
-const createSessionModel = (model: PiModel) => ({
+const createSessionModel = (model: AgentModel) => ({
     providerID: model.providerID,
-    id: model.modelID,
+    modelID: model.modelID,
 });
 
 const signalOptions = (signal: AbortSignal | undefined) =>
     signal === undefined ? undefined : { signal };
 
-const verifyPiTaskRequest = async (request: PiTaskRequest): Promise<void> => {
+const verifyAgentTaskRequest = async (
+    request: AgentTaskRequest,
+): Promise<void> => {
     if (
         request.repositoryInvariant !== undefined &&
         request.verifyRepositoryInvariant !== undefined
@@ -344,11 +312,11 @@ const verifyPiTaskRequest = async (request: PiTaskRequest): Promise<void> => {
     if (request.verifyAfter !== undefined) await request.verifyAfter();
 };
 
-const promptPiTask = async (
-    client: PiClient,
-    session: PiTaskSession,
-    request: PiTaskRequest,
-): Promise<PiTaskResult> => {
+const promptAgentTask = async (
+    client: AgentClient,
+    session: AgentTaskSession,
+    request: AgentTaskRequest,
+): Promise<AgentTaskResult> => {
     const response = await client.session.prompt(
         taskSessionPromptParameters(session, {
             parts: [{ type: "text", text: request.prompt }],
@@ -358,30 +326,34 @@ const promptPiTask = async (
 
     if (response.error !== undefined || response.data === undefined) {
         throw new Error(
-            `Pi task prompt failed: ${describeApiError(response.error)}`,
+            `OpenCode task prompt failed: ${describeApiError(response.error)}`,
         );
     }
     if (response.data.info.error !== undefined) {
-        throw assistantFailure("Pi assistant failed", response.data.info.error);
+        throw assistantFailure(
+            "OpenCode assistant failed",
+            response.data.info.error,
+        );
     }
 
-    await verifyPiTaskRequest(request);
-    const needsAttention = parsePiNeedsAttentionRequest(
+    await verifyAgentTaskRequest(request);
+    const needsAttention = parseNeedsAttentionRequest(
         response.data.needsAttention,
     );
     return {
         session,
         response: response.data.info,
         parts: response.data.parts,
+        text: response.data.info.text,
         ...(needsAttention === undefined ? {} : { needsAttention }),
     };
 };
 
 /** Build prompt parameters for a task session. */
 export const taskSessionPromptParameters = (
-    session: PiTaskSession,
-    input: PiTaskPromptInput,
-): PiPromptParameters => ({
+    session: AgentTaskSession,
+    input: AgentTaskPromptInput,
+): AgentPromptParameters => ({
     ...input,
     sessionID: session.sessionID,
     directory: session.directory,
@@ -395,20 +367,22 @@ export const taskSessionPromptParameters = (
 });
 
 /** Create an isolated task session rooted in a repository checkout. */
-export const createPiTaskSession = async (
-    client: PiClient,
-    request: PiTaskSessionRequest,
-): Promise<PiTaskSession> => {
+export const createAgentTaskSession = async (
+    client: AgentClient,
+    request: AgentTaskSessionRequest,
+): Promise<AgentTaskSession> => {
     try {
         const response = await client.session.create(
             {
                 directory: request.directory,
                 title: request.title,
                 agent: request.selection.agent,
-                permission: PI_TASK_PERMISSION_POLICY,
                 ...(request.selection.model === undefined
                     ? {}
                     : { model: createSessionModel(request.selection.model) }),
+                ...(request.selection.variant === undefined
+                    ? {}
+                    : { variant: request.selection.variant }),
             },
             request.signal === undefined
                 ? undefined
@@ -417,7 +391,7 @@ export const createPiTaskSession = async (
 
         if (response.error !== undefined || response.data === undefined) {
             throw new Error(
-                `Could not create Pi task session: ${describeApiError(response.error)}`,
+                `Could not create OpenCode task session: ${describeApiError(response.error)}`,
             );
         }
 
@@ -441,44 +415,46 @@ export const createPiTaskSession = async (
     } catch (cause) {
         if (cause instanceof RalphieError) throw cause;
         throw new RalphieError({
-            message: "Failed to create an Pi task session.",
+            message: "Failed to create an OpenCode task session.",
             cause,
         });
     }
 };
 
 /** Run an ordinary text task in a new session. */
-export const runPiTask = async (
-    client: PiClient,
-    request: PiTaskRequest,
-): Promise<PiTaskResult> => {
+export const runAgentTask = async (
+    client: AgentClient,
+    request: AgentTaskRequest,
+): Promise<AgentTaskResult> => {
     try {
-        const session = await createPiTaskSession(client, request);
-        return await promptPiTask(client, session, request);
+        const session = await createAgentTaskSession(client, request);
+        return await promptAgentTask(client, session, request);
     } catch (cause) {
         const error =
             cause instanceof RalphieError
                 ? cause
                 : new RalphieError({
-                      message: "Failed to run an Pi task.",
+                      message: "Failed to run an OpenCode task.",
                       cause,
                   });
-        await reportPiFailure(request, error);
+        await reportAgentFailure(request, error);
         throw error;
     }
 };
 
-export type PiTaskSessionService = {
-    readonly create: (request: PiTaskSessionRequest) => Promise<PiTaskSession>;
-    readonly run: (request: PiTaskRequest) => Promise<PiTaskResult>;
-    readonly diagnostics: PiSessionDiagnostics;
+export type AgentTaskSessionService = {
+    readonly create: (
+        request: AgentTaskSessionRequest,
+    ) => Promise<AgentTaskSession>;
+    readonly run: (request: AgentTaskRequest) => Promise<AgentTaskResult>;
+    readonly diagnostics: AgentSessionDiagnostics;
 };
 
-export const makePiTaskSessionService = (
-    client: PiClient,
-): PiTaskSessionService => {
-    const diagnostics = makePiSessionDiagnostics();
-    const withDiagnostics = <Request extends PiTaskSessionRequest>(
+export const makeAgentTaskSessionService = (
+    client: AgentClient,
+): AgentTaskSessionService => {
+    const diagnostics = makeAgentSessionDiagnostics();
+    const withDiagnostics = <Request extends AgentTaskSessionRequest>(
         request: Request,
     ): Request =>
         request.diagnostics === undefined
@@ -488,7 +464,48 @@ export const makePiTaskSessionService = (
     return {
         diagnostics,
         create: (request) =>
-            createPiTaskSession(client, withDiagnostics(request)),
-        run: (request) => runPiTask(client, withDiagnostics(request)),
+            createAgentTaskSession(client, withDiagnostics(request)),
+        run: (request) => runAgentTask(client, withDiagnostics(request)),
     };
 };
+
+// Backwards-compatible aliases for the Pi-era names used across tests.
+export {
+    makeAgentSessionDiagnostics as makePiSessionDiagnostics,
+    parseNeedsAttentionRequest as parsePiNeedsAttentionRequest,
+    reportAgentFailure as reportPiFailure,
+    toAgentAssistantError as toPiAssistantError,
+    runAgentTask as runPiTask,
+    createAgentTaskSession as createPiTaskSession,
+};
+export type {
+    AgentTaskSessionRequest as PiTaskSessionRequest,
+    AgentTaskSession as PiTaskSession,
+    AgentTaskRequest as PiTaskRequest,
+    AgentTaskResult as PiTaskResult,
+    AgentAssistantError as PiAssistantError,
+    AgentAssistantErrorKind as PiAssistantErrorKind,
+    AgentRepositoryInvariant as PiRepositoryInvariant,
+    AgentRepositoryInvariantVerifier as PiRepositoryInvariantVerifier,
+    AgentSessionDiagnostic as PiSessionDiagnostic,
+    AgentSessionDiagnosticInput as PiSessionDiagnosticInput,
+    AgentSessionDiagnostics as PiSessionDiagnostics,
+    NeedsAttentionRequest as PiNeedsAttentionRequest,
+    NeedsAttentionReasonValue as PiNeedsAttentionReason,
+};
+export const PI_NEEDS_ATTENTION_REASONS = NEEDS_ATTENTION_REASONS;
+export const PI_NEEDS_ATTENTION_MESSAGE_LIMIT = NEEDS_ATTENTION_MESSAGE_LIMIT;
+export const piNeedsAttentionRequestSchema = needsAttentionRequestSchema;
+export const PI_SESSION_RETENTION_POLICY = AgentSessionRetentionPolicy;
+export const PiSessionRetentionPolicy = AgentSessionRetentionPolicy;
+/** Server owns permissions now; kept as empty placeholders for migration. */
+export const PI_TASK_PERMISSION_POLICY: ReadonlyArray<{
+    readonly permission: string;
+    readonly pattern: string;
+    readonly action: "allow" | "deny";
+}> = [];
+export const PI_DECISION_PERMISSION_POLICY: ReadonlyArray<{
+    readonly permission: string;
+    readonly pattern: string;
+    readonly action: "allow" | "deny";
+}> = [];

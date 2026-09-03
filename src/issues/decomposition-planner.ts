@@ -59,7 +59,7 @@ export const makeDecompositionPlannerService = (
                 message: `Decomposition requires branch ${context.targetBranch}, but checkout is on ${invariant.branch}.`,
             });
         }
-        const result = await requestStructuredOutput(context.pi, {
+        const result = await requestStructuredOutput(context.agent, {
             directory: context.repositoryPath,
             title: `Plan the decomposition of issue #${context.issue.number}`,
             prompt: buildDecompositionPrompt({
@@ -69,11 +69,11 @@ export const makeDecompositionPlannerService = (
                 failedReviewSummaries: [],
             }),
             schema: issueBreakdownDecisionSchema,
-            agent: context.piSelection.agent,
-            model: context.piSelection.model,
-            variant: context.piSelection.variant,
+            agent: context.agentSelection.agent,
+            model: context.agentSelection.model,
+            variant: context.agentSelection.variant,
             runId: context.runId,
-            diagnostics: context.piDiagnostics,
+            diagnostics: context.agentDiagnostics,
             verifyAfter: () =>
                 context.repositoryInvariant.verify(
                     context.repositoryPath,

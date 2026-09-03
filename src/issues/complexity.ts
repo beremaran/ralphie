@@ -55,7 +55,7 @@ export const makeComplexityAssessmentService = (
                 });
             }
 
-            const result = await requestStructuredOutput(context.pi, {
+            const result = await requestStructuredOutput(context.agent, {
                 directory: context.repositoryPath,
                 title: `Assess issue #${context.issue.number}`,
                 prompt: buildComplexityPrompt({
@@ -64,13 +64,13 @@ export const makeComplexityAssessmentService = (
                     targetBranch: context.targetBranch,
                 }),
                 schema: complexityDecisionSchema,
-                agent: context.piSelection.agent,
-                model: context.piSelection.model,
+                agent: context.agentSelection.agent,
+                model: context.agentSelection.model,
                 variant:
-                    context.piStageVariants?.complexity ??
-                    context.piSelection.variant,
+                    context.agentStageVariants?.complexity ??
+                    context.agentSelection.variant,
                 runId: context.runId,
-                diagnostics: context.piDiagnostics,
+                diagnostics: context.agentDiagnostics,
                 verifyAfter: () =>
                     context.repositoryInvariant.verify(
                         context.repositoryPath,

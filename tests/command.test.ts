@@ -24,7 +24,7 @@ describe("native CLI parser", () => {
         expect(HELP_TEXT).toContain("--duplicate-action");
         expect(HELP_TEXT).toContain("--on-needs-attention <halt|continue>");
         expect(HELP_TEXT).toContain("--on-issue-failure <halt|continue>");
-        expect(HELP_TEXT).toContain("--implementation-thinking <level>");
+        expect(HELP_TEXT).toContain("--implementation-thinking <variant>");
         expect(HELP_TEXT).toContain("--implementation-attempts <n>");
         expect(HELP_TEXT).toContain("--implementation-fallback-model");
         expect(HELP_TEXT).toContain("--max-decomposition-depth <n>");
@@ -241,7 +241,9 @@ describe("native CLI parser", () => {
                         getDisplayState: () => ({}) as never,
                         dispose: async () => {},
                     }),
-                    makePi: () => ({ start: async () => undefined as never }),
+                    makeOpenCode: () => ({
+                        start: async () => undefined as never,
+                    }),
                     makeRuntime: () => ({}) as never,
                     runWorkflow: async (options) => {
                         workflowOptions = options as Record<string, unknown>;
@@ -278,7 +280,9 @@ describe("native CLI parser", () => {
                         getDisplayState: () => ({}) as never,
                         dispose: async () => {},
                     }),
-                    makePi: () => ({ start: async () => undefined as never }),
+                    makeOpenCode: () => ({
+                        start: async () => undefined as never,
+                    }),
                     makeRuntime: () => ({}) as never,
                     runWorkflow: async () => {
                         throw failure;

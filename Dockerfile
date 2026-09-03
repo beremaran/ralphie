@@ -37,7 +37,9 @@ RUN bun run build -- --commit-sha "$RALPHIE_COMMIT_SHA"
 
 # ---- runtime stage --------------------------------------------------------
 # Keep the runtime image Debian-based so the native binary and the external
-# commands used by Ralphie and Pi have their complete runtime dependencies.
+# commands used by Ralphie and the target checkout have their complete
+# runtime dependencies. The OpenCode server runs outside this image;
+# Ralphie connects to it over HTTP.
 FROM debian:bookworm-slim
 ARG RALPHIE_VERSION
 ARG RALPHIE_COMMIT_SHA
@@ -57,7 +59,7 @@ ENV HOME=/home/nonroot
 WORKDIR /home/nonroot
 USER 65532:65532
 LABEL org.opencontainers.image.title="ralphie" \
-      org.opencontainers.image.description="Turn a GitHub issue queue into reviewed commits with Pi." \
+      org.opencontainers.image.description="Turn a GitHub issue queue into reviewed commits with OpenCode." \
       org.opencontainers.image.source="https://github.com/beremaran/ralphie" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.version="$RALPHIE_VERSION" \

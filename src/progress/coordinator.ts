@@ -2,7 +2,7 @@ import type {
     PiEventContext,
     PiEventListener,
     PiSessionEvent,
-} from "../pi/client.ts";
+} from "../opencode/client.ts";
 import {
     arbitrateBreadcrumbCandidates,
     breadcrumbCandidateFor,

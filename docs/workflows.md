@@ -54,7 +54,7 @@ flowchart TD
 ## Implementation workflow: complexity 0–3
 
 1. Capture the exact clean branch and commit as an issue checkpoint.
-2. Ask a fresh Pi session to implement the issue and require a schema-valid
+2. Ask a fresh OpenCode session to implement the issue and require a schema-valid
    completion result; prose or premature model termination is not completion.
 3. Stage every change deterministically and capture the exact staged diff.
 4. Run deterministic verification. If a command exits non-zero, give its
@@ -98,7 +98,7 @@ sequenceDiagram
     participant R as Ralphie
     participant GH as GitHub
     participant G as Git
-    participant O as Pi
+    participant O as OpenCode
 
     R->>G: Capture clean branch checkpoint
     R->>G: Verify destination and remote base
@@ -153,7 +153,7 @@ sequenceDiagram
 
 ## Decomposition workflow: complexity 4–5
 
-1. Ask Pi to split the issue into the next set of independently actionable
+1. Ask OpenCode to split the issue into the next set of independently actionable
    tasks and declare their dependencies.
 2. Create child issues in deterministic order with their stable markers.
 3. Attach each created or recovered child to the original issue as a **native
@@ -182,7 +182,7 @@ flowchart LR
     H --> I[Refresh open-issue queue]
 ```
 
-The decomposition Pi session is read-only and returns an
+The decomposition OpenCode session is read-only and returns an
 `issueBreakdownDecisionSchema` result containing at least two independently
 actionable 0–3 children, stable keys, and an acyclic dependency graph. The
 breakdown is persisted before the first GitHub mutation.
