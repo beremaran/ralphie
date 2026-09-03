@@ -99,7 +99,7 @@ export type GitRevisionCommitService = {
      * The managed checkout must sit at the expected prior feature head; the
      * operation stages deterministically, creates exactly one commit from
      * the captured tree, and revalidates the resulting parent/tree without
-     * leaving partially staged state. It never invokes Pi, GitHub, force
+     * leaving partially staged state. It never invokes the agent, GitHub, force
      * operations, or branch/reset operations that could discard external
      * work; pre-commit failures clean up only temporary index state, and a
      * created commit is retained for reconciliation.

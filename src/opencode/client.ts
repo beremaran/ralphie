@@ -59,21 +59,6 @@ export type AgentEventListener = (
     context: AgentEventContext,
 ) => void;
 
-// Legacy Pi-era aliases kept for the progress layer migration.
-export type PiSessionEvent = any;
-export type PiEventContext = AgentEventContext;
-export type PiEventListener = AgentEventListener;
-export type PiClient = AgentClient;
-export type PiAssistantMessage = AgentAssistantMessage;
-export type PiAssistantError = AgentAssistantError;
-export type PiPart = AgentPart;
-export const PiSessionProfile = AgentSessionProfile;
-export type PiPermissionRuleset = ReadonlyArray<{
-    readonly permission: string;
-    readonly pattern: string;
-    readonly action: "allow" | "deny";
-}>;
-
 type CreateSessionInput = {
     readonly directory: string;
     readonly title?: string;

@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
 import type {
-    PiEventContext,
-    PiSessionEvent,
+    AgentEventContext,
+    AgentSessionEvent,
 } from "../../src/opencode/client.ts";
 import { makeProgressCoordinator } from "../../src/progress/coordinator.ts";
 import type { FooterTimer } from "../../src/progress/footer.ts";
@@ -11,13 +11,14 @@ import type { TerminalOutputStrategy } from "../../src/progress/terminal-control
 
 const CLEAR = "\r\x1b[2K";
 
-const context: PiEventContext = {
+const context: AgentEventContext = {
     sessionID: "session-1",
     directory: "/workspace/repository",
     title: "Task",
 };
 
-const asEvent = (value: unknown): PiSessionEvent => value as PiSessionEvent;
+const asEvent = (value: unknown): AgentSessionEvent =>
+    value as AgentSessionEvent;
 
 type FakeTimer = FooterTimer & { readonly run: () => void };
 

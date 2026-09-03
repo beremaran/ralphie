@@ -7,12 +7,12 @@ import {
     groundingDecisionSchema,
 } from "./decisions.ts";
 import type { IssueExecutionContext } from "./execution.ts";
-import type { PiNeedsAttentionRequest } from "../agent/task-session.ts";
+import type { NeedsAttentionRequest } from "../agent/task-session.ts";
 
 export type GroundingAssessmentResult = {
     readonly decision: GroundingDecision;
     readonly sessionID: string;
-    readonly needsAttention?: PiNeedsAttentionRequest;
+    readonly needsAttention?: NeedsAttentionRequest;
 };
 
 export type GroundingAssessmentService = {

@@ -1,4 +1,7 @@
-import type { PiEventContext, PiSessionEvent } from "../opencode/client.ts";
+import type {
+    AgentEventContext,
+    AgentSessionEvent,
+} from "../opencode/client.ts";
 import { stripTerminalControls } from "../shared/terminal.ts";
 import type {
     ProgressEvent,
@@ -196,8 +199,8 @@ const nestedTimestamp = (value: unknown): number | undefined => {
 };
 
 const timestampFromPi = (
-    event: PiSessionEvent,
-    context: PiEventContext,
+    event: AgentSessionEvent,
+    context: AgentEventContext,
     clock: DisplayClock,
 ): number => {
     const eventRecord = recordValue(event);
@@ -376,14 +379,14 @@ const change = (activity: DisplayActivity, label?: string): ActivityChange => ({
 });
 
 const messageToolName = (
-    event: Extract<PiSessionEvent, { type: "message_update" }>,
+    event: Extract<AgentSessionEvent, { type: "message_update" }>,
 ): string | undefined =>
     stringValue(
         recordValue(recordValue(event.assistantMessageEvent).toolCall).name,
     );
 
 const messageActivity = (
-    event: Extract<PiSessionEvent, { type: "message_update" }>,
+    event: Extract<AgentSessionEvent, { type: "message_update" }>,
 ): ActivityChange | undefined => {
     const kind = event.assistantMessageEvent.type;
     if (
@@ -413,7 +416,7 @@ const messageActivity = (
 };
 
 const lifecycleActivity = (
-    event: PiSessionEvent,
+    event: AgentSessionEvent,
 ): ActivityChange | undefined => {
     switch (event.type) {
         case "agent_start":
@@ -440,7 +443,9 @@ const lifecycleActivity = (
     }
 };
 
-const piActivity = (event: PiSessionEvent): ActivityChange | undefined => {
+const agentActivity = (
+    event: AgentSessionEvent,
+): ActivityChange | undefined => {
     if (event.type === "message_update") return messageActivity(event);
     if (event.type === "tool_execution_start") {
         return change("tool", activityLabelFor("tool", event.toolName));
@@ -463,14 +468,14 @@ const piActivity = (event: PiSessionEvent): ActivityChange | undefined => {
     return lifecycleActivity(event);
 };
 
-export const reducePiSessionEvent = (
+export const reduceAgentSessionEvent = (
     currentState: DisplayState | undefined,
-    event: PiSessionEvent,
-    context: PiEventContext = { sessionID: "", directory: "" },
+    event: AgentSessionEvent,
+    context: AgentEventContext = { sessionID: "", directory: "" },
     now?: DisplayClock | DisplayStateOptions,
 ): DisplayState => {
     const state = normalizedState(currentState ?? makeInitialDisplayState());
-    const activity = piActivity(event);
+    const activity = agentActivity(event);
     if (activity === undefined) return state;
     const timestamp =
         state.stage === undefined || state.stageStartedAt !== undefined
@@ -494,19 +499,19 @@ export function updateDisplayState(
 ): DisplayState;
 export function updateDisplayState(
     state: DisplayState | undefined,
-    event: PiSessionEvent,
-    context: PiEventContext,
+    event: AgentSessionEvent,
+    context: AgentEventContext,
     now?: DisplayClock | DisplayStateOptions,
 ): DisplayState;
 export function updateDisplayState(
     state: DisplayState | undefined,
-    event: PiSessionEvent,
+    event: AgentSessionEvent,
     now?: DisplayClock | DisplayStateOptions,
 ): DisplayState;
 export function updateDisplayState(
     state: DisplayState | undefined,
-    input: ProgressUpdate | ProgressEvent | PiSessionEvent,
-    contextOrNow?: PiEventContext | DisplayClock | DisplayStateOptions,
+    input: ProgressUpdate | ProgressEvent | AgentSessionEvent,
+    contextOrNow?: AgentEventContext | DisplayClock | DisplayStateOptions,
     now?: DisplayClock | DisplayStateOptions,
 ): DisplayState {
     if ("type" in input) {
@@ -516,12 +521,12 @@ export function updateDisplayState(
             "sessionID" in contextOrNow &&
             "directory" in contextOrNow;
         const context = hasContext
-            ? (contextOrNow as PiEventContext)
+            ? (contextOrNow as AgentEventContext)
             : undefined;
         const clock = hasContext
             ? now
             : (contextOrNow as DisplayClock | DisplayStateOptions | undefined);
-        return reducePiSessionEvent(
+        return reduceAgentSessionEvent(
             state,
             input,
             context ?? { sessionID: "", directory: "" },
@@ -533,4 +538,4 @@ export function updateDisplayState(
 
 export const reduceDisplayState = updateDisplayState;
 export const updateDisplayStateFromProgress = reduceProgressUpdate;
-export const updateDisplayStateFromPi = reducePiSessionEvent;
+export const updateDisplayStateFromAgent = reduceAgentSessionEvent;

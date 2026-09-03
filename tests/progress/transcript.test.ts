@@ -1,22 +1,22 @@
 import { describe, expect, test } from "bun:test";
-import { makePiTranscriptRenderer } from "../../src/progress/transcript.ts";
+import { makeAgentTranscriptRenderer } from "../../src/progress/transcript.ts";
 import type {
-    PiEventContext,
-    PiSessionEvent,
+    AgentEventContext,
+    AgentSessionEvent,
 } from "../../src/opencode/client.ts";
 
-const context: PiEventContext = {
+const context: AgentEventContext = {
     sessionID: "session-1",
     directory: "/tmp",
     title: "Task",
 };
 
-const asEvent = (value: unknown): PiSessionEvent =>
-    value as unknown as PiSessionEvent;
+const asEvent = (value: unknown): AgentSessionEvent =>
+    value as unknown as AgentSessionEvent;
 
 const makeCapture = () => {
     const chunks: string[] = [];
-    const renderer = makePiTranscriptRenderer({
+    const renderer = makeAgentTranscriptRenderer({
         write: (text: string) => {
             chunks.push(text);
         },
@@ -368,7 +368,7 @@ describe("transcript is lossless for sensitive-looking text", () => {
 
     test("JSON records retain complete nested event data", () => {
         const chunks: string[] = [];
-        const renderer = makePiTranscriptRenderer({
+        const renderer = makeAgentTranscriptRenderer({
             write: (text: string) => {
                 chunks.push(text);
             },
@@ -444,7 +444,7 @@ describe("transcript terminal safety", () => {
 
     test("falls back to [unserializable] for non-JSON event values", () => {
         const chunks: string[] = [];
-        const renderer = makePiTranscriptRenderer({
+        const renderer = makeAgentTranscriptRenderer({
             write: (text: string) => {
                 chunks.push(text);
             },

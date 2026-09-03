@@ -43,30 +43,3 @@ export type AgentSessionStage =
               | "decompose-issue";
           readonly output: StructuredOutputName;
       };
-
-// Legacy aliases.
-export type PiSessionPurpose = AgentSessionPurpose;
-export const PiSessionContext = AgentSessionContext;
-export type PiSessionContext = AgentSessionContext;
-export type PiSessionStage =
-    | {
-          readonly kind: "pi-session";
-          readonly purpose: "implement";
-      }
-    | {
-          readonly kind: "pi-session";
-          readonly purpose: "address-review";
-          readonly context: PiSessionContext;
-          readonly input: "review-decision";
-      }
-    | {
-          readonly kind: "pi-session";
-          readonly purpose:
-              | "assess-complexity"
-              | "assess-grounding"
-              | "verify-resolution"
-              | "review-diff"
-              | "generate-commit-message"
-              | "decompose-issue";
-          readonly output: StructuredOutputName;
-      };

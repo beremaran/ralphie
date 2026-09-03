@@ -1,6 +1,6 @@
 import { buildDecompositionPrompt } from "../agent/prompts.ts";
 import { requestStructuredOutput } from "../agent/structured-output.ts";
-import type { PiNeedsAttentionRequest } from "../agent/task-session.ts";
+import type { NeedsAttentionRequest } from "../agent/task-session.ts";
 import {
     nextDecompositionLineage,
     type DecompositionLineage,
@@ -28,7 +28,7 @@ export type DecompositionPlanResult =
       }
     | {
           readonly kind: "needs-attention";
-          readonly request: PiNeedsAttentionRequest;
+          readonly request: NeedsAttentionRequest;
       };
 
 export type DecompositionPlannerService = {

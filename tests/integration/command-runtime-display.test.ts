@@ -11,9 +11,9 @@ import {
     type CommandRuntime,
 } from "../../src/command.ts";
 import type {
-    PiEventContext,
-    PiEventListener,
-    PiSessionEvent,
+    AgentEventContext,
+    AgentEventListener,
+    AgentSessionEvent,
 } from "../../src/opencode/client.ts";
 import type { OpenCodeProviderConfig } from "../../src/opencode/config.ts";
 import type {
@@ -38,17 +38,18 @@ import {
 /**
  * End-to-end display regression through the real command runtime
  * (`runCommand`): real coordinator wiring, real mode resolution, and a fake
- * Pi service replaying a scripted session. Physical rows are measured with a
+ * Agent service replaying a scripted session. Physical rows are measured with a
  * terminal emulator, never from newline counts.
  */
 
-const context: PiEventContext = {
+const context: AgentEventContext = {
     sessionID: "session-1",
     directory: "/workspace/owner/repository",
     title: "Task",
 };
 
-const asEvent = (value: unknown): PiSessionEvent => value as PiSessionEvent;
+const asEvent = (value: unknown): AgentSessionEvent =>
+    value as AgentSessionEvent;
 
 type FakeTimer = FooterTimer & { readonly run: () => void };
 
@@ -150,7 +151,7 @@ const ASSISTANT_DELTAS = [
 
 /** Run one bounded bash + read cycle against the coordinator listener. */
 const runToolCycle = (
-    listener: PiEventListener,
+    listener: AgentEventListener,
     cycle: number,
     command: string,
 ): void => {
@@ -175,9 +176,9 @@ const runToolCycle = (
     );
 };
 
-/** Deterministic Pi + progress script exercised identically in every mode. */
+/** Deterministic agent session + progress script exercised identically in every mode. */
 const runScriptedSession = async (
-    listener: PiEventListener,
+    listener: AgentEventListener,
     progress: RalphieRuntime["progress"],
     settle: (() => void) | undefined = undefined,
 ): Promise<void> => {
@@ -256,7 +257,7 @@ const makeCapture = (): CommandOutput & {
 
 const noopSummary = undefined as never;
 
-/** Fake Pi service whose session replay is scripted by the fake workflow. */
+/** Fake agent service whose session replay is scripted by the fake workflow. */
 const makeFakePi = (): OpenCodeService => {
     const runtime = {
         url: "http://127.0.0.1:1",
@@ -305,7 +306,7 @@ const runInteractiveCommand = async ({
         value: fakeStderr,
         configurable: true,
     });
-    let listener: PiEventListener | undefined;
+    let listener: AgentEventListener | undefined;
     try {
         const factories: CommandFactories = {
             makeCoordinator: (options: ProgressCoordinatorOptions) =>
@@ -324,7 +325,7 @@ const runInteractiveCommand = async ({
                 _options: WorkflowOptions,
                 runtime: RalphieRuntime,
             ) => {
-                const piListener = listener as PiEventListener;
+                const piListener = listener as AgentEventListener;
                 const settle = (): void => {
                     timer.run();
                     samples.push(strategy.currentRegion().length);
@@ -363,7 +364,7 @@ const runNoninteractiveCommand = async ({
     readonly terminal: CliTerminalInfo;
 }): Promise<ReturnType<typeof makeCapture>> => {
     const capture = makeCapture();
-    let listener: PiEventListener | undefined;
+    let listener: AgentEventListener | undefined;
     await runCommand([...args], {
         terminal,
         output: capture,
@@ -379,7 +380,7 @@ const runNoninteractiveCommand = async ({
                 runtime: RalphieRuntime,
             ) => {
                 await runScriptedSession(
-                    listener as PiEventListener,
+                    listener as AgentEventListener,
                     runtime.progress,
                 );
                 return noopSummary;
@@ -537,7 +538,7 @@ describe("command runtime display: noninteractive fallback", () => {
                 if (record.runId !== undefined) runIds.add(record.runId);
             }
             expect(runIds.size).toBe(1);
-            // Structured progress values and Pi payloads stay lossless.
+            // Structured progress values and agent payloads stay lossless.
             expect(stdout).toContain('"verify":"bun run check"');
             expect(stdout).toContain('"command":"echo cycle 0');
             expect(stdout).toContain(

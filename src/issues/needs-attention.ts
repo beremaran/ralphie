@@ -1,7 +1,7 @@
 import type { IssueCheckpoint } from "../git/issue-checkpoint.ts";
 import { buildGroundingPrompt } from "../agent/prompts.ts";
 import { requestStructuredOutput } from "../agent/structured-output.ts";
-import type { PiNeedsAttentionRequest } from "../agent/task-session.ts";
+import type { NeedsAttentionRequest } from "../agent/task-session.ts";
 import { RalphieError } from "../shared/error.ts";
 import {
     IssueArtifactKind,
@@ -25,7 +25,7 @@ import type { IssueRecoveryService } from "./recovery.ts";
 export type NeedsAttentionRouteInput = {
     readonly context: IssueExecutionContext;
     readonly artifacts: IssueArtifactStore;
-    readonly request?: PiNeedsAttentionRequest;
+    readonly request?: NeedsAttentionRequest;
     readonly checkpoint?: IssueCheckpoint;
 };
 
@@ -58,7 +58,7 @@ export const issueFreshnessFingerprint = (
 
 const verificationPrompt = (
     context: IssueExecutionContext,
-    request: PiNeedsAttentionRequest,
+    request: NeedsAttentionRequest,
 ): string => `${buildGroundingPrompt({
     issue: context.issue,
     repositoryPath: context.repositoryPath,

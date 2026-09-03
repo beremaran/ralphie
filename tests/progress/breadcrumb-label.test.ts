@@ -9,8 +9,8 @@ import {
     renderBreadcrumbLine,
 } from "../../src/progress/breadcrumb-label.ts";
 import type { BreadcrumbLabelCandidate } from "../../src/progress/breadcrumb-label.ts";
-import type { PiSessionEvent } from "../../src/opencode/client.ts";
-import { makePiTranscriptRenderer } from "../../src/progress/transcript.ts";
+import type { AgentSessionEvent } from "../../src/opencode/client.ts";
+import { makeAgentTranscriptRenderer } from "../../src/progress/transcript.ts";
 
 const context = {
     sessionID: "session-1",
@@ -18,7 +18,7 @@ const context = {
     title: "Task",
 };
 
-const event = (value: unknown): PiSessionEvent => value as PiSessionEvent;
+const event = (value: unknown): AgentSessionEvent => value as AgentSessionEvent;
 
 const displayState: DisplayState = {
     repository: "owner/repo",
@@ -128,7 +128,7 @@ describe("breadcrumb labels", () => {
 describe("breadcrumb transcript insertion", () => {
     test("resumes an incomplete stream through the transcript boundary", () => {
         let output = "";
-        const render = makePiTranscriptRenderer({
+        const render = makeAgentTranscriptRenderer({
             write: (text) => {
                 output += text;
             },

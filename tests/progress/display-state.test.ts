@@ -1,21 +1,21 @@
 import { describe, expect, test } from "bun:test";
 
 import type {
-    PiEventContext,
-    PiSessionEvent,
+    AgentEventContext,
+    AgentSessionEvent,
 } from "../../src/opencode/client.ts";
 import {
     DISPLAY_ACTIVITY_LABELS,
     PROGRESS_STAGE_LABELS,
     createDisplayState,
     progressStageLabel,
-    reducePiSessionEvent,
+    reduceAgentSessionEvent,
     reduceProgressUpdate,
     type DisplayClock,
 } from "../../src/progress/display-state.ts";
 import type { ProgressStage } from "../../src/progress/progress.ts";
 
-const context: PiEventContext = {
+const context: AgentEventContext = {
     sessionID: "session-1",
     directory: "/workspace/repository",
     title: "Task",
@@ -26,7 +26,8 @@ const at =
     () =>
         value;
 
-const piEvent = (event: object): PiSessionEvent => event as PiSessionEvent;
+const piEvent = (event: object): AgentSessionEvent =>
+    event as AgentSessionEvent;
 
 const baseProgress = {
     stage: "issue-execution" as const,
@@ -129,16 +130,16 @@ describe("display state", () => {
         });
     });
 
-    test("maps Pi startup, thinking, response, tool, compaction, retry, and waiting activity", () => {
+    test("maps agent startup, thinking, response, tool, compaction, retry, and waiting activity", () => {
         let state = reduceProgressUpdate(undefined, baseProgress, at("now"));
-        state = reducePiSessionEvent(
+        state = reduceAgentSessionEvent(
             state,
             piEvent({ type: "agent_start" }),
             context,
         );
         expect(state.activity).toBe("thinking");
 
-        state = reducePiSessionEvent(
+        state = reduceAgentSessionEvent(
             state,
             piEvent({
                 type: "message_update",
@@ -148,7 +149,7 @@ describe("display state", () => {
         );
         expect(state.activity).toBe("thinking");
 
-        state = reducePiSessionEvent(
+        state = reduceAgentSessionEvent(
             state,
             piEvent({
                 type: "message_update",
@@ -158,7 +159,7 @@ describe("display state", () => {
         );
         expect(state.activity).toBe("responding");
 
-        state = reducePiSessionEvent(
+        state = reduceAgentSessionEvent(
             state,
             piEvent({
                 type: "tool_execution_start",
@@ -173,14 +174,14 @@ describe("display state", () => {
             activityLabel: "Using bash",
         });
 
-        state = reducePiSessionEvent(
+        state = reduceAgentSessionEvent(
             state,
             piEvent({ type: "compaction_start", reason: "threshold" }),
             context,
         );
         expect(state.activity).toBe("compacting");
 
-        state = reducePiSessionEvent(
+        state = reduceAgentSessionEvent(
             state,
             piEvent({
                 type: "auto_retry_start",
@@ -193,7 +194,7 @@ describe("display state", () => {
         );
         expect(state.activity).toBe("retrying");
 
-        state = reducePiSessionEvent(
+        state = reduceAgentSessionEvent(
             state,
             piEvent({ type: "agent_settled" }),
             context,
@@ -204,13 +205,13 @@ describe("display state", () => {
         });
     });
 
-    test("retains review attempt metadata through Pi events", () => {
+    test("retains review attempt metadata through agent events", () => {
         const state = reduceProgressUpdate(undefined, {
             ...baseProgress,
             attempt: 3,
             maxAttempts: 5,
         });
-        const next = reducePiSessionEvent(
+        const next = reduceAgentSessionEvent(
             state,
             piEvent({ type: "turn_start" }),
             context,
@@ -268,7 +269,7 @@ describe("display state", () => {
                 title: "Bearer private-value",
             },
         });
-        const next = reducePiSessionEvent(
+        const next = reduceAgentSessionEvent(
             state,
             piEvent({
                 type: "tool_execution_start",
@@ -312,7 +313,7 @@ describe("display state", () => {
                 title: "title\u0007\nsecond line\u009b3J",
             },
         });
-        const next = reducePiSessionEvent(
+        const next = reduceAgentSessionEvent(
             state,
             piEvent({
                 type: "tool_execution_start",

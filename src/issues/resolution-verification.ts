@@ -8,12 +8,12 @@ import {
     IssueResolutionStatus,
 } from "./decisions.ts";
 import type { IssueExecutionContext } from "./execution.ts";
-import type { PiNeedsAttentionRequest } from "../agent/task-session.ts";
+import type { NeedsAttentionRequest } from "../agent/task-session.ts";
 
 export type ResolutionVerificationResult = {
     readonly decision: ResolutionVerificationDecision;
     readonly sessionID: string;
-    readonly needsAttention?: PiNeedsAttentionRequest;
+    readonly needsAttention?: NeedsAttentionRequest;
 };
 
 export type ResolutionVerificationService = {

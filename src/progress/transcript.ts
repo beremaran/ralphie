@@ -1,7 +1,7 @@
 import type {
-    PiEventContext,
-    PiEventListener,
-    PiSessionEvent,
+    AgentEventContext,
+    AgentEventListener,
+    AgentSessionEvent,
 } from "../opencode/client.ts";
 import { stripTerminalControls } from "../shared/terminal.ts";
 import { cyan, dim, green, red, yellow } from "./colors.ts";
@@ -13,7 +13,7 @@ import {
 } from "./breadcrumb-label.ts";
 import { progressStageLabel, type DisplayState } from "./display-state.ts";
 
-export type PiTranscriptRendererOptions = {
+export type AgentTranscriptRendererOptions = {
     readonly write: (text: string) => void;
     readonly colors?: boolean;
     readonly json?: boolean;
@@ -26,14 +26,14 @@ export type PiTranscriptRendererOptions = {
 };
 
 /** A transcript listener with coordinator-facing stream-boundary hooks. */
-export type PiTranscriptRenderer = PiEventListener & {
+export type AgentTranscriptRenderer = AgentEventListener & {
     /** Finish the current visible line without dropping the active stream key. */
     readonly interruptLine: () => void;
     /** Insert a normalized breadcrumb and safely resume any interrupted stream. */
     readonly insertBreadcrumb: (
         candidate: BreadcrumbLabelCandidate,
     ) => NormalizedBreadcrumb;
-    /** Visible terminal rows written during the current Pi session. */
+    /** Visible terminal rows written during the current agent session. */
     readonly getVisibleLineCount: () => number;
 };
 
@@ -136,7 +136,10 @@ const safeJson = (value: unknown): string => {
     }
 };
 
-const eventJson = (event: PiSessionEvent, context: PiEventContext): string =>
+const eventJson = (
+    event: AgentSessionEvent,
+    context: AgentEventContext,
+): string =>
     safeJson({
         type: "opencode_event",
         sessionID: context.sessionID,
@@ -283,8 +286,8 @@ const makeTranscriptWriter = (
     resetLineMeter?: () => void,
     onSessionStart?: () => void,
 ): {
-    readonly beginSession: (context: PiEventContext) => void;
-    readonly ensureSession: (context: PiEventContext) => void;
+    readonly beginSession: (context: AgentEventContext) => void;
+    readonly ensureSession: (context: AgentEventContext) => void;
     readonly startStream: (key: StreamKey, label: string) => void;
     readonly writeStream: (
         key: StreamKey,
@@ -331,7 +334,7 @@ const makeTranscriptWriter = (
         if (hasBlock) write("│\n");
     };
 
-    const beginSession = (context: PiEventContext): void => {
+    const beginSession = (context: AgentEventContext): void => {
         if (sessionOpen) finishSession("interrupted");
         resetLineMeter?.();
         const title =
@@ -346,7 +349,7 @@ const makeTranscriptWriter = (
         onSessionStart?.();
     };
 
-    const ensureSession = (context: PiEventContext): void => {
+    const ensureSession = (context: AgentEventContext): void => {
         if (!sessionOpen) beginSession(context);
     };
 
@@ -453,7 +456,10 @@ const makeTranscriptWriter = (
     };
 };
 
-type MessageUpdateEvent = Extract<PiSessionEvent, { type: "message_update" }>;
+type MessageUpdateEvent = Extract<
+    AgentSessionEvent,
+    { type: "message_update" }
+>;
 
 const contentIndexFor = (event: MessageUpdateEvent): string => {
     const index = (
@@ -641,7 +647,7 @@ const toolFailureDetail = (result: unknown): string => {
 };
 
 const renderToolExecutionEnd = (
-    event: Extract<PiSessionEvent, { type: "tool_execution_end" }>,
+    event: Extract<AgentSessionEvent, { type: "tool_execution_end" }>,
     styles: TranscriptStyles,
     writer: TranscriptWriter,
 ): void => {
@@ -662,7 +668,7 @@ const renderToolExecutionEnd = (
 };
 
 const renderUserMessage = (
-    event: Extract<PiSessionEvent, { type: "message_start" }>,
+    event: Extract<AgentSessionEvent, { type: "message_start" }>,
     styles: TranscriptStyles,
     writer: TranscriptWriter,
     verbose: boolean,
@@ -684,7 +690,7 @@ const renderUserMessage = (
 };
 
 const renderLifecycleEvent = (
-    event: PiSessionEvent,
+    event: AgentSessionEvent,
     styles: TranscriptStyles,
     writer: TranscriptWriter,
 ): void => {
@@ -735,8 +741,8 @@ const renderLifecycleEvent = (
 };
 
 const renderTerminalEvent = (
-    event: PiSessionEvent,
-    context: PiEventContext,
+    event: AgentSessionEvent,
+    context: AgentEventContext,
     styles: TranscriptStyles,
     writer: TranscriptWriter,
     messageStates: Map<string, MessageStreamState>,
@@ -802,7 +808,7 @@ const renderTerminalEvent = (
     }
 };
 
-export const makePiTranscriptRenderer = ({
+export const makeAgentTranscriptRenderer = ({
     write,
     colors = false,
     json = false,
@@ -810,7 +816,7 @@ export const makePiTranscriptRenderer = ({
     width = () => process.stderr.columns ?? 100,
     getDisplayState,
     onSessionStart,
-}: PiTranscriptRendererOptions): PiTranscriptRenderer => {
+}: AgentTranscriptRendererOptions): AgentTranscriptRenderer => {
     const styles: TranscriptStyles = colors
         ? {
               assistant: cyan,
@@ -842,7 +848,7 @@ export const makePiTranscriptRenderer = ({
     );
     const messageStates = new Map<string, MessageStreamState>();
 
-    const render: PiEventListener = (event, context) => {
+    const render: AgentEventListener = (event, context) => {
         if (json) {
             write(`${eventJson(event, context)}\n`);
             return;

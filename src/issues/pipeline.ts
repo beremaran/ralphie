@@ -10,12 +10,12 @@ import {
     IssueLinkStrategy,
 } from "../github/issue-task.ts";
 import {
-    PiSessionContext,
-    type PiSessionPurpose,
-    type PiSessionStage,
+    AgentSessionContext,
+    type AgentSessionPurpose,
+    type AgentSessionStage,
     type StructuredOutputName,
 } from "../agent/session.ts";
-import type { PiSelection } from "../agent/model.ts";
+import type { AgentSelection } from "../agent/model.ts";
 import { ComplexityLevel, ReviewVerdict } from "./decisions.ts";
 import {
     CheckoutRestorePoint,
@@ -29,7 +29,7 @@ import {
 export type IssueAtomicStage =
     | GitIssueStage
     | GitHubIssueStage
-    | PiSessionStage;
+    | AgentSessionStage;
 
 export type ReviewLoopStage = {
     readonly kind: "review-loop";
@@ -45,8 +45,8 @@ export type ReviewLoopStage = {
         readonly verdict: ReviewVerdict.Approved;
     };
     readonly stageChanges: GitIssueStage;
-    readonly review: PiSessionStage;
-    readonly onChangesRequested: PiSessionStage;
+    readonly review: AgentSessionStage;
+    readonly onChangesRequested: AgentSessionStage;
 };
 
 export type IssueStage = IssueAtomicStage | ReviewLoopStage;
@@ -64,8 +64,8 @@ export type IssueExecutionPlan = {
     readonly issue: GitHubIssue;
     readonly repositoryPath: string;
     readonly targetBranch: string;
-    readonly pi: PiSelection;
-    readonly assessment: PiSessionStage;
+    readonly pi: AgentSelection;
+    readonly assessment: AgentSessionStage;
     readonly workflows: readonly [IssueWorkflow, IssueWorkflow];
 };
 
@@ -74,12 +74,12 @@ export type IssuePipelineService = {
         readonly issue: GitHubIssue;
         readonly repositoryPath: string;
         readonly targetBranch: string;
-        readonly pi: PiSelection;
+        readonly pi: AgentSelection;
     }) => Promise<IssueExecutionPlan>;
 };
 
-const assessment: PiSessionStage = {
-    kind: "pi-session",
+const assessment: AgentSessionStage = {
+    kind: "agent-session",
     purpose: "assess-complexity",
     output: "complexity-decision",
 };
@@ -97,7 +97,7 @@ const implementationWorkflow: IssueWorkflow = {
             output: GitIssueOutput,
         },
         {
-            kind: "pi-session",
+            kind: "agent-session",
             purpose: "implement",
         },
         {
@@ -118,19 +118,19 @@ const implementationWorkflow: IssueWorkflow = {
                 action: "stage-all",
             },
             review: {
-                kind: "pi-session",
+                kind: "agent-session",
                 purpose: "review-diff",
                 output: "review-decision",
             },
             onChangesRequested: {
-                kind: "pi-session",
+                kind: "agent-session",
                 purpose: "address-review",
-                context: PiSessionContext,
+                context: AgentSessionContext,
                 input: "review-decision",
             },
         },
         {
-            kind: "pi-session",
+            kind: "agent-session",
             purpose: "generate-commit-message",
             output: "commit-message-decision",
         },
@@ -154,7 +154,7 @@ const decompositionWorkflow: IssueWorkflow = {
     },
     stages: [
         {
-            kind: "pi-session",
+            kind: "agent-session",
             purpose: "decompose-issue",
             output: "issue-breakdown-decision",
         },

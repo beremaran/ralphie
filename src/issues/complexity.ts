@@ -11,12 +11,12 @@ import {
     type ComplexityDecision,
 } from "./decisions.ts";
 import type { IssueExecutionContext } from "./execution.ts";
-import type { PiNeedsAttentionRequest } from "../agent/task-session.ts";
+import type { NeedsAttentionRequest } from "../agent/task-session.ts";
 
 export type ComplexityAssessmentResult = {
     readonly decision: ComplexityDecision;
     readonly sessionID: string;
-    readonly needsAttention?: PiNeedsAttentionRequest;
+    readonly needsAttention?: NeedsAttentionRequest;
 };
 
 export type ComplexityAssessmentService = {

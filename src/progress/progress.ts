@@ -180,7 +180,7 @@ const clipToWidth = (text: string, width: number): string => {
     return `${clipped}…`;
 };
 
-/** Create the single line-aware sink shared by progress and Pi output. */
+/** Create the single line-aware sink shared by progress and agent output. */
 export const makeProgressOutput = ({
     mode,
     write = mode === "json"
@@ -433,10 +433,10 @@ export {
     initialDisplayState,
     progressStageLabel,
     reduceDisplayState,
-    reducePiSessionEvent,
+    reduceAgentSessionEvent,
     reduceProgressUpdate,
     updateDisplayState,
-    updateDisplayStateFromPi,
+    updateDisplayStateFromAgent,
     updateDisplayStateFromProgress,
 } from "./display-state.ts";
 export type {

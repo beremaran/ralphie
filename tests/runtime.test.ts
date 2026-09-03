@@ -17,7 +17,7 @@ describe("runtime factory", () => {
             opencode: {
                 start: async () => {
                     throw new Error(
-                        "Pi must not start while assembling runtime",
+                        "The agent must not start while assembling runtime",
                     );
                 },
             },
@@ -41,7 +41,7 @@ describe("runtime factory", () => {
         const runtime = makeLiveRuntime({
             opencode: {
                 start: async () => {
-                    throw new Error("Pi must not start while observing");
+                    throw new Error("The agent must not start while observing");
                 },
             },
             progress: makeProgressRecorder([]),

@@ -21,9 +21,9 @@ import type { GitHubIssuesService } from "../../src/github/issues.ts";
 import { DEFAULT_AGENT } from "../../src/agent/model.ts";
 import { requestStructuredOutput } from "../../src/agent/structured-output.ts";
 import {
-    PI_DECISION_PERMISSION_POLICY,
+    AGENT_DECISION_PERMISSION_POLICY,
     makeAgentSessionDiagnostics,
-    type PiNeedsAttentionRequest,
+    type NeedsAttentionRequest,
 } from "../../src/agent/task-session.ts";
 import {
     IssueArtifactKind,
@@ -113,7 +113,7 @@ const changedFingerprint: IssueFreshnessFingerprint = {
     commentVersion: "2026-08-29T00:00:00.000Z",
 };
 
-const attentionRequest: PiNeedsAttentionRequest = {
+const attentionRequest: NeedsAttentionRequest = {
     reason: "missing_information",
     message: "The request is blocked on a prerequisite.",
 };
@@ -171,7 +171,7 @@ type RecordedPrompt = {
 };
 
 /**
- * Deterministic Pi client. Each structured call creates one session and then
+ * Deterministic agent client. Each structured call creates one session and then
  * prompts it, so responses are matched by the session title captured at
  * create time. A script is served up to `count` times in order; the first
  * matching script with remaining budget wins.
@@ -204,7 +204,7 @@ const fakePi = (scripts: ReadonlyArray<FakeScript>) => {
                     );
                 });
                 if (index === -1) {
-                    throw new Error(`Fake Pi has no response for ${title}`);
+                    throw new Error(`Fake agent has no response for ${title}`);
                 }
                 const script = scripts[index]!;
                 const servedCount = (served.get(script.titlePrefix) ?? 0) + 1;

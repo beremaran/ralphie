@@ -460,7 +460,7 @@ const testRuntime = (
                       update.stage === "opencode-runtime" &&
                       update.status === "succeeded"
                   ) {
-                      throw new Error("Pi ready progress emission failed");
+                      throw new Error("Agent ready progress emission failed");
                   }
                   await progressRecorder.emit(update);
               },
@@ -761,7 +761,7 @@ const baseOptions = {
 } as const;
 
 describe("workflow", () => {
-    test("executes an issue, persists completion, releases Pi, and cleans up", async () => {
+    test("executes an issue, persists completion, releases the agent, and cleans up", async () => {
         const calls: string[] = [];
         const states: RunState[] = [];
         const events: ProgressUpdate[] = [];
@@ -3052,7 +3052,7 @@ describe("workflow", () => {
         });
     });
 
-    test("keeps notification recovery distinct and retries the saved outcome without Pi work", async () => {
+    test("keeps notification recovery distinct and retries the saved outcome without agent work", async () => {
         const firstStates: RunState[] = [];
         let attempts = 0;
         const notification: GitHubNeedsAttentionNotificationService = {
@@ -3386,7 +3386,7 @@ describe("workflow", () => {
         },
     );
 
-    test("halts, persists the active issue, and releases Pi on failure", async () => {
+    test("halts, persists the active issue, and releases the agent on failure", async () => {
         const calls: string[] = [];
         const states: RunState[] = [];
         await expect(
@@ -3444,7 +3444,7 @@ describe("workflow", () => {
         expect(calls).toContain("restoreCheckout");
     });
 
-    test("closes Pi if ready progress reporting fails after startup", async () => {
+    test("closes the agent if ready progress reporting fails after startup", async () => {
         const calls: string[] = [];
         const states: RunState[] = [];
         await expect(
@@ -3454,7 +3454,7 @@ describe("workflow", () => {
                     failPiReadyProgress: true,
                 }),
             ),
-        ).rejects.toThrow("Pi ready progress emission failed");
+        ).rejects.toThrow("Agent ready progress emission failed");
         expect(calls).toContain("closeRuntime");
     });
 
@@ -3692,7 +3692,7 @@ describe("workflow", () => {
         },
     );
 
-    test("cancels after Pi starts, closes the server, and saves active state", async () => {
+    test("cancels after the agent starts, closes the server, and saves active state", async () => {
         const calls: string[] = [];
         const states: RunState[] = [];
         const controller = new AbortController();

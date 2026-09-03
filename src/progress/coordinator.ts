@@ -1,7 +1,7 @@
 import type {
-    PiEventContext,
-    PiEventListener,
-    PiSessionEvent,
+    AgentEventContext,
+    AgentEventListener,
+    AgentSessionEvent,
 } from "../opencode/client.ts";
 import {
     arbitrateBreadcrumbCandidates,
@@ -17,13 +17,13 @@ import {
 } from "./breadcrumb-label.ts";
 import {
     createDisplayState,
-    reducePiSessionEvent,
+    reduceAgentSessionEvent,
     reduceProgressUpdate,
     type DisplayState,
 } from "./display-state.ts";
 import {
-    makePiTranscriptRenderer,
-    type PiTranscriptRenderer,
+    makeAgentTranscriptRenderer,
+    type AgentTranscriptRenderer,
 } from "./transcript.ts";
 import {
     makeProgressOutput,
@@ -51,7 +51,7 @@ import {
     type TerminalResizeSubscription,
 } from "./terminal-controller.ts";
 
-/** Options for the shared progress/Pi output coordinator. */
+/** Options for the shared progress/agent output coordinator. */
 export type ProgressCoordinatorOptions = Omit<
     ProgressRendererOptions,
     "output"
@@ -84,12 +84,12 @@ export type ProgressCoordinatorOptions = Omit<
  */
 export type ProgressCoordinator = {
     readonly progress: ProgressReporterService;
-    /** Listener to pass to the Pi service. */
-    readonly piListener: PiEventListener;
+    /** Listener to pass to the agent service. */
+    readonly piListener: AgentEventListener;
     /** Compatibility alias for callers that use the generic listener name. */
-    readonly listener: PiEventListener;
+    readonly listener: AgentEventListener;
     /** Explicit event-listener alias for dependency wiring. */
-    readonly piEventListener: PiEventListener;
+    readonly piEventListener: AgentEventListener;
     /** Insert an approved breadcrumb through the transcript boundary. */
     readonly insertBreadcrumb?: (
         candidate: BreadcrumbLabelCandidate,
@@ -103,9 +103,9 @@ const transcriptFor = (
     output: ProgressOutput,
     getDisplayState: () => DisplayState,
     onSessionStart: () => void,
-): PiTranscriptRenderer | undefined => {
+): AgentTranscriptRenderer | undefined => {
     if (options.mode === "quiet") return undefined;
-    return makePiTranscriptRenderer({
+    return makeAgentTranscriptRenderer({
         write: output.writeTranscript,
         colors: options.colors,
         json: options.mode === "json",
@@ -121,7 +121,7 @@ const transcriptFor = (
  * must never force the line closed, otherwise every token renders on its own
  * `│    `-prefixed row instead of streaming inline (see issue #409).
  */
-const incrementalStreamEvent = (event: PiSessionEvent): boolean => {
+const incrementalStreamEvent = (event: AgentSessionEvent): boolean => {
     switch (event.type) {
         case "tool_execution_update":
         case "bash_execution_update":
@@ -139,7 +139,7 @@ const incrementalStreamEvent = (event: PiSessionEvent): boolean => {
     }
 };
 
-const lifecycleBreadcrumbEvent = (event: PiSessionEvent): boolean => {
+const lifecycleBreadcrumbEvent = (event: AgentSessionEvent): boolean => {
     switch (event.type) {
         case "tool_execution_end":
         case "compaction_start":
@@ -157,7 +157,7 @@ const lifecycleBreadcrumbEvent = (event: PiSessionEvent): boolean => {
     }
 };
 
-const closesTranscriptSession = (event: PiSessionEvent): boolean =>
+const closesTranscriptSession = (event: AgentSessionEvent): boolean =>
     event.type === "agent_end" || event.type === "agent_settled";
 
 const policyCandidateFor = (
@@ -170,7 +170,7 @@ const policyCandidateFor = (
 
 const considerBreadcrumbEvent = (input: {
     readonly policy: BreadcrumbPolicy;
-    readonly transcript: PiTranscriptRenderer;
+    readonly transcript: AgentTranscriptRenderer;
     /** Candidate describing the state after the lifecycle event. */
     readonly candidate: BreadcrumbLabelCandidate;
     /** Candidate pending from the state before the lifecycle event. */
@@ -204,7 +204,7 @@ const considerBreadcrumbEvent = (input: {
 
 const considerClosingBreadcrumb = (input: {
     readonly policy: BreadcrumbPolicy;
-    readonly transcript: PiTranscriptRenderer | undefined;
+    readonly transcript: AgentTranscriptRenderer | undefined;
     readonly candidate: BreadcrumbLabelCandidate | undefined;
     readonly periodicCandidate: BreadcrumbLabelCandidate | undefined;
     readonly before: number;
@@ -232,7 +232,7 @@ const considerClosingBreadcrumb = (input: {
 
 const considerRenderedBreadcrumb = (input: {
     readonly policy: BreadcrumbPolicy;
-    readonly transcript: PiTranscriptRenderer | undefined;
+    readonly transcript: AgentTranscriptRenderer | undefined;
     readonly candidate: BreadcrumbLabelCandidate | undefined;
     readonly periodicCandidate: BreadcrumbLabelCandidate | undefined;
     readonly eventOutputBaseline: number;
@@ -259,7 +259,7 @@ const considerRenderedBreadcrumb = (input: {
     });
 };
 
-/** Construct the ordered progress and Pi presentation services for a run. */
+/** Construct the ordered progress and agent presentation services for a run. */
 export const makeProgressCoordinator = (
     options: ProgressCoordinatorOptions,
 ) => {
@@ -318,7 +318,7 @@ export const makeProgressCoordinator = (
             : { renderedLineThreshold: options.renderedLineThreshold }),
     });
     let eventOutputBaseline = 0;
-    let transcript: PiTranscriptRenderer | undefined;
+    let transcript: AgentTranscriptRenderer | undefined;
     transcript = transcriptFor(
         options,
         output,
@@ -330,7 +330,7 @@ export const makeProgressCoordinator = (
     );
     let disposed = false;
 
-    const piListener: PiEventListener = (event, context) => {
+    const piListener: AgentEventListener = (event, context) => {
         if (disposed) return;
         const before = transcript?.getVisibleLineCount() ?? 0;
         eventOutputBaseline = before;
@@ -339,7 +339,7 @@ export const makeProgressCoordinator = (
             transcript === undefined
                 ? undefined
                 : breadcrumbCandidateFor(state);
-        state = reducePiSessionEvent(state, event, context, now);
+        state = reduceAgentSessionEvent(state, event, context, now);
         activityState = reduceActivityEvent(activityState, event, () =>
             now().getTime(),
         );
@@ -423,5 +423,5 @@ export const makeProgressCoordinator = (
 /** Explicit alias for callers that name the service by its display role. */
 export const makeDisplayCoordinator = makeProgressCoordinator;
 
-export type { PiEventContext, PiSessionEvent };
+export type { AgentEventContext, AgentSessionEvent };
 export type { ProgressRenderMode };

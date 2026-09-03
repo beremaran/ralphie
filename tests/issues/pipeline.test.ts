@@ -9,8 +9,8 @@ import {
     IssueLinkStrategy,
 } from "../../src/github/issue-task.ts";
 import {
-    PiSessionContext,
-    type PiSessionPurpose,
+    AgentSessionContext,
+    type AgentSessionPurpose,
     type StructuredOutputName,
 } from "../../src/agent/session.ts";
 import { DEFAULT_AGENT } from "../../src/agent/model.ts";
@@ -74,7 +74,7 @@ describe("issue pipeline", () => {
         });
         expect(plan).not.toHaveProperty("issueBranch");
         expect(plan.assessment).toEqual({
-            kind: "pi-session",
+            kind: "agent-session",
             purpose: "assess-complexity",
             output: "complexity-decision",
         });
@@ -96,7 +96,7 @@ describe("issue pipeline", () => {
                 output: GitIssueOutput,
             },
             {
-                kind: "pi-session",
+                kind: "agent-session",
                 purpose: "implement",
             },
             {
@@ -117,19 +117,19 @@ describe("issue pipeline", () => {
                     action: "stage-all",
                 },
                 review: {
-                    kind: "pi-session",
+                    kind: "agent-session",
                     purpose: "review-diff",
                     output: "review-decision",
                 },
                 onChangesRequested: {
-                    kind: "pi-session",
+                    kind: "agent-session",
                     purpose: "address-review",
-                    context: PiSessionContext,
+                    context: AgentSessionContext,
                     input: "review-decision",
                 },
             },
             {
-                kind: "pi-session",
+                kind: "agent-session",
                 purpose: "generate-commit-message",
                 output: "commit-message-decision",
             },
@@ -155,7 +155,7 @@ describe("issue pipeline", () => {
         }
         expect(selectWorkflow(plan, 4)?.stages).toEqual([
             {
-                kind: "pi-session",
+                kind: "agent-session",
                 purpose: "decompose-issue",
                 output: "issue-breakdown-decision",
             },

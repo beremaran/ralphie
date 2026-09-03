@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { HELP_TEXT, parseCliArgs } from "../../src/command.ts";
-import type { PiSessionEvent } from "../../src/opencode/client.ts";
+import type { AgentSessionEvent } from "../../src/opencode/client.ts";
 import { makeProgressCoordinator } from "../../src/progress/coordinator.ts";
 import { breadcrumbCandidateFor } from "../../src/progress/breadcrumb-label.ts";
 import { makeBreadcrumbPolicy } from "../../src/progress/breadcrumb.ts";
@@ -12,7 +12,7 @@ const context = {
     title: "Task",
 };
 
-const event = (value: unknown): PiSessionEvent => value as PiSessionEvent;
+const event = (value: unknown): AgentSessionEvent => value as AgentSessionEvent;
 
 type BreadcrumbHarness = ReturnType<typeof makeBreadcrumbHarness>;
 
@@ -72,7 +72,7 @@ const writeAssistant = (
 
 const settleSession = (
     harness: BreadcrumbHarness,
-    settledEvent: PiSessionEvent = event({ type: "agent_settled" }),
+    settledEvent: AgentSessionEvent = event({ type: "agent_settled" }),
 ): void => {
     harness.coordinator.listener(settledEvent, context);
 };
@@ -80,7 +80,7 @@ const settleSession = (
 describe("assembled breadcrumb policy regressions", () => {
     test("does not add a breadcrumb when a session ends below threshold", () => {
         const endings: ReadonlyArray<{
-            readonly event: PiSessionEvent;
+            readonly event: AgentSessionEvent;
             readonly footer: string;
         }> = [
             {
@@ -294,7 +294,7 @@ describe("assembled breadcrumb policy regressions", () => {
 
     const lifecycleCases: ReadonlyArray<{
         readonly name: string;
-        readonly event: PiSessionEvent;
+        readonly event: AgentSessionEvent;
         readonly renderedLine: string;
         readonly breadcrumb: string;
     }> = [

@@ -469,42 +469,13 @@ export const makeAgentTaskSessionService = (
     };
 };
 
-// Backwards-compatible aliases for the Pi-era names used across tests.
-export {
-    makeAgentSessionDiagnostics as makePiSessionDiagnostics,
-    parseNeedsAttentionRequest as parsePiNeedsAttentionRequest,
-    reportAgentFailure as reportPiFailure,
-    toAgentAssistantError as toPiAssistantError,
-    runAgentTask as runPiTask,
-    createAgentTaskSession as createPiTaskSession,
-};
-export type {
-    AgentTaskSessionRequest as PiTaskSessionRequest,
-    AgentTaskSession as PiTaskSession,
-    AgentTaskRequest as PiTaskRequest,
-    AgentTaskResult as PiTaskResult,
-    AgentAssistantError as PiAssistantError,
-    AgentAssistantErrorKind as PiAssistantErrorKind,
-    AgentRepositoryInvariant as PiRepositoryInvariant,
-    AgentRepositoryInvariantVerifier as PiRepositoryInvariantVerifier,
-    AgentSessionDiagnostic as PiSessionDiagnostic,
-    AgentSessionDiagnosticInput as PiSessionDiagnosticInput,
-    AgentSessionDiagnostics as PiSessionDiagnostics,
-    NeedsAttentionRequest as PiNeedsAttentionRequest,
-    NeedsAttentionReasonValue as PiNeedsAttentionReason,
-};
-export const PI_NEEDS_ATTENTION_REASONS = NEEDS_ATTENTION_REASONS;
-export const PI_NEEDS_ATTENTION_MESSAGE_LIMIT = NEEDS_ATTENTION_MESSAGE_LIMIT;
-export const piNeedsAttentionRequestSchema = needsAttentionRequestSchema;
-export const PI_SESSION_RETENTION_POLICY = AgentSessionRetentionPolicy;
-export const PiSessionRetentionPolicy = AgentSessionRetentionPolicy;
-/** Server owns permissions now; kept as empty placeholders for migration. */
-export const PI_TASK_PERMISSION_POLICY: ReadonlyArray<{
+/** Server owns permissions now; kept as empty placeholders. */
+export const AGENT_TASK_PERMISSION_POLICY: ReadonlyArray<{
     readonly permission: string;
     readonly pattern: string;
     readonly action: "allow" | "deny";
 }> = [];
-export const PI_DECISION_PERMISSION_POLICY: ReadonlyArray<{
+export const AGENT_DECISION_PERMISSION_POLICY: ReadonlyArray<{
     readonly permission: string;
     readonly pattern: string;
     readonly action: "allow" | "deny";

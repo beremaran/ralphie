@@ -1,4 +1,4 @@
-import type { PiSessionEvent } from "../opencode/client.ts";
+import type { AgentSessionEvent } from "../opencode/client.ts";
 import { stripTerminalControls } from "../shared/terminal.ts";
 import { green, red, yellow } from "./colors.ts";
 import { PROGRESS_STAGE_LABELS } from "./display-state.ts";
@@ -355,7 +355,7 @@ const failureDetail = (result: unknown): string | undefined => {
 };
 
 const toolCallFromMessageUpdate = (
-    event: Extract<PiSessionEvent, { type: "message_update" }>,
+    event: Extract<AgentSessionEvent, { type: "message_update" }>,
 ):
     | { readonly id?: string; readonly name?: string; readonly args?: unknown }
     | undefined => {
@@ -391,7 +391,7 @@ const toolCallFromMessageUpdate = (
 
 const reduceMessageUpdate = (
     state: ActivityState,
-    event: Extract<PiSessionEvent, { type: "message_update" }>,
+    event: Extract<AgentSessionEvent, { type: "message_update" }>,
     now: ActivityClock,
 ): ActivityState => {
     const view = recordValue(event.assistantMessageEvent);
@@ -446,9 +446,9 @@ const reduceMessageUpdate = (
 const reduceToolExecution = (
     state: ActivityState,
     event:
-        | Extract<PiSessionEvent, { type: "tool_execution_start" }>
-        | Extract<PiSessionEvent, { type: "tool_execution_update" }>
-        | Extract<PiSessionEvent, { type: "tool_execution_end" }>,
+        | Extract<AgentSessionEvent, { type: "tool_execution_start" }>
+        | Extract<AgentSessionEvent, { type: "tool_execution_update" }>
+        | Extract<AgentSessionEvent, { type: "tool_execution_end" }>,
     now: ActivityClock,
 ): ActivityState => {
     const name = event.toolName || "tool";
@@ -481,7 +481,7 @@ const reduceToolExecution = (
 
 const reduceBashUpdate = (
     state: ActivityState,
-    event: Extract<PiSessionEvent, { type: "bash_execution_update" }>,
+    event: Extract<AgentSessionEvent, { type: "bash_execution_update" }>,
     now: ActivityClock,
 ): ActivityState =>
     upsert(
@@ -497,7 +497,7 @@ const reduceBashUpdate = (
 
 const lifecycleAgentAndTurn = (
     state: ActivityState,
-    event: PiSessionEvent,
+    event: AgentSessionEvent,
     now: ActivityClock,
 ): ActivityState => {
     switch (event.type) {
@@ -564,7 +564,7 @@ const lifecycleAgentAndTurn = (
 
 const lifecycleCompaction = (
     state: ActivityState,
-    event: PiSessionEvent,
+    event: AgentSessionEvent,
     now: ActivityClock,
 ): ActivityState => {
     switch (event.type) {
@@ -606,7 +606,7 @@ const lifecycleCompaction = (
 
 const lifecycleRetry = (
     state: ActivityState,
-    event: PiSessionEvent,
+    event: AgentSessionEvent,
     now: ActivityClock,
 ): ActivityState => {
     switch (event.type) {
@@ -670,7 +670,7 @@ const lifecycleRetry = (
 
 const reduceLifecycleEvent = (
     state: ActivityState,
-    event: PiSessionEvent,
+    event: AgentSessionEvent,
     now: ActivityClock,
 ): ActivityState => {
     switch (event.type) {
@@ -695,7 +695,7 @@ const reduceLifecycleEvent = (
 };
 
 /**
- * Reduce a Pi session event into the activity registry.
+ * Reduce an agent session event into the activity registry.
  *
  * Tool calls are keyed by their call id, bash streams by their execution id,
  * and thinking/lifecycle work by a stable per-operation id, so repeated
@@ -704,7 +704,7 @@ const reduceLifecycleEvent = (
  */
 export const reduceActivityEvent = (
     state: ActivityState | undefined,
-    event: PiSessionEvent,
+    event: AgentSessionEvent,
     now: ActivityClock = defaultClock,
 ): ActivityState => {
     const base = state ?? createActivityState();
