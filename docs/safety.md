@@ -26,6 +26,17 @@ again before a push that:
 If any invariant fails, Ralphie halts instead of guessing or retrying a
 dangerous operation.
 
+For revisions delivered to an existing managed feature branch (the `pr`
+workflow), a revision-specific contract applies: the local checkout and the
+remote branch must both still sit at the exact expected prior feature head
+(the first delivery may use the original PR/base commit as its prior head and
+may find the remote branch absent), the feature head must descend from the
+original PR/base commit however many commits it is ahead of it, and every push
+stays non-force. A stale local head, an externally moved remote head, a
+missing remote branch beyond the first delivery, an unanchored feature head,
+or a force push halts the revision instead of following or resetting over the
+expected head.
+
 Implementation agents may use normal shell composition, pipes, redirection,
 and language runtimes. Ralphie's shell hook rejects explicit agent requests for
 orchestration-owned Git/GitHub mutations such as commits, pushes, branch
