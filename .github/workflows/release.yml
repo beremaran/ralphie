@@ -654,677 +654,6 @@ jobs:
             sleep 10
           done
 
-  push-container:
-    name: Push container image
-    needs:
-      - validate
-      - stage-container
-      - aggregate-release-metadata
-    if: >-
-      ${{
-        always() &&
-        needs.validate.result == 'success' &&
-        needs.stage-container.result == 'success' &&
-        needs.aggregate-release-metadata.result == 'success' &&
-        needs.validate.outputs.dry_run == 'false'
-      }}
-    runs-on: ubuntu-latest
-    # The validated release context is job-level so every step that resolves
-    # the exact candidate artifact names (`Validate exact staged container
-    # candidate set`, `Inspect OCI metadata before promotion`, `Promote
-    # platform images...`, and `Create manifest aliases...`) interpolates
-    # the same version/commit, and so a future step split or reorder cannot
-    # silently lose the binding.
-    env:
-      VERSION: ${{ needs.validate.outputs.version }}
-      SOURCE_REF: ${{ needs.validate.outputs.source_ref }}
-    # Container publication is separately downstream of the metadata check.
-    # Its protected environment prevents a retry from bypassing validation.
-    environment:
-      name: release
-      url: https://github.com/${{ github.repository }}/packages/container/ralphie
-    # The minimum permission set for digest promotion plus SBOM and SLSA
-    # provenance attestations: `packages` for GHCR writes and referrer
-    # attachments, `attestations` for attestation storage records, and
-    # `id-token` for the GitHub OIDC signing path. `contents: read` allows
-    # checking out the validated source that hosts the checked-in
-    # validation seams (`scripts/validate-container-candidates.ts` and
-    # `scripts/validate-container-sboms.ts`). No other write permission
-    # is granted; `stage-container` stays credential-free and read-only.
-    permissions:
-      contents: read
-      packages: write
-      attestations: write
-      id-token: write
-    steps:
-      - name: Check out validated source
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.validate.outputs.source_ref }}
-          persist-credentials: false
-
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: ${{ env.BUN_VERSION }}
-
-      - name: Verify Bun version
-        run: test "$(bun --version)" = "$BUN_VERSION"
-
-      # Use one exact artifact name per platform. This prevents an untrusted
-      # artifact matching a broad pattern from entering the promotion input.
-      - name: Download amd64 container candidate artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: ralphie-container-candidate-${{ needs.validate.outputs.version }}-amd64
-          path: container-candidates/ralphie-container-candidate-${{ needs.validate.outputs.version }}-amd64
-      - name: Download arm64 container candidate artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: ralphie-container-candidate-${{ needs.validate.outputs.version }}-arm64
-          path: container-candidates/ralphie-container-candidate-${{ needs.validate.outputs.version }}-arm64
-
-      # Validate every candidate before the first registry write. The checker
-      # requires exactly the amd64/arm64 candidate artifact names for the
-      # validated version, strictly parses each
-      # `ralphie.container-candidate.v1` contract, recomputes the archive
-      # SHA-256, and compares the archive's actual image manifest content
-      # digest with the recorded BuildKit digest; it never logs in to GHCR,
-      # writes a tag, rebuilds an image, or continues after a validation
-      # error.
-      - name: Validate exact staged container candidate set
-        run: |
-          set -euo pipefail
-          bun scripts/validate-container-candidates.ts \
-            --candidates-dir container-candidates \
-            --version "$VERSION" \
-            --source-ref "$SOURCE_REF"
-
-      - name: Install skopeo
-        run: |
-          set -euo pipefail
-          if ! command -v skopeo >/dev/null 2>&1; then
-            sudo apt-get update
-            sudo apt-get install --yes skopeo
-          fi
-
-      - name: Inspect OCI metadata before promotion
-        run: |
-          set -euo pipefail
-          for arch in amd64 arm64; do
-            archive="container-candidates/ralphie-container-candidate-${VERSION}-${arch}/ralphie-container-${arch}.oci.tar"
-            contract="container-candidates/ralphie-container-candidate-${VERSION}-${arch}/ralphie-container-${arch}.metadata.json"
-            expected_digest="$(jq -er '.digest' "$contract")"
-            actual_digest="$(skopeo inspect --format '{{.Digest}}' "oci-archive:$archive")"
-            license_label="$(skopeo inspect --format '{{ index .Labels "org.opencontainers.image.licenses" }}' "oci-archive:$archive")"
-            version_label="$(skopeo inspect --format '{{ index .Labels "org.opencontainers.image.version" }}' "oci-archive:$archive")"
-            revision_label="$(skopeo inspect --format '{{ index .Labels "org.opencontainers.image.revision" }}' "oci-archive:$archive")"
-            test "$actual_digest" = "$expected_digest"
-            test "$license_label" = "MIT"
-            test "$version_label" = "$VERSION"
-            test "$revision_label" = "$SOURCE_REF"
-          done
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      # The normalized package version is the canonical tag base. The minor,
-      # latest, and source-revision tags are explicit aliases produced by the
-      # checked-in semver-aware planner (scripts/derive-container-tags.ts over
-      # src/release/container-tags.ts), never by shell truncation such as
-      # ${VERSION%.*} or by docker/metadata-action inference. The planner
-      # removes the leading v, retains a prerelease suffix, derives the minor
-      # alias from the parsed numeric major/minor fields, emits latest only
-      # for SemVer without a prerelease identifier, always emits
-      # sha-<source_ref>, fails closed on malformed SemVer, and normalizes
-      # build metadata out of every OCI-safe tag: a raw value like
-      # 1.2.3+build.7 is never written to a registry, while the full
-      # validated version stays in the candidate/image metadata. The step
-      # re-validates the exact persisted plan (schema, order, deduplication,
-      # latest policy, sha tag, and OCI tag safety) before any promotion.
-      - name: Derive container tag plan
-        run: |
-          set -euo pipefail
-          bun scripts/derive-container-tags.ts \
-            --version "$VERSION" \
-            --source-ref "$SOURCE_REF" \
-            --output container-tag-plan.json
-          jq -e \
-            --arg version "$VERSION" \
-            --arg source_ref "$SOURCE_REF" \
-            '(.schema == "ralphie.container-tag-plan.v1") and
-             (.version == $version) and
-             (.source_ref == $source_ref) and
-             (.version_tag | contains("+") | not) and
-             (.platform_tag_base == .version_tag) and
-             (.source_tag == ("sha-" + $source_ref)) and
-             (.index_tags | length) == (.index_tags | unique | length) and
-             (.index_tags | length) >= 3 and
-             (.index_tags[0] == .version_tag) and
-             (.index_tags[1] == .minor_tag) and
-             (.index_tags[-1] == .source_tag) and
-             (if .latest then
-                (.index_tags[2] == "latest") and (.index_tags | length) == 4
-              else
-                (.index_tags | index("latest")) == null and
-                (.index_tags | length) == 3
-              end) and
-             ([.index_tags[] | select(contains("+"))] | length == 0) and
-             ([.platform_tags[] | select(contains("+"))] | length == 0)' \
-            container-tag-plan.json > /dev/null
-
-      # Promote the inspected OCI archives, rather than rebuilding with a
-      # different ref. Each promoted GHCR image is re-inspected immediately:
-      # the registry digest must be a lowercase `sha256:<64 hex>` value equal
-      # to the candidate contract's `.digest`, the platform must match, and
-      # the validated version/source_ref (and license) OCI labels must match
-      # the release-gate outputs. Every subject entry is derived from that
-      # post-promotion result and persisted in the
-      # `ralphie.publication-subjects.v1` map; a missing, duplicate,
-      # unsupported, or mismatched subject fails this step before any alias
-      # can be created.
-      - name: Promote platform images and persist publication subjects
-        env:
-          IMAGE: ghcr.io/beremaran/ralphie
-        run: |
-          set -euo pipefail
-          authfile="$HOME/.docker/config.json"
-          test -s "$authfile"
-          # The platform tag base is the plan's OCI-safe version: the leading
-          # v is removed and build metadata is normalized out (a raw value
-          # like 1.2.3+build.7 is never part of a registry tag), and the base
-          # must be a valid OCI tag name. The full validated version still
-          # lives in the candidate metadata and image labels.
-          platform_tag_base="$(jq -er '.platform_tag_base' container-tag-plan.json)"
-          test "$platform_tag_base" = "$(printf '%s' "$platform_tag_base" | grep -E '^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$')"
-          subjects='[]'
-          for arch in amd64 arm64; do
-            case "$arch" in
-              amd64) platform="linux/amd64" ;;
-              arm64) platform="linux/arm64" ;;
-              *) echo "Unsupported container architecture: $arch" >&2; exit 1 ;;
-            esac
-            archive="container-candidates/ralphie-container-candidate-${VERSION}-${arch}/ralphie-container-${arch}.oci.tar"
-            contract="container-candidates/ralphie-container-candidate-${VERSION}-${arch}/ralphie-container-${arch}.metadata.json"
-            expected_digest="$(jq -er '.digest' "$contract")"
-            test "$expected_digest" = "$(printf '%s' "$expected_digest" | grep -E '^sha256:[0-9a-f]{64}$')"
-
-            skopeo copy --authfile "$authfile" --retry-times 3 \
-              "oci-archive:$archive" \
-              "docker://$IMAGE:${platform_tag_base}-${arch}"
-
-            inspected="$(skopeo inspect --authfile "$authfile" --retry-times 3 \
-              --format '{{json .}}' "docker://$IMAGE:${platform_tag_base}-${arch}")"
-            registry_digest="$(jq -er '.Digest' <<< "$inspected")"
-            registry_platform="$(jq -er '"\(.Os)/\(.Architecture)"' <<< "$inspected")"
-            license_label="$(jq -er '.Labels["org.opencontainers.image.licenses"]' <<< "$inspected")"
-            version_label="$(jq -er '.Labels["org.opencontainers.image.version"]' <<< "$inspected")"
-            revision_label="$(jq -er '.Labels["org.opencontainers.image.revision"]' <<< "$inspected")"
-            test "$registry_digest" = "$(printf '%s' "$registry_digest" | grep -E '^sha256:[0-9a-f]{64}$')"
-            test "$registry_digest" = "$expected_digest"
-            test "$registry_platform" = "$platform"
-            test "$license_label" = "MIT"
-            test "$version_label" = "$VERSION"
-            test "$revision_label" = "$SOURCE_REF"
-            subjects="$(jq \
-              --arg platform "$platform" \
-              --arg digest "$registry_digest" \
-              --arg reference "$IMAGE@$registry_digest" \
-              '. + [{platform: $platform, digest: $digest, reference: $reference}]' \
-              <<< "$subjects")"
-          done
-
-          # The publication subject map must contain exactly the linux/amd64
-          # and linux/arm64 promotions, each with a unique canonical digest
-          # and the `ghcr.io/beremaran/ralphie@sha256:<digest>` reference
-          # derived from the post-promotion inspection above.
-          jq -e \
-            --arg image "$IMAGE" \
-            '(length == 2) and
-             ([.[].platform] | sort) == ["linux/amd64", "linux/arm64"] and
-             ([.[].platform] | unique | length == 2) and
-             ([.[].digest] | unique | length == 2) and
-             (all(.[]; (.platform == "linux/amd64" or .platform == "linux/arm64") and
-                       (.digest | test("^sha256:[0-9a-f]{64}$")) and
-                       (.reference == ($image + "@" + .digest))))' \
-            <<< "$subjects" > /dev/null
-          jq -n \
-            --arg schema "ralphie.publication-subjects.v1" \
-            --arg image "$IMAGE" \
-            --arg version "$VERSION" \
-            --arg source_ref "$SOURCE_REF" \
-            --argjson subjects "$subjects" \
-            '{schema: $schema, image: $image, version: $version, source_ref: $source_ref, subjects: $subjects}' \
-            > publication-subjects.json
-
-      # Persist the verified subjects as an immutable artifact so later
-      # attestation steps and this job's alias step consume the same
-      # post-promotion digests.
-      - name: Upload verified publication subjects
-        uses: actions/upload-artifact@v4
-        with:
-          name: ralphie-publication-subjects-${{ needs.validate.outputs.version }}
-          path: publication-subjects.json
-          if-no-files-found: error
-          overwrite: false
-          retention-days: 90
-
-      # Container attestation generation (r218-container-attestation-generation):
-      # consume the exact two-entry subject map after platform digest
-      # verification and before any mutable alias. For each immutable
-      # `ghcr.io/beremaran/ralphie@sha256:<digest>` subject, generate an SPDX
-      # 2.3 SBOM by scanning that digest (never an OCI archive or tag),
-      # attach it with the pinned SBOM attestation action using the canonical
-      # subject-name, exact subject-digest, SBOM path, and registry/referrer
-      # push, and attach SLSA provenance-v1 build provenance with the same
-      # pinned provenance action and subject digest. The OIDC identity must
-      # be the validated protected tag and its exact commit; the validated
-      # release version and commit are carried as the build identity in the
-      # persisted map and each SBOM. Both attestation kinds are required for
-      # both platforms, every generator/attachment failure fails the job
-      # (`set -euo pipefail`, no `continue-on-error`, no swallowed errors, no
-      # fallback), and aliases run only after successful generation.
-      - name: Validate workflow identity and persist container attestation subjects
-        id: attestation-subjects
-        env:
-          IMAGE: ghcr.io/beremaran/ralphie
-          TAG: ${{ needs.validate.outputs.tag }}
-        run: |
-          set -euo pipefail
-          # The signing identity must be the protected release tag and its
-          # exact commit, never the default branch or a mutable tag.
-          test "$GITHUB_REF" = "refs/tags/$TAG"
-          test "$GITHUB_SHA" = "$SOURCE_REF"
-          test "$GITHUB_WORKFLOW_REF" = "$GITHUB_REPOSITORY/.github/workflows/release.yml@refs/tags/$TAG"
-          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ ]]
-          [[ "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
-
-          # Re-validate the persisted two-entry subject map exactly as the
-          # alias step does: only the linux/amd64 and linux/arm64
-          # promotions, unique immutable digests, and references derived as
-          # `<image>@<digest>`.
-          jq -e \
-            --arg schema "ralphie.publication-subjects.v1" \
-            --arg image "$IMAGE" \
-            --arg version "$VERSION" \
-            --arg source_ref "$SOURCE_REF" \
-            '(.schema == $schema) and
-             (.image == $image) and
-             (.version == $version) and
-             (.source_ref == $source_ref) and
-             (.subjects | type == "array" and length == 2) and
-             ([.subjects[].platform] | sort) == ["linux/amd64", "linux/arm64"] and
-             ([.subjects[].platform] | unique | length == 2) and
-             ([.subjects[].digest] | unique | length == 2) and
-             (all(.subjects[]; (.platform == "linux/amd64" or .platform == "linux/arm64") and
-                               (.digest | test("^sha256:[0-9a-f]{64}$")) and
-                               (.reference == ($image + "@" + .digest))))' \
-            publication-subjects.json > /dev/null
-
-          # Derive one immutable attestation subject per platform: canonical
-          # subject-name (the image), exact registry digest and reference,
-          # and the deterministic SBOM output name.
-          subjects="$(jq -c --arg image "$IMAGE" \
-            '[.subjects[] | {
-               platform,
-               digest,
-               reference,
-               name: $image,
-               sbom: ("ralphie-container-" + (.platform | split("/")[1]) + ".sbom.spdx.json")
-             }]' publication-subjects.json)"
-          jq -n \
-            --arg schema "ralphie.container-attestation-subjects.v1" \
-            --arg image "$IMAGE" \
-            --arg tag "$TAG" \
-            --arg version "$VERSION" \
-            --arg source_ref "$SOURCE_REF" \
-            --arg workflow "Release" \
-            --arg workflow_file ".github/workflows/release.yml" \
-            --arg workflow_ref "$GITHUB_WORKFLOW_REF" \
-            --arg run_id "$GITHUB_RUN_ID" \
-            --arg run_attempt "$GITHUB_RUN_ATTEMPT" \
-            --argjson subjects "$subjects" \
-            '{schema: $schema, image: $image, tag: $tag, version: $version,
-              source_ref: $source_ref, workflow: $workflow,
-              workflow_file: $workflow_file, workflow_ref: $workflow_ref,
-              run_id: $run_id, run_attempt: $run_attempt, subjects: $subjects}' \
-            > container-attestation-subjects.json
-          jq -e \
-            --arg schema "ralphie.container-attestation-subjects.v1" \
-            --arg image "$IMAGE" \
-            --arg tag "$TAG" \
-            --arg version "$VERSION" \
-            --arg source_ref "$SOURCE_REF" \
-            '(.schema == $schema) and
-             (.image == $image) and
-             (.tag == $tag) and
-             (.version == $version) and
-             (.source_ref == $source_ref) and
-             (.workflow_file == ".github/workflows/release.yml") and
-             (.subjects | type == "array" and length == 2) and
-             ([.subjects[].platform] | sort) == ["linux/amd64", "linux/arm64"] and
-             ([.subjects[].platform] | unique | length == 2) and
-             ([.subjects[].digest] | unique | length == 2) and
-             (all(.subjects[];
-                  (.platform == "linux/amd64" or .platform == "linux/arm64") and
-                  (.name == $image) and
-                  (.digest | test("^sha256:[0-9a-f]{64}$")) and
-                  (.reference == ($image + "@" + .digest)) and
-                  (.sbom == ("ralphie-container-" + (.platform | split("/")[1]) + ".sbom.spdx.json"))))' \
-            container-attestation-subjects.json > /dev/null
-
-          amd64_digest="$(jq -er '.subjects[] | select(.platform == "linux/amd64") | .digest' container-attestation-subjects.json)"
-          arm64_digest="$(jq -er '.subjects[] | select(.platform == "linux/arm64") | .digest' container-attestation-subjects.json)"
-          echo "amd64_digest=$amd64_digest" >> "$GITHUB_OUTPUT"
-          echo "arm64_digest=$arm64_digest" >> "$GITHUB_OUTPUT"
-
-      # Generate one SPDX 2.3 SBOM per immutable subject by scanning the
-      # promoted registry digest itself, never an OCI archive or a mutable
-      # tag. A scan, pull, or generation failure fails the job here, before
-      # any attestation or alias can run.
-      - name: Generate SPDX SBOM for linux/amd64 digest
-        uses: anchore/sbom-action@006b7ce8314066bdf1765b4500370d40fa6917a3 # v0.24.2
-        with:
-          image: ghcr.io/beremaran/ralphie@${{ steps.attestation-subjects.outputs.amd64_digest }}
-          format: spdx-json
-          output-file: ralphie-container-amd64.sbom.spdx.json
-          registry-username: ${{ github.actor }}
-          registry-password: ${{ secrets.GITHUB_TOKEN }}
-          dependency-snapshot: false
-          upload-artifact: false
-          upload-release-assets: false
-      - name: Generate SPDX SBOM for linux/arm64 digest
-        uses: anchore/sbom-action@006b7ce8314066bdf1765b4500370d40fa6917a3 # v0.24.2
-        with:
-          image: ghcr.io/beremaran/ralphie@${{ steps.attestation-subjects.outputs.arm64_digest }}
-          format: spdx-json
-          output-file: ralphie-container-arm64.sbom.spdx.json
-          registry-username: ${{ github.actor }}
-          registry-password: ${{ secrets.GITHUB_TOKEN }}
-          dependency-snapshot: false
-          upload-artifact: false
-          upload-release-assets: false
-
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: ${{ env.BUN_VERSION }}
-
-      - name: Install dependencies for container SBOM validation
-        run: bun install --frozen-lockfile
-
-      # Bind each generated SPDX document to the validated release identity
-      # (tag, version, commit, platform, digest, workflow ref) and
-      # re-validate it as SPDX 2.3 JSON before anything is attested. The
-      # script also records each final SBOM's SHA-256 and size in the
-      # subjects map for the attestation verification gate.
-      - name: Validate and pin container SBOMs to release identity
-        env:
-          TAG: ${{ needs.validate.outputs.tag }}
-        run: |
-          set -euo pipefail
-          bun_version="$(bun --version)"
-          test "$bun_version" = "$BUN_VERSION"
-          bun scripts/validate-container-sboms.ts \
-            --subjects container-attestation-subjects.json \
-            --version "$VERSION" \
-            --tag "$TAG" \
-            --commit-sha "$SOURCE_REF"
-
-      # Attach each SBOM to its exact immutable subject with the pinned SBOM
-      # attestation action: canonical subject-name, exact subject-digest,
-      # SBOM path, and registry/referrer push enabled. Both platforms are
-      # required; a missing or failed attachment fails here.
-      - name: Attest linux/amd64 container SBOM
-        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
-        with:
-          subject-name: ghcr.io/beremaran/ralphie
-          subject-digest: ${{ steps.attestation-subjects.outputs.amd64_digest }}
-          sbom-path: ralphie-container-amd64.sbom.spdx.json
-          push-to-registry: true
-          show-summary: true
-      - name: Attest linux/arm64 container SBOM
-        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
-        with:
-          subject-name: ghcr.io/beremaran/ralphie
-          subject-digest: ${{ steps.attestation-subjects.outputs.arm64_digest }}
-          sbom-path: ralphie-container-arm64.sbom.spdx.json
-          push-to-registry: true
-          show-summary: true
-
-      # Attach SLSA provenance-v1 build provenance to the same immutable
-      # subjects with the existing pinned provenance action and OCI
-      # registry/referrer push, so each digest carries both attestation
-      # kinds.
-      - name: Attest linux/amd64 container provenance
-        uses: actions/attest-build-provenance@bd77c077858b8d561b7a36cbe48ef4cc642ca39d # v2.2.2
-        with:
-          subject-name: ghcr.io/beremaran/ralphie
-          subject-digest: ${{ steps.attestation-subjects.outputs.amd64_digest }}
-          push-to-registry: true
-          show-summary: true
-      - name: Attest linux/arm64 container provenance
-        uses: actions/attest-build-provenance@bd77c077858b8d561b7a36cbe48ef4cc642ca39d # v2.2.2
-        with:
-          subject-name: ghcr.io/beremaran/ralphie
-          subject-digest: ${{ steps.attestation-subjects.outputs.arm64_digest }}
-          push-to-registry: true
-          show-summary: true
-
-      # Require both attestation kinds for both platforms before any mutable
-      # alias. `gh attestation verify` cryptographically validates every SLSA
-      # provenance v1 and SPDX Document predicate bundle against the
-      # protected tag/commit workflow identity for each immutable digest.
-      # Attestation records are keyed by bundle signature, so re-running an
-      # interrupted attempt leaves additional records for the same digest:
-      # the gate requires at least one verified attestation per predicate
-      # kind (presence, never an exact total) while still binding every
-      # accepted predicate to the validated identity and to the exact
-      # annotated SBOM bytes.
-      - name: Verify all container attestations exist and match subjects
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          TAG: ${{ needs.validate.outputs.tag }}
-        run: |
-          set -euo pipefail
-          test "$GITHUB_REF" = "refs/tags/$TAG"
-          test "$GITHUB_SHA" = "$SOURCE_REF"
-          test "$GITHUB_WORKFLOW_REF" = "$GITHUB_REPOSITORY/.github/workflows/release.yml@refs/tags/$TAG"
-          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ ]]
-          [[ "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
-          jq -e \
-            --arg schema "ralphie.container-attestation-subjects.v1" \
-            --arg image "ghcr.io/beremaran/ralphie" \
-            '(.schema == $schema) and
-             (.image == $image) and
-             (.subjects | type == "array" and length == 2) and
-             ([.subjects[].platform] | sort) == ["linux/amd64", "linux/arm64"] and
-             ([.subjects[].platform] | unique | length == 2) and
-             ([.subjects[].digest] | unique | length == 2) and
-             (all(.subjects[];
-                  (.platform == "linux/amd64" or .platform == "linux/arm64") and
-                  (.name == $image) and
-                  (.digest | test("^sha256:[0-9a-f]{64}$")) and
-                  (.reference == ($image + "@" + .digest)) and
-                  (.sbom | type == "string") and
-                  (.sbom_sha256 | test("^[0-9a-f]{64}$"))))' \
-            container-attestation-subjects.json > /dev/null
-
-          # `gh attestation verify` treats any argument without the `oci://`
-          # prefix as a local file path, and OCI image verification resolves
-          # the digest by fetching the manifest through the Docker keychain.
-          # The job token is therefore materialized as an explicit
-          # $DOCKER_CONFIG entry for ghcr.io instead of relying on the login
-          # action's configuration file, and fetching the manifest for the
-          # exact immutable digest re-confirms that the promoted digest
-          # still exists under the package before any alias is created.
-          docker_config="$RUNNER_TEMP/ralphie-docker-config"
-          mkdir -p "$docker_config"
-          registry_auth="$(printf '%s:%s' "$GITHUB_ACTOR" "$GH_TOKEN" | base64 -w0)"
-          printf '{"auths":{"ghcr.io":{"auth":"%s"}}}\n' "$registry_auth" > "$docker_config/config.json"
-          export DOCKER_CONFIG="$docker_config"
-
-          while IFS= read -r subject; do
-            platform="$(jq -er '.platform' <<< "$subject")"
-            name="$(jq -er '.name' <<< "$subject")"
-            digest="$(jq -er '.digest' <<< "$subject")"
-            reference="$(jq -er '.reference' <<< "$subject")"
-            sbom="$(jq -er '.sbom' <<< "$subject")"
-            sbom_sha256="$(jq -er '.sbom_sha256' <<< "$subject")"
-
-            # The annotated SBOM on disk must still be the exact bytes the
-            # validator recorded in the subjects map and that attest-sbom
-            # attached; the attested predicate is compared byte-for-byte
-            # (parsed) below.
-            test "$(sha256sum "$sbom" | cut -d ' ' -f1)" = "$sbom_sha256"
-
-            provenance_document="$(gh attestation verify "oci://$reference" \
-              --repo "$GH_REPO" \
-              --signer-workflow "$GH_REPO/.github/workflows/release.yml" \
-              --source-ref "refs/tags/$TAG" \
-              --cert-identity "https://github.com/$GH_REPO/.github/workflows/release.yml@refs/tags/$TAG" \
-              --cert-oidc-issuer https://token.actions.githubusercontent.com \
-              --predicate-type https://slsa.dev/provenance/v1 \
-              --format json)"
-            # The gate is presence-based: re-running an interrupted attempt
-            # leaves extra bundle records for the same digest under new
-            # signatures, so every element is checked and at least one must
-            # carry the identity of this exact run (including the
-            # invocationId), the protected tag, and the validated commit.
-            # The statement subject digest is the lowercase `sha256:<64 hex>`
-            # value, exactly as persisted in the subject map (`gh` reports
-            # the algorithm separately on OCI references in terminal output
-            # only).
-            jq -e \
-              --arg name "$name" \
-              --arg digest "$digest" \
-              --arg repo "$GH_REPO" \
-              --arg tag "$TAG" \
-              --arg commit "$SOURCE_REF" \
-              --arg event "$GITHUB_EVENT_NAME" \
-              --arg run_id "$GITHUB_RUN_ID" \
-              --arg run_attempt "$GITHUB_RUN_ATTEMPT" \
-              'any(.[];
-               . as $attestation |
-               ($attestation.verificationResult.statement) as $statement |
-               ($statement.predicate) as $predicate |
-               ($statement.predicateType == "https://slsa.dev/provenance/v1") and
-               ([ $statement.subject[]? ] | length == 1) and
-               ($statement.subject[0].name == $name) and
-               ("sha256:" + $statement.subject[0].digest.sha256 == $digest) and
-               ($predicate.buildDefinition.externalParameters.workflow.repository == ("https://github.com/" + $repo)) and
-               ($predicate.buildDefinition.externalParameters.workflow.path == ".github/workflows/release.yml") and
-               ($predicate.buildDefinition.externalParameters.workflow.ref == ("refs/tags/" + $tag)) and
-               ($predicate.buildDefinition.internalParameters.github.event_name == $event) and
-               ([ $predicate.buildDefinition.resolvedDependencies[]? |
-                  select(.uri == ("git+https://github.com/" + $repo + "@refs/tags/" + $tag) and
-                         .digest.gitCommit == $commit) ] | length == 1) and
-               ($predicate.runDetails.metadata.invocationId == ("https://github.com/" + $repo + "/actions/runs/" + $run_id + "/attempts/" + $run_attempt)))' \
-              <<< "$provenance_document"
-
-            sbom_document="$(gh attestation verify "oci://$reference" \
-              --repo "$GH_REPO" \
-              --signer-workflow "$GH_REPO/.github/workflows/release.yml" \
-              --source-ref "refs/tags/$TAG" \
-              --cert-identity "https://github.com/$GH_REPO/.github/workflows/release.yml@refs/tags/$TAG" \
-              --cert-oidc-issuer https://token.actions.githubusercontent.com \
-              --predicate-type https://spdx.dev/Document/v2.3 \
-              --format json)"
-            jq -e \
-              --arg name "$name" \
-              --arg digest "$digest" \
-              --arg tag "$TAG" \
-              --arg version "$VERSION" \
-              --arg commit "$SOURCE_REF" \
-              --arg platform "$platform" \
-              --slurpfile local_sbom "$sbom" \
-              'any(.[];
-               . as $attestation |
-               ($attestation.verificationResult.statement) as $statement |
-               ($statement.predicate) as $predicate |
-               ($statement.predicateType == "https://spdx.dev/Document/v2.3") and
-               ([ $statement.subject[]? ] | length == 1) and
-               ($statement.subject[0].name == $name) and
-               ("sha256:" + $statement.subject[0].digest.sha256 == $digest) and
-               ($predicate.spdxVersion == "SPDX-2.3") and
-               ($predicate == $local_sbom[0]) and
-               (($predicate.creationInfo.comment | fromjson) as $identity |
-                ($identity.platform == $platform) and
-                ($identity.digest == $digest) and
-                ($identity.releaseTag == $tag) and
-                ($identity.releaseVersion == $version) and
-                ($identity.commitSha == $commit)))' \
-              <<< "$sbom_document"
-          done < <(jq -c '.subjects[]' container-attestation-subjects.json)
-
-      # Create every version/minor/latest/source-revision manifest alias from
-      # the immutable digest references of the verified subject map, never
-      # from the `$VERSION-amd64`/`$VERSION-arm64` platform tags. The
-      # persisted map is re-validated and each digest is crossed against the
-      # candidate contracts before the first alias write, so a digest
-      # mismatch stops the job before any alias is pushed.
-      - name: Create manifest aliases from immutable digests
-        env:
-          IMAGE: ghcr.io/beremaran/ralphie
-        run: |
-          set -euo pipefail
-          jq -e \
-            --arg schema "ralphie.publication-subjects.v1" \
-            --arg image "$IMAGE" \
-            --arg version "$VERSION" \
-            --arg source_ref "$SOURCE_REF" \
-            '(.schema == $schema) and
-             (.image == $image) and
-             (.version == $version) and
-             (.source_ref == $source_ref) and
-             (.subjects | type == "array" and length == 2) and
-             ([.subjects[].platform] | sort) == ["linux/amd64", "linux/arm64"] and
-             ([.subjects[].platform] | unique | length == 2) and
-             ([.subjects[].digest] | unique | length == 2) and
-             (all(.subjects[]; (.platform == "linux/amd64" or .platform == "linux/arm64") and
-                               (.digest | test("^sha256:[0-9a-f]{64}$")) and
-                               (.reference == ($image + "@" + .digest))))' \
-            publication-subjects.json > /dev/null
-
-          # The persisted digests must still equal the candidate contract
-          # digests staged by the uncredentialed build.
-          for arch in amd64 arm64; do
-            case "$arch" in
-              amd64) platform="linux/amd64" ;;
-              arm64) platform="linux/arm64" ;;
-              *) echo "Unsupported container architecture: $arch" >&2; exit 1 ;;
-            esac
-            subject_digest="$(jq -er --arg platform "$platform" \
-              '.subjects[] | select(.platform == $platform) | .digest' publication-subjects.json)"
-            contract_digest="$(jq -er '.digest' "container-candidates/ralphie-container-candidate-${VERSION}-${arch}/ralphie-container-${arch}.metadata.json")"
-            test "$subject_digest" = "$contract_digest"
-          done
-
-          amd64_reference="$(jq -er '.subjects[] | select(.platform == "linux/amd64") | .reference' publication-subjects.json)"
-          arm64_reference="$(jq -er '.subjects[] | select(.platform == "linux/arm64") | .reference' publication-subjects.json)"
-          test -n "$amd64_reference"
-          test -n "$arm64_reference"
-
-          # The release-index tag list comes from the deterministic
-          # container-tag-plan document, never from an inferred or truncated
-          # alias set. Every index tag must already be a valid OCI tag name
-          # (the plan step fails closed otherwise) and is joined with the
-          # image to form the full manifest references.
-          while IFS= read -r tag; do
-            test -n "$tag"
-            [[ "$tag" =~ ^[a-zA-Z0-9_][a-zA-Z0-9._-]{0,127}$ ]]
-            case "$tag" in
-              *+*) echo "Refusing unsafe container tag: $tag" >&2; exit 1 ;;
-            esac
-            docker manifest create "$IMAGE:$tag" \
-              "$amd64_reference" \
-              "$arm64_reference"
-            docker manifest push "$IMAGE:$tag"
-          done <<< "$(jq -cr '.index_tags[]' container-tag-plan.json)"
-
   publish:
     name: Publish release
     needs:
@@ -1351,6 +680,11 @@ jobs:
       url: https://github.com/${{ github.repository }}/releases/tag/${{ needs.validate.outputs.tag }}
     permissions:
       contents: write
+      # `actions: read` lets the publisher inventory this run's workflow
+      # artifacts through the REST API before downloading the exact
+      # candidate names; it grants no write capability.
+      actions: read
+      packages: write
       id-token: write
       attestations: write
     steps:
@@ -1534,10 +868,15 @@ jobs:
           test "$(printf '%s\n' "${attestation_ids[@]}" | sort -u | wc -l)" = 4
 
       # Verify the generated documents and the attestations against the exact
-      # files that the release uploader will consume. The API count is checked
-      # as well as the cryptographic gh verification: a valid attestation for
-      # an old filename, source checkout, or another run is not sufficient.
-      # This gate must remain before the release handle is created.
+      # files that the release uploader will consume. The API response is
+      # checked (at least one record, every record with a bundle) as well as
+      # the cryptographic gh verification: a valid attestation for an old
+      # filename, source checkout, or another run is not sufficient. The
+      # record count is presence-based because attestation records are keyed
+      # by bundle signature and a rerun of an interrupted attempt leaves
+      # extra records for the same digest; at least one record must carry the
+      # identity of this exact run. This gate must remain before the release
+      # handle is created.
       - name: Verify final SBOMs and build provenance
         env:
           GH_TOKEN: ${{ github.token }}
@@ -1550,8 +889,8 @@ jobs:
           test "$GITHUB_REF" = "refs/tags/$TAG"
           test "$GITHUB_SHA" = "$SOURCE_REF"
           test "$GITHUB_WORKFLOW_REF" = "$GITHUB_REPOSITORY/.github/workflows/release.yml@refs/tags/$TAG"
-          test "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$
-          test "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
 
           expected_binaries=$'ralphie-darwin-arm64\nralphie-darwin-x64\nralphie-linux-arm64\nralphie-linux-x64'
           actual_binaries="$(find release-assets -maxdepth 1 -type f -name 'ralphie-*' ! -name '*.sha256' ! -name '*.sbom.spdx.json' -printf '%f\n' | sort)"
@@ -1598,9 +937,13 @@ jobs:
             gh api --paginate --slurp \
               -H 'Accept: application/vnd.github+json' \
               "repos/$GH_REPO/attestations/sha256:$digest?per_page=100" > "$attestation_response"
+            # Presence-based: a rerun of an interrupted attempt leaves extra
+            # bundle records for the same digest under new signatures, so
+            # require at least one record and a non-null bundle on every
+            # record; the binding to this exact run follows below.
             jq -e \
-              '([.[].attestations[]] | length == 1) and
-               ([.[].attestations[]] | .[0].bundle != null)' \
+              '([.[].attestations[]] | length >= 1) and
+               (all([.[].attestations[]][]; .bundle != null))' \
               "$attestation_response" > /dev/null
 
             verification="$(
@@ -1622,8 +965,8 @@ jobs:
               --arg event "$GITHUB_EVENT_NAME" \
               --arg run_id "$GITHUB_RUN_ID" \
               --arg run_attempt "$GITHUB_RUN_ATTEMPT" \
-              'if length != 1 then false else
-               .[0] as $attestation |
+              'any(.[];
+               . as $attestation |
                ($attestation.verificationResult.statement) as $statement |
                ($statement.predicate) as $predicate |
                ($statement.predicateType == "https://slsa.dev/provenance/v1") and
@@ -1637,8 +980,7 @@ jobs:
                ([ $predicate.buildDefinition.resolvedDependencies[]? |
                   select(.uri == ("git+https://github.com/" + $repo + "@refs/tags/" + $tag) and
                          .digest.gitCommit == $commit) ] | length == 1) and
-               ($predicate.runDetails.metadata.invocationId == ("https://github.com/" + $repo + "/actions/runs/" + $run_id + "/attempts/" + $run_attempt))
-               end' \
+               ($predicate.runDetails.metadata.invocationId == ("https://github.com/" + $repo + "/actions/runs/" + $run_id + "/attempts/" + $run_attempt)))' \
               <<< "$verification"
           done
 
@@ -1707,6 +1049,562 @@ jobs:
             core.setOutput("upload_url", release.upload_url);
             core.setOutput("state", state);
 
+      # ------------------------------------------------------------------
+      # Container publication (rel20-publisher-container-promotion-integration).
+      #
+      # The uncredentialed `stage-container` matrix staged exactly two
+      # immutable amd64/arm64 candidates. This protected publisher inventories
+      # the workflow artifacts, downloads those exact names, then runs the
+      # candidate validator and every local OCI-manifest check BEFORE the
+      # GHCR login step; a failure stops the job and nothing is rebuilt. Only
+      # after validation and tag planning succeed does the job authenticate
+      # and promote the exact tested platform manifests to the
+      # normalized-version platform tags through the create-only registry
+      # reconciler (every destination is preflighted first, exact existing
+      # digests are reused, missing tags are created only through the probed
+      # server-enforced compare-and-swap, and tags are never moved). The
+      # attestation steps run between platform promotion and the
+      # release-index aliases, and every alias from the tag plan is then
+      # reconciled from the exact assembled index digest, so any
+      # authentication or push failure fails the job and prevents later
+      # alias publication. Prereleases never receive `latest`, and build
+      # metadata never reaches a registry ref (the tag plan normalizes it
+      # out of every OCI-safe tag).
+      - name: Inventory exact staged container candidate artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          set -euo pipefail
+          # The exact artifact names are immutable per release version. For
+          # each validated platform, require at least one non-expired
+          # artifact with that exact name uploaded by this workflow run; a
+          # missing, expired, foreign, or stale artifact fails here, before
+          # any download, validation, or registry login.
+          for arch in amd64 arm64; do
+            name="ralphie-container-candidate-${VERSION}-${arch}"
+            inventory="$(gh api \
+              -H 'Accept: application/vnd.github+json' \
+              "repos/$GH_REPO/actions/artifacts?name=$name&per_page=100")"
+            jq -e \
+              --arg name "$name" \
+              --arg run_id "$GITHUB_RUN_ID" \
+              '(.artifacts | type == "array" and length >= 1) and
+               (all(.artifacts[];
+                    (.name == $name) and
+                    (.expired == false) and
+                    (.workflow_run | type == "object") and
+                    (.workflow_run.id == ($run_id | tonumber))))' \
+              <<< "$inventory" > /dev/null
+          done
+      - name: Download amd64 container candidate artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ralphie-container-candidate-${{ needs.validate.outputs.version }}-amd64
+          path: container-candidates/ralphie-container-candidate-${{ needs.validate.outputs.version }}-amd64
+      - name: Download arm64 container candidate artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ralphie-container-candidate-${{ needs.validate.outputs.version }}-arm64
+          path: container-candidates/ralphie-container-candidate-${{ needs.validate.outputs.version }}-arm64
+      - name: Validate exact staged container candidate set
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+          SOURCE_REF: ${{ needs.validate.outputs.source_ref }}
+        run: |
+          set -euo pipefail
+          bun scripts/validate-container-candidates.ts \
+            --candidates-dir container-candidates \
+            --version "$VERSION" \
+            --source-ref "$SOURCE_REF"
+      - name: Install skopeo
+        run: |
+          set -euo pipefail
+          if ! command -v skopeo >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install --yes skopeo
+          fi
+      - name: Inspect OCI metadata before promotion
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+          SOURCE_REF: ${{ needs.validate.outputs.source_ref }}
+        run: |
+          set -euo pipefail
+          for arch in amd64 arm64; do
+            archive="container-candidates/ralphie-container-candidate-${VERSION}-${arch}/ralphie-container-${arch}.oci.tar"
+            contract="container-candidates/ralphie-container-candidate-${VERSION}-${arch}/ralphie-container-${arch}.metadata.json"
+            expected_digest="$(jq -er '.digest' "$contract")"
+            actual_digest="$(skopeo inspect --format '{{.Digest}}' "oci-archive:$archive")"
+            license_label="$(skopeo inspect --format '{{ index .Labels "org.opencontainers.image.licenses" }}' "oci-archive:$archive")"
+            version_label="$(skopeo inspect --format '{{ index .Labels "org.opencontainers.image.version" }}' "oci-archive:$archive")"
+            revision_label="$(skopeo inspect --format '{{ index .Labels "org.opencontainers.image.revision" }}' "oci-archive:$archive")"
+            test "$actual_digest" = "$expected_digest"
+            test "$license_label" = "MIT"
+            test "$version_label" = "$VERSION"
+            test "$revision_label" = "$SOURCE_REF"
+          done
+      - name: Derive container tag plan
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+          SOURCE_REF: ${{ needs.validate.outputs.source_ref }}
+        run: |
+          set -euo pipefail
+          bun scripts/derive-container-tags.ts \
+            --version "$VERSION" \
+            --source-ref "$SOURCE_REF" \
+            --output container-tag-plan.json
+          jq -e \
+            --arg version "$VERSION" \
+            --arg source_ref "$SOURCE_REF" \
+            '(.schema == "ralphie.container-tag-plan.v1") and
+             (.version == $version) and
+             (.source_ref == $source_ref) and
+             (.version_tag | contains("+") | not) and
+             (.platform_tag_base == .version_tag) and
+             (.source_tag == ("sha-" + $source_ref)) and
+             (.index_tags | length) == (.index_tags | unique | length) and
+             (.index_tags | length) >= 3 and
+             (.index_tags[0] == .version_tag) and
+             (.index_tags[1] == .minor_tag) and
+             (.index_tags[-1] == .source_tag) and
+             (if .latest then
+                (.index_tags[2] == "latest") and (.index_tags | length) == 4
+              else
+                (.index_tags | index("latest")) == null and
+                (.index_tags | length) == 3
+              end) and
+             ([.index_tags[] | select(contains("+"))] | length == 0) and
+             ([.platform_tags[] | select(contains("+"))] | length == 0)' \
+            container-tag-plan.json > /dev/null
+      - name: Assemble deterministic container index and reconcile plan
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+          SOURCE_REF: ${{ needs.validate.outputs.source_ref }}
+        run: |
+          set -euo pipefail
+          bun scripts/assemble-container-index.ts \
+            --candidates-dir container-candidates \
+            --version "$VERSION" \
+            --source-ref "$SOURCE_REF" \
+            --image ghcr.io/beremaran/ralphie \
+            --tag-plan container-tag-plan.json \
+            --output container-index
+          jq -e \
+            --arg schema "ralphie.container-reconcile-plan.v1" \
+            --arg version "$VERSION" \
+            --arg source_ref "$SOURCE_REF" \
+            --arg image "ghcr.io/beremaran/ralphie" \
+            '(.schema == $schema) and
+             (.version == $version) and
+             (.source_ref == $source_ref) and
+             (.image == $image) and
+             ([.platform_tags[] | select(contains("+"))] | length == 0) and
+             ([.index_tags[] | select(contains("+"))] | length == 0) and
+             (.index.digest | test("^sha256:[0-9a-f]{64}$")) and
+             ([.platform.amd64.digest, .platform.arm64.digest] |
+              (map(test("^sha256:[0-9a-f]{64}$")) | all) and
+              (unique | length) == 2)' \
+            container-index/ralphie-reconcile-plan.json > /dev/null
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Promote platform images with create-only reconciliation
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+          SOURCE_REF: ${{ needs.validate.outputs.source_ref }}
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          bun scripts/reconcile-container-registry.ts \
+            --plan container-index/ralphie-reconcile-plan.json \
+            --stage platform
+          jq -e \
+            --arg schema "ralphie.publication-subjects.v1" \
+            --arg image "ghcr.io/beremaran/ralphie" \
+            --arg version "$VERSION" \
+            --arg source_ref "$SOURCE_REF" \
+            '(.schema == $schema) and
+             (.image == $image) and
+             (.version == $version) and
+             (.source_ref == $source_ref) and
+             (.subjects | type == "array" and length == 2) and
+             ([.subjects[].platform] | sort) == ["linux/amd64", "linux/arm64"] and
+             ([.subjects[].platform] | unique | length == 2) and
+             ([.subjects[].digest] | unique | length == 2) and
+             (all(.subjects[]; (.platform == "linux/amd64" or .platform == "linux/arm64") and
+                               (.digest | test("^sha256:[0-9a-f]{64}$")) and
+                               (.reference == ($image + "@" + .digest))))' \
+            publication-subjects.json > /dev/null
+      - name: Upload verified publication subjects
+        uses: actions/upload-artifact@v4
+        with:
+          name: ralphie-publication-subjects-${{ needs.validate.outputs.version }}
+          path: publication-subjects.json
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 90
+      - name: Validate workflow identity and persist container attestation subjects
+        id: attestation-subjects
+        env:
+          IMAGE: ghcr.io/beremaran/ralphie
+          TAG: ${{ needs.validate.outputs.tag }}
+          VERSION: ${{ needs.validate.outputs.version }}
+          SOURCE_REF: ${{ needs.validate.outputs.source_ref }}
+        run: |
+          set -euo pipefail
+          # The signing identity must be the protected release tag and its
+          # exact commit, never the default branch or a mutable tag.
+          test "$GITHUB_REF" = "refs/tags/$TAG"
+          test "$GITHUB_SHA" = "$SOURCE_REF"
+          test "$GITHUB_WORKFLOW_REF" = "$GITHUB_REPOSITORY/.github/workflows/release.yml@refs/tags/$TAG"
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+
+          # Re-validate the persisted two-entry subject map exactly as the
+          # alias step does: only the linux/amd64 and linux/arm64
+          # promotions, unique immutable digests, and references derived as
+          # `<image>@<digest>`.
+          jq -e \
+            --arg schema "ralphie.publication-subjects.v1" \
+            --arg image "$IMAGE" \
+            --arg version "$VERSION" \
+            --arg source_ref "$SOURCE_REF" \
+            '(.schema == $schema) and
+             (.image == $image) and
+             (.version == $version) and
+             (.source_ref == $source_ref) and
+             (.subjects | type == "array" and length == 2) and
+             ([.subjects[].platform] | sort) == ["linux/amd64", "linux/arm64"] and
+             ([.subjects[].platform] | unique | length == 2) and
+             ([.subjects[].digest] | unique | length == 2) and
+             (all(.subjects[]; (.platform == "linux/amd64" or .platform == "linux/arm64") and
+                               (.digest | test("^sha256:[0-9a-f]{64}$")) and
+                               (.reference == ($image + "@" + .digest))))' \
+            publication-subjects.json > /dev/null
+
+          # Derive one immutable attestation subject per platform: canonical
+          # subject-name (the image), exact registry digest and reference,
+          # and the deterministic SBOM output name.
+          subjects="$(jq -c --arg image "$IMAGE" \
+            '[.subjects[] | {
+               platform,
+               digest,
+               reference,
+               name: $image,
+               sbom: ("ralphie-container-" + (.platform | split("/")[1]) + ".sbom.spdx.json")
+             }]' publication-subjects.json)"
+          jq -n \
+            --arg schema "ralphie.container-attestation-subjects.v1" \
+            --arg image "$IMAGE" \
+            --arg tag "$TAG" \
+            --arg version "$VERSION" \
+            --arg source_ref "$SOURCE_REF" \
+            --arg workflow "Release" \
+            --arg workflow_file ".github/workflows/release.yml" \
+            --arg workflow_ref "$GITHUB_WORKFLOW_REF" \
+            --arg run_id "$GITHUB_RUN_ID" \
+            --arg run_attempt "$GITHUB_RUN_ATTEMPT" \
+            --argjson subjects "$subjects" \
+            '{schema: $schema, image: $image, tag: $tag, version: $version,
+              source_ref: $source_ref, workflow: $workflow,
+              workflow_file: $workflow_file, workflow_ref: $workflow_ref,
+              run_id: $run_id, run_attempt: $run_attempt, subjects: $subjects}' \
+            > container-attestation-subjects.json
+          jq -e \
+            --arg schema "ralphie.container-attestation-subjects.v1" \
+            --arg image "$IMAGE" \
+            --arg tag "$TAG" \
+            --arg version "$VERSION" \
+            --arg source_ref "$SOURCE_REF" \
+            '(.schema == $schema) and
+             (.image == $image) and
+             (.tag == $tag) and
+             (.version == $version) and
+             (.source_ref == $source_ref) and
+             (.workflow_file == ".github/workflows/release.yml") and
+             (.subjects | type == "array" and length == 2) and
+             ([.subjects[].platform] | sort) == ["linux/amd64", "linux/arm64"] and
+             ([.subjects[].platform] | unique | length == 2) and
+             ([.subjects[].digest] | unique | length == 2) and
+             (all(.subjects[];
+                  (.platform == "linux/amd64" or .platform == "linux/arm64") and
+                  (.name == $image) and
+                  (.digest | test("^sha256:[0-9a-f]{64}$")) and
+                  (.reference == ($image + "@" + .digest)) and
+                  (.sbom == ("ralphie-container-" + (.platform | split("/")[1]) + ".sbom.spdx.json"))))' \
+            container-attestation-subjects.json > /dev/null
+
+          amd64_digest="$(jq -er '.subjects[] | select(.platform == "linux/amd64") | .digest' container-attestation-subjects.json)"
+          arm64_digest="$(jq -er '.subjects[] | select(.platform == "linux/arm64") | .digest' container-attestation-subjects.json)"
+          echo "amd64_digest=$amd64_digest" >> "$GITHUB_OUTPUT"
+          echo "arm64_digest=$arm64_digest" >> "$GITHUB_OUTPUT"
+      - name: Generate SPDX SBOM for linux/amd64 digest
+        uses: anchore/sbom-action@006b7ce8314066bdf1765b4500370d40fa6917a3 # v0.24.2
+        with:
+          image: ghcr.io/beremaran/ralphie@${{ steps.attestation-subjects.outputs.amd64_digest }}
+          format: spdx-json
+          output-file: ralphie-container-amd64.sbom.spdx.json
+          registry-username: ${{ github.actor }}
+          registry-password: ${{ secrets.GITHUB_TOKEN }}
+          dependency-snapshot: false
+          upload-artifact: false
+          upload-release-assets: false
+      - name: Generate SPDX SBOM for linux/arm64 digest
+        uses: anchore/sbom-action@006b7ce8314066bdf1765b4500370d40fa6917a3 # v0.24.2
+        with:
+          image: ghcr.io/beremaran/ralphie@${{ steps.attestation-subjects.outputs.arm64_digest }}
+          format: spdx-json
+          output-file: ralphie-container-arm64.sbom.spdx.json
+          registry-username: ${{ github.actor }}
+          registry-password: ${{ secrets.GITHUB_TOKEN }}
+          dependency-snapshot: false
+          upload-artifact: false
+          upload-release-assets: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - name: Install dependencies for container SBOM validation
+        run: bun install --frozen-lockfile
+      - name: Validate and pin container SBOMs to release identity
+        env:
+          TAG: ${{ needs.validate.outputs.tag }}
+          VERSION: ${{ needs.validate.outputs.version }}
+          SOURCE_REF: ${{ needs.validate.outputs.source_ref }}
+        run: |
+          set -euo pipefail
+          bun_version="$(bun --version)"
+          test "$bun_version" = "$BUN_VERSION"
+          bun scripts/validate-container-sboms.ts \
+            --subjects container-attestation-subjects.json \
+            --version "$VERSION" \
+            --tag "$TAG" \
+            --commit-sha "$SOURCE_REF"
+      - name: Attest linux/amd64 container SBOM
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-name: ghcr.io/beremaran/ralphie
+          subject-digest: ${{ steps.attestation-subjects.outputs.amd64_digest }}
+          sbom-path: ralphie-container-amd64.sbom.spdx.json
+          push-to-registry: true
+          show-summary: true
+      - name: Attest linux/arm64 container SBOM
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-name: ghcr.io/beremaran/ralphie
+          subject-digest: ${{ steps.attestation-subjects.outputs.arm64_digest }}
+          sbom-path: ralphie-container-arm64.sbom.spdx.json
+          push-to-registry: true
+          show-summary: true
+      - name: Attest linux/amd64 container provenance
+        uses: actions/attest-build-provenance@bd77c077858b8d561b7a36cbe48ef4cc642ca39d # v2.2.2
+        with:
+          subject-name: ghcr.io/beremaran/ralphie
+          subject-digest: ${{ steps.attestation-subjects.outputs.amd64_digest }}
+          push-to-registry: true
+          show-summary: true
+      - name: Attest linux/arm64 container provenance
+        uses: actions/attest-build-provenance@bd77c077858b8d561b7a36cbe48ef4cc642ca39d # v2.2.2
+        with:
+          subject-name: ghcr.io/beremaran/ralphie
+          subject-digest: ${{ steps.attestation-subjects.outputs.arm64_digest }}
+          push-to-registry: true
+          show-summary: true
+      - name: Verify all container attestations exist and match subjects
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.validate.outputs.tag }}
+          VERSION: ${{ needs.validate.outputs.version }}
+          SOURCE_REF: ${{ needs.validate.outputs.source_ref }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/tags/$TAG"
+          test "$GITHUB_SHA" = "$SOURCE_REF"
+          test "$GITHUB_WORKFLOW_REF" = "$GITHUB_REPOSITORY/.github/workflows/release.yml@refs/tags/$TAG"
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          jq -e \
+            --arg schema "ralphie.container-attestation-subjects.v1" \
+            --arg image "ghcr.io/beremaran/ralphie" \
+            '(.schema == $schema) and
+             (.image == $image) and
+             (.subjects | type == "array" and length == 2) and
+             ([.subjects[].platform] | sort) == ["linux/amd64", "linux/arm64"] and
+             ([.subjects[].platform] | unique | length == 2) and
+             ([.subjects[].digest] | unique | length == 2) and
+             (all(.subjects[];
+                  (.platform == "linux/amd64" or .platform == "linux/arm64") and
+                  (.name == $image) and
+                  (.digest | test("^sha256:[0-9a-f]{64}$")) and
+                  (.reference == ($image + "@" + .digest)) and
+                  (.sbom | type == "string") and
+                  (.sbom_sha256 | test("^[0-9a-f]{64}$"))))' \
+            container-attestation-subjects.json > /dev/null
+
+          # `gh attestation verify` treats any argument without the `oci://`
+          # prefix as a local file path, and OCI image verification resolves
+          # the digest by fetching the manifest through the Docker keychain.
+          # The job token is therefore materialized as an explicit
+          # $DOCKER_CONFIG entry for ghcr.io instead of relying on the login
+          # action's configuration file, and fetching the manifest for the
+          # exact immutable digest re-confirms that the promoted digest
+          # still exists under the package before any alias is created.
+          docker_config="$RUNNER_TEMP/ralphie-docker-config"
+          mkdir -p "$docker_config"
+          registry_auth="$(printf '%s:%s' "$GITHUB_ACTOR" "$GH_TOKEN" | base64 -w0)"
+          printf '{"auths":{"ghcr.io":{"auth":"%s"}}}\n' "$registry_auth" > "$docker_config/config.json"
+          export DOCKER_CONFIG="$docker_config"
+
+          while IFS= read -r subject; do
+            platform="$(jq -er '.platform' <<< "$subject")"
+            name="$(jq -er '.name' <<< "$subject")"
+            digest="$(jq -er '.digest' <<< "$subject")"
+            reference="$(jq -er '.reference' <<< "$subject")"
+            sbom="$(jq -er '.sbom' <<< "$subject")"
+            sbom_sha256="$(jq -er '.sbom_sha256' <<< "$subject")"
+
+            # The annotated SBOM on disk must still be the exact bytes the
+            # validator recorded in the subjects map and that attest-sbom
+            # attached; the attested predicate is compared byte-for-byte
+            # (parsed) below.
+            test "$(sha256sum "$sbom" | cut -d ' ' -f1)" = "$sbom_sha256"
+
+            provenance_document="$(gh attestation verify "oci://$reference" \
+              --repo "$GH_REPO" \
+              --signer-workflow "$GH_REPO/.github/workflows/release.yml" \
+              --source-ref "refs/tags/$TAG" \
+              --cert-identity "https://github.com/$GH_REPO/.github/workflows/release.yml@refs/tags/$TAG" \
+              --cert-oidc-issuer https://token.actions.githubusercontent.com \
+              --predicate-type https://slsa.dev/provenance/v1 \
+              --format json)"
+            # The gate is presence-based: re-running an interrupted attempt
+            # leaves extra bundle records for the same digest under new
+            # signatures, so every element is checked and at least one must
+            # carry the identity of this exact run (including the
+            # invocationId), the protected tag, and the validated commit.
+            # The statement subject digest is the lowercase `sha256:<64 hex>`
+            # value, exactly as persisted in the subject map (`gh` reports
+            # the algorithm separately on OCI references in terminal output
+            # only).
+            jq -e \
+              --arg name "$name" \
+              --arg digest "$digest" \
+              --arg repo "$GH_REPO" \
+              --arg tag "$TAG" \
+              --arg commit "$SOURCE_REF" \
+              --arg event "$GITHUB_EVENT_NAME" \
+              --arg run_id "$GITHUB_RUN_ID" \
+              --arg run_attempt "$GITHUB_RUN_ATTEMPT" \
+              'any(.[];
+               . as $attestation |
+               ($attestation.verificationResult.statement) as $statement |
+               ($statement.predicate) as $predicate |
+               ($statement.predicateType == "https://slsa.dev/provenance/v1") and
+               ([ $statement.subject[]? ] | length == 1) and
+               ($statement.subject[0].name == $name) and
+               ("sha256:" + $statement.subject[0].digest.sha256 == $digest) and
+               ($predicate.buildDefinition.externalParameters.workflow.repository == ("https://github.com/" + $repo)) and
+               ($predicate.buildDefinition.externalParameters.workflow.path == ".github/workflows/release.yml") and
+               ($predicate.buildDefinition.externalParameters.workflow.ref == ("refs/tags/" + $tag)) and
+               ($predicate.buildDefinition.internalParameters.github.event_name == $event) and
+               ([ $predicate.buildDefinition.resolvedDependencies[]? |
+                  select(.uri == ("git+https://github.com/" + $repo + "@refs/tags/" + $tag) and
+                         .digest.gitCommit == $commit) ] | length == 1) and
+               ($predicate.runDetails.metadata.invocationId == ("https://github.com/" + $repo + "/actions/runs/" + $run_id + "/attempts/" + $run_attempt)))' \
+              <<< "$provenance_document"
+
+            sbom_document="$(gh attestation verify "oci://$reference" \
+              --repo "$GH_REPO" \
+              --signer-workflow "$GH_REPO/.github/workflows/release.yml" \
+              --source-ref "refs/tags/$TAG" \
+              --cert-identity "https://github.com/$GH_REPO/.github/workflows/release.yml@refs/tags/$TAG" \
+              --cert-oidc-issuer https://token.actions.githubusercontent.com \
+              --predicate-type https://spdx.dev/Document/v2.3 \
+              --format json)"
+            jq -e \
+              --arg name "$name" \
+              --arg digest "$digest" \
+              --arg tag "$TAG" \
+              --arg version "$VERSION" \
+              --arg commit "$SOURCE_REF" \
+              --arg platform "$platform" \
+              --slurpfile local_sbom "$sbom" \
+              'any(.[];
+               . as $attestation |
+               ($attestation.verificationResult.statement) as $statement |
+               ($statement.predicate) as $predicate |
+               ($statement.predicateType == "https://spdx.dev/Document/v2.3") and
+               ([ $statement.subject[]? ] | length == 1) and
+               ($statement.subject[0].name == $name) and
+               ("sha256:" + $statement.subject[0].digest.sha256 == $digest) and
+               ($predicate.spdxVersion == "SPDX-2.3") and
+               ($predicate == $local_sbom[0]) and
+               (($predicate.creationInfo.comment | fromjson) as $identity |
+                ($identity.platform == $platform) and
+                ($identity.digest == $digest) and
+                ($identity.releaseTag == $tag) and
+                ($identity.releaseVersion == $version) and
+                ($identity.commitSha == $commit)))' \
+              <<< "$sbom_document"
+          done < <(jq -c '.subjects[]' container-attestation-subjects.json)
+      - name: Reconcile release-index aliases from immutable digests
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+          SOURCE_REF: ${{ needs.validate.outputs.source_ref }}
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          jq -e \
+            --arg schema "ralphie.publication-subjects.v1" \
+            --arg image "ghcr.io/beremaran/ralphie" \
+            --arg version "$VERSION" \
+            --arg source_ref "$SOURCE_REF" \
+            '(.schema == $schema) and
+             (.image == $image) and
+             (.version == $version) and
+             (.source_ref == $source_ref) and
+             (.subjects | type == "array" and length == 2) and
+             ([.subjects[].platform] | sort) == ["linux/amd64", "linux/arm64"] and
+             ([.subjects[].platform] | unique | length == 2) and
+             ([.subjects[].digest] | unique | length == 2) and
+             (all(.subjects[]; (.platform == "linux/amd64" or .platform == "linux/arm64") and
+                               (.digest | test("^sha256:[0-9a-f]{64}$")) and
+                               (.reference == ($image + "@" + .digest))))' \
+            publication-subjects.json > /dev/null
+
+          # The persisted digests must still equal the candidate contract
+          # digests staged by the uncredentialed build.
+          for arch in amd64 arm64; do
+            case "$arch" in
+              amd64) platform="linux/amd64" ;;
+              arm64) platform="linux/arm64" ;;
+              *) echo "Unsupported container architecture: $arch" >&2; exit 1 ;;
+            esac
+            subject_digest="$(jq -er --arg platform "$platform" \
+              '.subjects[] | select(.platform == $platform) | .digest' publication-subjects.json)"
+            contract_digest="$(jq -er '.digest' "container-candidates/ralphie-container-candidate-${VERSION}-${arch}/ralphie-container-${arch}.metadata.json")"
+            test "$subject_digest" = "$contract_digest"
+          done
+
+          # The reconciliation plan carries exactly the validated tag plan's
+          # index tags; the reconciler never derives an alias itself.
+          jq -e --slurpfile tag_plan container-tag-plan.json \
+            --arg schema "ralphie.container-reconcile-plan.v1" \
+            '(.schema == $schema) and
+             (.index_tags == $tag_plan[0].index_tags) and
+             (.index.digest | test("^sha256:[0-9a-f]{64}$")) and
+             ([.index_tags[] | select(contains("+"))] | length == 0)' \
+            container-index/ralphie-reconcile-plan.json > /dev/null
+
+          bun scripts/reconcile-container-registry.ts \
+            --plan container-index/ralphie-reconcile-plan.json \
+            --stage index
       # Rel20 exact release-handle and six-asset reconciliation. The release
       # carries exactly these six assets and nothing else; any missing, extra,
       # or mismatched asset or note is an explicit conflict. Draft retries

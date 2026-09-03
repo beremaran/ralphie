@@ -5,6 +5,43 @@ All notable changes to Ralphie are documented here. The project follows
 
 ## [Unreleased]
 
+- Wire verified candidate promotion into the single protected publish job
+  (`rel20-publisher-container-promotion-integration`): the container
+  publication path now runs inside the protected `publish` job of
+  `release.yml` immediately after the draft-release handle gate and before
+  the native release is finalized, and the separate `push-container`
+  registry-writing job is removed. `packages: write` is granted only to
+  that protected publisher. The publisher inventories the workflow
+  artifacts, downloads exactly the validated
+  `ralphie-container-candidate-<version>-amd64|arm64` artifact names, runs
+  the candidate validator (`scripts/validate-container-candidates.ts`) and
+  the local skopeo OCI inspection, derives the tag plan
+  (`scripts/derive-container-tags.ts`), and assembles the single
+  deterministic multi-architecture OCI index
+  (`scripts/assemble-container-index.ts`, `src/release/container-index.ts`)
+  with the fixed amd64-then-arm64 mapping, exact media types/sizes/digests,
+  and no annotations — all before the GHCR login step; the image is never
+  rebuilt. Promotion is driven by the registry reconciler
+  (`scripts/reconcile-container-registry.ts`,
+  `src/release/container-registry-reconcile.ts`) from the
+  `ralphie.container-reconcile-plan.v1` document: every destination is
+  preflighted first and conflicts are rejected before any production write,
+  exact existing platform/index digests are reused (tags are never moved or
+  overwritten), missing tags are created only through the probed
+  server-enforced compare-and-swap, and every write is reread, so a partial
+  run is safely repeatable without creating an alternate copy. Attestations
+  run between platform promotion and index aliases, and every release index
+  tag from the tag plan is reconciled last from the exact assembled index
+  digest, so authentication or push failures fail the job and prevent later
+  alias publication. Prereleases never receive `latest` and build metadata
+  never reaches a registry ref (the tag plan normalizes it out of every
+  tag). Container SBOM/provenance attestations move with the promotion path
+  into the same protected job. Unit coverage in
+  `tests/release/container-index.test.ts` and
+  `tests/release/container-registry-reconcile.test.ts`; the ordering,
+  explicit alias policy, and fail-closed/no-overwrite behavior are recorded
+  in `docs/releases.md`.
+
 - Implement the explicit semver-aware GHCR tag plan
   (`rel20-publisher-container-tag-plan`) with a deterministic,
   testable planner `src/release/container-tags.ts` driven by the new

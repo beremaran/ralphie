@@ -77,11 +77,12 @@ uses the
 `source_ref`, platform, OCI archive name and SHA-256, BuildKit image
 manifest `digest`, and OCI version/revision labels; the checked-in
 `scripts/validate-container-candidates.ts` seam requires exactly those
-fields before promotion — the protected `push-container` job downloads the
-two exact `ralphie-container-candidate-<version>-<arch>` artifacts, strictly
+fields before promotion — the protected `publish` job downloads the two
+exact `ralphie-container-candidate-<version>-<arch>` artifact names (never a
+broad merged glob), strictly
 parses every contract, recomputes each archive SHA-256 and each archive's
 actual image manifest content digest against the recorded BuildKit digest,
-and fails closed on any mismatch. Before the contract is written,
+and fails closed on any mismatch before the GHCR login step. Before the contract is written,
 staging also binds the recorded BuildKit digest to the OCI archive's own
 `index.json` entry: a single-platform export has exactly one manifest
 descriptor whose digest must be the same lowercase `sha256:<64 hex>` value,
@@ -107,21 +108,35 @@ the immutable `actions/attest-build-provenance` action revision.
 SHA-256 together with the validated tag, commit, release workflow, Bun and
 build-tool versions, and build command, so each subject can be checked against
 the released bytes. Before creating a release handle, the publisher requires
-exactly four final binaries and exactly one matching SPDX document per target,
-checks every SBOM's tag/version/commit and binary digest against the bytes in
-`release-assets`, and verifies exactly one attestation for each digest. The
-GitHub attestation API response must contain exactly one bundle, and the
-verified provenance predicate must identify the current release workflow run.
-`gh attestation verify` must also validate the release workflow, protected tag,
-commit, repository, and Actions OIDC issuer. Missing, duplicate, stale, or
-mismatched SBOMs and attestations fail closed before any release is
+exactly four final binaries and exactly one matching SPDX document per target
+(the documents are regenerated in place, never accumulated) and checks every
+SBOM's tag/version/commit and binary digest against the bytes in
+`release-assets`. The attestation gate is presence-based rather than an exact
+record count: attestation records are keyed by bundle signature, so re-running
+an interrupted attempt leaves additional records for the same digest, and the
+gate requires at least one record — every API record carrying a bundle — whose
+verified provenance predicate identifies the current release workflow run
+(including the SLSA `invocationId`), the protected tag, commit, exact subject
+name and digest. `gh attestation verify` must also validate the release
+workflow, protected tag, commit, repository, and Actions OIDC issuer. Missing,
+stale, or mismatched SBOMs and attestations fail closed before any release is
 created. Attestation and signing complete before the publisher creates a
 release handle; any missing or failed attestation stops publication.
 The minor
 version, `latest` for stable releases only, and `sha-<commit>` are explicit
 aliases derived by the deterministic tag plan described below. A dry run skips GitHub Release and GHCR publication. A normal tag
 push is not a dry run and runs release and container publication in the
-protected GitHub `release` environment. The native publisher targets the
+protected GitHub `release` environment. Container publication runs inside
+that same protected `publish` job, immediately after the draft-release
+handle gate and before the native release is finalized: the exact
+amd64/arm64 candidates are downloaded and validated, the tag plan and the
+single deterministic OCI index are assembled, and only then does the job
+authenticate to GHCR and promote the platform manifests and every release
+index alias through the create-only reconciler (see
+[Verified create-only manifest promotion](#verified-create-only-manifest-promotion)).
+A failure anywhere in the container path fails the job before the native
+release is published, leaving only the validated draft handle for a
+deterministic rerun. The native publisher targets the
 canonical repository explicitly, creates or reuses a validated draft release
 handle before any asset mutation, and lets exactly six assets exist on the
 release: `ralphie-darwin-arm64`, `ralphie-darwin-x64`, `ralphie-linux-arm64`,
@@ -164,7 +179,7 @@ before the final publisher can write release assets or packages.
 Container tag names are computed by the checked-in semver-aware planner
 (`planContainerTags` in `src/release/container-tags.ts`, driven by
 `scripts/derive-container-tags.ts` in the "Derive container tag plan" step of
-`push-container`). The planner consumes the already validated release version
+the protected `publish` job). The planner consumes the already validated release version
 and `source_ref` and emits the exact `ralphie.container-tag-plan.v1`
 document; it never truncates with shell patterns such as `${VERSION%.*}` and
 never delegates tag inference to `docker/metadata-action`. The policy is:
@@ -196,14 +211,18 @@ no plan is produced.
 The plan document records `version`, `source_ref`, `version_tag`,
 `minor_tag`, `latest`, `source_tag`, `platform_tag_base`, `platform_tags`
 (`<version_tag>-amd64` and `<version_tag>-arm64`), and `index_tags`. The
-`push-container` job re-validates the persisted document with a jq gate
+protected `publish` job re-validates the persisted document with a jq gate
 (schema, exact order, deduplication, `latest` policy, `sha-` tag, and OCI tag
 safety) before any registry write. Platform promotion targets the
-`<platform_tag_base>-<arch>` names, and every manifest alias is created from
-the `index_tags` list joined with the image reference; the persisted
-`ralphie.publication-subjects.v1` map and the exact-digest reconciliation in
-`registry-reconcile.ts` are unchanged. Focused unit coverage lives in
-`tests/release/container-tags.test.ts`.
+`<platform_tag_base>-<arch>` names and every release index alias is created
+from the `index_tags` list; both tag sets are bound with the exact assembled
+index digest into the `ralphie.container-reconcile-plan.v1` document and are
+written only through the create-only reconciler (see
+[Verified create-only manifest promotion](#verified-create-only-manifest-promotion)),
+never by shell truncation, `docker/metadata-action`, or `docker manifest`
+inference. The persisted `ralphie.publication-subjects.v1` map feeds the
+attestation steps. Focused unit coverage lives in
+`tests/release/container-tags.test.ts` and `tests/release/container-index.test.ts`.
 
 ### Container build input boundary
 
@@ -223,7 +242,10 @@ version and commit remain the intentional public OCI labels.
 
 ### Verified create-only manifest promotion
 
-Container promotion is exact and create-only. The reconciliation primitive in
+Container promotion is exact and create-only and runs entirely inside the
+protected `publish` job, immediately after the draft-release handle gate
+and before the native release is finalized (`rel20-publisher-container-
+promotion-integration`). The reconciliation primitive in
 `src/release/registry-reconcile.ts` (HTTP client in `registry-http-client.ts`,
 fake registry in `registry-fixture.ts`) inspects every destination tag first
 and reuses it only when its complete serialized digest equals the intended
@@ -231,15 +253,22 @@ digest; a missing tag is created through the OCI Distribution API with a
 server-enforced compare-and-swap (`If-None-Match: *`), and the tag is reread
 after the write. Any other digest, malformed response, or unexpected registry
 status is a conflict/failure, and an unconditional tag write is never used.
+`scripts/reconcile-container-registry.ts` drives that reconciler
+(`reconcileContainerRegistry` in
+`src/release/container-registry-reconcile.ts`) from the
+`ralphie.container-reconcile-plan.v1` document emitted by
+`scripts/assemble-container-index.ts`; credentials are read from the
+`GHCR_USERNAME`/`GHCR_PASSWORD` environment and are never echoed.
 
-The `push-container` publisher promotes the two staged OCI archives to their
+The publisher promotes the two staged OCI archives to their
 per-platform `ghcr.io/beremaran/ralphie:<platform_tag_base>-amd64|arm64` tags
-(where `<platform_tag_base>` is the plan's OCI-safe version tag). Before
-the first registry write, the
-`scripts/validate-container-candidates.ts` seam requires exactly the amd64
-and arm64 `ralphie-container-candidate-<version>-<arch>` artifact names
-(rejecting missing, duplicate, extra, and cross-release candidates and
-unexpected files), strictly parses every `ralphie.container-candidate.v1`
+(where `<platform_tag_base>` is the plan's OCI-safe version tag). The
+ordering is fixed: the publisher inventories this run's workflow artifacts
+through the REST API and requires exactly the validated amd64/arm64
+candidate names (non-expired and uploaded by this run) before downloading
+exactly those names; the
+`scripts/validate-container-candidates.ts` seam then requires exactly those names
+and strictly parses every `ralphie.container-candidate.v1`
 contract (artifact, version, 40-character `source_ref`, platform,
 `format: oci-archive`, archive filename, lowercase archive SHA-256,
 lowercase `sha256:` BuildKit digest, and the MIT/version/revision labels),
@@ -250,25 +279,52 @@ config/layer blob must exist with the exact recorded size and digest,
 archive paths may not contain traversal or absolute components, and nothing
 beyond the layout, index, and exactly the referenced blobs may be present.
 The validator is side-effect free and never logs in to GHCR, writes a tag,
-rebuilds an image, or continues after a validation error. It then
-re-inspects each promoted image in GHCR: the registry digest must be a
-lowercase `sha256:<64 hex>` value equal to the candidate's recorded `.digest`,
-the platform must match, and the validated `version`/`source_ref` (and
-license) OCI labels must match the release-gate outputs. The post-promotion
-results are persisted as a `ralphie.publication-subjects.v1` map (immutable
-artifact `ralphie-publication-subjects-<version>`) containing exactly the
-`linux/amd64` and `linux/arm64` subjects; missing, duplicate, unsupported, or
-mismatched subjects fail closed. Platform promotion is a separate step from
-alias creation so attestation steps can later run in between, and every
-version/minor/`latest`/`sha-<revision>` manifest alias is created from the
-immutable `ghcr.io/beremaran/ralphie@sha256:<digest>` references rather than
-from the `${VERSION}-amd64`/`${VERSION}-arm64` tags; a digest mismatch stops
-the job before any alias is pushed.
+rebuilds an image, or continues after a validation error. A local skopeo
+inspection re-checks the staged archives' digests and labels, and only after
+validation and tag planning succeed does the job log in to GHCR. Nothing is
+rebuilt: the exact tested platform manifests and blobs are promoted.
+
+`scripts/assemble-container-index.ts` re-validates the candidates, extracts
+the exact manifests and referenced blobs, and assembles the single
+deterministic multi-architecture OCI image index from the two validated
+platform descriptors — fixed amd64-then-arm64 mapping and ordering, exact
+media types/sizes/digests, and no incidental mutable annotations — and
+computes its exact digest. The emitted `ralphie.container-reconcile-plan.v1`
+document binds the per-platform tags and every release index tag from the
+validated tag plan to those digests; the reconciler never derives a tag or
+digest itself.
+
+For each stage, the reconciler first preflights every existing destination
+and rejects any conflict before a production write; exact existing platform
+or index digests are reused (a tag is never moved or re-pointed), missing
+tags are created only through the probed server-enforced compare-and-swap,
+and every write is reread. Before the first production write,
+`probeCreateOnlyPublishing` proves the registry tolerates no competing
+manifest for the exact media types that stage writes; authentication, blob,
+and manifest-push failures fail the job and prevent later alias publication.
+Content (config/layer blobs and the child platform manifests) is uploaded by
+content address first, so a partial run is safely repeatable:
+re-running an interrupted run reuses the exact digests, creates only the
+missing tags, and never creates an alternate copy.
+
+The post-promotion results are persisted as a `ralphie.publication-subjects.v1`
+map (immutable artifact `ralphie-publication-subjects-<version>`) containing
+exactly the `linux/amd64` and `linux/arm64` subjects; missing, duplicate,
+unsupported, or mismatched subjects fail closed. Platform promotion is a
+separate step from alias creation so attestation steps can later run in
+between, and every version/minor/`latest`/`sha-<revision>` manifest alias is
+then reconciled against the exact assembled index digest (never from the
+`${VERSION}-amd64`/`${VERSION}-arm64` tags or the platform manifests); a
+digest mismatch stops the job before any alias is pushed. Prereleases never
+receive `latest`, and build metadata never reaches a registry ref: the tag
+plan normalizes it out of every tag while the full validated version stays
+in the candidate/plan metadata and image labels.
 
 ### Container SBOM and provenance attestations
 
-Between the verified subject map and the mutable aliases, `push-container`
-attaches both attestation kinds to every immutable platform digest. It first
+Between the verified subject map and the mutable aliases, the protected
+`publish` job attaches both attestation kinds to every immutable platform
+digest. It first
 re-validates the exact two-entry map and pins the Actions OIDC identity to the
 validated protected tag and its exact commit (`GITHUB_REF`, `GITHUB_SHA`, and
 `GITHUB_WORKFLOW_REF` must equal `refs/tags/<tag>`/`<commit>`/
@@ -312,10 +368,11 @@ kind must match the exact run identity (including the SLSA `invocationId`),
 the exact annotated SBOM bytes (the attested SPDX predicate must equal the
 pinned document), and the SBOM SHA-256 the validator recorded; the exact
 subject-name, subject-digest, and release identity are checked on every
-accepted statement. The job grants only
-`packages: write`, `attestations: write`, and `id-token: write` (the GitHub
-OIDC signing path) and no unrelated write permission; `stage-container` keeps
-no credentials and stays read-only.
+accepted statement. `packages: write` (GHCR promotion) is granted only to
+the protected `publish` job, alongside the `contents: write` needed for the
+native release assets, `attestations: write`, and `id-token: write` (the
+GitHub OIDC signing path); no other job can authenticate to GHCR or write
+package tags, and `stage-container` keeps no credentials and stays read-only.
 
 Before any production tag write, `probeCreateOnlyPublishing` authenticates and
 proves the target registry is create-only: for each writable media type (OCI

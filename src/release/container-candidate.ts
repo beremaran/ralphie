@@ -980,6 +980,9 @@ const assertExactlyReferencedBlobs = (
  * exist with the exact recorded size and digest, and nothing else may be
  * present.
  */
+const isGzipArchive = (bytes: Uint8Array): boolean =>
+    bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b;
+
 const inspectOciArchive = ({
     archiveBytes,
     arch,
@@ -995,10 +998,7 @@ const inspectOciArchive = ({
     readonly sourceRef: string;
     readonly recordedDigest: string;
 }): ValidatedContainerCandidateImage => {
-    const isGzip =
-        archiveBytes.length >= 2 &&
-        archiveBytes[0] === 0x1f &&
-        archiveBytes[1] === 0x8b;
+    const isGzip = isGzipArchive(archiveBytes);
     const entries = parseTarEntries(gunzipOrPlain(archiveBytes, isGzip));
     const { descriptor, manifestBytes, manifest } = inspectIndex(
         entries,
@@ -1124,6 +1124,37 @@ const validateCandidate = async ({
  * containing exactly its contract and OCI archive. Nothing is written,
  * downloaded, or pushed; the only output is the returned value.
  */
+/**
+ * Extract the exact blob bytes of a validated single-platform OCI archive
+ * (`blobs/sha256/<hex>` entries, including the image manifest blob) using the
+ * same strict tar parser as the validator: every blob's content must digest
+ * to its path-derived digest, so the returned map can be handed to the index
+ * assembly and registry reconciler without re-deriving trust from the archive
+ * layout. The callers re-check the archive SHA-256 against the validated
+ * contract so a mutation between validation and extraction fails closed.
+ */
+export const readOciArchiveBlobs = async (
+    archiveBytes: Uint8Array,
+): Promise<ReadonlyMap<string, Uint8Array>> => {
+    const entries = parseTarEntries(
+        gunzipOrPlain(archiveBytes, isGzipArchive(archiveBytes)),
+    );
+    const blobs = new Map<string, Uint8Array>();
+    for (const [path, entry] of entries) {
+        if (entry.kind !== "file") continue;
+        const match = BLOB_FILE_PATTERN.exec(path);
+        if (match === null) continue;
+        const digest = `sha256:${match[1] as string}`;
+        if (`sha256:${sha256Hex(entry.bytes)}` !== digest) {
+            return fail(
+                `Archive blob '${path}' content digests to something other than '${digest}'.`,
+            );
+        }
+        blobs.set(digest, entry.bytes);
+    }
+    return blobs;
+};
+
 export const validateContainerCandidates = async ({
     candidatesDir,
     version,
