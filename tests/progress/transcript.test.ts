@@ -174,3 +174,162 @@ describe("transcript output bounds", () => {
         expect(text.includes("output truncated")).toBe(true);
     });
 });
+
+describe("transcript is lossless for sensitive-looking text", () => {
+    test("token-like values survive session headers", () => {
+        const { renderer, output } = makeCapture();
+        renderer(asEvent({ type: "agent_start" }), {
+            sessionID: "ghp_HEADERSESSIONTOKEN",
+            directory: "/tmp",
+            title: "Task with github_pat_HEADERPATTYPE secret",
+        });
+        const text = output();
+        expect(text).toContain("ghp_HEADERSESSIONTOKEN");
+        expect(text).toContain("github_pat_HEADERPATTYPE");
+        expect(text).not.toContain("[REDACTED]");
+    });
+
+    test("token-like values survive streamed human text", () => {
+        const { renderer, output } = makeCapture();
+        renderer(asEvent({ type: "agent_start" }), context);
+        renderer(
+            asEvent({
+                type: "message_start",
+                message: {
+                    role: "user",
+                    content: "use gh ghp_STREAMTOKEN and Bearer STREAM-BEARER",
+                },
+            }),
+            context,
+        );
+        const text = output();
+        expect(text).toContain("ghp_STREAMTOKEN");
+        expect(text).toContain("STREAM-BEARER");
+        expect(text).not.toContain("[REDACTED]");
+    });
+
+    test("tokens survive assistant streams, tool output, and errors", () => {
+        const { renderer, output } = makeCapture();
+        renderer(asEvent({ type: "agent_start" }), context);
+        renderer(
+            asEvent({
+                type: "message_update",
+                assistantMessageEvent: {
+                    type: "text_delta",
+                    contentIndex: 0,
+                    delta: "assistant says Bearer ASSISTANT-BEARER",
+                },
+            }),
+            context,
+        );
+        renderer(
+            asEvent({
+                type: "tool_execution_start",
+                toolCallId: "1",
+                toolName: "bash",
+                args: { command: "echo ghp_TOOLEVENTTOKEN" },
+            }),
+            context,
+        );
+        renderer(
+            asEvent({
+                type: "tool_execution_end",
+                toolCallId: "1",
+                toolName: "bash",
+                result: { content: "plain ghp_TOOLOUTPUTTOKEN" },
+                isError: true,
+            }),
+            context,
+        );
+        const text = output();
+        expect(text).toContain("ASSISTANT-BEARER");
+        expect(text).toContain("ghp_TOOLEVENTTOKEN");
+        expect(text).toContain("ghp_TOOLOUTPUTTOKEN");
+        expect(text).not.toContain("[REDACTED]");
+    });
+
+    test("JSON records retain complete nested event data", () => {
+        const chunks: string[] = [];
+        const renderer = makePiTranscriptRenderer({
+            write: (text: string) => {
+                chunks.push(text);
+            },
+            json: true,
+        });
+        renderer(
+            asEvent({
+                type: "tool_execution_start",
+                toolCallId: "1",
+                toolName: "bash",
+                args: {
+                    command: "echo hi",
+                    token: "sk-json-nested",
+                    credentials: { apiKey: "ghp_JSONKEYVALUESECRET" },
+                },
+            }),
+            {
+                sessionID: "session-json",
+                directory: "/tmp",
+                title: "JSON task ghp_JSONTITLESECRET",
+            },
+        );
+        const output = chunks.join("");
+        expect(output).toContain('"type":"pi_event"');
+        expect(output).toContain('"token":"sk-json-nested"');
+        expect(output).toContain('"apiKey":"ghp_JSONKEYVALUESECRET"');
+        expect(output).toContain("ghp_JSONTITLESECRET");
+        expect(output).not.toContain("[REDACTED]");
+    });
+});
+
+describe("transcript terminal safety", () => {
+    test("strips ANSI and control sequences from streamed text", () => {
+        const { renderer, output } = makeCapture();
+        renderer(asEvent({ type: "agent_start" }), context);
+        renderer(
+            asEvent({
+                type: "tool_execution_update",
+                toolCallId: "1",
+                toolName: "bash",
+                partialResult: { content: "\u001b[31mred\u001b[0m\tdone" },
+            }),
+            context,
+        );
+        const text = output();
+        expect(text).toContain("red");
+        expect(text).toContain("    done");
+        expect(text).not.toContain("\u001b");
+        expect(text).not.toContain("\t");
+    });
+
+    test("normalizes carriage returns in streamed output", () => {
+        const { renderer, output } = makeCapture();
+        renderer(asEvent({ type: "agent_start" }), context);
+        renderer(
+            asEvent({
+                type: "tool_execution_update",
+                toolCallId: "1",
+                toolName: "bash",
+                partialResult: { content: "line1\rline2\r\nline3" },
+            }),
+            context,
+        );
+        const text = output();
+        expect(text).not.toContain("\r");
+        expect(text).toContain("line1");
+        expect(text).toContain("line2");
+        expect(text).toContain("line3");
+    });
+
+    test("falls back to [unserializable] for non-JSON event values", () => {
+        const chunks: string[] = [];
+        const renderer = makePiTranscriptRenderer({
+            write: (text: string) => {
+                chunks.push(text);
+            },
+            json: true,
+        });
+        renderer(asEvent({ type: "agent_start", unrenderable: 1n }), context);
+        expect(chunks.join("")).toContain("[unserializable]");
+    });
+});

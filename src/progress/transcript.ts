@@ -3,11 +3,7 @@ import type {
     PiEventListener,
     PiSessionEvent,
 } from "../pi/client.ts";
-import {
-    redactSensitiveText,
-    redactSensitiveValue,
-    stripTerminalControls,
-} from "../shared/redaction.ts";
+import { stripTerminalControls } from "../shared/redaction.ts";
 import { cyan, dim, green, red, yellow } from "./colors.ts";
 import {
     prepareBreadcrumbCandidate,
@@ -43,9 +39,14 @@ export type PiTranscriptRenderer = PiEventListener & {
 
 const plain = (text: string): string => text;
 
-/** Keep model and tool output from changing the terminal's state. */
+/**
+ * Neutralize terminal state (ANSI/OSC sequences, CR/LF variants, tabs, and
+ * C0/C1 cursor/erase/bell controls) without otherwise altering the text.
+ * This is purely terminal hygiene: secrets and other sensitive-looking text
+ * intentionally pass through unchanged.
+ */
 const sanitizeTerminalText = (text: string): string =>
-    redactSensitiveText(stripTerminalControls(text).replace(/\t/g, "    "));
+    stripTerminalControls(text).replace(/\t/g, "    ");
 
 const oneLine = (text: string): string =>
     sanitizeTerminalText(text).replace(/\s+/g, " ").trim();
@@ -126,10 +127,10 @@ const contentText = (message: unknown): string | undefined => {
     return text.length === 0 ? undefined : text;
 };
 
+/** Serialize event values verbatim; JSON transcript records are lossless. */
 const safeJson = (value: unknown): string => {
     try {
-        const redacted = redactSensitiveValue(value);
-        return JSON.stringify(redacted) ?? String(redacted);
+        return JSON.stringify(value) ?? String(value);
     } catch {
         return "[unserializable]";
     }
