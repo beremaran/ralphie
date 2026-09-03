@@ -240,7 +240,7 @@ describe("assembled breadcrumb policy regressions", () => {
         expect(breadcrumbs).not.toContain("│  › Responding");
     });
 
-    test("renders one breadcrumb for a single long tool-output event", () => {
+    test("keeps a long tool-output event compact with a one-line outcome", () => {
         const harness = makeBreadcrumbHarness();
         const toolOutput = Array.from(
             { length: 14 },
@@ -259,6 +259,15 @@ describe("assembled breadcrumb policy regressions", () => {
         );
         harness.coordinator.listener(
             event({
+                type: "tool_execution_update",
+                toolCallId: "tool-long",
+                toolName: "bash",
+                partialResult: { content: toolOutput },
+            }),
+            context,
+        );
+        harness.coordinator.listener(
+            event({
                 type: "tool_execution_end",
                 toolCallId: "tool-long",
                 toolName: "bash",
@@ -269,19 +278,18 @@ describe("assembled breadcrumb policy regressions", () => {
         );
         settleSession(harness);
 
+        // The multi-line output itself stays in the compact activity surface;
+        // the transcript records only the call and the one-line outcome, so a
+        // long output event cannot inflate the breadcrumb cadence either.
         expect(visibleLines(harness.output)).toEqual([
             "╭─ Pi · Task · session-1",
             "│",
             "│  $ printf tool-output",
-            "│    tool line 1",
-            "│    tool line 2",
-            "│    tool line 3",
-            "│    … output truncated",
-            "│  ✓ bash done · 14 lines · 172 chars · truncated",
-            "│  › Waiting",
+            "│  ✓ bash done",
             "╰─ settled",
         ]);
-        expect(breadcrumbLines(harness.output)).toEqual(["│  › Waiting"]);
+        expect(harness.output).not.toContain("tool line");
+        expect(breadcrumbLines(harness.output)).toEqual([]);
     });
 
     const lifecycleCases: ReadonlyArray<{

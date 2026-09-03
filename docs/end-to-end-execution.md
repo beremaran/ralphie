@@ -540,8 +540,9 @@ reconcile a commit that may already have reached the remote.
 
 The command resolves `--output default` to `interactive` only when both stdin
 and stderr are TTYs and `CI` is not set. Otherwise it uses append-only `plain`
-output. `--output verbose` keeps the same mode selection while increasing
-human-readable tool previews.
+output. `--output verbose` keeps the same mode selection and never expands the
+live interactive region's row cap (always at most three terminal rows); it only
+enriches durable progress rows with structured details.
 
 Interactive output has two coordinated surfaces: Pi transcript rows remain in
 scrollback, and one replaceable region holds the sticky stage/status line plus
@@ -575,15 +576,20 @@ Human transcript output also emits lifecycle breadcrumbs, such as:
 │  • thinking level · high
 ```
 
-The human renderer bounds tool, thinking, and assistant output to keep
-terminals usable. The named `LIVE_OUTPUT_LIMIT` threshold is measured in
-characters and defaults to 140 characters per tool call for incremental
-output, with the same 140-character bound for thinking/assistant streams.
-Final previews use the source-level `maxLines`/`maxCharacters` limits of 3
-lines/140 characters. Truncated streams still report background totals (total
-characters and lines with a `truncated` marker) so hidden output remains
-observable. These bounds apply to human rendering only; the structured Pi
-records remain complete (subject to reporting-boundary redaction).
+The human transcript keeps assistant text deltas, session headers, and durable
+breadcrumbs readable, but routes intermediate work into the compact activity
+surface instead of scrollback: tool-call start/delta/end, tool execution
+start/update/end, bash execution updates, streamed thinking, compaction/retry
+lifecycle, and active progress changes all become bounded activity rows in the
+replaceable region. The transcript shows each tool call as a readable command
+and, on completion, exactly one concise line: `✓ <tool> done`, or a single
+sanitized, bounded failure line with enough error detail to act on (for
+example `✗ grep failed — error: no matches for …`). Streamed assistant text
+remains bounded to the same 140-character stream limit used before, and the
+structured Pi records stay complete (subject to reporting-boundary
+redaction). The compact activity area only ever paints the replaceable region
+through the stream-boundary tracker, so it can never clear or corrupt
+assistant response bytes.
 
 The cross-mode guarantees are:
 
@@ -672,16 +678,17 @@ Progress events include `runId`, timestamp, stage, status, and message. An
 active PR closure additionally streams `pr-gate` events with the pull-request
 number, exact observed head SHA, transition details, and terminal events whose
 verbose/JSON payloads carry the structured check snapshot, elapsed time, poll
-count, and terminal reason. The normal output also streams Pi `thinking_delta`,
-`text_delta`, tool-call, and
+count, and terminal reason. The normal output also streams Pi `text_delta`, tool-call, and
 tool-result events as they arrive. Human-readable Pi transcript output groups
-each session into a compact block: thinking and assistant text stream
-immediately, tool calls are shown as readable commands, and tool output is
-indented, de-duplicated, and bounded. Use `--output verbose` for a larger
-tool-output preview. Terminal control sequences are sanitized and Pi
-transcript values are redacted before terminal rendering. JSON mode emits
-progress and `pi_event` JSON Lines to stdout, preserving supplied progress
-values; normal modes render to stderr, and quiet mode renders failures only.
+each session into a compact block: assistant text streams immediately, tool
+calls are shown as readable commands, and live/final tool output plus streamed
+thinking stay in the compact activity surface rather than scrollback — each
+tool completion or failure is summarized as a single line, so `--output
+verbose` cannot expand the live row count. Terminal control sequences are
+sanitized and Pi transcript values are redacted before terminal rendering.
+JSON mode emits progress and `pi_event` JSON Lines to stdout, preserving
+supplied progress values; normal modes render to stderr, and quiet mode
+renders failures only.
 Grounding events identify skipped agent work, while needs-attention details
 retain the reason, summary, evidence, questions, path, and policy. Event
 details can include issue positions, review attempts, session ids, commit SHAs,

@@ -26,7 +26,7 @@ const makeCapture = () => {
 };
 
 describe("transcript output bounds", () => {
-    test("tool live output is bounded to 140 characters", () => {
+    test("tool live output never enters the human transcript", () => {
         const { renderer, output } = makeCapture();
         renderer(asEvent({ type: "agent_start" }), context);
         renderer(
@@ -58,13 +58,14 @@ describe("transcript output bounds", () => {
             context,
         );
         const text = output();
-        expect(text.includes("a".repeat(141))).toBe(false);
-        expect(text.includes("a".repeat(140))).toBe(true);
-        expect(text.includes("truncated")).toBe(true);
-        expect(text.includes("500 chars")).toBe(true);
+        expect(text).toContain("│  $ echo hi");
+        expect(text).toContain("│  ✓ bash done");
+        expect(text).not.toContain("a".repeat(10));
+        expect(text).not.toContain("truncated");
+        expect(text).not.toContain("500 chars");
     });
 
-    test("thinking stream is bounded to 140 characters", () => {
+    test("streamed thinking never enters the human transcript", () => {
         const { renderer, output } = makeCapture();
         renderer(asEvent({ type: "agent_start" }), context);
         renderer(
@@ -98,11 +99,23 @@ describe("transcript output bounds", () => {
             }),
             context,
         );
+        renderer(
+            asEvent({
+                type: "message_update",
+                assistantMessageEvent: {
+                    type: "text_delta",
+                    contentIndex: 0,
+                    delta: "answer",
+                },
+            }),
+            context,
+        );
         const text = output();
-        expect(text.includes("t".repeat(141))).toBe(false);
-        expect(text.includes("t".repeat(140))).toBe(true);
-        expect(text.includes("500 chars")).toBe(true);
-        expect(text.includes("truncated")).toBe(true);
+        expect(text).not.toContain("t".repeat(10));
+        expect(text).not.toContain("⋯");
+        expect(text).not.toContain("500 chars");
+        expect(text).not.toContain("truncated");
+        expect(text).toContain("answer");
     });
 
     test("assistant stream shows background counts when truncated", () => {
@@ -145,7 +158,7 @@ describe("transcript output bounds", () => {
         expect(text.includes("truncated")).toBe(true);
     });
 
-    test("final preview is bounded to 3 lines and 140 characters", () => {
+    test("final tool output never enters the human transcript", () => {
         const { renderer, output } = makeCapture();
         renderer(asEvent({ type: "agent_start" }), context);
         renderer(
@@ -168,10 +181,115 @@ describe("transcript output bounds", () => {
             context,
         );
         const text = output();
-        expect(text.includes("l1")).toBe(true);
-        expect(text.includes("l3")).toBe(true);
-        expect(text.includes("l4")).toBe(false);
-        expect(text.includes("output truncated")).toBe(true);
+        expect(text).toContain("│  $ echo hi");
+        expect(text).toContain("│  ✓ bash done");
+        expect(text).not.toContain("l1");
+        expect(text).not.toContain("l5");
+        expect(text).not.toContain("output truncated");
+    });
+
+    test("tool completion emits one concise success summary", () => {
+        const { renderer, output } = makeCapture();
+        renderer(asEvent({ type: "agent_start" }), context);
+        renderer(
+            asEvent({
+                type: "tool_execution_start",
+                toolCallId: "1",
+                toolName: "bash",
+                args: { command: "echo hi" },
+            }),
+            context,
+        );
+        renderer(
+            asEvent({
+                type: "tool_execution_update",
+                toolCallId: "1",
+                toolName: "bash",
+                partialResult: { content: "partial".repeat(40) },
+            }),
+            context,
+        );
+        renderer(
+            asEvent({
+                type: "tool_execution_end",
+                toolCallId: "1",
+                toolName: "bash",
+                result: { content: "partial".repeat(40) },
+                isError: false,
+            }),
+            context,
+        );
+        const text = output();
+        expect(text).toContain("│  ✓ bash done");
+        expect(text).not.toContain("partial");
+        expect(
+            text.split("\n").filter((line) => line.includes("✓ bash done")),
+        ).toHaveLength(1);
+    });
+
+    test("tool failure emits one sanitized bounded summary with error detail", () => {
+        const { renderer, output } = makeCapture();
+        renderer(asEvent({ type: "agent_start" }), context);
+        renderer(
+            asEvent({
+                type: "tool_execution_start",
+                toolCallId: "1",
+                toolName: "grep",
+                args: { pattern: "needle" },
+            }),
+            context,
+        );
+        const longError =
+            "error: directive failed because of a long explanation ".repeat(20);
+        renderer(
+            asEvent({
+                type: "tool_execution_end",
+                toolCallId: "1",
+                toolName: "grep",
+                result: { content: longError },
+                isError: true,
+            }),
+            context,
+        );
+        const text = output();
+        expect(text).toContain("│  ✗ grep failed —");
+        expect(text).not.toContain(longError);
+        const summary = text
+            .split("\n")
+            .find((line) => line.includes("✗ grep failed —"));
+        expect(summary).toBeDefined();
+        const visible = (summary as string).replace(/\.{3}\s*$/, "…");
+        expect(visible.endsWith("…")).toBe(true);
+        expect(
+            Array.from((summary as string).replace("│  ", "")).length,
+        ).toBeLessThanOrEqual(160);
+    });
+
+    test("tool failure without readable output still emits a concise summary", () => {
+        const { renderer, output } = makeCapture();
+        renderer(asEvent({ type: "agent_start" }), context);
+        renderer(
+            asEvent({
+                type: "tool_execution_start",
+                toolCallId: "1",
+                toolName: "edit",
+                args: { file_path: "/tmp/a.ts" },
+            }),
+            context,
+        );
+        renderer(
+            asEvent({
+                type: "tool_execution_end",
+                toolCallId: "1",
+                toolName: "edit",
+                result: undefined,
+                isError: true,
+            }),
+            context,
+        );
+        const text = output();
+        expect(text).toContain("│  ✗ edit failed");
+        expect(text).not.toContain("—");
     });
 });
 
@@ -288,10 +406,12 @@ describe("transcript terminal safety", () => {
         renderer(asEvent({ type: "agent_start" }), context);
         renderer(
             asEvent({
-                type: "tool_execution_update",
-                toolCallId: "1",
-                toolName: "bash",
-                partialResult: { content: "\u001b[31mred\u001b[0m\tdone" },
+                type: "message_update",
+                assistantMessageEvent: {
+                    type: "text_delta",
+                    contentIndex: 0,
+                    delta: "\u001b[31mred\u001b[0m\tdone",
+                },
             }),
             context,
         );
@@ -302,15 +422,17 @@ describe("transcript terminal safety", () => {
         expect(text).not.toContain("\t");
     });
 
-    test("normalizes carriage returns in streamed output", () => {
+    test("normalizes carriage returns in streamed assistant text", () => {
         const { renderer, output } = makeCapture();
         renderer(asEvent({ type: "agent_start" }), context);
         renderer(
             asEvent({
-                type: "tool_execution_update",
-                toolCallId: "1",
-                toolName: "bash",
-                partialResult: { content: "line1\rline2\r\nline3" },
+                type: "message_update",
+                assistantMessageEvent: {
+                    type: "text_delta",
+                    contentIndex: 0,
+                    delta: "line1\rline2\r\nline3",
+                },
             }),
             context,
         );

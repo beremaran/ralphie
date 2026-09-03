@@ -502,15 +502,6 @@ const toolResultText = (result: unknown): string => {
     return Array.isArray(valueAt(result, "content")) ? "" : safeJson(result);
 };
 
-type ToolExecutionState = {
-    readonly key: StreamKey;
-    latestOutput: string;
-    renderedCharacters: number;
-    outputLimited: boolean;
-};
-
-const LIVE_OUTPUT_LIMIT = 140;
-
 const STREAM_OUTPUT_LIMIT = 140;
 
 type MessageStreamState = {
@@ -573,11 +564,6 @@ const endMessageStream = (
     }
 };
 
-const cumulativeDelta = (previous: string, next: string): string => {
-    if (next === previous) return "";
-    return next.startsWith(previous) ? next.slice(previous.length) : next;
-};
-
 const renderMessageUpdate = (
     event: MessageUpdateEvent,
     styles: TranscriptStyles,
@@ -587,29 +573,10 @@ const renderMessageUpdate = (
     const update = event.assistantMessageEvent;
     switch (update.type) {
         case "thinking_start":
-            writer.startStream(
-                messageUpdateKey(event, "thinking"),
-                styles.thinking("⋯ thinking "),
-            );
-            return;
         case "thinking_delta":
-            renderBoundedMessageDelta(
-                messageUpdateKey(event, "thinking"),
-                update.delta,
-                states,
-                writer,
-                styles.thinking,
-                styles.thinking("⋯ thinking "),
-            );
-            return;
         case "thinking_end":
-            endMessageStream(
-                messageUpdateKey(event, "thinking"),
-                states,
-                writer,
-                "⋯ thinking done",
-                styles.thinking,
-            );
+            // Streamed thinking is routed to the compact activity surface only;
+            // it is never written into the human transcript.
             return;
         case "text_start":
             writer.startStream(
@@ -655,124 +622,42 @@ const renderMessageUpdate = (
     }
 };
 
-const outputStateFor = (
-    states: Map<string, ToolExecutionState>,
-    key: string,
-    toolName: string,
-): ToolExecutionState => {
-    const existing = states.get(key);
-    if (existing !== undefined) return existing;
-    const state: ToolExecutionState = {
-        key: `tool:${key}`,
-        latestOutput: "",
-        renderedCharacters: 0,
-        outputLimited: false,
-    };
-    states.set(key, state);
-    return state;
+const FAILURE_DETAIL_LIMIT = 140;
+
+/**
+ * One-line, sanitized, bounded failure detail derived from a tool result.
+ * Enough detail to act on, without the full multi-line output (which lives in
+ * the compact activity surface instead of the human transcript).
+ */
+const toolFailureDetail = (result: unknown): string => {
+    if (result === undefined || result === null) return "";
+    const clean = oneLine(toolResultText(result));
+    if (clean === "") return "";
+    const characters = Array.from(clean);
+    return characters.length <= FAILURE_DETAIL_LIMIT
+        ? clean
+        : `${characters.slice(0, FAILURE_DETAIL_LIMIT).join("")}…`;
 };
-
-const renderToolDelta = (
-    state: ToolExecutionState,
-    delta: string,
-    styles: TranscriptStyles,
-    writer: TranscriptWriter,
-): void => {
-    const remaining = LIVE_OUTPUT_LIMIT - state.renderedCharacters;
-    if (remaining <= 0) {
-        state.outputLimited = true;
-        return;
-    }
-    const visible = delta.slice(0, remaining);
-    writer.writeStream(
-        state.key,
-        visible,
-        styles.event,
-        styles.event("output "),
-    );
-    state.renderedCharacters += visible.length;
-    if (visible.length < delta.length) state.outputLimited = true;
-};
-
-const renderToolExecutionUpdate = (
-    event: Extract<PiSessionEvent, { type: "tool_execution_update" }>,
-    states: Map<string, ToolExecutionState>,
-    styles: TranscriptStyles,
-    writer: TranscriptWriter,
-): void => {
-    const key = event.toolCallId;
-    const state = outputStateFor(states, key, event.toolName);
-    const output = contentText(event.partialResult);
-    if (output === undefined) return;
-    const delta = cumulativeDelta(state.latestOutput, output);
-    state.latestOutput = output;
-    renderToolDelta(state, delta, styles, writer);
-};
-
-const renderBashExecutionUpdate = (
-    event: Extract<PiSessionEvent, { type: "bash_execution_update" }>,
-    states: Map<string, ToolExecutionState>,
-    styles: TranscriptStyles,
-    writer: TranscriptWriter,
-): void => {
-    const key = event.id ?? "bash-stream";
-    const state = outputStateFor(states, key, "bash");
-    state.latestOutput += event.delta;
-    renderToolDelta(state, event.delta, styles, writer);
-};
-
-const renderToolFinal = (
-    state: ToolExecutionState,
-    finalPreview: { readonly text: string },
-    finalDelta: string,
-    styles: TranscriptStyles,
-    writer: TranscriptWriter,
-): void => {
-    if (state.renderedCharacters === 0 && finalPreview.text !== "") {
-        writer.writeStream(
-            state.key,
-            finalPreview.text,
-            styles.event,
-            styles.event("output "),
-        );
-        return;
-    }
-    if (state.renderedCharacters > 0 && finalDelta !== "") {
-        renderToolDelta(state, finalDelta, styles, writer);
-    }
-};
-
-const toolLineSuffix = (lines: number): string =>
-    lines === 0 ? "" : ` · ${lines} line${lines === 1 ? "" : "s"}`;
-
-const toolCharsSuffix = (isTruncated: boolean, total: number): string =>
-    isTruncated && total > 0 ? ` · ${total} chars` : "";
-
-const toolTruncatedSuffix = (isTruncated: boolean): string =>
-    isTruncated ? " · truncated" : "";
 
 const renderToolExecutionEnd = (
     event: Extract<PiSessionEvent, { type: "tool_execution_end" }>,
-    states: Map<string, ToolExecutionState>,
     styles: TranscriptStyles,
     writer: TranscriptWriter,
-    verbose: boolean,
 ): void => {
-    const state = outputStateFor(states, event.toolCallId, event.toolName);
-    const finalOutput = toolResultText(event.result);
-    const finalPreview = previewText(finalOutput, verbose);
-    const finalDelta = cumulativeDelta(state.latestOutput, finalOutput);
-    state.latestOutput = finalOutput;
-    renderToolFinal(state, finalPreview, finalDelta, styles, writer);
-    writer.endStream(state.key);
-
-    const isTruncated = state.outputLimited || finalPreview.omitted;
-    const status = event.isError ? styles.error("✗") : styles.success("✓");
+    const name = oneLine(event.toolName) || "tool";
+    if (!event.isError) {
+        writer.line(`${styles.success("✓")} ${name} done`, {
+            blankBefore: false,
+        });
+        return;
+    }
+    const detail = toolFailureDetail(event.result);
     writer.line(
-        `${status} ${oneLine(event.toolName) || "tool"} ${event.isError ? "failed" : "done"}${toolLineSuffix(finalPreview.lines)}${toolCharsSuffix(isTruncated, finalOutput.length)}${toolTruncatedSuffix(isTruncated)}`,
+        detail === ""
+            ? `${styles.error("✗")} ${name} failed`
+            : `${styles.error("✗")} ${name} failed — ${styles.error(detail)}`,
         { blankBefore: false },
     );
-    states.delete(event.toolCallId);
 };
 
 const renderUserMessage = (
@@ -853,7 +738,6 @@ const renderTerminalEvent = (
     context: PiEventContext,
     styles: TranscriptStyles,
     writer: TranscriptWriter,
-    states: Map<string, ToolExecutionState>,
     messageStates: Map<string, MessageStreamState>,
     verbose: boolean,
     width: () => number,
@@ -879,28 +763,20 @@ const renderTerminalEvent = (
         case "message_update":
             renderMessageUpdate(event, styles, writer, messageStates);
             return;
-        case "tool_execution_start": {
-            const state = outputStateFor(
-                states,
-                event.toolCallId,
-                event.toolName,
-            );
+        case "tool_execution_start":
             writer.line(
                 styles.tool(
                     formatToolCall(event.toolName, event.args, width() - 6),
                 ),
-                { key: state.key },
             );
             return;
-        }
         case "tool_execution_update":
-            renderToolExecutionUpdate(event, states, styles, writer);
+        case "bash_execution_update":
+            // Intermediate tool output streams into the compact activity
+            // surface; the human transcript only records the call and outcome.
             return;
         case "tool_execution_end":
-            renderToolExecutionEnd(event, states, styles, writer, verbose);
-            return;
-        case "bash_execution_update":
-            renderBashExecutionUpdate(event, states, styles, writer);
+            renderToolExecutionEnd(event, styles, writer);
             return;
         case "turn_start":
         case "turn_end":
@@ -963,7 +839,6 @@ export const makePiTranscriptRenderer = ({
         lineMeter.reset,
         onSessionStart,
     );
-    const toolStates = new Map<string, ToolExecutionState>();
     const messageStates = new Map<string, MessageStreamState>();
 
     const render: PiEventListener = (event, context) => {
@@ -977,7 +852,6 @@ export const makePiTranscriptRenderer = ({
             context,
             styles,
             writer,
-            toolStates,
             messageStates,
             verbose,
             width,

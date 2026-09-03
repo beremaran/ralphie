@@ -5,6 +5,22 @@ All notable changes to Ralphie are documented here. The project follows
 
 ## [Unreleased]
 
+- Route the Pi event stream and progress updates through the compact activity
+  surface in the real coordinator/CLI path: tool-call start/delta/end, tool
+  execution start/update/end, bash execution updates, streamed thinking,
+  compaction/retry lifecycle, and active progress changes map to bounded
+  activity rows in the replaceable interactive region. The human transcript no
+  longer streams multi-line partial/final tool output or streamed thinking;
+  each tool completion emits at most one concise `✓ <tool> done` line, and a
+  failure emits one sanitized, 140-character-bounded line with enough error
+  detail to act. Assistant text deltas, session headers, durable breadcrumbs,
+  and lossless JSON `pi_event` records are unchanged, the region never clears
+  or corrupts assistant response bytes, and `--output verbose` keeps the live
+  row count at its fixed three-row cap. Plain, JSON, and quiet modes retain
+  their append-only/structured/failure-only contracts. Coordinator-level tests
+  cover repeated calls, missing ids, interleaved assistant text, success and
+  failure, and mode-specific behavior.
+
 - Render the interactive activity view in one replaceable three-row terminal
   region: the sticky stage/status line plus the bounded activity rows share a
   single region whose total height never exceeds three terminal rows (no panel

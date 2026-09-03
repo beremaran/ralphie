@@ -185,14 +185,15 @@ start with contextual headers such as:
 ```
 
 Human-readable output also records lifecycle breadcrumbs for events such as
-context compaction and Pi retries. Tool, thinking, and assistant output is
-bounded for terminal use: `LIVE_OUTPUT_LIMIT` is the rendered-output
-threshold, measured in characters, with a default of `140` per tool call, and
-thinking/assistant streams use the same `140`-character bound. Final human
-previews use the `maxLines`/`maxCharacters` limits of 3 lines/140 characters;
-truncated streams still report background totals (total characters and lines
-with a `truncated` marker) so hidden output remains observable. These are not
-limits on the structured stream.
+context compaction and Pi retries. Intermediate work stays in the compact
+activity surface: tool-call deltas, tool execution updates, bash execution
+updates, streamed thinking, compaction/retry lifecycle, and active progress
+changes render as bounded rows in the replaceable interactive region rather
+than scrollback, while assistant text deltas stream in the transcript with a
+`140`-character rendered bound. Each tool completion emits at most one concise
+`✓ <tool> done` line, and a failure emits one sanitized, bounded line with
+enough error detail to act on. `--output verbose` never expands the live
+region's three-row cap. These are not limits on the structured stream.
 
 Outside an interactive terminal—including CI—plain output is append-only and
 uses no ANSI cursor controls. Quiet output reports failures and handled
