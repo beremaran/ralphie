@@ -649,3 +649,27 @@ export const playScriptedScenario = async (
         }
     }
 };
+
+/** The ordered progress emits of a scenario, for JSON-matrix assertions. */
+export const progressEmitsFor = (
+    name: ScenarioName,
+): readonly ProgressUpdate[] =>
+    scriptFor(name)
+        .filter(
+            (
+                step,
+            ): step is Extract<ScenarioStep, { readonly kind: "progress" }> =>
+                step.kind === "progress",
+        )
+        .map((step) => step.update);
+
+/** The ordered agent events of a scenario, for JSON-matrix assertions. */
+export const eventEmitsFor = (
+    name: ScenarioName,
+): readonly AgentSessionEvent[] =>
+    scriptFor(name)
+        .filter(
+            (step): step is Extract<ScenarioStep, { readonly kind: "event" }> =>
+                step.kind === "event",
+        )
+        .map((step) => step.event);

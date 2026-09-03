@@ -59,7 +59,9 @@ import {
     WIDE_PROGRESS_DONE,
     WIDE_PROGRESS_STARTED,
     WIDE_TEXT,
+    eventEmitsFor,
     playScriptedScenario,
+    progressEmitsFor,
     type ScenarioName,
 } from "../shared/scripted-scenarios.ts";
 
@@ -1052,6 +1054,264 @@ const expectContiguousRawChunks = (
     }
 };
 
+/** A parsed JSON-mode stdout record. */
+type JsonRecord = Readonly<Record<string, unknown>>;
+
+/** Shape 1: a parsed JSON-mode progress event record. */
+type ProgressRecord = JsonRecord & {
+    readonly stage: string;
+    readonly status: string;
+    readonly runId: string;
+    readonly timestamp: string;
+    readonly message: string;
+};
+
+/** Shape 2: the lossless transcript envelope around one verbatim agent event. */
+const isOpenCodeEventRecord = (record: JsonRecord): boolean =>
+    record.type === "opencode_event" &&
+    typeof record.sessionID === "string" &&
+    typeof record.directory === "string" &&
+    typeof record.event === "object" &&
+    record.event !== null;
+
+/**
+ * Assistant text deltas carried by the `opencode_event` records, in emit
+ * order. Every `text_delta` agent event yields exactly one record, so the
+ * ordered deltas reassemble streamed content that was split across
+ * chunk/delta boundaries contiguously.
+ */
+const textDeltasOf = (records: readonly JsonRecord[]): readonly string[] => {
+    const deltas: string[] = [];
+    for (const record of records) {
+        if (!isOpenCodeEventRecord(record)) continue;
+        const event = record.event as AgentSessionEvent;
+        if (event.type !== "message_update") continue;
+        const update = event.assistantMessageEvent;
+        if (update.type !== "text_delta") continue;
+        deltas.push(update.delta);
+    }
+    return deltas;
+};
+
+/** Multi-delta assistant messages per scenario, in emit order. */
+const ASSEMBLED_MESSAGE_DELTAS: Partial<
+    Readonly<Record<ScenarioName, readonly string[]>>
+> = {
+    completion: ASSISTANT_DELTAS,
+    "interleaved-streams": INTERLEAVED_TEXT,
+    "split-credentials": ["Bearer ", CREDENTIAL_TEXT],
+};
+
+/** Human-transcript glyphs that must never appear in JSON-mode stdout. */
+const HUMAN_GLYPHS = [
+    "✓",
+    "✗",
+    "│",
+    "╭─",
+    "╰─",
+    "↻",
+    "◐",
+    "⚠",
+    "✦",
+    "›",
+] as const;
+
+/**
+ * Parse every non-empty stdout line as one complete JSON record: the stream
+ * is newline-delimited with no partial lines and no trailing garbage.
+ */
+const parseJsonRecords = (
+    stdout: string,
+    scenario: ScenarioName,
+): readonly JsonRecord[] => {
+    expect(stdout.endsWith("\n")).toBe(true);
+    const lines = stdout.split("\n");
+    expect(lines.at(-1)).toBe("");
+    expect(lines.slice(0, -1)).not.toContain("");
+    return lines
+        .filter((line) => line !== "")
+        .map((line) => JSON.parse(line) as JsonRecord);
+};
+
+/**
+ * Classify every record into exactly one of the two allowed shapes: a
+ * progress event or an `opencode_event`. Nothing else is permitted.
+ */
+const classifyJsonRecords = (
+    records: readonly JsonRecord[],
+    scenario: ScenarioName,
+): {
+    readonly progressRecords: readonly JsonRecord[];
+    readonly opencodeRecords: readonly JsonRecord[];
+} => {
+    const progressRecords: JsonRecord[] = [];
+    const opencodeRecords: JsonRecord[] = [];
+    for (const record of records) {
+        if (isOpenCodeEventRecord(record)) {
+            opencodeRecords.push(record);
+            continue;
+        }
+        expect(
+            typeof record.stage === "string" &&
+                typeof record.status === "string" &&
+                typeof record.runId === "string" &&
+                typeof record.timestamp === "string" &&
+                typeof record.message === "string",
+            `${scenario} emitted a record that is neither a progress event nor an opencode_event: ${JSON.stringify(record)}`,
+        ).toBe(true);
+        progressRecords.push(record);
+    }
+    expect(
+        progressRecords.length + opencodeRecords.length,
+        `${scenario} json records were not all classified`,
+    ).toBe(records.length);
+    return { progressRecords, opencodeRecords };
+};
+
+/**
+ * Agent events map one-to-one to lossless records: every record embeds its
+ * scripted event verbatim inside the session envelope.
+ */
+const expectOpenCodeEventRecords = (
+    opencodeRecords: readonly JsonRecord[],
+    scenario: ScenarioName,
+): void => {
+    const expectedEvents = eventEmitsFor(scenario);
+    expect(
+        opencodeRecords.length,
+        `${scenario} opencode_event record count`,
+    ).toBe(expectedEvents.length);
+    for (const [index, expected] of expectedEvents.entries()) {
+        expect(
+            opencodeRecords[index]?.event,
+            `${scenario} opencode_event record ${index} payload`,
+        ).toEqual(expected);
+        expect(opencodeRecords[index]?.sessionID).toBe(context.sessionID);
+        expect(opencodeRecords[index]?.directory).toBe(context.directory);
+    }
+};
+
+/**
+ * Progress records carry exactly the emitted fields with values verbatim:
+ * one record per emit, one runId per run, and ISO-8601 timestamps.
+ */
+const expectProgressMatrix = (
+    progressRecords: readonly JsonRecord[],
+    scenario: ScenarioName,
+): void => {
+    const runIds = new Set<string>();
+    for (const record of progressRecords) {
+        runIds.add(record.runId as string);
+    }
+    expect(runIds.size, `${scenario} used multiple runIds`).toBe(1);
+
+    for (const record of progressRecords) {
+        const timestamp = record.timestamp as string;
+        const parsed = new Date(timestamp);
+        expect(
+            Number.isNaN(parsed.getTime()),
+            `${scenario} timestamp ${JSON.stringify(timestamp)} is not a valid date`,
+        ).toBe(false);
+        expect(
+            parsed.toISOString(),
+            `${scenario} timestamp ${JSON.stringify(timestamp)} is not ISO-8601`,
+        ).toBe(timestamp);
+    }
+
+    const expectedProgress = progressEmitsFor(scenario);
+    expect(progressRecords.length, `${scenario} progress record count`).toBe(
+        expectedProgress.length,
+    );
+    for (const [index, update] of expectedProgress.entries()) {
+        const actual = progressRecords[index];
+        expect(
+            actual,
+            `${scenario} progress record ${index} missing`,
+        ).toBeDefined();
+        const record = actual as ProgressRecord;
+        expect(record).toEqual({
+            ...update,
+            runId: record.runId,
+            timestamp: record.timestamp,
+        });
+    }
+};
+
+/**
+ * Lossless values (GH-180 unredacted contract): credential-like strings
+ * inside `details` survive byte-exact, and content split across
+ * chunks/deltas reassembles contiguously with writeRaw suppressed.
+ */
+const expectLosslessJsonValues = (
+    progressRecords: readonly JsonRecord[],
+    records: readonly JsonRecord[],
+    stdout: string,
+    scenario: ScenarioName,
+): void => {
+    // The `verbose-unsafe` scenario is the JSON-mode stand-in for the
+    // `--output verbose` unsafe-details case: JSON never redacts, masks, or
+    // elides what verbose mode surfaces.
+    if (scenario === "verbose-unsafe") {
+        const unsafeDetails = JSON.stringify(UNSAFE_DETAILS);
+        const unsafeRecords = progressRecords.filter(
+            (record) => JSON.stringify(record.details) === unsafeDetails,
+        );
+        expect(
+            unsafeRecords.length,
+            `${scenario} expected three unsafe-details records`,
+        ).toBe(3);
+        for (const record of unsafeRecords) {
+            expect(record.details).toEqual(UNSAFE_DETAILS);
+        }
+        expect(stdout).toContain(UNSAFE_API_KEY);
+        expect(stdout).toContain(UNSAFE_TOKEN);
+        expect(stdout).toContain(unsafeDetails);
+    }
+
+    // Split-chunk/delta content: each logical emit produces exactly one
+    // record, and joining the records in order reassembles the payload
+    // contiguously.
+    const deltaExpectations = ASSEMBLED_MESSAGE_DELTAS[scenario];
+    if (deltaExpectations !== undefined) {
+        const deltas = textDeltasOf(records);
+        expect(
+            deltas,
+            `${scenario} text_delta emits did not map one-to-one to records`,
+        ).toEqual([...deltaExpectations]);
+        expect(deltas.join("")).toBe(deltaExpectations.join(""));
+    }
+
+    // writeRaw is suppressed in JSON: raw chunks never leak.
+    if (scenario === "interleaved-streams") {
+        for (const chunk of INTERLEAVED_RAW) {
+            expect(
+                stdout,
+                `${scenario} raw chunk leaked into json stdout`,
+            ).not.toContain(chunk);
+        }
+    }
+    if (scenario === "split-credentials") {
+        expect(stdout).not.toContain(CREDENTIAL_RAW);
+        expect(stdout).not.toContain("sk-proj-");
+        // The credential delivered in one text_delta lands byte-exact.
+        expect(stdout).toContain(CREDENTIAL_TEXT);
+    }
+};
+
+/** Assert stdout is free of control bytes and human-transcript glyphs. */
+const expectCleanJsonStdout = (
+    stdout: string,
+    scenario: ScenarioName,
+): void => {
+    expectControlFree(stdout);
+    for (const glyph of HUMAN_GLYPHS) {
+        expect(
+            stdout.includes(glyph),
+            `${scenario} json stdout contains human glyph ${JSON.stringify(glyph)}`,
+        ).toBe(false);
+    }
+};
+
 describe("command runtime display: noninteractive fallback", () => {
     test("plain/CI output is deterministic, append-only, and control-free", async () => {
         const first = await mkdtemp(join(tmpdir(), "ralphie-plain-"));
@@ -1119,6 +1379,51 @@ describe("command runtime display: noninteractive fallback", () => {
             expect(result.stderrBytes()).toBe("");
         } finally {
             await rm(workspace, { recursive: true, force: true });
+        }
+    });
+
+    test("json mode emits a strict two-shape, lossless record matrix for every scenario", async () => {
+        for (const scenario of SCENARIO_NAMES) {
+            const workspace = await mkdtemp(join(tmpdir(), "ralphie-json-"));
+            try {
+                const result = await runNoninteractiveCommand({
+                    args: argsFor("json", workspace),
+                    terminal: NONINTERACTIVE_TERMINAL,
+                    scenario,
+                });
+                const stdout = result.stdoutBytes();
+                expect(
+                    stdout.length,
+                    `${scenario} json emitted nothing on stdout`,
+                ).toBeGreaterThan(0);
+                // JSON mode owns stdout; stderr stays empty.
+                expect(result.stderrBytes()).toBe("");
+
+                // (1) Every non-empty line parses as one complete JSON record.
+                const records = parseJsonRecords(stdout, scenario);
+
+                // (2) Every record is exactly one of two shapes.
+                const { progressRecords, opencodeRecords } =
+                    classifyJsonRecords(records, scenario);
+                expectOpenCodeEventRecords(opencodeRecords, scenario);
+
+                // (3)-(5) One runId, ISO-8601 timestamps, and one lossless
+                // record per progress emit.
+                expectProgressMatrix(progressRecords, scenario);
+
+                // (5) Lossless unsafe values and split-chunk assembly.
+                expectLosslessJsonValues(
+                    progressRecords,
+                    records,
+                    stdout,
+                    scenario,
+                );
+
+                // (6) No control bytes and no human glyphs.
+                expectCleanJsonStdout(stdout, scenario);
+            } finally {
+                await rm(workspace, { recursive: true, force: true });
+            }
         }
     });
 
