@@ -184,7 +184,12 @@ finally:
     os._exit(0)
 `;
 
-export type PtySignalName = "SIGHUP" | "SIGINT" | "SIGTERM" | "SIGKILL";
+export type PtySignalName =
+    | "SIGHUP"
+    | "SIGINT"
+    | "SIGTERM"
+    | "SIGKILL"
+    | "SIGUSR1";
 
 export type PtyWaitOptions = {
     readonly timeoutMs?: number;

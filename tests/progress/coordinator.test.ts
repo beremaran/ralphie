@@ -192,8 +192,6 @@ describe("coordinator activity wiring", () => {
             context,
         );
         settle();
-        await coordinator.dispose();
-
         const output = strategy.output();
         // The transcript records the call and one bounded outcome row only.
         expect(output).toContain("│  $ echo work");
@@ -205,6 +203,9 @@ describe("coordinator activity wiring", () => {
         const region = strategy.finalRegion();
         expect(region.filter((row) => row.includes("bash"))).toHaveLength(1);
         expect(region.length).toBeLessThanOrEqual(INTERACTIVE_REGION_MAX_ROWS);
+        await coordinator.dispose();
+        // Disposal erases the region in place: nothing survives.
+        expect(strategy.finalRegion()).toEqual([]);
     });
 
     test("missing or empty ids never crash or grow the activity registry", async () => {
@@ -317,8 +318,6 @@ describe("coordinator activity wiring", () => {
             context,
         );
         settle();
-        await coordinator.dispose();
-
         const output = strategy.output();
         expect(output).toContain("│  ✓ bash done");
         expect(output).not.toContain("✓ bash failed");
@@ -328,6 +327,9 @@ describe("coordinator activity wiring", () => {
             expect(row.length).toBeLessThanOrEqual(80);
         }
         expect(region.length).toBeLessThanOrEqual(INTERACTIVE_REGION_MAX_ROWS);
+        await coordinator.dispose();
+        // Disposal erases the region in place: nothing survives.
+        expect(strategy.finalRegion()).toEqual([]);
     });
 
     test("tool failure maps to a bounded sanitized activity row and summary", async () => {
@@ -349,8 +351,6 @@ describe("coordinator activity wiring", () => {
             context,
         );
         settle();
-        await coordinator.dispose();
-
         const output = strategy.output();
         expect(output).toContain(
             "✗ grep failed — error: no matches for a very long pattern",
@@ -371,6 +371,9 @@ describe("coordinator activity wiring", () => {
             expect(row.length).toBeLessThanOrEqual(80);
         }
         expect(region.length).toBeLessThanOrEqual(INTERACTIVE_REGION_MAX_ROWS);
+        await coordinator.dispose();
+        // Disposal erases the region in place: nothing survives.
+        expect(strategy.finalRegion()).toEqual([]);
     });
 
     test("active progress changes map to compact progress rows", async () => {
@@ -392,8 +395,6 @@ describe("coordinator activity wiring", () => {
             message: "fix written",
         });
         settle();
-        await coordinator.dispose();
-
         const output = strategy.output();
         // Settled milestone remains a durable row.
         expect(output).toContain("fix written");
@@ -402,6 +403,9 @@ describe("coordinator activity wiring", () => {
         expect(region.join("\n")).toContain("Implementing changes");
         expect(region.join("\n")).not.toContain("writing fix");
         expect(region.length).toBeLessThanOrEqual(INTERACTIVE_REGION_MAX_ROWS);
+        await coordinator.dispose();
+        // Disposal erases the region in place: nothing survives.
+        expect(strategy.finalRegion()).toEqual([]);
     });
 
     test("verbose mode does not expand the interactive live row count", async () => {
@@ -432,19 +436,19 @@ describe("coordinator activity wiring", () => {
             details: { attempt: 1, mode: "full" },
         });
         settle();
-        await coordinator.dispose();
-
         const output = strategy.output();
         // Verbose durable rows may carry details…
         expect(output).toContain('"attempt":1');
         expect(output).toContain("fix written");
         // …but the live region never grows beyond the shared row cap.
-        expect(strategy.finalRegion().length).toBeLessThanOrEqual(
-            INTERACTIVE_REGION_MAX_ROWS,
-        );
-        for (const row of strategy.finalRegion()) {
+        const region = strategy.finalRegion();
+        expect(region.length).toBeLessThanOrEqual(INTERACTIVE_REGION_MAX_ROWS);
+        for (const row of region) {
             expect(row.length).toBeLessThanOrEqual(80);
         }
+        await coordinator.dispose();
+        // Disposal erases the region in place: nothing survives.
+        expect(strategy.finalRegion()).toEqual([]);
     });
 
     test("interactive mode routes through the replaceable region and never the fallback sink", async () => {
@@ -460,13 +464,13 @@ describe("coordinator activity wiring", () => {
             context,
         );
         settle();
-        await coordinator.dispose();
-
         // All content flows through the strategy surface, not the `write` sink.
         expect(strategy.output()).toContain("│  $ echo hi");
         expect(fallback()).toBe("");
-        const lastPaint = strategy.finalRegion();
-        expect(lastPaint.length).toBeGreaterThan(0);
+        expect(strategy.finalRegion().length).toBeGreaterThan(0);
+        await coordinator.dispose();
+        // Disposal erases the region in place: nothing survives.
+        expect(strategy.finalRegion()).toEqual([]);
     });
 });
 

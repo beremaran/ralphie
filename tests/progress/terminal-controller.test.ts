@@ -328,7 +328,7 @@ describe("terminal output controller region", () => {
         expect(Bun.stringWidth(paint)).toBeLessThanOrEqual(10);
     });
 
-    test("disposal leaves the region in scrollback and restores the strategy", () => {
+    test("disposal erases the region in place, settles the cursor, and restores the strategy", () => {
         const activity = ["run bash", "run read"];
         const { output, settle, setFooter, controller } = makeHarness({
             activityLines: () => activity,
@@ -343,10 +343,23 @@ describe("terminal output controller region", () => {
         );
 
         controller.dispose();
+        // The region is erased in place and the stream settles on a fresh
+        // line, so no footer/status or activity fragment survives on the
+        // final surface.
         expect(output()).toBe(
             `stage\nrun bash\nrun read${CLEAR}${UP}${CLEAR}${UP}${CLEAR}` +
-                "assistant text\nstage\nrun bash\nrun read\n[restore]",
+                "assistant text\nstage\nrun bash\nrun read" +
+                `${CLEAR}${UP}${CLEAR}${UP}${CLEAR}\n[restore]`,
         );
+        // Double disposal is harmless: a second dispose writes no bytes.
+        const afterFirstDispose = output();
+        controller.dispose();
+        expect(output()).toBe(afterFirstDispose);
+        // A disposed controller ignores further region updates entirely.
+        setFooter("stale");
+        controller.invalidate();
+        settle();
+        expect(output()).toBe(afterFirstDispose);
     });
 
     test("disposal flushes lines deferred by an open transcript line", () => {

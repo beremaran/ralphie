@@ -360,7 +360,13 @@ export const makeTerminalOutputController = ({
             ensureLineBoundary();
             for (const line of pendingLines) strategy.write(`${line}\n`);
             pendingLines.length = 0;
-            if (regionShown) strategy.write("\n");
+            if (regionShown) {
+                // Erase the live region in place so no footer/status or
+                // activity fragment survives on the final screen, then settle
+                // the cursor on a fresh line below the durable content.
+                clearRegion();
+                strategy.write("\n");
+            }
             footerTarget = undefined;
             regionShown = false;
             regionRows = [];

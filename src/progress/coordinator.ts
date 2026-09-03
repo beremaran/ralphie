@@ -46,6 +46,7 @@ import { renderFooter } from "./footer.ts";
 import {
     makeTerminalOutputController,
     type TerminalFooterOptions,
+    type TerminalOutputController,
     type TerminalOutputStrategy,
     type TerminalResizeListener,
     type TerminalResizeSubscription,
@@ -66,6 +67,8 @@ export type ProgressCoordinatorOptions = Omit<
     readonly output?: ProgressOutput;
     /** Injectable sticky-footer scheduler and view settings. */
     readonly footer?: Omit<TerminalFooterOptions, "footerLine">;
+    /** Test seam: observe the interactive terminal output controller. */
+    readonly onController?: (controller: TerminalOutputController) => void;
     /** Injectable terminal surface, useful for deterministic coordinator tests. */
     readonly strategy?: TerminalOutputStrategy;
     /** Injectable resize source; the default listens to stderr in interactive mode. */
@@ -295,6 +298,7 @@ export const makeProgressCoordinator = (
                   },
               })
             : undefined;
+    if (controller !== undefined) options.onController?.(controller);
     const output: ProgressOutput =
         controller ??
         options.output ??
