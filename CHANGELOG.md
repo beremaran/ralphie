@@ -5,6 +5,23 @@ All notable changes to Ralphie are documented here. The project follows
 
 ## [Unreleased]
 
+- Validate OpenCode model/variant compatibility before execution and fail fast
+  on silent turns. After the OpenCode runtime starts, the workflow lists the
+  server's model catalog (`src/opencode/server.ts`, `src/opencode/variants.ts`)
+  and checks every planned stage variant (grounding, complexity,
+  implementation, review, commit message, plus the implementation fallback
+  model) against the variants each model advertises (`default` is always
+  accepted). Unsupported combinations abort the run before any issue work with
+  the offending stage, model, available variants, and the exact
+  `--*-thinking` flag to adjust, instead of failing mid-run with a misleading
+  contract error. Separately, structured and unstructured prompts now treat a
+  turn that produces no assistant message (for example a server-side model
+  resolution failure) as a distinct silent-turn failure naming the model,
+  variant, and session, with no pointless contract-violation retries; genuine
+  contract misses now emit the transcript and include a response preview in
+  the error. Covered by `tests/opencode-variants.test.ts`, new silent-turn
+  cases in `tests/opencode-client.test.ts`, and fail-fast workflow tests.
+
 - Add the standalone Bun-invokable release target command
   (`scripts/standalone-targets.ts`, exposed as the package script `targets`,
   `bun run targets -- ...`) on top of the release target query API,

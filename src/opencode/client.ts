@@ -146,6 +146,15 @@ export type AgentClient = {
 };
 
 /** Minimal OpenCode transport; production binds this to @opencode-ai/client. */
+export type OpenCodeModelInfo = {
+    readonly providerID: string;
+    readonly modelID: string;
+    readonly id?: string;
+    readonly name?: string;
+    readonly enabled?: boolean;
+    readonly variants: ReadonlyArray<string>;
+};
+
 export type OpenCodeTransport = {
     readonly sessionCreate: (input: {
         readonly title?: string;
@@ -179,6 +188,12 @@ export type OpenCodeTransport = {
         readonly requestID: string;
         readonly reply: "once" | "always" | "reject";
     }) => Promise<void>;
+    readonly modelList?: (input: {
+        readonly directory?: string;
+    }) => Promise<ReadonlyArray<OpenCodeModelInfo>>;
+    readonly modelDefault?: (input: {
+        readonly directory?: string;
+    }) => Promise<OpenCodeModelInfo | undefined>;
 };
 
 export type OpenCodeMessage = {
@@ -205,6 +220,8 @@ export type OpenCodeClientOptions = {
     readonly sessionWaitMaxRetries?: number;
     /** Initial backoff between wait retries; doubles after each failure. */
     readonly sessionWaitBackoffMs?: number;
+    /** Grace for a transcript that shows no assistant message after the wait returns. */
+    readonly silentTurnSettleMs?: number;
 };
 
 export type OpenCodePermissionRequest = {
@@ -253,6 +270,14 @@ const toTransportModel = (
         id,
         ...(variant === undefined ? {} : { variant }),
     };
+};
+
+const modelReferenceOf = (
+    model: PendingSession["model"],
+): string | undefined => {
+    if (model === undefined) return undefined;
+    const id = modelIDOf(model);
+    return id === undefined ? undefined : `${model.providerID}/${id}`;
 };
 
 const assistantTextOf = (messages: ReadonlyArray<OpenCodeMessage>): string => {
@@ -477,6 +502,30 @@ type AttemptOutcome = {
     readonly messages: ReadonlyArray<OpenCodeMessage>;
 };
 
+const sleep = (ms: number): Promise<void> =>
+    new Promise((resolve) => setTimeout(resolve, ms));
+
+const DEFAULT_SILENT_TURN_SETTLE_MS = 50;
+
+const hasAssistantMessage = (
+    messages: ReadonlyArray<OpenCodeMessage>,
+): boolean => messages.some((message) => message.type === "assistant");
+
+const silentTurnError = (created: PendingSession): RalphieError => {
+    const model = modelReferenceOf(created.model);
+    const target =
+        model === undefined
+            ? "default model"
+            : created.variant === undefined
+              ? model
+              : `${model} (variant ${created.variant})`;
+    return new RalphieError({
+        message:
+            `OpenCode completed the turn without producing any assistant response (${target}, session ${created.openCodeSessionID}). ` +
+            "The turn likely failed before execution (such as an unsupported model variant or server rejection); check the OpenCode server logs.",
+    });
+};
+
 const runPromptOnce = async (
     transport: OpenCodeTransport,
     openCodeSessionID: string,
@@ -486,9 +535,17 @@ const runPromptOnce = async (
 ): Promise<AttemptOutcome> => {
     await transport.sessionPrompt({ sessionID: openCodeSessionID, text });
     await waitWithWatcher(transport, openCodeSessionID, signal, options);
-    const messages = await transport.messageList({
+    let messages = await transport.messageList({
         sessionID: openCodeSessionID,
     });
+    const settleMs =
+        options.silentTurnSettleMs ?? DEFAULT_SILENT_TURN_SETTLE_MS;
+    if (!hasAssistantMessage(messages) && settleMs > 0) {
+        await sleep(settleMs);
+        messages = await transport.messageList({
+            sessionID: openCodeSessionID,
+        });
+    }
     return { text: assistantTextOf(messages), messages };
 };
 
@@ -558,6 +615,9 @@ const runStructuredPrompt = async (
             signal,
             options,
         );
+        if (!hasAssistantMessage(last.messages)) {
+            throw silentTurnError(created);
+        }
         const checked = validStructuredCandidate(input.format, last.text);
         if (checked.value !== undefined) {
             return finishStructuredAttempt(
@@ -580,8 +640,13 @@ const runStructuredPrompt = async (
             },
         };
     }
+    emitSessionTranscript(emit, last.messages, last.text, context);
+    const preview =
+        last.text.trim() === ""
+            ? ""
+            : ` Last response preview: ${JSON.stringify(last.text.slice(0, 160))}.`;
     throw new RalphieError({
-        message: `OpenCode completed without a valid fenced json result.${lastError === undefined ? "" : ` Last validation error: ${lastError.slice(0, 500)}`}`,
+        message: `OpenCode completed without a valid fenced json result.${lastError === undefined ? "" : ` Last validation error: ${lastError.slice(0, 500)}`}${preview}`,
     });
 };
 
@@ -601,6 +666,9 @@ const runUnstructuredPrompt = async (
         signal,
         options,
     );
+    if (!hasAssistantMessage(outcome.messages)) {
+        throw silentTurnError(created);
+    }
     const needsAttention = extractNeedsAttentionJson(outcome.text);
     emitSessionTranscript(emit, outcome.messages, outcome.text, context);
     emit({ type: "agent_end", willRetry: false }, context);
@@ -617,9 +685,6 @@ const runUnstructuredPrompt = async (
         },
     };
 };
-
-const sleep = (ms: number): Promise<void> =>
-    new Promise((resolve) => setTimeout(resolve, ms));
 
 const SESSION_WAIT_MAX_RETRIES = 8;
 const SESSION_WAIT_BACKOFF_MS = 250;

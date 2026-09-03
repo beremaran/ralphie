@@ -27,6 +27,7 @@ import {
     toQueuedIssues,
 } from "./issues/queue.ts";
 import type { OpenCodeRuntime } from "./opencode/server.ts";
+import { validateModelVariants } from "./opencode/variants.ts";
 import type { GitHubPullRequest } from "./github/pull-requests.ts";
 import type {
     PipelineObservationOutcome,
@@ -939,6 +940,30 @@ const emitRunFailed = async (
             statePath: config.statePath,
         },
     });
+};
+
+const validateRuntimeModelVariants = async (
+    server: OpenCodeRuntime,
+    config: WorkflowConfiguration,
+    directory: string,
+): Promise<void> => {
+    if (server.modelList === undefined) return;
+    try {
+        const [models, defaultModel] = await Promise.all([
+            server.modelList({ directory }),
+            server.modelDefault?.({ directory }),
+        ]);
+        validateModelVariants({
+            models,
+            defaultModel,
+            primaryModel: config.model,
+            fallbackModel: config.implementationFallbackModel,
+            defaultVariant: config.modelVariant,
+            stageVariants: config.agentStageVariants,
+        });
+    } catch (cause) {
+        if (cause instanceof RalphieError) throw cause;
+    }
 };
 
 /** Run Ralphie using an explicit dependency object. */
@@ -2722,6 +2747,11 @@ export const workflow = async (
                 async () => {
                     const started = await opencode.start();
                     server = started;
+                    await validateRuntimeModelVariants(
+                        started,
+                        config,
+                        prepared.path,
+                    );
                     return started;
                 },
                 "OpenCode runtime ready.",

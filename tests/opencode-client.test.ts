@@ -178,3 +178,115 @@ describe("structured output failure reporting", () => {
         ).rejects.toThrow(/Cause: ClientError: Transport/);
     });
 });
+
+describe("silent turn detection", () => {
+    test("fails fast without retrying when the turn produces no assistant message", async () => {
+        const transport = makeFakeTransport(
+            async () => undefined,
+            () => [],
+        );
+
+        await expect(
+            prompt(transport, {
+                sessionWaitMaxRetries: 1,
+                sessionWaitBackoffMs: 1,
+                silentTurnSettleMs: 1,
+            }),
+        ).rejects.toThrow(
+            /completed the turn without producing any assistant response/,
+        );
+
+        expect(transport.waitCalls()).toBe(1);
+    });
+
+    test("recovers when the assistant message lands during the settle window", async () => {
+        let calls = 0;
+        const transport = makeFakeTransport(
+            async () => undefined,
+            () => {
+                calls += 1;
+                return calls === 1
+                    ? []
+                    : [terminalMessage(fencedJson({ ok: true }))];
+            },
+        );
+
+        const result = await prompt(transport, {
+            sessionWaitMaxRetries: 1,
+            sessionWaitBackoffMs: 1,
+            silentTurnSettleMs: 5,
+        });
+
+        expect(result.error).toBeUndefined();
+        expect(result.data?.info.structured).toEqual({ ok: true });
+    });
+
+    test("unstructured prompts fail fast on a silent turn", async () => {
+        const transport = makeFakeTransport(
+            async () => undefined,
+            () => [],
+        );
+        const client = makeOpenCodeClient(transport, undefined, {
+            sessionWaitMaxRetries: 1,
+            sessionWaitBackoffMs: 1,
+            silentTurnSettleMs: 1,
+        });
+        const created = await client.session.create({
+            directory: "/repo",
+            title: "test",
+        });
+        if (created.data === undefined)
+            throw new Error("session create failed");
+
+        await expect(
+            client.session.prompt({
+                sessionID: created.data.id,
+                directory: "/repo",
+                parts: [{ type: "text", text: "Do the work." }],
+            }),
+        ).rejects.toThrow(
+            /completed the turn without producing any assistant response/,
+        );
+    });
+});
+
+describe("structured contract failure diagnostics", () => {
+    test("emits the transcript and includes a response preview", async () => {
+        const events: Array<{ readonly type: string }> = [];
+        const transport = makeFakeTransport(
+            async () => undefined,
+            () => [terminalMessage("analysis without any json payload")],
+        );
+        const client = makeOpenCodeClient(
+            transport,
+            (event) => {
+                events.push(event as { readonly type: string });
+            },
+            {
+                sessionWaitMaxRetries: 1,
+                sessionWaitBackoffMs: 1,
+            },
+        );
+        const created = await client.session.create({
+            directory: "/repo",
+            title: "test",
+        });
+        if (created.data === undefined)
+            throw new Error("session create failed");
+
+        const failure = await client.session
+            .prompt({
+                sessionID: created.data.id,
+                directory: "/repo",
+                parts: [{ type: "text", text: "Do the work." }],
+                format: structuredFormat,
+            })
+            .catch((error: unknown) => error);
+        expect(String((failure as Error)?.message ?? failure)).toMatch(
+            /Last response preview/,
+        );
+        expect(events.some((event) => event.type === "message_update")).toBe(
+            true,
+        );
+    });
+});

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { Octokit } from "octokit";
 import type { AgentClient } from "../src/opencode/client.ts";
+import type { OpenCodeModelInfo } from "../src/opencode/client.ts";
 
 import { CommandRunnerLive } from "../src/process/command-runner.ts";
 import type { GitRepositoryService } from "../src/git/repository.ts";
@@ -161,6 +162,10 @@ type TestRuntimeOptions = {
     readonly observeAbortController?: AbortController;
     /** When set, merging the pull request rejects with this error. */
     readonly mergePullRequestFailure?: RalphieError;
+    /** Model catalog exposed by the mock OpenCode runtime for variant checks. */
+    readonly opencodeModels?: ReadonlyArray<OpenCodeModelInfo>;
+    /** Default model exposed by the mock OpenCode runtime. */
+    readonly opencodeDefaultModel?: OpenCodeModelInfo;
 };
 
 const testRuntime = (
@@ -410,6 +415,17 @@ const testRuntime = (
             return {
                 url: "http://127.0.0.1:4096",
                 client: {} as AgentClient,
+                ...(options.opencodeModels === undefined
+                    ? {}
+                    : {
+                          modelList: async () => options.opencodeModels ?? [],
+                      }),
+                ...(options.opencodeDefaultModel === undefined
+                    ? {}
+                    : {
+                          modelDefault: async () =>
+                              options.opencodeDefaultModel,
+                      }),
                 close: async () => {
                     calls.push("closeRuntime");
                 },
@@ -785,6 +801,63 @@ describe("workflow", () => {
         expect(events.some(({ stage }) => stage === "issue-execution")).toBe(
             true,
         );
+    });
+
+    test("fails fast before any issue work when a stage variant is unsupported", async () => {
+        const calls: string[] = [];
+        const states: RunState[] = [];
+        await expect(
+            workflow(
+                {
+                    ...baseOptions,
+                    model: {
+                        providerID: "opencode-go",
+                        modelID: "deepseek-v4-flash",
+                    },
+                    agentStageVariants: {
+                        grounding: "low",
+                        complexity: "medium",
+                        implementation: "high",
+                        review: "high",
+                        commitMessage: "low",
+                    },
+                },
+                testRuntime(calls, states, {
+                    opencodeModels: [
+                        {
+                            providerID: "opencode-go",
+                            modelID: "deepseek-v4-flash",
+                            variants: ["low", "high", "max"],
+                        },
+                    ],
+                }),
+            ),
+        ).rejects.toThrow(/--complexity-thinking/);
+        expectNoIssueWork(calls);
+        expect(calls).toContain("closeRuntime");
+    });
+
+    test("skips variant validation when the runtime exposes no model catalog", async () => {
+        const calls: string[] = [];
+        const states: RunState[] = [];
+        const summary = await workflow(
+            {
+                ...baseOptions,
+                model: {
+                    providerID: "opencode-go",
+                    modelID: "deepseek-v4-flash",
+                },
+                agentStageVariants: {
+                    grounding: "low",
+                    complexity: "medium",
+                    implementation: "high",
+                    review: "high",
+                    commitMessage: "low",
+                },
+            },
+            testRuntime(calls, states, {}),
+        );
+        expect(summary.counts.completed).toBe(1);
     });
 
     test("keeps completed issue closure unchanged when notifications are enabled", async () => {

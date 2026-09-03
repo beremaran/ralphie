@@ -7,6 +7,7 @@ import {
     type AgentClient,
     type AgentEventListener,
     type OpenCodeMessage,
+    type OpenCodeModelInfo,
     type OpenCodeTransport,
 } from "./client.ts";
 import type { OpenCodeProviderConfig } from "./config.ts";
@@ -15,6 +16,12 @@ export type OpenCodeRuntime = {
     readonly url: string;
     readonly client: AgentClient;
     readonly close: () => Promise<void>;
+    readonly modelList?: (input: {
+        readonly directory?: string;
+    }) => Promise<ReadonlyArray<OpenCodeModelInfo>>;
+    readonly modelDefault?: (input: {
+        readonly directory?: string;
+    }) => Promise<OpenCodeModelInfo | undefined>;
 };
 
 export type OpenCodeService = {
@@ -22,6 +29,38 @@ export type OpenCodeService = {
 };
 
 type OpenCodeHttpClient = ReturnType<typeof OpenCode.make>;
+
+const stringVariantOf = (variant: unknown): string | undefined => {
+    if (typeof variant === "string" && variant !== "") return variant;
+    if (
+        typeof variant === "object" &&
+        variant !== null &&
+        "id" in variant &&
+        typeof (variant as { readonly id?: unknown }).id === "string"
+    ) {
+        const id = (variant as { readonly id: string }).id;
+        return id === "" ? undefined : id;
+    }
+    return undefined;
+};
+
+const extractVariants = (item: any): ReadonlyArray<string> => {
+    if (!Array.isArray(item?.variants)) return [];
+    return item.variants
+        .map(stringVariantOf)
+        .filter((v: string | undefined): v is string => v !== undefined);
+};
+
+const toModelInfo = (item: any): OpenCodeModelInfo => ({
+    providerID: String(item.providerID ?? ""),
+    modelID: String(item.modelID ?? item.id ?? ""),
+    id: typeof item.id === "string" ? item.id : undefined,
+    name: typeof item.name === "string" ? item.name : undefined,
+    variants: extractVariants(item),
+});
+
+const modelPayloadOf = (response: unknown): unknown =>
+    (response as { readonly data?: unknown })?.data ?? response;
 
 const transportFrom = (client: OpenCodeHttpClient): OpenCodeTransport => ({
     sessionCreate: async (input) => {
@@ -88,6 +127,34 @@ const transportFrom = (client: OpenCodeHttpClient): OpenCodeTransport => ({
             reply: input.reply,
         });
     },
+    modelList: async (input) => {
+        try {
+            const response = await client.model.list(
+                input?.directory === undefined
+                    ? undefined
+                    : { location: { directory: input.directory } },
+            );
+            const data = modelPayloadOf(response);
+            if (!Array.isArray(data)) return [];
+            return data.map(toModelInfo);
+        } catch {
+            return [];
+        }
+    },
+    modelDefault: async (input) => {
+        try {
+            const response = await client.model.default(
+                input?.directory === undefined
+                    ? undefined
+                    : { location: { directory: input.directory } },
+            );
+            const data = modelPayloadOf(response);
+            if (data === null || typeof data !== "object") return undefined;
+            return toModelInfo(data);
+        } catch {
+            return undefined;
+        }
+    },
 });
 
 const openCodeClientFromConfig = async (
@@ -148,14 +215,14 @@ export const makeOpenCodeService = (
     start: async () => {
         try {
             const { url, client } = await openCodeClientFromConfig(config);
-            const agent = makeOpenCodeClient(
-                transportFrom(client),
-                eventListener,
-            );
+            const transport = transportFrom(client);
+            const agent = makeOpenCodeClient(transport, eventListener);
             let closed = false;
             return {
                 url,
                 client: agent,
+                modelList: transport.modelList,
+                modelDefault: transport.modelDefault,
                 close: async () => {
                     if (closed) return;
                     closed = true;
