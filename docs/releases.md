@@ -222,7 +222,15 @@ written only through the create-only reconciler (see
 never by shell truncation, `docker/metadata-action`, or `docker manifest`
 inference. The persisted `ralphie.publication-subjects.v1` map feeds the
 attestation steps. Focused unit coverage lives in
-`tests/release/container-tags.test.ts` and `tests/release/container-index.test.ts`.
+`tests/release/container-tags.test.ts` and `tests/release/container-index.test.ts`;
+executable regression coverage for the promotion and reconciliation contract
+runs against local OCI-archive fixture candidates and the loopback fake registry
+(`tests/release/container-registry-reconcile.test.ts` and
+`tests/release/container-registry-regression.test.ts`, driven by
+`src/release/registry-fixture.ts`), and
+`tests/release/container-workflow-contract.test.ts` guards the staging-job
+credential boundary and the validation-before-authentication/production-write
+step ordering in `.github/workflows/release.yml`.
 
 ### Container build input boundary
 
