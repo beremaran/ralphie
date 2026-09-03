@@ -20,6 +20,15 @@
  *   manifest record (`StandaloneTarget`). The downloaded asset is exactly the
  *   record's `releaseAssetName`; it is never reconstructed from the pair.
  *
+ * - `posix-installer-mapping` —
+ *   `renderPosixInstallerMapping(value)` returns the checked-in generated
+ *   POSIX installer mapping: the complete accepted alias tables
+ *   (`osAliases`, `archAliases`, canonical values plus the query API's
+ *   `uname` spellings as identity/alias entries) and the four full manifest
+ *   records sorted by stable `id`. Installer resolution of a raw `uname`
+ *   pair is: case-fold the raw value, resolve it through the alias table,
+ *   then read the matching record's `releaseAssetName` — never rebuilt.
+ *
  * - `homebrew-target-rows` —
  *   `renderHomebrewTargetRows(value, version)` returns rows sorted
  *   lexicographically by stable `id`. Each row contains the complete manifest
@@ -40,7 +49,11 @@
  * need a finished JSON document; the renderers themselves stay in memory.
  */
 import { RalphieError } from "../shared/error.ts";
-import { createStandaloneTargetQueryClient } from "./standalone-target-query.ts";
+import {
+    ARCH_ALIASES,
+    createStandaloneTargetQueryClient,
+    OS_ALIASES,
+} from "./standalone-target-query.ts";
 import type {
     StandaloneTarget,
     StandaloneTargets,
@@ -122,6 +135,56 @@ const releaseDownloadUrl = (
  * `binaryFormat`, `bunVersion`, `dockerPlatform`) is reconstructed from the
  * asset name.
  */
+/**
+ * POSIX installer mapping (`posix-installer-mapping`).
+ *
+ * The checked-in generated artifact for the standalone installer
+ * (`targets/posix-installer-targets.json`) is the full mapping: the accepted
+ * `uname` alias tables and the four complete manifest records sorted by
+ * stable `id`. The downloaded asset is exactly the matching record's
+ * `releaseAssetName`; no field (`bunCompileTarget`, `targetTriple`, `runner`,
+ * `binaryFormat`, `bunVersion`, `dockerPlatform`) is reconstructed from the
+ * asset name or used to derive one.
+ */
+
+/** Accepted `uname` OS spellings mapped to canonical manifest `os` values. */
+export type PosixInstallerAliasMap = Readonly<Record<string, string>>;
+
+/** The generated POSIX installer mapping document shape. */
+export type PosixInstallerMapping = {
+    /** Every canonical `os` as an identity plus the extra accepted spellings. */
+    readonly osAliases: PosixInstallerAliasMap;
+    /** Every canonical `arch` as an identity plus the extra accepted spellings. */
+    readonly archAliases: PosixInstallerAliasMap;
+    /** The complete validated manifest records sorted by stable `id`. */
+    readonly targets: ReadonlyArray<StandaloneTarget>;
+};
+
+export const renderPosixInstallerMapping = (
+    value: unknown,
+): PosixInstallerMapping => {
+    const catalog = validatedCatalogOf(value);
+
+    const aliasMapEntries = (
+        records: StandaloneTargets,
+        field: "os" | "arch",
+        aliases: Readonly<Record<string, string>>,
+    ): PosixInstallerAliasMap => {
+        const entries: Record<string, string> = {};
+        for (const target of records) {
+            entries[target[field]] = target[field];
+        }
+        Object.assign(entries, aliases);
+        return Object.freeze(entries);
+    };
+
+    return Object.freeze({
+        osAliases: aliasMapEntries(catalog, "os", OS_ALIASES),
+        archAliases: aliasMapEntries(catalog, "arch", ARCH_ALIASES),
+        targets: sortedCatalog(catalog),
+    });
+};
+
 export const renderPosixInstallerTarget = (
     value: unknown,
     os: string,

@@ -17,6 +17,11 @@ distribution metadata:
 - releases and native assets: <https://github.com/beremaran/ralphie/releases>;
 - native asset URL template: `https://github.com/beremaran/ralphie/releases/download/<tag>/<asset-name>` (anonymous);
 - raw installer: <https://raw.githubusercontent.com/beremaran/ralphie/main/scripts/install.sh>;
+- POSIX installer target mapping:
+  <https://raw.githubusercontent.com/beremaran/ralphie/main/targets/posix-installer-targets.json>
+  (a generated document; the raw installer fetches it to resolve the release
+  asset name from `uname` output, so no separate platform-to-asset list is
+  maintained in the installer);
 - Homebrew custom tap: `brew tap beremaran/ralphie https://github.com/beremaran/ralphie`;
 - Homebrew formula source: <https://raw.githubusercontent.com/beremaran/ralphie/main/Formula/ralphie.rb>;
 - OCI image: `ghcr.io/beremaran/ralphie`; and

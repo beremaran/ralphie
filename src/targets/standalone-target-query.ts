@@ -81,13 +81,22 @@ export class MismatchedTargetSelectorError extends RalphieError {
     }
 }
 
-/** Well-known os spellings that normalize to a canonical manifest `os`. */
-const OS_ALIASES = {
+/**
+ * Well-known os spellings that normalize to a canonical manifest `os`. The
+ * canonical `os` values themselves are always accepted identity aliases; these
+ * are the extra spellings (e.g. `uname -s` output) that must also resolve.
+ */
+export const OS_ALIASES = {
     macos: "darwin",
 } as const;
 
-/** Well-known arch spellings that normalize to a canonical manifest `arch`. */
-const ARCH_ALIASES = {
+/**
+ * Well-known arch spellings that normalize to a canonical manifest `arch`. The
+ * canonical `arch` values themselves are always accepted identity aliases;
+ * these are the extra spellings (e.g. `uname -m` output) that must also
+ * resolve.
+ */
+export const ARCH_ALIASES = {
     aarch64: "arm64",
     x86_64: "x64",
     amd64: "x64",

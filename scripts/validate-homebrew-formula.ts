@@ -2,11 +2,19 @@
 
 import { readFile } from "node:fs/promises";
 
-import { RELEASE_TARGETS } from "./create-sha256sums.ts";
+import {
+    renderHomebrewTargetRows,
+    type HomebrewTargetRow,
+} from "../src/targets/standalone-target-renderers.ts";
+import { loadStandaloneTargets } from "../src/targets/standalone-targets.ts";
+import { homebrewPlatformLabel } from "./generate-homebrew-formula.ts";
 
-export const HOMEBREW_TARGETS = RELEASE_TARGETS;
-
-type HomebrewTarget = (typeof HOMEBREW_TARGETS)[number];
+/** A catalog-derived Homebrew release asset and its formula branch. */
+export type HomebrewExpectedAsset = {
+    readonly assetName: string;
+    readonly os: "darwin" | "linux";
+    readonly arch: "arm64" | "x64";
+};
 
 export type HomebrewFormulaMapping = {
     readonly assetName: string;
@@ -23,30 +31,55 @@ type ValidateHomebrewFormulaOptions = {
 const releaseBase = "https://github.com/beremaran/ralphie/releases/download";
 const sha256Pattern = /^[0-9a-f]{64}$/;
 
-const expectedAssetName = (target: HomebrewTarget): string =>
-    `ralphie-${target}`;
+/** The expected assets come from catalog rows, never from a rebuilt name. */
+export const expectedAssetsFromRows = (
+    rows: ReadonlyArray<HomebrewTargetRow>,
+): ReadonlyArray<HomebrewExpectedAsset> =>
+    rows.map((row) => ({
+        assetName: row.target.releaseAssetName,
+        os: row.target.os,
+        arch: row.target.arch,
+    }));
 
-const expectedUrl = (version: string, target: HomebrewTarget): string =>
-    `${releaseBase}/v${version}/${expectedAssetName(target)}`;
+const expectedUrl = (version: string, assetName: string): string =>
+    `${releaseBase}/v${version}/${assetName}`;
 
-const expectedFormulaUrl = (target: HomebrewTarget): string =>
-    `${releaseBase}/v#{version}/${expectedAssetName(target)}`;
+const expectedFormulaUrl = (assetName: string): string =>
+    `${releaseBase}/v#{version}/${assetName}`;
 
 const escapeRegExp = (value: string): string =>
     value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-const HOMEBREW_TARGET_BRANCHES = [
-    {
-        platform: "macos",
-        armTarget: "darwin-arm64",
-        x64Target: "darwin-x64",
-    },
-    {
-        platform: "linux",
-        armTarget: "linux-arm64",
-        x64Target: "linux-x64",
-    },
-] as const;
+type TargetBranch = {
+    readonly platform: string;
+    readonly armAsset: string;
+    readonly x64Asset: string;
+};
+
+/** One arm/x64 branch per platform, derived from the catalog rows. */
+const targetBranches = (
+    expected: ReadonlyArray<HomebrewExpectedAsset>,
+): ReadonlyArray<TargetBranch> => {
+    const platforms = [...new Set(expected.map((asset) => asset.os))].sort();
+    return platforms.map((platform) => {
+        const arm = expected.find(
+            (asset) => asset.os === platform && asset.arch === "arm64",
+        );
+        const x64 = expected.find(
+            (asset) => asset.os === platform && asset.arch === "x64",
+        );
+        if (arm === undefined || x64 === undefined) {
+            throw new Error(
+                `Catalog must contain both arm64 and x64 targets for '${platform}'.`,
+            );
+        }
+        return {
+            platform: homebrewPlatformLabel(platform),
+            armAsset: arm.assetName,
+            x64Asset: x64.assetName,
+        };
+    });
+};
 
 function assert(condition: boolean, message: string): asserts condition {
     if (!condition) throw new Error(message);
@@ -61,7 +94,9 @@ const formulaVersion = (formula: string): string => {
 const formulaMappings = (
     formula: string,
     version: string,
+    expected: ReadonlyArray<HomebrewExpectedAsset>,
 ): ReadonlyArray<HomebrewFormulaMapping> => {
+    const expectedNames = expected.map((asset) => asset.assetName);
     const urls = [...formula.matchAll(/^\s*url\s+"([^"\r\n]+)"\s*$/gm)];
     const checksums = [...formula.matchAll(/^\s*sha256\s+"([^"\r\n]+)"\s*$/gm)];
     const mappings = [
@@ -71,16 +106,16 @@ const formulaMappings = (
     ];
 
     assert(
-        urls.length === HOMEBREW_TARGETS.length,
-        `Formula must contain exactly ${HOMEBREW_TARGETS.length} URLs; found ${urls.length}.`,
+        urls.length === expectedNames.length,
+        `Formula must contain exactly ${expectedNames.length} URLs; found ${urls.length}.`,
     );
     assert(
-        checksums.length === HOMEBREW_TARGETS.length,
-        `Formula must contain exactly ${HOMEBREW_TARGETS.length} SHA-256 values; found ${checksums.length}.`,
+        checksums.length === expectedNames.length,
+        `Formula must contain exactly ${expectedNames.length} SHA-256 values; found ${checksums.length}.`,
     );
     assert(
-        mappings.length === HOMEBREW_TARGETS.length,
-        `Formula must contain exactly ${HOMEBREW_TARGETS.length} URL/checksum mappings; found ${mappings.length}.`,
+        mappings.length === expectedNames.length,
+        `Formula must contain exactly ${expectedNames.length} URL/checksum mappings; found ${mappings.length}.`,
     );
 
     return mappings.map((mapping) => {
@@ -94,9 +129,7 @@ const formulaMappings = (
             `Invalid SHA-256 value for ${assetName}: ${sha256}.`,
         );
         assert(
-            HOMEBREW_TARGETS.some(
-                (target) => expectedUrl(version, target) === url,
-            ),
+            expectedNames.some((name) => expectedUrl(version, name) === url),
             `Formula URL does not match a release asset for version ${version}: ${rawUrl}.`,
         );
 
@@ -105,28 +138,28 @@ const formulaMappings = (
 };
 
 const targetMappingPattern = (
-    target: HomebrewTarget,
+    assetName: string,
     mappings: ReadonlyMap<string, HomebrewFormulaMapping>,
 ): string => {
-    const mapping = mappings.get(expectedAssetName(target));
-    assert(mapping !== undefined, `Missing formula mapping for ${target}.`);
+    const mapping = mappings.get(assetName);
+    assert(mapping !== undefined, `Missing formula mapping for ${assetName}.`);
     return [
-        `[ \\t]*url[ \\t]+"${escapeRegExp(expectedFormulaUrl(target))}"[ \\t]*`,
+        `[ \\t]*url[ \\t]+"${escapeRegExp(expectedFormulaUrl(assetName))}"[ \\t]*`,
         `\\r?\\n[ \\t]*sha256[ \\t]+"${escapeRegExp(mapping.sha256)}"[ \\t]*`,
     ].join("");
 };
 
 const targetBranchPattern = (
-    branch: (typeof HOMEBREW_TARGET_BRANCHES)[number],
+    branch: TargetBranch,
     mappings: ReadonlyMap<string, HomebrewFormulaMapping>,
 ): RegExp =>
     new RegExp(
         [
             `^[ \\t]*on_${branch.platform}[ \\t]+do[ \\t]*\\r?\\n`,
             `[ \\t]*if[ \\t]+Hardware::CPU\\.arm\\?[ \\t]*\\r?\\n`,
-            targetMappingPattern(branch.armTarget, mappings),
+            targetMappingPattern(branch.armAsset, mappings),
             `[ \\t]*\\r?\\n[ \\t]*else[ \\t]*\\r?\\n`,
-            targetMappingPattern(branch.x64Target, mappings),
+            targetMappingPattern(branch.x64Asset, mappings),
             `[ \\t]*\\r?\\n[ \\t]*end[ \\t]*\\r?\\n`,
             `[ \\t]*end[ \\t]*(?:\\r?\\n|$)`,
         ].join(""),
@@ -135,17 +168,21 @@ const targetBranchPattern = (
 
 const validateTargetPlacement = (
     formula: string,
+    expected: ReadonlyArray<HomebrewExpectedAsset>,
     mappings: ReadonlyMap<string, HomebrewFormulaMapping>,
 ): void => {
-    for (const branch of HOMEBREW_TARGET_BRANCHES) {
+    for (const branch of targetBranches(expected)) {
         assert(
             targetBranchPattern(branch, mappings).test(formula),
-            `Formula must map ${expectedAssetName(branch.armTarget)} to the arm branch and ${expectedAssetName(branch.x64Target)} to the x64 branch under on_${branch.platform}.`,
+            `Formula must map ${branch.armAsset} to the arm branch and ${branch.x64Asset} to the x64 branch under on_${branch.platform}.`,
         );
     }
 };
 
-const manifestMappings = (manifest: string): ReadonlyMap<string, string> => {
+const manifestMappings = (
+    manifest: string,
+    expectedNames: ReadonlyArray<string>,
+): ReadonlyMap<string, string> => {
     const content = manifest.endsWith("\n") ? manifest.slice(0, -1) : manifest;
     const lines = content.split(/\r?\n/);
     const entries = new Map<string, string>();
@@ -176,11 +213,10 @@ const manifestMappings = (manifest: string): ReadonlyMap<string, string> => {
         checksums.add(checksum);
     }
 
-    const expectedAssets = HOMEBREW_TARGETS.map(expectedAssetName);
     assert(
-        entries.size === expectedAssets.length &&
-            expectedAssets.every((assetName) => entries.has(assetName)),
-        `SHA256SUMS must contain exactly: ${expectedAssets.join(", ")}.`,
+        entries.size === expectedNames.length &&
+            expectedNames.every((assetName) => entries.has(assetName)),
+        `SHA256SUMS must contain exactly: ${expectedNames.join(", ")}.`,
     );
     return entries;
 };
@@ -188,16 +224,18 @@ const manifestMappings = (manifest: string): ReadonlyMap<string, string> => {
 export const parseHomebrewFormula = (
     formula: string,
     version: string,
+    expected: ReadonlyArray<HomebrewExpectedAsset>,
 ): ReadonlyMap<string, HomebrewFormulaMapping> => {
+    const expectedNames = expected.map((asset) => asset.assetName);
     assert(
         formulaVersion(formula) === version,
         `Formula version must be ${version}.`,
     );
 
-    const mappings = formulaMappings(formula, version);
+    const mappings = formulaMappings(formula, version, expected);
     assert(
         new Set(mappings.map((mapping) => mapping.sha256)).size ===
-            HOMEBREW_TARGETS.length,
+            expectedNames.length,
         "Formula must contain a distinct SHA-256 value for each release asset.",
     );
     const result = new Map<string, HomebrewFormulaMapping>();
@@ -209,10 +247,10 @@ export const parseHomebrewFormula = (
         result.set(mapping.assetName, mapping);
     }
     assert(
-        result.size === HOMEBREW_TARGETS.length,
+        result.size === expectedNames.length,
         `Formula must contain one mapping for each release asset; found ${result.size}.`,
     );
-    validateTargetPlacement(formula, result);
+    validateTargetPlacement(formula, expected, result);
     return result;
 };
 
@@ -220,12 +258,16 @@ export const validateHomebrewFormulaText = (
     formula: string,
     manifest: string,
     version: string,
+    expected: ReadonlyArray<HomebrewExpectedAsset>,
 ): void => {
-    const formulaEntries = parseHomebrewFormula(formula, version);
-    const manifestEntries = manifestMappings(manifest);
+    const formulaEntries = parseHomebrewFormula(formula, version, expected);
+    const manifestEntries = manifestMappings(
+        manifest,
+        expected.map((asset) => asset.assetName),
+    );
 
-    for (const target of HOMEBREW_TARGETS) {
-        const assetName = expectedAssetName(target);
+    for (const asset of expected) {
+        const assetName = asset.assetName;
         const formulaEntry = formulaEntries.get(assetName);
         const manifestChecksum = manifestEntries.get(assetName);
         assert(
@@ -244,11 +286,15 @@ export const validateHomebrewFormula = async ({
     manifestPath,
     version,
 }: ValidateHomebrewFormulaOptions): Promise<void> => {
-    const [formula, manifest] = await Promise.all([
+    const [formula, manifest, catalog] = await Promise.all([
         readFile(formulaPath, "utf8"),
         readFile(manifestPath, "utf8"),
+        loadStandaloneTargets(),
     ]);
-    validateHomebrewFormulaText(formula, manifest, version);
+    const expected = expectedAssetsFromRows(
+        renderHomebrewTargetRows(catalog, version),
+    );
+    validateHomebrewFormulaText(formula, manifest, version, expected);
 };
 
 const optionValue = (args: ReadonlyArray<string>, option: string): string => {

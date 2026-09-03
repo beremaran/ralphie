@@ -38,6 +38,9 @@
 
 import { appendFile, readFile } from "node:fs/promises";
 
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { RalphieError } from "../src/shared/error.ts";
 import {
     HOMEBREW_FORMULA_BEGIN_MARKER,
@@ -653,6 +656,15 @@ const validateManifest = (
     };
 };
 
+/** The canonical standalone target catalog, validated by the generator. */
+const canonicalCatalogValue = (): unknown =>
+    JSON.parse(
+        readFileSync(
+            resolve(import.meta.dir, "../targets/standalone-targets.json"),
+            "utf8",
+        ),
+    ) as unknown;
+
 /** Render the guarded candidate against a base formula, wrapping failures. */
 const candidateFormulaFor = (
     baseFormula: string,
@@ -667,7 +679,11 @@ const candidateFormulaFor = (
         })),
     };
     try {
-        return renderHomebrewFormula(baseFormula, metadata);
+        return renderHomebrewFormula(
+            baseFormula,
+            metadata,
+            canonicalCatalogValue(),
+        );
     } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
         return failPreflight(

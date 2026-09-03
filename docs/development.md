@@ -70,9 +70,9 @@ output exists.
 ```bash
 bun run targets -- query --id <stable-id>
 bun run targets -- query --os <os> --arch <arch>
-bun run targets -- generate --format <json|github-matrix|posix|homebrew|documentation> \
+bun run targets -- generate --format <json|github-matrix|posix|posix-mapping|homebrew|documentation> \
   [--version <version>] [--os <os> --arch <arch>] --output <file> [--manifest <path>]
-bun run targets -- check --format <json|github-matrix|posix|homebrew|documentation> \
+bun run targets -- check --format <json|github-matrix|posix|posix-mapping|homebrew|documentation> \
   [--version <version>] [--os <os> --arch <arch>] --file <file> [--manifest <path>]
 ```
 
@@ -85,7 +85,11 @@ bun run targets -- check --format <json|github-matrix|posix|homebrew|documentati
   LF line endings, and the final newline included — succeeds only on an exact
   match, and never rewrites the checked file.
 - `posix` selects a single record by `--os`/`--arch`; `homebrew` requires
-  `--version` (a plain `<major>.<minor>.<patch>`).
+  `--version` (a plain `<major>.<minor>.<patch>`). `posix-mapping` emits the
+  checked-in POSIX installer mapping artifact
+  (`targets/posix-installer-targets.json`): the accepted `uname` alias
+  tables plus all four records, consumed by `scripts/install.sh` at install
+  time without Bun.
 
 Every document shares one byte contract: UTF-8 without a BOM, LF line endings
 only, two-space indentation, object keys sorted lexicographically, and exactly

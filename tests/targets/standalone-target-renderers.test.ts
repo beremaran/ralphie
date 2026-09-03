@@ -4,6 +4,7 @@ import {
     InvalidHomebrewVersionError,
     renderDocumentationTargets,
     renderHomebrewTargetRows,
+    renderPosixInstallerMapping,
     renderPosixInstallerTarget,
 } from "../../src/targets/standalone-target-renderers.ts";
 import { UnsupportedTargetSelectorError } from "../../src/targets/standalone-target-query.ts";
@@ -86,6 +87,111 @@ describe("standalone target consumer renderers", () => {
         expect(() =>
             renderPosixInstallerTarget(canonicalCatalog, "darwin", "riscv64"),
         ).toThrow(UnsupportedTargetSelectorError);
+    });
+
+    test("posix installer mapping emits alias tables and all four records", () => {
+        const mapping = renderPosixInstallerMapping(canonicalCatalog);
+        expect(mapping.osAliases).toEqual({
+            darwin: "darwin",
+            linux: "linux",
+            macos: "darwin",
+        });
+        expect(mapping.archAliases).toEqual({
+            aarch64: "arm64",
+            amd64: "x64",
+            arm64: "arm64",
+            x64: "x64",
+            x86_64: "x64",
+        });
+        expect(mapping.targets.map((target) => target.id)).toEqual([
+            "darwin-arm64",
+            "darwin-x64",
+            "linux-arm64",
+            "linux-x64",
+        ]);
+        for (const target of mapping.targets) {
+            expect(target).toEqual(canonicalRecord(target.id));
+            expect(Object.isFrozen(target)).toBe(true);
+        }
+        expect(Object.isFrozen(mapping.osAliases)).toBe(true);
+        expect(Object.isFrozen(mapping.archAliases)).toBe(true);
+        expect(Object.isFrozen(mapping.targets)).toBe(true);
+    });
+
+    test("posix installer mapping resolves every canonical target and uname alias", () => {
+        const mapping = renderPosixInstallerMapping(canonicalCatalog);
+        const resolve = (os: string, arch: string) => {
+            const canonicalOs = mapping.osAliases[os.toLowerCase().trim()];
+            const canonicalArch =
+                mapping.archAliases[arch.toLowerCase().trim()];
+            if (canonicalOs === undefined || canonicalArch === undefined) {
+                return undefined;
+            }
+            const record = mapping.targets.find(
+                (target) =>
+                    target.os === canonicalOs && target.arch === canonicalArch,
+            );
+            return record?.releaseAssetName;
+        };
+
+        const cases = [
+            ["darwin", "arm64", "ralphie-darwin-arm64"],
+            ["darwin", "x64", "ralphie-darwin-x64"],
+            ["linux", "arm64", "ralphie-linux-arm64"],
+            ["linux", "x64", "ralphie-linux-x64"],
+            ["Darwin", "x86_64", "ralphie-darwin-x64"],
+            ["macOS", "aarch64", "ralphie-darwin-arm64"],
+            ["Linux", "amd64", "ralphie-linux-x64"],
+            ["  linux ", " ARM64 ", "ralphie-linux-arm64"],
+        ] as const;
+        for (const [os, arch, asset] of cases) {
+            expect(resolve(os, arch)).toBe(asset);
+        }
+
+        expect(resolve("Windows", "arm64")).toBeUndefined();
+        expect(resolve("darwin", "riscv64")).toBeUndefined();
+        expect(resolve("plan9", "i386")).toBeUndefined();
+        expect(resolve("linux", "mips64")).toBeUndefined();
+    });
+
+    test("installer mapping asset names come from releaseAssetName only", () => {
+        const mapping = renderPosixInstallerMapping(canonicalCatalog);
+        const rows = renderHomebrewTargetRows(canonicalCatalog, "0.1.2");
+        const ids = [
+            "darwin-arm64",
+            "darwin-x64",
+            "linux-arm64",
+            "linux-x64",
+        ] as const;
+        for (const id of ids) {
+            const record = canonicalRecord(id);
+            expect(
+                mapping.targets.find((target) => target.id === id)
+                    ?.releaseAssetName,
+            ).toBe(record.releaseAssetName);
+            expect(
+                rows.find((row) => row.target.id === id)?.target
+                    .releaseAssetName,
+            ).toBe(record.releaseAssetName);
+            expect(record.releaseAssetName).toBe(
+                `ralphie-${record.os}-${record.arch}`,
+            );
+        }
+
+        // A manifest edit that changes only bunCompileTarget never reaches a
+        // consumer mapping: canonical validation rejects the record before any
+        // output exists, so no asset name can be derived from (or coupled to)
+        // the compiler target field.
+        const edited = canonicalCatalog.map((record) =>
+            record.id === "darwin-arm64"
+                ? {
+                      ...record,
+                      bunCompileTarget: "bun-modified-darwin-arm64",
+                  }
+                : record,
+        );
+        expect(() => renderPosixInstallerMapping(edited)).toThrow();
+        expect(() => renderHomebrewTargetRows(edited, "0.1.2")).toThrow();
     });
 
     test("homebrew mapping emits rows sorted by stable id", () => {

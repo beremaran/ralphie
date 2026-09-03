@@ -49,6 +49,7 @@ import {
 import {
     renderDocumentationTargets,
     renderHomebrewTargetRows,
+    renderPosixInstallerMapping,
     renderPosixInstallerTarget,
 } from "../src/targets/standalone-target-renderers.ts";
 import {
@@ -58,11 +59,12 @@ import {
 } from "../src/targets/standalone-target-serializer.ts";
 import type { StandaloneTargets } from "../src/targets/standalone-targets.ts";
 
-/** The five document formats the targets command can generate and check. */
+/** The six document formats the targets command can generate and check. */
 export const STANDALONE_TARGETS_FORMATS = [
     "json",
     "github-matrix",
     "posix",
+    "posix-mapping",
     "homebrew",
     "documentation",
 ] as const;
@@ -219,6 +221,10 @@ const renderDocument = (
                 renderPosixInstallerTarget(catalog, selector.os, selector.arch),
             );
         }
+        case "posix-mapping":
+            return serializeStandaloneJsonDocument(
+                renderPosixInstallerMapping(catalog),
+            );
     }
 };
 
@@ -343,9 +349,9 @@ const USAGE = [
     "Usage:",
     "  bun run targets -- query --id <stable-id> [--manifest <path>]",
     "  bun run targets -- query --os <os> --arch <arch> [--manifest <path>]",
-    "  bun run targets -- generate --format <json|github-matrix|posix|homebrew|documentation>",
+    "  bun run targets -- generate --format <json|github-matrix|posix|posix-mapping|homebrew|documentation>",
     "      [--version <version>] [--os <os> --arch <arch>] --output <file> [--manifest <path>]",
-    "  bun run targets -- check --format <json|github-matrix|posix|homebrew|documentation>",
+    "  bun run targets -- check --format <json|github-matrix|posix|posix-mapping|homebrew|documentation>",
     "      [--version <version>] [--os <os> --arch <arch>] --file <file> [--manifest <path>]",
     "",
     "Modes:",
@@ -357,6 +363,8 @@ const USAGE = [
     "  json           Complete catalog array (default manifest; no selector).",
     "  github-matrix  GitHub Actions matrix object with an include array.",
     "  posix          The single record selected by --os/--arch (installer mapping).",
+    "  posix-mapping  The POSIX installer mapping doc (alias tables + all records);",
+    "                 checked in at targets/posix-installer-targets.json.",
     "  homebrew       Homebrew rows sorted by id; requires --version.",
     "  documentation  Complete catalog sorted by id for documentation consumers.",
     "",

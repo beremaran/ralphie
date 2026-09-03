@@ -295,12 +295,13 @@ const assertInstaller = async (
         }
     }
     for (const reference of [
-        'ASSET="ralphie-${OS}-${ARCH}"',
+        'MAPPING_URL="https://raw.githubusercontent.com/beremaran/ralphie/main/targets/posix-installer-targets.json"',
+        'ASSET="$(resolve_record_asset "$OS" "$ARCH")"',
         'RELEASE_URL="$RELEASE_BASE/$ASSET"',
     ]) {
         if (!installer.includes(reference)) {
             fail(
-                `staged installer must select the host asset with ${reference}.`,
+                `staged installer must resolve the host asset from the generated target mapping with ${reference}.`,
             );
         }
     }

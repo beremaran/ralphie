@@ -547,10 +547,23 @@ bun run generate:homebrew-formula -- \
   --formula Formula/ralphie.rb
 ```
 
-Only the region between the `BEGIN RALPHIE GENERATED RELEASE METADATA` and
-`END RALPHIE GENERATED RELEASE METADATA` markers is replaced. The generator
-fails when the markers are missing, duplicated, or out of order, preserving the
-description, homepage, install behavior, and smoke test outside that region.
+The generator derives the macOS/Linux CPU branches from the canonical target
+catalog (`targets/standalone-targets.json`, overridable with
+`--catalog <path>`): the four branch URLs are built from each row's
+`releaseAssetName`, the platform and arm/x64 split come from the row's
+`os`/`arch`, and the metadata's checksums are matched by asset name. No
+independent list of the four release assets exists in the formula tooling;
+unknown, missing, duplicate, or malformed metadata assets are rejected.
+
+Only the region between the
+`BEGIN RALPHIE GENERATED RELEASE METADATA - DO NOT EDIT` and
+`END RALPHIE GENERATED RELEASE METADATA - DO NOT EDIT` markers is replaced.
+The generator fails when the markers are missing, duplicated, or out of
+order, preserving the description, homepage, install behavior, and smoke test
+outside that region. The formula validator
+(`bun run validate:homebrew-formula`) derives its expected assets the same
+way from the catalog and checks every formula URL/checksum against the
+release SHA256SUMS.
 
 The deterministic preparation step guards the formula change before anything
 is applied to the tap branch. It consumes the exact-tag verifier's manifest

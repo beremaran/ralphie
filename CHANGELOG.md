@@ -11,14 +11,15 @@ All notable changes to Ralphie are documented here. The project follows
   deterministic serializers, and consumer renderers. `query --id <stable-id>`
   or `query --os <os> --arch <arch>` prints one complete target record as
   deterministic JSON; `generate --format
-  <json|github-matrix|posix|homebrew|documentation> [--version <version>]
-  [--os <os> --arch <arch>] --output <file>` renders the complete catalog,
-  GitHub Actions matrix, single posix-selected record, versioned Homebrew
-  rows, or documentation catalog; and `check --format <...> [--version
-  <version>] [--os <os> --arch <arch>] --file <file>` byte-compares a file
-  against the rendered document (key order, LF endings, and the final newline
-  included), succeeding only on an exact match and never rewriting it. An
-  optional `--manifest <path>` overrides the canonical
+  <json|github-matrix|posix|posix-mapping|homebrew|documentation>
+  [--version <version>] [--os <os> --arch <arch>] --output <file>` renders
+  the complete catalog, GitHub Actions matrix, single posix-selected record,
+  POSIX installer mapping, versioned Homebrew rows, or documentation
+  catalog; and `check --format <...> [--version <version>] [--os <os>
+  --arch <arch>] --file <file>` byte-compares a file against the rendered
+  document (key order, LF endings, and the final newline included),
+  succeeding only on an exact match and never rewriting it. An optional
+  `--manifest <path>` overrides the canonical
   `targets/standalone-targets.json` for isolated tests. The whole manifest is
   loaded, validated, and rendered in memory before any stdout or file write:
   `generate` writes through a temporary file and renames only after success
@@ -28,6 +29,39 @@ All notable changes to Ralphie are documented here. The project follows
   effects; invocation and formats are documented in `docs/development.md`
   and `docs/architecture.md`, with in-memory unit coverage in
   `tests/targets/standalone-targets-command.test.ts`.
+
+- Introduce the checked-in generated POSIX installer mapping
+  (`targets/posix-installer-targets.json`, `generate --format posix-mapping`,
+  `renderPosixInstallerMapping`) and migrate `scripts/install.sh` to consume
+  it: the installer fetches the mapping at install time (no Bun required),
+  case-folds the `uname` OS/architecture values, resolves them through the
+  mapping's alias tables, and downloads exactly the matching record's
+  `releaseAssetName`. The script no longer carries any independent list of
+  the four release assets (no `ralphie-<os>-<arch>` construction and no
+  hardcoded `case` mappings); unsupported values fail with clear errors, and
+  version resolution, checksum/Sigstore verification, destination handling,
+  and the `--version` guidance are preserved. The checked-in artifact is
+  drift-checked byte-for-byte against the rendered document in
+  `tests/targets/posix-installer-mapping.test.ts`, which also exercises every
+  canonical target, the `x86_64`/`amd64`/`aarch64`/`arm64` and
+  Darwin/macOS aliases, and unsupported combinations.
+
+- Migrate the Homebrew formula generator and validator to the canonical
+  target catalog: `scripts/generate-homebrew-formula.ts` now derives the
+  `on_macos`/`on_linux` CPU branches from the catalog's release asset values
+  (each row's `releaseAssetName`, `os`, and `arch`) through
+  `renderHomebrewTargetRows` instead of a locally maintained four-target
+  list, and `scripts/validate-homebrew-formula.ts` derives its expected
+  assets from the same rows. The generated region markers became
+  `BEGIN/END RALPHIE GENERATED RELEASE METADATA - DO NOT EDIT` to mark the
+  section as non-editable; formula version, install, and test behavior are
+  unchanged. `generate:homebrew-formula` accepts an optional
+  `--catalog <path>` (defaults to `targets/standalone-targets.json`), and
+  unknown, missing, duplicate, or malformed metadata assets are rejected.
+  Coverage in `tests/targets/homebrew-formula-generator.test.ts`; the
+  independence property (changing a compiler-target value cannot change an
+  asset name unless the manifest changes that asset field) is verified for
+  both consumers.
 
 - Wire verified candidate promotion into the single protected publish job
   (`rel20-publisher-container-promotion-integration`): the container

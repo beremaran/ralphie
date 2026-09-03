@@ -126,6 +126,16 @@ and documentation follow-up work:
   normalizes the OS/architecture pair through the query API and returns the
   matching full `StandaloneTarget` record. The downloaded asset is exactly the
   returned record's `releaseAssetName`; it is never rebuilt from the pair.
+- `posix-installer-mapping` — `renderPosixInstallerMapping(value)` returns the
+  checked-in generated POSIX installer mapping document
+  (`targets/posix-installer-targets.json`): the complete accepted alias
+  tables (`osAliases`, `archAliases`, each canonical `os`/`arch` plus the
+  query API's extra `uname` spellings) and the four full manifest records
+  sorted by stable `id`. `scripts/install.sh` fetches the mapping at install
+  time (no Bun required) and resolves a raw `uname` pair by case-folding it,
+  resolving it through the alias tables, and reading exactly the matching
+  record's `releaseAssetName`; unsupported values fail with a clear error
+  and the asset name is never reconstructed from the pair.
 - `homebrew-target-rows` — `renderHomebrewTargetRows(value, version)` returns
   rows sorted lexicographically by stable `id`. Each `HomebrewTargetRow`
   contains the complete manifest record nested under `target`, the explicit
@@ -153,16 +163,19 @@ GitHub. Modes and formats:
 
 - `query --id <stable-id>` or `query --os <os> --arch <arch>` prints one
   complete target record as deterministic JSON;
-- `generate --format <json|github-matrix|posix|homebrew|documentation>
+- `generate --format <json|github-matrix|posix|posix-mapping|homebrew|documentation>
   [--version <version>] [--os <os> --arch <arch>] --output <file>` renders the
   complete catalog, the GitHub Actions matrix, the single `posix`-selected
-  record, the versioned Homebrew rows, or the documentation catalog — writing
+  record, the POSIX installer mapping, the versioned Homebrew rows, or the
+  documentation catalog — writing
   through a temporary file and renaming only after success, so an existing
   destination is preserved on any validation error;
 - `check --format <...> [--version <version>] [--os <os> --arch <arch>]
   --file <file>` byte-compares the checked file against the rendered document
   (key order, LF endings, and the final newline included), succeeding only on
-  an exact match and never rewriting the file;
+  an exact match and never rewriting the file; the checked-in
+  `targets/posix-installer-targets.json` mapping is verified with
+  `check --format posix-mapping --file targets/posix-installer-targets.json`;
 - `--manifest <path>` overrides the canonical manifest for isolated tests.
 
 All documents share the serializer encoding contract
