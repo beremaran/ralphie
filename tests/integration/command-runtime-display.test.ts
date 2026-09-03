@@ -32,11 +32,15 @@ import type { RalphieRuntime } from "../../src/runtime.ts";
 import { stripTerminalControls } from "../../src/shared/terminal.ts";
 import type { WorkflowOptions } from "../../src/workflow.ts";
 import {
+    CLEAR_LINE,
+    CURSOR_UP,
     makeRecordingStrategy,
     PhysicalRowMeter,
     regionBytes,
     type RecordingStrategy,
+    type StrategyOp,
 } from "../shared/physical-row-meter.ts";
+import { RalphieExitCode } from "../../src/process/exit-code.ts";
 import {
     ASSISTANT_DELTAS,
     CREDENTIAL_RAW,
@@ -167,6 +171,8 @@ type DisplaySession = {
     readonly timer: FakeTimer;
     readonly settle: () => void;
     readonly samples: number[];
+    /** Terminal width sampled when each painted region row was emitted. */
+    readonly paintWidths: readonly number[];
 };
 
 const insertBreadcrumbFrom = (coordinator: ProgressCoordinator | undefined) => {
@@ -199,8 +205,22 @@ const runInteractiveCommand = async ({
     readonly workflowError?: Error;
     readonly onSession?: (session: DisplaySession) => Promise<void> | void;
     readonly onDisposed?: (strategy: RecordingStrategy) => void;
-}): Promise<{ readonly strategy: RecordingStrategy }> => {
+}): Promise<{
+    readonly strategy: RecordingStrategy;
+    readonly paintWidths: readonly number[];
+}> => {
     const strategy = makeRecordingStrategy();
+    const widthAtPaint: number[] = [];
+    // Record the terminal width at the moment of every region-row paint so
+    // frame-level assertions can attribute each row to the width it was
+    // clipped at, including across a mid-run resize.
+    const measuredStrategy: RecordingStrategy = {
+        ...strategy,
+        paintFooter: (text) => {
+            widthAtPaint.push(fakeStderr.columns);
+            return strategy.paintFooter(text);
+        },
+    };
     const timer = makeFakeTimer();
     const samples: number[] = [];
     const fakeStderr = makeFakeStderr(width);
@@ -221,7 +241,7 @@ const runInteractiveCommand = async ({
             makeCoordinator: (options: ProgressCoordinatorOptions) => {
                 const made = makeProgressCoordinator({
                     ...options,
-                    strategy,
+                    strategy: measuredStrategy,
                     footer: { timer },
                     now: FIXED_NOW,
                 });
@@ -258,7 +278,13 @@ const runInteractiveCommand = async ({
                 });
                 if (workflowError !== undefined) throw workflowError;
                 if (onSession !== undefined) {
-                    await onSession({ strategy, timer, settle, samples });
+                    await onSession({
+                        strategy: measuredStrategy,
+                        timer,
+                        settle,
+                        samples,
+                        paintWidths: widthAtPaint,
+                    });
                 }
                 return noopSummary;
             },
@@ -279,9 +305,9 @@ const runInteractiveCommand = async ({
         } else {
             delete (process as { stderr?: unknown }).stderr;
         }
-        onDisposed?.(strategy);
+        onDisposed?.(measuredStrategy);
     }
-    return { strategy };
+    return { strategy: measuredStrategy, paintWidths: widthAtPaint };
 };
 
 /** Noninteractive harness: plain/CI, JSON, and quiet modes need no TTY. */
@@ -399,6 +425,87 @@ const isBreadcrumbRow = (line: string): boolean => {
     );
 };
 
+/** Same bytes as CLEAR_LIVE_LINE in src/progress/progress.ts: `\r\x1b[2K`. */
+const CLEAR_LIVE_LINE = CLEAR_LINE;
+
+const graphemeSegmenter = new Intl.Segmenter(undefined, {
+    granularity: "grapheme",
+});
+
+/**
+ * Reconstruct every painted frame of the replaceable region from the
+ * operation stream: consecutive paints are one frame; the controller emits a
+ * bare newline write between the rows of a frame, and any other op (clear,
+ * durable write, restore) closes the frame.
+ */
+const framesOf = (
+    strategy: RecordingStrategy,
+): readonly (readonly string[])[] => {
+    const frames: string[][] = [];
+    let current: string[] = [];
+    for (const op of strategy.ops()) {
+        if (op.kind === "paint") {
+            current.push(op.text);
+            continue;
+        }
+        if (op.kind === "write" && op.text === "\n" && current.length > 0) {
+            continue;
+        }
+        if (current.length > 0) {
+            frames.push(current);
+            current = [];
+        }
+    }
+    if (current.length > 0) frames.push(current);
+    return frames;
+};
+
+/**
+ * Assert every painted region frame stays within the three-row cap, every
+ * row is clipped to the width that was active when it was painted, and every
+ * row occupies exactly one physical terminal row (never wraps).
+ */
+const expectFramesFit = (
+    strategy: RecordingStrategy,
+    paintWidths: readonly number[],
+): void => {
+    const frames = framesOf(strategy);
+    expect(frames.length).toBeGreaterThan(0);
+    let paintIndex = 0;
+    for (const frame of frames) {
+        expect(frame.length).toBeLessThanOrEqual(3);
+        const frameWidth = paintWidths[paintIndex] as number;
+        const meter = new PhysicalRowMeter(frameWidth);
+        meter.feed(regionBytes(frame));
+        expect(meter.rows()).toBe(frame.length);
+        for (const row of frame) {
+            const width = paintWidths[paintIndex] as number;
+            paintIndex += 1;
+            expect(
+                Bun.stringWidth(stripTerminalControls(row)),
+            ).toBeLessThanOrEqual(width);
+        }
+    }
+    expect(paintIndex).toBe(paintWidths.length);
+    expect(strategy.peakRegionRows()).toBeLessThanOrEqual(3);
+};
+
+/**
+ * Assert no painted region row contains a dangling modifier segment. Every
+ * complete grapheme has nonzero display width; a mid-grapheme split leaves a
+ * zero-width combining mark, ZWJ, or variation selector behind.
+ */
+const expectNoSplitGraphemes = (strategy: RecordingStrategy): void => {
+    for (const frame of framesOf(strategy)) {
+        for (const row of frame) {
+            const stripped = stripTerminalControls(row);
+            for (const { segment } of graphemeSegmenter.segment(stripped)) {
+                expect(Bun.stringWidth(segment)).toBeGreaterThan(0);
+            }
+        }
+    }
+};
+
 describe("command runtime display: interactive mode", () => {
     test("never exceeds three physical rows across calls, tokens, and cleanup", async () => {
         const workspace = await mkdtemp(join(tmpdir(), "ralphie-display-"));
@@ -479,6 +586,270 @@ describe("command runtime display: interactive mode", () => {
                 },
             });
         } finally {
+            await rm(workspace, { recursive: true, force: true });
+        }
+    });
+
+    test("erase and cursor controls appear only in live-region updates, never in durable rows", async () => {
+        const workspace = await mkdtemp(join(tmpdir(), "ralphie-matrix-"));
+        try {
+            const { strategy } = await runInteractiveCommand({
+                workspace,
+                scenario: "interleaved-streams",
+            });
+            const output = strategy.output();
+
+            // Every erase sequence is a live-region operation: each
+            // `\r\x1b[2K` emission was recorded as a clear op, and no stray
+            // carriage return exists outside those erase sequences.
+            expect(strategy.clearCount()).toBe(
+                output.split(CLEAR_LIVE_LINE).length - 1,
+            );
+            expect(output.replaceAll(CLEAR_LIVE_LINE, "")).not.toContain("\r");
+
+            // Cursor-up bytes occur only while erasing the live region: every
+            // `\x1b[1A` write immediately follows a clear op.
+            let awaitingCursorUp = false;
+            let cursorUpWrites = 0;
+            for (const op of strategy.ops()) {
+                if (op.kind === "clear") {
+                    awaitingCursorUp = true;
+                    continue;
+                }
+                if (op.kind === "write" && op.text === CURSOR_UP) {
+                    expect(awaitingCursorUp).toBe(true);
+                    awaitingCursorUp = false;
+                    cursorUpWrites += 1;
+                    continue;
+                }
+                awaitingCursorUp = false;
+            }
+            expect(cursorUpWrites).toBe(output.split(CURSOR_UP).length - 1);
+
+            // Durable rows carry styling only: once the SGR color codes are
+            // removed, no escape, carriage return, erase, or cursor-motion
+            // control remains in the transcript, breadcrumb, or raw rows.
+            const durableRows = strategy
+                .ops()
+                .filter(
+                    (
+                        op,
+                    ): op is Extract<StrategyOp, { readonly kind: "write" }> =>
+                        op.kind === "write" && op.text !== CURSOR_UP,
+                )
+                .map((op) => op.text)
+                .join("");
+            expect(durableRows).not.toContain("\r");
+            expect(durableRows.replace(/\x1b\[[0-9;]*m/g, "")).not.toContain(
+                "\x1b",
+            );
+
+            // The partial raw chunks and streamed deltas survived intact.
+            expect(durableRows).toContain(
+                `${INTERLEAVED_RAW[0]}${INTERLEAVED_RAW[1]}`,
+            );
+            for (const part of INTERLEAVED_TEXT) {
+                expect(durableRows).toContain(part);
+            }
+        } finally {
+            await rm(workspace, { recursive: true, force: true });
+        }
+    });
+
+    test("every live frame stays clipped, unwrapped, and grapheme-complete at narrow widths and after a mid-run resize", async () => {
+        const workspace = await mkdtemp(join(tmpdir(), "ralphie-matrix-"));
+        try {
+            for (const width of [40, 24, 12, 8]) {
+                const { strategy, paintWidths } = await runInteractiveCommand({
+                    workspace,
+                    scenario: "wide-grapheme",
+                    width,
+                });
+                expectFramesFit(strategy, paintWidths);
+                expectNoSplitGraphemes(strategy);
+                // The wide text survives intact in the durable transcript at
+                // every width.
+                const durable = stripTerminalControls(durableBytes(strategy));
+                expect(durable).toContain(WIDE_TEXT);
+            }
+
+            // After a mid-run resize the same invariants hold for every frame
+            // painted at the new width.
+            const resized = await runInteractiveCommand({
+                workspace,
+                scenario: "resize",
+            });
+            expectFramesFit(resized.strategy, resized.paintWidths);
+            expectNoSplitGraphemes(resized.strategy);
+            expect(new Set(resized.paintWidths)).toContain(RESIZE_TARGET_WIDTH);
+            const region = resized.strategy.currentRegion();
+            for (const row of region) {
+                expect(
+                    Bun.stringWidth(stripTerminalControls(row)),
+                ).toBeLessThanOrEqual(RESIZE_TARGET_WIDTH);
+            }
+        } finally {
+            await rm(workspace, { recursive: true, force: true });
+        }
+    });
+
+    test("long streamed text reassembles once while long rows stay on one physical line", async () => {
+        const workspace = await mkdtemp(join(tmpdir(), "ralphie-matrix-"));
+        try {
+            const { strategy, paintWidths } = await runInteractiveCommand({
+                workspace,
+                scenario: "long-output",
+            });
+            const durable = stripTerminalControls(durableBytes(strategy));
+
+            // The streamed assistant text is preserved contiguously up to the
+            // transcript cap (STREAM_OUTPUT_LIMIT = 140 in transcript.ts) and
+            // appears exactly once in scrollback; the marker reports the full
+            // reassembled length.
+            const visible = LONG_TEXT.slice(0, 140);
+            expect(durable.split(visible)).toHaveLength(2);
+            expect(durable).toContain(
+                `✦ assistant done · ${LONG_TEXT.length} chars · truncated`,
+            );
+
+            // The long tool command line is a single clipped durable row.
+            const toolLine = durable
+                .split("\n")
+                .find((line) => line.includes("$ echo"));
+            expect(toolLine).toBeDefined();
+            expect(toolLine as string).toContain("…");
+            expect(Bun.stringWidth(toolLine as string)).toBeLessThanOrEqual(80);
+
+            // Live activity/footer frames never wrap and stay within the cap.
+            expectFramesFit(strategy, paintWidths);
+        } finally {
+            await rm(workspace, { recursive: true, force: true });
+        }
+    });
+
+    test("completed breadcrumb rows stay byte-stable through repeated live refreshes", async () => {
+        const workspace = await mkdtemp(join(tmpdir(), "ralphie-matrix-"));
+        try {
+            const { strategy } = await runInteractiveCommand({
+                workspace,
+                scenario: "breadcrumb-refresh",
+            });
+            const durable = stripTerminalControls(durableBytes(strategy));
+
+            // The three explicit breadcrumbs were written once each and their
+            // text is unchanged in the final scrollback.
+            const breadcrumbRows = durable
+                .split("\n")
+                .filter((line) => isBreadcrumbRow(line));
+            expect(breadcrumbRows).toHaveLength(3);
+            for (const row of breadcrumbRows) {
+                expect(row).toBe("│  › Waiting");
+            }
+            expect(durable.split("│  › Waiting")).toHaveLength(4);
+
+            // The refreshes that followed re-painted the live region only:
+            // ops after the last breadcrumb never re-emit or alter the rows.
+            const ops = strategy.ops();
+            let lastBreadcrumbWrite = -1;
+            ops.forEach((op, index) => {
+                if (op.kind === "write" && op.text.includes("› Waiting")) {
+                    lastBreadcrumbWrite = index;
+                }
+            });
+            const after = ops.slice(lastBreadcrumbWrite + 1);
+            expect(
+                after.filter((op) => op.kind === "paint").length,
+            ).toBeGreaterThanOrEqual(10);
+            expect(
+                after.filter((op) => op.kind === "clear").length,
+            ).toBeGreaterThanOrEqual(5);
+            for (const op of after) {
+                if (op.kind === "paint") {
+                    expect(op.text).not.toContain("│  › Waiting");
+                }
+            }
+        } finally {
+            await rm(workspace, { recursive: true, force: true });
+        }
+    });
+
+    test("abort and error disposal leave a clean surface and a failure exit code", async () => {
+        const workspace = await mkdtemp(join(tmpdir(), "ralphie-matrix-"));
+        const previousExitCode = process.exitCode;
+        try {
+            // (a) A throwing fake workflow: the run still disposes the
+            // coordinator, flattens the live region, keeps durable rows, and
+            // fails the process exit code.
+            let throwingKinds: readonly string[] = [];
+            let throwingStrategy: RecordingStrategy | undefined;
+            await expect(
+                runInteractiveCommand({
+                    workspace,
+                    scenario: "completion",
+                    workflowError: new Error("simulated workflow failure"),
+                    onDisposed: (strategy) => {
+                        throwingKinds = strategy.ops().map((op) => op.kind);
+                        throwingStrategy = strategy;
+                    },
+                }),
+            ).rejects.toThrow("simulated workflow failure");
+            expect(process.exitCode).toBe(RalphieExitCode.Failure);
+            expect(throwingKinds).toContain("restore");
+            expect(throwingKinds.at(-1)).toBe("restore");
+            const throwingOutput = throwingStrategy?.output() ?? "";
+            expect(throwingOutput.endsWith("\n")).toBe(true);
+            const throwingDurable = stripTerminalControls(
+                durableBytes(throwingStrategy as RecordingStrategy),
+            );
+            expect(throwingDurable).toContain(ASSISTANT_DELTAS.join(""));
+            expect(throwingDurable).toContain("✓ bash done");
+
+            // (b) The abort scenario aborts the run's own signal before the
+            // throwing workflow: cancelled exit code, durable rows intact.
+            let abortedKinds: readonly string[] = [];
+            let abortedStrategy: RecordingStrategy | undefined;
+            await expect(
+                runInteractiveCommand({
+                    workspace,
+                    scenario: "abort",
+                    workflowError: new Error("aborted before disposal"),
+                    onDisposed: (strategy) => {
+                        abortedKinds = strategy.ops().map((op) => op.kind);
+                        abortedStrategy = strategy;
+                    },
+                }),
+            ).rejects.toThrow("aborted before disposal");
+            expect(process.exitCode).toBe(RalphieExitCode.Cancelled);
+            expect(abortedKinds.at(-1)).toBe("restore");
+            expect(abortedStrategy?.output().endsWith("\n")).toBe(true);
+            const abortedDurable = stripTerminalControls(
+                durableBytes(abortedStrategy as RecordingStrategy),
+            );
+            expect(abortedDurable).toContain(
+                "Starting the aborted run session.",
+            );
+
+            // (c) A pre-aborted input signal disposes without throwing and
+            // emits nothing, so no live-row bytes can dangle.
+            let preAbortedStrategy: RecordingStrategy | undefined;
+            await expect(
+                runInteractiveCommand({
+                    workspace,
+                    scenario: "abort",
+                    preAborted: true,
+                    workflowError: new Error("pre-aborted signal"),
+                    onDisposed: (strategy) => {
+                        preAbortedStrategy = strategy;
+                    },
+                }),
+            ).rejects.toThrow("pre-aborted signal");
+            expect(process.exitCode).toBe(RalphieExitCode.Cancelled);
+            expect(preAbortedStrategy?.output()).toBe("");
+            expect(preAbortedStrategy?.ops().map((op) => op.kind)).toContain(
+                "restore",
+            );
+        } finally {
+            process.exitCode = previousExitCode;
             await rm(workspace, { recursive: true, force: true });
         }
     });
