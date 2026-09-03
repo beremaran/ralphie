@@ -30,6 +30,10 @@ export const ASSISTANT_DELTAS = [
 
 export const VERIFICATION_FAILURE_MESSAGE = "verification gate failed";
 
+/** Needs-attention epilogue message so quiet-mode runs emit both symbols. */
+export const VERIFICATION_NEEDS_ATTENTION_MESSAGE =
+    "verification needs attention";
+
 /** Raw writeRaw chunks for the interleaved-streams scenario, in emit order. */
 export const INTERLEAVED_RAW = [
     "fetching metadata ",
@@ -277,22 +281,27 @@ const completionScenario = (): ScenarioStep[] => [
         status: "succeeded",
         message: "change written",
     }),
+    ...FAILURE_EPILOGUE,
+    event(agentSettledEvent),
+    settle,
+];
+
+/**
+ * Shared failure epilogue so quiet-mode runs always emit bytes: one failed
+ * event and one needs-attention event, both carrying details whose values
+ * the unredacted output contract preserves verbatim.
+ */
+const FAILURE_EPILOGUE: ScenarioStep[] = [
     progress({
         stage: "verification",
         status: "failed",
         message: VERIFICATION_FAILURE_MESSAGE,
         details: { verify: "bun run check" },
     }),
-    event(agentSettledEvent),
-    settle,
-];
-
-/** Shared failure epilogue so quiet-mode smoke runs always emit bytes. */
-const FAILURE_EPILOGUE: ScenarioStep[] = [
     progress({
         stage: "verification",
-        status: "failed",
-        message: VERIFICATION_FAILURE_MESSAGE,
+        status: "needs-attention",
+        message: VERIFICATION_NEEDS_ATTENTION_MESSAGE,
         details: { verify: "bun run check" },
     }),
 ];
@@ -501,6 +510,12 @@ const verboseUnsafeScenario = (): ScenarioStep[] => [
         stage: "implementation",
         status: "succeeded",
         message: "artifact uploaded",
+        details: UNSAFE_DETAILS,
+    }),
+    progress({
+        stage: "implementation",
+        status: "needs-attention",
+        message: "artifact upload requires attention",
         details: UNSAFE_DETAILS,
     }),
     event(agentSettledEvent),

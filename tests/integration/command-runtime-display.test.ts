@@ -55,6 +55,7 @@ import {
     UNSAFE_DETAILS,
     UNSAFE_TOKEN,
     VERIFICATION_FAILURE_MESSAGE,
+    VERIFICATION_NEEDS_ATTENTION_MESSAGE,
     WIDE_PROGRESS_DONE,
     WIDE_PROGRESS_STARTED,
     WIDE_TEXT,
@@ -1136,6 +1137,202 @@ describe("command runtime display: noninteractive fallback", () => {
             expect(text).toContain("✗");
             expect(text).toContain(VERIFICATION_FAILURE_MESSAGE);
             expect(text).not.toContain("\x1b");
+            expect(result.stdoutBytes()).toBe("");
+        } finally {
+            await rm(workspace, { recursive: true, force: true });
+        }
+    });
+
+    /**
+     * Transcript, breadcrumb, writeRaw, and routine-progress content every
+     * quiet run must suppress, per scenario.
+     */
+    const suppressedQuietContentFor = (
+        scenario: ScenarioName,
+    ): readonly string[] => {
+        switch (scenario) {
+            case "completion":
+                return [
+                    ASSISTANT_DELTAS.join(""),
+                    "writing change",
+                    "change written",
+                    "✓ bash done",
+                    "✗ grep failed",
+                ];
+            case "interleaved-streams":
+                return [
+                    INTERLEAVED_RAW[0],
+                    INTERLEAVED_TEXT[0],
+                    "assembling",
+                    "assembled",
+                ];
+            case "thinking-tools":
+                return [
+                    "Let me look at the entry point and its imports.",
+                    "find *.ts",
+                    "✓ find done",
+                ];
+            case "lifecycle":
+                return [
+                    "Working through a dense turn with lifecycle boundaries.",
+                    "↻ compacting context",
+                    "↻ retrying OpenCode request",
+                ];
+            case "abort":
+                return ["Starting the aborted run session.", "✓ bash done"];
+            case "breadcrumb-refresh":
+                return [
+                    "First change lands on the existing path.",
+                    "│  › Waiting",
+                    "running gate 1",
+                    "gate 5 passed",
+                ];
+            case "long-output":
+                return [
+                    LONG_TEXT.slice(0, 140),
+                    LONG_PROGRESS,
+                    "long output handled",
+                ];
+            case "wide-grapheme":
+                return [WIDE_TEXT, WIDE_PROGRESS_STARTED, WIDE_PROGRESS_DONE];
+            case "verbose-unsafe":
+                return [
+                    "Authenticating against the artifact registry.",
+                    "uploading artifact",
+                    "artifact uploaded",
+                    "upload the artifact bundle",
+                ];
+            case "split-credentials":
+                return [`Bearer ${CREDENTIAL_TEXT}`, CREDENTIAL_RAW];
+            case "resize":
+                return [
+                    "Starting at the wide width for the first cycle.",
+                    "checking the narrow region",
+                    "narrow region verified",
+                    "✓ bash done",
+                ];
+        }
+    };
+
+    /**
+     * The suppression-scope invariant: in quiet mode every stderr line is a
+     * failure or needs-attention progress line, so no transcript, breadcrumb,
+     * raw, or routine-progress content can leak through.
+     */
+    const expectOnlyFailureLines = (
+        scenario: ScenarioName,
+        text: string,
+    ): void => {
+        for (const line of text.split("\n")) {
+            if (line === "") continue;
+            expect(
+                line.startsWith("✗") || line.startsWith("⚠"),
+                `${scenario} quiet emitted a non-failure line: ${JSON.stringify(line)}`,
+            ).toBe(true);
+        }
+    };
+
+    /** Assert the scenario-specific transcript content is fully suppressed. */
+    const expectSuppressedQuietContent = (
+        scenario: ScenarioName,
+        text: string,
+    ): void => {
+        // No transcript frame or breadcrumb rows at all.
+        expect(text).not.toContain("╭─");
+        expect(text).not.toContain("│ ");
+        // Scenario-specific transcript/breadcrumb/raw/routine content.
+        for (const marker of suppressedQuietContentFor(scenario)) {
+            expect(
+                text,
+                `${scenario} quiet leaked ${JSON.stringify(marker)}`,
+            ).not.toContain(marker);
+        }
+    };
+
+    test("quiet mode suppresses transcript, breadcrumbs, raw output, and routine progress for every scenario", async () => {
+        for (const scenario of SCENARIO_NAMES) {
+            const workspace = await mkdtemp(join(tmpdir(), "ralphie-quiet-"));
+            try {
+                const result = await runNoninteractiveCommand({
+                    args: argsFor("quiet", workspace),
+                    terminal: NONINTERACTIVE_TERMINAL,
+                    scenario,
+                });
+                const text = result.stderrBytes();
+                expect(
+                    text.length,
+                    `${scenario} quiet output was empty`,
+                ).toBeGreaterThan(0);
+                expectOnlyFailureLines(scenario, text);
+                expectSuppressedQuietContent(scenario, text);
+                // No control bytes anywhere in stderr; stdout stays empty.
+                expectControlFree(text);
+                expect(result.stdoutBytes()).toBe("");
+            } finally {
+                await rm(workspace, { recursive: true, force: true });
+            }
+        }
+    });
+
+    test("quiet mode surfaces failed and needs-attention events with symbols and full messages for every scenario", async () => {
+        for (const scenario of SCENARIO_NAMES) {
+            const workspace = await mkdtemp(join(tmpdir(), "ralphie-quiet-"));
+            try {
+                const result = await runNoninteractiveCommand({
+                    args: argsFor("quiet", workspace),
+                    terminal: NONINTERACTIVE_TERMINAL,
+                    scenario,
+                });
+                const text = result.stderrBytes();
+                // The failure outcome surfaces (the failing grep activity in
+                // completion reports through the run's failed event) with its
+                // `✗` symbol, full message, and supplied details verbatim.
+                expect(
+                    text,
+                    `${scenario} quiet dropped the failed event`,
+                ).toContain(`✗ ${VERIFICATION_FAILURE_MESSAGE}`);
+                expect(text).toContain(
+                    `✗ ${VERIFICATION_FAILURE_MESSAGE} {"verify":"bun run check"}`,
+                );
+                // The needs-attention event surfaces with `⚠` and its message.
+                expect(
+                    text,
+                    `${scenario} quiet dropped the needs-attention event`,
+                ).toContain(`⚠ ${VERIFICATION_NEEDS_ATTENTION_MESSAGE}`);
+                // No control bytes anywhere in stderr; stdout stays empty.
+                expectControlFree(text);
+                expect(result.stdoutBytes()).toBe("");
+            } finally {
+                await rm(workspace, { recursive: true, force: true });
+            }
+        }
+    });
+
+    test("quiet mode preserves unsafe failure and needs-attention values verbatim for the credential-like scenario", async () => {
+        const workspace = await mkdtemp(join(tmpdir(), "ralphie-quiet-"));
+        try {
+            const result = await runNoninteractiveCommand({
+                args: argsFor("quiet", workspace),
+                terminal: NONINTERACTIVE_TERMINAL,
+                scenario: "verbose-unsafe",
+            });
+            const text = result.stderrBytes();
+            // The needs-attention event surfaces with its full message and the
+            // supplied details JSON: nothing is elided, replaced, or masked,
+            // per the GH-180 unredacted output contract.
+            expect(text).toContain("⚠ artifact upload requires attention");
+            expect(text).toContain(JSON.stringify(UNSAFE_DETAILS));
+            expect(text).toContain(UNSAFE_API_KEY);
+            expect(text).toContain(UNSAFE_TOKEN);
+            expect(text).toContain(`✗ ${VERIFICATION_FAILURE_MESSAGE}`);
+            expect(text).toContain(
+                `✗ ${VERIFICATION_FAILURE_MESSAGE} {"verify":"bun run check"}`,
+            );
+            expect(text).toContain(
+                `⚠ ${VERIFICATION_NEEDS_ATTENTION_MESSAGE} {"verify":"bun run check"}`,
+            );
+            // No control bytes anywhere in stderr; stdout stays empty.
+            expectControlFree(text);
             expect(result.stdoutBytes()).toBe("");
         } finally {
             await rm(workspace, { recursive: true, force: true });

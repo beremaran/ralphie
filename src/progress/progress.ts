@@ -304,7 +304,11 @@ export const makeProgressReporter = ({
             event.attempt !== undefined && event.maxAttempts !== undefined
                 ? ` ${style(dim, `(${event.attempt}/${event.maxAttempts})`)}`
                 : "";
-        const details = verbose ? formatDetails(event.details) : "";
+        // Quiet mode surfaces failures and needs-attention events only; those
+        // events must carry their full payload so reporting never elides
+        // supplied values (GH-180 unredacted output contract).
+        const details =
+            verbose || mode === "quiet" ? formatDetails(event.details) : "";
         const status = statusSymbol(event.status, colors);
         return `${status}${scope}${position}${attempt}${issue} ${humanText(event.message)}${details}`;
     };
