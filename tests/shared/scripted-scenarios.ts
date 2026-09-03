@@ -34,6 +34,24 @@ export const VERIFICATION_FAILURE_MESSAGE = "verification gate failed";
 export const VERIFICATION_NEEDS_ATTENTION_MESSAGE =
     "verification needs attention";
 
+/**
+ * The fixture's repository path, carried by progress updates exactly as the
+ * real executors do. Every human-readable mode renders it verbatim inside the
+ * progress-line scope marker (`[…]`), per the GH-180 unredacted contract.
+ */
+export const LABEL_REPOSITORY = "/workspace/owner/repository";
+
+/**
+ * The fixture's issue number/title, carried by progress updates exactly as
+ * the real executors do. Every human-readable mode renders the number on
+ * every failure/needs-attention line and the title on needs-attention lines,
+ * verbatim.
+ */
+export const LABEL_ISSUE = {
+    number: 7,
+    title: "Keep display label values verbatim",
+} as const;
+
 /** Raw writeRaw chunks for the interleaved-streams scenario, in emit order. */
 export const INTERLEAVED_RAW = [
     "fetching metadata ",
@@ -289,19 +307,27 @@ const completionScenario = (): ScenarioStep[] => [
 /**
  * Shared failure epilogue so quiet-mode runs always emit bytes: one failed
  * event and one needs-attention event, both carrying details whose values
- * the unredacted output contract preserves verbatim.
+ * the unredacted output contract preserves verbatim. The epilogue also
+ * carries the fixture's repository path and issue number/title, so every
+ * human-readable mode surfaces those display-context labels verbatim on the
+ * failure and needs-attention lines (mirroring the real executors, which
+ * attach `repository` and `issue` to progress events).
  */
 const FAILURE_EPILOGUE: ScenarioStep[] = [
     progress({
         stage: "verification",
         status: "failed",
         message: VERIFICATION_FAILURE_MESSAGE,
+        repository: LABEL_REPOSITORY,
+        issue: LABEL_ISSUE,
         details: { verify: "bun run check" },
     }),
     progress({
         stage: "verification",
         status: "needs-attention",
         message: VERIFICATION_NEEDS_ATTENTION_MESSAGE,
+        repository: LABEL_REPOSITORY,
+        issue: LABEL_ISSUE,
         details: { verify: "bun run check" },
     }),
 ];

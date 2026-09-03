@@ -47,6 +47,8 @@ import {
     CREDENTIAL_TEXT,
     INTERLEAVED_RAW,
     INTERLEAVED_TEXT,
+    LABEL_ISSUE,
+    LABEL_REPOSITORY,
     LONG_PROGRESS,
     LONG_TEXT,
     RESIZE_TARGET_WIDTH,
@@ -1591,19 +1593,26 @@ describe("command runtime display: noninteractive fallback", () => {
                 const text = result.stderrBytes();
                 // The failure outcome surfaces (the failing grep activity in
                 // completion reports through the run's failed event) with its
-                // `✗` symbol, full message, and supplied details verbatim.
+                // `✗` symbol, full message, and supplied details verbatim;
+                // the fixture's repository path and issue number/title render
+                // on the same line exactly as supplied.
                 expect(
                     text,
                     `${scenario} quiet dropped the failed event`,
-                ).toContain(`✗ ${VERIFICATION_FAILURE_MESSAGE}`);
-                expect(text).toContain(
-                    `✗ ${VERIFICATION_FAILURE_MESSAGE} {"verify":"bun run check"}`,
+                ).toContain(
+                    `✗ [${LABEL_REPOSITORY}] #${LABEL_ISSUE.number} ${VERIFICATION_FAILURE_MESSAGE}`,
                 );
-                // The needs-attention event surfaces with `⚠` and its message.
+                expect(text).toContain(
+                    `✗ [${LABEL_REPOSITORY}] #${LABEL_ISSUE.number} ${VERIFICATION_FAILURE_MESSAGE} {"verify":"bun run check"}`,
+                );
+                // The needs-attention event surfaces with `⚠`, its message,
+                // and the issue number and title verbatim.
                 expect(
                     text,
                     `${scenario} quiet dropped the needs-attention event`,
-                ).toContain(`⚠ ${VERIFICATION_NEEDS_ATTENTION_MESSAGE}`);
+                ).toContain(
+                    `⚠ [${LABEL_REPOSITORY}] #${LABEL_ISSUE.number} ${LABEL_ISSUE.title} — ${VERIFICATION_NEEDS_ATTENTION_MESSAGE}`,
+                );
                 // No control bytes anywhere in stderr; stdout stays empty.
                 expectControlFree(text);
                 expect(result.stdoutBytes()).toBe("");
@@ -1629,12 +1638,16 @@ describe("command runtime display: noninteractive fallback", () => {
             expect(text).toContain(JSON.stringify(UNSAFE_DETAILS));
             expect(text).toContain(UNSAFE_API_KEY);
             expect(text).toContain(UNSAFE_TOKEN);
-            expect(text).toContain(`✗ ${VERIFICATION_FAILURE_MESSAGE}`);
+            // The shared epilogue lines carry the repository path and issue
+            // number/title verbatim as well.
             expect(text).toContain(
-                `✗ ${VERIFICATION_FAILURE_MESSAGE} {"verify":"bun run check"}`,
+                `✗ [${LABEL_REPOSITORY}] #${LABEL_ISSUE.number} ${VERIFICATION_FAILURE_MESSAGE}`,
             );
             expect(text).toContain(
-                `⚠ ${VERIFICATION_NEEDS_ATTENTION_MESSAGE} {"verify":"bun run check"}`,
+                `✗ [${LABEL_REPOSITORY}] #${LABEL_ISSUE.number} ${VERIFICATION_FAILURE_MESSAGE} {"verify":"bun run check"}`,
+            );
+            expect(text).toContain(
+                `⚠ [${LABEL_REPOSITORY}] #${LABEL_ISSUE.number} ${LABEL_ISSUE.title} — ${VERIFICATION_NEEDS_ATTENTION_MESSAGE} {"verify":"bun run check"}`,
             );
             // No control bytes anywhere in stderr; stdout stays empty.
             expectControlFree(text);
@@ -2273,4 +2286,207 @@ describe("scripted scenarios: smoke coverage through both harnesses", () => {
             }
         });
     }
+});
+
+/**
+ * The GH-180 unredacted label contract, asserted uniformly across every
+ * human-readable mode through one shared helper.
+ *
+ * - Labels verbatim: the fixture's repository path, issue number/title,
+ *   progress stage label, activity label, and tool name appear exactly
+ *   (substring equality) in the rendered output of the modes that render
+ *   them.
+ * - Lossless: `stripTerminalControls` is the only normalization; no value
+ *   is redacted, elided, masked, or replaced.
+ * - Channels per mode: the repository path and issue number/title ride on
+ *   the shared failure/needs-attention progress lines, so every mode renders
+ *   them; stage and activity labels live in the interactive display context
+ *   (footer and activity surface) only, per "display-context-only"; tool
+ *   names appear in the transcript and activity rows of interactive and
+ *   plain modes. Quiet mode suppresses transcript/tool content by contract,
+ *   so it carries no tool, stage, or activity label to preserve.
+ */
+type LabelMode = "interactive" | "plain" | "quiet";
+
+const expectLabelLossless = (
+    output: string,
+    scenario: ScenarioName,
+    mode: LabelMode,
+): void => {
+    // The raw renderer bytes feed in; stripping terminal controls here must
+    // be the single normalization that reveals the verbatim values.
+    const clean = stripTerminalControls(output);
+    const tag = `${scenario}/${mode} label contract`;
+
+    // Repository path, issue number, and issue title: carried by the shared
+    // failure epilogue, so every human-readable mode renders them on the
+    // failed and needs-attention lines.
+    for (const [label, value] of [
+        ["repository path", LABEL_REPOSITORY],
+        ["issue number", `#${LABEL_ISSUE.number}`],
+        ["issue title", LABEL_ISSUE.title],
+    ] as const) {
+        expect(clean, `${tag} ${label} verbatim`).toContain(value);
+    }
+
+    if (mode === "interactive") {
+        // Display-context-only labels: the interactive footer and activity
+        // surface render the stage label, the activity label, and the
+        // tool-derived activity label; they never leak into durable rows.
+        expect(clean, `${tag} stage label verbatim`).toContain(
+            "Running verification",
+        );
+        expect(clean, `${tag} activity label verbatim`).toContain("Waiting");
+        expect(clean, `${tag} tool activity label verbatim`).toContain(
+            "Using bash",
+        );
+    }
+
+    if (mode !== "quiet") {
+        // Tool names surface in transcript and activity rows; quiet mode has
+        // no tool content by contract.
+        expect(clean, `${tag} tool name verbatim`).toContain("bash");
+    }
+
+    // No redaction, masking, or elision placeholder may replace any value.
+    expect(clean, `${tag} no redaction placeholder`).not.toContain(
+        "[REDACTED]",
+    );
+    expect(clean, `${tag} no mask placeholder`).not.toContain("***");
+};
+
+describe("command runtime display: GH-180 unredacted label contract", () => {
+    test("interactive mode renders repository, issue, stage, activity, and tool labels verbatim", async () => {
+        const workspace = await mkdtemp(join(tmpdir(), "ralphie-labels-"));
+        try {
+            const { strategy } = await runInteractiveCommand({
+                workspace,
+                scenario: "split-credentials",
+            });
+            // The captured surface (live paints included) preserves every
+            // label the interactive mode renders.
+            expectLabelLossless(
+                strategy.output(),
+                "split-credentials",
+                "interactive",
+            );
+            // The repository path and issue labels also survive in the
+            // durable scrollback bytes after the region settles.
+            const durable = stripTerminalControls(durableBytes(strategy));
+            expect(durable).toContain(LABEL_REPOSITORY);
+            expect(durable).toContain(`#${LABEL_ISSUE.number}`);
+            expect(durable).toContain(LABEL_ISSUE.title);
+        } finally {
+            await rm(workspace, { recursive: true, force: true });
+        }
+    });
+
+    test("plain/CI and verbose modes render repository, issue, and tool labels verbatim", async () => {
+        for (const terminal of NONINTERACTIVE_TERMINALS) {
+            for (const mode of ["default", "verbose"] as const) {
+                const workspace = await mkdtemp(
+                    join(tmpdir(), "ralphie-labels-"),
+                );
+                try {
+                    const result = await runNoninteractiveCommand({
+                        args: argsFor(mode, workspace),
+                        terminal,
+                        scenario: "split-credentials",
+                    });
+                    expectLabelLossless(
+                        result.stderrBytes(),
+                        "split-credentials",
+                        "plain",
+                    );
+                } finally {
+                    await rm(workspace, { recursive: true, force: true });
+                }
+            }
+        }
+    });
+
+    test("quiet mode keeps repository and issue labels verbatim for every scenario", async () => {
+        for (const scenario of SCENARIO_NAMES) {
+            const workspace = await mkdtemp(join(tmpdir(), "ralphie-labels-"));
+            try {
+                const result = await runNoninteractiveCommand({
+                    args: argsFor("quiet", workspace),
+                    terminal: NONINTERACTIVE_TERMINAL,
+                    scenario,
+                });
+                // Failure and needs-attention lines are the only quiet
+                // content; the epilogue labels survive them verbatim,
+                // including the issue title on the needs-attention line.
+                expectLabelLossless(result.stderrBytes(), scenario, "quiet");
+            } finally {
+                await rm(workspace, { recursive: true, force: true });
+            }
+        }
+    });
+
+    test("credential content split across writeRaw and text_delta boundaries reassembles contiguously in durable output", async () => {
+        const workspace = await mkdtemp(join(tmpdir(), "ralphie-labels-"));
+        try {
+            // Interactive: the durable (non-paint) stream keeps the adjacent
+            // chunks contiguous, in emit order, with nothing injected between
+            // them.
+            const { strategy } = await runInteractiveCommand({
+                workspace,
+                scenario: "split-credentials",
+            });
+            const durable = stripTerminalControls(durableBytes(strategy));
+            expect(durable).toContain(`Bearer ${CREDENTIAL_TEXT}`);
+            expect(durable).toContain(CREDENTIAL_RAW);
+            expect(durable.indexOf(`Bearer ${CREDENTIAL_TEXT}`)).toBeLessThan(
+                durable.indexOf(CREDENTIAL_RAW),
+            );
+
+            // Plain and verbose (plain with details) reassemble the same way
+            // in the append-only stderr bytes.
+            for (const terminal of NONINTERACTIVE_TERMINALS) {
+                for (const mode of ["default", "verbose"] as const) {
+                    const result = await runNoninteractiveCommand({
+                        args: argsFor(mode, workspace),
+                        terminal,
+                        scenario: "split-credentials",
+                    });
+                    const text = result.stderrBytes();
+                    expect(text).toContain(`Bearer ${CREDENTIAL_TEXT}`);
+                    expect(text).toContain(CREDENTIAL_RAW);
+                    expect(
+                        text.indexOf(`Bearer ${CREDENTIAL_TEXT}`),
+                    ).toBeLessThan(text.indexOf(CREDENTIAL_RAW));
+                }
+            }
+        } finally {
+            await rm(workspace, { recursive: true, force: true });
+        }
+    });
+
+    test("interactive width clipping shortens live rows only; scrollback keeps the full values", async () => {
+        const workspace = await mkdtemp(join(tmpdir(), "ralphie-labels-"));
+        try {
+            for (const width of [12, 8]) {
+                const { strategy, paintWidths } = await runInteractiveCommand({
+                    workspace,
+                    scenario: "split-credentials",
+                    width,
+                });
+                // Live region rows stay clipped and unwrapped at the active
+                // width (never spilling onto a second physical row).
+                expectFramesFit(strategy, paintWidths);
+                // Once the region settles, the durable scrollback preserves
+                // the credential-split content and the label values in full,
+                // even though the live rows were visually shortened.
+                const durable = stripTerminalControls(durableBytes(strategy));
+                expect(durable).toContain(`Bearer ${CREDENTIAL_TEXT}`);
+                expect(durable).toContain(CREDENTIAL_RAW);
+                expect(durable).toContain(LABEL_REPOSITORY);
+                expect(durable).toContain(`#${LABEL_ISSUE.number}`);
+                expect(durable).toContain(LABEL_ISSUE.title);
+            }
+        } finally {
+            await rm(workspace, { recursive: true, force: true });
+        }
+    });
 });
