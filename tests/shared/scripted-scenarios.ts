@@ -83,6 +83,10 @@ export const WIDE_TEXT =
     "漢字のレイアウト検査 e\u0301\u0301lision 🎉 絵文字 🚀✨";
 export const WIDE_COMMAND = "echo ワイド文字列テスト 🎉 e\u0301 完了 ✨";
 
+/** Progress messages for the wide-grapheme scenario. */
+export const WIDE_PROGRESS_STARTED = "多バイト文字の進捗メッセージ 🎉 幅確認";
+export const WIDE_PROGRESS_DONE = "幅確認完了 ✨";
+
 /** Width the resize scenario switches to mid-run. */
 export const RESIZE_TARGET_WIDTH = 12;
 
@@ -463,12 +467,12 @@ const wideGraphemeScenario = (): ScenarioStep[] => [
     progress({
         stage: "implementation",
         status: "started",
-        message: "多バイト文字の進捗メッセージ 🎉 幅確認",
+        message: WIDE_PROGRESS_STARTED,
     }),
     progress({
         stage: "implementation",
         status: "succeeded",
-        message: "幅確認完了 ✨",
+        message: WIDE_PROGRESS_DONE,
     }),
     event(agentSettledEvent),
     ...FAILURE_EPILOGUE,

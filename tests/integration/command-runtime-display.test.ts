@@ -47,12 +47,16 @@ import {
     CREDENTIAL_TEXT,
     INTERLEAVED_RAW,
     INTERLEAVED_TEXT,
+    LONG_PROGRESS,
     LONG_TEXT,
     RESIZE_TARGET_WIDTH,
     SCENARIO_NAMES,
     UNSAFE_API_KEY,
+    UNSAFE_DETAILS,
     UNSAFE_TOKEN,
     VERIFICATION_FAILURE_MESSAGE,
+    WIDE_PROGRESS_DONE,
+    WIDE_PROGRESS_STARTED,
     WIDE_TEXT,
     playScriptedScenario,
     type ScenarioName,
@@ -383,6 +387,25 @@ const NONINTERACTIVE_TERMINAL: CliTerminalInfo = {
     width: 80,
 };
 
+/** Redirected (non-CI) terminal: plain mode with output piped elsewhere. */
+const REDIRECTED_TERMINAL: CliTerminalInfo = {
+    isInteractive: false,
+    isCI: false,
+    width: 80,
+};
+
+/** The plain/CI and redirected (non-CI) terminal configurations. */
+const NONINTERACTIVE_TERMINALS: readonly CliTerminalInfo[] = [
+    NONINTERACTIVE_TERMINAL,
+    REDIRECTED_TERMINAL,
+];
+
+/** Human-readable output modes covered by the noninteractive matrix. */
+const NONINTERACTIVE_MATRIX_MODES = ["default", "verbose", "quiet"] as const;
+
+const terminalLabel = (terminal: CliTerminalInfo): string =>
+    terminal.isCI ? "plain/CI" : "redirected";
+
 const argsFor = (mode: OutputMode, workspace: string): string[] =>
     mode === "default"
         ? ["owner/repository", "--workspace", workspace]
@@ -427,6 +450,22 @@ const isBreadcrumbRow = (line: string): boolean => {
 
 /** Same bytes as CLEAR_LIVE_LINE in src/progress/progress.ts: `\r\x1b[2K`. */
 const CLEAR_LIVE_LINE = CLEAR_LINE;
+
+/**
+ * C0 cursor/erase/bell controls (except tab and newline), DEL, and C1
+ * controls, mirroring TERMINAL_CONTROL_CODE in src/shared/terminal.ts.
+ */
+const TERMINAL_CONTROL_CODE =
+    /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u0080-\u009f]/;
+
+/** Assert a capture is byte-clean: no ESC, CR, or C0/C1 cursor/erase/bell. */
+const expectControlFree = (text: string): void => {
+    expect(text).not.toContain("\x1b");
+    expect(text).not.toContain("\r");
+    expect(text).not.toMatch(TERMINAL_CONTROL_CODE);
+    // stripTerminalControls must be an identity no-op on the captured bytes.
+    expect(stripTerminalControls(text)).toBe(text);
+};
 
 const graphemeSegmenter = new Intl.Segmenter(undefined, {
     granularity: "grapheme",
@@ -855,6 +894,163 @@ describe("command runtime display: interactive mode", () => {
     });
 });
 
+/**
+ * Landmark substrings every scenario must contain in strict emit order.
+ * Each entry mirrors a distinct durable write of the plain renderer, so
+ * monotonically increasing positions prove the capture is append-only and
+ * never reordered, for every scenario and terminal configuration.
+ */
+const orderedMarkersFor = (scenario: ScenarioName): readonly string[] => {
+    switch (scenario) {
+        case "completion":
+            return [
+                "╭─ OpenCode · Task · session-1",
+                ASSISTANT_DELTAS.join(""),
+                "$ echo cycle 0",
+                "✓ bash done",
+                "✗ grep failed",
+                "✓ change written",
+                VERIFICATION_FAILURE_MESSAGE,
+                "╰─ settled",
+            ];
+        case "interleaved-streams":
+            return [
+                "╭─ OpenCode · Task · session-1",
+                INTERLEAVED_RAW[0],
+                INTERLEAVED_RAW[1],
+                INTERLEAVED_TEXT[0],
+                INTERLEAVED_RAW[2],
+                INTERLEAVED_TEXT[1],
+                INTERLEAVED_RAW[3],
+                "assembling",
+                INTERLEAVED_TEXT[2],
+                "✓ bash done",
+                INTERLEAVED_RAW[4],
+                "assembled",
+                "╰─ settled",
+                VERIFICATION_FAILURE_MESSAGE,
+            ];
+        case "thinking-tools":
+            return [
+                "╭─ OpenCode · Task · session-1",
+                "find *.ts in /workspace",
+                "Let me look at the entry point and its imports.",
+                " The module boundary looks clean.",
+                "✓ find done",
+                "╰─ settled",
+                VERIFICATION_FAILURE_MESSAGE,
+            ];
+        case "lifecycle":
+            return [
+                "╭─ OpenCode · Task · session-1",
+                "Working through a dense turn with lifecycle boundaries.",
+                "↻ compacting context · context window nearing capacity",
+                "↻ context compaction done",
+                "↻ retrying OpenCode request · attempt 1/3",
+                "OpenCode retry failed",
+                "↻ retrying OpenCode request · attempt 2/3",
+                "OpenCode retry succeeded",
+                "↻ retrying context summary · attempt 1/2",
+                "↻ context summary finished",
+                "╰─ retrying…",
+                "Retrying with a shorter context.",
+                "╰─ settled",
+                VERIFICATION_FAILURE_MESSAGE,
+            ];
+        case "abort":
+            return [
+                "╭─ OpenCode · Task · session-1",
+                "Starting the aborted run session.",
+                "✓ bash done",
+                "╰─ settled",
+                VERIFICATION_FAILURE_MESSAGE,
+            ];
+        case "breadcrumb-refresh":
+            return [
+                "╭─ OpenCode · Task · session-1",
+                "First change lands on the existing path.",
+                "✓ bash done",
+                "│  › Waiting",
+                "◐ running gate 1",
+                "✓ gate 5 passed",
+                "╰─ settled",
+                VERIFICATION_FAILURE_MESSAGE,
+            ];
+        case "long-output":
+            return [
+                "╭─ OpenCode · Task · session-1",
+                `✦ assistant done · ${LONG_TEXT.length} chars · truncated`,
+                "$ echo",
+                "✓ bash done",
+                LONG_PROGRESS,
+                "long output handled",
+                "╰─ settled",
+                VERIFICATION_FAILURE_MESSAGE,
+            ];
+        case "wide-grapheme":
+            return [
+                "╭─ OpenCode · Task · session-1",
+                WIDE_TEXT,
+                "$ echo",
+                "✓ bash done",
+                WIDE_PROGRESS_STARTED,
+                WIDE_PROGRESS_DONE,
+                "╰─ settled",
+                VERIFICATION_FAILURE_MESSAGE,
+            ];
+        case "verbose-unsafe":
+            return [
+                "╭─ OpenCode · Task · session-1",
+                "Authenticating against the artifact registry.",
+                "$ upload the artifact bundle",
+                "✓ bash done",
+                "uploading artifact",
+                "artifact uploaded",
+                "╰─ settled",
+                VERIFICATION_FAILURE_MESSAGE,
+            ];
+        case "split-credentials":
+            return [
+                "╭─ OpenCode · Task · session-1",
+                `Bearer ${CREDENTIAL_TEXT}`,
+                CREDENTIAL_RAW,
+                "$ echo split",
+                "✓ bash done",
+                "╰─ settled",
+                VERIFICATION_FAILURE_MESSAGE,
+            ];
+        case "resize":
+            return [
+                "╭─ OpenCode · Task · session-1",
+                "Starting at the wide width for the first cycle.",
+                "$ echo pre-resize",
+                "✓ bash done",
+                "$ echo post-resize",
+                "✓ bash done",
+                "checking the narrow region",
+                "narrow region verified",
+                "╰─ settled",
+                VERIFICATION_FAILURE_MESSAGE,
+            ];
+    }
+};
+
+/**
+ * Consecutive writeRaw chunks must land contiguously in the capture: no byte
+ * from another stream may be interleaved between them.
+ */
+const expectContiguousRawChunks = (
+    scenario: ScenarioName,
+    text: string,
+): void => {
+    if (scenario === "interleaved-streams") {
+        expect(text).toContain(`${INTERLEAVED_RAW[0]}${INTERLEAVED_RAW[1]}`);
+    }
+    if (scenario === "split-credentials") {
+        expect(text).toContain(CREDENTIAL_RAW);
+    }
+};
+
 describe("command runtime display: noninteractive fallback", () => {
     test("plain/CI output is deterministic, append-only, and control-free", async () => {
         const first = await mkdtemp(join(tmpdir(), "ralphie-plain-"));
@@ -943,6 +1139,210 @@ describe("command runtime display: noninteractive fallback", () => {
             expect(result.stdoutBytes()).toBe("");
         } finally {
             await rm(workspace, { recursive: true, force: true });
+        }
+    });
+
+    test("plain/CI and redirected outputs are control-free for every scenario and human mode", async () => {
+        for (const scenario of SCENARIO_NAMES) {
+            for (const terminal of NONINTERACTIVE_TERMINALS) {
+                for (const mode of NONINTERACTIVE_MATRIX_MODES) {
+                    const workspace = await mkdtemp(
+                        join(tmpdir(), "ralphie-plain-"),
+                    );
+                    try {
+                        const result = await runNoninteractiveCommand({
+                            args: argsFor(mode, workspace),
+                            terminal,
+                            scenario,
+                        });
+                        const text = result.stderrBytes();
+                        expect(
+                            text.length,
+                            `${scenario}/${terminalLabel(terminal)}/${mode} emitted nothing`,
+                        ).toBeGreaterThan(0);
+                        expectControlFree(text);
+                    } finally {
+                        await rm(workspace, { recursive: true, force: true });
+                    }
+                }
+            }
+        }
+    });
+
+    test("plain/CI and redirected outputs are byte-identical across runs with empty stdout", async () => {
+        for (const scenario of SCENARIO_NAMES) {
+            for (const terminal of NONINTERACTIVE_TERMINALS) {
+                for (const mode of NONINTERACTIVE_MATRIX_MODES) {
+                    const first = await mkdtemp(
+                        join(tmpdir(), "ralphie-plain-"),
+                    );
+                    const second = await mkdtemp(
+                        join(tmpdir(), "ralphie-plain-"),
+                    );
+                    try {
+                        const runOne = await runNoninteractiveCommand({
+                            args: argsFor(mode, first),
+                            terminal,
+                            scenario,
+                        });
+                        const runTwo = await runNoninteractiveCommand({
+                            args: argsFor(mode, second),
+                            terminal,
+                            scenario,
+                        });
+                        expect(
+                            runTwo.stderrBytes(),
+                            `${scenario}/${terminalLabel(terminal)}/${mode} differed across runs`,
+                        ).toBe(runOne.stderrBytes());
+                        expect(runTwo.stderrBytes().length).toBeGreaterThan(0);
+                        // stdout stays empty for every human-readable mode.
+                        expect(runOne.stdoutBytes()).toBe("");
+                        expect(runTwo.stdoutBytes()).toBe("");
+                    } finally {
+                        await rm(first, { recursive: true, force: true });
+                        await rm(second, { recursive: true, force: true });
+                    }
+                }
+            }
+        }
+    });
+
+    test("raw chunks and transcript/breadcrumb lines stay in emit order for every scenario", async () => {
+        for (const scenario of SCENARIO_NAMES) {
+            for (const terminal of NONINTERACTIVE_TERMINALS) {
+                const workspace = await mkdtemp(
+                    join(tmpdir(), "ralphie-plain-"),
+                );
+                try {
+                    const result = await runNoninteractiveCommand({
+                        args: argsFor("default", workspace),
+                        terminal,
+                        scenario,
+                    });
+                    const text = result.stderrBytes();
+                    let position = -1;
+                    for (const marker of orderedMarkersFor(scenario)) {
+                        // Search past the previous landmark so repeated rows
+                        // (for example two identical tool outcomes) are each
+                        // verified at their own emit position.
+                        const found = text.indexOf(marker, position + 1);
+                        expect(
+                            found,
+                            `${scenario}/${terminalLabel(terminal)} reordered or dropped ${JSON.stringify(marker)}`,
+                        ).toBeGreaterThan(position);
+                        position = found;
+                    }
+                    expectContiguousRawChunks(scenario, text);
+                } finally {
+                    await rm(workspace, { recursive: true, force: true });
+                }
+            }
+        }
+    });
+
+    test("breadcrumb rows are append-only scrollback that survives the run unchanged", async () => {
+        for (const terminal of NONINTERACTIVE_TERMINALS) {
+            const workspace = await mkdtemp(join(tmpdir(), "ralphie-plain-"));
+            try {
+                const result = await runNoninteractiveCommand({
+                    args: argsFor("default", workspace),
+                    terminal,
+                    scenario: "breadcrumb-refresh",
+                });
+                const text = result.stderrBytes();
+                // One durable row per explicit breadcrumb, in scrollback order,
+                // byte-identical to the inserted row, never re-emitted.
+                const breadcrumbRows = text
+                    .split("\n")
+                    .filter((line) => line.startsWith("│  › Waiting"));
+                expect(breadcrumbRows).toEqual([
+                    "│  › Waiting",
+                    "│  › Waiting",
+                    "│  › Waiting",
+                ]);
+                expect(text.split("│  › Waiting")).toHaveLength(4);
+                // The rows landed between the seeding tool and the gates.
+                expect(text.indexOf("│  › Waiting")).toBeGreaterThan(
+                    text.indexOf("✓ bash done"),
+                );
+                expect(text.indexOf("│  › Waiting")).toBeLessThan(
+                    text.indexOf("◐ running gate 1"),
+                );
+            } finally {
+                await rm(workspace, { recursive: true, force: true });
+            }
+        }
+    });
+
+    test("long output survives in full without control bytes or durable-stream truncation", async () => {
+        for (const terminal of NONINTERACTIVE_TERMINALS) {
+            const workspace = await mkdtemp(join(tmpdir(), "ralphie-plain-"));
+            try {
+                const result = await runNoninteractiveCommand({
+                    args: argsFor("default", workspace),
+                    terminal,
+                    scenario: "long-output",
+                });
+                const text = result.stderrBytes();
+                // Streamed assistant text reassembles contiguously up to the
+                // transcript cap and reports the full reassembled length.
+                const visible = LONG_TEXT.slice(0, 140);
+                expect(text.split(visible)).toHaveLength(2);
+                expect(text).toContain(
+                    `✦ assistant done · ${LONG_TEXT.length} chars · truncated`,
+                );
+                // Long progress messages reach the durable stream in full.
+                expect(text).toContain(LONG_PROGRESS);
+                // The long tool line is a single clipped durable row.
+                const toolLine = text
+                    .split("\n")
+                    .find((line) => line.includes("$ echo"));
+                expect(toolLine).toBeDefined();
+                expect(toolLine as string).toContain("…");
+                expect(Bun.stringWidth(toolLine as string)).toBeLessThanOrEqual(
+                    80,
+                );
+                expectControlFree(text);
+            } finally {
+                await rm(workspace, { recursive: true, force: true });
+            }
+        }
+    });
+
+    test("verbose mode renders progress details inline with values verbatim", async () => {
+        for (const terminal of NONINTERACTIVE_TERMINALS) {
+            const workspace = await mkdtemp(join(tmpdir(), "ralphie-plain-"));
+            try {
+                const result = await runNoninteractiveCommand({
+                    args: argsFor("verbose", workspace),
+                    terminal,
+                    scenario: "verbose-unsafe",
+                });
+                const text = result.stderrBytes();
+                const details = JSON.stringify(UNSAFE_DETAILS);
+                // Details render inline as humanText(JSON.stringify(details)).
+                expect(text).toContain(details);
+                for (const message of [
+                    "uploading artifact",
+                    "artifact uploaded",
+                ]) {
+                    const line = text
+                        .split("\n")
+                        .find((candidate) => candidate.includes(message));
+                    expect(
+                        line,
+                        `${message} line missing under ${terminalLabel(terminal)}`,
+                    ).toBeDefined();
+                    expect(line as string).toContain(details);
+                }
+                // Values survive verbatim with no terminal controls.
+                expect(text).toContain(UNSAFE_API_KEY);
+                expect(text).toContain(UNSAFE_TOKEN);
+                expectControlFree(text);
+                expect(result.stdoutBytes()).toBe("");
+            } finally {
+                await rm(workspace, { recursive: true, force: true });
+            }
         }
     });
 });
