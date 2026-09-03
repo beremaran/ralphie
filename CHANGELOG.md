@@ -5,6 +5,13 @@ All notable changes to Ralphie are documented here. The project follows
 
 ## [Unreleased]
 
+- Tighten human transcript bounds to 3 lines/140 characters: tool incremental
+  output uses `LIVE_OUTPUT_LIMIT=140`, thinking/assistant streams use the same
+  140-character bound, and final previews truncate to 3 lines/140 characters
+  with the existing truncation marker. Truncated tool, thinking, and assistant
+  streams still report background totals (total characters and lines with a
+  `truncated` marker). JSON and durable logs remain lossless.
+
 - Add the needs-attention recovery contract across the Pi boundary, issue
   executor, recovery service, and local end-to-end path: bounded
   `request_needs_attention` signals (`reason` one of `outdated_premise`,

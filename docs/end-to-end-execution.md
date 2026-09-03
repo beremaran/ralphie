@@ -569,13 +569,15 @@ Human transcript output also emits lifecycle breadcrumbs, such as:
 │  • thinking level · high
 ```
 
-The human renderer bounds tool output to keep terminals usable. The named
-`LIVE_OUTPUT_LIMIT` threshold is measured in characters and defaults to 2,400
-characters per tool call for incremental output. Final previews use the
-source-level `maxLines`/`maxCharacters` limits of 12 lines/2,400 characters by
-default, or 40 lines/8,000 characters with `--output verbose`. These bounds
-apply to human rendering only; the structured Pi records remain complete
-(subject to reporting-boundary redaction).
+The human renderer bounds tool, thinking, and assistant output to keep
+terminals usable. The named `LIVE_OUTPUT_LIMIT` threshold is measured in
+characters and defaults to 140 characters per tool call for incremental
+output, with the same 140-character bound for thinking/assistant streams.
+Final previews use the source-level `maxLines`/`maxCharacters` limits of 3
+lines/140 characters. Truncated streams still report background totals (total
+characters and lines with a `truncated` marker) so hidden output remains
+observable. These bounds apply to human rendering only; the structured Pi
+records remain complete (subject to reporting-boundary redaction).
 
 The cross-mode guarantees are:
 

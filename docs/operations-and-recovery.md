@@ -12,9 +12,10 @@ thinking deltas, assistant text, tool calls, and tool results. Tasks and issues
 are intentionally processed sequentially so this output remains ordered.
 
 Human-readable transcript output groups each Pi session into a compact block:
-thinking and assistant text stream immediately, tool calls are shown as readable
-commands, and tool output is indented, de-duplicated, and bounded. Use
-`--output verbose` for a larger tool-output preview. JSON output remains the
+thinking and assistant text stream immediately within a 140-character bound,
+tool calls are shown as readable commands, and tool output is indented,
+de-duplicated, and bounded to 3 lines/140 characters. Truncated streams still
+report background totals with a `truncated` marker. JSON output remains the
 lossless event stream for integrations.
 
 Ralphie adapts its progress renderer to its environment:

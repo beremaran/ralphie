@@ -472,17 +472,18 @@ const messageId = (message: unknown): string => {
 
 const previewText = (
     text: string,
-    verbose: boolean,
+    _verbose: boolean,
 ): {
     readonly text: string;
     readonly omitted: boolean;
     readonly lines: number;
 } => {
+    void _verbose;
     const clean = sanitizeTerminalText(text).trim();
     if (clean === "") return { text: "", omitted: false, lines: 0 };
 
-    const maxLines = verbose ? 40 : 12;
-    const maxCharacters = verbose ? 8_000 : 2_400;
+    const maxLines = 3;
+    const maxCharacters = 140;
     const sourceLines = clean.split("\n");
     let result = sourceLines.slice(0, maxLines).join("\n");
     let omitted = sourceLines.length > maxLines;
@@ -507,7 +508,69 @@ type ToolExecutionState = {
     outputLimited: boolean;
 };
 
-const LIVE_OUTPUT_LIMIT = 2_400;
+const LIVE_OUTPUT_LIMIT = 140;
+
+const STREAM_OUTPUT_LIMIT = 140;
+
+type MessageStreamState = {
+    renderedCharacters: number;
+    totalCharacters: number;
+    outputLimited: boolean;
+};
+
+const messageStateFor = (
+    states: Map<string, MessageStreamState>,
+    key: string,
+): MessageStreamState => {
+    const existing = states.get(key);
+    if (existing !== undefined) return existing;
+    const state: MessageStreamState = {
+        renderedCharacters: 0,
+        totalCharacters: 0,
+        outputLimited: false,
+    };
+    states.set(key, state);
+    return state;
+};
+
+const renderBoundedMessageDelta = (
+    key: StreamKey,
+    delta: string,
+    states: Map<string, MessageStreamState>,
+    writer: TranscriptWriter,
+    textStyle: (text: string) => string,
+    fallbackLabel: string,
+): void => {
+    const state = messageStateFor(states, key);
+    state.totalCharacters += delta.length;
+    const remaining = STREAM_OUTPUT_LIMIT - state.renderedCharacters;
+    if (remaining <= 0) {
+        state.outputLimited = true;
+        return;
+    }
+    const visible = delta.slice(0, remaining);
+    writer.writeStream(key, visible, textStyle, fallbackLabel);
+    state.renderedCharacters += visible.length;
+    if (visible.length < delta.length) state.outputLimited = true;
+};
+
+const endMessageStream = (
+    key: StreamKey,
+    states: Map<string, MessageStreamState>,
+    writer: TranscriptWriter,
+    label: string,
+    style: (text: string) => string,
+): void => {
+    const state = states.get(key);
+    writer.endStream(key);
+    states.delete(key);
+    if (state?.outputLimited === true) {
+        writer.line(
+            `${style(label)} · ${state.totalCharacters} chars · truncated`,
+            { blankBefore: false },
+        );
+    }
+};
 
 const cumulativeDelta = (previous: string, next: string): string => {
     if (next === previous) return "";
@@ -518,6 +581,7 @@ const renderMessageUpdate = (
     event: MessageUpdateEvent,
     styles: TranscriptStyles,
     writer: TranscriptWriter,
+    states: Map<string, MessageStreamState>,
 ): void => {
     const update = event.assistantMessageEvent;
     switch (update.type) {
@@ -528,15 +592,23 @@ const renderMessageUpdate = (
             );
             return;
         case "thinking_delta":
-            writer.writeStream(
+            renderBoundedMessageDelta(
                 messageUpdateKey(event, "thinking"),
                 update.delta,
+                states,
+                writer,
                 styles.thinking,
                 styles.thinking("⋯ thinking "),
             );
             return;
         case "thinking_end":
-            writer.endStream(messageUpdateKey(event, "thinking"));
+            endMessageStream(
+                messageUpdateKey(event, "thinking"),
+                states,
+                writer,
+                "⋯ thinking done",
+                styles.thinking,
+            );
             return;
         case "text_start":
             writer.startStream(
@@ -545,15 +617,23 @@ const renderMessageUpdate = (
             );
             return;
         case "text_delta":
-            writer.writeStream(
+            renderBoundedMessageDelta(
                 messageUpdateKey(event, "assistant"),
                 update.delta,
+                states,
+                writer,
                 styles.assistant,
                 styles.assistant("✦ assistant "),
             );
             return;
         case "text_end":
-            writer.endStream(messageUpdateKey(event, "assistant"));
+            endMessageStream(
+                messageUpdateKey(event, "assistant"),
+                states,
+                writer,
+                "✦ assistant done",
+                styles.assistant,
+            );
             return;
         case "toolcall_start":
         case "toolcall_delta":
@@ -640,6 +720,36 @@ const renderBashExecutionUpdate = (
     renderToolDelta(state, event.delta, styles, writer);
 };
 
+const renderToolFinal = (
+    state: ToolExecutionState,
+    finalPreview: { readonly text: string },
+    finalDelta: string,
+    styles: TranscriptStyles,
+    writer: TranscriptWriter,
+): void => {
+    if (state.renderedCharacters === 0 && finalPreview.text !== "") {
+        writer.writeStream(
+            state.key,
+            finalPreview.text,
+            styles.event,
+            styles.event("output "),
+        );
+        return;
+    }
+    if (state.renderedCharacters > 0 && finalDelta !== "") {
+        renderToolDelta(state, finalDelta, styles, writer);
+    }
+};
+
+const toolLineSuffix = (lines: number): string =>
+    lines === 0 ? "" : ` · ${lines} line${lines === 1 ? "" : "s"}`;
+
+const toolCharsSuffix = (isTruncated: boolean, total: number): string =>
+    isTruncated && total > 0 ? ` · ${total} chars` : "";
+
+const toolTruncatedSuffix = (isTruncated: boolean): string =>
+    isTruncated ? " · truncated" : "";
+
 const renderToolExecutionEnd = (
     event: Extract<PiSessionEvent, { type: "tool_execution_end" }>,
     states: Map<string, ToolExecutionState>,
@@ -652,28 +762,13 @@ const renderToolExecutionEnd = (
     const finalPreview = previewText(finalOutput, verbose);
     const finalDelta = cumulativeDelta(state.latestOutput, finalOutput);
     state.latestOutput = finalOutput;
-    if (state.renderedCharacters === 0 && finalPreview.text !== "") {
-        writer.writeStream(
-            state.key,
-            finalPreview.text,
-            styles.event,
-            styles.event("output "),
-        );
-    } else if (state.renderedCharacters > 0 && finalDelta !== "") {
-        renderToolDelta(state, finalDelta, styles, writer);
-    }
+    renderToolFinal(state, finalPreview, finalDelta, styles, writer);
     writer.endStream(state.key);
 
-    const lineCount = finalPreview.lines;
-    const count =
-        lineCount === 0
-            ? ""
-            : ` · ${lineCount} line${lineCount === 1 ? "" : "s"}`;
-    const truncated =
-        state.outputLimited || finalPreview.omitted ? " · truncated" : "";
+    const isTruncated = state.outputLimited || finalPreview.omitted;
     const status = event.isError ? styles.error("✗") : styles.success("✓");
     writer.line(
-        `${status} ${oneLine(event.toolName) || "tool"} ${event.isError ? "failed" : "done"}${count}${truncated}`,
+        `${status} ${oneLine(event.toolName) || "tool"} ${event.isError ? "failed" : "done"}${toolLineSuffix(finalPreview.lines)}${toolCharsSuffix(isTruncated, finalOutput.length)}${toolTruncatedSuffix(isTruncated)}`,
         { blankBefore: false },
     );
     states.delete(event.toolCallId);
@@ -758,6 +853,7 @@ const renderTerminalEvent = (
     styles: TranscriptStyles,
     writer: TranscriptWriter,
     states: Map<string, ToolExecutionState>,
+    messageStates: Map<string, MessageStreamState>,
     verbose: boolean,
     width: () => number,
 ): void => {
@@ -780,7 +876,7 @@ const renderTerminalEvent = (
             renderUserMessage(event, styles, writer, verbose);
             return;
         case "message_update":
-            renderMessageUpdate(event, styles, writer);
+            renderMessageUpdate(event, styles, writer, messageStates);
             return;
         case "tool_execution_start": {
             const state = outputStateFor(
@@ -867,6 +963,7 @@ export const makePiTranscriptRenderer = ({
         onSessionStart,
     );
     const toolStates = new Map<string, ToolExecutionState>();
+    const messageStates = new Map<string, MessageStreamState>();
 
     const render: PiEventListener = (event, context) => {
         if (json) {
@@ -880,6 +977,7 @@ export const makePiTranscriptRenderer = ({
             styles,
             writer,
             toolStates,
+            messageStates,
             verbose,
             width,
         );
