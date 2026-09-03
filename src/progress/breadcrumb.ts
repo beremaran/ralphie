@@ -12,14 +12,14 @@ export {
     displayContextBreadcrumbLabel,
     makeBreadcrumbCandidate,
     makeBreadcrumbLabel,
+    normalizeBreadcrumbKey,
+    normalizeBreadcrumbLabel,
     prepareBreadcrumbCandidate,
     prepareBreadcrumbLabel,
     renderBreadcrumb,
     renderBreadcrumbCandidate,
     renderBreadcrumbLabel,
     renderBreadcrumbLine,
-    sanitizeBreadcrumbKey,
-    sanitizeBreadcrumbLabel,
 } from "./breadcrumb-label.ts";
 export type {
     ApprovedBreadcrumbCandidate,
@@ -27,7 +27,7 @@ export type {
     BreadcrumbLabelCandidate,
     BreadcrumbRenderOptions,
     BreadcrumbRenderResult,
-    SanitizedBreadcrumb,
+    NormalizedBreadcrumb,
 } from "./breadcrumb-label.ts";
 
 /** Default number of visible rendered rows between breadcrumb opportunities. */
@@ -38,7 +38,7 @@ export type BreadcrumbPolicyState = {
     readonly renderedOutputBaseline: number;
     /** Number of threshold crossings consumed since that baseline. */
     readonly processedPeriodicCrossings: number;
-    /** Sanitized key of the last emitted breadcrumb, when one exists. */
+    /** Normalized key of the last emitted breadcrumb, when one exists. */
     readonly lastEmittedCanonicalKey?: string;
 };
 

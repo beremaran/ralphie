@@ -13,7 +13,7 @@ import {
 import {
     prepareBreadcrumbCandidate,
     type BreadcrumbLabelCandidate,
-    type SanitizedBreadcrumb,
+    type NormalizedBreadcrumb,
 } from "./breadcrumb-label.ts";
 import {
     createDisplayState,
@@ -86,7 +86,7 @@ export type ProgressCoordinator = {
     /** Insert an approved breadcrumb through the transcript boundary. */
     readonly insertBreadcrumb?: (
         candidate: BreadcrumbLabelCandidate,
-    ) => SanitizedBreadcrumb;
+    ) => NormalizedBreadcrumb;
     readonly getDisplayState: () => DisplayState;
     readonly dispose: () => Promise<void>;
 };
@@ -375,7 +375,7 @@ export const makeProgressCoordinator = (
 
     const insertBreadcrumb = (
         candidate: BreadcrumbLabelCandidate,
-    ): SanitizedBreadcrumb => {
+    ): NormalizedBreadcrumb => {
         const prepared = prepareBreadcrumbCandidate(candidate);
         if (disposed) return prepared;
         return transcript?.insertBreadcrumb(candidate) ?? prepared;

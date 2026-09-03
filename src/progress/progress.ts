@@ -506,6 +506,8 @@ export {
     makeBreadcrumbCadencePolicy,
     makeBreadcrumbPolicy,
     makeBreadcrumbPolicyEngine,
+    normalizeBreadcrumbKey,
+    normalizeBreadcrumbLabel,
     prepareBreadcrumbCandidate,
     prepareBreadcrumbLabel,
     reduceBreadcrumbPolicy,
@@ -513,8 +515,6 @@ export {
     renderBreadcrumbCandidate,
     renderBreadcrumbLabel,
     renderBreadcrumbLine,
-    sanitizeBreadcrumbKey,
-    sanitizeBreadcrumbLabel,
 } from "./breadcrumb.ts";
 export type {
     ApprovedBreadcrumbCandidate,
@@ -530,7 +530,7 @@ export type {
     BreadcrumbPolicyOptions,
     BreadcrumbPolicyResult,
     BreadcrumbPolicyState,
-    SanitizedBreadcrumb,
+    NormalizedBreadcrumb,
     BreadcrumbArbitrationCandidate,
     BreadcrumbArbitrationResult,
     BreadcrumbCandidateKind,

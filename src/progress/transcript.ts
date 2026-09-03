@@ -9,7 +9,7 @@ import {
     prepareBreadcrumbCandidate,
     renderBreadcrumbLabel,
     type BreadcrumbLabelCandidate,
-    type SanitizedBreadcrumb,
+    type NormalizedBreadcrumb,
 } from "./breadcrumb-label.ts";
 import { progressStageLabel, type DisplayState } from "./display-state.ts";
 
@@ -29,10 +29,10 @@ export type PiTranscriptRendererOptions = {
 export type PiTranscriptRenderer = PiEventListener & {
     /** Finish the current visible line without dropping the active stream key. */
     readonly interruptLine: () => void;
-    /** Insert a sanitized breadcrumb and safely resume any interrupted stream. */
+    /** Insert a normalized breadcrumb and safely resume any interrupted stream. */
     readonly insertBreadcrumb: (
         candidate: BreadcrumbLabelCandidate,
-    ) => SanitizedBreadcrumb;
+    ) => NormalizedBreadcrumb;
     /** Visible terminal rows written during the current Pi session. */
     readonly getVisibleLineCount: () => number;
 };
@@ -985,7 +985,7 @@ export const makePiTranscriptRenderer = ({
     };
     const insertBreadcrumb = (
         candidate: BreadcrumbLabelCandidate,
-    ): SanitizedBreadcrumb => {
+    ): NormalizedBreadcrumb => {
         const prepared = prepareBreadcrumbCandidate(candidate);
         if (!json && prepared.label !== "") {
             writer.insertBreadcrumb(

@@ -1,7 +1,4 @@
-import {
-    redactSensitiveText,
-    stripTerminalControls,
-} from "../shared/redaction.ts";
+import { stripTerminalControls } from "../shared/redaction.ts";
 import { dim } from "./colors.ts";
 import {
     DISPLAY_ACTIVITY_LABELS,
@@ -10,28 +7,26 @@ import {
 } from "./display-state.ts";
 
 /**
- * Text that is safe to use as a human breadcrumb label.
+ * Normalize text to one terminal-safe breadcrumb label line.
  *
  * Breadcrumbs are deliberately a presentation of already-reduced display
- * state. This is the last boundary before a label is rendered or compared,
- * so a secret-bearing variant cannot render differently from its key.
+ * state. Only ANSI/control removal and whitespace normalization apply here;
+ * label content, including token-like values, passes through unchanged.
  */
-export const sanitizeBreadcrumbLabel = (value: unknown): string => {
+export const normalizeBreadcrumbLabel = (value: unknown): string => {
     const text = typeof value === "string" ? value : "";
-    return redactSensitiveText(
-        stripTerminalControls(text).replace(/\s+/g, " ").trim(),
-    );
+    return stripTerminalControls(text).replace(/\s+/g, " ").trim();
 };
 
 /** Canonical key shared by breadcrumb rendering and adjacent de-duplication. */
 export const canonicalBreadcrumbKey = (value: unknown): string =>
-    sanitizeBreadcrumbLabel(value);
+    normalizeBreadcrumbLabel(value);
 
 /** Alias for callers that name the operation by its key boundary. */
-export const sanitizeBreadcrumbKey = canonicalBreadcrumbKey;
+export const normalizeBreadcrumbKey = canonicalBreadcrumbKey;
 
 const nonEmpty = (value: unknown): string | undefined => {
-    const clean = sanitizeBreadcrumbLabel(value);
+    const clean = normalizeBreadcrumbLabel(value);
     return clean === "" ? undefined : clean;
 };
 
@@ -64,12 +59,12 @@ const contextPartsFor = (state: DisplayState): string[] => {
 };
 
 /**
- * Build a breadcrumb from the sanitized display context and current activity.
+ * Build a breadcrumb from the normalized display context and current activity.
  * Pi events, tool arguments, and tool output are intentionally not inputs to
  * this function.
  */
 export const breadcrumbLabelFor = (state: DisplayState): string =>
-    sanitizeBreadcrumbLabel(contextPartsFor(state).join(" "));
+    normalizeBreadcrumbLabel(contextPartsFor(state).join(" "));
 
 /** Naming aliases for code that emphasizes the display-state boundary. */
 export const breadcrumbLabelForDisplayState = breadcrumbLabelFor;
@@ -79,7 +74,7 @@ declare const displayContextCandidateBrand: unique symbol;
 
 const approvedCandidates = new WeakSet<object>();
 
-export type SanitizedBreadcrumb = {
+export type NormalizedBreadcrumb = {
     readonly label: string;
     readonly canonicalKey: string;
 };
@@ -89,12 +84,12 @@ export type SanitizedBreadcrumb = {
  * The private brand and runtime provenance set prevent raw strings from being
  * supplied to preparation or rendering as if they were approved labels.
  */
-export type BreadcrumbLabelCandidate = SanitizedBreadcrumb & {
+export type BreadcrumbLabelCandidate = NormalizedBreadcrumb & {
     readonly [displayContextCandidateBrand]: true;
 };
 
-export type BreadcrumbLabel = SanitizedBreadcrumb;
-export type BreadcrumbRenderResult = SanitizedBreadcrumb;
+export type BreadcrumbLabel = NormalizedBreadcrumb;
+export type BreadcrumbRenderResult = NormalizedBreadcrumb;
 export type ApprovedBreadcrumbCandidate = BreadcrumbLabelCandidate;
 
 const isApprovedBreadcrumbCandidate = (
@@ -123,7 +118,7 @@ const requireApprovedBreadcrumbCandidate = (
 };
 
 const candidateFromLabel = (value: string): BreadcrumbLabelCandidate => {
-    const label = sanitizeBreadcrumbLabel(value);
+    const label = normalizeBreadcrumbLabel(value);
     const candidate = Object.freeze({
         label,
         canonicalKey: canonicalBreadcrumbKey(label),
@@ -132,12 +127,12 @@ const candidateFromLabel = (value: string): BreadcrumbLabelCandidate => {
     return candidate;
 };
 
-/** Sanitize an approved candidate and derive its key from the sanitized label. */
+/** Normalize an approved candidate and derive its key from the label. */
 export const prepareBreadcrumbCandidate = (
     candidate: BreadcrumbLabelCandidate,
-): SanitizedBreadcrumb => {
+): NormalizedBreadcrumb => {
     requireApprovedBreadcrumbCandidate(candidate);
-    const label = sanitizeBreadcrumbLabel(candidate.label);
+    const label = normalizeBreadcrumbLabel(candidate.label);
     return { label, canonicalKey: canonicalBreadcrumbKey(label) };
 };
 
@@ -165,7 +160,7 @@ const styleFor = (
 ): ((text: string) => string) =>
     options.style ?? (options.colors === true ? dim : (text) => text);
 
-/** Render only the sanitized, subdued label text. */
+/** Render only the normalized, subdued label text. */
 export const renderBreadcrumbLabel = (
     candidate: BreadcrumbLabelCandidate,
     options: BreadcrumbRenderOptions = {},
@@ -188,7 +183,7 @@ export const renderBreadcrumbLine = (
 export const renderBreadcrumb = renderBreadcrumbLine;
 export const renderBreadcrumbCandidate = renderBreadcrumbLine;
 
-/** Return an approved, sanitized label directly from display state. */
+/** Return an approved, normalized label directly from display state. */
 export const breadcrumbForDisplayState = (
     state: DisplayState,
 ): BreadcrumbLabelCandidate => breadcrumbCandidateFor(state);

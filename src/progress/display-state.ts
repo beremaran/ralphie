@@ -1,8 +1,5 @@
 import type { PiEventContext, PiSessionEvent } from "../pi/client.ts";
-import {
-    redactSensitiveText,
-    stripTerminalControls,
-} from "../shared/redaction.ts";
+import { stripTerminalControls } from "../shared/redaction.ts";
 import type {
     ProgressEvent,
     ProgressStage,
@@ -123,11 +120,14 @@ const stringValue = (value: unknown): string | undefined =>
 const numberValue = (value: unknown): number | undefined =>
     typeof value === "number" && Number.isFinite(value) ? value : undefined;
 
-/** Keep display text on the same redaction boundary as progress and transcripts. */
+/**
+ * Reduce display text to one terminal-safe line without altering its content.
+ *
+ * Only ANSI/control removal and whitespace normalization apply here; values
+ * are otherwise preserved verbatim for rendering and canonical keys.
+ */
 const displayText = (value: string): string =>
-    redactSensitiveText(
-        stripTerminalControls(value).replace(/\s+/g, " ").trim(),
-    );
+    stripTerminalControls(value).replace(/\s+/g, " ").trim();
 
 const nonEmptyDisplayText = (value: string, fallback: string): string => {
     const clean = displayText(value);
@@ -164,7 +164,8 @@ const timestampFromProgress = (
     return timestamp ?? clockValue(clock);
 };
 
-const sanitizedState = (state: DisplayState): DisplayState => ({
+/** Normalize stored display values without dropping any of their content. */
+const normalizedState = (state: DisplayState): DisplayState => ({
     ...state,
     ...(state.repository === undefined
         ? {}
@@ -335,7 +336,7 @@ export const reduceProgressUpdate = (
     update: ProgressUpdate | ProgressEvent,
     now?: DisplayClock | DisplayStateOptions,
 ): DisplayState => {
-    const state = sanitizedState(currentState ?? makeInitialDisplayState());
+    const state = normalizedState(currentState ?? makeInitialDisplayState());
     const clock = clockFrom(now);
     const timestamp = timestampFromProgress(update, clock);
     const repository = repositoryFor(state, update);
@@ -468,7 +469,7 @@ export const reducePiSessionEvent = (
     context: PiEventContext = { sessionID: "", directory: "" },
     now?: DisplayClock | DisplayStateOptions,
 ): DisplayState => {
-    const state = sanitizedState(currentState ?? makeInitialDisplayState());
+    const state = normalizedState(currentState ?? makeInitialDisplayState());
     const activity = piActivity(event);
     if (activity === undefined) return state;
     const timestamp =
