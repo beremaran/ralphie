@@ -22,9 +22,7 @@
     "docs/end-to-end-execution.md",
     "docs/getting-started.md",
     "docs/operations-and-recovery.md",
-    "docs/public-distribution.md",
     "docs/README.md",
-    "docs/releases.md",
     "docs/safety.md",
     "docs/workflows.md"
   ],
@@ -68,24 +66,16 @@
     "start": "bun run index.ts",
     "dev": "bun --watch ./index.ts",
     "build": "bun run scripts/build.ts",
-    "build:package": "bun run scripts/build.ts --package",
+    "build:package": "bun run scripts/build.ts",
     "check": "bun run format:check && bun run lint && bun run typecheck && bun run test && bun run build",
     "format": "biome format --write .",
     "format:check": "biome format .",
     "lint": "biome lint .",
     "package:check": "bun run scripts/package-smoke.ts",
     "package:inspect": "bun run scripts/package-smoke.ts --dry-run",
-    "package:stage": "bun run scripts/stage-release-package.ts",
     "prepack": "bun run build:package",
-    "prepare:homebrew-formula": "bun scripts/prepare-homebrew-formula.ts",
     "probe:structured-output": "bun run scripts/probe-structured-output.ts",
-    "reconcile:homebrew-update": "bun scripts/reconcile-homebrew-update.ts",
-    "targets": "bun run scripts/standalone-targets.ts",
     "test": "bun test tests",
-    "typecheck": "bunx tsc --noEmit",
-    "validate:homebrew-formula": "bun scripts/validate-homebrew-formula.ts",
-    "verify:homebrew-assets": "bun scripts/verify-homebrew-assets.ts",
-    "generate:homebrew-formula": "bun scripts/generate-homebrew-formula.ts",
-    "verify:public-distribution": "bun run scripts/verify-public-distribution.ts"
+    "typecheck": "bunx tsc --noEmit"
   }
 }

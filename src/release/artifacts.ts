@@ -1,1 +1,0 @@
-export * from "./artifact-contract.ts";

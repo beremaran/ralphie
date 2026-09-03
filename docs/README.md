@@ -42,12 +42,11 @@ buried in a landing page.
 
 ### Release maintainer
 
-1. [Public distribution topology](public-distribution.md) — canonical repository,
-   public endpoints, publication permissions, and privacy boundaries.
-2. [Development](development.md) — the local release validation gate.
-3. [Releases](releases.md) — version compatibility, protected tags, artifacts,
-   containers, and checksum trust.
-4. [Operations and recovery](operations-and-recovery.md) — operational state and
+1. [Getting started](getting-started.md) — the installation contract
+   (`bunx @beremaran/ralphie`) and first dry run.
+2. [Development](development.md) — build, package smoke, and the tag-triggered
+   npm publish flow.
+3. [Operations and recovery](operations-and-recovery.md) — operational state and
    cleanup behavior.
 
 ## Page map
@@ -61,8 +60,6 @@ buried in a landing page.
 | [Operations and recovery](operations-and-recovery.md) | Document progress, artifacts, state, resume, cancellation, failure, and cleanup. |
 | [Architecture](architecture.md) | Map runtime, orchestrator, domain services, and source locations. |
 | [Development](development.md) | Explain local development, test commands, network smoke tests, and contribution rules. |
-| [Public distribution topology](public-distribution.md) | Record the canonical public repository, distribution endpoints, publication setup, and privacy boundary. |
-| [Releases](releases.md) | Define release compatibility, workflow, Homebrew, containers, and checksum verification. |
 | [End-to-end execution trace](end-to-end-execution.md) | Preserve the detailed source-level trigger-to-exit trace. |
 
 ## Keeping documentation current
@@ -71,6 +68,7 @@ Keep each contract authoritative on one page. Put new CLI options in the [CLI
 reference](cli-reference.md), workflow behavior in [Workflows](workflows.md),
 recovery behavior in [Operations and recovery](operations-and-recovery.md),
 component changes in [Architecture](architecture.md), and release changes in
-[Releases](releases.md). Summaries elsewhere should link here rather than copy
-sections that can drift. Keep safety warnings visible before mutation-enabled
-commands and use relative links so pages work on GitHub and in a checkout.
+[Development](development.md)'s publishing section. Summaries elsewhere should
+link here rather than copy sections that can drift. Keep safety warnings
+visible before mutation-enabled commands and use relative links so pages work
+on GitHub and in a checkout.

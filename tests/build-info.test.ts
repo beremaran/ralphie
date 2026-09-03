@@ -48,7 +48,14 @@ describe("build info", () => {
         ]);
 
         expect(
-            JSON.parse(run("./dist/cli", ["--version", "--output", "json"])),
+            JSON.parse(
+                run(process.execPath, [
+                    "./dist/ralphie.js",
+                    "--version",
+                    "--output",
+                    "json",
+                ]),
+            ),
         ).toEqual({ version: packageJson.version, commitSha });
     });
 });

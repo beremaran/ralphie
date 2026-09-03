@@ -26,24 +26,18 @@ Useful individual commands:
 | `bun run format` | Format the repository with Biome. |
 | `bun run format:check` | Verify formatting without modifying files. |
 | `bun run lint` | Check TypeScript cognitive complexity (maximum 12). |
-| `bun run build` | Build the standalone executable at `dist/cli` (local builds use the `local` commit sentinel). |
-| `bun run build -- --commit-sha <sha> [--version <version>] [--target <darwin-arm64, darwin-x64, linux-arm64, linux-x64>]` | Build with explicit release metadata; `--target` selects the Bun native compiler target. |
-| `bun run build:package` | Build the publishable package bundle at `dist/ralphie.js`. |
+| `bun run build` | Build the publishable package bundle at `dist/ralphie.js` (local builds use the `local` commit sentinel). |
+| `bun run build -- --commit-sha <sha> [--version <version>]` | Build with explicit release metadata. |
+| `bun run build:package` | Same as `bun run build`; the package bundle at `dist/ralphie.js`. |
 | `bun run package:check` | Pack, inspect, install, and run the local package in isolated temporary directories. |
 | `bun run package:inspect` | Inspect the local `npm pack --dry-run` file list without installing it. |
-| `bun run package:stage -- --version <version> --commit-sha <sha> --output-dir <dir>` | Build and validate release package and installer staging inputs without publishing. |
-| `env -u GH_TOKEN -u GITHUB_TOKEN bun run verify:public-distribution` | Verify the public repository, release assets, installer, formula, OCI image, and license anonymously (requires `sigstore`). |
 | `bun run probe:structured-output` | Exercise a real schema-validated OpenCode decision; `--union` probes the grounding decision union, and `--model provider/id`, `--agent`, `--variant` target a specific model. |
-| `bun run targets -- <mode>` | Query, generate, or byte-check release target documents over `targets/standalone-targets.json`; see the standalone targets command below. |
 
 The package check builds an actual tarball, verifies its allowlist, installs it
 with `npm install --omit=dev` in a fresh project, and invokes the installed bin
 with Bun. Its isolated install does not use the checkout's lockfile or `node_modules`;
 all temporary pack, install, cache, and home directories are created outside the
-checkout. `package:stage` is the release handoff: it verifies the exact source
-revision, builds with explicit version and commit metadata, packs the scoped
-package with scripts disabled, and stages only the versioned tarball plus the
-exact `scripts/install.sh` under stable contract paths.
+checkout.
 For an explicitly opt-in registry check, pass a package spec:
 
 ```bash
@@ -58,43 +52,15 @@ with four-space indentation, double quotes, and semicolons. Keep functions
 small: the configured cognitive-complexity limit is the meaningful lint
 constraint.
 
-## Standalone targets command
+## Publishing
 
-`bun run targets` (backed by `scripts/standalone-targets.ts`) is a
-credential-free, repository-side-effect-free command over the canonical
-release target manifest `targets/standalone-targets.json`. Use `--manifest
-<path>` to point it at a fixture for isolated tests; otherwise the canonical
-manifest is loaded, parsed, and exact-target-validated in full before any
-output exists.
-
-```bash
-bun run targets -- query --id <stable-id>
-bun run targets -- query --os <os> --arch <arch>
-bun run targets -- generate --format <json|github-matrix|posix|posix-mapping|homebrew|documentation> \
-  [--version <version>] [--os <os> --arch <arch>] --output <file> [--manifest <path>]
-bun run targets -- check --format <json|github-matrix|posix|posix-mapping|homebrew|documentation> \
-  [--version <version>] [--os <os> --arch <arch>] --file <file> [--manifest <path>]
-```
-
-- `query` prints one complete target record (by stable `id` or by a
-  normalized `os`/`arch` pair) as deterministic JSON.
-- `generate` renders the whole document in memory and writes `--output`
-  atomically (temporary file plus rename), so validation errors leave no
-  partial output and preserve an existing destination.
-- `check` byte-compares `--file` against the rendered document — key order,
-  LF line endings, and the final newline included — succeeds only on an exact
-  match, and never rewrites the checked file.
-- `posix` selects a single record by `--os`/`--arch`; `homebrew` requires
-  `--version` (a plain `<major>.<minor>.<patch>`). `posix-mapping` emits the
-  checked-in POSIX installer mapping artifact
-  (`targets/posix-installer-targets.json`): the accepted `uname` alias
-  tables plus all four records, consumed by `scripts/install.sh` at install
-  time without Bun.
-
-Every document shares one byte contract: UTF-8 without a BOM, LF line endings
-only, two-space indentation, object keys sorted lexicographically, and exactly
-one final newline. Invalid arguments and validation errors go to stderr with a
-nonzero exit status and no generated stdout.
+The package builds with `bun run build` to `dist/ralphie.js`; `bun run
+package:check` packs, installs, and runs it in an isolated directory, and
+`bun run package:inspect` lists the packed files. Release flow: bump
+`package.json` `version` and `CHANGELOG.md`, push a `v<major>.<minor>.<patch>`
+tag, and the tag-triggered publish workflow validates the tag/package version
+(`scripts/validate-npm-context.ts`), builds, smoke-checks, and runs
+`bun publish`. No other distribution channel exists.
 
 ## Local GitHub REST fixture
 

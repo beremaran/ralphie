@@ -41,24 +41,23 @@ For task-oriented details, start with the [documentation index](./docs/README.md
 
 ## Install and try it
 
-Ralphie has three runtime forms with different local dependencies:
+Ralphie is distributed as a single npm package; Bun is the only runtime
+requirement. Run it without installing globally:
 
-- **Verified standalone binary:** executing a release binary does not require
-  [Bun](https://bun.sh/). The installer needs `curl`, the Sigstore CLI, and a
-  SHA-256 utility (`sha256sum` or `shasum`); it supports macOS and Linux on
-  `arm64` and `x64`.
-- **Published JavaScript package or source checkout:** Bun is required to run
-  `bunx @beremaran/ralphie` or `bun run index.ts`, and to build Ralphie from
-  source.
-- **Docker image:** the published image runs the native binary and does not
-  include Bun at runtime. It includes the GitHub CLI, Git, a POSIX shell, and CA certificates.
+```bash
+bunx @beremaran/ralphie --version
+```
 
-Every repository workflow also needs GitHub CLI, Git, a shell, and model
-an OpenCode server with model credentials. The target repository's verification command is a
+or install it globally (`bun add -g @beremaran/ralphie`) and use the `ralphie`
+command. Contributing from source is the same: `bun install`, then
+`bun run index.ts`.
+
+Every repository workflow also needs GitHub CLI, Git, a shell, and an
+OpenCode server with model credentials. The target repository's verification command is a
 separate dependency boundary: install whatever that command uses (for example,
 Bun, Node.js, or a project compiler) in the selected runtime. The default
-`bun run check` is therefore a target-repository requirement, not a standalone
-Ralphie requirement. Ralphie discovers that command from `package.json`; use
+`bun run check` is therefore a target-repository requirement, not a Ralphie
+requirement. Ralphie discovers that command from `package.json`; use
 one or more `--verify-command` options for a target-specific verification
 command.
 
@@ -74,28 +73,7 @@ gh --version
 For unattended runs, provide `GH_TOKEN` (preferred) or `GITHUB_TOKEN` to the
 process instead; credentials are inputs and need not be printed or exposed.
 Start an OpenCode server (`opencode2 serve`) before running Ralphie. By default Ralphie discovers the local background service; use `--opencode-url` (or `OPENCODE_URL`) for an explicit server and `--opencode-token` (or `OPENCODE_TOKEN`) when it requires a token. See [Getting started](./docs/getting-started.md) for
-the complete installation, authentication, container, and source-checkout
-contract.
-
-Verify an installed standalone binary without contacting a repository:
-
-```bash
-ralphie --version
-```
-
-The shortest safe package smoke check is:
-
-```bash
-bunx @beremaran/ralphie --version
-```
-
-The standalone release installer is also available. Verification is mandatory;
-install the Sigstore CLI and a SHA-256 utility before using it:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/beremaran/ralphie/main/scripts/install.sh | sh
-ralphie --version
-```
+the complete installation, authentication, and source-checkout contract.
 
 Preview one issue without implementation, commits, pushes, or GitHub mutations:
 
@@ -107,63 +85,20 @@ Dry-run still performs preflight, issue discovery, read-only grounding, and
 may prepare or reset the local workspace. Read the [safety model](./docs/safety.md)
 before using mutation-enabled commands.
 
-## Public distribution
+## Distribution
 
-The [latest release](https://github.com/beremaran/ralphie/releases/latest) and
-its [release assets](https://github.com/beremaran/ralphie/releases) are public.
-The supported standalone installer is
-[install.sh](https://raw.githubusercontent.com/beremaran/ralphie/main/scripts/install.sh);
-it supports macOS and Linux on `arm64` and `x64`. Release tags use the strict
-`v<major>.<minor>.<patch>` form; the installer accepts either that tag or the
-version without `v`.
-
-Other canonical channels are the [Homebrew tap](https://github.com/beremaran/ralphie)
-and [formula source](https://raw.githubusercontent.com/beremaran/ralphie/main/Formula/ralphie.rb),
-the [OCI image](https://ghcr.io/beremaran/ralphie), the
-[published npm package](https://www.npmjs.com/package/@beremaran/ralphie), and
-the [MIT license](https://github.com/beremaran/ralphie/blob/main/LICENSE).
-Public artifacts do not require GitHub credentials. Operating on a private target
-repository still requires a GitHub account or runtime token with the necessary
-permissions; OpenCode model credentials are also required when Ralphie asks OpenCode to make
-a decision.
-
-## Docker runtime
-
-The published OCI image is a verified standalone runtime. It runs as
-`65532:65532` with `HOME` and the working directory set to `/home/nonroot`.
-The image contains no credentials or credential-bearing defaults. Supply all
-credentials and configuration at runtime:
-
-- `GH_TOKEN` (preferred) or `GITHUB_TOKEN` for noninteractive GitHub CLI access;
-- `OPENCODE_URL` (or `--opencode-url`) for the external OpenCode server, and `OPENCODE_TOKEN` (or `--opencode-token`) when it requires a token;
-- a writable `/home/nonroot/.ralphie` volume for checkouts, state, and recovery
-  artifacts.
-
-Use these safe image and authentication smoke checks:
-
-```bash
-docker run --rm ghcr.io/beremaran/ralphie:latest --version
-docker run --rm --env GH_TOKEN --entrypoint gh \
-  ghcr.io/beremaran/ralphie:latest auth status
-```
-
-A complete first-run preview:
-
-```bash
-docker run --rm \
-  --env GH_TOKEN \
-  --env OPENCODE_URL \
-  --mount type=volume,source=ralphie-state,target=/home/nonroot/.ralphie \
-  ghcr.io/beremaran/ralphie:latest owner/repository \
-  --workspace /home/nonroot/.ralphie \
-  --dry-run --max-issues 1
-```
-
-The Docker runtime does not include Bun. If the target repository's
-verification command is `bun run check` or otherwise needs a tool not in the
-image, use a target-specific image/runtime or supply a verification command
-whose dependencies are available there. See [Getting started](./docs/getting-started.md)
-for the full contract.
+Ralphie's only distribution channel is the
+[published npm package](https://www.npmjs.com/package/@beremaran/ralphie):
+`bunx @beremaran/ralphie` downloads and runs the latest published version, and
+`bun add -g @beremaran/ralphie` installs it globally. Release tags use the
+strict `v<major>.<minor>.<patch>` form; pushing a tag runs the tag-triggered
+publish workflow (validate tag/version, build, smoke-check the packed
+tarball, `bun publish`). Public package contents require no GitHub
+credentials. Operating on a private target repository still requires a GitHub
+account or runtime token with the necessary permissions; OpenCode model
+credentials are also required when Ralphie asks OpenCode to make a decision.
+The [MIT license](https://github.com/beremaran/ralphie/blob/main/LICENSE)
+applies.
 
 ## Output contract
 
@@ -331,10 +266,6 @@ The main references are:
   component map.
 - [Development](./docs/development.md) — local setup, tests, and contribution
   expectations.
-- [Public distribution topology](./docs/public-distribution.md) — canonical
-  repository, public endpoints, publication setup, and privacy boundaries.
-- [Releases](./docs/releases.md) — compatibility, publishing, and release
-  verification.
 - [End-to-end execution trace](./docs/end-to-end-execution.md) — the detailed
   source-level trigger-to-exit path.
 
@@ -358,24 +289,8 @@ under [`docs/`](./docs/README.md). See [Development](./docs/development.md) for
 the contributor checklist.
 
 Ralphie follows [Semantic Versioning](https://semver.org/). Release candidates
-must pass `bun run check`; the full compatibility and publishing contract is in
-[Releases](./docs/releases.md), with notable changes recorded in
+must pass `bun run check`; publishing follows the
+[distribution contract](#distribution): push a `v<major>.<minor>.<patch>` tag
+and the publish workflow validates, builds, smoke-checks, and runs
+`bun publish`. Notable changes are recorded in
 [`CHANGELOG.md`](./CHANGELOG.md).
-
-For a release checksum, the authoritative trust policy and explanation are in
-[Releases](./docs/releases.md). This runnable verification command is kept as a
-small landing-page quick reference:
-
-```bash
-TAG=v0.1.0
-SOURCE_REF=<40-character commit SHA targeted by $TAG>
-sigstore verify github SHA256SUMS \
-  --bundle SHA256SUMS.sigstore.json \
-  --repository beremaran/ralphie \
-  --name Release \
-  --cert-identity "https://github.com/beremaran/ralphie/.github/workflows/release.yml@refs/tags/$TAG" \
-  --trigger push \
-  --sha "$SOURCE_REF" \
-  --ref "refs/tags/$TAG"
-sha256sum --check SHA256SUMS
-```

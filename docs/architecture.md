@@ -47,7 +47,6 @@ effects and validate their invariants at the boundary.
 | `src/progress/` | Typed events, audit persistence, and terminal/JSON renderers. |
 | `src/run/` | Versioned state, artifacts, reconciliation, and resume behavior. |
 | `src/workspace/` | Path expansion and protected workspace removal. |
-| `src/targets/` | Canonical standalone release target manifest, typed parser/loader, read-only target query API, deterministic catalog/GitHub Actions matrix JSON serializers, stable consumer renderers (POSIX installer, Homebrew, documentation), and the `scripts/standalone-targets.ts` command surface. |
 | `src/process/` | External command execution and process exit semantics. |
 
 `src/workflow.ts` orchestrates the domain services. `src/runtime.ts` assembles
@@ -107,82 +106,9 @@ and [Safety](safety.md). For state transitions and reconciliation, see
 
 ## Standalone target consumer renderers
 
-`src/targets/standalone-target-renderers.ts` exposes stable, typed consumer
-projections on top of the target query API and serializers. Every renderer
-accepts unknown manifest input, parses and exact-target-validates the whole
-manifest through `createStandaloneTargetQueryClient` before deriving anything,
-and throws before any output exists for malformed or non-canonical manifests.
-The renderers never carry their own target list: the four-target catalog is
-always read from the validated manifest, and the query API and serializers are
-never edited. Output arrays and records are frozen, records stay sorted by
-stable `id`, and every manifest field (`releaseAssetName`, `bunCompileTarget`,
-`targetTriple`, `runner`, `binaryFormat`, `bunVersion`, `dockerPlatform`) is
-passed through unmodified rather than reconstructed from an asset name.
-
-Stable shapes and format names consumed by the release, installer, Homebrew,
-and documentation follow-up work:
-
-- `posix-installer-target` — `renderPosixInstallerTarget(value, os, arch)`
-  normalizes the OS/architecture pair through the query API and returns the
-  matching full `StandaloneTarget` record. The downloaded asset is exactly the
-  returned record's `releaseAssetName`; it is never rebuilt from the pair.
-- `posix-installer-mapping` — `renderPosixInstallerMapping(value)` returns the
-  checked-in generated POSIX installer mapping document
-  (`targets/posix-installer-targets.json`): the complete accepted alias
-  tables (`osAliases`, `archAliases`, each canonical `os`/`arch` plus the
-  query API's extra `uname` spellings) and the four full manifest records
-  sorted by stable `id`. `scripts/install.sh` fetches the mapping at install
-  time (no Bun required) and resolves a raw `uname` pair by case-folding it,
-  resolving it through the alias tables, and reading exactly the matching
-  record's `releaseAssetName`; unsupported values fail with a clear error
-  and the asset name is never reconstructed from the pair.
-- `homebrew-target-rows` — `renderHomebrewTargetRows(value, version)` returns
-  rows sorted lexicographically by stable `id`. Each `HomebrewTargetRow`
-  contains the complete manifest record nested under `target`, the explicit
-  `version` input (plain `<major>.<minor>.<patch>`, validated; a leading `v`,
-  leading zeros, prerelease, or build suffix is rejected with
-  `InvalidHomebrewVersionError`), and a derived `downloadUrl` built from
-  `target.releaseAssetName` at
-  `https://github.com/beremaran/ralphie/releases/download/v<version>/<releaseAssetName>`.
-- `target-documentation-catalog` — `renderDocumentationTargets(value)` returns
-  the complete catalog sorted lexicographically by stable `id`, with every
-  validated field preserved as typed values for documentation consumers.
-
-For finished JSON documents (catalog or GitHub Actions matrix), pair the typed
-projections with the document serializers in
-`standalone-target-serializer.ts` (`serializeStandaloneTargets`,
-`serializeStandaloneTargetMatrix`); the renderers themselves stay in memory.
-
-## Standalone targets command
-
-`scripts/standalone-targets.ts` (exposed as the package script `targets`,
-`bun run targets -- ...`) is the standalone Bun-invokable surface over all of
-the above. It loads, validates, and renders the whole manifest in memory
-before writing anything, requires no credentials, and never touches Git or
-GitHub. Modes and formats:
-
-- `query --id <stable-id>` or `query --os <os> --arch <arch>` prints one
-  complete target record as deterministic JSON;
-- `generate --format <json|github-matrix|posix|posix-mapping|homebrew|documentation>
-  [--version <version>] [--os <os> --arch <arch>] --output <file>` renders the
-  complete catalog, the GitHub Actions matrix, the single `posix`-selected
-  record, the POSIX installer mapping, the versioned Homebrew rows, or the
-  documentation catalog — writing
-  through a temporary file and renaming only after success, so an existing
-  destination is preserved on any validation error;
-- `check --format <...> [--version <version>] [--os <os> --arch <arch>]
-  --file <file>` byte-compares the checked file against the rendered document
-  (key order, LF endings, and the final newline included), succeeding only on
-  an exact match and never rewriting the file; the checked-in
-  `targets/posix-installer-targets.json` mapping is verified with
-  `check --format posix-mapping --file targets/posix-installer-targets.json`;
-- `--manifest <path>` overrides the canonical manifest for isolated tests.
-
-All documents share the serializer encoding contract
-(`serializeStandaloneJsonDocument` extends it to the consumer mappings).
-Invalid arguments and validation errors go to stderr with a nonzero exit
-status and no generated stdout. Invocation and examples are documented in
-[Development](development.md).
+Ralphie's only distribution channel is the published npm package (see
+[Getting started](getting-started.md#published-package)); the former native
+binary, installer, Homebrew, and container distribution machinery was removed.
 
 ## Source map
 
@@ -200,7 +126,6 @@ status and no generated stdout. Invocation and examples are documented in
 | Git checkpoints, safety, and branches | `src/git/` |
 | Durable state and reconciliation | `src/run/`, `src/issues/artifacts.ts` |
 | Progress and exit semantics | `src/progress/`, `src/process/exit-code.ts` |
-| Standalone release target manifest, read-only query API, deterministic catalog/matrix JSON serializers, consumer renderers (installer/Homebrew/documentation), and the `bun run targets` command | `src/targets/`, `targets/standalone-targets.json`, `scripts/standalone-targets.ts` |
 
 The source-level trigger-to-exit path is maintained in the [end-to-end
 execution trace](end-to-end-execution.md), which cross-references these

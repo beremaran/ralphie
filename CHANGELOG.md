@@ -7,6 +7,18 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Removed
 
+- Remove every non-npm distribution channel: the native standalone bundles
+  (four-platform `bun compile` builds, `scripts/install.sh`, `bun run targets`
+  catalog machinery), the Homebrew tap/formula (generators, validators,
+  reconciliation, checksums), the Docker image and container registry
+  publication (GHCR, OCI indexes, tag plans, SBOM/SLSA attestations), and the
+  release checksum/Sigstore verification surface (`SHA256SUMS`). The release
+  and public-distribution workflows are replaced by one tag-triggered publish
+  workflow (`.github/workflows/npm-publish.yml`): validate the tag/package
+  version (`scripts/validate-npm-context.ts`), build the package bundle,
+  smoke-check the packed tarball, and `bun publish`. `bunx
+  @beremaran/ralphie` is the only supported way to run Ralphie.
+
 - Remove the shared redaction implementation (`src/shared/redaction.ts`,
   `tests/shared/redaction.test.ts`) and every `[REDACTED]` reporting assertion.
   `redactSensitiveText`/`redactSensitiveValue` no longer exist; the terminal
@@ -49,159 +61,6 @@ All notable changes to Ralphie are documented here. The project follows
   contract misses now emit the transcript and include a response preview in
   the error. Covered by `tests/opencode-variants.test.ts`, new silent-turn
   cases in `tests/opencode-client.test.ts`, and fail-fast workflow tests.
-
-- Add the standalone Bun-invokable release target command
-  (`scripts/standalone-targets.ts`, exposed as the package script `targets`,
-  `bun run targets -- ...`) on top of the release target query API,
-  deterministic serializers, and consumer renderers. `query --id <stable-id>`
-  or `query --os <os> --arch <arch>` prints one complete target record as
-  deterministic JSON; `generate --format
-  <json|github-matrix|posix|posix-mapping|homebrew|documentation>
-  [--version <version>] [--os <os> --arch <arch>] --output <file>` renders
-  the complete catalog, GitHub Actions matrix, single posix-selected record,
-  POSIX installer mapping, versioned Homebrew rows, or documentation
-  catalog; and `check --format <...> [--version <version>] [--os <os>
-  --arch <arch>] --file <file>` byte-compares a file against the rendered
-  document (key order, LF endings, and the final newline included),
-  succeeding only on an exact match and never rewriting it. An optional
-  `--manifest <path>` overrides the canonical
-  `targets/standalone-targets.json` for isolated tests. The whole manifest is
-  loaded, validated, and rendered in memory before any stdout or file write:
-  `generate` writes through a temporary file and renames only after success
-  (no partial output; existing destinations preserved), and invalid arguments
-  and validation errors go to stderr with a nonzero exit status and no
-  generated stdout. The command requires no credentials and no repository side
-  effects; invocation and formats are documented in `docs/development.md`
-  and `docs/architecture.md`, with in-memory unit coverage in
-  `tests/targets/standalone-targets-command.test.ts`.
-
-- Introduce the checked-in generated POSIX installer mapping
-  (`targets/posix-installer-targets.json`, `generate --format posix-mapping`,
-  `renderPosixInstallerMapping`) and migrate `scripts/install.sh` to consume
-  it: the installer fetches the mapping at install time (no Bun required),
-  case-folds the `uname` OS/architecture values, resolves them through the
-  mapping's alias tables, and downloads exactly the matching record's
-  `releaseAssetName`. The script no longer carries any independent list of
-  the four release assets (no `ralphie-<os>-<arch>` construction and no
-  hardcoded `case` mappings); unsupported values fail with clear errors, and
-  version resolution, checksum/Sigstore verification, destination handling,
-  and the `--version` guidance are preserved. The checked-in artifact is
-  drift-checked byte-for-byte against the rendered document in
-  `tests/targets/posix-installer-mapping.test.ts`, which also exercises every
-  canonical target, the `x86_64`/`amd64`/`aarch64`/`arm64` and
-  Darwin/macOS aliases, and unsupported combinations.
-
-- Migrate the Homebrew formula generator and validator to the canonical
-  target catalog: `scripts/generate-homebrew-formula.ts` now derives the
-  `on_macos`/`on_linux` CPU branches from the catalog's release asset values
-  (each row's `releaseAssetName`, `os`, and `arch`) through
-  `renderHomebrewTargetRows` instead of a locally maintained four-target
-  list, and `scripts/validate-homebrew-formula.ts` derives its expected
-  assets from the same rows. The generated region markers became
-  `BEGIN/END RALPHIE GENERATED RELEASE METADATA - DO NOT EDIT` to mark the
-  section as non-editable; formula version, install, and test behavior are
-  unchanged. `generate:homebrew-formula` accepts an optional
-  `--catalog <path>` (defaults to `targets/standalone-targets.json`), and
-  unknown, missing, duplicate, or malformed metadata assets are rejected.
-  Coverage in `tests/targets/homebrew-formula-generator.test.ts`; the
-  independence property (changing a compiler-target value cannot change an
-  asset name unless the manifest changes that asset field) is verified for
-  both consumers.
-
-- Wire verified candidate promotion into the single protected publish job
-  (`rel20-publisher-container-promotion-integration`): the container
-  publication path now runs inside the protected `publish` job of
-  `release.yml` immediately after the draft-release handle gate and before
-  the native release is finalized, and the separate `push-container`
-  registry-writing job is removed. `packages: write` is granted only to
-  that protected publisher. The publisher inventories the workflow
-  artifacts, downloads exactly the validated
-  `ralphie-container-candidate-<version>-amd64|arm64` artifact names, runs
-  the candidate validator (`scripts/validate-container-candidates.ts`) and
-  the local skopeo OCI inspection, derives the tag plan
-  (`scripts/derive-container-tags.ts`), and assembles the single
-  deterministic multi-architecture OCI index
-  (`scripts/assemble-container-index.ts`, `src/release/container-index.ts`)
-  with the fixed amd64-then-arm64 mapping, exact media types/sizes/digests,
-  and no annotations — all before the GHCR login step; the image is never
-  rebuilt. Promotion is driven by the registry reconciler
-  (`scripts/reconcile-container-registry.ts`,
-  `src/release/container-registry-reconcile.ts`) from the
-  `ralphie.container-reconcile-plan.v1` document: every destination is
-  preflighted first and conflicts are rejected before any production write,
-  exact existing platform/index digests are reused (tags are never moved or
-  overwritten), missing tags are created only through the probed
-  server-enforced compare-and-swap, and every write is reread, so a partial
-  run is safely repeatable without creating an alternate copy. Attestations
-  run between platform promotion and index aliases, and every release index
-  tag from the tag plan is reconciled last from the exact assembled index
-  digest, so authentication or push failures fail the job and prevent later
-  alias publication. Prereleases never receive `latest` and build metadata
-  never reaches a registry ref (the tag plan normalizes it out of every
-  tag). Container SBOM/provenance attestations move with the promotion path
-  into the same protected job. Unit coverage in
-  `tests/release/container-index.test.ts` and
-  `tests/release/container-registry-reconcile.test.ts`; the ordering,
-  explicit alias policy, and fail-closed/no-overwrite behavior are recorded
-  in `docs/releases.md`.
-
-- Implement the explicit semver-aware GHCR tag plan
-  (`rel20-publisher-container-tag-plan`) with a deterministic,
-  testable planner `src/release/container-tags.ts` driven by the new
-  executable seam `scripts/derive-container-tags.ts`, replacing the
-  `docker/metadata-action` inference and shell truncation in the
-  `push-container` job of `release.yml` (steps "Derive container tag
-  plan", "Promote platform images and persist publication subjects", and
-  "Create manifest aliases from immutable digests"). The planner consumes
-  the already validated release version and source commit and emits the
-  exact `ralphie.container-tag-plan.v1` document: the leading `v` is
-  removed, a prerelease suffix is retained, the minor alias comes from the
-  parsed numeric major/minor fields, `latest` is present only for SemVer
-  without a prerelease identifier, `sha-<source_ref>` is always present,
-  and the release-index list is exactly ordered and deduplicated
-  (`1.2.3-rc.1` → `1.2.3-rc.1`, `1.2`, `sha-...`; `1.2.3` → `1.2.3`,
-  `1.2`, `latest`, `sha-...`). Build metadata is the documented
-  release-contract handoff: `+` cannot appear in an OCI/Docker tag, so it
-  is normalized out of every emitted tag (`1.2.3+build.7` → `1.2.3`)
-  while the full validated version is retained in the plan and the
-  candidate/image metadata, and a raw value such as `1.2.3+build.7` is
-  never passed to a registry. Malformed SemVer, an invalid source ref, or
-  any derived tag that is not a valid OCI tag name fails closed
-  (`ContainerTagPlanError`) with no unlisted aliases emitted. Platform
-  promotion now uses the plan's `<platform_tag_base>-<arch>` names and
-  manifest aliases are created from the plan's `index_tags`; the persisted
-  plan is re-validated with a jq gate before any registry write. Unit
-  coverage in `tests/release/container-tags.test.ts` and the release
-  contract is documented in `docs/releases.md` under "Deterministic GHCR
-  tag plan".
-
-- Validate the exact staged container-candidate set in the protected
-  `push-container` job (`rel20-publisher-container-candidate-validation`)
-  with a new side-effect-free seam `scripts/validate-container-candidates.ts`
-  backed by `src/release/container-candidate.ts`: the publisher downloads the
-  two exact `ralphie-container-candidate-<version>-<arch>` artifact names
-  (instead of a broad merged glob) and the validator requires exactly that
-  amd64/arm64 pair for the validated version, rejecting missing, duplicate,
-  extra, and cross-release candidates, unexpected files, and artifacts that
-  do not contain exactly their `ralphie.container-candidate.v1` contract and
-  OCI archive. It strictly parses each contract (exact artifact name,
-  version, 40-character lowercase `source_ref`, expected platform,
-  `format: oci-archive`, expected archive filename, lowercase archive
-  SHA-256, lowercase `sha256:` BuildKit manifest digest, and the
-  MIT/version/revision image labels), recomputes the archive SHA-256, and
-  inspects each OCI archive's own `index.json` and actual image manifest,
-  requiring the recomputed manifest content digest to equal the recorded
-  BuildKit digest (labels, config, and child layer digests alone are
-  insufficient), every referenced config/layer blob to exist with the exact
-  recorded size and digest, safe relative archive paths (no traversal or
-  absolute components), and nothing beyond the OCI layout, index, and exactly
-  the referenced blobs. It returns the validated archive paths, exact
-  manifest bytes/descriptors, and expected digests for later index assembly,
-  never logs in to GHCR, writes a tag, rebuilds an image, or silently
-  continues after a validation error. Focused fixture tests cover
-  malformed/missing contract fields, wrong artifact/version/source/platform/
-  path, extra files, archive checksum mismatches, manifest digest mismatches,
-  missing/unreferenced blobs, and traversal/absolute archive entries.
 
 - Lock down the cross-mode display contract with end-to-end regression
   coverage: the interactive in-progress activity surface is measured in
@@ -303,93 +162,6 @@ All notable changes to Ralphie are documented here. The project follows
   `Command timed out after N seconds` with partial output and can retry with
   an explicit timeout.
 
-- Attach SPDX SBOM and SLSA provenance attestations to every GHCR platform
-  digest in the protected `push-container` job
-  (`r218-container-attestation-generation`): after platform promotion and
-  digest verification and before any mutable manifest alias, each immutable
-  `ghcr.io/beremaran/ralphie@sha256:<digest>` subject gets an SPDX 2.3 JSON
-  SBOM generated by scanning that digest with the pinned
-  `anchore/sbom-action` (never an OCI archive or tag), attached with the
-  pinned `actions/attest-sbom` using the canonical subject-name, exact
-  subject-digest, SBOM path, and registry/referrer push, plus SLSA
-  provenance-v1 build provenance with the existing pinned
-  `actions/attest-build-provenance` mechanism. The OIDC identity is pinned to
-  the validated protected tag and exact commit (via `GITHUB_REF`, `GITHUB_SHA`,
-  and `GITHUB_WORKFLOW_REF`), the validated release version and commit are
-  bound into each SBOM's `creationInfo.comment` and verified, both
-  attestation kinds are required for both platforms, all actions run at
-  immutable SHAs, every generator/attachment failure fails the job, and the
-  job grants only `packages: write`, `attestations: write`, and
-  `id-token: write`. Add the deterministic seam
-  `scripts/validate-container-sboms.ts` (run as the "Validate and pin
-  container SBOMs to release identity" step), which pins each generated SPDX
-  document to the release identity, re-validates it against the checked-in
-  SPDX 2.3 JSON schema, and records each final SBOM's SHA-256 and size in the
-  `ralphie.container-attestation-subjects.v1` map;
-  `gh attestation verify` then checks the SLSA provenance v1 and SPDX
-  Document predicates per platform before aliases run, passing the exact
-  immutable `oci://ghcr.io/beremaran/ralphie@sha256:<digest>` reference (a
-  bare reference would be treated as a non-existent local file) with an
-  explicit `DOCKER_CONFIG` keychain entry for GHCR, and requiring at least
-  one verified attestation per predicate kind (presence-based, re-run safe)
-  bound to the exact run identity, the annotated SBOM bytes, and the
-  recorded SBOM SHA-256 rather than an exact record total, because
-  attestation bundles are keyed by signature and a re-run of an interrupted
-  attempt leaves additional records for the same digest. Aliases are created
-  only after successful generation and verification.
-
-- Add the deterministic Homebrew branch/pull-request reconciliation seam
-  around the guarded formula candidate (`scripts/reconcile-homebrew-update.ts`,
-  run as `reconcile:homebrew-update`): starting from a fresh fetch of `main`
-  it derives the guarded candidate through the exact generator, permits only
-  `Formula/ralphie.rb` changes inside the generated marker region, uses the
-  deterministic `automation/homebrew-v<version>` branch and
-  `Update Homebrew formula for v<version>` pull request per release, reuses an
-  existing branch and a single matching open pull request, fails on multiple
-  matches, unrelated edits, an unexpected base, or a concurrent head change
-  (never resetting, force-pushing, deleting, or recreating a branch),
-  resolves to `main-current` with zero mutations when `main` already has the
-  verified metadata, and keeps GitHub mutations behind an injected API (fake
-  in tests, GitHub REST adapter over fetch in `createHomebrewUpdateApi`). Add
-  deterministic temporary-git-repository/fake-GitHub coverage under
-  `tests/homebrew-update-reconcile.test.ts`.
-
-- Add the deterministic, fail-closed Homebrew formula change guard
-  (`scripts/prepare-homebrew-formula.ts`, run as `prepare:homebrew-formula`):
-  it consumes the exact-tag verifier's `ralphie.homebrew-asset-manifest.v1`
-  manifest plus the validated tag/version, renders the candidate formula in a
-  temporary output through the existing generator, requires a fresh
-  target-branch checkout to be clean, rejects any changed path other than
-  `Formula/ralphie.rb`, any pending edit outside the generated region,
-  malformed or unmarked formula content, a tag/version mismatch, or an
-  unexpected manifest, and returns an explicit `changed`/`unchanged` result so
-  callers can skip a commit when the desired metadata is already present.
-  Add focused temporary-fixture tests under `tests/homebrew-formula-guard.test.ts`.
-
-- Extract the release-context and npm-publication validation gates into
-  executable seams used directly by `.github/workflows/release.yml`:
-  `scripts/validate-release-context.ts` enforces the stable
-  `v<major>.<minor>.<patch>` tag grammar, protected-tag and event/ref
-  resolution, and emits the canonical `version`/`tag`/`source_ref`/`dry_run`
-  outputs only for a valid context; `scripts/validate-npm-context.ts` enforces
-  the prerelease-capable SemVer grammar and the exact scoped package
-  name/version match for npm publication. Add deterministic tests under
-  `tests/release/` that exercise the same production entry points with
-  temporary package files and a temporary Git repository with real commits
-  and tags, asserting that every rejected context emits no validated outputs
-  and can never reach a publisher.
-
-- Add a verified create-only registry reconciliation primitive for exact
-  manifest promotion (`src/release/registry-reconcile.ts` with the OCI
-  Distribution HTTP client in `registry-http-client.ts` and the fake registry
-  in `registry-fixture.ts`): destination tags are inspected first and reused
-  only on an exact serialized-digest match, missing tags are created through
-  a server-enforced compare-and-swap (`If-None-Match: *`) with a mandatory
-  reread, an index with the same child digests but different bytes is
-  rejected, and a per-media-type capability probe proves the registry is
-  create-only against disposable probe tags (failing closed when
-  `If-None-Match` is ignored or unsupported) before any production tag write.
-
 - Resolve open dependencies on decomposed tracking parents transitively to
   their open leaf children in the issue queue, so a child depending on a
   decomposed-but-open container issue can never deadlock against a parent
@@ -399,20 +171,11 @@ All notable changes to Ralphie are documented here. The project follows
   dependency, instead of failing the run with a bare "blocked by open
   dependencies" error: `--on-needs-attention halt` stops with the handled
   stop; `continue` completes the run with the preserved issues still pending,
-  and the opt-in notifier labels/comments each blocked issue idempotently.
+  and no GitHub notification or label is published for queue-order blocks
+  (the opt-in notifier is reserved for agent-reported blockers).
 - Pin grounding and resolution-verification evidence to the exact
   checked-out commit: the read-only prompts now name the checked-out SHA
   alongside the repository path and target branch.
-- Correct the runtime documentation: verified standalone binaries and Docker
-  images run without Bun, while Bun remains required for source and published
-  JavaScript usage; target-repository verification commands keep their own
-  dependencies.
-- Add deterministic SPDX 2.3 SBOMs for the four final native release assets;
-  each document binds the validated source, build inputs, and final binary digest.
-- Add an exact-tag GitHub release verifier that emits a deterministic,
-  checksum-verified Homebrew asset manifest.
-- Build each native release binary with its explicit Bun target and validate its
-  executable header and architecture before emitting checksums.
 - Add an explicit local Octokit test seam and a deterministic in-memory GitHub
   REST fixture (`src/github/rest-fixture.ts`). The production client with no
   test configuration still targets `api.github.com` with its existing `gh`
@@ -450,36 +213,6 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Changed
 
-- Refactor container promotion around immutable, verified platform digests
-  (`.github/workflows/release.yml`): `stage-container` now binds the recorded
-  BuildKit digest to the OCI archive's own index entry before staging, and
-  `push-container` splits platform promotion from alias creation — each
-  promoted GHCR image is re-inspected and must match the candidate `.digest`,
-  platform, and the validated `version`/`source_ref` labels; the
-  post-promotion results are persisted as a `ralphie.publication-subjects.v1`
-  map with exactly `linux/amd64` and `linux/arm64` (rejecting missing,
-  duplicate, unsupported, or mismatched subjects); and every
-  version/minor/`latest`/`sha-<revision>` manifest alias is created from the
-  immutable `ghcr.io/beremaran/ralphie@sha256:<digest>` references instead
-  of the `${VERSION}-amd64`/`${VERSION}-arm64` tags, so a digest mismatch
-  stops the job before any alias is pushed.
-- The protected native release publisher now gates on every validated build
-  matrix result, regenerates `SHA256SUMS`, and creates or reuses a
-  REST-validated release handle before any asset mutation, then reconciles an
-  exact six-asset set (`ralphie-darwin-arm64/x64`, `ralphie-linux-arm64/x64`,
-  `SHA256SUMS`, `SHA256SUMS.sigstore.json`): the per-target `.sha256`
-  sidecars, `release-metadata.json`, the four SPDX documents, and
-  `attestation-subjects.json` stay staged as in-checkout/attestation evidence
-  but are no longer release assets, and any other remote asset is an explicit
-  conflict (never deleted, overwritten, or ignored). The checksum contract is
-  recomputed from the exact staged bytes before any remote mutation, and each
-  remote asset must match those bytes; a missing asset is repaired only on a
-  draft handle. Before the final `draft: false` update the exact release is
-  re-read by ID and its id, upload URL, tag, `target_commitish`, and still-
-  draft state are asserted; an already-published handle is reconciled
-  read-only (same tag/target, byte-identical generated notes, checksum
-  contents, and all six asset digests) and succeeds only when everything
-  matches.
 - Added `--max-decomposition-depth` (default `3`) and persisted it in run state.
   A direct or review-escalated decomposition beyond the configured ceiling now
   leaves the issue open as `decomposition_limit_reached` needs attention and
@@ -616,19 +349,11 @@ All notable changes to Ralphie are documented here. The project follows
   dependency issue numbers so queue eligibility never depends on live GitHub
   state alone.
 
-- A maintainer-approved public source and distribution topology, with one
-  canonical repository, endpoint inventory, publication setup, and explicit
-  privacy boundaries.
-- The maintainer-approved MIT license and consistent npm, Homebrew, and OCI
-  metadata, including license inspection before container publication.
 - A single package-version authority with build-time commit metadata and plain
   or JSON `--version` output that works without repository or Pi configuration.
 - An isolated package smoke check that inspects the tarball allowlist, installs
   production dependencies in a fresh project, and verifies scoped identity and
   manifest-backed `--version` output.
-- An anonymous public-distribution verification command and scheduled workflow
-  that check canonical links, release assets, the temporary installer,
-  Homebrew, GHCR, and license metadata without GitHub credentials.
 - Staged-tree-bound deterministic verification before review, after review
   fixes, and before commit, with persisted command evidence and repeatable
   `--verify-command` overrides.
@@ -661,8 +386,7 @@ All notable changes to Ralphie are documented here. The project follows
   services.
 - Resumable issue execution with complexity routing, bounded review loops,
   deterministic commits and pushes, and dependency-aware decomposition.
-- Typed progress events, JSON Lines output, diagnostics, and credential
-  redaction.
+- Typed progress events, JSON Lines output, and diagnostics.
 - Structured no-change resolution verification with persisted evidence.
 
 ### Changed
@@ -671,23 +395,13 @@ All notable changes to Ralphie are documented here. The project follows
   the existing complexity thresholds, require fresh concrete verification for
   already-resolved closure, and keep needs-attention outcomes out of closure
   and PR delivery. Complexity is never a needs-attention reason.
-- Read container candidate digests from the supported Buildx action output,
-  serialize every candidate contract field explicitly, and use the supported
-  Intel macOS runner so release staging fails closed without hanging or writing
-  null promotion metadata.
-- Use the supported Sigstore GitHub verification selectors in the standalone
-  installer and release documentation, preserving the exact workflow, event,
-  commit, and protected tag constraints.
-- Expose the canonical repository as an explicit public Homebrew custom tap and
-  install the selected release asset under the expected `ralphie` executable
-  name.
 - Document the cross-mode display contract: interactive sticky footer and
   contextual Pi session output, periodic and lifecycle breadcrumbs, the
   `LIVE_OUTPUT_LIMIT` character threshold and human-preview defaults, active
   leaf-stage status, append-only plain/CI output, quiet output limited to
   failures and handled needs-attention stops,
   lossless JSON Lines without human breadcrumb records, and the independent
-  durable progress-event log, including redaction and cleanup behavior.
+  durable progress-event log preserving supplied values (never redacted).
 - Expose grounding and needs-attention decisions consistently across default,
   interactive, verbose, quiet, and JSON Lines output, including complete
   evidence, questions, artifact paths, policy, and final outcome counts.
@@ -701,40 +415,9 @@ All notable changes to Ralphie are documented here. The project follows
   `--pi-dir` directories remain operator-owned, while environment-generated
   configuration uses a private temporary directory with secure permissions and
   cleanup on close or startup failure.
-- Add a deterministic Homebrew formula generator that consumes explicit,
-  version-tag-bound release metadata, validates the exact four lowercase
-  checksums, and updates only the marked formula metadata region.
-- Add exact per-platform Homebrew formula checksums and a validator that checks
-  them against the canonical release manifest.
-- Make the standalone installer fail closed by requiring the signed checksum
-  manifest, exact platform entry, and atomic temporary-file replacement.
-- Sign the exact `SHA256SUMS` bytes with keyless Sigstore through GitHub OIDC,
-  publish the canonical `SHA256SUMS.sigstore.json` bundle, and document the
-  downstream trust policy.
-- Publish a deterministic SHA256SUMS manifest alongside the four native
-  release binaries, hashing the exact files uploaded to GitHub.
-- Publish multi-architecture Docker images from inspected, immutable
-  candidates with validated version and revision OCI metadata, using an
-  explicit normalized-version tag and stable-only `latest` alias.
-- Define the container runtime contract as UID/GID `65532:65532` with
-  `/home/nonroot` as `HOME` and the working directory, and include the
-  external GitHub, Git, Pi search, shell, and CA-certificate dependencies.
 - Define noninteractive `github.com` authentication through the preferred
   `GH_TOKEN` and fallback `GITHUB_TOKEN` environment variables, without
   requiring `gh auth login` or a mounted GitHub CLI profile.
-- Stage and smoke-test immutable `linux/amd64` and `linux/arm64` container
-  candidates from the validated release ref, including per-platform OCI
-  archives, image digests, and promotion metadata; defer registry publication
-  to the protected publisher.
-- Enforce a validated release tag/version/ref context, immutable protected
-  release tags, protected publisher environment, least-privilege workflow
-  permissions, and safe manual dry runs.
-- Make native release publication idempotent by explicitly targeting the
-  canonical repository, reusing an existing tag release, and repairing partial
-  asset uploads on retries.
-- Publish the scoped npm package only from a validated release tag with npm
-  trusted publishing, provenance, and exact post-publication registry smoke
-  verification.
 - Document the published scoped Bun package and use
   `bunx @beremaran/ralphie` for installation, version verification, dry-run,
   and workflow examples; the scope distinguishes this CLI from the unrelated

@@ -1,20 +1,17 @@
 #!/usr/bin/env bun
 
 /**
- * Production package-publication context validation used by the `publish-npm`
- * job of `.github/workflows/release.yml` (step "Verify scoped package and
- * release tag version"). The step previously inlined this logic in bash; this
+ * Production package-publication context validation used by the tag-triggered
+ * publish workflow `.github/workflows/npm-publish.yml` (step "Validate tag and
+ * package version"). The step previously inlined this logic in bash; this
  * script is its executable seam.
  *
- * This is the prerelease-capable twin of
- * `scripts/validate-release-context.ts`: it accepts the full SemVer 2.0.0
- * grammar (prerelease and build metadata) that the stable-only release path
- * rejects, and additionally pins the scoped package name and the exact
- * tag/package version match. Like its counterpart it reads the GitHub Actions
- * context from the environment and appends the canonical `version` output to
- * `$GITHUB_OUTPUT` only when the context is valid. A rejected context exits
- * non-zero before writing anything, so the publication step of the same job
- * cannot run.
+ * It accepts the full SemVer 2.0.0 grammar (prerelease and build metadata),
+ * pins the scoped package name, and requires the exact tag/package version
+ * match. It reads the GitHub Actions context from the environment and appends
+ * the canonical `version` output to `$GITHUB_OUTPUT` only when the context is
+ * valid. A rejected context exits non-zero before writing anything, so the
+ * publication step of the same job cannot run.
  */
 
 import { appendFile, readFile } from "node:fs/promises";
