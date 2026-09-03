@@ -119,17 +119,13 @@ export type IssueResolutionDecision = z.infer<
 >;
 export type ResolutionVerificationDecision = IssueResolutionDecision;
 
-const groundingActionableDecisionSchema = z
-    .object({
-        disposition: z.literal(GroundingDisposition.Actionable),
-    })
-    .strict();
+const groundingActionableDecisionSchema = z.object({
+    disposition: z.literal(GroundingDisposition.Actionable),
+});
 
-const groundingAlreadyResolvedDecisionSchema = z
-    .object({
-        disposition: z.literal(GroundingDisposition.AlreadyResolved),
-    })
-    .strict();
+const groundingAlreadyResolvedDecisionSchema = z.object({
+    disposition: z.literal(GroundingDisposition.AlreadyResolved),
+});
 
 export const needsAttentionDecisionSchema = z
     .object({
