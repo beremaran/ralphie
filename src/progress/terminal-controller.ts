@@ -16,9 +16,9 @@ import { makeTerminalStreamBoundaryTracker } from "./terminal-stream-boundary.ts
 export type TerminalOutputStrategy = {
     /** Emit arbitrary content bytes (transcript, durable progress lines). */
     readonly write: (text: string) => void;
-    /** Paint a footer at the current cursor position (assumed line start). */
+    /** Paint a region row at the current cursor position (assumed line start). */
     readonly paintFooter: (text: string) => void;
-    /** Erase the currently visible footer without touching content. */
+    /** Erase the row at the current cursor position without touching content. */
     readonly clearFooter: () => void;
     /** Restore cursor and scroll state when the controller is disposed. */
     readonly restore: () => void;
@@ -39,9 +39,16 @@ export type TerminalFooterOptions = {
      * and setFooter.
      */
     readonly footerLine?: () => string | undefined;
-    /** Width used to clip footer text before it reaches a terminal strategy. */
+    /**
+     * Optional bounded one-line activity rows rendered beneath the stage/status
+     * line. Rows share the single replaceable interactive region with the
+     * footer, whose total height never exceeds
+     * {@link INTERACTIVE_REGION_MAX_ROWS} terminal rows.
+     */
+    readonly activityLines?: () => readonly string[] | undefined;
+    /** Width used to clip region rows before they reach a terminal strategy. */
     readonly width?: () => number;
-    /** Footer refresh cadence; forwarded to the footer view scheduler. */
+    /** Region refresh cadence; forwarded to the footer view scheduler. */
     readonly intervalMs?: number;
     /** Injectable timer for deterministic scheduler tests. */
     readonly timer?: FooterTimer;
@@ -53,7 +60,7 @@ export type TerminalOutputControllerOptions = {
     /** Replace the terminal surface primitives (defaults mirror stderr writes). */
     readonly strategy?: TerminalOutputStrategy;
     readonly footer?: TerminalFooterOptions;
-    /** Current terminal width, sampled for every footer paint and resize. */
+    /** Current terminal width, sampled for every region paint and resize. */
     readonly width?: () => number;
     /** Injectable resize source; defaults to the interactive stderr stream. */
     readonly resize?: TerminalResizeSubscription | TerminalResizeListener;
@@ -67,22 +74,33 @@ export type TerminalOutputControllerOptions = {
  * The terminal output controller.
  *
  * A drop-in `ProgressOutput` that arbitrates every transcript/raw write with
- * the terminal stream boundary tracker, keeps a sticky footer that is cleared
- * before content output and restored only at safe line boundaries, and defers
- * durable progress lines while a transcript fragment is open mid-line so
- * progress can never merge with, overwrite, or falsely close the fragment.
- * Footer bytes are only ever emitted through the strategy's footer surface.
+ * the terminal stream boundary tracker and owns one replaceable interactive
+ * region below the streamed content. The region holds the sticky stage/status
+ * line plus the bounded activity view rows; its total height never exceeds
+ * {@link INTERACTIVE_REGION_MAX_ROWS} terminal rows, each row is clipped
+ * before it can wrap, and every replacement repaint erases the region in
+ * place before redrawing it. Repaints are deferred while a transcript
+ * fragment is open mid-line or a control sequence is incomplete, so region
+ * bytes can never merge with, overwrite, or falsely close the fragment.
+ * Region bytes are only ever emitted through the strategy's footer surface.
  */
 export type TerminalOutputController = ProgressOutput & {
     /** Replace the footer content; safe draws are scheduled and coalesced. */
     readonly setFooter: (line: string) => void;
-    /** True while a footer is currently painted on screen. */
+    /** True while the replaceable region is currently painted on screen. */
     readonly isFooterVisible: () => boolean;
-    /** Coalesce a footer repaint for display-state changes. */
+    /** Coalesce a region repaint for display-state changes. */
     readonly invalidate: () => void;
 };
 
 const CLEAR_LINE = "\r\x1b[2K";
+const CURSOR_UP = "\x1b[1A";
+
+/**
+ * Total height of the replaceable interactive region, including the
+ * stage/status line: the footer plus at most this many terminal rows overall.
+ */
+export const INTERACTIVE_REGION_MAX_ROWS = 3;
 
 /** Default strategy: durable breadcrumb/content bytes share one byte sink. */
 export const makeDefaultTerminalOutputStrategy = (
@@ -133,8 +151,9 @@ export const makeTerminalOutputController = ({
     const boundary = makeTerminalStreamBoundaryTracker();
     const interactive = mode === "interactive";
     let footerTarget: string | undefined;
-    let footerRendered: string | undefined;
-    let footerShown = false;
+    /** Rows currently painted on screen inside the replaceable region. */
+    let regionRows: string[] = [];
+    let regionShown = false;
     let resizePending = false;
     let disposed = false;
     const pendingLines: string[] = [];
@@ -142,31 +161,83 @@ export const makeTerminalOutputController = ({
     const footerContent = (): string | undefined =>
         footer?.footerLine === undefined ? footerTarget : footer.footerLine();
 
-    const clearVisibleFooter = (): void => {
-        if (!footerShown) return;
-        strategy.clearFooter();
-        footerShown = false;
-        footerRendered = undefined;
+    /**
+     * Append clipped, non-empty rows until the region reaches its height cap.
+     */
+    const appendClippedRows = (
+        rows: string[],
+        source: readonly string[],
+        columnWidth: number,
+    ): void => {
+        for (const line of source) {
+            if (rows.length >= INTERACTIVE_REGION_MAX_ROWS) return;
+            const clipped = clipFooter(line, columnWidth);
+            if (clipped !== "") rows.push(clipped);
+        }
+    };
+
+    /**
+     * Compose the replaceable region: the clipped stage/status line plus the
+     * bounded activity rows, capped at {@link INTERACTIVE_REGION_MAX_ROWS}
+     * terminal rows in total. Every row is clipped so it can never wrap.
+     */
+    const regionContent = (): string[] => {
+        const columnWidth = width();
+        const rows: string[] = [];
+        const statusRow = footerContent();
+        if (statusRow !== undefined && statusRow !== "") {
+            rows.push(clipFooter(statusRow, columnWidth));
+        }
+        const activity = footer?.activityLines;
+        if (activity === undefined) return rows;
+        const activityRows = activity();
+        if (activityRows !== undefined) {
+            appendClippedRows(rows, activityRows, columnWidth);
+        }
+        return rows;
+    };
+
+    /**
+     * Erase the visible region in place. The cursor rests on the last region
+     * row, so each row is cleared and the cursor stepped up to the previous
+     * row; afterwards the cursor sits on the cleared top region row just
+     * below the streamed content.
+     */
+    const clearRegion = (): void => {
+        if (!regionShown) return;
+        const height = regionRows.length;
+        for (let index = 0; index < height; index += 1) {
+            strategy.clearFooter();
+            if (index < height - 1) strategy.write(CURSOR_UP);
+        }
+        regionShown = false;
+        regionRows = [];
+    };
+
+    /** Paint the region below the content; the last row keeps the cursor. */
+    const paintRegion = (rows: readonly string[]): void => {
+        rows.forEach((row, index) => {
+            strategy.paintFooter(row);
+            if (index < rows.length - 1) strategy.write("\n");
+        });
     };
 
     /** Strict clear-before-draw: replacement repaints always erase first. */
-    const renderFooter = (
-        content: string | undefined,
-        force = false,
-        clippedContent?: string,
-    ): void => {
-        const clipped =
-            clippedContent ??
-            (content === undefined ? undefined : clipFooter(content, width()));
-        if (clipped === undefined || clipped === "") {
-            clearVisibleFooter();
+    const renderRegion = (force = false): void => {
+        const rows = regionContent();
+        if (
+            !force &&
+            regionShown &&
+            rows.length === regionRows.length &&
+            rows.every((row, index) => row === regionRows[index])
+        ) {
             return;
         }
-        if (!force && footerShown && footerRendered === clipped) return;
-        clearVisibleFooter();
-        strategy.paintFooter(clipped);
-        footerShown = true;
-        footerRendered = clipped;
+        clearRegion();
+        if (rows.length === 0) return;
+        paintRegion(rows);
+        regionShown = true;
+        regionRows = rows;
     };
 
     const flushPending = (): void => {
@@ -181,7 +252,7 @@ export const makeTerminalOutputController = ({
         ? makeFooterRefreshScheduler({
               repaint: () => {
                   if (disposed || !boundary.isRedrawSafe()) return;
-                  renderFooter(footerContent());
+                  renderRegion();
               },
               intervalMs: footer?.intervalMs,
               timer: footer?.timer,
@@ -193,30 +264,27 @@ export const makeTerminalOutputController = ({
         scheduler?.invalidate();
     };
 
-    const restoreFooter = (): void => {
+    const restoreRegion = (): void => {
         if (!interactive || !boundary.isRedrawSafe()) return;
-        const needsRedraw = resizePending || !footerShown;
+        const needsRedraw = resizePending || !regionShown;
         resizePending = false;
-        if (needsRedraw) renderFooter(footerContent());
+        if (needsRedraw) renderRegion(true);
     };
 
     const afterContentWrite = (): void => {
         if (!interactive) return;
         flushPending();
-        restoreFooter();
+        restoreRegion();
     };
 
     /** Repaint at the new width, but never insert bytes into an unsafe stream. */
     const handleResize = (): void => {
         if (disposed) return;
         resizePending = true;
-        const content = footerContent();
-        const clipped =
-            content === undefined ? undefined : clipFooter(content, width());
-        clearVisibleFooter();
+        clearRegion();
         if (!boundary.isRedrawSafe()) return;
         resizePending = false;
-        renderFooter(content, true, clipped);
+        renderRegion(true);
     };
 
     /** Close an open control sequence and finish a partial line. */
@@ -238,7 +306,7 @@ export const makeTerminalOutputController = ({
             invalidate();
             return;
         }
-        clearVisibleFooter();
+        clearRegion();
         if (!interactive) ensureLineBoundary();
         strategy.write(`${line}\n`);
         boundary.write(`${line}\n`);
@@ -261,7 +329,7 @@ export const makeTerminalOutputController = ({
             invalidate();
             if (!boundary.isRedrawSafe()) return;
             flushPending();
-            renderFooter(footerContent());
+            renderRegion();
         },
         appendLine: (line, liveLine) => {
             if (disposed) return;
@@ -271,7 +339,7 @@ export const makeTerminalOutputController = ({
         writeLine: writeDurableLine,
         writeTranscript: (text) => {
             if (text.length === 0 || disposed) return;
-            clearVisibleFooter();
+            clearRegion();
             strategy.write(text);
             boundary.write(text);
             afterContentWrite();
@@ -282,7 +350,7 @@ export const makeTerminalOutputController = ({
             if (!interactive) return;
             invalidate();
         },
-        isFooterVisible: () => footerShown,
+        isFooterVisible: () => regionShown,
         invalidate,
         dispose: () => {
             if (disposed) return;
@@ -292,10 +360,10 @@ export const makeTerminalOutputController = ({
             ensureLineBoundary();
             for (const line of pendingLines) strategy.write(`${line}\n`);
             pendingLines.length = 0;
-            if (footerShown) strategy.write("\n");
+            if (regionShown) strategy.write("\n");
             footerTarget = undefined;
-            footerShown = false;
-            footerRendered = undefined;
+            regionShown = false;
+            regionRows = [];
             resizePending = false;
             boundary.reset();
             strategy.restore?.();

@@ -5,6 +5,19 @@ All notable changes to Ralphie are documented here. The project follows
 
 ## [Unreleased]
 
+- Render the interactive activity view in one replaceable three-row terminal
+  region: the sticky stage/status line plus the bounded activity rows share a
+  single region whose total height never exceeds three terminal rows (no panel
+  added beneath the footer), every row is clipped before it can wrap, and each
+  replacement repaints the region in place using the terminal stream boundary
+  primitives — repaints are deferred while a transcript fragment is open
+  mid-line or a control sequence is incomplete, and the region clears/restores
+  without overwriting streamed assistant text, splitting an ANSI/control
+  sequence, or inserting bytes into a partial line. Resize, disposal, stale
+  rows, and completion removal are handled; cursor controls remain limited to
+  interactive mode, and plain, CI, piped, JSON, and quiet surfaces stay
+  append-only or structured with no cursor-control artifacts.
+
 - Deliver managed feature-branch revisions as one deterministic operation
   with authoritative remote reconciliation: the revision safety checks run
   before staging/commit and again immediately before the push, the exact-tree

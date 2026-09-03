@@ -34,6 +34,13 @@ import {
     type ProgressRendererOptions,
     type ProgressUpdate,
 } from "./progress.ts";
+import {
+    createActivityState,
+    reduceActivityEvent,
+    renderActivitySnapshot,
+    updateActivityFromProgress,
+    type ActivityState,
+} from "./activity.ts";
 import { dim } from "./colors.ts";
 import { renderFooter } from "./footer.ts";
 import {
@@ -258,6 +265,7 @@ export const makeProgressCoordinator = (
 ) => {
     const now = options.now ?? (() => new Date());
     let state = createDisplayState();
+    let activityState: ActivityState = createActivityState();
     const footerWidth = options.footer?.width ?? options.width;
     const controller =
         options.mode === "interactive"
@@ -276,6 +284,13 @@ export const makeProgressCoordinator = (
                               now,
                               width: footerWidth,
                               color: options.colors ? dim : undefined,
+                          }),
+                      activityLines: () =>
+                          renderActivitySnapshot(activityState, {
+                              ...(footerWidth === undefined
+                                  ? {}
+                                  : { width: footerWidth() }),
+                              colors: options.colors,
                           }),
                   },
               })
@@ -325,6 +340,9 @@ export const makeProgressCoordinator = (
                 ? undefined
                 : breadcrumbCandidateFor(state);
         state = reducePiSessionEvent(state, event, context, now);
+        activityState = reduceActivityEvent(activityState, event, () =>
+            now().getTime(),
+        );
         controller?.invalidate();
         if (!incrementalStreamEvent(event)) transcript?.interruptLine();
         const candidate =
@@ -360,6 +378,11 @@ export const makeProgressCoordinator = (
         emit: async (update: ProgressUpdate) => {
             if (disposed) return;
             state = reduceProgressUpdate(state, update, now);
+            activityState = updateActivityFromProgress(
+                activityState,
+                update,
+                () => now().getTime(),
+            );
             controller?.invalidate();
             transcript?.interruptLine();
             await progressRenderer.emit(update);

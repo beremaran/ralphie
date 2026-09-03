@@ -544,9 +544,15 @@ output. `--output verbose` keeps the same mode selection while increasing
 human-readable tool previews.
 
 Interactive output has two coordinated surfaces: Pi transcript rows remain in
-scrollback, and a single sticky footer supplies periodic progress breadcrumbs
-for the active leaf stage. Footer refreshes are coalesced at roughly 100–125 ms,
-so activity updates do not create rows. A representative footer is:
+scrollback, and one replaceable region holds the sticky stage/status line plus
+the bounded activity view rows (running tools, reads/searches, thinking, and
+lifecycle work) for the active leaf stage. The whole region is at most three
+terminal rows including the stage/status line, every row is clipped before it
+can wrap, and replacements repaint the region in place — intermediate activity
+never goes to scrollback. Repaints are coalesced at roughly 100–125 ms and are
+deferred while a transcript fragment is open mid-line or a control sequence is
+incomplete, so activity updates never create rows or corrupt streamed text. A
+representative region is:
 
 ```text
 ◐ [owner/repo] [2/4] #56 Context Review 1/3 › Reviewing changes › Using bash · 3s
@@ -583,7 +589,7 @@ The cross-mode guarantees are:
 
 | Mode or sink | Contract |
 | --- | --- |
-| Interactive | Pi transcript scrollback plus one periodically refreshed sticky footer; completed milestones and lifecycle breadcrumbs remain durable rows. |
+| Interactive | Pi transcript scrollback plus one replaceable region of at most three terminal rows (stage/status line plus bounded activity rows), repainted in place; completed milestones and lifecycle breadcrumbs remain durable rows. |
 | Plain and CI | Append-only human-readable lines. No ANSI cursor controls are emitted, so logs do not require terminal repainting. |
 | `--output quiet` | Failures and handled needs-attention stops only; routine progress and Pi transcript rows are suppressed. |
 | `--output json` | One parseable JSON object per line on stdout: progress records and lossless `pi_event` records; progress values are preserved as supplied, while credential redaction still applies to `pi_event` records. Human headers, footers, and breadcrumb lines are not emitted. |

@@ -472,6 +472,7 @@ export type {
     FooterViewOptions,
 } from "./footer.ts";
 export {
+    INTERACTIVE_REGION_MAX_ROWS,
     makeDefaultTerminalOutputStrategy,
     makeDurableBreadcrumbStrategy,
     makeDurableBreadcrumbTerminalOutputStrategy,
