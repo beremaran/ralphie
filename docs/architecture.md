@@ -44,7 +44,7 @@ effects and validate their invariants at the boundary.
 | `src/issues/` | Queueing, complexity routing, implementation, review, recovery, and decomposition. |
 | `src/agent/` | Ralphie's session, prompt, schema, diagnostics, and structured-output boundary. |
 | `src/opencode/` | External OpenCode server client, session lifecycle, and safety policy. |
-| `src/progress/` | Typed events, audit persistence, redaction, and terminal/JSON renderers. |
+| `src/progress/` | Typed events, audit persistence, and terminal/JSON renderers. |
 | `src/run/` | Versioned state, artifacts, reconciliation, and resume behavior. |
 | `src/workspace/` | Path expansion and protected workspace removal. |
 | `src/targets/` | Canonical standalone release target manifest, typed parser/loader, read-only target query API, deterministic catalog/GitHub Actions matrix JSON serializers, stable consumer renderers (POSIX installer, Homebrew, documentation), and the `scripts/standalone-targets.ts` command surface. |
@@ -199,7 +199,7 @@ status and no generated stdout. Invocation and examples are documented in
 | OpenCode sessions and structured results | `src/agent/`, `src/opencode/` |
 | Git checkpoints, safety, and branches | `src/git/` |
 | Durable state and reconciliation | `src/run/`, `src/issues/artifacts.ts` |
-| Progress, redaction, and exit semantics | `src/progress/`, `src/shared/redaction.ts`, `src/process/exit-code.ts` |
+| Progress and exit semantics | `src/progress/`, `src/process/exit-code.ts` |
 | Standalone release target manifest, read-only query API, deterministic catalog/matrix JSON serializers, consumer renderers (installer/Homebrew/documentation), and the `bun run targets` command | `src/targets/`, `targets/standalone-targets.json`, `scripts/standalone-targets.ts` |
 
 The source-level trigger-to-exit path is maintained in the [end-to-end

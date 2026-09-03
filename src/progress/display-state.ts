@@ -1,5 +1,5 @@
 import type { PiEventContext, PiSessionEvent } from "../opencode/client.ts";
-import { stripTerminalControls } from "../shared/redaction.ts";
+import { stripTerminalControls } from "../shared/terminal.ts";
 import type {
     ProgressEvent,
     ProgressStage,

@@ -32,7 +32,6 @@ describe("GitHub client authentication", () => {
         expect(error).toBeInstanceOf(RalphieError);
         expect(error.message).toContain("GitHub authentication check failed.");
         expect(error.message).toContain("Bearer private-value");
-        expect(error.message).not.toContain("[REDACTED]");
     });
 
     test("fails with gh auth token stderr verbatim", async () => {
@@ -53,7 +52,6 @@ describe("GitHub client authentication", () => {
             "Could not retrieve the GitHub authentication token.",
         );
         expect(error.message).toContain("private-auth-token");
-        expect(error.message).not.toContain("[REDACTED]");
     });
 
     test("keeps environment-derived values in authentication failures", async () => {
@@ -69,7 +67,6 @@ describe("GitHub client authentication", () => {
             const error = await authenticationError(runner);
 
             expect(error.message).toContain("env-derived-secret");
-            expect(error.message).not.toContain("[REDACTED]");
         } finally {
             delete process.env.GH_TOKEN;
         }

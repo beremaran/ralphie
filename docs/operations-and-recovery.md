@@ -51,7 +51,8 @@ needs-attention event with `handled: true` and every outcome count before exit.
 Depending on the event, it may also include the repository, review attempt,
 session ID, commit SHA, created issue numbers, or diagnostic paths. Supplied
 progress-event values are preserved as-is; OpenCode transcripts and breadcrumbs
-remain redacted or sanitized at the reporting boundary.
+are never redacted, and terminal control sequences are stripped at the
+reporting boundary.
 
 ## State and artifacts
 

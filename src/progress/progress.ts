@@ -1,7 +1,7 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
-import { stripTerminalControls } from "../shared/redaction.ts";
+import { stripTerminalControls } from "../shared/terminal.ts";
 import { cyan, dim, green, red, yellow } from "./colors.ts";
 
 export type ProgressStage =

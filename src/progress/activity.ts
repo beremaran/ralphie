@@ -1,9 +1,5 @@
 import type { PiSessionEvent } from "../opencode/client.ts";
-import {
-    redactSensitiveText,
-    redactSensitiveValue,
-    stripTerminalControls,
-} from "../shared/redaction.ts";
+import { stripTerminalControls } from "../shared/terminal.ts";
 import { green, red, yellow } from "./colors.ts";
 import { PROGRESS_STAGE_LABELS } from "./display-state.ts";
 import type { ProgressStatus, ProgressUpdate } from "./progress.ts";
@@ -108,11 +104,9 @@ export const findActivityOperation = (
     id: string,
 ): ActivityOperation | undefined => state.operations.find((op) => op.id === id);
 
-/** Same redaction boundary as progress and transcript rendering. */
+/** Terminal-control stripping only; supplied text passes through unmodified. */
 const sanitizeText = (text: string): string =>
-    redactSensitiveText(
-        stripTerminalControls(text).replace(/\s+/g, " ").trim(),
-    );
+    stripTerminalControls(text).replace(/\s+/g, " ").trim();
 
 const boundDetail = (detail: string): string => {
     const clean = sanitizeText(detail);
@@ -237,7 +231,7 @@ export const activityKindForTool = (toolName: string): ActivityKind => {
 const shortJson = (value: unknown): string => {
     let text: string;
     try {
-        text = JSON.stringify(redactSensitiveValue(value)) ?? "";
+        text = JSON.stringify(value) ?? "";
     } catch {
         return "[unserializable]";
     }

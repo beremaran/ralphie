@@ -282,9 +282,6 @@ describe("display state", () => {
         expect(next.repository).toBe("owner/repo?token=private-value");
         expect(next.issue?.title).toBe("Bearer private-value");
         expect(next.activityLabel).toBe("Using Bearer private-value");
-        expect(next.repository).not.toContain("[REDACTED]");
-        expect(next.issue?.title).not.toContain("[REDACTED]");
-        expect(next.activityLabel).not.toContain("[REDACTED]");
     });
 
     test("keeps distinct token values distinct in display state", () => {

@@ -578,8 +578,9 @@ and, on completion, exactly one concise line: `✓ <tool> done`, or a single
 sanitized, bounded failure line with enough error detail to act on (for
 example `✗ grep failed — error: no matches for …`). Streamed assistant text
 remains bounded to the same 140-character stream limit used before, and the
-structured OpenCode records stay complete (subject to reporting-boundary
-redaction). The compact activity area only ever paints the replaceable region
+structured OpenCode records stay complete (only terminal control sequences
+are stripped at the reporting boundary). The compact activity area only ever
+paints the replaceable region
 through the stream-boundary tracker, so it can never clear or corrupt
 assistant response bytes. The three-row cap is a cap on physical terminal
 rows — regression coverage locks it down with a terminal emulator that
@@ -596,7 +597,7 @@ The cross-mode guarantees are:
 | Interactive | OpenCode transcript scrollback plus one replaceable region of at most three terminal rows (stage/status line plus bounded activity rows), repainted in place; completed milestones and lifecycle breadcrumbs remain durable rows. |
 | Plain and CI | Append-only human-readable lines. No ANSI cursor controls are emitted, so logs do not require terminal repainting. |
 | `--output quiet` | Failures and handled needs-attention stops only; routine progress and OpenCode transcript rows are suppressed. |
-| `--output json` | One parseable JSON object per line on stdout: progress records and lossless `opencode_event` records; progress values are preserved as supplied, while credential redaction still applies to `opencode_event` records. Human headers, footers, and breadcrumb lines are not emitted. |
+| `--output json` | One parseable JSON object per line on stdout: progress records and lossless `opencode_event` records; values are preserved as supplied. Human headers, footers, and breadcrumb lines are not emitted. |
 | Durable event log | Progress events are written independently to `events.jsonl` in the run directory, preserving supplied values, regardless of the renderer. |
 
 For example, a JSON Lines consumer sees structured records rather than the
@@ -607,11 +608,12 @@ human footer or `↻` lines:
 {"type":"opencode_event","sessionID":"session-1","directory":"/workspace/repository","event":{"type":"turn_start"}}
 ```
 
-OpenCode records are redacted before reporting; progress events preserve supplied
-values. Sensitive environment values, credentials, terminal controls in human
-text, and unsafe display text are not allowed to leak into OpenCode transcript or
-breadcrumb output. JSON and the durable log preserve structured fields and raw
-OpenCode event shape; credential redaction still applies to OpenCode transcript records.
+OpenCode records are never redacted before reporting; progress events preserve
+supplied values. Credentials and other sensitive values pass through verbatim
+into OpenCode transcript, breadcrumb, JSON, and durable-log output; only
+terminal control sequences are stripped from human text so no control can
+repaint or corrupt an append-only sink. JSON and the durable log preserve
+structured fields and raw OpenCode event shape losslessly.
 The durable log is at
 `<workspace>/.ralphie/runs/<run-id>/events.jsonl` for new runs; a resumed run
 uses the directory containing its supplied state file. `--clean end` removes
@@ -683,7 +685,8 @@ calls are shown as readable commands, and live/final tool output plus streamed
 thinking stay in the compact activity surface rather than scrollback — each
 tool completion or failure is summarized as a single line, so `--output
 verbose` cannot expand the live row count. Terminal control sequences are
-sanitized and OpenCode transcript values are redacted before terminal rendering.
+stripped before terminal rendering; OpenCode transcript and progress values
+are preserved as supplied.
 JSON mode emits progress and `opencode_event` JSON Lines to stdout, preserving
 supplied progress values; normal modes render to stderr, and quiet mode
 renders failures only.
@@ -744,4 +747,4 @@ stateDiagram-v2
 | OpenCode sessions and structured results | `src/agent/`, `src/opencode/` |
 | Git checkpoints, safety, and branches | `src/git/` |
 | Durable state and reconciliation | `src/run/`, `src/issues/artifacts.ts` |
-| Progress, redaction, and exit semantics | `src/progress/`, `src/shared/redaction.ts`, `src/process/exit-code.ts` |
+| Progress and exit semantics | `src/progress/`, `src/process/exit-code.ts` |

@@ -53,7 +53,6 @@ describe("requireSuccess", () => {
         expect(error.message).toContain("GitHub authentication check failed.");
         expect(error.message).toContain("Authorization: Bearer private-value");
         expect(error.message).toContain("?token=query-secret");
-        expect(error.message).not.toContain("[REDACTED]");
     });
 
     test("keeps environment-derived values verbatim in stderr", async () => {
@@ -67,7 +66,6 @@ describe("requireSuccess", () => {
             ).catch((caught) => caught as Error)) as Error;
 
             expect(error.message).toContain("private-auth-token");
-            expect(error.message).not.toContain("[REDACTED]");
         } finally {
             delete process.env.GH_TOKEN;
         }

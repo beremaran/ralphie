@@ -3,7 +3,7 @@ import type {
     PiEventListener,
     PiSessionEvent,
 } from "../opencode/client.ts";
-import { stripTerminalControls } from "../shared/redaction.ts";
+import { stripTerminalControls } from "../shared/terminal.ts";
 import { cyan, dim, green, red, yellow } from "./colors.ts";
 import {
     prepareBreadcrumbCandidate,

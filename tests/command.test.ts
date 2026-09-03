@@ -297,7 +297,6 @@ describe("native CLI parser", () => {
             expect(error.message).toContain("Bearer private-value");
             expect(error.message).toContain("query-secret");
             expect(error.message).toContain("private-auth-token");
-            expect(error.message).not.toContain("[REDACTED]");
             expect(error.cause).toBe(failure);
         } finally {
             process.exitCode = 0;
@@ -344,7 +343,6 @@ describe("native CLI parser", () => {
             ]);
             const output = written.join("");
             expect(output).toContain("Cannot resume run Bearer private-value");
-            expect(output).not.toContain("[REDACTED]");
             expect(process.exitCode).toBe(RalphieExitCode.Failure);
         } finally {
             process.stderr.write = originalWrite;

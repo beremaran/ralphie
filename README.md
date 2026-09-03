@@ -36,7 +36,7 @@ For task-oriented details, start with the [documentation index](./docs/README.md
 - **Crash-safe recovery** — versioned run state, issue checkpoints, artifacts,
   and idempotent reconciliation make interrupted runs resumable.
 - **Observable, bounded autonomy** — transcripts, progress, JSON Lines output,
-  credential redaction, a five-attempt review limit, and non-force pushes are
+  a five-attempt review limit, and non-force pushes are
   built in.
 
 ## Install and try it
@@ -201,9 +201,9 @@ JSON Lines on stdout: each line is a parseable progress record or a lossless
 `opencode_event` record, without
 human breadcrumb lines. The durable progress-event log remains at
 `<workspace>/.ralphie/runs/<run-id>/events.jsonl` independently of the selected
-renderer; supplied progress-event values are preserved as-is. OpenCode transcripts,
-terminal controls, and other unsafe display text are redacted or sanitized at
-the reporting boundary.
+renderer; supplied progress-event values are preserved as-is. Only terminal
+control sequences are stripped from human-readable rows; transcripts and
+progress values are never redacted.
 See [Operations and recovery](./docs/operations-and-recovery.md) for output,
 resume, and cleanup details; successful `--clean end` removes the workspace
 and its log, while failed runs retain diagnostics for recovery.

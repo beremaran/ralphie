@@ -52,8 +52,6 @@ describe("breadcrumb labels", () => {
         expect(second.label).toContain("Using Bearer second-secret");
         expect(second.canonicalKey).toContain("Using Bearer second-secret");
         expect(second.canonicalKey).not.toBe(first.canonicalKey);
-        expect(first.label).not.toContain("[REDACTED]");
-        expect(second.canonicalKey).not.toContain("[REDACTED]");
     });
 
     test("retains token-like repository and issue title content in the full label", () => {
@@ -72,7 +70,6 @@ describe("breadcrumb labels", () => {
             "[owner/repo?token=private-value] [2/5] #42 Bearer private-value Review 1/3 › Implementing changes › Using bash",
         );
         expect(candidate.canonicalKey).toBe(candidate.label);
-        expect(candidate.label).not.toContain("[REDACTED]");
     });
 
     test("treats distinct token values as distinct canonical keys", () => {
@@ -177,7 +174,6 @@ describe("breadcrumb transcript insertion", () => {
                 "╰─ done\n",
         );
         expect(output).toContain("super-secret");
-        expect(output).not.toContain("[REDACTED]");
         expect(output).not.toContain("beforeafter");
     });
 });

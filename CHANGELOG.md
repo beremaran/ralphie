@@ -5,6 +5,27 @@ All notable changes to Ralphie are documented here. The project follows
 
 ## [Unreleased]
 
+### Removed
+
+- Remove the shared redaction implementation (`src/shared/redaction.ts`,
+  `tests/shared/redaction.test.ts`) and every `[REDACTED]` reporting assertion.
+  `redactSensitiveText`/`redactSensitiveValue` no longer exist; the terminal
+  control sanitizer they contained moved to `src/shared/terminal.ts`
+  (`stripTerminalControls`).
+
+### Changed
+
+- Progress detail, activity rows, and short JSON snapshots are no longer
+  redacted. The reporting boundary now preserves supplied values verbatim
+  (`src/progress/activity.ts` sanitizes only terminal control sequences),
+  matching the already-lossless `opencode_event` transcript records and
+  durable event log. Credentials and other sensitive values pass through into
+  transcripts, breadcrumbs, JSON Lines, and `events.jsonl` exactly as
+  supplied; only terminal control sequences are stripped from human-readable
+  rows. Documentation (`README.md`, `docs/architecture.md`,
+  `docs/end-to-end-execution.md`, `docs/operations-and-recovery.md`) now
+  describes this intentional unredacted output contract.
+
 - Validate OpenCode model/variant compatibility before execution and fail fast
   on silent turns. After the OpenCode runtime starts, the workflow lists the
   server's model catalog (`src/opencode/server.ts`, `src/opencode/variants.ts`)

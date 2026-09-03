@@ -26,7 +26,7 @@ import {
 } from "../../src/progress/coordinator.ts";
 import type { FooterTimer } from "../../src/progress/footer.ts";
 import type { RalphieRuntime } from "../../src/runtime.ts";
-import { stripTerminalControls } from "../../src/shared/redaction.ts";
+import { stripTerminalControls } from "../../src/shared/terminal.ts";
 import type { WorkflowOptions } from "../../src/workflow.ts";
 import {
     makeRecordingStrategy,

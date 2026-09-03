@@ -1,4 +1,4 @@
-import { stripTerminalControls } from "../shared/redaction.ts";
+import { stripTerminalControls } from "../shared/terminal.ts";
 import { dim } from "./colors.ts";
 import {
     DISPLAY_ACTIVITY_LABELS,

@@ -480,7 +480,6 @@ describe("assembled breadcrumb policy regressions", () => {
             "╰─ settled",
         ]);
         expect(harness.output).toContain("private-value");
-        expect(harness.output).not.toContain("[REDACTED]");
         expect(breadcrumbLines(harness.output)).toHaveLength(1);
     });
 
@@ -543,7 +542,6 @@ describe("assembled breadcrumb policy regressions", () => {
                 line.includes("owner/repo?token=second-value"),
             ),
         ).toBe(true);
-        expect(harness.output).not.toContain("[REDACTED]");
     });
 
     test("resumes an incomplete assistant stream after automatic insertion", () => {
