@@ -20,12 +20,23 @@ lossless event stream for integrations.
 
 Ralphie adapts its progress renderer to its environment:
 
-- interactive terminals receive streamed Pi output plus one in-place status line
-  for the active leaf stage, while completed milestones remain in the scrollback;
-- CI and redirected output receive durable, append-only lines;
-- `--output verbose` adds operational details;
-- `--output json` writes progress and `pi_event` objects one per line to stdout;
-  and
+- interactive terminals receive the streamed Pi transcript plus one replaceable
+  interactive region: the sticky stage/status line and the bounded activity
+  rows run together in a single region of at most three physical terminal rows
+  (the cap is measured in rows actually painted, never newline counts), each
+  row is clipped before it can wrap, and replacements repaint the region in
+  place — intermediate activity, long commands, and deep paths never spill
+  into scrollback or onto extra rows;
+- each tool completion and each failure surfaces one concise summary line
+  (`✓ <tool> done`, or a single sanitized, character-bounded failure line with
+  enough error detail to act on) instead of streamed multi-line output;
+- CI and redirected output are the deterministic noninteractive fallback:
+  durable, append-only lines with neither ANSI cursor controls nor
+  carriage-return bytes;
+- `--output verbose` adds operational details without expanding the
+  interactive region beyond its three-row cap;
+- `--output json` writes progress and `pi_event` objects one per line to
+  stdout; and
 - `--output quiet` suppresses routine progress but retains failures,
   needs-attention decisions, and handled stops.
 

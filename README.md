@@ -174,8 +174,12 @@ for the full contract.
 ## Output contract
 
 `--output` selects `default`, `verbose`, `quiet`, or `json`. In an interactive,
-non-CI terminal, the default is a Pi transcript with an in-place sticky footer.
-The footer is refreshed periodically and describes the active leaf stage and
+non-CI terminal, the default streams the Pi transcript with one replaceable
+interactive region below it: the sticky stage/status line plus the bounded
+activity rows together occupy at most three physical terminal rows (measured
+by the rows actually painted, not by newline counts), repainted in place and
+clipped before wrap at the current width. The footer is refreshed
+periodically and describes the active leaf stage and
 activity—for example, `› Reviewing changes › Using bash`—rather than a global
 step count. Completed progress milestones remain in scrollback. Pi sessions
 start with contextual headers such as:
@@ -195,9 +199,10 @@ than scrollback, while assistant text deltas stream in the transcript with a
 enough error detail to act on. `--output verbose` never expands the live
 region's three-row cap. These are not limits on the structured stream.
 
-Outside an interactive terminal—including CI—plain output is append-only and
-uses no ANSI cursor controls. Quiet output reports failures and handled
-needs-attention stops only. JSON output is
+Outside an interactive terminal—including CI and any redirected output—plain
+output is the deterministic, append-only noninteractive fallback and uses no
+ANSI cursor controls and no carriage-return bytes. Quiet output reports
+failures and handled needs-attention stops only. JSON output is
 JSON Lines on stdout: each line is a parseable progress record or a lossless
 `pi_event` record, without
 human breadcrumb lines. The durable progress-event log remains at

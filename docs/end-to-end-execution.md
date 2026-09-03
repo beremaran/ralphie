@@ -589,7 +589,13 @@ remains bounded to the same 140-character stream limit used before, and the
 structured Pi records stay complete (subject to reporting-boundary
 redaction). The compact activity area only ever paints the replaceable region
 through the stream-boundary tracker, so it can never clear or corrupt
-assistant response bytes.
+assistant response bytes. The three-row cap is a cap on physical terminal
+rows — regression coverage locks it down with a terminal emulator that
+measures painted rows across repeated tool calls, long commands and paths,
+narrow terminals and resize, interleaved streamed assistant text,
+ANSI/control-sequence boundaries, completion, failure, and cleanup
+(`tests/progress/` plus the end-to-end command-runtime suite in
+`tests/integration/command-runtime-display.test.ts`).
 
 The cross-mode guarantees are:
 

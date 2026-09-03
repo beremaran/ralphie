@@ -5,6 +5,20 @@ All notable changes to Ralphie are documented here. The project follows
 
 ## [Unreleased]
 
+- Lock down the cross-mode display contract with end-to-end regression
+  coverage: the interactive in-progress activity surface is measured in
+  physical terminal rows (never newline counts) and stays within the shared
+  three-row replaceable region across repeated tool calls, long
+  commands/paths, narrow terminals and resize, interleaved streamed assistant
+  text, ANSI/control-sequence boundaries, completion, failure, and cleanup;
+  streamed assistant text is preserved exactly, plain/CI output stays
+  deterministic and append-only with no carriage-return or ANSI cursor bytes,
+  JSON Lines output remains parseable and lossless, and quiet mode surfaces
+  no routine activity. The command-runtime display suite drives the real
+  coordinator wiring through `runCommand`, and the docs describe the bounded
+  interactive region, concise completion/error summaries, and the
+  noninteractive fallback.
+
 - Route the Pi event stream and progress updates through the compact activity
   surface in the real coordinator/CLI path: tool-call start/delta/end, tool
   execution start/update/end, bash execution updates, streamed thinking,
