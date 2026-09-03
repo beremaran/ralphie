@@ -47,7 +47,7 @@ effects and validate their invariants at the boundary.
 | `src/progress/` | Typed events, audit persistence, redaction, and terminal/JSON renderers. |
 | `src/run/` | Versioned state, artifacts, reconciliation, and resume behavior. |
 | `src/workspace/` | Path expansion and protected workspace removal. |
-| `src/targets/` | Canonical standalone release target manifest, typed parser/loader, read-only target query API, deterministic catalog/GitHub Actions matrix JSON serializers, and stable consumer renderers (POSIX installer, Homebrew, documentation). |
+| `src/targets/` | Canonical standalone release target manifest, typed parser/loader, read-only target query API, deterministic catalog/GitHub Actions matrix JSON serializers, stable consumer renderers (POSIX installer, Homebrew, documentation), and the `scripts/standalone-targets.ts` command surface. |
 | `src/process/` | External command execution and process exit semantics. |
 
 `src/workflow.ts` orchestrates the domain services. `src/runtime.ts` assembles
@@ -143,6 +143,34 @@ projections with the document serializers in
 `standalone-target-serializer.ts` (`serializeStandaloneTargets`,
 `serializeStandaloneTargetMatrix`); the renderers themselves stay in memory.
 
+## Standalone targets command
+
+`scripts/standalone-targets.ts` (exposed as the package script `targets`,
+`bun run targets -- ...`) is the standalone Bun-invokable surface over all of
+the above. It loads, validates, and renders the whole manifest in memory
+before writing anything, requires no credentials, and never touches Git or
+GitHub. Modes and formats:
+
+- `query --id <stable-id>` or `query --os <os> --arch <arch>` prints one
+  complete target record as deterministic JSON;
+- `generate --format <json|github-matrix|posix|homebrew|documentation>
+  [--version <version>] [--os <os> --arch <arch>] --output <file>` renders the
+  complete catalog, the GitHub Actions matrix, the single `posix`-selected
+  record, the versioned Homebrew rows, or the documentation catalog — writing
+  through a temporary file and renaming only after success, so an existing
+  destination is preserved on any validation error;
+- `check --format <...> [--version <version>] [--os <os> --arch <arch>]
+  --file <file>` byte-compares the checked file against the rendered document
+  (key order, LF endings, and the final newline included), succeeding only on
+  an exact match and never rewriting the file;
+- `--manifest <path>` overrides the canonical manifest for isolated tests.
+
+All documents share the serializer encoding contract
+(`serializeStandaloneJsonDocument` extends it to the consumer mappings).
+Invalid arguments and validation errors go to stderr with a nonzero exit
+status and no generated stdout. Invocation and examples are documented in
+[Development](development.md).
+
 ## Source map
 
 | Concern | Primary source |
@@ -159,7 +187,7 @@ projections with the document serializers in
 | Git checkpoints, safety, and branches | `src/git/` |
 | Durable state and reconciliation | `src/run/`, `src/issues/artifacts.ts` |
 | Progress, redaction, and exit semantics | `src/progress/`, `src/shared/redaction.ts`, `src/process/exit-code.ts` |
-| Standalone release target manifest, read-only query API, deterministic catalog/matrix JSON serializers, and consumer renderers (installer/Homebrew/documentation) | `src/targets/`, `targets/standalone-targets.json` |
+| Standalone release target manifest, read-only query API, deterministic catalog/matrix JSON serializers, consumer renderers (installer/Homebrew/documentation), and the `bun run targets` command | `src/targets/`, `targets/standalone-targets.json`, `scripts/standalone-targets.ts` |
 
 The source-level trigger-to-exit path is maintained in the [end-to-end
 execution trace](end-to-end-execution.md), which cross-references these

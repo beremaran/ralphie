@@ -34,6 +34,7 @@ Useful individual commands:
 | `bun run package:stage -- --version <version> --commit-sha <sha> --output-dir <dir>` | Build and validate release package and installer staging inputs without publishing. |
 | `env -u GH_TOKEN -u GITHUB_TOKEN bun run verify:public-distribution` | Verify the public repository, release assets, installer, formula, OCI image, and license anonymously (requires `sigstore`). |
 | `bun run probe:structured-output` | Exercise a real schema-validated Pi decision; `--union` probes the grounding decision union, and `--model provider/id`, `--agent`, `--variant` target a specific model. |
+| `bun run targets -- <mode>` | Query, generate, or byte-check release target documents over `targets/standalone-targets.json`; see the standalone targets command below. |
 
 The package check builds an actual tarball, verifies its allowlist, installs it
 with `npm install --omit=dev` in a fresh project, and invokes the installed bin
@@ -56,6 +57,40 @@ The project is a Bun + TypeScript CLI in strict mode. The entry point is
 with four-space indentation, double quotes, and semicolons. Keep functions
 small: the configured cognitive-complexity limit is the meaningful lint
 constraint.
+
+## Standalone targets command
+
+`bun run targets` (backed by `scripts/standalone-targets.ts`) is a
+credential-free, repository-side-effect-free command over the canonical
+release target manifest `targets/standalone-targets.json`. Use `--manifest
+<path>` to point it at a fixture for isolated tests; otherwise the canonical
+manifest is loaded, parsed, and exact-target-validated in full before any
+output exists.
+
+```bash
+bun run targets -- query --id <stable-id>
+bun run targets -- query --os <os> --arch <arch>
+bun run targets -- generate --format <json|github-matrix|posix|homebrew|documentation> \
+  [--version <version>] [--os <os> --arch <arch>] --output <file> [--manifest <path>]
+bun run targets -- check --format <json|github-matrix|posix|homebrew|documentation> \
+  [--version <version>] [--os <os> --arch <arch>] --file <file> [--manifest <path>]
+```
+
+- `query` prints one complete target record (by stable `id` or by a
+  normalized `os`/`arch` pair) as deterministic JSON.
+- `generate` renders the whole document in memory and writes `--output`
+  atomically (temporary file plus rename), so validation errors leave no
+  partial output and preserve an existing destination.
+- `check` byte-compares `--file` against the rendered document — key order,
+  LF line endings, and the final newline included — succeeds only on an exact
+  match, and never rewrites the checked file.
+- `posix` selects a single record by `--os`/`--arch`; `homebrew` requires
+  `--version` (a plain `<major>.<minor>.<patch>`).
+
+Every document shares one byte contract: UTF-8 without a BOM, LF line endings
+only, two-space indentation, object keys sorted lexicographically, and exactly
+one final newline. Invalid arguments and validation errors go to stderr with a
+nonzero exit status and no generated stdout.
 
 ## Local GitHub REST fixture
 

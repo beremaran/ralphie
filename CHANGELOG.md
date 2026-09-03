@@ -5,6 +5,30 @@ All notable changes to Ralphie are documented here. The project follows
 
 ## [Unreleased]
 
+- Add the standalone Bun-invokable release target command
+  (`scripts/standalone-targets.ts`, exposed as the package script `targets`,
+  `bun run targets -- ...`) on top of the release target query API,
+  deterministic serializers, and consumer renderers. `query --id <stable-id>`
+  or `query --os <os> --arch <arch>` prints one complete target record as
+  deterministic JSON; `generate --format
+  <json|github-matrix|posix|homebrew|documentation> [--version <version>]
+  [--os <os> --arch <arch>] --output <file>` renders the complete catalog,
+  GitHub Actions matrix, single posix-selected record, versioned Homebrew
+  rows, or documentation catalog; and `check --format <...> [--version
+  <version>] [--os <os> --arch <arch>] --file <file>` byte-compares a file
+  against the rendered document (key order, LF endings, and the final newline
+  included), succeeding only on an exact match and never rewriting it. An
+  optional `--manifest <path>` overrides the canonical
+  `targets/standalone-targets.json` for isolated tests. The whole manifest is
+  loaded, validated, and rendered in memory before any stdout or file write:
+  `generate` writes through a temporary file and renames only after success
+  (no partial output; existing destinations preserved), and invalid arguments
+  and validation errors go to stderr with a nonzero exit status and no
+  generated stdout. The command requires no credentials and no repository side
+  effects; invocation and formats are documented in `docs/development.md`
+  and `docs/architecture.md`, with in-memory unit coverage in
+  `tests/targets/standalone-targets-command.test.ts`.
+
 - Wire verified candidate promotion into the single protected publish job
   (`rel20-publisher-container-promotion-integration`): the container
   publication path now runs inside the protected `publish` job of

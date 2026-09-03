@@ -28,7 +28,10 @@
  *
  * Encoding contract (identical for both documents): UTF-8 without a BOM, LF
  * line endings only, two-space JSON indentation, and exactly one final
- * newline (`\n`, U+000A) at the end of the document.
+ * newline (`\n`, U+000A) at the end of the document. Consumer mappings
+ * (POSIX installer target, Homebrew rows, documentation catalog) and the
+ * standalone targets command share the same contract through
+ * `serializeStandaloneJsonDocument`.
  */
 import { createStandaloneTargetQueryClient } from "./standalone-target-query.ts";
 import type {
@@ -102,3 +105,16 @@ export const serializeStandaloneTargets = (value: unknown): string =>
  */
 export const serializeStandaloneTargetMatrix = (value: unknown): string =>
     renderJsonDocument({ include: sortCatalogById(validatedCatalogOf(value)) });
+
+/**
+ * Serialize any rendered value as one deterministic JSON document following
+ * the same encoding contract as the catalog and matrix serializers:
+ * two-space JSON indentation, object keys sorted lexicographically at every
+ * depth, UTF-8 without a BOM, LF line endings only, and exactly one final
+ * newline. Consumer-renderer outputs (`posix-installer-target`,
+ * `homebrew-target-rows`, `target-documentation-catalog`) and the standalone
+ * targets command render through this helper so every document variant
+ * shares a single byte contract.
+ */
+export const serializeStandaloneJsonDocument = (value: unknown): string =>
+    renderJsonDocument(sortKeysDeep(value));
