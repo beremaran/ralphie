@@ -47,7 +47,7 @@ effects and validate their invariants at the boundary.
 | `src/progress/` | Typed events, audit persistence, redaction, and terminal/JSON renderers. |
 | `src/run/` | Versioned state, artifacts, reconciliation, and resume behavior. |
 | `src/workspace/` | Path expansion and protected workspace removal. |
-| `src/targets/` | Canonical standalone release target manifest, typed parser/loader, read-only target query API, and deterministic catalog/GitHub Actions matrix JSON serializers. |
+| `src/targets/` | Canonical standalone release target manifest, typed parser/loader, read-only target query API, deterministic catalog/GitHub Actions matrix JSON serializers, and stable consumer renderers (POSIX installer, Homebrew, documentation). |
 | `src/process/` | External command execution and process exit semantics. |
 
 `src/workflow.ts` orchestrates the domain services. `src/runtime.ts` assembles
@@ -105,6 +105,44 @@ For workflow behavior and the agent/deterministic boundary, see [Workflows](work
 and [Safety](safety.md). For state transitions and reconciliation, see
 [Operations and recovery](operations-and-recovery.md).
 
+## Standalone target consumer renderers
+
+`src/targets/standalone-target-renderers.ts` exposes stable, typed consumer
+projections on top of the target query API and serializers. Every renderer
+accepts unknown manifest input, parses and exact-target-validates the whole
+manifest through `createStandaloneTargetQueryClient` before deriving anything,
+and throws before any output exists for malformed or non-canonical manifests.
+The renderers never carry their own target list: the four-target catalog is
+always read from the validated manifest, and the query API and serializers are
+never edited. Output arrays and records are frozen, records stay sorted by
+stable `id`, and every manifest field (`releaseAssetName`, `bunCompileTarget`,
+`targetTriple`, `runner`, `binaryFormat`, `bunVersion`, `dockerPlatform`) is
+passed through unmodified rather than reconstructed from an asset name.
+
+Stable shapes and format names consumed by the release, installer, Homebrew,
+and documentation follow-up work:
+
+- `posix-installer-target` — `renderPosixInstallerTarget(value, os, arch)`
+  normalizes the OS/architecture pair through the query API and returns the
+  matching full `StandaloneTarget` record. The downloaded asset is exactly the
+  returned record's `releaseAssetName`; it is never rebuilt from the pair.
+- `homebrew-target-rows` — `renderHomebrewTargetRows(value, version)` returns
+  rows sorted lexicographically by stable `id`. Each `HomebrewTargetRow`
+  contains the complete manifest record nested under `target`, the explicit
+  `version` input (plain `<major>.<minor>.<patch>`, validated; a leading `v`,
+  leading zeros, prerelease, or build suffix is rejected with
+  `InvalidHomebrewVersionError`), and a derived `downloadUrl` built from
+  `target.releaseAssetName` at
+  `https://github.com/beremaran/ralphie/releases/download/v<version>/<releaseAssetName>`.
+- `target-documentation-catalog` — `renderDocumentationTargets(value)` returns
+  the complete catalog sorted lexicographically by stable `id`, with every
+  validated field preserved as typed values for documentation consumers.
+
+For finished JSON documents (catalog or GitHub Actions matrix), pair the typed
+projections with the document serializers in
+`standalone-target-serializer.ts` (`serializeStandaloneTargets`,
+`serializeStandaloneTargetMatrix`); the renderers themselves stay in memory.
+
 ## Source map
 
 | Concern | Primary source |
@@ -121,7 +159,7 @@ and [Safety](safety.md). For state transitions and reconciliation, see
 | Git checkpoints, safety, and branches | `src/git/` |
 | Durable state and reconciliation | `src/run/`, `src/issues/artifacts.ts` |
 | Progress, redaction, and exit semantics | `src/progress/`, `src/shared/redaction.ts`, `src/process/exit-code.ts` |
-| Standalone release target manifest, read-only query API, and deterministic catalog/matrix JSON serializers | `src/targets/`, `targets/standalone-targets.json` |
+| Standalone release target manifest, read-only query API, deterministic catalog/matrix JSON serializers, and consumer renderers (installer/Homebrew/documentation) | `src/targets/`, `targets/standalone-targets.json` |
 
 The source-level trigger-to-exit path is maintained in the [end-to-end
 execution trace](end-to-end-execution.md), which cross-references these
