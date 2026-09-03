@@ -7,18 +7,7 @@
     "enabled": true,
     "useEditorconfig": true
   },
-  "overrides": [
-    {
-      "includes": [
-        "tests/integration/command-runtime-harness.ts",
-        "tests/integration/command-runtime-scenario.test.ts",
-        "tests/integration/pi-stream-failure-cleanup.test.ts"
-      ],
-      "formatter": {
-        "trailingNewline": true
-      }
-    }
-  ],
+  "overrides": [],
   "linter": {
     "enabled": true,
     "rules": {

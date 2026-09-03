@@ -5,20 +5,19 @@ Bun 1.3.14 pinned in CI (`engines: >=1.3.0`) + TypeScript strict + `@types/bun`.
 ## Commands
 
 - Full local gate (same order as CI `ci.yml`): `bun run check` = `format:check → lint → typecheck → test → build`. Always `bun install --frozen-lockfile` first; run `bun run check` before considering work done.
-- Focused verification: `bun run format:check` / `bun run lint` / `bunx tsc --noEmit` / `bun test tests/command.test.ts` (single file) / `bun test -t "<name>" tests/integration/local-end-to-end.test.ts` (single test).
+- Focused verification: `bun run format:check` / `bun run lint` / `bunx tsc --noEmit` / `bun test tests/command.test.ts` (single file) / `bun test -t "<name>" tests/workflow.test.ts` (single test).
 - Build: `bun run build` → `dist/cli` (native binary, gitignored; local builds embed `local` sentinel from `src/build-info.ts`, release builds pass `--version/--commit-sha/--target darwin-arm64|darwin-x64|linux-arm64|linux-x64`). `bun run build:package` → `dist/ralphie.js` (publishable npm bundle).
 - `bun run probe:structured-output` exercises a real Pi structured-output call (needs Pi credentials on `PATH`/env; `--union` / `--model` / `--agent` / `--variant` select the decision).
 
 ## Tests
 
-- `bun run test` runs everything under `tests/` — unit + local e2e that build temporary git repos with a stubbed Pi client and the in-memory GitHub REST fixture (`src/github/rest-fixture.ts`). No network or credentials required, safe to run.
-- Real-network tests in `tests/integration/network-smoke.test.ts` are opt-in and self-skip: `RALPHIE_RUN_PI_COMPLEXITY_SMOKE=1`, `RALPHIE_RUN_PI_IMPLEMENTATION_SMOKE=1`, `RALPHIE_RUN_GITHUB_INTEGRATION=1`, `RALPHIE_RUN_GITHUB_SUB_ISSUES_SMOKE=1` (GitHub ones additionally require `RALPHIE_GITHUB_TEST_REPOSITORY` matching `test|sandbox|fixture|integration|smoke`; sub-issues one is mutating in that sandbox). Model selection via `RALPHIE_PI_SMOKE_MODEL` / `RALPHIE_PI_SMOKE_AGENT` / `RALPHIE_PI_SMOKE_VARIANT`.
+- `bun run test` runs a deliberately small unit suite (~130 in-memory tests across 9 files: CLI surface, workflow orchestration, runtime assembly, safety, and a GitHub-issue/pipeline slice). No network, no process spawns, no temp git repos; completes in ~2s. The process/e2e/network suites (temp-repo e2e, installer, docker, homebrew reconciliation, release processes, network smoke) were removed; keep new tests fast, in-memory units.
 
 ## Conventions
 
 - Biome: formatter 4-space indent, double quotes, semicolons (via `.editorconfig`); linter has only `noExcessiveCognitiveComplexity` (max 12). Keep functions small — this is the real constraint.
 - `tsconfig.json` has `verbatimModuleSyntax` and `moduleResolution: bundler` — import `.ts` extensions, use `import type` for type-only imports.
-- Git/GitHub mutations belong in deterministic domain services (`src/git/`, `src/github/`), never in `src/pi/` or `src/agent/` paths. Agents are denied mutating `git`/`gh` commands; Ralphie owns delivery. Cover new mutation paths with tests following existing patterns under `tests/`.
+- Git/GitHub mutations belong in deterministic domain services (`src/git/`, `src/github/`), never in `src/pi/` or `src/agent/` paths. Agents are denied mutating `git`/`gh` commands; Ralphie owns delivery. Cover new behavior with in-memory unit tests under `tests/` — for GitHub paths, drive the domain services against `src/github/rest-fixture.ts` as `tests/github/issues.test.ts` does.
 
 ## Gotchas
 

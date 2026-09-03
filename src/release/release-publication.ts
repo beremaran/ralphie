@@ -11,8 +11,7 @@ import { RalphieError } from "../shared/error.ts";
  * GitHub release"). The inline actions/github-script and gh/curl logic cannot
  * be invoked directly from Bun, so this module re-implements the exact
  * contract against a narrow injected GitHub API/CLI adapter
- * (`ReleasePublicationApi`); deterministic tests drive it with the in-memory
- * fake in `tests/release/release-publication-reconcile.test.ts`.
+ * (`ReleasePublicationApi`).
  *
  * Contract highlights (rel20-release-contract):
  * - The six-asset set below is exact: anything else on the release handle is

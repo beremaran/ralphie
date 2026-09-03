@@ -4,8 +4,7 @@
  * Production release-context validation used by the `validate` job of
  * `.github/workflows/release.yml` (step "Validate and resolve release
  * context"). The step previously inlined this logic in bash; this script is
- * its executable seam, so the identical checks can be exercised locally and by
- * the deterministic tests in `tests/release/release-context.test.ts`.
+ * its executable seam, reading the same GitHub Actions context.
  *
  * It reads the GitHub Actions context entirely from the environment (the same
  * variables the workflow step provides), runs every check in the same order

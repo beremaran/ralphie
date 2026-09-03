@@ -4,8 +4,7 @@
  * Production package-publication context validation used by the `publish-npm`
  * job of `.github/workflows/release.yml` (step "Verify scoped package and
  * release tag version"). The step previously inlined this logic in bash; this
- * script is its executable seam, exercised locally by the deterministic tests
- * in `tests/release/npm-context.test.ts`.
+ * script is its executable seam.
  *
  * This is the prerelease-capable twin of
  * `scripts/validate-release-context.ts`: it accepts the full SemVer 2.0.0

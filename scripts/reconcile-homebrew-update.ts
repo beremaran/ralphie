@@ -33,10 +33,7 @@
  *   and no mutable `latest` reference.
  *
  * The injected `HomebrewUpdateApi` keeps every GitHub mutation in this
- * deterministic layer rather than in formula-generation code; deterministic
- * tests drive it with the in-memory fake in
- * `tests/homebrew-update-reconcile.test.ts` against temporary git
- * repositories.
+ * deterministic layer rather than in formula-generation code.
  */
 
 import { appendFile, readFile } from "node:fs/promises";

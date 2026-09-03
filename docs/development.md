@@ -21,7 +21,7 @@ Useful individual commands:
 
 | Command | Purpose |
 | --- | --- |
-| `bun run test` | Run the unit and disposable integration test suite, including the standalone binary smoke that compiles a fresh native executable with fixture release metadata and launches it from an isolated directory with no Bun on `PATH`. |
+| `bun run test` | Run the unit test suite: ~130 fast, in-memory tests across 9 files (CLI surface, workflow orchestration, runtime assembly, safety, and a GitHub-issue/pipeline slice). No network, no process spawns, no temporary repositories. |
 | `bun run typecheck` | Type-check without emitting JavaScript. |
 | `bun run format` | Format the repository with Biome. |
 | `bun run format:check` | Verify formatting without modifying files. |
@@ -57,38 +57,6 @@ with four-space indentation, double quotes, and semicolons. Keep functions
 small: the configured cognitive-complexity limit is the meaningful lint
 constraint.
 
-## Network smoke tests
-
-Real network integrations are opt-in and skipped by the normal test suite:
-
-```bash
-RALPHIE_RUN_PI_COMPLEXITY_SMOKE=1 \
-  bun test tests/integration/network-smoke.test.ts
-
-RALPHIE_RUN_PI_IMPLEMENTATION_SMOKE=1 \
-  bun test tests/integration/network-smoke.test.ts
-
-RALPHIE_RUN_GITHUB_INTEGRATION=1 \
-RALPHIE_GITHUB_TEST_REPOSITORY=owner/ralphie-smoke-test \
-  bun test tests/integration/network-smoke.test.ts
-
-RALPHIE_RUN_GITHUB_SUB_ISSUES_SMOKE=1 \
-RALPHIE_GITHUB_TEST_REPOSITORY=owner/ralphie-smoke-test \
-  bun test tests/integration/network-smoke.test.ts
-```
-
-The GitHub smoke test is read-only and refuses repository names that do not look
-like dedicated test, sandbox, fixture, integration, or smoke repositories.
-Model selection can be supplied with `RALPHIE_PI_SMOKE_MODEL`,
-`RALPHIE_PI_SMOKE_AGENT`, and `RALPHIE_PI_SMOKE_VARIANT`.
-
-The sub-issues smoke test is **mutating** in the configured sandbox repository:
-it creates three scratch issues, attaches native sub-issues, adds a
-`blocked_by` dependency, verifies idempotency, closes the children, reconciles
-the tracking parent as `completed`, and cleans up after itself. It requires a
-host with the native sub-issues and dependencies endpoints and a token with
-issue write permission.
-
 ## Local GitHub REST fixture
 
 `src/github/rest-fixture.ts` provides a reusable, deterministic in-memory HTTP
@@ -107,14 +75,14 @@ Per-operation response sequences (`fixture.enqueue`) can force controlled
 HTTP, malformed, or lost-response failures; every request is recorded as a
 method/path/body/authorization observation in fixture memory, outside the
 Ralphie state volume. Unknown or public-shaped paths are rejected with a loud
-HTTP 500 and are never proxied. Tests under `tests/github/rest-fixture.test.ts`
-prove the production default still targets `api.github.com` with the
-`x-github-api-version` header, that the explicit local path is selected only by
-the test setup, and that public or unexpected requests fail immediately.
+HTTP 500 and are never proxied. The unit suite drives the production domain
+services against the fixture (see `tests/github/issues.test.ts`).
 
-The normal `bun run test` suite includes local end-to-end tests that build
-temporary Git repositories with a stubbed Pi client; they do not need network
-access or credentials.
+The `bun run test` suite is deliberately small: fast, in-memory unit tests
+only. The former disposable integration suites (temporary Git repositories,
+installer, docker image, Homebrew reconciliation, release processes, and the
+opt-in network smoke tests) were removed to keep the gate under a few seconds;
+git history preserves them if they are ever needed again.
 
 ## Contribution expectations
 
@@ -131,7 +99,9 @@ Before submitting a change:
    changes. Update [`CHANGELOG.md`](../CHANGELOG.md) when the command surface or
    recovery contract changes.
 
-Use the existing tests as patterns for Git and GitHub mutation paths. Do not
+Add in-memory unit tests for new behavior, following the patterns in the
+remaining files under `tests/` (use `src/github/rest-fixture.ts` for GitHub
+paths). Do not
 run the mutating CLI against an uncontrolled repository while developing; use
 `--dry-run --max-issues 1` and a repository you control when a command-level
 check is needed. Reusing a workspace can reset and clean that checkout, and
