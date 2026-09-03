@@ -184,6 +184,8 @@ export type OpenCodeTransport = {
 export type OpenCodeMessage = {
     readonly id: string;
     readonly type: string;
+    readonly error?: unknown;
+    readonly finish?: unknown;
     readonly content?: ReadonlyArray<{
         readonly type: string;
         readonly text?: string;
@@ -196,6 +198,13 @@ export type OpenCodeMessage = {
             readonly metadata?: unknown;
         };
     }>;
+};
+
+export type OpenCodeClientOptions = {
+    /** Retry budget for transport-level drops of the session wait long-poll. */
+    readonly sessionWaitMaxRetries?: number;
+    /** Initial backoff between wait retries; doubles after each failure. */
+    readonly sessionWaitBackoffMs?: number;
 };
 
 export type OpenCodePermissionRequest = {
@@ -473,9 +482,10 @@ const runPromptOnce = async (
     openCodeSessionID: string,
     text: string,
     signal: AbortSignal | undefined,
+    options: OpenCodeClientOptions,
 ): Promise<AttemptOutcome> => {
     await transport.sessionPrompt({ sessionID: openCodeSessionID, text });
-    await waitWithWatcher(transport, openCodeSessionID, signal);
+    await waitWithWatcher(transport, openCodeSessionID, signal, options);
     const messages = await transport.messageList({
         sessionID: openCodeSessionID,
     });
@@ -535,6 +545,7 @@ const runStructuredPrompt = async (
     created: PendingSession,
     context: AgentEventContext,
     signal: AbortSignal | undefined,
+    options: OpenCodeClientOptions,
 ): Promise<PromptApiResult> => {
     const maximumAttempts = (input.format.retryCount ?? 2) + 1;
     let last: AttemptOutcome = { text: "", messages: [] };
@@ -545,6 +556,7 @@ const runStructuredPrompt = async (
             created.openCodeSessionID,
             promptTextForAttempt(input, attempt, lastError),
             signal,
+            options,
         );
         const checked = validStructuredCandidate(input.format, last.text);
         if (checked.value !== undefined) {
@@ -580,12 +592,14 @@ const runUnstructuredPrompt = async (
     created: PendingSession,
     context: AgentEventContext,
     signal: AbortSignal | undefined,
+    options: OpenCodeClientOptions,
 ): Promise<PromptApiResult> => {
     const outcome = await runPromptOnce(
         transport,
         created.openCodeSessionID,
         promptTextForAttempt(input, 0),
         signal,
+        options,
     );
     const needsAttention = extractNeedsAttentionJson(outcome.text);
     emitSessionTranscript(emit, outcome.messages, outcome.text, context);
@@ -606,6 +620,103 @@ const runUnstructuredPrompt = async (
 
 const sleep = (ms: number): Promise<void> =>
     new Promise((resolve) => setTimeout(resolve, ms));
+
+const SESSION_WAIT_MAX_RETRIES = 8;
+const SESSION_WAIT_BACKOFF_MS = 250;
+const SESSION_WAIT_BACKOFF_CAP_MS = 4_000;
+
+/** A turn is complete when its newest assistant message records a finish reason other than a pending tool loop, or carries an error. */
+const isTurnTerminal = (messages: ReadonlyArray<OpenCodeMessage>): boolean => {
+    for (const message of [...messages].reverse()) {
+        if (message.type !== "assistant") continue;
+        if ((message as { readonly error?: unknown }).error !== undefined) {
+            return true;
+        }
+        const finish = (message as { readonly finish?: unknown }).finish;
+        return finish !== undefined && finish !== "tool-calls";
+    }
+    return false;
+};
+
+/** Returns undefined once the wait completes, otherwise the last failure. */
+const waitForSessionTurn = async (
+    transport: OpenCodeTransport,
+    openCodeSessionID: string,
+    signal: AbortSignal | undefined,
+    maxRetries: number,
+    backoffMs: number,
+): Promise<unknown> => {
+    let failure: unknown = undefined;
+    for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+        try {
+            await transport.sessionWait({
+                sessionID: openCodeSessionID,
+                signal,
+            });
+            return undefined;
+        } catch (cause) {
+            if (signal?.aborted === true) throw signal.reason ?? cause;
+            failure = cause;
+            if (attempt < maxRetries) {
+                await sleep(
+                    Math.min(
+                        backoffMs * 2 ** attempt,
+                        SESSION_WAIT_BACKOFF_CAP_MS,
+                    ),
+                );
+            }
+        }
+    }
+    return failure;
+};
+
+const sessionCompletedWhileDisconnected = async (
+    transport: OpenCodeTransport,
+    openCodeSessionID: string,
+): Promise<boolean> => {
+    try {
+        const messages = await transport.messageList({
+            sessionID: openCodeSessionID,
+        });
+        return isTurnTerminal(messages);
+    } catch {
+        return false;
+    }
+};
+
+/**
+ * Wait for a session turn, tolerating transport-level drops of the long-poll.
+ *
+ * The OpenCode session keeps running server-side when a wait request drops, so
+ * a lost poll only loses the wait, not the work. Re-issue the wait with
+ * backoff; when the retry budget is exhausted, accept a transcript that
+ * already shows the turn completed. Caller cancellation remains fatal.
+ */
+const sessionWaitResilient = async (
+    transport: OpenCodeTransport,
+    openCodeSessionID: string,
+    signal: AbortSignal | undefined,
+    options: OpenCodeClientOptions,
+): Promise<void> => {
+    const maxRetries =
+        options.sessionWaitMaxRetries ?? SESSION_WAIT_MAX_RETRIES;
+    const backoffMs = options.sessionWaitBackoffMs ?? SESSION_WAIT_BACKOFF_MS;
+    const failure = await waitForSessionTurn(
+        transport,
+        openCodeSessionID,
+        signal,
+        maxRetries,
+        backoffMs,
+    );
+    if (failure === undefined) return;
+    if (await sessionCompletedWhileDisconnected(transport, openCodeSessionID)) {
+        return;
+    }
+    throw new RalphieError({
+        message: `OpenCode session wait disconnected ${maxRetries + 1} times; the agent session may still be running.`,
+        cause: failure,
+    });
+};
 
 const runPermissionWatcher = async (
     transport: OpenCodeTransport,
@@ -649,6 +760,7 @@ const waitWithWatcher = async (
     transport: OpenCodeTransport,
     openCodeSessionID: string,
     signal: AbortSignal | undefined,
+    options: OpenCodeClientOptions,
 ): Promise<void> => {
     let finished = false;
     const watcher = runPermissionWatcher(
@@ -671,7 +783,12 @@ const waitWithWatcher = async (
     };
     signal?.addEventListener("abort", onAbort, { once: true });
     try {
-        await transport.sessionWait({ sessionID: openCodeSessionID, signal });
+        await sessionWaitResilient(
+            transport,
+            openCodeSessionID,
+            signal,
+            options,
+        );
         finished = true;
         await watcher.catch(() => undefined);
     } catch (cause) {
@@ -693,6 +810,7 @@ const waitWithWatcher = async (
 export const makeOpenCodeClient = (
     transport: OpenCodeTransport,
     eventListener?: AgentEventListener,
+    clientOptions: OpenCodeClientOptions = {},
 ): AgentClient => {
     const pending = new Map<string, PendingSession>();
     let counter = 0;
@@ -775,6 +893,7 @@ export const makeOpenCodeClient = (
                                   created,
                                   context,
                                   options?.signal,
+                                  clientOptions,
                               )
                             : await runStructuredPrompt(
                                   transport,
@@ -785,6 +904,7 @@ export const makeOpenCodeClient = (
                                   created,
                                   context,
                                   options?.signal,
+                                  clientOptions,
                               );
                     pending.delete(input.sessionID);
                     return result;

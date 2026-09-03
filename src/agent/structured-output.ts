@@ -69,6 +69,23 @@ const describeApiError = (error: unknown): string => {
     return `${name}: ${message}`;
 };
 
+const describeFailureCause = (cause: unknown): string => {
+    if (typeof cause !== "object" || cause === null) return String(cause);
+
+    const candidate = cause as {
+        readonly name?: unknown;
+        readonly message?: unknown;
+    };
+    const parts: string[] = [];
+    if (typeof candidate.name === "string" && candidate.name !== "") {
+        parts.push(candidate.name);
+    }
+    if (typeof candidate.message === "string" && candidate.message !== "") {
+        parts.push(candidate.message);
+    }
+    return parts.length === 0 ? String(cause) : parts.join(": ");
+};
+
 const signalOptions = (signal: AbortSignal | undefined) =>
     signal === undefined ? undefined : { signal };
 
@@ -215,7 +232,7 @@ export const requestStructuredOutput = async <Output>(
             cause instanceof RalphieError
                 ? cause
                 : new RalphieError({
-                      message: "Failed to get structured output from OpenCode.",
+                      message: `Failed to get structured output from OpenCode. Cause: ${describeFailureCause(cause)}`,
                       cause,
                   });
         await reportAgentFailure(request, error);
