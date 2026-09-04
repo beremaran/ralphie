@@ -76,6 +76,11 @@ import {
     type PipelineObservationServiceDependencies,
 } from "./github/pipeline-observation.ts";
 import {
+    makePipelineDiagnosticsService,
+    type PipelineDiagnosticsService,
+    type PipelineDiagnosticsServiceDependencies,
+} from "./github/pipeline-diagnostics-service.ts";
+import {
     makeGitHubNeedsAttentionNotificationService,
     type GitHubNeedsAttentionNotificationService,
 } from "./github/needs-attention.ts";
@@ -139,6 +144,8 @@ export type RalphieRuntime = {
     readonly pipelineSnapshot: PipelineSnapshotCollectorService;
     /** Bounded, read-only pipeline observer for one exact commit SHA. */
     readonly pipelineObservation: PipelineObservationService;
+    /** Collects, persists, and prompt-bounds diagnostics for a failed run. */
+    readonly pipelineDiagnostics: PipelineDiagnosticsService;
     readonly githubIssues: GitHubIssuesService;
     readonly githubIssueMutations: GitHubIssueMutationService;
     readonly githubIssueRelationships: GitHubIssueRelationshipService;
@@ -180,6 +187,8 @@ export type RuntimeOverrides = {
     readonly progress: ProgressReporterService;
     /** Optional deterministic seams for the read-only pipeline observer. */
     readonly pipelineObservationDependencies?: PipelineObservationServiceDependencies;
+    /** Optional deterministic seams for the pipeline diagnostics runtime path. */
+    readonly pipelineDiagnosticsDependencies?: PipelineDiagnosticsServiceDependencies;
     readonly commandRunner?: CommandRunnerService;
     readonly runStateStore?: RunStateStoreService;
     readonly workspace?: WorkspaceService;
@@ -193,11 +202,15 @@ export const makeLiveRuntime = ({
     runStateStore = RunStateStoreLive,
     workspace = WorkspaceLive,
     pipelineObservationDependencies,
+    pipelineDiagnosticsDependencies,
 }: RuntimeOverrides): RalphieRuntime => {
     const githubClient = makeGitHubClientService(commandRunner);
     const pipelineSnapshot = makePipelineSnapshotCollectorService();
     const pipelineObservation = makePipelineObservationService(
         pipelineObservationDependencies,
+    );
+    const pipelineDiagnostics = makePipelineDiagnosticsService(
+        pipelineDiagnosticsDependencies,
     );
     const githubIssues = makeGitHubIssuesService();
     const githubIssueMutations = makeGitHubIssueMutationsService();
@@ -293,6 +306,7 @@ export const makeLiveRuntime = ({
         githubClient,
         pipelineSnapshot,
         pipelineObservation,
+        pipelineDiagnostics,
         githubIssues,
         githubIssueMutations,
         githubIssueRelationships,

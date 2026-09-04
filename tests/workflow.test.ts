@@ -512,6 +512,7 @@ const testRuntime = (
         githubClient,
         pipelineSnapshot: {} as never,
         pipelineObservation,
+        pipelineDiagnostics: {} as never,
         githubIssues,
         githubIssueMutations: mutations,
         githubIssueRelationships: {

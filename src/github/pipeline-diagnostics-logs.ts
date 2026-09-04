@@ -94,6 +94,8 @@ export type JobLogExcerptsInput = {
     readonly request: PipelineSnapshotRequest;
     /** Typed job records (#402) whose excerpts are retrieved, in order. */
     readonly jobs: ReadonlyArray<JobLogExcerptJob>;
+    /** Optional caller cancellation signal for every transport boundary. */
+    readonly signal?: AbortSignal;
 };
 
 /**
@@ -104,7 +106,10 @@ export type JobLogExcerptsInput = {
  * general-purpose scraper: the retriever only ever calls it with the
  * `Location` URL returned by the job-log API for the examined job.
  */
-export type JobLogFetcher = (url: string) => Promise<unknown>;
+export type JobLogFetcher = (
+    url: string,
+    signal?: AbortSignal,
+) => Promise<unknown>;
 
 /** Bounded-read result for one sanitized log body. */
 export type BoundedLogRead = {
@@ -415,6 +420,7 @@ const endpointFor = (dependencies: JobLogExcerptsDependencies): unknown => {
 const resolveLocation = async (
     job: JobLogExcerptJob,
     transport: PreparedTransport,
+    signal?: AbortSignal,
 ): Promise<ResolveOutcome> => {
     if (!transport.endpointCallable)
         return {
@@ -441,9 +447,10 @@ const resolveLocation = async (
         response = await transport.request(
             transport.endpoint as Endpoint,
             { owner: transport.owner, repo: transport.repo, job_id: job.jobId },
-            undefined,
+            signal,
         );
     } catch (cause) {
+        if (signal?.aborted === true) throw cause;
         return {
             kind: "outcome",
             outcome: transportOutcome(
@@ -507,8 +514,9 @@ const fetchJobOutcome = async (
     job: JobLogExcerptJob,
     granted: number,
     transport: PreparedTransport,
+    signal?: AbortSignal,
 ): Promise<JobOutcome> => {
-    const resolved = await resolveLocation(job, transport);
+    const resolved = await resolveLocation(job, transport, signal);
     if (resolved.kind === "outcome") return resolved.outcome;
     const url = resolved.url;
     if (!isGithubLogHostAllowed(url.hostname, transport.allowedHosts))
@@ -527,8 +535,9 @@ const fetchJobOutcome = async (
         );
     let delivered: unknown;
     try {
-        delivered = await transport.fetch!(url.toString());
+        delivered = await transport.fetch!(url.toString(), signal);
     } catch (cause) {
+        if (signal?.aborted === true) throw cause;
         return transportOutcome(
             job,
             "job-log body fetch failed.",
@@ -575,7 +584,9 @@ const collectJob = async (
     state: CollectionState,
     job: JobLogExcerptJob,
     transport: PreparedTransport,
+    signal?: AbortSignal,
 ): Promise<void> => {
+    signal?.throwIfAborted();
     const remaining = transport.maxTotal - state.retainedBytes;
     if (remaining <= 0) {
         appendOutcome(state, job, {
@@ -595,6 +606,7 @@ const collectJob = async (
         job,
         Math.min(transport.maxExcerpt, remaining),
         transport,
+        signal,
     );
     state.retainedBytes += outcome.fetchedBytes;
     appendOutcome(state, job, outcome);
@@ -613,6 +625,7 @@ const collectWithDependencies = async (
     input: JobLogExcerptsInput,
     dependencies: JobLogExcerptsDependencies,
 ): Promise<JobLogExcerptsResult> => {
+    input.signal?.throwIfAborted();
     const { owner, name: repo } = parseRepositorySlug(input.request.repository);
     const endpoint = endpointFor(dependencies);
     const request = dependencies.request ?? requestDirectly;
@@ -639,7 +652,10 @@ const collectWithDependencies = async (
         retainedBytes: 0,
         truncated: false,
     };
-    for (const job of input.jobs) await collectJob(state, job, transport);
+    for (const job of input.jobs) {
+        input.signal?.throwIfAborted();
+        await collectJob(state, job, transport, input.signal);
+    }
     return {
         request: input.request,
         source: WORKFLOW_RUN_LOGS_SOURCE,

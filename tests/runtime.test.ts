@@ -31,6 +31,8 @@ describe("runtime factory", () => {
         );
         expect(runtime.pipelineObservation).toBeDefined();
         expect(runtime.pipelineObservation.observe).toBeFunction();
+        expect(runtime.pipelineDiagnostics).toBeDefined();
+        expect(runtime.pipelineDiagnostics.collectAndStore).toBeFunction();
         expect(runtime.pullRequestReviewAttempt).toBeDefined();
         expect(runtime.pullRequestReviewAttempt.review).toBeFunction();
         expect(runtime.pullRequestReviewCoordinator).toBeDefined();

@@ -39,7 +39,7 @@ effects and validate their invariants at the boundary.
 
 | Area | Responsibility |
 | --- | --- |
-| `src/github/` | GitHub CLI authentication, Octokit, issue discovery, mutations, native sub-issues/dependencies, decomposition links, pipeline snapshot collection, and bounded pipeline observation. |
+| `src/github/` | GitHub CLI authentication, Octokit, issue discovery, mutations, native sub-issues/dependencies, decomposition links, pipeline snapshot collection, bounded pipeline observation, and persisted pipeline diagnostics. |
 | `src/git/` | Checkout preparation, checkpoints, deterministic issue operations, invariants, and remote safety. |
 | `src/issues/` | Queueing, complexity routing, implementation, review, recovery, and decomposition. |
 | `src/agent/` | Ralphie's session, prompt, schema, diagnostics, and structured-output boundary. |
@@ -87,6 +87,25 @@ sleep receives an abortable derived signal; caller cancellation returns an
 failure. Normalized items retain source/producer identity and raw diagnostic
 fields for audit consumers.
 
+## Pipeline diagnostics collection
+
+The live runtime exposes `runtime.pipelineDiagnostics.collectAndStore(...)` for
+failure repair and recovery paths. The operation keeps the observed request
+and exact commit SHA fixed while it collects bounded workflow-run and
+check-run evidence, retrieves only allowlisted job-log redirects, writes a
+versioned artifact, and returns the prompt-safe repair projection. GitHub
+collection is read-only; the only local mutation is the atomic artifact write.
+
+The artifact is stored at
+`.ralphie/runs/<run-id>/pipeline/diagnostics.json`. It retains provider
+identity, run/attempt/job/check IDs, raw status and conclusion values,
+dispositions, unknown JSON fields, and byte accounting within the shared job,
+step, excerpt, and total-evidence bounds. Terminal controls are stripped at
+the persistence boundary without redacting supplied text. The repair-facing
+text is generated from the same typed projection as the structured result and
+is enclosed in `<untrusted-pipeline-diagnostics>` markers; provider content
+cannot escape those markers or inject a second closing marker.
+
 ## Dependency and side-effect rules
 
 Agents own reasoning and edits within their permitted tool boundary. They do not
@@ -119,6 +138,7 @@ binary, installer, Homebrew, and container distribution machinery was removed.
 | Run orchestration, queue, state transitions | `src/workflow.ts`, `src/issues/queue.ts` |
 | Pipeline snapshot normalization and collection | `src/github/pipeline-snapshot.ts`, `src/github/pipeline-snapshot-collector.ts` |
 | Bounded, deadline-aware pipeline observation, paginated exact-SHA reads, retries, and final HEAD check | `src/github/pipeline-observation.ts`, `src/github/pipeline-snapshot-collector.ts` |
+| Pipeline diagnostics collection, persistence, and repair boundary | `src/github/pipeline-diagnostics-collector.ts`, `src/github/pipeline-diagnostics-service.ts`, `src/github/pipeline-diagnostics-artifact.ts`, `src/github/pipeline-diagnostics-boundary.ts` |
 | Complexity routing | `src/issues/executor.ts`, `src/issues/complexity.ts` |
 | Implementation/review/delivery | `src/issues/implementation-executor.ts` |
 | Decomposition and GitHub mutations | `src/issues/decomposition-executor.ts`, `src/github/issue-mutations.ts`, `src/github/issue-relationships.ts` |
