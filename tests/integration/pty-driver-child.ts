@@ -27,6 +27,7 @@
 
 import { appendFileSync } from "node:fs";
 import { join } from "node:path";
+import { parseArgs } from "node:util";
 
 import {
     runCommand,
@@ -43,7 +44,10 @@ import type {
     OpenCodeRuntime,
     OpenCodeService,
 } from "../../src/opencode/server.ts";
-import { breadcrumbCandidateFor } from "../../src/progress/breadcrumb.ts";
+import {
+    breadcrumbCandidateFor,
+    DEFAULT_BREADCRUMB_THRESHOLD,
+} from "../../src/progress/breadcrumb.ts";
 import {
     makeProgressCoordinator,
     type ProgressCoordinator,
@@ -74,6 +78,23 @@ export const POST_DISPOSE_MARKER = "PTY_POST_DISPOSE";
 /** Line the smoke test types into the PTY; the child must receive it. */
 export const INPUT_LINE = "hello pty terminal";
 export const EVENT_LOG_NAME = "pty-driver-events.jsonl";
+/**
+ * Deterministic scenario options for the PTY fixture: terminal geometry,
+ * issue identity and retry position, and the rendered-line cadence
+ * threshold. The child records a `config` event-log milestone with these so
+ * the driver can assert the scenario ran with exactly the parsed options.
+ */
+export type PtyScenarioOptions = {
+    readonly columns: number;
+    readonly rows: number;
+    readonly issueCurrent: number;
+    readonly issueTotal: number;
+    readonly issueNumber: number;
+    readonly repository: string;
+    readonly attempt: number;
+    readonly maxAttempts: number;
+    readonly threshold: number;
+};
 /**
  * Durable failure line emitted only AFTER the driver resizes the PTY: at 60
  * columns it wraps, which the screen oracle proves.
@@ -166,7 +187,8 @@ type EventLogEntry =
     | { readonly kind: "active" }
     | { readonly kind: "settled" }
     | { readonly kind: "run_failed"; readonly message: string }
-    | { readonly kind: "done" };
+    | { readonly kind: "done" }
+    | { readonly kind: "config"; readonly options: PtyScenarioOptions };
 
 type ChildRalphieRuntime = RalphieRuntime & {
     readonly dispose?: () => Promise<void>;
@@ -190,15 +212,113 @@ export type RunPtyDriverChildOptions = {
     readonly signal?: AbortSignal;
 };
 
+/** The CLI options the PTY child declares (see `parsePtyScenarioArgs`). */
+const scenarioCliOptions = {
+    workspace: { type: "string" },
+    columns: { type: "string" },
+    rows: { type: "string" },
+    "issue-current": { type: "string" },
+    "issue-total": { type: "string" },
+    "issue-number": { type: "string" },
+    repository: { type: "string" },
+    attempt: { type: "string" },
+    "max-attempts": { type: "string" },
+    threshold: { type: "string" },
+    scenario: { type: "string" },
+} as const;
+
+const asScenarioPositiveInt = (
+    values: Record<string, unknown>,
+    name: string,
+    fallback: number,
+): number => {
+    const raw = values[name];
+    if (raw === undefined) return fallback;
+    if (typeof raw !== "string") {
+        throw new Error(`Option --${name} requires an integer value.`);
+    }
+    const value = Number(raw);
+    if (!Number.isSafeInteger(value) || value < 1) {
+        throw new Error(
+            `Option --${name} requires a positive integer, got ${JSON.stringify(raw)}.`,
+        );
+    }
+    return value;
+};
+
+const asScenarioRepository = (values: Record<string, unknown>): string => {
+    const raw = values.repository;
+    if (raw === undefined) return "owner/repository";
+    if (typeof raw !== "string") {
+        throw new Error("Option --repository requires a string value.");
+    }
+    const repository = raw.trim();
+    if (repository.length === 0) {
+        throw new Error("Option --repository requires a non-empty value.");
+    }
+    return repository;
+};
+
+/**
+ * Parse the PTY fixture's deterministic scenario CLI options. `--workspace`
+ * and `--scenario` are declared (the child already consumes them) but are not
+ * part of the returned options. Defaults reproduce the fixture's current
+ * behavior exactly: a 100x30 terminal, issue 1 of 1 on #423 for
+ * `owner/repository`, attempt 1 of 3, and the default breadcrumb cadence.
+ */
+export const parsePtyScenarioArgs = (
+    args: readonly string[],
+): PtyScenarioOptions => {
+    const parsed = parseArgs({
+        args: [...args],
+        options: scenarioCliOptions,
+        allowPositionals: true,
+        strict: true,
+    });
+    const values = parsed.values as Record<string, unknown>;
+    return {
+        columns: asScenarioPositiveInt(values, "columns", 100),
+        rows: asScenarioPositiveInt(values, "rows", 30),
+        issueCurrent: asScenarioPositiveInt(values, "issue-current", 1),
+        issueTotal: asScenarioPositiveInt(values, "issue-total", 1),
+        issueNumber: asScenarioPositiveInt(values, "issue-number", 423),
+        repository: asScenarioRepository(values),
+        attempt: asScenarioPositiveInt(values, "attempt", 1),
+        maxAttempts: asScenarioPositiveInt(values, "max-attempts", 3),
+        threshold: asScenarioPositiveInt(
+            values,
+            "threshold",
+            DEFAULT_BREADCRUMB_THRESHOLD,
+        ),
+    };
+};
+
+/**
+ * Coordinator seam for the deterministic scenario: every coordinator built
+ * for the child run gets the configured rendered-line cadence threshold.
+ */
+export const makeScenarioCoordinator =
+    (
+        base: (options: ProgressCoordinatorOptions) => ProgressCoordinator,
+        threshold: number,
+    ): ((options: ProgressCoordinatorOptions) => ProgressCoordinator) =>
+    (options) =>
+        base({ ...options, renderedLineThreshold: threshold });
+
 export const runPtyDriverChild = async (
     workspace: string,
     scenario: ChildScenario = "smoke",
+    scenarioOptions: PtyScenarioOptions = parsePtyScenarioArgs([]),
     options: RunPtyDriverChildOptions = {},
 ): Promise<void> => {
     const eventLogPath = join(workspace, EVENT_LOG_NAME);
     const log = (entry: EventLogEntry): void => {
         appendFileSync(eventLogPath, `${JSON.stringify(entry)}\n`, "utf8");
     };
+    // Record the parsed scenario configuration as the first milestone so
+    // later scenario fixtures can assert determinism and the effective
+    // rendered-line cadence against exactly what the child received.
+    log({ kind: "config", options: scenarioOptions });
     const emitMarker = (text: string): void => {
         process.stdout.write(`${text}\n`);
     };
@@ -627,22 +747,19 @@ export const runPtyDriverChild = async (
     };
 
     const factories: CommandFactories = {
-        ...(scenario === "smoke"
-            ? {}
-            : {
-                  makeCoordinator: (
-                      madeOptions: ProgressCoordinatorOptions,
-                  ) => {
-                      const made = makeProgressCoordinator({
-                          ...madeOptions,
-                          onController: (madeController) => {
-                              controller = madeController;
-                          },
-                      });
-                      coordinator = made;
-                      return made;
-                  },
-              }),
+        makeCoordinator: makeScenarioCoordinator(
+            (madeOptions: ProgressCoordinatorOptions) => {
+                const made = makeProgressCoordinator({
+                    ...madeOptions,
+                    onController: (madeController) => {
+                        controller = madeController;
+                    },
+                });
+                coordinator = made;
+                return made;
+            },
+            scenarioOptions.threshold,
+        ),
         makeOpenCode: (_config: OpenCodeProviderConfig, eventListener) => {
             agentListener = eventListener;
             return makeFakeAgentService();
@@ -662,18 +779,22 @@ export const runPtyDriverChild = async (
     };
 
     if (scenario === "smoke") {
-        await runCommand(["owner/repository", "--workspace", workspace], {
-            factories,
-        });
+        await runCommand(
+            [scenarioOptions.repository, "--workspace", workspace],
+            { factories },
+        );
         return;
     }
 
     let runError: unknown;
     try {
-        await runCommand(["owner/repository", "--workspace", workspace], {
-            factories,
-            signal: options.signal,
-        });
+        await runCommand(
+            [scenarioOptions.repository, "--workspace", workspace],
+            {
+                factories,
+                signal: options.signal,
+            },
+        );
     } catch (error) {
         runError = error;
     }
@@ -701,6 +822,7 @@ if (import.meta.main) {
         );
         process.exit(2);
     }
+    const scenarioOptions = parsePtyScenarioArgs(args);
 
     const eventLogPath = join(workspace, EVENT_LOG_NAME);
     const abortController = new AbortController();
@@ -714,7 +836,7 @@ if (import.meta.main) {
     };
     if (scenario === "interrupt") process.on("SIGINT", onInterrupt);
     try {
-        await runPtyDriverChild(workspace, scenario, {
+        await runPtyDriverChild(workspace, scenario, scenarioOptions, {
             signal: abortController.signal,
         });
     } catch (error) {
