@@ -341,7 +341,8 @@ const rawStateFor = (value: JsonObject): PipelineRawState => {
 const stateFor = (value: JsonObject): PipelineItemStatus =>
     classifyPipelineState(rawStateFor(value));
 
-const serializeJson = (
+/** JSON-safe normalization shared by evidence budgeting and fingerprints. */
+export const serializeJson = (
     value: unknown,
     seen: Set<object> = new Set(),
 ): JsonValue => {
