@@ -9,10 +9,16 @@
  * touching an agent server, GitHub, or a live repository.
  *
  * Scenarios:
- * - `smoke` (default): the original smoke script from the PTY fixture work —
- *   the scripted agent stream stays open across the driver's resize, typed
- *   input, and SIGINT, then settles. Every milestone is written to stdout
- *   (which is the PTY) so the driver synchronizes on explicit markers.
+ * - `smoke` (default): the deterministic scenario session from the #195
+ *   coverage tracks — one long assistant text stream (ASCII run, wide
+ *   graphemes, embedded control bytes, a ZWJ grapheme split across a delta
+ *   boundary) plus the full lifecycle milestone script (compaction,
+ *   auto-retry, summarization retry, a failing tool execution, and the
+ *   ordinary close). After `PTY_ACTIVE` the stream stays open across exactly
+ *   two driver resizes; the closing tool end + `agent_end` fire only after
+ *   the second resize, then the stream finalizes exactly once and the
+ *   progress sequence settles. Every milestone is written to stdout (which
+ *   is the PTY) so the driver synchronizes on explicit markers.
  * - `completion`, `interrupt`, `failure`: lifecycle-cleanup scripts. All
  *   mid-run milestones are appended to the workspace event log ONLY, never
  *   to stdout: writing to the PTY while the interactive region is painted
@@ -66,9 +72,11 @@ export const FOOTER_MARKER = "PTY_FOOTER";
 /** Marker written once the long agent stream is open. */
 export const ACTIVE_MARKER = "PTY_ACTIVE";
 export const RESIZE_MARKER_PREFIX = "PTY_RESIZED:";
-export const INPUT_MARKER_PREFIX = "PTY_INPUT:";
-export const SIGINT_MARKER = "PTY_SIGINT";
 export const DONE_MARKER = "PTY_DONE";
+/** Marker written exactly once after the stream closes (resize gate passed). */
+export const STREAM_FINALIZED_MARKER = "PTY_STREAM_FINALIZED";
+/** Marker written after the progress sequence settles; the run is over. */
+export const SCENARIO_DONE_MARKER = "PTY_SCENARIO_DONE";
 /**
  * Post-run markers (lifecycle scenarios only). `POST_DISPOSE_MARKER` is the
  * final durable stdout line, written only after `runCommand` has fully
@@ -78,8 +86,7 @@ export const DONE_MARKER = "PTY_DONE";
 export const DISPOSED_MARKER = "PTY_DISPOSED";
 export const QUIESCENT_MARKER = "PTY_QUIESCENT";
 export const POST_DISPOSE_MARKER = "PTY_POST_DISPOSE";
-/** Line the smoke test types into the PTY; the child must receive it. */
-export const INPUT_LINE = "hello pty terminal";
+/** Workspace event-log name recording every milestone the child logs. */
 export const EVENT_LOG_NAME = "pty-driver-events.jsonl";
 /**
  * Deterministic scenario options for the PTY fixture: terminal geometry,
@@ -155,14 +162,182 @@ export const LIFECYCLE_STREAM_DELTAS: Record<
  */
 export const FOOTER_REPAINT_QUIESCE_MS = 400;
 
-const STREAM_DELTAS = [
-    "The PTY driver ",
-    "streams a partial ",
-    "agent transcript ",
-    "line across the ",
-    "resize, the typed ",
-    "input, and SIGINT.",
+/**
+ * Distinctive credential literal for credential-placement coverage.
+ *
+ * The token must appear only inside `tool_execution_update.partialResult.content`
+ * and inside one (negative) `thinking_delta` content — never in tool args,
+ * progress messages, breadcrumb labels, assistant text deltas, or command
+ * targets. The visible surface (transcript, activity rows, footer, breadcrumbs)
+ * stays credential-free while the lossless JSON event stream still contains it.
+ */
+export const FAKE_TOKEN = "rk_s3cret_pty_9f3d_token";
+
+const ZWJ = "\u200d";
+/** The wide-grapheme pair split across a delta boundary (D6 | D7 below). */
+const WIDE_ZWJ_FIRST = `👩${ZWJ}`;
+const WIDE_ZWJ_SECOND = "💻";
+
+/**
+ * The deterministic smoke scenario's long assistant text stream.
+ *
+ * The concatenated deltas are one continuous assistant message: an ASCII run,
+ * a wide-grapheme run (CJK and emoji, every character `Bun.stringWidth >= 2`),
+ * raw control bytes inside the deltas (an SGR `\x1b[31m` run, an OSC hyperlink
+ * `\x1b]8;;https://example.invalid\x07…\x07`, BEL `\x07`, and backspace `\x08`),
+ * and deltas that end mid-line with no trailing newline. The message totals
+ * 139 UTF-16 units, within the coordinator's 140-unit per-stream render
+ * budget (`STREAM_OUTPUT_LIMIT` in `src/progress/transcript.ts`), so the
+ * entire message renders and the stream ends mid-line.
+ *
+ * Control bytes: the transcript sanitizer (`stripTerminalControls`) removes SGR,
+ * OSC, BEL, and backspace for display, so the deltas carry them without any
+ * terminal side effect; the two control-byte lines keep their ASCII labels
+ * ("SGR", "OSC x", "BEL BS") visible on screen.
+ *
+ * Wide-grapheme split: delta 6 ends with `👩\u200d` (the leading surrogate pair
+ * and the ZWJ joiner) and delta 7 begins with `💻`, so the `👩\u200d💻` grapheme
+ * is split across two consecutive deltas. The renderer writes both fragments
+ * verbatim and the terminal re-joins them, so a mid-line split streams
+ * seamlessly. KNOWN PRESENTATION DEFECT (documented, intentionally not fixed
+ * here — the #195 coverage children own coordinator fixes): when a wide
+ * grapheme straddles a wrap or reflow boundary during a live resize, the
+ * terminal can display the glyph split across two cells or rows. This fixture
+ * deliberately exercises that path; the PTY screen oracle coverage tracks it.
+ *
+ * Volume calibration: through the real coordinator at the default 100x30
+ * geometry the session renders ~39 visible transcript rows (the 11 streamed
+ * lines, session header, lifecycle milestone lines, and tool rows), so the
+ * cumulative volume crosses every configured `PtyScenarioOptions.threshold`
+ * in the practical range up to and including `DEFAULT_BREADCRUMB_THRESHOLD`
+ * (30), and the breadcrumb crossing count scales inversely with the threshold
+ * (fewer crossings at larger thresholds), which is how a later child proves
+ * cadence changes.
+ */
+export const buildScenarioStreamDeltas = (
+    _options: PtyScenarioOptions,
+): readonly string[] => [
+    "PTY scenario\n", //            13 — ASCII run opener
+    "agent run\n", //               11
+    "ASCII run\n", //               10 — explicit ASCII run
+    "graphemes\n", //               10
+    "（漢字） 🎉\n", //                8 — wide graphemes: CJK + emoji
+    `ZWJ ${WIDE_ZWJ_FIRST}`, //      7 — ends INSIDE the ZWJ grapheme
+    `${WIDE_ZWJ_SECOND} SGR\u001b[31mred\u001b[0m\n`, // 19 — completes the pair
+    "OSC \u001b]8;;https://example.invalid\u0007x\u0007\n", // 35 — OSC hyperlink + BEL
+    "BEL\u0007 BS\u0008\n", //       9 — literal BEL + backspace bytes
+    "mid-line\n", //                 9
+    "finalize", //                   8 — ends mid-line, no trailing newline
 ];
+
+/**
+ * Thinking block emitted right after `agent_start`: one (negative)
+ * `thinking_delta` carries `FAKE_TOKEN` in its content. Thinking streams are
+ * routed to the compact activity surface only and are never written into the
+ * human transcript, so the token never reaches the visible surface.
+ */
+export const scenarioThinkingEvents = (): readonly AgentSessionEvent[] => [
+    asEvent({
+        type: "message_update",
+        assistantMessageEvent: { type: "thinking_start", contentIndex: 0 },
+    }),
+    asEvent({
+        type: "message_update",
+        assistantMessageEvent: {
+            type: "thinking_delta",
+            contentIndex: 0,
+            delta: `negative example: keep ${FAKE_TOKEN} out of visible output`,
+        },
+    }),
+    asEvent({
+        type: "message_update",
+        assistantMessageEvent: { type: "thinking_end", contentIndex: 0 },
+    }),
+];
+
+/**
+ * The canonical lifecycle milestone script, in the exact order the PTY
+ * coverage tracks share (see the issue's requirement list):
+ *
+ * 1. `compaction_start` then `compaction_end`;
+ * 2. `auto_retry_start` then `auto_retry_end`;
+ * 3. `summarization_retry_scheduled` then `summarization_retry_attempt_start`
+ *    then `summarization_retry_finished`;
+ * 4. one failing tool execution — `tool_execution_start`, three
+ *    `tool_execution_update`s (the first carries `FAKE_TOKEN` inside
+ *    `partialResult.content` only), then `tool_execution_end` with
+ *    `isError: true`;
+ * 5. the closing `tool_execution_end` (ordinary result, `isError: false`) and
+ *    `agent_end`.
+ *
+ * The last {@link SCENARIO_CLOSE_EVENT_COUNT} events are the stream close:
+ * the smoke child keeps the stream open across the driver's two resizes and
+ * only then emits them, finalizing the session exactly once.
+ */
+export const scenarioLifecycleEvents = (): readonly AgentSessionEvent[] => [
+    asEvent({
+        type: "compaction_start",
+        reason: "context window exceeded while the PTY scenario session streamed its long deterministic transcript across every lifecycle milestone before the resize gate admitted two driver resizes and the stream finalized exactly once",
+    }),
+    asEvent({ type: "compaction_end" }),
+    asEvent({ type: "auto_retry_start", attempt: 2, maxAttempts: 3 }),
+    asEvent({ type: "auto_retry_end", success: true }),
+    asEvent({
+        type: "summarization_retry_scheduled",
+        attempt: 1,
+        maxAttempts: 2,
+    }),
+    asEvent({ type: "summarization_retry_attempt_start" }),
+    asEvent({ type: "summarization_retry_finished" }),
+    asEvent({
+        type: "tool_execution_start",
+        toolCallId: "pty-gate",
+        toolName: "bash",
+        args: { command: "printf 'verification gate output sample line\\n'" },
+    }),
+    asEvent({
+        type: "tool_execution_update",
+        toolCallId: "pty-gate",
+        toolName: "bash",
+        partialResult: {
+            content: `gate tick 0 — ${FAKE_TOKEN} — stream the secret, never render it`,
+        },
+    }),
+    asEvent({
+        type: "tool_execution_update",
+        toolCallId: "pty-gate",
+        toolName: "bash",
+        partialResult: { content: "gate tick 1" },
+    }),
+    asEvent({
+        type: "tool_execution_update",
+        toolCallId: "pty-gate",
+        toolName: "bash",
+        partialResult: { content: "gate tick 2" },
+    }),
+    asEvent({
+        type: "tool_execution_end",
+        toolCallId: "pty-gate",
+        toolName: "bash",
+        result: {
+            content:
+                "gate verification failed: the resize gate rejected the stream before finalization, so the fixture reports a mid-stream failure and keeps the transcript open for the driver to resize again afterwards",
+        },
+        isError: true,
+    }),
+    asEvent({
+        type: "tool_execution_end",
+        toolCallId: "pty-probe",
+        toolName: "bash",
+        result: { content: "pty probe output" },
+        isError: false,
+    }),
+    asEvent({ type: "agent_end", willRetry: false }),
+];
+
+/** Number of trailing lifecycle events that close the stream. */
+export const SCENARIO_CLOSE_EVENT_COUNT = 2;
+
 const TOOL_UPDATES = 6;
 
 const asEvent = (value: unknown): AgentSessionEvent =>
@@ -430,47 +605,25 @@ export const runPtyDriverChild = async (
         };
     };
 
-    const driverActions = (): Promise<void> => {
-        let resizeSeen = false;
-        let inputSeen = false;
-        let sigintSeen = false;
+    /**
+     * Resize gate: the smoke stream stays open until exactly two `resize`
+     * events arrive on `process.stderr`. Every resize is logged and emitted
+     * as `PTY_RESIZED:<WxH>`; synchronization is marker-based, never sleeps.
+     * Returns a promise that resolves once the second resize has arrived.
+     */
+    const waitForDriverResizes = (): Promise<void> => {
+        let resizeCount = 0;
         let release: () => void = () => {};
         const completed = new Promise<void>((resolve) => {
             release = resolve;
         });
-        const maybeRelease = (): void => {
-            if (resizeSeen && inputSeen && sigintSeen) release();
-        };
-
         process.stderr.on("resize", () => {
             const columns = process.stderr.columns;
             const rows = process.stderr.rows;
             log({ kind: "resize", columns, rows });
-            resizeSeen = true;
             emitMarker(`${RESIZE_MARKER_PREFIX}${columns}x${rows}`);
-            maybeRelease();
-        });
-        const handleInputLine = (line: string): void => {
-            if (line.length === 0) return;
-            log({ kind: "input", line });
-            if (line !== INPUT_LINE) return;
-            inputSeen = true;
-            emitMarker(`${INPUT_MARKER_PREFIX}${line}`);
-            maybeRelease();
-        };
-        process.stdin.setEncoding("utf8");
-        process.stdin.on("data", (chunk: string | Uint8Array) => {
-            const text =
-                typeof chunk === "string"
-                    ? chunk
-                    : Buffer.from(chunk).toString("utf8");
-            for (const line of text.split("\n")) handleInputLine(line);
-        });
-        process.on("SIGINT", () => {
-            log({ kind: "signal", name: "SIGINT" });
-            sigintSeen = true;
-            emitMarker(SIGINT_MARKER);
-            maybeRelease();
+            resizeCount += 1;
+            if (resizeCount >= 2) release();
         });
         return completed;
     };
@@ -525,9 +678,25 @@ export const runPtyDriverChild = async (
         emitMarker(FOOTER_MARKER);
         log({ kind: "marker", name: FOOTER_MARKER });
 
-        // Agent events: an agent session with a long, deliberately open stream.
-        listener(asEvent({ type: "agent_start" }), context);
-        listener(
+        // Open the agent session: the deterministic scenario script. The
+        // thinking block carries the negative FAKE_TOKEN delta, then the one
+        // long assistant text stream opens and stays open across everything.
+        const emitAgentEvent = (event: AgentSessionEvent): void => {
+            listener(event, context);
+            log({
+                kind: "agent",
+                type:
+                    event.type === "message_update"
+                        ? (event.assistantMessageEvent.type as string)
+                        : event.type,
+            });
+        };
+        emitAgentEvent(asEvent({ type: "agent_start" }));
+        for (const event of scenarioThinkingEvents()) {
+            emitAgentEvent(event);
+            await delay(15);
+        }
+        emitAgentEvent(
             asEvent({
                 type: "message_update",
                 assistantMessageEvent: {
@@ -535,10 +704,9 @@ export const runPtyDriverChild = async (
                     contentIndex: 0,
                 },
             }),
-            context,
         );
-        for (const delta of STREAM_DELTAS) {
-            listener(
+        for (const delta of buildScenarioStreamDeltas(scenarioOptions)) {
+            emitAgentEvent(
                 asEvent({
                     type: "message_update",
                     assistantMessageEvent: {
@@ -547,66 +715,57 @@ export const runPtyDriverChild = async (
                         delta,
                     },
                 }),
-                context,
             );
-            log({ kind: "agent", type: "text_delta" });
             await delay(20);
         }
-        listener(
-            asEvent({
-                type: "tool_execution_start",
-                toolCallId: "pty-probe",
-                toolName: "bash",
-                args: { command: "echo pty probe" },
-            }),
-            context,
-        );
-        log({ kind: "agent", type: "tool_execution_start" });
-        for (let index = 0; index < TOOL_UPDATES; index += 1) {
-            listener(
-                asEvent({
-                    type: "tool_execution_update",
-                    toolCallId: "pty-probe",
-                    toolName: "bash",
-                    partialResult: { content: `probe tick ${index}` },
-                }),
-                context,
-            );
-            log({ kind: "agent", type: "tool_execution_update" });
+
+        // Every lifecycle milestone, through the failing tool execution. The
+        // stream stays open here: the close events are held for the gate.
+        const script = scenarioLifecycleEvents();
+        const openEvents = script.slice(0, -SCENARIO_CLOSE_EVENT_COUNT);
+        const closeEvents = script.slice(-SCENARIO_CLOSE_EVENT_COUNT);
+        for (const event of openEvents) {
+            emitAgentEvent(event);
             await delay(20);
         }
         emitMarker(ACTIVE_MARKER);
         log({ kind: "active" });
 
-        // Hold the stream open until the driver has resized, typed, and
-        // delivered SIGINT; synchronize on explicit markers, never sleeps.
-        const actionsTimeout = setTimeout(() => {
-            emitMarker("PTY_DRIVER_ACTIONS_TIMEOUT");
-        }, DRIVER_ACTIONS_TIMEOUT_MS);
-        await driverActions();
-        clearTimeout(actionsTimeout);
+        // Hold the stream open until the driver resizes twice; synchronize
+        // on markers, never sleeps. If the driver never arrives, bail loudly
+        // and leave the stream open (the marker fails the driver test).
+        let finalizeTimeout: ReturnType<typeof setTimeout> | undefined;
+        const armFinalizeTimeout = (): void => {
+            finalizeTimeout = setTimeout(() => {
+                emitMarker("PTY_DRIVER_ACTIONS_TIMEOUT");
+            }, DRIVER_ACTIONS_TIMEOUT_MS);
+        };
+        armFinalizeTimeout();
 
-        // Close the long stream and settle the nested progress updates.
-        listener(
-            asEvent({
-                type: "tool_execution_end",
-                toolCallId: "pty-probe",
-                toolName: "bash",
-                result: { content: "pty probe output" },
-                isError: false,
-            }),
-            context,
-        );
-        listener(asEvent({ type: "agent_end", willRetry: false }), context);
-        log({ kind: "agent", type: "agent_end" });
+        // Finalize exactly once (idempotent guard): emit the close events,
+        // stream-finalized marker, settle progress, then the done markers.
+        let finalized = false;
+        const finalizeStream = async (): Promise<void> => {
+            if (finalized) return;
+            finalized = true;
+            if (finalizeTimeout !== undefined) clearTimeout(finalizeTimeout);
+            for (const event of closeEvents) {
+                emitAgentEvent(event);
+            }
+            emitMarker(STREAM_FINALIZED_MARKER);
+            log({ kind: "marker", name: STREAM_FINALIZED_MARKER });
+            for (const update of scenarioUpdates.slice(3)) {
+                log({ kind: "progress", ...update });
+                await progress.emit({ ...update });
+            }
+            emitMarker(DONE_MARKER);
+            emitMarker(SCENARIO_DONE_MARKER);
+            log({ kind: "done" });
+        };
 
-        for (const update of scenarioUpdates.slice(3)) {
-            log({ kind: "progress", ...update });
-            await progress.emit({ ...update });
-        }
+        await waitForDriverResizes();
+        await finalizeStream();
 
-        emitMarker(DONE_MARKER);
-        log({ kind: "done" });
         return undefined as never;
     };
 
