@@ -336,59 +336,62 @@ const makeTrackedStore = async (
     };
     return {
         issueNumber: store.issueNumber,
-        write: async (kind, value) => {
+        write: async (kind, value, signal) => {
             throwIfFailing("write");
-            await store.write(kind, value);
+            await store.write(kind, value, signal);
         },
         read: store.read,
         has: store.has,
-        recordResolutionDecision: async (value) => {
+        recordResolutionDecision: async (value, signal) => {
             throwIfFailing("recordResolutionDecision");
-            await store.recordResolutionDecision(value);
+            await store.recordResolutionDecision(value, signal);
         },
-        beginNeedsAttentionHandoff: async (value) => {
+        beginNeedsAttentionHandoff: async (value, signal) => {
             throwIfFailing("beginNeedsAttentionHandoff");
-            await store.beginNeedsAttentionHandoff(value);
+            await store.beginNeedsAttentionHandoff(value, signal);
         },
-        recordNeedsAttentionDecision: async (value) => {
+        recordNeedsAttentionDecision: async (value, signal) => {
             throwIfFailing("recordNeedsAttentionDecision");
-            await store.recordNeedsAttentionDecision(value);
+            await store.recordNeedsAttentionDecision(value, signal);
         },
-        appendReview: async (review) => {
+        appendReview: async (review, signal) => {
             throwIfFailing("appendReview");
-            await store.appendReview(review);
+            await store.appendReview(review, signal);
         },
-        appendPullRequestReview: async (review) => {
+        appendPullRequestReview: async (review, signal) => {
             throwIfFailing("appendPullRequestReview");
-            await store.appendPullRequestReview(review);
+            await store.appendPullRequestReview(review, signal);
         },
-        recordCreatedIssue: async (key, createdIssueNumber) => {
+        recordCreatedIssue: async (key, createdIssueNumber, signal) => {
             throwIfFailing("recordCreatedIssue");
-            await store.recordCreatedIssue(key, createdIssueNumber);
+            await store.recordCreatedIssue(key, createdIssueNumber, signal);
         },
-        resetImplementationAttempt: async () => {
+        resetImplementationAttempt: async (signal) => {
             throwIfFailing("resetImplementationAttempt");
-            await store.resetImplementationAttempt();
+            await store.resetImplementationAttempt(signal);
         },
-        clearUnresolvedResolutionDecision: async () => {
+        clearUnresolvedResolutionDecision: async (signal) => {
             throwIfFailing("clearUnresolvedResolutionDecision");
-            return store.clearUnresolvedResolutionDecision();
+            return store.clearUnresolvedResolutionDecision(signal);
         },
-        invalidateStaleIssueDecisions: async (fingerprint) => {
+        invalidateStaleIssueDecisions: async (fingerprint, signal) => {
             throwIfFailing("invalidateStaleIssueDecisions");
-            return store.invalidateStaleIssueDecisions(fingerprint);
+            return store.invalidateStaleIssueDecisions(fingerprint, signal);
         },
-        invalidateStaleNeedsAttentionDecision: async (fingerprint) => {
+        invalidateStaleNeedsAttentionDecision: async (fingerprint, signal) => {
             throwIfFailing("invalidateStaleNeedsAttentionDecision");
-            return store.invalidateStaleNeedsAttentionDecision(fingerprint);
+            return store.invalidateStaleNeedsAttentionDecision(
+                fingerprint,
+                signal,
+            );
         },
-        invalidateNeedsAttentionDecision: async (fingerprint) => {
+        invalidateNeedsAttentionDecision: async (fingerprint, signal) => {
             throwIfFailing("invalidateNeedsAttentionDecision");
-            return store.invalidateNeedsAttentionDecision(fingerprint);
+            return store.invalidateNeedsAttentionDecision(fingerprint, signal);
         },
-        clearNeedsAttentionHandoff: async () => {
+        clearNeedsAttentionHandoff: async (signal) => {
             throwIfFailing("clearNeedsAttentionHandoff");
-            await store.clearNeedsAttentionHandoff();
+            await store.clearNeedsAttentionHandoff(signal);
         },
     };
 };

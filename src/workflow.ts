@@ -1887,6 +1887,7 @@ export const workflow = async (
             const artifacts = await artifactStores.forIssue(
                 issueContext.issue.number,
                 { workspace, runId: actualRunId, repository: repo },
+                signal,
             );
             const reviews = artifacts.has(IssueArtifactKind.ReviewAttempts)
                 ? await artifacts.read(IssueArtifactKind.ReviewAttempts)

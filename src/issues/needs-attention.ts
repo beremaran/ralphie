@@ -86,7 +86,10 @@ const loadHandoff = async (
     fingerprint: IssueFreshnessFingerprint,
 ): Promise<NeedsAttentionHandoffArtifact | undefined> => {
     const { artifacts, request, checkpoint } = input;
-    await artifacts.invalidateStaleNeedsAttentionDecision(fingerprint);
+    await artifacts.invalidateStaleNeedsAttentionDecision(
+        fingerprint,
+        input.context.signal,
+    );
     if (request !== undefined) {
         if (checkpoint === undefined) {
             throw new RalphieError({
@@ -95,7 +98,10 @@ const loadHandoff = async (
             });
         }
         const handoff = { request, checkpoint, fingerprint };
-        await artifacts.beginNeedsAttentionHandoff(handoff);
+        await artifacts.beginNeedsAttentionHandoff(
+            handoff,
+            input.context.signal,
+        );
         return handoff;
     }
     if (!artifacts.has(IssueArtifactKind.NeedsAttentionHandoff)) {
@@ -133,13 +139,16 @@ const verifyHandoff = async (
         signal: context.signal,
     });
     if (verified.output.disposition !== GroundingDisposition.NeedsAttention) {
-        await artifacts.clearNeedsAttentionHandoff();
+        await artifacts.clearNeedsAttentionHandoff(context.signal);
         return undefined;
     }
-    await artifacts.recordNeedsAttentionDecision({
-        decision: verified.output,
-        fingerprint: handoff.fingerprint,
-    });
+    await artifacts.recordNeedsAttentionDecision(
+        {
+            decision: verified.output,
+            fingerprint: handoff.fingerprint,
+        },
+        context.signal,
+    );
     return verified.output;
 };
 
@@ -163,7 +172,7 @@ const recoverHandoff = async (
         repositoryInvariant: context.repositoryInvariant,
         signal: context.signal,
     });
-    await artifacts.clearNeedsAttentionHandoff();
+    await artifacts.clearNeedsAttentionHandoff(context.signal);
     return outcome(decision, recovered.diagnosticsPath);
 };
 

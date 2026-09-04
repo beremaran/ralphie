@@ -59,10 +59,13 @@ export const makeIssueExecutorService = (
         artifacts: Awaited<ReturnType<IssueArtifactStoreService["forIssue"]>>,
         decision: IssueResolutionDecision,
     ): Promise<IssueExecutionOutcome> => {
-        await artifacts.recordResolutionDecision({
-            decision,
-            fingerprint: issueFreshnessFingerprint(context.issue),
-        });
+        await artifacts.recordResolutionDecision(
+            {
+                decision,
+                fingerprint: issueFreshnessFingerprint(context.issue),
+            },
+            context.signal,
+        );
         return decision.status === IssueResolutionStatus.Resolved
             ? alreadyResolvedOutcome(decision)
             : {
@@ -176,10 +179,14 @@ export const makeIssueExecutorService = (
         if (decision.disposition === GroundingDisposition.AlreadyResolved) {
             return await verifyAlreadyResolved(context, artifacts);
         }
-        await artifacts.write(IssueArtifactKind.NeedsAttentionDecision, {
-            decision,
-            fingerprint,
-        });
+        await artifacts.write(
+            IssueArtifactKind.NeedsAttentionDecision,
+            {
+                decision,
+                fingerprint,
+            },
+            context.signal,
+        );
         const { disposition: _disposition, ...details } = decision;
         return {
             kind: IssueExecutionOutcomeKind.NeedsAttention,
@@ -205,10 +212,14 @@ export const makeIssueExecutorService = (
         }
         const assessed = await complexityAssessment.assess(context);
         const { decision } = assessed;
-        await artifacts.write(IssueArtifactKind.ComplexityDecision, {
-            decision,
-            fingerprint: issueFreshnessFingerprint(context.issue),
-        });
+        await artifacts.write(
+            IssueArtifactKind.ComplexityDecision,
+            {
+                decision,
+                fingerprint: issueFreshnessFingerprint(context.issue),
+            },
+            context.signal,
+        );
         return decision;
     };
 
@@ -234,6 +245,7 @@ export const makeIssueExecutorService = (
     ): Promise<IssueExecutionOutcome> => {
         await artifacts.invalidateStaleIssueDecisions(
             issueFreshnessFingerprint(context.issue),
+            context.signal,
         );
         const resumed = await resumeNeedsAttention(context, artifacts);
         if (resumed !== undefined) return resumed;
@@ -286,6 +298,7 @@ export const makeIssueExecutorService = (
                               repository: context.repository,
                           }
                         : undefined,
+                    context.signal,
                 );
                 return await executeIssue(context, artifacts);
             } catch (error) {

@@ -124,6 +124,7 @@ export type IssueArtifactStore = {
     readonly write: <K extends IssueArtifactKind>(
         kind: K,
         value: IssueArtifactValues[K],
+        signal?: AbortSignal,
     ) => Promise<void>;
     readonly read: <K extends IssueArtifactKind>(
         kind: K,
@@ -132,39 +133,56 @@ export type IssueArtifactStore = {
     /** Persist the latest fresh resolution proof, replacing an older decision. */
     readonly recordResolutionDecision: (
         value: IssueResolutionDecisionArtifact,
+        signal?: AbortSignal,
     ) => Promise<void>;
     /** Start verification of a newly detected request and discard an older confirmation. */
     readonly beginNeedsAttentionHandoff: (
         value: NeedsAttentionHandoffArtifact,
+        signal?: AbortSignal,
     ) => Promise<void>;
     /** Persist the latest verifier confirmation before recovery begins. */
     readonly recordNeedsAttentionDecision: (
         value: NeedsAttentionDecisionArtifact,
+        signal?: AbortSignal,
     ) => Promise<void>;
-    readonly appendReview: (review: ReviewAttempt) => Promise<void>;
+    readonly appendReview: (
+        review: ReviewAttempt,
+        signal?: AbortSignal,
+    ) => Promise<void>;
     readonly appendPullRequestReview: (
         review: PullRequestReviewAttempt,
+        signal?: AbortSignal,
     ) => Promise<void>;
     readonly recordCreatedIssue: (
         key: string,
         issueNumber: number,
+        signal?: AbortSignal,
     ) => Promise<void>;
     /** Drop artifacts from an interrupted implementation attempt after checkout restore. */
-    readonly resetImplementationAttempt: () => Promise<void>;
+    readonly resetImplementationAttempt: (
+        signal?: AbortSignal,
+    ) => Promise<void>;
     /** Remove a non-terminal unresolved decision before actionable work resumes. */
-    readonly clearUnresolvedResolutionDecision: () => Promise<boolean>;
+    readonly clearUnresolvedResolutionDecision: (
+        signal?: AbortSignal,
+    ) => Promise<boolean>;
     /** Remove issue-derived decisions only when the live issue has changed. */
     readonly invalidateStaleIssueDecisions: (
         fingerprint: IssueFreshnessFingerprint,
+        signal?: AbortSignal,
     ) => Promise<boolean>;
     /** Remove a needs-attention decision only when the issue has changed. */
     readonly invalidateStaleNeedsAttentionDecision: (
         fingerprint: IssueFreshnessFingerprint,
+        signal?: AbortSignal,
     ) => Promise<boolean>;
     readonly invalidateNeedsAttentionDecision: (
         fingerprint: IssueFreshnessFingerprint,
+        signal?: AbortSignal,
     ) => Promise<boolean>;
-    readonly clearNeedsAttentionHandoff: () => Promise<void>;
+    readonly clearNeedsAttentionHandoff: (
+        signal?: AbortSignal,
+    ) => Promise<void>;
 };
 
 export type IssueArtifactScope = {
@@ -173,15 +191,89 @@ export type IssueArtifactScope = {
     readonly repository?: string;
 };
 
+/** File operations used by the durable artifact commit boundary. */
+export type IssueArtifactFileSystem = {
+    readonly readFile: (filePath: string, encoding: "utf8") => Promise<string>;
+    readonly mkdir: (
+        directory: string,
+        options: { readonly recursive: true },
+    ) => Promise<void>;
+    readonly writeFile: (
+        filePath: string,
+        contents: string,
+        options: {
+            readonly encoding: "utf8";
+            readonly flag: "wx";
+            readonly signal?: AbortSignal;
+        },
+    ) => Promise<void>;
+    readonly rename: (temporaryPath: string, filePath: string) => Promise<void>;
+    readonly rm: (
+        filePath: string,
+        options: { readonly force: true },
+    ) => Promise<void>;
+};
+
+/** Optional controls for durable artifact-store creation. */
+export type IssueArtifactStoreOptions = {
+    readonly signal?: AbortSignal;
+    readonly fileSystem?: IssueArtifactFileSystem;
+};
+
+export type ArtifactPersistenceAbortPhase =
+    | "before-write"
+    | "write"
+    | "before-rename"
+    | "rename"
+    | "after-rename";
+
+/**
+ * Cancellation at the artifact commit boundary. `committed` distinguishes a
+ * temporary write that was safely discarded from a rename that won the race;
+ * callers must treat both as cancellation, while a retry can safely use the
+ * reconciled in-memory state in the latter case.
+ */
+export class IssueArtifactWriteAbortedError extends RalphieError {
+    override readonly _tag = "IssueArtifactWriteAbortedError" as const;
+    readonly committed: boolean;
+    readonly phase: ArtifactPersistenceAbortPhase;
+    readonly issueNumber?: number;
+
+    constructor(input: {
+        readonly phase: ArtifactPersistenceAbortPhase;
+        readonly committed: boolean;
+        readonly issueNumber?: number;
+        readonly cause?: unknown;
+    }) {
+        super({
+            message: input.committed
+                ? "Issue artifact persistence was cancelled after the durable rename; the committed result was reconciled."
+                : "Issue artifact persistence was cancelled before the durable rename; the temporary state was discarded.",
+            ...(input.cause === undefined ? {} : { cause: input.cause }),
+        });
+        this.name = "IssueArtifactWriteAbortedError";
+        this.committed = input.committed;
+        this.phase = input.phase;
+        this.issueNumber = input.issueNumber;
+    }
+}
+
+export {
+    IssueArtifactWriteAbortedError as ArtifactPersistenceAbortedError,
+    IssueArtifactWriteAbortedError as ArtifactWriteAbortedError,
+};
+
 export type IssueArtifactStoreService = {
     readonly forIssue: (
         issueNumber: number,
         scope?: IssueArtifactScope,
+        signal?: AbortSignal,
     ) => Promise<IssueArtifactStore>;
     /** Load artifacts without migration or mutation persistence. */
     readonly forIssueReadOnly?: (
         issueNumber: number,
         scope?: IssueArtifactScope,
+        signal?: AbortSignal,
     ) => Promise<IssueArtifactStore>;
 };
 
@@ -450,7 +542,27 @@ const legacyV3PersistedArtifactStateSchema = z
     .strict();
 
 type PersistedArtifactState = z.infer<typeof persistedArtifactStateSchema>;
-type ArtifactPersistence = (state: PersistedArtifactState) => Promise<void>;
+type ArtifactPersistence = (
+    state: PersistedArtifactState,
+    signal?: AbortSignal,
+) => Promise<void>;
+
+const liveArtifactFileSystem: IssueArtifactFileSystem = {
+    readFile: async (filePath, encoding) =>
+        await readFile(filePath, { encoding }),
+    mkdir: async (directory, options) => {
+        await mkdir(directory, options);
+    },
+    writeFile: async (filePath, contents, options) => {
+        await writeFile(filePath, contents, options);
+    },
+    rename: async (temporaryPath, filePath) => {
+        await rename(temporaryPath, filePath);
+    },
+    rm: async (filePath, options) => {
+        await rm(filePath, options);
+    },
+};
 
 const safeRunId = (runId: string): string =>
     runId.replace(/[^a-zA-Z0-9_-]/g, "_") || "run";
@@ -495,17 +607,70 @@ const toPersistedState = (
 const persistAtomically = async (
     filePath: string,
     state: PersistedArtifactState,
+    signal?: AbortSignal,
+    fileSystem: IssueArtifactFileSystem = liveArtifactFileSystem,
+    issueNumber?: number,
 ): Promise<void> => {
     const temporaryPath = `${filePath}.${randomUUID()}.tmp`;
-    try {
-        await mkdir(dirname(filePath), { recursive: true });
-        await writeFile(temporaryPath, `${JSON.stringify(state, null, 2)}\n`, {
-            encoding: "utf8",
-            flag: "wx",
+    const encoded = `${JSON.stringify(state, null, 2)}\n`;
+    const abort = (
+        phase: ArtifactPersistenceAbortPhase,
+        committed: boolean,
+        cause?: unknown,
+    ) =>
+        new IssueArtifactWriteAbortedError({
+            phase,
+            committed,
+            issueNumber,
+            cause,
         });
-        await rename(temporaryPath, filePath);
+    const throwIfAborted = (
+        phase: ArtifactPersistenceAbortPhase,
+        committed: boolean,
+    ): void => {
+        if (signal?.aborted === true)
+            throw abort(phase, committed, signal.reason);
+    };
+    const cleanup = async (): Promise<void> => {
+        await fileSystem
+            .rm(temporaryPath, { force: true })
+            .catch(() => undefined);
+    };
+    const destinationContainsState = async (): Promise<boolean> => {
+        try {
+            return (await fileSystem.readFile(filePath, "utf8")) === encoded;
+        } catch {
+            return false;
+        }
+    };
+    try {
+        throwIfAborted("before-write", false);
+        await fileSystem.mkdir(dirname(filePath), { recursive: true });
+        throwIfAborted("before-write", false);
+        try {
+            await fileSystem.writeFile(temporaryPath, encoded, {
+                encoding: "utf8",
+                flag: "wx",
+                ...(signal === undefined ? {} : { signal }),
+            });
+        } catch (cause) {
+            if (signal?.aborted === true) throw abort("write", false, cause);
+            throw cause;
+        }
+        throwIfAborted("before-rename", false);
+        try {
+            await fileSystem.rename(temporaryPath, filePath);
+        } catch (cause) {
+            if (signal?.aborted === true) {
+                const committed = await destinationContainsState();
+                throw abort("rename", committed, cause);
+            }
+            throw cause;
+        }
+        throwIfAborted("after-rename", true);
     } catch (cause) {
-        await rm(temporaryPath, { force: true }).catch(() => undefined);
+        await cleanup();
+        if (cause instanceof IssueArtifactWriteAbortedError) throw cause;
         throw new RalphieError({
             message: `Failed to persist issue artifacts at ${filePath}.`,
             cause,
@@ -706,6 +871,28 @@ const validateArtifactValue = (
     }
 };
 
+const replaceValues = (
+    values: Map<IssueArtifactKind, unknown>,
+    nextValues: ReadonlyMap<IssueArtifactKind, unknown>,
+): void => {
+    values.clear();
+    for (const [kind, value] of nextValues) values.set(kind, value);
+};
+
+const throwIfArtifactWriteAborted = (
+    signal: AbortSignal | undefined,
+    issueNumber: number,
+    phase: ArtifactPersistenceAbortPhase = "before-write",
+): void => {
+    if (signal?.aborted === true)
+        throw new IssueArtifactWriteAbortedError({
+            issueNumber,
+            phase,
+            committed: false,
+            cause: signal.reason,
+        });
+};
+
 const makeStore = (
     issueNumber: number,
     initialValues = new Map<IssueArtifactKind, unknown>(),
@@ -715,21 +902,41 @@ const makeStore = (
     const values = initialValues;
     const save = async (
         nextValues: ReadonlyMap<IssueArtifactKind, unknown>,
+        signal?: AbortSignal,
     ): Promise<void> => {
+        throwIfArtifactWriteAborted(signal, issueNumber);
         if (persistence === undefined) {
-            values.clear();
-            for (const [kind, value] of nextValues) values.set(kind, value);
+            replaceValues(values, nextValues);
             return;
         }
         const state = toPersistedState(issueNumber, nextValues, scope);
-        await persistence(state);
-        values.clear();
-        for (const [kind, value] of nextValues) values.set(kind, value);
+        try {
+            await persistence(state, signal);
+        } catch (cause) {
+            if (
+                cause instanceof IssueArtifactWriteAbortedError &&
+                cause.committed
+            )
+                replaceValues(values, nextValues);
+            throw cause;
+        }
+        if (signal?.aborted === true) {
+            replaceValues(values, nextValues);
+            throw new IssueArtifactWriteAbortedError({
+                issueNumber,
+                phase: "after-rename",
+                committed: true,
+                cause: signal.reason,
+            });
+        }
+        replaceValues(values, nextValues);
     };
 
     const invalidateStaleNeedsAttentionDecision = async (
         fingerprint: IssueFreshnessFingerprint,
+        signal?: AbortSignal,
     ): Promise<boolean> => {
+        throwIfArtifactWriteAborted(signal, issueNumber);
         try {
             issueFreshnessFingerprintSchema.parse(fingerprint);
         } catch (cause) {
@@ -757,13 +964,15 @@ const makeStore = (
         const nextValues = new Map(values);
         nextValues.delete(IssueArtifactKind.NeedsAttentionDecision);
         nextValues.delete(IssueArtifactKind.NeedsAttentionHandoff);
-        await save(nextValues);
+        await save(nextValues, signal);
         return true;
     };
 
     const invalidateStaleIssueDecisions = async (
         fingerprint: IssueFreshnessFingerprint,
+        signal?: AbortSignal,
     ): Promise<boolean> => {
+        throwIfArtifactWriteAborted(signal, issueNumber);
         issueFreshnessFingerprintSchema.parse(fingerprint);
         const kinds = [
             IssueArtifactKind.ComplexityDecision,
@@ -785,13 +994,14 @@ const makeStore = (
         if (stale.length === 0) return false;
         const nextValues = new Map(values);
         for (const kind of stale) nextValues.delete(kind);
-        await save(nextValues);
+        await save(nextValues, signal);
         return true;
     };
 
     return {
         issueNumber,
-        write: async (kind, value) => {
+        write: async (kind, value, signal) => {
+            throwIfArtifactWriteAborted(signal, issueNumber);
             if (values.has(kind)) {
                 throw new RalphieError({
                     message: `Artifact ${kind} has already been produced for issue ${issueNumber}.`,
@@ -831,7 +1041,7 @@ const makeStore = (
             }
             const nextValues = new Map(values);
             nextValues.set(kind, value);
-            await save(nextValues);
+            await save(nextValues, signal);
         },
 
         read: async (kind) => {
@@ -846,7 +1056,8 @@ const makeStore = (
 
         has: (kind) => values.has(kind),
 
-        recordResolutionDecision: async (value) => {
+        recordResolutionDecision: async (value, signal) => {
+            throwIfArtifactWriteAborted(signal, issueNumber);
             validateArtifactValue(
                 issueNumber,
                 IssueArtifactKind.IssueResolutionDecision,
@@ -854,10 +1065,11 @@ const makeStore = (
             );
             const nextValues = new Map(values);
             nextValues.set(IssueArtifactKind.IssueResolutionDecision, value);
-            await save(nextValues);
+            await save(nextValues, signal);
         },
 
-        beginNeedsAttentionHandoff: async (value) => {
+        beginNeedsAttentionHandoff: async (value, signal) => {
+            throwIfArtifactWriteAborted(signal, issueNumber);
             validateArtifactValue(
                 issueNumber,
                 IssueArtifactKind.NeedsAttentionHandoff,
@@ -866,10 +1078,11 @@ const makeStore = (
             const nextValues = new Map(values);
             nextValues.delete(IssueArtifactKind.NeedsAttentionDecision);
             nextValues.set(IssueArtifactKind.NeedsAttentionHandoff, value);
-            await save(nextValues);
+            await save(nextValues, signal);
         },
 
-        recordNeedsAttentionDecision: async (value) => {
+        recordNeedsAttentionDecision: async (value, signal) => {
+            throwIfArtifactWriteAborted(signal, issueNumber);
             validateArtifactValue(
                 issueNumber,
                 IssueArtifactKind.NeedsAttentionDecision,
@@ -877,10 +1090,11 @@ const makeStore = (
             );
             const nextValues = new Map(values);
             nextValues.set(IssueArtifactKind.NeedsAttentionDecision, value);
-            await save(nextValues);
+            await save(nextValues, signal);
         },
 
-        appendPullRequestReview: async (review) => {
+        appendPullRequestReview: async (review, signal) => {
+            throwIfArtifactWriteAborted(signal, issueNumber);
             let validated: PullRequestReviewAttempt;
             try {
                 validated = pullRequestReviewAttemptSchema.parse(review);
@@ -923,10 +1137,11 @@ const makeStore = (
                 values,
                 validated.reviewedHeadSha,
             );
-            await save(nextValues);
+            await save(nextValues, signal);
         },
 
-        appendReview: async (review) => {
+        appendReview: async (review, signal) => {
+            throwIfArtifactWriteAborted(signal, issueNumber);
             if (!review || !Number.isInteger(review.attempt)) {
                 throw new RalphieError({
                     message: `Invalid review attempt for issue ${issueNumber}.`,
@@ -949,10 +1164,11 @@ const makeStore = (
                 ...existing,
                 review,
             ]);
-            await save(nextValues);
+            await save(nextValues, signal);
         },
 
-        recordCreatedIssue: async (key, createdIssueNumber) => {
+        recordCreatedIssue: async (key, createdIssueNumber, signal) => {
+            throwIfArtifactWriteAborted(signal, issueNumber);
             if (
                 key.trim().length === 0 ||
                 !validIssueNumber(createdIssueNumber)
@@ -974,19 +1190,21 @@ const makeStore = (
                 ...existing,
                 [key]: createdIssueNumber,
             });
-            await save(nextValues);
+            await save(nextValues, signal);
         },
 
-        resetImplementationAttempt: async () => {
+        resetImplementationAttempt: async (signal) => {
+            throwIfArtifactWriteAborted(signal, issueNumber);
             const nextValues = new Map(values);
             nextValues.delete(IssueArtifactKind.ReviewAttempts);
             nextValues.delete(IssueArtifactKind.CommitMessageDecision);
             nextValues.delete(IssueArtifactKind.CreatedCommit);
             nextValues.delete(IssueArtifactKind.IssueResolutionDecision);
-            await save(nextValues);
+            await save(nextValues, signal);
         },
 
-        clearUnresolvedResolutionDecision: async () => {
+        clearUnresolvedResolutionDecision: async (signal) => {
+            throwIfArtifactWriteAborted(signal, issueNumber);
             const artifact = values.get(
                 IssueArtifactKind.IssueResolutionDecision,
             ) as IssueResolutionDecisionArtifact | undefined;
@@ -997,31 +1215,42 @@ const makeStore = (
             }
             const nextValues = new Map(values);
             nextValues.delete(IssueArtifactKind.IssueResolutionDecision);
-            await save(nextValues);
+            await save(nextValues, signal);
             return true;
         },
 
         invalidateStaleIssueDecisions,
         invalidateStaleNeedsAttentionDecision,
         invalidateNeedsAttentionDecision: invalidateStaleNeedsAttentionDecision,
-        clearNeedsAttentionHandoff: async () => {
+        clearNeedsAttentionHandoff: async (signal) => {
+            throwIfArtifactWriteAborted(signal, issueNumber);
             if (!values.has(IssueArtifactKind.NeedsAttentionHandoff)) return;
             const nextValues = new Map(values);
             nextValues.delete(IssueArtifactKind.NeedsAttentionHandoff);
-            await save(nextValues);
+            await save(nextValues, signal);
         },
     };
 };
 
 export const makeIssueArtifactStore = async (
     issueNumber: number,
+    signal?: AbortSignal,
 ): Promise<IssueArtifactStore> => {
+    throwIfArtifactWriteAborted(signal, issueNumber);
     if (!validIssueNumber(issueNumber)) {
         throw new RalphieError({
             message: `Cannot create an artifact store for issue ${issueNumber}.`,
         });
     }
     return makeStore(issueNumber);
+};
+
+const storeOptionsFor = (
+    options: IssueArtifactStoreOptions | AbortSignal | undefined,
+): IssueArtifactStoreOptions => {
+    if (options === undefined) return {};
+    if ("aborted" in options) return { signal: options };
+    return options;
 };
 
 const valuesFromLoadedState = (
@@ -1039,7 +1268,10 @@ const valuesFromLoadedState = (
 export const makeDurableIssueArtifactStore = async (
     issueNumber: number,
     scope: IssueArtifactScope,
+    options?: IssueArtifactStoreOptions | AbortSignal,
 ): Promise<IssueArtifactStore> => {
+    const settings = storeOptionsFor(options);
+    throwIfArtifactWriteAborted(settings.signal, issueNumber);
     if (!validIssueNumber(issueNumber)) {
         throw new RalphieError({
             message: `Cannot create an artifact store for issue ${issueNumber}.`,
@@ -1047,13 +1279,27 @@ export const makeDurableIssueArtifactStore = async (
     }
     const filePath = issueArtifactPath(scope, issueNumber);
     const loaded = await loadPersistedState(filePath, issueNumber, scope);
+    throwIfArtifactWriteAborted(settings.signal, issueNumber);
     if (loaded?.migrated === true || loaded?.decisionsInvalidated === true) {
-        await persistAtomically(filePath, loaded.state);
+        await persistAtomically(
+            filePath,
+            loaded.state,
+            settings.signal,
+            settings.fileSystem,
+            issueNumber,
+        );
     }
     return makeStore(
         issueNumber,
         valuesFromLoadedState(loaded),
-        (nextState) => persistAtomically(filePath, nextState),
+        (nextState, signal) =>
+            persistAtomically(
+                filePath,
+                nextState,
+                signal,
+                settings.fileSystem,
+                issueNumber,
+            ),
         scope,
     );
 };
@@ -1066,7 +1312,10 @@ export const makeDurableIssueArtifactStore = async (
 export const makeReadOnlyDurableIssueArtifactStore = async (
     issueNumber: number,
     scope: IssueArtifactScope,
+    options?: IssueArtifactStoreOptions | AbortSignal,
 ): Promise<IssueArtifactStore> => {
+    const settings = storeOptionsFor(options);
+    throwIfArtifactWriteAborted(settings.signal, issueNumber);
     if (!validIssueNumber(issueNumber)) {
         throw new RalphieError({
             message: `Cannot create an artifact store for issue ${issueNumber}.`,
@@ -1077,6 +1326,7 @@ export const makeReadOnlyDurableIssueArtifactStore = async (
         issueNumber,
         scope,
     );
+    throwIfArtifactWriteAborted(settings.signal, issueNumber);
     return makeStore(issueNumber, valuesFromLoadedState(loaded));
 };
 
@@ -1085,7 +1335,8 @@ export const makeIssueArtifactStoreService = (): IssueArtifactStoreService => {
     const readOnlyStores = new Map<string, IssueArtifactStore>();
 
     return {
-        forIssue: async (issueNumber, scope) => {
+        forIssue: async (issueNumber, scope, signal) => {
+            throwIfArtifactWriteAborted(signal, issueNumber);
             const key = scope
                 ? `${resolveWorkspacePath(scope.workspace)}\u0000${safeRunId(scope.runId)}\u0000${issueNumber}`
                 : `memory\u0000${issueNumber}`;
@@ -1093,12 +1344,17 @@ export const makeIssueArtifactStoreService = (): IssueArtifactStoreService => {
             if (existing !== undefined) return existing;
 
             const store = scope
-                ? await makeDurableIssueArtifactStore(issueNumber, scope)
-                : await makeIssueArtifactStore(issueNumber);
+                ? await makeDurableIssueArtifactStore(
+                      issueNumber,
+                      scope,
+                      signal,
+                  )
+                : await makeIssueArtifactStore(issueNumber, signal);
             stores.set(key, store);
             return store;
         },
-        forIssueReadOnly: async (issueNumber, scope) => {
+        forIssueReadOnly: async (issueNumber, scope, signal) => {
+            throwIfArtifactWriteAborted(signal, issueNumber);
             const key = scope
                 ? `${resolveWorkspacePath(scope.workspace)}\u0000${safeRunId(scope.runId)}\u0000${issueNumber}`
                 : `memory\u0000${issueNumber}`;
@@ -1109,8 +1365,9 @@ export const makeIssueArtifactStoreService = (): IssueArtifactStoreService => {
                 ? await makeReadOnlyDurableIssueArtifactStore(
                       issueNumber,
                       scope,
+                      signal,
                   )
-                : await makeIssueArtifactStore(issueNumber);
+                : await makeIssueArtifactStore(issueNumber, signal);
             readOnlyStores.set(key, store);
             return store;
         },

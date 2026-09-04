@@ -371,7 +371,8 @@ const testRuntime = (
         },
     };
     const artifactStore: IssueArtifactStoreService = options.artifactStore ?? {
-        forIssue: (issueNumber) => makeIssueArtifactStore(issueNumber),
+        forIssue: (issueNumber, _scope, signal) =>
+            makeIssueArtifactStore(issueNumber, signal),
     };
     const issueExecutor: IssueExecutorService = options.issueExecutor ?? {
         execute: async (context) => {
@@ -664,14 +665,14 @@ const groundedRouteExecutor = (
         Awaited<ReturnType<typeof makeIssueArtifactStore>>
     >();
     const artifacts: IssueArtifactStoreService = {
-        forIssue: async (issueNumber) => {
+        forIssue: async (issueNumber, _scope, signal) => {
             const existing = stores.get(issueNumber);
             if (existing !== undefined) return existing;
             const created = await makeIssueArtifactStore(issueNumber);
             const tracked = {
                 ...created,
-                write: async (kind, value) => {
-                    await created.write(kind, value);
+                write: async (kind, value, writeSignal) => {
+                    await created.write(kind, value, writeSignal);
                     calls.push(`artifact:${issueNumber}:${kind}`);
                 },
             } satisfies Awaited<

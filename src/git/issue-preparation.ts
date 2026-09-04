@@ -8,6 +8,7 @@ export type IssuePreparationInput = {
     readonly issueNumber: number;
     readonly repositoryPath: string;
     readonly branch: string;
+    readonly signal?: AbortSignal;
 };
 
 export type GitIssuePreparationService = {
@@ -26,7 +27,11 @@ export const makeGitIssuePreparationService = (
             input.repositoryPath,
             input.branch,
         );
-        const artifacts = await artifactStores.forIssue(input.issueNumber);
+        const artifacts = await artifactStores.forIssue(
+            input.issueNumber,
+            undefined,
+            input.signal,
+        );
         if (artifacts.has(IssueArtifactKind.IssueCheckpoint)) {
             const existing = await artifacts.read(
                 IssueArtifactKind.IssueCheckpoint,
@@ -41,7 +46,11 @@ export const makeGitIssuePreparationService = (
             }
             return checkpoint;
         }
-        await artifacts.write(IssueArtifactKind.IssueCheckpoint, checkpoint);
+        await artifacts.write(
+            IssueArtifactKind.IssueCheckpoint,
+            checkpoint,
+            input.signal,
+        );
         return checkpoint;
     },
 });

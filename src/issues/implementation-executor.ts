@@ -210,6 +210,7 @@ const readCheckpoint = async (
         issueNumber: input.context.issue.number,
         repositoryPath: input.context.repositoryPath,
         branch: input.context.targetBranch,
+        signal: input.context.signal,
     });
 
 export const makeImplementationExecutorService = (
@@ -326,7 +327,7 @@ export const makeImplementationExecutorService = (
             artifacts.has(IssueArtifactKind.ReviewAttempts) ||
             artifacts.has(IssueArtifactKind.CommitMessageDecision)
         ) {
-            await artifacts.resetImplementationAttempt();
+            await artifacts.resetImplementationAttempt(context.signal);
         }
         const invariant = {
             branch: checkpoint.branch,
@@ -428,10 +429,14 @@ export const makeImplementationExecutorService = (
         ) {
             return { unresolvedSummary: outcome.message };
         }
-        await artifacts.write(IssueArtifactKind.IssueResolutionDecision, {
-            decision: resolution.decision,
-            fingerprint: issueFreshnessFingerprint(context.issue),
-        });
+        await artifacts.write(
+            IssueArtifactKind.IssueResolutionDecision,
+            {
+                decision: resolution.decision,
+                fingerprint: issueFreshnessFingerprint(context.issue),
+            },
+            context.signal,
+        );
         return outcome.kind === IssueExecutionOutcomeKind.Failed
             ? {
                   ...outcome,
@@ -692,6 +697,7 @@ export const makeImplementationExecutorService = (
         await artifacts.write(
             IssueArtifactKind.CommitMessageDecision,
             commitMessage.output,
+            context.signal,
         );
         const commit = await stage(
             progress,
@@ -702,7 +708,11 @@ export const makeImplementationExecutorService = (
                 operations.commit(context.repositoryPath, commitMessage.output),
             "Implementation changes committed.",
         );
-        await artifacts.write(IssueArtifactKind.CreatedCommit, commit);
+        await artifacts.write(
+            IssueArtifactKind.CreatedCommit,
+            commit,
+            context.signal,
+        );
         checkSignal(context.signal);
         await progress.emit({
             ...issueProgress(input),
@@ -968,7 +978,7 @@ export const makeImplementationExecutorService = (
             if ("kind" in review) return review;
             const isRepeated = sameBlockingFindings(reviews.at(-1), review);
             reviews.push(review);
-            await artifacts.appendReview(review);
+            await artifacts.appendReview(review, context.signal);
             const outcome = await finishReviewAttempt(
                 input,
                 checkpoint,
@@ -1041,7 +1051,7 @@ export const makeImplementationExecutorService = (
             if (resolution.decision.status === IssueResolutionStatus.Resolved) {
                 return resolutionOutcome(resolution.decision);
             }
-            await artifacts.clearUnresolvedResolutionDecision();
+            await artifacts.clearUnresolvedResolutionDecision(context.signal);
         }
 
         const recovered = await recoverCommittedAttempt(input);
@@ -1056,6 +1066,7 @@ export const makeImplementationExecutorService = (
             try {
                 await input.artifacts.invalidateStaleIssueDecisions(
                     issueFreshnessFingerprint(input.context.issue),
+                    input.context.signal,
                 );
                 return await executeImplementation(input);
             } catch (error) {

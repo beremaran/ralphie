@@ -222,6 +222,7 @@ export const makeDecompositionExecutorService = (
         await artifacts.write(
             IssueArtifactKind.IssueBreakdownDecision,
             result.output,
+            context.signal,
         );
         return result.output;
     };
@@ -287,7 +288,12 @@ export const makeDecompositionExecutorService = (
             if (recorded === undefined) {
                 await recoverableMutation(
                     `record-created-${key}`,
-                    () => input.artifacts.recordCreatedIssue(key, issueNumber),
+                    () =>
+                        input.artifacts.recordCreatedIssue(
+                            key,
+                            issueNumber,
+                            input.context.signal,
+                        ),
                     input,
                 );
                 nextMapping = { ...nextMapping, [key]: issueNumber };
@@ -321,6 +327,7 @@ export const makeDecompositionExecutorService = (
                     input.artifacts.recordCreatedIssue(
                         child.key,
                         created.number,
+                        input.context.signal,
                     ),
                 input,
             );
@@ -614,6 +621,7 @@ export const makeDecompositionExecutorService = (
                 input.artifacts.write(
                     IssueArtifactKind.CreatedIssueDependencies,
                     dependencyMapping,
+                    input.context.signal,
                 ),
             input,
         );
