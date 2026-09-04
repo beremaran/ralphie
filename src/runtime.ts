@@ -133,6 +133,11 @@ import {
     makeOpenCodeService,
     type OpenCodeService,
 } from "./opencode/server.ts";
+import { makeMaintainIssuesGroundingReader } from "./maintain-issues-grounding-reader.ts";
+import {
+    makeMaintenanceSnapshotService,
+    type MaintenanceSnapshotService,
+} from "./maintain-issues-snapshot-service.ts";
 import { type ProgressReporterService } from "./progress/progress.ts";
 import { RunStateStoreLive, type RunStateStoreService } from "./run/state.ts";
 import { WorkspaceLive, type WorkspaceService } from "./workspace/workspace.ts";
@@ -157,6 +162,8 @@ export type RalphieRuntime = {
     readonly pullRequestReviewCoordinator: PullRequestReviewCoordinatorService;
     /** Publishes structured needs-attention outcomes outside issue execution. */
     readonly githubNeedsAttentionNotification: GitHubNeedsAttentionNotificationService;
+    /** Fresh, immutable, read-only maintenance context for one run. */
+    readonly maintenanceSnapshot: MaintenanceSnapshotService;
     readonly gitRepository: GitRepositoryService;
     readonly gitRepositoryInvariant: GitRepositoryInvariantService;
     readonly gitIssueCheckpoint: GitIssueCheckpointService;
@@ -189,6 +196,8 @@ export type RuntimeOverrides = {
     readonly pipelineObservationDependencies?: PipelineObservationServiceDependencies;
     /** Optional deterministic seams for the pipeline diagnostics runtime path. */
     readonly pipelineDiagnosticsDependencies?: PipelineDiagnosticsServiceDependencies;
+    /** Optional deterministic seam for maintenance snapshot tests. */
+    readonly maintenanceSnapshot?: MaintenanceSnapshotService;
     readonly commandRunner?: CommandRunnerService;
     readonly runStateStore?: RunStateStoreService;
     readonly workspace?: WorkspaceService;
@@ -203,6 +212,7 @@ export const makeLiveRuntime = ({
     workspace = WorkspaceLive,
     pipelineObservationDependencies,
     pipelineDiagnosticsDependencies,
+    maintenanceSnapshot: maintenanceSnapshotOverride,
 }: RuntimeOverrides): RalphieRuntime => {
     const githubClient = makeGitHubClientService(commandRunner);
     const pipelineSnapshot = makePipelineSnapshotCollectorService();
@@ -223,6 +233,12 @@ export const makeLiveRuntime = ({
     const githubPullRequests = makeGitHubPullRequestService();
     const githubNeedsAttentionNotification =
         makeGitHubNeedsAttentionNotificationService();
+    const maintenanceSnapshot =
+        maintenanceSnapshotOverride ??
+        makeMaintenanceSnapshotService({
+            githubClient,
+            groundingReader: makeMaintainIssuesGroundingReader(commandRunner),
+        });
     const gitRepository = makeGitRepositoryService(commandRunner);
     const gitRepositoryInvariant =
         makeGitRepositoryInvariantService(commandRunner);
@@ -315,6 +331,7 @@ export const makeLiveRuntime = ({
         pullRequestReviewAttempt,
         pullRequestReviewCoordinator,
         githubNeedsAttentionNotification,
+        maintenanceSnapshot,
         gitRepository,
         gitRepositoryInvariant,
         gitIssueCheckpoint,
