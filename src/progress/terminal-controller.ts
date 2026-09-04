@@ -102,6 +102,25 @@ const CURSOR_UP = "\x1b[1A";
  */
 export const INTERACTIVE_REGION_MAX_ROWS = 3;
 
+/**
+ * Locked interactive footer layout strategy (issue #313).
+ *
+ * Terminal-level evidence from the PTY streaming-stress fixture (high-rate
+ * transcript/progress writes, narrow and dynamic resize, split/partial ANSI
+ * input) and the PTY lifecycle fixture (normal completion, Ctrl-C/SIGINT,
+ * failure, repeated cleanup) supports only the inline
+ * durable-transcript-breadcrumbs layout. A reserved bottom row or DECSTBM
+ * scroll region stays disabled: the controller repaints the replaceable
+ * region in place below streamed content and never emits scroll-region or
+ * absolute cursor-addressing sequences.
+ */
+export const INTERACTIVE_FOOTER_LAYOUT_STRATEGY =
+    "durable-transcript-breadcrumbs" as const;
+export type InteractiveFooterLayoutStrategy =
+    typeof INTERACTIVE_FOOTER_LAYOUT_STRATEGY;
+export const INTERACTIVE_FOOTER_USES_SCROLL_REGION = false as const;
+export const INTERACTIVE_FOOTER_USES_RESERVED_ROW = false as const;
+
 /** Default strategy: durable breadcrumb/content bytes share one byte sink. */
 export const makeDefaultTerminalOutputStrategy = (
     write: (text: string) => void,
@@ -116,6 +135,15 @@ export const makeDefaultTerminalOutputStrategy = (
 export const makeDurableBreadcrumbStrategy = makeDefaultTerminalOutputStrategy;
 export const makeDurableBreadcrumbTerminalOutputStrategy =
     makeDefaultTerminalOutputStrategy;
+
+/**
+ * Locked interactive default: the durable-transcript-breadcrumbs strategy.
+ * Kept as a distinct export so a future reserved-row or scroll-region
+ * strategy cannot silently become the default without updating the layout
+ * lock and its regression coverage.
+ */
+export const makeInteractiveTerminalOutputStrategy =
+    makeDurableBreadcrumbTerminalOutputStrategy;
 
 const nativeResizeSubscription: TerminalResizeSubscription = {
     subscribe: (listener) => {
@@ -141,7 +169,7 @@ const resizeSubscriptionFor = (
 export const makeTerminalOutputController = ({
     mode,
     write = (text) => process.stderr.write(text),
-    strategy = makeDefaultTerminalOutputStrategy(write),
+    strategy = makeInteractiveTerminalOutputStrategy(write),
     footer,
     width = footer?.width ?? (() => process.stderr.columns ?? 80),
     resize,

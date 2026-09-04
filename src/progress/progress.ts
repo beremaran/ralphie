@@ -476,13 +476,18 @@ export type {
     FooterViewOptions,
 } from "./footer.ts";
 export {
+    INTERACTIVE_FOOTER_LAYOUT_STRATEGY,
+    INTERACTIVE_FOOTER_USES_RESERVED_ROW,
+    INTERACTIVE_FOOTER_USES_SCROLL_REGION,
     INTERACTIVE_REGION_MAX_ROWS,
     makeDefaultTerminalOutputStrategy,
     makeDurableBreadcrumbStrategy,
     makeDurableBreadcrumbTerminalOutputStrategy,
+    makeInteractiveTerminalOutputStrategy,
     makeTerminalOutputController,
 } from "./terminal-controller.ts";
 export type {
+    InteractiveFooterLayoutStrategy,
     TerminalFooterOptions,
     TerminalOutputController,
     TerminalOutputControllerOptions,
