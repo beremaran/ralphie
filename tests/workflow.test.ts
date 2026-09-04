@@ -533,6 +533,7 @@ const testRuntime = (
             mutations,
         }),
         githubPullRequests: pullRequests,
+        pullRequestReviewAttempt: {} as never,
         githubNeedsAttentionNotification:
             options.needsAttentionNotification ?? {
                 notify: async () => {

@@ -31,6 +31,8 @@ describe("runtime factory", () => {
         );
         expect(runtime.pipelineObservation).toBeDefined();
         expect(runtime.pipelineObservation.observe).toBeFunction();
+        expect(runtime.pullRequestReviewAttempt).toBeDefined();
+        expect(runtime.pullRequestReviewAttempt.review).toBeFunction();
         expect(runtime.gitRevisionCommit).toBeDefined();
         expect(runtime.gitRevisionCommit.commitRevision).toBeFunction();
         expect(runtime.gitRevisionDelivery).toBeDefined();

@@ -59,6 +59,7 @@ export type GitHubPullRequestService = {
         client: Octokit,
         repository: string,
         snapshot: PullRequestSnapshot,
+        signal?: AbortSignal,
     ) => Promise<PullRequestSnapshot>;
     /** Publish head-scoped PR review evidence idempotently. */
     readonly publishPullRequestReviewAttempts: (
@@ -467,15 +468,16 @@ export const makeGitHubPullRequestService = (): GitHubPullRequestService => ({
         }
     },
 
-    rereadMatchingSnapshot: async (client, repository, snapshot) => {
+    rereadMatchingSnapshot: async (client, repository, snapshot, signal) => {
         const response = await client.rest.pulls.get({
             ...repositoryParameters(repository),
             pull_number: snapshot.number,
+            ...(signal === undefined ? {} : { request: { signal } }),
         });
         const current = requirePullRequestSnapshot(response.data);
         if (
             current.number !== snapshot.number ||
-            current.baseSha !== snapshot.baseSha
+            current.baseSha.toLowerCase() !== snapshot.baseSha.toLowerCase()
         ) {
             throw new RalphieError({
                 message: `Pull request #${snapshot.number} no longer matches its captured base.`,
