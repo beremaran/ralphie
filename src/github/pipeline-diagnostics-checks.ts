@@ -163,6 +163,24 @@ type CheckWork = {
     readonly diagnostic: PipelineDiagnostic;
 };
 
+const checkEvidenceFor = (work: CheckWork): Record<string, unknown> => ({
+    provider: work.identity.provider,
+    commitSha: work.identity.commitSha,
+    checkRunId: work.identity.checkRunId,
+    ...(work.identity.jobId === undefined
+        ? {}
+        : { jobId: work.identity.jobId }),
+    ...(work.identity.runId === undefined
+        ? {}
+        : { runId: work.identity.runId }),
+    ...(work.identity.runAttempt === undefined
+        ? {}
+        : { runAttempt: work.identity.runAttempt }),
+    ...(work.identity.workflowId === undefined
+        ? {}
+        : { workflowId: work.identity.workflowId }),
+});
+
 type Work = CheckWork | { readonly error: DiagnosticError };
 
 type CollectionState = {
@@ -338,6 +356,14 @@ const identityKey = (identity: CheckIdentity): string =>
         identity.provider,
         identity.commitSha.trim().toLowerCase(),
         identifierToken(identity.checkRunId),
+        identity.jobId === undefined ? null : identifierToken(identity.jobId),
+        identity.runId === undefined ? null : identifierToken(identity.runId),
+        identity.runAttempt === undefined
+            ? null
+            : identifierToken(identity.runAttempt),
+        identity.workflowId === undefined
+            ? null
+            : identifierToken(identity.workflowId),
     ]);
 
 const optionalMetadataError = (
@@ -519,7 +545,7 @@ const collectCheckGet = async (
             diagnosticErrorFor(
                 CHECK_RUN_GET_SOURCE,
                 "check-run get endpoint is not callable.",
-                { checkRunId: work.identity.checkRunId },
+                checkEvidenceFor(work),
                 undefined,
                 "unavailable",
             ),
@@ -549,7 +575,7 @@ const collectCheckGet = async (
                 CHECK_RUN_GET_SOURCE,
                 "check-run get request failed.",
                 {
-                    checkRunId: work.identity.checkRunId,
+                    ...checkEvidenceFor(work),
                     ...(trace.response === undefined
                         ? {}
                         : { response: trace.response }),
@@ -601,6 +627,7 @@ const paginationErrorFor = (
     pagination: PaginationResult,
     trace: RequestTrace,
     source: string,
+    work: CheckWork,
 ): DiagnosticError | undefined => {
     if (pagination.error === undefined) return undefined;
     const explicit =
@@ -613,6 +640,7 @@ const paginationErrorFor = (
         source,
         pagination.error.message,
         {
+            ...checkEvidenceFor(work),
             records: pagination.records,
             ...(trace.response === undefined
                 ? {}
@@ -627,6 +655,7 @@ const paginationErrorFor = (
 const paginationTruncationError = (
     pagination: PaginationResult,
     source: string,
+    work: CheckWork,
 ): DiagnosticError | undefined =>
     pagination.disposition !== "truncated"
         ? undefined
@@ -634,6 +663,7 @@ const paginationTruncationError = (
               source,
               `check-run annotations collection was truncated after ${String(pagination.records.length)} retained annotations.`,
               {
+                  ...checkEvidenceFor(work),
                   records: pagination.records,
                   truncation: pagination.truncation,
               },
@@ -654,7 +684,7 @@ const collectAnnotations = async (
             diagnosticErrorFor(
                 CHECK_RUN_ANNOTATIONS_SOURCE,
                 "check-run annotations endpoint is not callable.",
-                { checkRunId: work.identity.checkRunId },
+                checkEvidenceFor(work),
                 undefined,
                 "unavailable",
             ),
@@ -680,11 +710,13 @@ const collectAnnotations = async (
         pagination,
         trace,
         CHECK_RUN_ANNOTATIONS_SOURCE,
+        work,
     );
     if (paginationError !== undefined) state.errors.push(paginationError);
     const truncationError = paginationTruncationError(
         pagination,
         CHECK_RUN_ANNOTATIONS_SOURCE,
+        work,
     );
     if (truncationError !== undefined) state.errors.push(truncationError);
     let truncated = pagination.disposition === "truncated";
@@ -692,29 +724,51 @@ const collectAnnotations = async (
     for (const rawAnnotation of pagination.records) {
         const parsed = annotationRecordFor(rawAnnotation);
         if (parsed.kind === "invalid") {
-            state.errors.push(parsed.error);
+            state.errors.push({
+                ...parsed.error,
+                rawValues: bounded({
+                    ...checkEvidenceFor(work),
+                    annotation: parsed.error.rawValues,
+                }),
+            });
             truncated = true;
             continue;
         }
         const record = parsed.record;
-        const recordTruncated = containsTruncationMarker(serializeJson(record));
+        const associatedBudget = budgetRawEvidence(
+            Object.assign(
+                {},
+                checkEvidenceFor(work),
+                record,
+                checkEvidenceFor(work),
+            ),
+        );
+        const associatedRecord = isRecord(associatedBudget.value)
+            ? (associatedBudget.value as AnnotationRecord)
+            : record;
+        const recordTruncated = containsTruncationMarker(
+            serializeJson(associatedRecord),
+        );
         if (recordTruncated) {
             truncated = true;
             state.errors.push(
                 diagnosticErrorFor(
                     CHECK_RUN_ANNOTATIONS_SOURCE,
-                    "check-run annotation raw evidence was truncated.",
-                    { annotation: record },
+                    "check-run annotation raw evidence or association metadata was truncated.",
+                    {
+                        ...checkEvidenceFor(work),
+                        annotation: associatedRecord,
+                    },
                     undefined,
                     "truncated",
                 ),
             );
         }
-        annotations.push(record);
+        annotations.push(associatedRecord);
         state.records.push(
             recordError(
                 "annotation",
-                record,
+                associatedRecord,
                 recordTruncated ? "truncated" : "ok",
                 [],
             ),
@@ -886,6 +940,7 @@ const collectOutput = (
     check: Record<string, unknown> | undefined,
     maxOutputChars: number,
     state: CollectionState,
+    work: CheckWork,
 ): OutputOutcome => {
     if (check === undefined) return { output: undefined, truncated: false };
     const capture = captureOutput(check.output, maxOutputChars);
@@ -894,7 +949,7 @@ const collectOutput = (
             diagnosticErrorFor(
                 CHECK_RUN_GET_SOURCE,
                 "check-run output is not a JSON object.",
-                { output: capture.value },
+                { ...checkEvidenceFor(work), output: capture.value },
                 undefined,
                 "malformed",
             ),
@@ -904,7 +959,7 @@ const collectOutput = (
             diagnosticErrorFor(
                 CHECK_RUN_GET_SOURCE,
                 `check-run output was truncated to fit the ${String(maxOutputChars)}-character output budget.`,
-                { output: capture.value },
+                { ...checkEvidenceFor(work), output: capture.value },
                 undefined,
                 "truncated",
             ),
@@ -995,7 +1050,7 @@ const collectCheck = async (
             diagnosticErrorFor(
                 CHECK_RUN_GET_SOURCE,
                 "check-run diagnostic raw evidence was truncated.",
-                { rawValues: diagnosticRawValues },
+                { ...checkEvidenceFor(work), rawValues: diagnosticRawValues },
                 undefined,
                 "truncated",
             ),
@@ -1005,7 +1060,12 @@ const collectCheck = async (
 
     const transport = transportFor(dependencies, input.request.repository);
     const check = await collectCheckGet(work, transport, state);
-    const outputOutcome = collectOutput(check, transport.maxOutputChars, state);
+    const outputOutcome = collectOutput(
+        check,
+        transport.maxOutputChars,
+        state,
+        work,
+    );
     const annotationOutcome = await collectAnnotations(work, transport, state);
 
     const value = buildCheckValue({
@@ -1021,7 +1081,7 @@ const collectCheck = async (
             diagnosticErrorFor(
                 CHECK_RUN_GET_SOURCE,
                 "check-run raw evidence was truncated.",
-                { rawValues: value.rawValues },
+                { ...checkEvidenceFor(work), rawValues: value.rawValues },
                 undefined,
                 "truncated",
             ),

@@ -281,6 +281,16 @@ const identityKey = (identity: Identity): string =>
             : identifierToken(identity.workflowId),
     ]);
 
+const runEvidenceFor = (work: RunWork): Record<string, unknown> => ({
+    provider: work.identity.provider,
+    commitSha: work.identity.commitSha,
+    runId: work.identity.runId,
+    runAttempt: work.identity.runAttempt,
+    ...(work.identity.workflowId === undefined
+        ? {}
+        : { workflowId: work.identity.workflowId }),
+});
+
 const workForDiagnostic = (
     diagnostic: PipelineDiagnostic,
     request: PipelineSnapshotRequest,
@@ -820,6 +830,7 @@ const appendJobRecords = (
 const paginationErrorFor = (
     pagination: PaginationResult,
     trace: RequestTrace,
+    work: RunWork,
 ): DiagnosticError | undefined => {
     if (pagination.error === undefined) return undefined;
     const explicit =
@@ -831,6 +842,7 @@ const paginationErrorFor = (
     return diagnosticError(
         pagination.error.message,
         {
+            ...runEvidenceFor(work),
             records: pagination.records,
             ...(trace.response === undefined
                 ? {}
@@ -844,12 +856,14 @@ const paginationErrorFor = (
 
 const paginationTruncationError = (
     pagination: PaginationResult,
+    work: RunWork,
 ): DiagnosticError | undefined =>
     pagination.disposition !== "truncated"
         ? undefined
         : diagnosticError(
               `workflow-run jobs collection was truncated after ${String(pagination.records.length)} retained jobs.`,
               {
+                  ...runEvidenceFor(work),
                   records: pagination.records,
                   truncation: pagination.truncation,
               },
@@ -861,10 +875,11 @@ const applyPaginationOutcome = (
     state: CollectionState,
     pagination: PaginationResult,
     trace: RequestTrace,
+    work: RunWork,
 ): boolean => {
-    const paginationError = paginationErrorFor(pagination, trace);
+    const paginationError = paginationErrorFor(pagination, trace, work);
     if (paginationError !== undefined) state.errors.push(paginationError);
-    const truncationError = paginationTruncationError(pagination);
+    const truncationError = paginationTruncationError(pagination, work);
     if (truncationError === undefined) return false;
     state.errors.push(truncationError);
     state.truncated = true;
@@ -982,6 +997,7 @@ const collectRun = async (
         state,
         pagination,
         trace,
+        work,
     );
     const maxSteps = boundedLimit(
         dependencies.maxStepsPerJob,
