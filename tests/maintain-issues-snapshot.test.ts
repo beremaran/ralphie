@@ -10,6 +10,7 @@ import {
     parseRalphieMarker,
 } from "../src/maintain-issues-snapshot.ts";
 import { renderMaintenanceActionComment } from "../src/github/issue-maintenance.ts";
+import { renderMaintenanceRelationshipComment } from "../src/github/issue-maintenance-relationships.ts";
 
 const issueInput = () => ({
     number: 12,
@@ -222,6 +223,26 @@ describe("maintain-issues-snapshot value boundary", () => {
             bodySha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
         });
         expect(isRalphieManaged(maintenanceActionBody)).toBe(true);
+
+        const relationshipBody = renderMaintenanceRelationshipComment({
+            issueNumber: 12,
+            targetIssueNumber: 13,
+            relation: "duplicate",
+            targetUrl: "https://example.test/owner/repo/issues/13",
+            candidateId: "issue:12->13",
+            snapshotFingerprint: "snapshot-fingerprint",
+            rationale: "The issue is an exact duplicate.",
+        });
+        expect(parseRalphieMarker(relationshipBody)).toMatchObject({
+            kind: "maintenance-relationship",
+            issue: 12,
+            relation: "duplicate",
+            targetIssueNumber: 13,
+            pairKey: "relationship:duplicate:12:13",
+            version: 1,
+            bodySha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
+        });
+        expect(isRalphieManaged(relationshipBody)).toBe(true);
 
         const nearMatches: ReadonlyArray<string | null> = [
             null,

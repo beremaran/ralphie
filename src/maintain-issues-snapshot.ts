@@ -410,7 +410,8 @@ export type RalphieMarkerKind =
     | "pr-review"
     | "review-attempt"
     | "maintain"
-    | "maintenance-action";
+    | "maintenance-action"
+    | "maintenance-relationship";
 
 export type MarkerKind = RalphieMarkerKind;
 export type MaintainableMarkerKind = RalphieMarkerKind;
@@ -432,6 +433,9 @@ export type RalphieMarker = {
     readonly action?: "ask-question" | "answer-question";
     readonly actionKey?: string;
     readonly bodySha256?: string;
+    readonly relation?: "duplicate" | "related";
+    readonly targetIssueNumber?: number;
+    readonly pairKey?: string;
 };
 
 export type MaintainableMarker = RalphieMarker;
@@ -467,6 +471,8 @@ const REVIEW_ATTEMPT_PATTERN = /<!-- ralphie:review-attempt=(\d+) -->/;
 const MAINTAIN_PATTERN = /<!-- ralphie:maintain issue=(\d+) -->/;
 const MAINTENANCE_ACTION_PATTERN =
     /<!-- ralphie:maintain-action version=1 issue=([1-9]\d*) action=(ask-question|answer-question) key=("(?:\\.|[^"\\])*") body-sha256=([0-9a-f]{64}) -->(?=\n|$)/;
+const MAINTENANCE_RELATIONSHIP_PATTERN =
+    /<!-- ralphie:maintain-relationship version=1 issue=([1-9]\d*) relation=(duplicate|related) target=([1-9]\d*) pair-key=("(?:\\.|[^"\\])*") body-sha256=([0-9a-f]{64}) -->(?=\n|$)/;
 
 const safeInteger = (text: string): number | undefined => {
     const parsed = Number(text);
@@ -609,6 +615,47 @@ const parseMaintenanceActionMarkerValue = (
     });
 };
 
+const parseMaintenanceRelationshipMarkerValue = (
+    body: string,
+): RalphieMarker | undefined => {
+    const relationship = MAINTENANCE_RELATIONSHIP_PATTERN.exec(body);
+    if (relationship === null) return undefined;
+    const issue = safeInteger(relationship[1] ?? "");
+    const relation = relationship[2];
+    const targetIssueNumber = safeInteger(relationship[3] ?? "");
+    const bodySha256 = relationship[5];
+    if (
+        issue === undefined ||
+        issue <= 0 ||
+        (relation !== "duplicate" && relation !== "related") ||
+        targetIssueNumber === undefined ||
+        targetIssueNumber <= 0 ||
+        issue === targetIssueNumber ||
+        bodySha256 === undefined
+    ) {
+        return undefined;
+    }
+    let pairKey: unknown;
+    try {
+        pairKey = JSON.parse(relationship[4] ?? "");
+    } catch {
+        return undefined;
+    }
+    if (typeof pairKey !== "string" || pairKey.trim().length === 0) {
+        return undefined;
+    }
+    return Object.freeze({
+        kind: "maintenance-relationship",
+        normalized: relationship[0],
+        issue,
+        version: 1,
+        relation,
+        targetIssueNumber,
+        pairKey,
+        bodySha256,
+    });
+};
+
 const parseSingleMarker = (body: string): RalphieMarker | undefined =>
     parseDecompositionMarker(body) ??
     parseDecompositionOriginalMarker(body) ??
@@ -616,7 +663,8 @@ const parseSingleMarker = (body: string): RalphieMarker | undefined =>
     parsePrReviewMarker(body) ??
     parseReviewAttemptMarker(body) ??
     parseMaintainMarkerValue(body) ??
-    parseMaintenanceActionMarkerValue(body);
+    parseMaintenanceActionMarkerValue(body) ??
+    parseMaintenanceRelationshipMarkerValue(body);
 
 export const parseRalphieMarker = (
     body: string | null | undefined,
@@ -639,6 +687,7 @@ const GLOBAL_MARKER_PATTERNS: ReadonlyArray<RegExp> = [
     /<!-- ralphie:review-attempt=(\d+) -->/g,
     /<!-- ralphie:maintain issue=(\d+) -->/g,
     /<!-- ralphie:maintain-action version=1 issue=([1-9]\d*) action=(ask-question|answer-question) key=("(?:\\.|[^"\\])*") body-sha256=([0-9a-f]{64}) -->(?=\n|$)/g,
+    /<!-- ralphie:maintain-relationship version=1 issue=([1-9]\d*) relation=(duplicate|related) target=([1-9]\d*) pair-key=("(?:\\.|[^"\\])*") body-sha256=([0-9a-f]{64}) -->(?=\n|$)/g,
 ];
 
 export const parseAllRalphieMarkers = (
