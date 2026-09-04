@@ -72,9 +72,24 @@ When no branch is configured, Ralphie uses `main` when it exists and otherwise
 
 The `maintain-issues` mode accepts shared issue selection options and uses
 `--duplicate-action link` by default; `close` is also accepted. Its maintenance
-executor is intentionally not wired yet, so selecting this mode fails closed
-rather than running the issue implementation pipeline. Issue workflow and
-implementation-only options are rejected in this mode.
+executor is a bounded one-shot pass: it captures one selected open-issue
+snapshot, asks a read-only OpenCode planner for a schema-validated plan, and
+reconciles allowed labels/comments/relationships through deterministic GitHub
+services after live revalidation. It never runs issue implementation,
+decomposition, commit/push, pull-request delivery, or completed closure. Issue
+workflow and implementation-only options are rejected in this mode. See the
+[maintenance execution trace](end-to-end-execution.md#maintenance-mode) for
+the action, safety, and recovery contract.
+
+Use `--duplicate-action close` only when the operator accepts the additional
+issue-closure risk. The default `link` policy leaves both duplicate candidates
+open; `close` links first, reconciles the existing `duplicate` label, and then
+closes only the proven duplicate after the live issue pair is rechecked. A
+non-dry-run pass stores separate maintenance state at
+`<workspace>/.ralphie/runs/<run-id>/state.json`; resume with
+`--resume <state.json>`. A maintenance dry run performs read-only observation,
+planning, validation, and reporting without workspace preparation, GitHub
+mutation, state-file, artifact, or event-log writes.
 
 The `get-pipelines-green` mode is selected explicitly and keeps its retry
 settings separate from issue options. It is not implemented yet and therefore

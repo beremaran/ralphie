@@ -285,10 +285,36 @@ configured, Ralphie uses `main` when it exists and otherwise `master`.
 
 The `maintain-issues` mode is reserved for deterministic issue maintenance. It
 accepts shared issue selection options and uses `--duplicate-action link` by
-default; `close` is also accepted. Its maintenance executor is intentionally
-not wired yet, so selecting this mode fails closed rather than running the
-issue implementation pipeline. Issue workflow and implementation-only options
-are rejected in this mode.
+default; `close` is also accepted. It captures one bounded open-issue snapshot,
+plans each selected issue in a read-only OpenCode session, validates that plan
+independently, and then runs the allowed actions sequentially. Labels,
+comments, related links, and duplicate linking/closure are performed only by
+deterministic GitHub services after live revalidation. The mode never enters
+complexity assessment, implementation, decomposition, commit, push, pull
+request delivery, or completed issue closure. Issue workflow and
+implementation-only options are rejected in this mode.
+
+Maintenance is deliberately a one-shot pass; an external scheduler may invoke
+it periodically, but Ralphie does not keep an in-process watch loop. The
+default duplicate policy only links and leaves both issues open. `close` is an
+explicit risk opt-in and is allowed only for a proven duplicate, in the order
+link, existing `duplicate` label, then GitHub duplicate closure. Uncertainty,
+stale data, insufficient evidence, and unsupported actions become a question,
+skip, or bounded re-plan rather than a guessed mutation. The pass records
+changed, unchanged, skipped, and replanned results with evidence and uses the
+same default/verbose/quiet/JSON output contract as issue mode.
+
+Non-dry-run maintenance persists a separate versioned state machine under
+`<workspace>/.ralphie/runs/<run-id>/state.json`. It checkpoints the intended
+action before mutation and the authoritative result afterward; `--resume
+<state.json>` revalidates live state and resumes the exact unsettled action
+without blindly replaying a response that may have been lost. `--dry-run`
+performs observation, candidate analysis, planning, validation, and complete
+reporting but does not prepare/reset the workspace, call GitHub mutation
+services, or write state, artifacts, or an event log. Read access to repository
+metadata, issues, comments, labels, and the selected source revision is
+required; live mode additionally needs Issues write permission. Contents write,
+branch push, pull-request, Projects, and Actions permission are not required.
 
 The `get-pipelines-green` mode is selected explicitly and keeps its retry
 settings separate from issue options:

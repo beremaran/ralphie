@@ -118,6 +118,15 @@ needs-attention artifacts, and it cannot invoke implementation, decomposition,
 delivery, commits, pushes, checkout mutation, or GitHub mutations. A resumed
 dry run remains a dry run.
 
+The `maintain-issues` dry-run boundary is narrower: it reads the GitHub issue,
+comment, label, and repository data needed for one complete maintenance
+snapshot, and reads the existing checkout for source grounding, but it does
+not prepare, clone, reset, or otherwise mutate the workspace. It does not call
+label, comment, relationship, or duplicate-closure services, and it writes no
+maintenance state, artifacts, or event log. The output still contains the
+validated plan, action outcomes, evidence, and skip reasons, so operators can
+check the proposed pass before granting Issues write permission.
+
 ## Agent and mutation boundaries
 
 Structured decision sessions deny edits/writes and mutating Git/GitHub commands.

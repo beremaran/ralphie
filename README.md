@@ -17,6 +17,12 @@ GitHub, run state, recovery, and safety checks deterministic.
 > branch and pull request instead. Ralphie is pre-1.0. Start with a one-issue
 > `--dry-run` against a repository you control before enabling mutations.
 
+The top-level `--mode` defaults to `issues`, which is the code-delivery queue
+described below. `--mode maintain-issues` is a separate, bounded one-shot
+backlog-reconciliation mode: it improves issue metadata and discussion but
+never implements or delivers code. A scheduler can invoke that command
+periodically; Ralphie does not run an in-process daemon or watch loop.
+
 For task-oriented details, start with the [documentation index](./docs/README.md).
 
 ## What Ralphie provides
@@ -35,6 +41,10 @@ For task-oriented details, start with the [documentation index](./docs/README.md
   saved decision.
 - **Crash-safe recovery** — versioned run state, issue checkpoints, artifacts,
   and idempotent reconciliation make interrupted runs resumable.
+- **Issue maintenance** — `--mode maintain-issues` uses read-only OpenCode
+  planning and deterministic GitHub services to add existing labels, ask or
+  answer grounded questions, link related issues, and link likely duplicates.
+  Duplicate closure is a separate explicit opt-in.
 - **Observable, bounded autonomy** — transcripts, progress, JSON Lines output,
   a five-attempt review limit, and non-force pushes are
   built in.
@@ -82,8 +92,19 @@ bunx @beremaran/ralphie owner/repository --dry-run --max-issues 1
 ```
 
 Dry-run still performs preflight, issue discovery, read-only grounding, and
-may prepare or reset the local workspace. Read the [safety model](./docs/safety.md)
-before using mutation-enabled commands.
+may prepare or reset the local workspace in the default `issues` mode. For a
+maintenance-only preview, use:
+
+```bash
+bunx @beremaran/ralphie owner/repository \
+  --mode maintain-issues --dry-run --max-issues 1 --output verbose
+```
+
+Maintenance dry-run reads GitHub, Git, and the existing checkout as needed for
+observation and grounding, but does not call a GitHub mutation, prepare/reset
+the workspace, write run state or an event log, or modify any persisted file.
+Read the [safety model](./docs/safety.md) before using mutation-enabled
+commands.
 
 ## Distribution
 
@@ -272,10 +293,62 @@ push: every Git and GitHub mutation is performed by Ralphie's deterministic
 domain services, and agent sessions are denied mutating Git and GitHub
 commands.
 
+Maintenance output follows the same `default`, `verbose`, `quiet`, and `json`
+surfaces. A maintenance pass reports changed, unchanged, skipped, and
+replanned actions plus lossless evidence and skip reasons; JSON emits the
+typed progress/audit records as JSON Lines, while quiet mode suppresses routine
+output and retains terminal failures. Maintenance exits `0` when the selected
+issues are reconciled, unchanged, intentionally skipped, or previewed, `1`
+for a failed pass, and `130` when cancelled.
+
 See [Workflows](./docs/workflows.md) for the full routing, implementation,
 decomposition, and delivery contracts, and
 [Operations and recovery](./docs/operations-and-recovery.md) for the exact
 state, artifact, progress, and exit-code contracts.
+
+## Maintenance mode
+
+Run issue hygiene independently of code delivery:
+
+```bash
+bunx @beremaran/ralphie owner/repository --mode maintain-issues
+bunx @beremaran/ralphie owner/repository --mode maintain-issues \
+  --duplicate-action close --max-issues 10
+```
+
+The mode captures one bounded open-issue snapshot using the shared label,
+sort, order, and `--max-issues` selectors, then processes the selected issues
+sequentially and exits. Pi receives only read-only issue, repository, and
+candidate context and returns a schema-validated plan. Independent policy
+validation and deterministic GitHub services perform any allowed labels,
+comments, related links, or duplicate actions after a fresh live revalidation
+of the affected issue pair. The default duplicate policy is `link`, which
+leaves both issues open. `--duplicate-action close` is a meaningful risk
+expansion: it may close only a proven duplicate, after the link and existing
+`duplicate` label are reconciled and the live pair is checked again; the
+canonical issue is never closed.
+
+Maintenance is additive-only in the first release. It never edits human issue
+titles, bodies, or comments, removes labels, changes assignees, milestones, or
+projects, creates labels, reopens or completes issues, or creates branches,
+commits, pushes, pull requests, releases, or workflow runs. It does not
+implement or decompose issues, follow arbitrary external links, operate across
+repositories, make maintainer-policy or timeline commitments, or run as a
+daemon. Uncertainty, unsupported requests, stale data, and insufficient
+evidence become an explicit question, skip, or bounded re-plan—not an invented
+answer or destructive guess.
+
+Live maintenance requires GitHub repository metadata/issues read access and
+Issues write access for labels/comments; duplicate closure additionally needs
+permission to change issue state. It does not require Contents write, branch
+push, pull-request, Projects, or Actions permission. `--dry-run` is useful for
+checking read access and the complete proposed plan before granting write
+access. A non-dry-run pass stores atomic, schema-validated state at
+`<workspace>/.ralphie/runs/<run-id>/state.json` and checkpoints intent and
+outcome around every action. Resume with `--resume <state.json>` to reconcile
+the exact pending action; changed snapshots, comments, candidates, or
+grounding HEADs invalidate stale plans, and an ambiguous response is resolved
+from live state before any retry.
 
 ## Documentation
 

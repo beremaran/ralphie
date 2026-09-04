@@ -27,6 +27,23 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Changed
 
+- Complete the first user-visible `--mode maintain-issues` release slice. The
+  mode is a bounded one-shot issue-reconciliation pass separate from the
+  default `--mode issues` delivery queue: read-only OpenCode planning feeds
+  schema/policy validation, while deterministic GitHub services perform only
+  live-revalidated additive labels, managed questions/answers, and reciprocal
+  relationship or duplicate links. Duplicate closure remains an explicit
+  `--duplicate-action close` opt-in with link → existing `duplicate` label →
+  duplicate-close ordering; uncertainty, stale data, and insufficient evidence
+  skip or replan instead of guessing. Versioned maintenance state checkpoints
+  every action for exact resume, and maintenance dry runs perform no workspace,
+  GitHub, state-file, artifact, or event-log mutation. Added offline
+  fake-GitHub/stub-Pi integration coverage for reconciliation, ambiguity,
+  interruption/resume, output modes, permissions, dry-run isolation, and exit
+  codes (`tests/integration/maintain-issues.test.ts`). The documentation records
+  the required permissions, output/recovery contract, and first-release
+  non-goals; no mutation-enabled network smoke test is included.
+
 - Dependency-blocked issues (open queue prerequisites) are recorded as
   needs-attention outcomes but no longer publish a needs-attention GitHub
   comment or label: the opt-in notifier is reserved for agent-reported

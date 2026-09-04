@@ -12,8 +12,10 @@ triggered by a GitHub webhook; the trigger is the public CLI invocation:
 bunx @beremaran/ralphie owner/repository [options]
 ```
 
-The default delivery mode is `lgtm`. `pr`, `--dry-run`, and `--resume` change
-the path at the points called out below.
+The top-level `--mode` defaults to `issues`; inside that mode the default
+delivery workflow is `lgtm`. `--mode maintain-issues` selects a separate
+one-shot issue-reconciliation path and does not deliver code. `pr`, `--dry-run`,
+and `--resume` change the path at the points called out below.
 
 ## 1. Trigger and bootstrap
 
@@ -59,6 +61,13 @@ flowchart TD
 6. The command assembles the live services in `src/runtime.ts`, configures the
    OpenCode service from the model flags, connects its event stream to the transcript
    renderer, and then executes `workflow` with the explicit runtime object.
+
+For `--mode maintain-issues`, the command instead loads and validates the
+mode-specific maintenance state (when `--resume` is supplied), creates the
+maintenance progress coordinator, and dispatches to `maintainIssues`. A
+maintenance dry run has no event-log path and does not create persisted state;
+the non-dry-run path owns its separate state file and closes the read-only
+planning session after the pass or a recoverable failure.
 
 ## 2. Workflow preflight
 
@@ -470,6 +479,98 @@ the queue.
 | `pr` | `ralphie/issue-<number>` in the main checkout | Push feature branch, create/find matching PR, persist its number and head SHA, publish stored review attempts as marked comments, and gate merged delivery on the exact-head check observer: 30-second registration grace, 5s-to-60s bounded exponential backoff, a 30-minute deadline, and two stable green confirmations, with a re-read of the PR immediately before the expected-head merge | PR body contains `Closes #<issue>`; GitHub closes the issue on merge. A failed, cancelled, timed-out, absent, no-pipelines, unknown, changed-head, closed, or unmergeable gate retains the feature branch and PR, leaves the issue open, and persists recoverable run state. The serial run restores the base checkout afterward. |
 | `--dry-run` | Prepared normal checkout | Ground the issue, then assess complexity and report implementation or decomposition when actionable; report already-resolved and needs-attention routes otherwise. A decomposition dry run also performs the read-only breakdown session and reports the intended native sub-issue hierarchy, children to create or reuse, and dependency edges. No implementation, decomposition, delivery, commit, push, checkout, issue, or PR mutation | No issue is closed. The result is `skipped` except needs-attention, which remains a needs-attention outcome. |
 
+### Maintenance mode
+
+`--mode maintain-issues` is a separate execution state machine for issue
+hygiene. The top-level mode default remains `issues`; `--workflow lgtm|pr` is
+an issue-delivery setting and is not used by maintenance. Maintenance is a
+bounded one-shot pass: it captures one immutable, repository-wide maintenance
+snapshot, selects the requested open issues using the shared label/sort/order
+and `--max-issues` options, processes them sequentially, and exits. A cron or
+other scheduler may invoke another pass later; there is no in-process daemon
+or watch loop.
+
+The maintenance path is deliberately split at the agent boundary:
+
+1. The snapshot service reads repository metadata, the existing label catalog,
+   open issue summaries, complete bounded threads for selected issues, and the
+   selected source revision/guidance used for grounding. It computes a
+   fingerprint for the relevant observation.
+2. A read-only OpenCode session proposes a schema-validated plan for each
+   issue. Pi receives no Octokit client, GitHub credentials, or mutation-capable
+   tool.
+3. Independent policy validation checks every issue, comment, label, candidate,
+   evidence field, action conflict, and snapshot fingerprint. Unsupported or
+   insufficiently evidenced suggestions are explicit skips.
+4. Before an allowed live action, the deterministic GitHub service rereads the
+   target issue/comment or relationship pair. A changed issue, comment,
+   candidate, canonical issue, or grounding HEAD invalidates the action and
+   causes bounded re-planning. The service then performs and reconciles the
+   mutation; Pi never performs the write.
+5. The runner persists the action result, evidence, identifiers, and skip/failure
+   reason, then advances to the next action and issue.
+
+The first-release action surface is additive: adding labels that already exist
+in the repository, asking one compact managed clarification comment, answering
+an unresolved comment only when the answer is grounded in the selected source
+revision or issue evidence, and maintaining marker-owned related/duplicate
+links. Human-authored titles, bodies, comments, and links are preserved. A
+managed comment is never overwritten after an unrecognized or human edit, and
+an ambiguous create response is reconciled by marker discovery and a fresh
+read rather than blindly posting again.
+
+Duplicate handling has an explicit risk boundary. `--duplicate-action link`
+is the default: a proven duplicate is linked and both issues remain open.
+`--duplicate-action close` opts into a higher-risk action and can close only
+the duplicate, never the canonical issue, after the live pair is revalidated
+and the deterministic service completes this order:
+
+1. reconcile the duplicate-to-canonical link;
+2. add the existing `duplicate` label when it is available;
+3. close the duplicate with GitHub state reason `duplicate`.
+
+If the evidence, canonical choice, live state, permission, or response is
+uncertain, maintenance asks a question, skips, or replans. It never invents an
+answer, treats a model confidence value as policy, or closes on a guess.
+
+Non-dry-run maintenance uses a separate versioned state file at
+`<workspace>/.ralphie/runs/<run-id>/state.json`. State records the selected
+issues, policy, snapshot/grounding fingerprints, validated plans, ordered
+action keys, attempts, re-plan counts, outcomes, evidence, and errors. The
+runner checkpoints intent before each GitHub mutation and the authoritative
+result afterward. `--resume <state.json>` verifies repository, branch, mode,
+duplicate policy, and dry-run compatibility, rereads the live targets, and
+resumes the exact unsettled action. An already-applied or already-reconciled
+action is recorded and not blindly repeated. Cancellation closes the planning
+session, preserves the failed/in-progress state, and exits `130`; ordinary
+failures persist recoverable state and exit `1`.
+
+Maintenance dry-run executes observation, candidate analysis, plan validation,
+and complete output, but it does not prepare, clone, reset, or otherwise change
+the workspace; call GitHub mutation services; write state, artifacts, or an
+event log; or change GitHub. It is therefore the recommended way to inspect a
+proposed maintenance pass before granting write permission. The output modes
+remain equivalent across human/default, `--output verbose`, `--output quiet`,
+and `--output json`: human and verbose output summarize the pass and reasons,
+JSON emits lossless typed progress/audit JSON Lines, and quiet suppresses
+routine output while retaining terminal failures. Exit `0` means every selected
+issue was reconciled, unchanged, intentionally skipped, or previewed.
+
+Maintenance requires read access to repository metadata, the selected source
+revision, issues, comments, and labels. A live pass requires Issues write
+permission for labels/comments and, for `--duplicate-action close`, permission
+to change issue state. It does not require Contents write, branch push,
+pull-request, Projects, or Actions permission.
+
+The first release explicitly does not edit human-authored titles or bodies;
+remove labels; change assignees, milestones, or Projects; create labels; close
+issues as completed, invalid, or not planned; reopen issues; implement or
+decompose issues; create branches, commits, pushes, pull requests, releases,
+or workflow runs; detect or link across repositories; follow arbitrary
+external links or integrate support systems; automatically merge based only on
+semantic similarity or model confidence; post social/status/timeline or
+roadmap commitments; or run as a long-lived daemon/watch process.
+
 Only a `completed` outcome enters delivery or source-issue closure. A
 needs-attention outcome is retained in run state, and its fingerprinted decision
 is retained in the per-issue artifacts, but the issue is not added to completed
@@ -786,6 +887,8 @@ stateDiagram-v2
 | Complexity routing | `src/issues/executor.ts`, `src/issues/complexity.ts` |
 | Implementation/review/delivery | `src/issues/implementation-executor.ts` |
 | Decomposition and GitHub mutations | `src/issues/decomposition-executor.ts`, `src/github/` |
+| Maintenance snapshot, planning, execution, and state | `src/maintain-issues-snapshot-service.ts`, `src/maintain-issues-candidates.ts`, `src/maintain-issues-plan.ts`, `src/maintain-issues.ts`, `src/maintain-issues-state.ts` |
+| Maintenance GitHub reconciliation | `src/github/issue-maintenance.ts`, `src/github/issue-maintenance-relationships.ts` |
 | OpenCode sessions and structured results | `src/agent/`, `src/opencode/` |
 | Git checkpoints, safety, and branches | `src/git/` |
 | Durable state and reconciliation | `src/run/`, `src/issues/artifacts.ts` |
