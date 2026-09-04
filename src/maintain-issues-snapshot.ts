@@ -409,7 +409,8 @@ export type RalphieMarkerKind =
     | "needs-attention"
     | "pr-review"
     | "review-attempt"
-    | "maintain";
+    | "maintain"
+    | "maintenance-action";
 
 export type MarkerKind = RalphieMarkerKind;
 export type MaintainableMarkerKind = RalphieMarkerKind;
@@ -427,6 +428,10 @@ export type RalphieMarker = {
     readonly pullRequest?: number;
     readonly head?: string;
     readonly attempt?: number;
+    readonly version?: number;
+    readonly action?: "ask-question" | "answer-question";
+    readonly actionKey?: string;
+    readonly bodySha256?: string;
 };
 
 export type MaintainableMarker = RalphieMarker;
@@ -460,6 +465,8 @@ const PR_REVIEW_PATTERN =
     /<!-- ralphie:pr-review pr=(\d+) head=([0-9a-f]{40}(?:[0-9a-f]{24})?) attempt=(\d+) -->/;
 const REVIEW_ATTEMPT_PATTERN = /<!-- ralphie:review-attempt=(\d+) -->/;
 const MAINTAIN_PATTERN = /<!-- ralphie:maintain issue=(\d+) -->/;
+const MAINTENANCE_ACTION_PATTERN =
+    /<!-- ralphie:maintain-action version=1 issue=([1-9]\d*) action=(ask-question|answer-question) key=("(?:\\.|[^"\\])*") body-sha256=([0-9a-f]{64}) -->(?=\n|$)/;
 
 const safeInteger = (text: string): number | undefined => {
     const parsed = Number(text);
@@ -567,13 +574,49 @@ const parseMaintainMarkerValue = (body: string): RalphieMarker | undefined => {
     });
 };
 
+const parseMaintenanceActionMarkerValue = (
+    body: string,
+): RalphieMarker | undefined => {
+    const maintenanceAction = MAINTENANCE_ACTION_PATTERN.exec(body);
+    if (maintenanceAction === null) return undefined;
+    const issue = safeInteger(maintenanceAction[1] ?? "");
+    const action = maintenanceAction[2];
+    const bodySha256 = maintenanceAction[4];
+    if (
+        issue === undefined ||
+        (action !== "ask-question" && action !== "answer-question") ||
+        bodySha256 === undefined
+    ) {
+        return undefined;
+    }
+    let actionKey: unknown;
+    try {
+        actionKey = JSON.parse(maintenanceAction[3] ?? "");
+    } catch {
+        return undefined;
+    }
+    if (typeof actionKey !== "string" || actionKey.trim().length === 0) {
+        return undefined;
+    }
+    return Object.freeze({
+        kind: "maintenance-action",
+        normalized: maintenanceAction[0],
+        issue,
+        version: 1,
+        action,
+        actionKey,
+        bodySha256,
+    });
+};
+
 const parseSingleMarker = (body: string): RalphieMarker | undefined =>
     parseDecompositionMarker(body) ??
     parseDecompositionOriginalMarker(body) ??
     parseNeedsAttentionMarker(body) ??
     parsePrReviewMarker(body) ??
     parseReviewAttemptMarker(body) ??
-    parseMaintainMarkerValue(body);
+    parseMaintainMarkerValue(body) ??
+    parseMaintenanceActionMarkerValue(body);
 
 export const parseRalphieMarker = (
     body: string | null | undefined,
@@ -595,6 +638,7 @@ const GLOBAL_MARKER_PATTERNS: ReadonlyArray<RegExp> = [
     /<!-- ralphie:pr-review pr=(\d+) head=([0-9a-f]{40}(?:[0-9a-f]{24})?) attempt=(\d+) -->/g,
     /<!-- ralphie:review-attempt=(\d+) -->/g,
     /<!-- ralphie:maintain issue=(\d+) -->/g,
+    /<!-- ralphie:maintain-action version=1 issue=([1-9]\d*) action=(ask-question|answer-question) key=("(?:\\.|[^"\\])*") body-sha256=([0-9a-f]{64}) -->(?=\n|$)/g,
 ];
 
 export const parseAllRalphieMarkers = (

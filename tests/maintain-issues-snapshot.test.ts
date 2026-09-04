@@ -9,6 +9,7 @@ import {
     normalizeMaintainableAvailability,
     parseRalphieMarker,
 } from "../src/maintain-issues-snapshot.ts";
+import { renderMaintenanceActionComment } from "../src/github/issue-maintenance.ts";
 
 const issueInput = () => ({
     number: 12,
@@ -203,6 +204,24 @@ describe("maintain-issues-snapshot value boundary", () => {
         expect(parseRalphieMarker(exact)?.kind).toBe("maintain");
         expect(parseRalphieMarker(exact)?.normalized).toBe(exact);
         expect(isRalphieManaged(`before\n${exact}\nafter`)).toBe(true);
+
+        const maintenanceActionBody = renderMaintenanceActionComment({
+            action: {
+                action: "ask-question",
+                issueNumber: 12,
+                question: "Which deployment is affected?",
+                rationale: "The issue does not identify one.",
+            },
+        });
+        expect(parseRalphieMarker(maintenanceActionBody)).toMatchObject({
+            kind: "maintenance-action",
+            issue: 12,
+            action: "ask-question",
+            actionKey: expect.any(String),
+            version: 1,
+            bodySha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
+        });
+        expect(isRalphieManaged(maintenanceActionBody)).toBe(true);
 
         const nearMatches: ReadonlyArray<string | null> = [
             null,
