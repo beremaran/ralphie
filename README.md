@@ -102,15 +102,40 @@ applies.
 
 ## Output contract
 
-`--output` selects `default`, `verbose`, `quiet`, or `json`. In an interactive,
-non-CI terminal, the default streams the OpenCode transcript with one replaceable
-interactive region below it: the sticky stage/status line plus the bounded
-activity rows together occupy at most three physical terminal rows (measured
-by the rows actually painted, not by newline counts), repainted in place and
-clipped before wrap at the current width. The footer is refreshed
-periodically and describes the active leaf stage and
+`--output` selects `default`, `verbose`, `quiet`, or `json`. `--output
+default` resolves to `interactive` only when stdin and stderr are both TTYs
+and `CI` is neither `"true"` nor `"1"` (rechecked against `stderr.isTTY` at
+mode resolution); otherwise it uses append-only `plain` output. In
+interactive mode, the default streams the OpenCode transcript with one
+replaceable interactive region below it: the sticky stage/status line plus
+the bounded activity rows together occupy at most three physical terminal
+rows (measured by the rows actually painted, not by newline counts),
+repainted in place and clipped before wrap at the current width. The locked
+interactive layout strategy is `durable-transcript-breadcrumbs`
+(`INTERACTIVE_FOOTER_LAYOUT_STRATEGY`, with
+`INTERACTIVE_FOOTER_USES_SCROLL_REGION=false` and
+`INTERACTIVE_FOOTER_USES_RESERVED_ROW=false`): the status is an in-place
+region below streamed content, never a reserved bottom row or DECSTBM scroll
+region. Reserved-row/scroll-region cursor manipulation is disabled: the
+controller never emits DECSTBM (`...r`), absolute cursor addressing (CUP
+`H`/`f`), alternate-screen, or save/restore sequences — only in-place line
+erase (`\r\x1b[2K`) and single-row step-up (`\x1b[1A`) plus SGR color repaint
+the region, and every replacement repaint clears the visible region before
+drawing. The footer is refreshed on a coalesced roughly 100–125 ms scheduler
+(clamped, default 100 ms) and describes the active leaf stage and
 activity—for example, `› Reviewing changes › Using bash`—rather than a global
-step count. Completed progress milestones remain in scrollback. OpenCode sessions
+step count. Transcript token deltas stream immediately without waiting for
+that scheduler, so transcript order is independent of footer scheduling.
+Repaints are deferred while a transcript fragment is open mid-line or a
+control sequence is incomplete, durable progress lines wait for a safe line
+boundary so they never merge with or falsely close the fragment, every row is
+clipped at the width sampled for its own repaint, and resize clears and
+repaints at the new width only at a safe boundary. On completion,
+interruption (SIGINT/Ctrl-C), failure, or disposal the live region is erased
+in place, the cursor settles on a fresh line below durable content, the
+resize subscription and refresh timer are released, and no further bytes are
+emitted; no live-only row (`◐`, `›`, started progress, activity) survives on
+screen or scrollback. Completed progress milestones remain in scrollback. OpenCode sessions
 start with contextual headers such as:
 
 ```text
@@ -129,12 +154,17 @@ enough error detail to act on. `--output verbose` never expands the live
 region's three-row cap. These are not limits on the structured stream.
 
 Outside an interactive terminal—including CI and any redirected output—plain
-output is the deterministic, append-only noninteractive fallback and uses no
-ANSI cursor controls and no carriage-return bytes. Quiet output reports
-failures and handled needs-attention stops only. JSON output is
-JSON Lines on stdout: each line is a parseable progress record or a lossless
-`opencode_event` record, without
-human breadcrumb lines. The durable progress-event log remains at
+output is the deterministic, append-only noninteractive fallback: byte-identical
+across identical runs, with no ANSI cursor controls (no `ESC`), no
+carriage-return bytes, and no footer/status residue (no `◐`, no `\r\x1b[2K`),
+so logs need no terminal repainting. `--output verbose` keeps the same mode
+selection and only enriches durable progress rows with structured details; it
+never expands the live region's three-row cap. Quiet output reports
+failures and handled needs-attention stops only, suppressing routine progress
+and transcript rows. JSON output is
+JSON Lines on stdout with stderr empty: each line is a parseable progress
+record or a lossless `opencode_event` record, without human headers, footers,
+glyphs, or breadcrumb lines. The durable progress-event log remains at
 `<workspace>/.ralphie/runs/<run-id>/events.jsonl` independently of the selected
 renderer; supplied progress-event values are preserved as-is. Only terminal
 control sequences are stripped from human-readable rows; transcripts and

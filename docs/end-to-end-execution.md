@@ -534,20 +534,46 @@ reconcile a commit that may already have reached the remote.
 ### Cross-mode display contract
 
 The command resolves `--output default` to `interactive` only when both stdin
-and stderr are TTYs and `CI` is not set. Otherwise it uses append-only `plain`
+and stderr are TTYs and `CI` is neither `"true"` nor `"1"` (rechecked against
+`stderr.isTTY` at mode resolution). Otherwise it uses append-only `plain`
 output. `--output verbose` keeps the same mode selection and never expands the
 live interactive region's row cap (always at most three terminal rows); it only
 enriches durable progress rows with structured details.
+
+The locked interactive layout strategy is `durable-transcript-breadcrumbs`
+(`INTERACTIVE_FOOTER_LAYOUT_STRATEGY`, with
+`INTERACTIVE_FOOTER_USES_SCROLL_REGION=false` and
+`INTERACTIVE_FOOTER_USES_RESERVED_ROW=false`). The status is an in-place
+replaceable region below streamed content, never a reserved bottom row or
+DECSTBM scroll region. Reserved-row/scroll-region cursor manipulation is
+disabled: the controller never emits DECSTBM (`...r`), absolute cursor
+addressing (CUP `H`/`f`), alternate-screen, or save/restore sequences — only
+in-place line erase (`\r\x1b[2K`) and single-row step-up (`\x1b[1A`) plus SGR
+color repaint the region, and every replacement repaint clears the visible
+region before drawing (strict clear-before-draw).
 
 Interactive output has two coordinated surfaces: OpenCode transcript rows remain in
 scrollback, and one replaceable region holds the sticky stage/status line plus
 the bounded activity view rows (running tools, reads/searches, thinking, and
 lifecycle work) for the active leaf stage. The whole region is at most three
-terminal rows including the stage/status line, every row is clipped before it
-can wrap, and replacements repaint the region in place — intermediate activity
-never goes to scrollback. Repaints are coalesced at roughly 100–125 ms and are
+terminal rows including the stage/status line (`INTERACTIVE_REGION_MAX_ROWS`),
+every row is clipped before it
+can wrap at the width sampled for its own repaint, and replacements repaint the region in place — intermediate activity
+never goes to scrollback. Transcript token deltas (`text_delta`,
+`thinking_delta`, tool/bash execution updates) are forwarded immediately and
+never wait for the footer scheduler, so transcript order is independent of
+footer scheduling. Footer-only repaints are coalesced at roughly 100–125 ms (clamped,
+default 100 ms) and are
 deferred while a transcript fragment is open mid-line or a control sequence is
-incomplete, so activity updates never create rows or corrupt streamed text. A
+incomplete, so activity updates never create rows or corrupt streamed text.
+Durable progress lines wait for a safe line boundary so they never merge with,
+overwrite, or falsely close the fragment, and footer bytes flow only through
+the strategy's footer surface, never into transcript/control payload or
+durable scrollback. Resize clears the region and repaints at the new width
+only at a safe boundary; disposal unregisters the resize subscription, cancels
+the scheduler, flushes pending durable lines, erases the live region in place,
+and settles the cursor on a fresh line below durable content with no further
+bytes (repeated dispose/resize stays quiescent). A
 representative region is:
 
 ```text
@@ -591,16 +617,29 @@ measures painted rows across repeated tool calls, long commands and paths,
 narrow terminals and resize, interleaved streamed assistant text,
 ANSI/control-sequence boundaries, completion, failure, and cleanup
 (`tests/progress/` plus the end-to-end command-runtime suite in
-`tests/integration/command-runtime-display.test.ts`).
+`tests/integration/command-runtime-display.test.ts`), the PTY
+streaming-stress fixture (high-rate transcript/progress writes, narrow and
+dynamic resize, split/partial ANSI, strict clear-before-draw ordering,
+paint-time width clipping, no ephemeral leak into scrollback) in
+`tests/integration/pty-footer-stream-stress.test.ts`, the real-PTY lifecycle
+fixture (normal completion, SIGINT/Ctrl-C abort, mid-stream failure, erased
+region with a fresh-line settle, zero post-dispose bytes, unregistered
+resize) in `tests/integration/pty-lifecycle-cleanup.test.ts`, and the layout
+lock asserting no scroll-region/reserved-row bytes and no footer leak into
+durable writes in
+`tests/progress/interactive-footer-layout-strategy.test.ts`. No reserved-row
+or scroll-region strategy is tested or published: the only supported
+interactive layout is the locked durable-transcript-breadcrumbs region above.
 
 The cross-mode guarantees are:
 
 | Mode or sink | Contract |
 | --- | --- |
-| Interactive | OpenCode transcript scrollback plus one replaceable region of at most three terminal rows (stage/status line plus bounded activity rows), repainted in place; completed milestones and lifecycle breadcrumbs remain durable rows. |
-| Plain and CI | Append-only human-readable lines. No ANSI cursor controls are emitted, so logs do not require terminal repainting. |
+| Interactive | OpenCode transcript scrollback plus one in-place replaceable region of at most three physical terminal rows (stage/status line plus bounded activity rows), repainted with clear-before-draw at roughly 100–125 ms; transcript deltas stream immediately; partial-line/control-open fragments defer repaints; resize repaints only at a safe boundary; completion/interruption/failure erases the region, settles on a fresh line, and emits no further bytes; completed milestones and lifecycle breadcrumbs remain durable rows. No reserved row or scroll region is used. |
+| Plain and CI | Deterministic, append-only human-readable lines, byte-identical across identical runs. No `ESC`, no carriage-return bytes, and no footer/status residue (no `◐`, no `\r\x1b[2K`); `stripTerminalControls` is an identity no-op on the stream. |
+| `--output verbose` | Same mode selection as default; never expands the three-row cap, only adds the structured details payload to durable rows. |
 | `--output quiet` | Failures and handled needs-attention stops only; routine progress and OpenCode transcript rows are suppressed. |
-| `--output json` | One parseable JSON object per line on stdout: progress records and lossless `opencode_event` records; values are preserved as supplied. Human headers, footers, and breadcrumb lines are not emitted. |
+| `--output json` | One parseable JSON object per line on stdout with stderr empty: progress records and lossless `opencode_event` records; values are preserved as supplied. Human headers, footers, glyphs, and breadcrumb lines are not emitted. |
 | Durable event log | Progress events are written independently to `events.jsonl` in the run directory, preserving supplied values, regardless of the renderer. |
 
 For example, a JSON Lines consumer sees structured records rather than the

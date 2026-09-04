@@ -105,6 +105,28 @@ All notable changes to Ralphie are documented here. The project follows
   interactive mode, and plain, CI, piped, JSON, and quiet surfaces stay
   append-only or structured with no cursor-control artifacts.
 
+- Finalize the interactive footer layout as `durable-transcript-breadcrumbs`
+  (`INTERACTIVE_FOOTER_LAYOUT_STRATEGY`, `INTERACTIVE_FOOTER_USES_SCROLL_REGION=false`,
+  `INTERACTIVE_FOOTER_USES_RESERVED_ROW=false`): the status is an in-place
+  replaceable region below streamed content, never a reserved bottom row or
+  DECSTBM scroll region, so reserved-row/scroll-region cursor manipulation is
+  disabled (no DECSTBM, CUP, alternate-screen, or save/restore sequences; only
+  in-place erase and single-row step-up repaint the region with strict
+  clear-before-draw). Interactive mode requires stdin and stderr TTYs with `CI`
+  neither `"true"` nor `"1"`; footer-only repaints coalesce at roughly 100–125 ms
+  while transcript token deltas stream immediately; partial-line/control-open
+  fragments defer repaints, rows clip at their paint-time width, resize repaints
+  only at a safe boundary, and completion/interruption (SIGINT/Ctrl-C)/failure
+  erases the region, settles on a fresh line, and emits no further bytes.
+  Plain/CI output is deterministic append-only with no `ESC`/carriage-return or
+  footer residue, verbose never expands the three-row cap, quiet keeps failures
+  and handled needs-attention stops only, and JSON stays JSON Lines on stdout
+  with stderr empty. `README.md`, `docs/end-to-end-execution.md`, and
+  `docs/operations-and-recovery.md` now publish exactly this tested contract,
+  locked by `tests/progress/interactive-footer-layout-strategy.test.ts`, the PTY
+  streaming-stress fixture, the real-PTY lifecycle fixture, and the
+  noninteractive cleanup matrix.
+
 - Deliver managed feature-branch revisions as one deterministic operation
   with authoritative remote reconciliation: the revision safety checks run
   before staging/commit and again immediately before the push, the exact-tree

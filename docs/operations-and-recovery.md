@@ -18,26 +18,55 @@ de-duplicated, and bounded to 3 lines/140 characters. Truncated streams still
 report background totals with a `truncated` marker. JSON output remains the
 lossless event stream for integrations.
 
-Ralphie adapts its progress renderer to its environment:
+Ralphie adapts its progress renderer to its environment. `--output default`
+resolves to `interactive` only when stdin and stderr are both TTYs and `CI`
+is neither `"true"` nor `"1"` (rechecked against `stderr.isTTY`); otherwise
+it uses append-only `plain` output. The locked interactive layout strategy is
+`durable-transcript-breadcrumbs` (`INTERACTIVE_FOOTER_LAYOUT_STRATEGY`, with
+`INTERACTIVE_FOOTER_USES_SCROLL_REGION=false` and
+`INTERACTIVE_FOOTER_USES_RESERVED_ROW=false`): the status is an in-place
+replaceable region below streamed content, never a reserved bottom row or
+DECSTBM scroll region. Reserved-row/scroll-region cursor manipulation is
+disabled — the controller never emits DECSTBM (`...r`), absolute cursor
+addressing (CUP `H`/`f`), alternate-screen, or save/restore sequences; only
+in-place line erase (`\r\x1b[2K`) and single-row step-up (`\x1b[1A`) plus SGR
+color repaint the region, with strict clear-before-draw on every replacement.
+No reserved-row or scroll-region strategy is tested or published.
 
 - interactive terminals receive the streamed OpenCode transcript plus one replaceable
   interactive region: the sticky stage/status line and the bounded activity
   rows run together in a single region of at most three physical terminal rows
   (the cap is measured in rows actually painted, never newline counts), each
-  row is clipped before it can wrap, and replacements repaint the region in
+  row is clipped before it can wrap at the width sampled for its own repaint,
+  and replacements repaint the region in
   place — intermediate activity, long commands, and deep paths never spill
-  into scrollback or onto extra rows;
+  into scrollback or onto extra rows. Transcript token deltas stream
+  immediately without waiting for the footer scheduler, which coalesces
+  footer-only repaints at roughly 100–125 ms (clamped, default 100 ms).
+  Repaints defer while a transcript fragment is open mid-line or a control
+  sequence is incomplete, durable progress lines wait for a safe line boundary,
+  and resize clears and repaints at the new width only at a safe boundary. On
+  completion, interruption (SIGINT/Ctrl-C), failure, or disposal the live
+  region is erased in place, the cursor settles on a fresh line below durable
+  content, the resize subscription and refresh timer are released, and no
+  further bytes are emitted; no live-only row (`◐`, `›`, started progress,
+  activity) survives on screen or scrollback;
 - each tool completion and each failure surfaces one concise summary line
   (`✓ <tool> done`, or a single sanitized, character-bounded failure line with
   enough error detail to act on) instead of streamed multi-line output;
 - CI and redirected output are the deterministic noninteractive fallback:
-  durable, append-only lines with neither ANSI cursor controls nor
-  carriage-return bytes;
-- `--output verbose` adds operational details without expanding the
+  durable, append-only lines, byte-identical across identical runs, with
+  neither ANSI cursor controls (`ESC`) nor
+  carriage-return bytes and no footer/status residue (no `◐`, no
+  `\r\x1b[2K`); `stripTerminalControls` is an identity no-op on these streams;
+- `--output verbose` keeps the same mode selection and adds operational details
+  (the structured details payload on durable rows) without expanding the
   interactive region beyond its three-row cap;
 - `--output json` writes progress and `opencode_event` objects one per line to
-  stdout; and
-- `--output quiet` suppresses routine progress but retains failures,
+  stdout with stderr empty: every non-empty line parses as one complete JSON
+  record, human headers/footers/glyphs/breadcrumbs never appear, and values
+  are preserved as supplied; and
+- `--output quiet` suppresses routine progress and transcript rows but retains failures,
   needs-attention decisions, and handled stops.
 
 JSON events use a stable operational vocabulary and include `runId`,
