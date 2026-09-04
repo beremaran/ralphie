@@ -127,6 +127,8 @@ export type PullRequestReviewAttemptResult = {
     /** The authoritative snapshot returned by the final PR reread. */
     readonly snapshot: PullRequestSnapshot;
     readonly decision: PullRequestReviewAttempt["decision"];
+    /** Exact diff used for this attempt; useful to ground a subsequent fix. */
+    readonly committedDiff: string;
     /** True only for a valid approved decision with no blocking finding. */
     readonly approved: boolean;
     readonly needsAttention?: NeedsAttentionRequest;
@@ -310,6 +312,7 @@ export const makePullRequestReviewAttemptService = (
             attempt: reviewAttempt,
             snapshot: authoritativeSnapshot,
             decision: result.output,
+            committedDiff,
             approved,
             ...(result.needsAttention === undefined
                 ? {}

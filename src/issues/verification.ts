@@ -20,6 +20,43 @@ const bounded = (value: string): string =>
         ? value
         : `${value.slice(0, OUTPUT_LIMIT)}\n...[verification output truncated]...`;
 
+const assertTreeUnchanged = async (
+    stagedTreeSha: (
+        repositoryPath: string,
+        signal?: AbortSignal,
+    ) => Promise<string>,
+    repositoryPath: string,
+    expectedTree: string,
+    signal?: AbortSignal,
+): Promise<void> => {
+    const after = await stagedTreeSha(repositoryPath, signal);
+    if (after.toLowerCase() !== expectedTree.toLowerCase()) {
+        throw new RalphieError({
+            message:
+                "Verification changed the staged tree; refusing to continue.",
+        });
+    }
+};
+
+const failVerificationWithoutTreeDrift = async (
+    stagedTreeSha: (
+        repositoryPath: string,
+        signal?: AbortSignal,
+    ) => Promise<string>,
+    repositoryPath: string,
+    expectedTree: string,
+    evidence: VerificationEvidence,
+    signal?: AbortSignal,
+): Promise<never> => {
+    await assertTreeUnchanged(
+        stagedTreeSha,
+        repositoryPath,
+        expectedTree,
+        signal,
+    );
+    throw new VerificationCommandError(evidence);
+};
+
 export const verificationCommandResultSchema = z.object({
     command: z.string().min(1),
     exitCode: z.number().int(),
@@ -58,8 +95,12 @@ export type IssueVerificationService = {
     readonly verify: (
         repositoryPath: string,
         commands: ReadonlyArray<string>,
+        signal?: AbortSignal,
     ) => Promise<VerificationEvidence>;
-    readonly stagedTreeSha: (repositoryPath: string) => Promise<string>;
+    readonly stagedTreeSha: (
+        repositoryPath: string,
+        signal?: AbortSignal,
+    ) => Promise<string>;
 };
 
 export const makeIssueVerificationService = (
@@ -68,11 +109,16 @@ export const makeIssueVerificationService = (
     const resolveCommands = async (
         repositoryPath: string,
         commands: ReadonlyArray<string>,
+        signal?: AbortSignal,
     ): Promise<ReadonlyArray<string>> => {
+        signal?.throwIfAborted();
         if (commands.length > 0) return commands;
         try {
             const manifest = JSON.parse(
-                await readFile(join(repositoryPath, "package.json"), "utf8"),
+                await readFile(join(repositoryPath, "package.json"), {
+                    encoding: "utf8",
+                    ...(signal === undefined ? {} : { signal }),
+                }),
             ) as { readonly scripts?: { readonly check?: unknown } };
             if (typeof manifest.scripts?.check === "string") {
                 return ["bun run check"];
@@ -85,9 +131,13 @@ export const makeIssueVerificationService = (
                 "No deterministic verification command is configured or discoverable. Supply --verify-command.",
         });
     };
-    const stagedTreeSha = async (repositoryPath: string): Promise<string> => {
+    const stagedTreeSha = async (
+        repositoryPath: string,
+        signal?: AbortSignal,
+    ): Promise<string> => {
         const result = await runner.run("git", ["write-tree"], {
             cwd: repositoryPath,
+            ...(signal === undefined ? {} : { signal }),
         });
         if (
             result.exitCode !== 0 ||
@@ -102,18 +152,21 @@ export const makeIssueVerificationService = (
 
     return {
         stagedTreeSha,
-        verify: async (repositoryPath, commands) => {
+        verify: async (repositoryPath, commands, signal) => {
             const resolvedCommands = await resolveCommands(
                 repositoryPath,
                 commands,
+                signal,
             );
-            const tree = await stagedTreeSha(repositoryPath);
+            const tree = await stagedTreeSha(repositoryPath, signal);
             const results = [];
             for (const command of resolvedCommands) {
+                signal?.throwIfAborted();
                 const result = await runner.run("/bin/sh", ["-c", command], {
                     cwd: repositoryPath,
                     trimStdout: false,
                     timeoutMs: VERIFICATION_COMMAND_TIMEOUT_MS,
+                    ...(signal === undefined ? {} : { signal }),
                 });
                 const evidence = {
                     command,
@@ -123,26 +176,21 @@ export const makeIssueVerificationService = (
                 };
                 results.push(evidence);
                 if (result.exitCode !== 0) {
-                    const after = await stagedTreeSha(repositoryPath);
-                    if (after.toLowerCase() !== tree.toLowerCase()) {
-                        throw new RalphieError({
-                            message:
-                                "Verification changed the staged tree; refusing to continue.",
-                        });
-                    }
-                    throw new VerificationCommandError({
-                        stagedTreeSha: tree,
-                        commands: results,
-                    });
+                    await failVerificationWithoutTreeDrift(
+                        stagedTreeSha,
+                        repositoryPath,
+                        tree,
+                        { stagedTreeSha: tree, commands: results },
+                        signal,
+                    );
                 }
             }
-            const after = await stagedTreeSha(repositoryPath);
-            if (after.toLowerCase() !== tree.toLowerCase()) {
-                throw new RalphieError({
-                    message:
-                        "Verification changed the staged tree; refusing to continue.",
-                });
-            }
+            await assertTreeUnchanged(
+                stagedTreeSha,
+                repositoryPath,
+                tree,
+                signal,
+            );
             return { stagedTreeSha: tree, commands: results };
         },
     };

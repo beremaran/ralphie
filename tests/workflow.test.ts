@@ -534,6 +534,7 @@ const testRuntime = (
         }),
         githubPullRequests: pullRequests,
         pullRequestReviewAttempt: {} as never,
+        pullRequestReviewCoordinator: {} as never,
         githubNeedsAttentionNotification:
             options.needsAttentionNotification ?? {
                 notify: async () => {

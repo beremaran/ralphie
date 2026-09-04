@@ -63,6 +63,10 @@ import {
     type PullRequestReviewAttemptService,
 } from "./issues/pull-request-review.ts";
 import {
+    makePullRequestReviewCoordinatorService,
+    type PullRequestReviewCoordinatorService,
+} from "./issues/pull-request-review-coordinator.ts";
+import {
     makePipelineSnapshotCollectorService,
     type PipelineSnapshotCollectorService,
 } from "./github/pipeline-snapshot-collector.ts";
@@ -142,6 +146,8 @@ export type RalphieRuntime = {
     readonly githubPullRequests: GitHubPullRequestService;
     /** One immutable, fresh-session PR review attempt. */
     readonly pullRequestReviewAttempt: PullRequestReviewAttemptService;
+    /** Shared-budget post-creation PR review/revision coordinator. */
+    readonly pullRequestReviewCoordinator: PullRequestReviewCoordinatorService;
     /** Publishes structured needs-attention outcomes outside issue execution. */
     readonly githubNeedsAttentionNotification: GitHubNeedsAttentionNotificationService;
     readonly gitRepository: GitRepositoryService;
@@ -232,6 +238,15 @@ export const makeLiveRuntime = ({
     );
     const needsAttentionRouter = makeNeedsAttentionRouterService(issueRecovery);
     const issueVerification = makeIssueVerificationService(commandRunner);
+    const pullRequestReviewCoordinator =
+        makePullRequestReviewCoordinatorService({
+            pullRequests: githubPullRequests,
+            reviewAttempt: pullRequestReviewAttempt,
+            issueOperations: gitIssueOperations,
+            verification: issueVerification,
+            revisionDelivery: gitRevisionDelivery,
+            commandRunner,
+        });
     const complexityAssessment = makeComplexityAssessmentService(progress);
     const groundingAssessment = makeGroundingAssessmentService(progress);
     const resolutionVerification = makeResolutionVerificationService(progress);
@@ -284,6 +299,7 @@ export const makeLiveRuntime = ({
         parentCompletion,
         githubPullRequests,
         pullRequestReviewAttempt,
+        pullRequestReviewCoordinator,
         githubNeedsAttentionNotification,
         gitRepository,
         gitRepositoryInvariant,
