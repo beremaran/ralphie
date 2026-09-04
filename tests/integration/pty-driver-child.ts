@@ -53,7 +53,10 @@ import {
     type ProgressCoordinator,
     type ProgressCoordinatorOptions,
 } from "../../src/progress/coordinator.ts";
-import type { ProgressUpdate } from "../../src/progress/progress.ts";
+import type {
+    ProgressIssue,
+    ProgressUpdate,
+} from "../../src/progress/progress.ts";
 import type { TerminalOutputController } from "../../src/progress/terminal-controller.ts";
 import type { RalphieRuntime } from "../../src/runtime.ts";
 import type { WorkflowOptions } from "../../src/workflow.ts";
@@ -174,6 +177,12 @@ type EventLogEntry =
           readonly stage: string;
           readonly status: string;
           readonly message: string;
+          readonly repository?: string;
+          readonly issue?: ProgressIssue;
+          readonly current?: number;
+          readonly total?: number;
+          readonly attempt?: number;
+          readonly maxAttempts?: number;
       }
     | { readonly kind: "agent"; readonly type: string }
     | { readonly kind: "marker"; readonly name: string }
@@ -305,6 +314,75 @@ export const makeScenarioCoordinator =
     (options) =>
         base({ ...options, renderedLineThreshold: threshold });
 
+/**
+ * The smoke workflow's deterministic progress emission, derived entirely
+ * from the parsed scenario options so unit tests and the real PTY fixture
+ * agree on every payload.
+ *
+ * The first three updates open the run with a repository scope, an issue
+ * carrying `[current/total]`, and a review `(attempt/maxAttempts)`; the
+ * last is the nested leaf (`implementation/started`) that stays current
+ * while the agent stream is open at resize time. The final three settle
+ * implementation, then grounding, then verification with the long durable
+ * failure message. Every update carries the same context fields so the
+ * display reducer keeps repository, issue, and review attempt stable for
+ * the single issue the fixture runs (one issue throughout).
+ */
+export const scenarioProgressUpdates = (
+    options: PtyScenarioOptions,
+): readonly ProgressUpdate[] => {
+    const issue = {
+        number: options.issueNumber,
+        title: "PTY scenario issue",
+    } as const;
+    const context = {
+        repository: options.repository,
+        issue,
+        current: options.issueCurrent,
+        total: options.issueTotal,
+        attempt: options.attempt,
+        maxAttempts: options.maxAttempts,
+    } as const;
+    return [
+        {
+            stage: "run",
+            status: "info",
+            message: "PTY driver run started",
+            ...context,
+        },
+        {
+            stage: "grounding",
+            status: "started",
+            message: "Examining the PTY driver premise",
+            ...context,
+        },
+        {
+            stage: "implementation",
+            status: "started",
+            message: "Implementing the PTY driver",
+            ...context,
+        },
+        {
+            stage: "implementation",
+            status: "succeeded",
+            message: "PTY driver implemented",
+            ...context,
+        },
+        {
+            stage: "grounding",
+            status: "succeeded",
+            message: "PTY driver premise validated",
+            ...context,
+        },
+        {
+            stage: "verification",
+            status: "failed",
+            message: LONG_FAILURE_MESSAGE,
+            ...context,
+        },
+    ] as const satisfies ReadonlyArray<ProgressUpdate>;
+};
+
 export const runPtyDriverChild = async (
     workspace: string,
     scenario: ChildScenario = "smoke",
@@ -435,32 +513,12 @@ export const runPtyDriverChild = async (
     ): Promise<never> => {
         const listener = agentListener as AgentEventListener;
         const { progress } = smokeRuntime;
+        const scenarioUpdates = scenarioProgressUpdates(scenarioOptions);
 
-        await progress.emit({
-            stage: "run",
-            status: "info",
-            message: "PTY driver run started",
-            details: { workspace },
-        });
-        log({
-            kind: "progress",
-            stage: "run",
-            status: "info",
-            message: "PTY driver run started",
-        });
-        // Nested progress updates: implementation starts beneath grounding.
-        for (const update of [
-            {
-                stage: "grounding",
-                status: "started",
-                message: "Examining the PTY driver premise",
-            },
-            {
-                stage: "implementation",
-                status: "started",
-                message: "Implementing the PTY driver",
-            },
-        ] as const) {
+        // Nested progress updates: run opens, then implementation starts
+        // beneath grounding. The leaf stays current while the agent stream
+        // is open at resize time; the settlement sequence runs later.
+        for (const update of scenarioUpdates.slice(0, 3)) {
             log({ kind: "progress", ...update });
             await progress.emit({ ...update });
         }
@@ -542,23 +600,7 @@ export const runPtyDriverChild = async (
         listener(asEvent({ type: "agent_end", willRetry: false }), context);
         log({ kind: "agent", type: "agent_end" });
 
-        for (const update of [
-            {
-                stage: "implementation",
-                status: "succeeded",
-                message: "PTY driver implemented",
-            },
-            {
-                stage: "grounding",
-                status: "succeeded",
-                message: "PTY driver premise validated",
-            },
-            {
-                stage: "verification",
-                status: "failed",
-                message: LONG_FAILURE_MESSAGE,
-            },
-        ] as const) {
+        for (const update of scenarioUpdates.slice(3)) {
             log({ kind: "progress", ...update });
             await progress.emit({ ...update });
         }

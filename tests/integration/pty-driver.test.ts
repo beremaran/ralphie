@@ -139,6 +139,12 @@ describe("PTY command driver", () => {
                         kind: "progress",
                         stage: "implementation",
                         status: "started",
+                        repository: "owner/repository",
+                        issue: { number: 423, title: "PTY scenario issue" },
+                        current: 1,
+                        total: 1,
+                        attempt: 1,
+                        maxAttempts: 3,
                     }),
                     expect.objectContaining({
                         kind: "progress",
