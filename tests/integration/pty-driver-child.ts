@@ -572,8 +572,9 @@ export const runPtyDriverChild = async (
     // later scenario fixtures can assert determinism and the effective
     // rendered-line cadence against exactly what the child received.
     log({ kind: "config", options: scenarioOptions });
+    const markersOnPty = process.env.RALPHIE_PTY_MARKERS !== "event-log";
     const emitMarker = (text: string): void => {
-        process.stdout.write(`${text}\n`);
+        if (markersOnPty) process.stdout.write(`${text}\n`);
     };
 
     const context: AgentEventContext = {
@@ -626,6 +627,13 @@ export const runPtyDriverChild = async (
             if (resizeCount >= 2) release();
         });
         return completed;
+    };
+
+    const waitForFinalizationRelease = (): Promise<void> => {
+        if (markersOnPty) return Promise.resolve();
+        return new Promise<void>((resolve) => {
+            process.once("SIGUSR1", () => resolve());
+        });
     };
 
     const openAgentStream = async (
@@ -759,12 +767,18 @@ export const runPtyDriverChild = async (
                 await progress.emit({ ...update });
             }
             emitMarker(DONE_MARKER);
+            log({ kind: "marker", name: DONE_MARKER });
             emitMarker(SCENARIO_DONE_MARKER);
+            log({ kind: "marker", name: SCENARIO_DONE_MARKER });
             log({ kind: "done" });
         };
 
+        const finalizationRelease = waitForFinalizationRelease();
         await waitForDriverResizes();
+        await finalizationRelease;
+        const postFinalizationRelease = waitForFinalizationRelease();
         await finalizeStream();
+        await postFinalizationRelease;
 
         return undefined as never;
     };

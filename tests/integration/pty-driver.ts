@@ -228,6 +228,65 @@ const csiParams = (parameters: string, index: number): number => {
     return Number.isFinite(value) && value > 0 ? value : 1;
 };
 
+type PtyRow = {
+    cells: string[];
+    softWrap: boolean;
+};
+
+const blankPtyRow = (width: number): PtyRow => ({
+    cells: Array.from({ length: width }, () => ""),
+    softWrap: false,
+});
+
+const ptyRowText = (row: PtyRow): string => row.cells.join("").trimEnd();
+
+const ptyRowFromText = (
+    text: string,
+    width: number,
+    softWrap: boolean,
+): PtyRow => {
+    const row = blankPtyRow(width);
+    let column = 0;
+    const segmenter = new Intl.Segmenter(undefined, {
+        granularity: "grapheme",
+    });
+    for (const { segment } of segmenter.segment(text)) {
+        const segmentWidth = charWidth(segment);
+        if (column >= width || column + segmentWidth > width) break;
+        row.cells[column] = segment;
+        column += segmentWidth;
+    }
+    row.softWrap = softWrap;
+    return row;
+};
+
+const reflowText = (
+    text: string,
+    width: number,
+    hardEnd: boolean,
+): readonly PtyRow[] => {
+    const chunks: string[] = [];
+    let chunk = "";
+    let used = 0;
+    const segmenter = new Intl.Segmenter(undefined, {
+        granularity: "grapheme",
+    });
+    for (const { segment } of segmenter.segment(text)) {
+        const segmentWidth = charWidth(segment);
+        if (chunk !== "" && used + segmentWidth > width) {
+            chunks.push(chunk);
+            chunk = "";
+            used = 0;
+        }
+        chunk += segment;
+        used += segmentWidth;
+    }
+    if (chunk !== "" || chunks.length === 0) chunks.push(chunk);
+    return chunks.map((value, index) =>
+        ptyRowFromText(value, width, index < chunks.length - 1 || !hardEnd),
+    );
+};
+
 /**
  * Minimal terminal emulator for final-screen inspection.
  *
@@ -243,14 +302,14 @@ export class PtyScreen {
     private height: number;
     private cursorRow = 0;
     private cursorCol = 0;
-    private rows: string[][] = [];
-    private history: string[] = [];
+    private rows: PtyRow[] = [];
+    private history: PtyRow[] = [];
 
     constructor(width: number, height: number) {
         this.width = Math.max(1, Math.floor(width));
         this.height = Math.max(1, Math.floor(height));
         this.rows = Array.from({ length: this.height }, () =>
-            Array.from({ length: this.width }, () => ""),
+            blankPtyRow(this.width),
         );
     }
 
@@ -261,12 +320,14 @@ export class PtyScreen {
     /** Scroll one line: push the top row into history and grow at the bottom. */
     private readonly scroll = (): void => {
         const top = this.rows.shift();
-        if (top !== undefined) this.history.push(top.join("").trimEnd());
-        this.rows.push(Array.from({ length: this.width }, () => ""));
+        if (top !== undefined) this.history.push(top);
+        this.rows.push(blankPtyRow(this.width));
         this.cursorRow = this.height - 1;
     };
 
-    private readonly lineFeed = (): void => {
+    private readonly lineFeed = (softWrap = false): void => {
+        const current = this.rows[this.cursorRow];
+        if (current !== undefined) current.softWrap = softWrap;
         if (this.cursorRow >= this.height - 1) {
             this.scroll();
         } else {
@@ -284,7 +345,8 @@ export class PtyScreen {
         from: number,
         to: number,
     ): void => {
-        const cells = this.rows[row] as string[];
+        const cells = this.rows[row]?.cells;
+        if (cells === undefined) return;
         for (let column = from; column < to; column += 1) {
             cells[column] = "";
         }
@@ -292,7 +354,7 @@ export class PtyScreen {
 
     private readonly replaceRows = (): void => {
         this.rows = Array.from({ length: this.height }, () =>
-            Array.from({ length: this.width }, () => ""),
+            blankPtyRow(this.width),
         );
     };
 
@@ -300,6 +362,10 @@ export class PtyScreen {
         if (mode === 1)
             this.clearRowRange(this.cursorRow, 0, this.cursorCol + 1);
         else this.clearRowRange(this.cursorRow, this.cursorCol, this.width);
+        if (mode === 2 || (mode === 1 && this.cursorCol >= this.width - 1)) {
+            const row = this.rows[this.cursorRow];
+            if (row !== undefined) row.softWrap = false;
+        }
     };
 
     private readonly eraseInDisplay = (mode: number): void => {
@@ -317,9 +383,10 @@ export class PtyScreen {
 
     private readonly putCell = (character: string): void => {
         if (this.cursorCol >= this.width) {
-            this.lineFeed();
+            this.lineFeed(true);
         }
-        const cells = this.rows[this.cursorRow] as string[];
+        const cells = this.rows[this.cursorRow]?.cells;
+        if (cells === undefined) return;
         cells[this.cursorCol] = character;
         const width = charWidth(character);
         this.cursorCol = Math.min(this.width, this.cursorCol + width);
@@ -448,7 +515,7 @@ export class PtyScreen {
         if (this.cursorRow === 0) {
             const bottom = this.rows.pop();
             if (bottom === undefined) return;
-            this.rows.unshift(Array.from({ length: this.width }, () => ""));
+            this.rows.unshift(blankPtyRow(this.width));
             this.history.pop();
             return;
         }
@@ -510,10 +577,12 @@ export class PtyScreen {
         }
         if (code <= 0x1f || code === 0x7f) return index + 1;
 
-        const character = text[index] as string;
+        const codePoint = text.codePointAt(index);
+        if (codePoint === undefined) return index + 1;
+        const character = String.fromCodePoint(codePoint);
         if (charWidth(character) === 0) return index + 1;
         this.putCell(character);
-        return index + 1;
+        return index + character.length;
     };
 
     /** Feed raw PTY bytes exactly as a terminal would render them. */
@@ -524,27 +593,67 @@ export class PtyScreen {
         }
     };
 
-    /** Re-model the surface at a new size, keeping everything scrolled away. */
+    /** Reflow the buffered terminal surface at a new size without scrolling it. */
     readonly resize = (columns: number, rows: number): void => {
-        for (const row of this.rows) {
-            const line = row.join("").trimEnd();
-            if (line !== "") this.history.push(line);
+        const nextWidth = Math.max(1, Math.floor(columns));
+        const nextHeight = Math.max(1, Math.floor(rows));
+        const buffered = [...this.history, ...this.rows];
+        const cursorBufferRow = this.history.length + this.cursorRow;
+        const reflowed: PtyRow[] = [];
+        let cursorTarget = 0;
+        let logicalText = "";
+        let logicalSourceStart = 0;
+        const flushLogicalLine = (
+            hardEnd: boolean,
+            logicalSourceEnd: number,
+        ): void => {
+            const outputStart = reflowed.length;
+            const lineRows = reflowText(logicalText, nextWidth, hardEnd);
+            reflowed.push(...lineRows);
+            if (
+                cursorBufferRow >= logicalSourceStart &&
+                cursorBufferRow < logicalSourceEnd
+            ) {
+                cursorTarget = outputStart + lineRows.length - 1;
+            }
+            logicalText = "";
+        };
+        for (const [index, row] of buffered.entries()) {
+            logicalText += ptyRowText(row);
+            if (!row.softWrap) {
+                flushLogicalLine(true, index + 1);
+                logicalSourceStart = index + 1;
+            }
         }
-        this.width = Math.max(1, Math.floor(columns));
-        this.height = Math.max(1, Math.floor(rows));
-        this.rows = Array.from({ length: this.height }, () =>
-            Array.from({ length: this.width }, () => ""),
+        if (logicalText !== "") {
+            flushLogicalLine(false, buffered.length);
+        }
+
+        const desiredCursorRow = Math.min(this.cursorRow, nextHeight - 1);
+        const maxStart = Math.max(0, reflowed.length - nextHeight);
+        const start = Math.max(
+            0,
+            Math.min(maxStart, cursorTarget - desiredCursorRow),
         );
-        this.cursorRow = 0;
+        this.width = nextWidth;
+        this.height = nextHeight;
+        this.history = reflowed.slice(0, start);
+        this.rows = reflowed.slice(start, start + nextHeight);
+        while (this.rows.length < nextHeight) {
+            this.rows.push(blankPtyRow(nextWidth));
+        }
+        this.cursorRow = Math.max(
+            0,
+            Math.min(nextHeight - 1, cursorTarget - start),
+        );
         this.cursorCol = 0;
     };
 
     /** The currently visible screen rows, trailing whitespace trimmed. */
-    readonly screen = (): readonly string[] =>
-        this.rows.map((row) => row.join("").trimEnd());
+    readonly screen = (): readonly string[] => this.rows.map(ptyRowText);
 
     /** Rows that scrolled past the bottom of the visible screen. */
-    readonly scrollback = (): readonly string[] => [...this.history];
+    readonly scrollback = (): readonly string[] => this.history.map(ptyRowText);
 }
 
 type StdinSink = {

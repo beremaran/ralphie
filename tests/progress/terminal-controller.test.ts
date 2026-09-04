@@ -145,13 +145,13 @@ describe("terminal output controller region", () => {
         activity = ["run bash"];
         controller.invalidate();
         settle();
-        expect(output()).toBe(`A${CLEAR}A\nrun bash`);
+        expect(output()).toBe(`A${CLEAR}run bash\nA`);
 
         activity = ["run read"];
         controller.invalidate();
         settle();
         expect(output()).toBe(
-            `A${CLEAR}A\nrun bash${CLEAR}${UP}${CLEAR}A\nrun read`,
+            `A${CLEAR}run bash\nA${CLEAR}${UP}${CLEAR}run read\nA`,
         );
     });
 
@@ -162,13 +162,13 @@ describe("terminal output controller region", () => {
         });
         setFooter("stage");
         settle();
-        expect(output()).toBe("stage\nbash\nread");
+        expect(output()).toBe("bash\nread\nstage");
 
         activity = ["write", "grep"];
         controller.invalidate();
         settle();
         expect(output()).toBe(
-            `stage\nbash\nread${CLEAR}${UP}${CLEAR}${UP}${CLEAR}stage\nwrite\ngrep`,
+            `bash\nread\nstage${CLEAR}${UP}${CLEAR}${UP}${CLEAR}write\ngrep\nstage`,
         );
     });
 
@@ -179,7 +179,7 @@ describe("terminal output controller region", () => {
         });
         setFooter("status");
         settle();
-        expect(output()).toBe("status\na\nb");
+        expect(output()).toBe("a\nb\nstatus");
         expect(output()).not.toContain("c");
         expect(INTERACTIVE_REGION_MAX_ROWS).toBe(3);
     });
@@ -274,12 +274,12 @@ describe("terminal output controller region", () => {
         });
         setFooter("S");
         settle();
-        expect(output()).toBe("S\na\nb");
+        expect(output()).toBe("a\nb\nS");
 
         activity = [];
         controller.invalidate();
         settle();
-        expect(output()).toBe(`S\na\nb${CLEAR}${UP}${CLEAR}${UP}${CLEAR}S`);
+        expect(output()).toBe(`a\nb\nS${CLEAR}${UP}${CLEAR}${UP}${CLEAR}S`);
     });
 
     test("replaces a failed row in place when the operation settles", () => {
@@ -289,13 +289,13 @@ describe("terminal output controller region", () => {
         });
         setFooter("S");
         settle();
-        expect(output()).toBe("S\n✗ failed op");
+        expect(output()).toBe("✗ failed op\nS");
 
         activity = ["✓ settled op"];
         controller.invalidate();
         settle();
         expect(output()).toBe(
-            `S\n✗ failed op${CLEAR}${UP}${CLEAR}S\n✓ settled op`,
+            `✗ failed op\nS${CLEAR}${UP}${CLEAR}✓ settled op\nS`,
         );
     });
 
@@ -344,11 +344,11 @@ describe("terminal output controller region", () => {
         });
         setFooter("stage");
         settle();
-        expect(output()).toBe("stage\nrun bash\nrun read");
+        expect(output()).toBe("run bash\nrun read\nstage");
         controller.writeTranscript("assistant text\n");
         expect(output()).toBe(
-            `stage\nrun bash\nrun read${CLEAR}${UP}${CLEAR}${UP}${CLEAR}` +
-                "assistant text\nstage\nrun bash\nrun read",
+            `run bash\nrun read\nstage${CLEAR}${UP}${CLEAR}${UP}${CLEAR}` +
+                "assistant text\nrun bash\nrun read\nstage",
         );
 
         controller.dispose();
@@ -356,8 +356,8 @@ describe("terminal output controller region", () => {
         // line, so no footer/status or activity fragment survives on the
         // final surface.
         expect(output()).toBe(
-            `stage\nrun bash\nrun read${CLEAR}${UP}${CLEAR}${UP}${CLEAR}` +
-                "assistant text\nstage\nrun bash\nrun read" +
+            `run bash\nrun read\nstage${CLEAR}${UP}${CLEAR}${UP}${CLEAR}` +
+                "assistant text\nrun bash\nrun read\nstage" +
                 `${CLEAR}${UP}${CLEAR}${UP}${CLEAR}\n[restore]`,
         );
         // Double disposal is harmless: a second dispose writes no bytes.

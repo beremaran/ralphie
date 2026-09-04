@@ -196,9 +196,10 @@ export const makeTerminalOutputController = ({
         rows: string[],
         source: readonly string[],
         columnWidth: number,
+        rowLimit = INTERACTIVE_REGION_MAX_ROWS,
     ): void => {
         for (const line of source) {
-            if (rows.length >= INTERACTIVE_REGION_MAX_ROWS) return;
+            if (rows.length >= rowLimit) return;
             const clipped = clipFooter(line, columnWidth);
             if (clipped !== "") rows.push(clipped);
         }
@@ -213,27 +214,54 @@ export const makeTerminalOutputController = ({
         const columnWidth = width();
         const rows: string[] = [];
         const statusRow = footerContent();
-        if (statusRow !== undefined && statusRow !== "") {
-            rows.push(clipFooter(statusRow, columnWidth));
-        }
         const activity = footer?.activityLines;
-        if (activity === undefined) return rows;
-        const activityRows = activity();
-        if (activityRows !== undefined) {
-            appendClippedRows(rows, activityRows, columnWidth);
+        const hasStatus = statusRow !== undefined && statusRow !== "";
+        if (activity !== undefined) {
+            const activityRows = activity();
+            if (activityRows !== undefined) {
+                // The status/footer row is the bottom row of the replaceable
+                // region. Reserve it before adding activity rows so a live
+                // activity update can never push the sticky footer below the
+                // terminal's last non-empty row.
+                appendClippedRows(
+                    rows,
+                    activityRows,
+                    columnWidth,
+                    hasStatus
+                        ? INTERACTIVE_REGION_MAX_ROWS - 1
+                        : INTERACTIVE_REGION_MAX_ROWS,
+                );
+            }
+        }
+        if (hasStatus) {
+            rows.push(clipFooter(statusRow, columnWidth));
         }
         return rows;
     };
 
     /**
      * Erase the visible region in place. The cursor rests on the last region
-     * row, so each row is cleared and the cursor stepped up to the previous
-     * row; afterwards the cursor sits on the cleared top region row just
-     * below the streamed content.
+     * row, so each physical row is cleared and the cursor stepped up to the
+     * previous row; a row painted at the old width may occupy several
+     * physical rows after a narrow resize, so the current width determines
+     * how many clear operations are required.
      */
     const clearRegion = (): void => {
         if (!regionShown) return;
-        const height = regionRows.length;
+        const sampledWidth = width();
+        const columnWidth =
+            Number.isFinite(sampledWidth) && sampledWidth > 0
+                ? Math.max(1, Math.floor(sampledWidth))
+                : 1;
+        const height = regionRows.reduce(
+            (total, row) =>
+                total +
+                Math.max(
+                    1,
+                    Math.ceil(Math.max(1, Bun.stringWidth(row)) / columnWidth),
+                ),
+            0,
+        );
         for (let index = 0; index < height; index += 1) {
             strategy.clearFooter();
             if (index < height - 1) strategy.write(CURSOR_UP);
