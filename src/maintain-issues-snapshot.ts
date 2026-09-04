@@ -694,6 +694,62 @@ export type MaintainableAvailabilityInput = {
     readonly detail?: unknown;
 };
 
+const availabilityKindFromInput = (
+    kind: unknown,
+): MaintainableAvailabilityKind => {
+    if (kind === "available" || kind === "unavailable" || kind === "partial") {
+        return kind;
+    }
+    if (kind === undefined || kind === null) {
+        return "available";
+    }
+    return "unavailable";
+};
+
+const availabilityReasonFromInput = (
+    reason: unknown,
+): MaintainableSkipReason | null => {
+    if (reason === null || reason === undefined) {
+        return null;
+    }
+    if (typeof reason === "string" && reason.length === 0) {
+        return null;
+    }
+    return normalizeMaintainableSkipReason(reason);
+};
+
+const availabilityDetailFromInput = (detail: unknown): string | null => {
+    if (typeof detail === "string") {
+        return detail;
+    }
+    if (detail === null || detail === undefined) {
+        return null;
+    }
+    return String(detail);
+};
+
+const reconcileAvailabilityKindReason = (
+    kind: MaintainableAvailabilityKind,
+    reason: MaintainableSkipReason | null,
+    detail: string | null,
+): MaintainableAvailability => {
+    if (kind === "available" && reason !== null) {
+        const reasonKey = typeof reason === "string" ? reason : "unavailable";
+        const nextKind =
+            reasonKey === "partial" || reasonKey === "locked"
+                ? "partial"
+                : "unavailable";
+        return Object.freeze({ kind: nextKind, reason, detail });
+    }
+    if (kind === "partial" && reason === null) {
+        return Object.freeze({ kind, reason: "partial", detail });
+    }
+    if (kind === "unavailable" && reason === null) {
+        return Object.freeze({ kind, reason: "unavailable", detail });
+    }
+    return Object.freeze({ kind, reason, detail });
+};
+
 export const normalizeMaintainableAvailability = (
     value: unknown,
 ): MaintainableAvailability => {
@@ -701,25 +757,10 @@ export const normalizeMaintainableAvailability = (
         return Object.freeze({ kind: "available", reason: null, detail: null });
     }
     const record = value as Record<string, unknown>;
-    const kind =
-        record.kind === "available" ||
-        record.kind === "unavailable" ||
-        record.kind === "partial"
-            ? record.kind
-            : "available";
-    const reason =
-        record.reason === null ||
-        record.reason === undefined ||
-        (typeof record.reason === "string" && record.reason.length === 0)
-            ? null
-            : normalizeMaintainableSkipReason(record.reason);
-    const detail =
-        typeof record.detail === "string"
-            ? record.detail
-            : record.detail === null || record.detail === undefined
-              ? null
-              : String(record.detail);
-    return Object.freeze({ kind, reason, detail });
+    const kind = availabilityKindFromInput(record.kind);
+    const reason = availabilityReasonFromInput(record.reason);
+    const detail = availabilityDetailFromInput(record.detail);
+    return reconcileAvailabilityKindReason(kind, reason, detail);
 };
 
 export const normalizeAvailability = normalizeMaintainableAvailability;
@@ -925,36 +966,228 @@ const copyComments = (value: unknown): ReadonlyArray<MaintainableComment> => {
     return Object.freeze(comments);
 };
 
-export const createMaintainableThread = (
-    input: MaintainableSelectedThreadInput = {},
-): MaintainableSelectedThread => {
-    const source = (input ?? {}) as Record<string, unknown>;
-    const comments = copyComments(source.comments);
-    const fetchedCount =
-        typeof (source.fetchedCount ?? source.fetched_count) === "number" &&
-        Number.isSafeInteger(source.fetchedCount ?? source.fetched_count)
-            ? ((source.fetchedCount ?? source.fetched_count) as number)
-            : comments.length;
+const threadTotalCount = (source: Record<string, unknown>): number | null => {
     const rawTotal = source.totalCount ?? source.total_count;
-    const totalCount =
-        typeof rawTotal === "number" && Number.isSafeInteger(rawTotal)
-            ? rawTotal
-            : null;
-    const complete =
-        typeof source.complete === "boolean" ? source.complete : false;
-    const availability = normalizeMaintainableAvailability(
+    if (
+        typeof rawTotal === "number" &&
+        Number.isSafeInteger(rawTotal) &&
+        rawTotal >= 0
+    ) {
+        return rawTotal;
+    }
+    return null;
+};
+
+const threadBaseAvailability = (
+    source: Record<string, unknown>,
+): MaintainableAvailability =>
+    normalizeMaintainableAvailability(
         source.availability ?? {
             kind: "available",
             reason: null,
             detail: null,
         },
     );
+
+const unavailableThreadState = (
+    availability: MaintainableAvailability,
+    fallback: string,
+): { complete: false; availability: MaintainableAvailability } => {
+    if (availability.kind === "available") {
+        return {
+            complete: false,
+            availability: Object.freeze({
+                kind: "unavailable",
+                reason: "unavailable",
+                detail: availability.detail ?? fallback,
+            }) as MaintainableAvailability,
+        };
+    }
+    return { complete: false, availability };
+};
+
+const truncatedThreadState = (
+    availability: MaintainableAvailability,
+    totalCount: number,
+    fetchedCount: number,
+): { complete: false; availability: MaintainableAvailability } => {
+    if (availability.kind === "available") {
+        return {
+            complete: false,
+            availability: Object.freeze({
+                kind: "partial",
+                reason: "partial",
+                detail:
+                    availability.detail ??
+                    `known total ${totalCount} exceeds fetched ${fetchedCount}`,
+            }) as MaintainableAvailability,
+        };
+    }
+    return { complete: false, availability };
+};
+
+const hasThreadCountContradiction = (
+    totalCount: number | null,
+    fetchedCount: number,
+): boolean => totalCount !== null && totalCount !== fetchedCount;
+
+const hasThreadAvailabilityContradiction = (
+    availability: MaintainableAvailability,
+): boolean => availability.kind !== "available" || availability.reason !== null;
+
+const hasThreadEvidenceGap = (
+    hasExplicitComments: boolean,
+    fetchedCount: number,
+    totalCount: number | null,
+): boolean => {
+    if (!hasExplicitComments) {
+        return true;
+    }
+    return fetchedCount === 0 && totalCount !== 0;
+};
+
+const forcedIncompleteThreadAvailability = (
+    availability: MaintainableAvailability,
+    totalCount: number | null,
+    fetchedCount: number,
+): MaintainableAvailability => {
+    if (totalCount !== null && totalCount > fetchedCount) {
+        return Object.freeze({
+            kind: "partial",
+            reason: "partial",
+            detail:
+                availability.detail ??
+                `known total ${totalCount} exceeds fetched ${fetchedCount}`,
+        }) as MaintainableAvailability;
+    }
+    return Object.freeze({
+        kind: "unavailable",
+        reason: "unavailable",
+        detail: availability.detail ?? "comment thread is incomplete",
+    }) as MaintainableAvailability;
+};
+
+const guardCompleteThreadState = (input: {
+    complete: boolean;
+    availability: MaintainableAvailability;
+    hasExplicitComments: boolean;
+    totalCount: number | null;
+    fetchedCount: number;
+}): { complete: boolean; availability: MaintainableAvailability } => {
+    if (!input.complete) {
+        return { complete: false, availability: input.availability };
+    }
+    const countContradicts = hasThreadCountContradiction(
+        input.totalCount,
+        input.fetchedCount,
+    );
+    const availabilityContradicts = hasThreadAvailabilityContradiction(
+        input.availability,
+    );
+    const evidenceMissing = hasThreadEvidenceGap(
+        input.hasExplicitComments,
+        input.fetchedCount,
+        input.totalCount,
+    );
+    const isConsistent =
+        !countContradicts && !availabilityContradicts && !evidenceMissing;
+    if (isConsistent) {
+        return { complete: true, availability: input.availability };
+    }
+    if (input.availability.kind !== "available") {
+        return { complete: false, availability: input.availability };
+    }
+    return {
+        complete: false,
+        availability: forcedIncompleteThreadAvailability(
+            input.availability,
+            input.totalCount,
+            input.fetchedCount,
+        ),
+    };
+};
+
+export const createMaintainableThread = (
+    input: MaintainableSelectedThreadInput = {},
+): MaintainableSelectedThread => {
+    const source = (input ?? {}) as Record<string, unknown>;
+    const hasExplicitComments = Array.isArray(source.comments);
+    const comments = copyComments(hasExplicitComments ? source.comments : []);
+    // fetchedCount is always derived from normalized comments so it stays
+    // consistent with the retained thread independently of later projection.
+    const fetchedCount = comments.length;
+    const totalCount = threadTotalCount(source);
+    const inputComplete = source.complete === true;
+    const baseAvailability = threadBaseAvailability(source);
+    if (!hasExplicitComments) {
+        // Omitted comments (or an omitted selected-thread input) means
+        // comments were not fetched: never invent a complete zero-comment
+        // thread.
+        const state = unavailableThreadState(
+            baseAvailability,
+            "comments were not fetched",
+        );
+        return Object.freeze({
+            comments,
+            fetchedCount,
+            totalCount,
+            ...state,
+        });
+    }
+    if (totalCount !== null && totalCount > fetchedCount) {
+        // A known total greater than the fetched count contradicts any
+        // explicit complete:true: fail closed to an incomplete thread.
+        const state = truncatedThreadState(
+            baseAvailability,
+            totalCount,
+            fetchedCount,
+        );
+        return Object.freeze({
+            comments,
+            fetchedCount,
+            totalCount,
+            ...state,
+        });
+    }
+    if (fetchedCount === 0 && totalCount !== 0) {
+        // An explicitly fetched empty collection is complete only with
+        // authoritative completion evidence such as a known total of zero.
+        const state = unavailableThreadState(
+            baseAvailability,
+            "comment thread was fetched but completeness is unknown",
+        );
+        return Object.freeze({
+            comments,
+            fetchedCount,
+            totalCount,
+            ...state,
+        });
+    }
+    if (
+        baseAvailability.kind !== "available" ||
+        baseAvailability.reason !== null
+    ) {
+        // Explicit unavailability contradicts any complete:true claim.
+        return Object.freeze({
+            comments,
+            fetchedCount,
+            totalCount,
+            complete: false,
+            availability: baseAvailability,
+        });
+    }
+    const guarded = guardCompleteThreadState({
+        complete: inputComplete,
+        availability: baseAvailability,
+        hasExplicitComments,
+        totalCount,
+        fetchedCount,
+    });
     return Object.freeze({
         comments,
         fetchedCount,
         totalCount,
-        complete,
-        availability,
+        ...guarded,
     });
 };
 
@@ -1071,6 +1304,81 @@ const resolveThreadInput = (
     return {};
 };
 
+const skipKindForReason = (
+    reason: MaintainableSkipReason,
+): MaintainableAvailabilityKind => {
+    const key = typeof reason === "string" ? reason : "unavailable";
+    return key === "partial" || key === "locked" ? "partial" : "unavailable";
+};
+
+const applySkipToAvailability = (
+    availability: MaintainableAvailability,
+    skip: MaintainableSkip,
+): MaintainableAvailability => {
+    if (availability.kind !== "available") {
+        return availability;
+    }
+    return Object.freeze({
+        kind: skipKindForReason(skip.reason),
+        reason: skip.reason,
+        detail: skip.detail ?? availability.detail,
+    }) as MaintainableAvailability;
+};
+
+const applySkipToThread = (
+    thread: MaintainableSelectedThread,
+    skip: MaintainableSkip,
+): MaintainableSelectedThread => {
+    if (thread.availability.kind === "available") {
+        return Object.freeze({
+            ...thread,
+            complete: false,
+            availability: Object.freeze({
+                kind: skipKindForReason(skip.reason),
+                reason: skip.reason,
+                detail: skip.detail ?? thread.availability.detail,
+            }),
+        }) as MaintainableSelectedThread;
+    }
+    if (thread.complete) {
+        return Object.freeze({
+            ...thread,
+            complete: false,
+        }) as MaintainableSelectedThread;
+    }
+    return thread;
+};
+
+const applyLockedToAvailability = (
+    availability: MaintainableAvailability,
+): MaintainableAvailability => {
+    if (availability.kind !== "available") {
+        return availability;
+    }
+    return Object.freeze({
+        kind: "partial",
+        reason: "locked",
+        detail: availability.detail ?? "issue is locked",
+    }) as MaintainableAvailability;
+};
+
+const applyLockedToThread = (
+    thread: MaintainableSelectedThread,
+): MaintainableSelectedThread => {
+    if (thread.availability.kind !== "available") {
+        return thread;
+    }
+    return Object.freeze({
+        ...thread,
+        complete: false,
+        availability: Object.freeze({
+            kind: "partial",
+            reason: "locked",
+            detail: thread.availability.detail ?? "issue is locked",
+        }),
+    }) as MaintainableSelectedThread;
+};
+
 export const createMaintainableIssue = (
     input: MaintainableIssueInput,
 ): MaintainableIssue => {
@@ -1092,16 +1400,24 @@ export const createMaintainableIssue = (
     const locked = source.locked === true;
     const createdAt = timestampOrEmpty(source.createdAt ?? source.created_at);
     const updatedAt = timestampOrEmpty(source.updatedAt ?? source.updated_at);
-    const selectedThread = createMaintainableThread(resolveThreadInput(source));
+    const skip = normalizeMaintainableSkip(source.skip ?? null);
+    let selectedThread = createMaintainableThread(resolveThreadInput(source));
     const marker = parseRalphieMarker(body);
-    const availability = normalizeMaintainableAvailability(
+    let availability = normalizeMaintainableAvailability(
         source.availability ?? {
             kind: "available",
             reason: null,
             detail: null,
         },
     );
-    const skip = normalizeMaintainableSkip(source.skip ?? null);
+    if (skip !== undefined) {
+        availability = applySkipToAvailability(availability, skip);
+        selectedThread = applySkipToThread(selectedThread, skip);
+    }
+    if (locked) {
+        availability = applyLockedToAvailability(availability);
+        selectedThread = applyLockedToThread(selectedThread);
+    }
     const issue: MaintainableIssue = {
         number,
         nodeId,

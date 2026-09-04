@@ -6,6 +6,7 @@ import {
     createMaintainableThread,
     isRalphieManaged,
     maintainMarker,
+    normalizeMaintainableAvailability,
     parseRalphieMarker,
 } from "../src/maintain-issues-snapshot.ts";
 
@@ -246,5 +247,332 @@ describe("maintain-issues-snapshot value boundary", () => {
             updatedAt: "2026-01-01T00:00:00.000Z",
         });
         expect(plainComment.isRalphieManaged).toBe(false);
+    });
+});
+
+describe("maintain-snapshot thread availability", () => {
+    const commentInput = (id: number, body: unknown = "body") => ({
+        id,
+        nodeId: `C${id}`,
+        url: `https://example.test/c/${id}`,
+        author: null,
+        authorAssociation: "NONE",
+        body,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    const baseIssueInput = () => ({
+        number: 12,
+        nodeId: "I_node",
+        title: "Issue title",
+        body: "Issue body",
+        url: "https://example.test/owner/repo/issues/12",
+        state: "open",
+        author: { login: "octocat", type: "User", nodeId: "U_node" },
+        authorAssociation: "MEMBER",
+        labels: [],
+        assignees: [],
+        milestone: null,
+        locked: false,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-02T00:00:00.000Z",
+    });
+
+    test("omitted thread input never invents a complete zero-comment thread", () => {
+        const omitted = createMaintainableThread({});
+        expect(omitted.comments).toHaveLength(0);
+        expect(omitted.fetchedCount).toBe(0);
+        expect(omitted.complete).toBe(false);
+        expect(["unavailable", "partial"]).toContain(omitted.availability.kind);
+        expect(omitted.availability.reason).not.toBeNull();
+
+        const omittedComments = createMaintainableThread({
+            totalCount: 0,
+            complete: false,
+        });
+        expect(omittedComments.complete).toBe(false);
+        expect(omittedComments.availability.kind).not.toBe("available");
+        expect(omittedComments.availability.reason).not.toBeNull();
+
+        const omittedIssue = createMaintainableIssue({
+            ...baseIssueInput(),
+        } as unknown as Parameters<typeof createMaintainableIssue>[0]);
+        expect(omittedIssue.selectedThread.comments).toHaveLength(0);
+        expect(omittedIssue.selectedThread.complete).toBe(false);
+        expect(omittedIssue.selectedThread.availability.kind).not.toBe(
+            "available",
+        );
+        expect(omittedIssue.selectedThread.availability.reason).not.toBeNull();
+    });
+
+    test("explicitly fetched zero comments are complete only with a known total of zero", () => {
+        const fetchedZero = createMaintainableThread({
+            comments: [],
+            totalCount: 0,
+            complete: true,
+            availability: { kind: "available", reason: null, detail: null },
+        });
+        expect(fetchedZero.comments).toHaveLength(0);
+        expect(fetchedZero.fetchedCount).toBe(0);
+        expect(fetchedZero.totalCount).toBe(0);
+        expect(fetchedZero.complete).toBe(true);
+        expect(fetchedZero.availability.kind).toBe("available");
+        expect(fetchedZero.availability.reason).toBeNull();
+
+        const fetchedZeroUnknown = createMaintainableThread({
+            comments: [],
+        });
+        expect(fetchedZeroUnknown.complete).toBe(false);
+        expect(fetchedZeroUnknown.availability.kind).not.toBe("available");
+        expect(fetchedZeroUnknown.availability.reason).not.toBeNull();
+    });
+
+    test("known total greater than fetched forces an incomplete partial thread", () => {
+        const thread = createMaintainableThread({
+            comments: [commentInput(1, "hello")],
+            fetchedCount: 99,
+            totalCount: 5,
+            complete: true,
+            availability: { kind: "available", reason: null, detail: null },
+        });
+        expect(thread.comments).toHaveLength(1);
+        expect(thread.comments[0]?.id).toBe(1);
+        expect(thread.fetchedCount).toBe(1);
+        expect(thread.totalCount).toBe(5);
+        expect(thread.complete).toBe(false);
+        expect(["partial", "unavailable"]).toContain(thread.availability.kind);
+        expect(thread.availability.reason).not.toBeNull();
+    });
+
+    test("skip metadata propagates so skipped records are never available", () => {
+        for (const reason of [
+            "transferred",
+            "deleted",
+            "inaccessible",
+        ] as const) {
+            const snapshot = createMaintainableIssue({
+                ...baseIssueInput(),
+                selectedThread: {
+                    comments: [commentInput(1, "hello")],
+                    totalCount: 1,
+                    complete: true,
+                    availability: {
+                        kind: "available",
+                        reason: null,
+                        detail: null,
+                    },
+                },
+                availability: {
+                    kind: "available",
+                    reason: null,
+                    detail: null,
+                },
+                skip: { reason, detail: `${reason} detail` },
+            } as unknown as Parameters<typeof createMaintainableIssue>[0]);
+            expect(snapshot.skip?.reason).toBe(reason);
+            expect(snapshot.availability.kind).toBe("unavailable");
+            expect(snapshot.availability.reason).toBe(reason);
+            expect(snapshot.selectedThread.availability.kind).toBe(
+                "unavailable",
+            );
+            expect(snapshot.selectedThread.availability.reason).toBe(reason);
+            expect(snapshot.selectedThread.complete).toBe(false);
+            expect(snapshot.selectedThread.comments).toHaveLength(1);
+        }
+    });
+
+    test("contradictory available state with blocking reasons fails closed", () => {
+        for (const reason of [
+            "inaccessible",
+            "deleted",
+            "transferred",
+            "null-author",
+            "unavailable",
+        ] as const) {
+            const availability = normalizeMaintainableAvailability({
+                kind: "available",
+                reason,
+                detail: null,
+            });
+            expect(availability.kind).toBe("unavailable");
+            expect(availability.reason).toBe(reason);
+        }
+        for (const reason of ["partial", "locked"] as const) {
+            const availability = normalizeMaintainableAvailability({
+                kind: "available",
+                reason,
+                detail: null,
+            });
+            expect(availability.kind).toBe("partial");
+            expect(availability.reason).toBe(reason);
+        }
+        const unknownKind = normalizeMaintainableAvailability({
+            kind: "future-kind",
+            reason: null,
+            detail: null,
+        });
+        expect(unknownKind.kind).toBe("unavailable");
+        expect(unknownKind.reason).not.toBeNull();
+
+        const partialWithoutReason = normalizeMaintainableAvailability({
+            kind: "partial",
+            reason: null,
+            detail: null,
+        });
+        expect(partialWithoutReason.reason).not.toBeNull();
+        const unavailableWithoutReason = normalizeMaintainableAvailability({
+            kind: "unavailable",
+            reason: null,
+            detail: null,
+        });
+        expect(unavailableWithoutReason.reason).not.toBeNull();
+
+        const contradictoryThread = createMaintainableThread({
+            comments: [commentInput(1, "hello")],
+            totalCount: 1,
+            complete: true,
+            availability: {
+                kind: "available",
+                reason: "deleted",
+                detail: null,
+            },
+        });
+        expect(contradictoryThread.complete).toBe(false);
+        expect(contradictoryThread.availability.kind).toBe("unavailable");
+    });
+
+    test("missing or null comment bodies stay null while empty strings stay empty", () => {
+        const missing = createMaintainableComment({
+            ...commentInput(1),
+            body: undefined,
+        } as unknown as Parameters<typeof createMaintainableComment>[0]);
+        expect(missing.body).toBeNull();
+        expect(missing.content).toBeNull();
+
+        const nil = createMaintainableComment(commentInput(2, null));
+        expect(nil.body).toBeNull();
+        expect(nil.content).toBeNull();
+
+        const empty = createMaintainableComment(commentInput(3, ""));
+        expect(empty.body).toBe("");
+        expect(empty.content).toBe("");
+    });
+
+    test("locked and partial records are preserved instead of dropped", () => {
+        const locked = createMaintainableIssue({
+            ...baseIssueInput(),
+            locked: true,
+            author: null,
+            selectedThread: {
+                comments: [commentInput(1, "first"), commentInput(2, "second")],
+                totalCount: 2,
+                complete: true,
+                availability: {
+                    kind: "available",
+                    reason: null,
+                    detail: null,
+                },
+            },
+            availability: { kind: "available", reason: null, detail: null },
+        } as unknown as Parameters<typeof createMaintainableIssue>[0]);
+        expect(locked.locked).toBe(true);
+        expect(locked.author).toBeNull();
+        expect(locked.selectedThread.comments).toHaveLength(2);
+        expect(locked.selectedThread.comments[0]?.id).toBe(1);
+        expect(locked.selectedThread.comments[1]?.id).toBe(2);
+        expect(locked.availability.kind).not.toBe("available");
+        expect(locked.selectedThread.availability.kind).not.toBe("available");
+        expect(locked.selectedThread.availability.reason).not.toBeNull();
+
+        const partial = createMaintainableIssue({
+            ...baseIssueInput(),
+            selectedThread: {
+                comments: [commentInput(7, "kept")],
+                totalCount: 3,
+                complete: false,
+                availability: {
+                    kind: "partial",
+                    reason: "partial",
+                    detail: "truncated",
+                },
+            },
+            availability: {
+                kind: "partial",
+                reason: "partial",
+                detail: "truncated",
+            },
+        } as unknown as Parameters<typeof createMaintainableIssue>[0]);
+        expect(partial.selectedThread.comments).toHaveLength(1);
+        expect(partial.selectedThread.comments[0]?.id).toBe(7);
+        expect(partial.selectedThread.complete).toBe(false);
+        expect(partial.selectedThread.availability.kind).toBe("partial");
+        expect(partial.availability.kind).toBe("partial");
+
+        const nullAuthorComment = createMaintainableComment(
+            commentInput(9, "ghost"),
+        );
+        expect(nullAuthorComment.author).toBeNull();
+        expect(nullAuthorComment.body).toBe("ghost");
+    });
+
+    test("complete fetched thread retains identity and order", () => {
+        const thread = createMaintainableThread({
+            comments: [
+                commentInput(30, "third"),
+                commentInput(10, "first"),
+                commentInput(20, "second"),
+            ],
+            totalCount: 3,
+            complete: true,
+            availability: { kind: "available", reason: null, detail: null },
+        });
+        expect(thread.comments.map((comment) => comment.id)).toEqual([
+            30, 10, 20,
+        ]);
+        expect(thread.comments.map((comment) => comment.body)).toEqual([
+            "third",
+            "first",
+            "second",
+        ]);
+        expect(thread.fetchedCount).toBe(3);
+        expect(thread.complete).toBe(true);
+        expect(thread.availability.kind).toBe("available");
+    });
+
+    test("unknown API values fail closed without throwing", () => {
+        const snapshot = createMaintainableIssue({
+            ...baseIssueInput(),
+            state: "future-state",
+            authorAssociation: "FUTURE_ROLE",
+            author: { login: "mystery", type: "FutureBot", nodeId: null },
+            availability: { kind: "future-kind", reason: null, detail: null },
+            skip: { reason: "future-skip", detail: null },
+            selectedThread: {
+                comments: [commentInput(1, "hello")],
+                totalCount: "many",
+                fetchedCount: "many",
+                complete: "yes",
+                availability: {
+                    kind: "future-kind",
+                    reason: "future-reason",
+                    detail: null,
+                },
+            },
+        } as unknown as Parameters<typeof createMaintainableIssue>[0]);
+        expect(snapshot.state).toEqual({
+            kind: "unknown",
+            value: "future-state",
+        });
+        expect(snapshot.availability.kind).not.toBe("available");
+        expect(snapshot.availability.reason).not.toBeNull();
+        expect(snapshot.selectedThread.complete).toBe(false);
+        expect(snapshot.selectedThread.availability.kind).not.toBe("available");
+        expect(snapshot.selectedThread.fetchedCount).toBe(1);
+        expect(snapshot.selectedThread.totalCount).toBeNull();
+        expect(snapshot.skip?.reason).toEqual({
+            kind: "unknown",
+            value: "future-skip",
+        });
     });
 });
