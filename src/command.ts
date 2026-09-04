@@ -44,6 +44,10 @@ import {
 } from "./maintain-issues.ts";
 import { BUILD_INFO } from "./build-info.ts";
 import { type RunState, RunStateStoreLive } from "./run/state.ts";
+import {
+    loadMaintenanceRunState,
+    type MaintenanceRunState,
+} from "./maintain-issues-state.ts";
 import { reconcileRunState } from "./run/reconciliation.ts";
 import { resolveWorkspacePath } from "./workspace/workspace.ts";
 import { RalphieError } from "./shared/error.ts";
@@ -88,6 +92,8 @@ type ParsedCli = {
     readonly help: boolean;
     readonly version: boolean;
     readonly options: Parameters<typeof resolveRalphieConfig>[0];
+    /** Undefined when --duplicate-action was not present on the command line. */
+    readonly explicitDuplicateAction?: DuplicateAction;
 };
 
 const asString = (
@@ -319,6 +325,10 @@ export const parseCliArgs = (args: ReadonlyArray<string>): ParsedCli => {
         help: asBoolean(values, "help"),
         version: asBoolean(values, "version"),
         options,
+        ...(values["duplicate-action"] === undefined ||
+        options.duplicateAction === undefined
+            ? {}
+            : { explicitDuplicateAction: options.duplicateAction }),
     };
 };
 
@@ -429,6 +439,8 @@ export type CommandFactories = {
     readonly runMaintenance?: typeof maintainIssues;
 };
 
+type CommandResumeState = RunState | MaintenanceRunState;
+
 export type CommandOutput = {
     readonly stdout: (text: string) => void;
     readonly stderr: (text: string) => void;
@@ -505,16 +517,18 @@ const loadResumeState = async (
 const eventLogPathFor = (
     config: ResolvedRalphieConfig,
     runId: string,
-): string =>
-    config.resume === undefined
-        ? join(
-              resolveWorkspacePath(config.workspace),
-              ".ralphie",
-              "runs",
-              runId,
-              "events.jsonl",
-          )
-        : join(dirname(config.resume), "events.jsonl");
+): string | undefined =>
+    config.mode === ExecutionMode.MaintainIssues && config.dryRun
+        ? undefined
+        : config.resume === undefined
+          ? join(
+                resolveWorkspacePath(config.workspace),
+                ".ralphie",
+                "runs",
+                runId,
+                "events.jsonl",
+            )
+          : join(dirname(config.resume), "events.jsonl");
 
 const makeCommandCoordinator = (
     config: ResolvedRalphieConfig,
@@ -541,14 +555,28 @@ const resumeStateForConfig = async (
     config: ResolvedRalphieConfig,
     explicitPolicy?: NeedsAttentionPolicy,
     explicitMaxDecompositionDepth?: number,
-): Promise<RunState | undefined> =>
-    config.mode === ExecutionMode.Issues
-        ? await loadResumeState(
-              config,
-              explicitPolicy,
-              explicitMaxDecompositionDepth,
-          )
-        : undefined;
+    explicitDuplicateAction?: DuplicateAction,
+): Promise<CommandResumeState | undefined> => {
+    if (config.mode === ExecutionMode.Issues) {
+        return await loadResumeState(
+            config,
+            explicitPolicy,
+            explicitMaxDecompositionDepth,
+        );
+    }
+    if (
+        config.mode !== ExecutionMode.MaintainIssues ||
+        config.resume === undefined
+    ) {
+        return undefined;
+    }
+    return await loadMaintenanceRunState(config.resume, {
+        repository: config.repo,
+        branch: config.branch,
+        duplicateAction: explicitDuplicateAction,
+        dryRun: config.dryRun,
+    });
+};
 
 const workflowOptionsFor = (
     config: IssueRalphieConfig,
@@ -601,13 +629,18 @@ const dispatchCommand = async (
     config: IssueRalphieConfig | MaintainIssuesRalphieConfig,
     input: RunCommandInput,
     runId: string,
-    resumeState: RunState | undefined,
+    resumeState: CommandResumeState | undefined,
+    explicitDuplicateAction: DuplicateAction | undefined,
     runtime: CommandRuntime,
     factories: Required<CommandFactories>,
 ): Promise<void> => {
     if (config.mode === ExecutionMode.Issues) {
+        const issueResumeState =
+            resumeState === undefined || !("mode" in resumeState)
+                ? resumeState
+                : undefined;
         await factories.runWorkflow(
-            workflowOptionsFor(config, input, runId, resumeState),
+            workflowOptionsFor(config, input, runId, issueResumeState),
             runtime,
         );
         return;
@@ -617,6 +650,12 @@ const dispatchCommand = async (
             config,
             runId,
             signal: input.signal,
+            ...(explicitDuplicateAction === undefined
+                ? {}
+                : { explicitDuplicateAction }),
+            ...(resumeState !== undefined && "mode" in resumeState
+                ? { resumeState }
+                : {}),
         } satisfies MaintainIssuesOptions,
         runtime,
     );
@@ -687,6 +726,7 @@ export const runCommand = async (
         config,
         parsed.options.onNeedsAttention,
         parsed.options.maxDecompositionDepth,
+        parsed.explicitDuplicateAction,
     );
 
     const terminal = input.terminal ?? terminalInfo();
@@ -717,6 +757,7 @@ export const runCommand = async (
             input,
             runId,
             resumeState,
+            parsed.explicitDuplicateAction,
             runtime,
             factories,
         );

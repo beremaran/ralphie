@@ -138,6 +138,23 @@ import {
     makeMaintenanceSnapshotService,
     type MaintenanceSnapshotService,
 } from "./maintain-issues-snapshot-service.ts";
+import {
+    makeGitHubIssueMaintenanceService,
+    type GitHubIssueMaintenanceService,
+} from "./github/issue-maintenance.ts";
+import {
+    makeGitHubIssueMaintenanceRelationshipService,
+    type GitHubIssueMaintenanceRelationshipService,
+} from "./github/issue-maintenance-relationships.ts";
+import {
+    MaintenanceRunStateStoreLive,
+    type MaintenanceRunStateStoreService,
+} from "./maintain-issues-state.ts";
+import {
+    makeMaintenancePlanService,
+    type MaintenancePlanService,
+} from "./maintain-issues-plan.ts";
+import type { AgentClient } from "./opencode/client.ts";
 import { type ProgressReporterService } from "./progress/progress.ts";
 import { RunStateStoreLive, type RunStateStoreService } from "./run/state.ts";
 import { WorkspaceLive, type WorkspaceService } from "./workspace/workspace.ts";
@@ -164,6 +181,18 @@ export type RalphieRuntime = {
     readonly githubNeedsAttentionNotification: GitHubNeedsAttentionNotificationService;
     /** Fresh, immutable, read-only maintenance context for one run. */
     readonly maintenanceSnapshot: MaintenanceSnapshotService;
+    /** Optional injected maintenance planner; production creates one per agent session. */
+    readonly maintenancePlanner?: MaintenancePlanService;
+    /** Build a planner around the agent client created for one run. */
+    readonly maintenancePlannerForAgent?: (
+        agent: AgentClient,
+    ) => MaintenancePlanService;
+    /** Deterministic additive/comment maintenance mutation boundary. */
+    readonly maintenanceMutation?: GitHubIssueMaintenanceService;
+    /** Deterministic duplicate/related relationship mutation boundary. */
+    readonly maintenanceRelationships?: GitHubIssueMaintenanceRelationshipService;
+    /** Mode-specific state store; it is never shared with issue queue state. */
+    readonly maintenanceRunStateStore?: MaintenanceRunStateStoreService;
     readonly gitRepository: GitRepositoryService;
     readonly gitRepositoryInvariant: GitRepositoryInvariantService;
     readonly gitIssueCheckpoint: GitIssueCheckpointService;
@@ -198,6 +227,16 @@ export type RuntimeOverrides = {
     readonly pipelineDiagnosticsDependencies?: PipelineDiagnosticsServiceDependencies;
     /** Optional deterministic seam for maintenance snapshot tests. */
     readonly maintenanceSnapshot?: MaintenanceSnapshotService;
+    /** Optional deterministic maintenance planner used by runner tests. */
+    readonly maintenancePlanner?: MaintenancePlanService;
+    /** Optional factory for a planner bound to the live OpenCode client. */
+    readonly maintenancePlannerForAgent?: (
+        agent: AgentClient,
+    ) => MaintenancePlanService;
+    /** Optional deterministic maintenance mutation seams. */
+    readonly maintenanceMutation?: GitHubIssueMaintenanceService;
+    readonly maintenanceRelationships?: GitHubIssueMaintenanceRelationshipService;
+    readonly maintenanceRunStateStore?: MaintenanceRunStateStoreService;
     readonly commandRunner?: CommandRunnerService;
     readonly runStateStore?: RunStateStoreService;
     readonly workspace?: WorkspaceService;
@@ -213,6 +252,11 @@ export const makeLiveRuntime = ({
     pipelineObservationDependencies,
     pipelineDiagnosticsDependencies,
     maintenanceSnapshot: maintenanceSnapshotOverride,
+    maintenancePlanner: maintenancePlannerOverride,
+    maintenancePlannerForAgent: maintenancePlannerForAgentOverride,
+    maintenanceMutation: maintenanceMutationOverride,
+    maintenanceRelationships: maintenanceRelationshipsOverride,
+    maintenanceRunStateStore: maintenanceRunStateStoreOverride,
 }: RuntimeOverrides): RalphieRuntime => {
     const githubClient = makeGitHubClientService(commandRunner);
     const pipelineSnapshot = makePipelineSnapshotCollectorService();
@@ -239,9 +283,23 @@ export const makeLiveRuntime = ({
             githubClient,
             groundingReader: makeMaintainIssuesGroundingReader(commandRunner),
         });
+    const maintenanceMutation =
+        maintenanceMutationOverride ?? makeGitHubIssueMaintenanceService();
+    const maintenanceRelationships =
+        maintenanceRelationshipsOverride ??
+        makeGitHubIssueMaintenanceRelationshipService();
+    const maintenanceRunStateStore =
+        maintenanceRunStateStoreOverride ?? MaintenanceRunStateStoreLive;
     const gitRepository = makeGitRepositoryService(commandRunner);
     const gitRepositoryInvariant =
         makeGitRepositoryInvariantService(commandRunner);
+    const maintenancePlannerForAgent =
+        maintenancePlannerForAgentOverride ??
+        ((agent: AgentClient) =>
+            makeMaintenancePlanService({
+                agent,
+                repositoryInvariant: gitRepositoryInvariant,
+            }));
     const gitIssueCheckpoint = makeGitIssueCheckpointService(commandRunner);
     const gitIssueOperations = makeGitIssueOperationsService(commandRunner);
     const pullRequestReviewAttempt = makePullRequestReviewAttemptService({
@@ -332,6 +390,13 @@ export const makeLiveRuntime = ({
         pullRequestReviewCoordinator,
         githubNeedsAttentionNotification,
         maintenanceSnapshot,
+        ...(maintenancePlannerOverride === undefined
+            ? {}
+            : { maintenancePlanner: maintenancePlannerOverride }),
+        maintenancePlannerForAgent,
+        maintenanceMutation,
+        maintenanceRelationships,
+        maintenanceRunStateStore,
         gitRepository,
         gitRepositoryInvariant,
         gitIssueCheckpoint,

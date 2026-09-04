@@ -373,6 +373,22 @@ describe("native CLI parser", () => {
         });
     });
 
+    test("preserves whether duplicate policy was explicitly supplied", () => {
+        expect(
+            parseCliArgs(["owner/repository", "--mode", "maintain-issues"])
+                .explicitDuplicateAction,
+        ).toBeUndefined();
+        expect(
+            parseCliArgs([
+                "owner/repository",
+                "--mode",
+                "maintain-issues",
+                "--duplicate-action",
+                "link",
+            ]).explicitDuplicateAction,
+        ).toBe(DuplicateAction.Link);
+    });
+
     test("rejects duplicate policy in issue mode and workflow in maintenance mode", () => {
         expect(() =>
             parseCliArgs(["owner/repository", "--duplicate-action", "close"]),

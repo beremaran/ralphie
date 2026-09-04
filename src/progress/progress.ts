@@ -37,6 +37,14 @@ export type ProgressStage =
     | "issue-creation"
     | "issue-relationships"
     | "issue-closure"
+    | "maintenance-observation"
+    | "maintenance-planning"
+    | "maintenance-validation"
+    | "maintenance-action"
+    | "maintenance-mutation"
+    | "maintenance-replan"
+    | "maintenance-outcome"
+    | "maintenance-recovery"
     | "pr-gate"
     | "notification-recovery";
 
