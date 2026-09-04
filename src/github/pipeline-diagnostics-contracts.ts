@@ -174,6 +174,12 @@ export const MAX_CHECK_OUTPUT_CHARS = 50_000;
 /** Raw-evidence bound: maximum raw JSON retained per record. */
 export const MAX_RAW_EVIDENCE = 32_768;
 
+/** Maximum UTF-8 bytes retained per individual job-log excerpt. */
+export const MAX_EXCERPT_BYTES = 8 * 1024;
+
+/** Maximum UTF-8 bytes retained across all job-log excerpts for one run. */
+export const MAX_TOTAL_BYTES = 64 * 1024;
+
 /** Hard pagination page cap for every diagnostics endpoint. */
 export const MAX_PAGINATION_PAGES = 10_000;
 
@@ -198,6 +204,8 @@ validateDiagnosticsLimit("MAX_STEPS_PER_JOB", MAX_STEPS_PER_JOB);
 validateDiagnosticsLimit("MAX_CHECK_ANNOTATIONS", MAX_CHECK_ANNOTATIONS);
 validateDiagnosticsLimit("MAX_CHECK_OUTPUT_CHARS", MAX_CHECK_OUTPUT_CHARS);
 validateDiagnosticsLimit("MAX_RAW_EVIDENCE", MAX_RAW_EVIDENCE);
+validateDiagnosticsLimit("MAX_EXCERPT_BYTES", MAX_EXCERPT_BYTES);
+validateDiagnosticsLimit("MAX_TOTAL_BYTES", MAX_TOTAL_BYTES);
 validateDiagnosticsLimit("MAX_PAGINATION_PAGES", MAX_PAGINATION_PAGES);
 
 export type {

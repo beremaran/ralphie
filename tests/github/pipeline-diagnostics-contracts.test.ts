@@ -13,10 +13,12 @@ import type {
 import {
     MAX_CHECK_ANNOTATIONS,
     MAX_CHECK_OUTPUT_CHARS,
+    MAX_EXCERPT_BYTES,
     MAX_JOBS_PER_RUN,
     MAX_PAGINATION_PAGES,
     MAX_RAW_EVIDENCE,
     MAX_STEPS_PER_JOB,
+    MAX_TOTAL_BYTES,
     validateDiagnosticsLimit,
 } from "../../src/github/pipeline-diagnostics-contracts.ts";
 
@@ -112,6 +114,8 @@ describe("pipeline diagnostics contracts", () => {
             MAX_CHECK_ANNOTATIONS,
             MAX_CHECK_OUTPUT_CHARS,
             MAX_RAW_EVIDENCE,
+            MAX_EXCERPT_BYTES,
+            MAX_TOTAL_BYTES,
             MAX_PAGINATION_PAGES,
         ];
         for (const limit of limits) {
