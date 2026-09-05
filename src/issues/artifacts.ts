@@ -27,9 +27,11 @@ import {
 } from "./decisions.ts";
 import {
     approvedPullRequestReviewEvidenceSchema,
+    pullRequestRevisionIntentSchema,
     pullRequestReviewAttemptsSchema,
     pullRequestReviewAttemptSchema,
     type ApprovedPullRequestReviewEvidence,
+    type PullRequestRevisionIntent,
     type PullRequestReviewAttempt,
 } from "./pull-request-review.ts";
 import type { ReviewAttempt } from "./recovery.ts";
@@ -42,6 +44,7 @@ export enum IssueArtifactKind {
     ReviewAttempts = "review-attempts",
     PullRequestReviewAttempts = "pull-request-review-attempts",
     ApprovedPullRequestReviewEvidence = "approved-pull-request-review-evidence",
+    PullRequestDeliveryState = "pull-request-delivery-state",
     CommitMessageDecision = "commit-message-decision",
     CreatedCommit = "created-commit",
     IssueResolutionDecision = "issue-resolution-decision",
@@ -100,12 +103,55 @@ export type NeedsAttentionHandoffArtifact = {
     readonly checkpoint: IssueCheckpoint;
 };
 
+/**
+ * Compact per-issue checkpoint for the post-creation PR lifecycle. Large
+ * provider snapshots remain in run state; this record is the artifact-side
+ * identity and mutation boundary used to resume review/publication safely.
+ */
+export type PullRequestDeliveryStateArtifact = {
+    readonly pullRequestNumber: number;
+    readonly baseSha: string;
+    readonly headSha: string;
+    readonly stage:
+        | "review"
+        | "revision-fix"
+        | "revision-delivery"
+        | "publication"
+        | "checks"
+        | "merge";
+    readonly status:
+        | "pending"
+        | "approved"
+        | "green"
+        | "merged"
+        | "failed"
+        | "exhausted"
+        | "stale"
+        | "delivery-recoverable";
+    readonly reviewAttempts: number;
+    readonly revisionCount: number;
+    readonly checkHeadSha?: string;
+    readonly checkStatus?: "green" | "pending" | "failed" | "unknown";
+    readonly checkFingerprint?: string;
+    readonly revisionIntent?: PullRequestRevisionIntent;
+    readonly delivery?: {
+        readonly status: "confirmed" | "external-movement" | "ambiguous";
+        readonly headSha: string;
+        readonly parentSha: string;
+        readonly remoteSha?: string;
+        readonly pushResponseLost?: boolean;
+    };
+    readonly terminalReason?: string;
+    readonly updatedAt: string;
+};
+
 export type IssueArtifactValues = {
     readonly [IssueArtifactKind.ComplexityDecision]: ComplexityDecisionArtifact;
     readonly [IssueArtifactKind.IssueCheckpoint]: IssueCheckpoint;
     readonly [IssueArtifactKind.ReviewAttempts]: ReadonlyArray<ReviewAttempt>;
     readonly [IssueArtifactKind.PullRequestReviewAttempts]: ReadonlyArray<PullRequestReviewAttempt>;
     readonly [IssueArtifactKind.ApprovedPullRequestReviewEvidence]: ApprovedPullRequestReviewEvidence;
+    readonly [IssueArtifactKind.PullRequestDeliveryState]: PullRequestDeliveryStateArtifact;
     readonly [IssueArtifactKind.CommitMessageDecision]: CommitMessageDecision;
     readonly [IssueArtifactKind.CreatedCommit]: {
         readonly sha: string;
@@ -151,6 +197,11 @@ export type IssueArtifactStore = {
     ) => Promise<void>;
     readonly appendPullRequestReview: (
         review: PullRequestReviewAttempt,
+        signal?: AbortSignal,
+    ) => Promise<void>;
+    /** Replace the latest compact post-PR lifecycle checkpoint. */
+    readonly recordPullRequestDeliveryState: (
+        value: PullRequestDeliveryStateArtifact,
         signal?: AbortSignal,
     ) => Promise<void>;
     readonly recordCreatedIssue: (
@@ -359,6 +410,56 @@ export const needsAttentionHandoffArtifactSchema = z
     })
     .strict();
 
+export const pullRequestDeliveryStateArtifactSchema = z
+    .object({
+        pullRequestNumber: z.number().int().positive(),
+        baseSha: z.string().min(1),
+        headSha: z.string().min(1),
+        stage: z.enum([
+            "review",
+            "revision-fix",
+            "revision-delivery",
+            "publication",
+            "checks",
+            "merge",
+        ]),
+        status: z.enum([
+            "pending",
+            "approved",
+            "green",
+            "merged",
+            "failed",
+            "exhausted",
+            "stale",
+            "delivery-recoverable",
+        ]),
+        reviewAttempts: z
+            .number()
+            .int()
+            .nonnegative()
+            .max(REVIEW_ITERATION_LIMIT),
+        revisionCount: z.number().int().nonnegative(),
+        checkHeadSha: z.string().min(1).optional(),
+        checkStatus: z
+            .enum(["green", "pending", "failed", "unknown"])
+            .optional(),
+        checkFingerprint: z.string().min(1).optional(),
+        revisionIntent: pullRequestRevisionIntentSchema.optional(),
+        delivery: z
+            .object({
+                status: z.enum(["confirmed", "external-movement", "ambiguous"]),
+                headSha: z.string().min(1),
+                parentSha: z.string().min(1),
+                remoteSha: z.string().min(1).optional(),
+                pushResponseLost: z.boolean().optional(),
+            })
+            .strict()
+            .optional(),
+        terminalReason: z.string().min(1).optional(),
+        updatedAt: z.string().datetime(),
+    })
+    .strict();
+
 const validatedArtifactSchemas: Partial<Record<IssueArtifactKind, z.ZodType>> =
     {
         [IssueArtifactKind.NeedsAttentionDecision]:
@@ -369,6 +470,8 @@ const validatedArtifactSchemas: Partial<Record<IssueArtifactKind, z.ZodType>> =
             issueResolutionDecisionArtifactSchema,
         [IssueArtifactKind.ApprovedPullRequestReviewEvidence]:
             approvedPullRequestReviewEvidenceSchema,
+        [IssueArtifactKind.PullRequestDeliveryState]:
+            pullRequestDeliveryStateArtifactSchema,
         [IssueArtifactKind.NeedsAttentionHandoff]:
             needsAttentionHandoffArtifactSchema,
     };
@@ -448,6 +551,8 @@ const persistedArtifactsV2BaseSchema = z
                 .optional(),
         [IssueArtifactKind.ApprovedPullRequestReviewEvidence]:
             approvedPullRequestReviewEvidenceSchema.optional(),
+        [IssueArtifactKind.PullRequestDeliveryState]:
+            pullRequestDeliveryStateArtifactSchema.optional(),
         [IssueArtifactKind.CommitMessageDecision]:
             commitMessageDecisionSchema.optional(),
         [IssueArtifactKind.CreatedCommit]: createdCommitSchema.optional(),
@@ -1137,6 +1242,21 @@ const makeStore = (
                 values,
                 validated.reviewedHeadSha,
             );
+            await save(nextValues, signal);
+        },
+
+        recordPullRequestDeliveryState: async (value, signal) => {
+            throwIfArtifactWriteAborted(signal, issueNumber);
+            try {
+                pullRequestDeliveryStateArtifactSchema.parse(value);
+            } catch (cause) {
+                throw new RalphieError({
+                    message: `Invalid pull request delivery state for issue ${issueNumber}.`,
+                    cause,
+                });
+            }
+            const nextValues = new Map(values);
+            nextValues.set(IssueArtifactKind.PullRequestDeliveryState, value);
             await save(nextValues, signal);
         },
 

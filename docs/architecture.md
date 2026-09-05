@@ -173,7 +173,7 @@ binary, installer, Homebrew, and container distribution machinery was removed.
 | Pipeline mode orchestration and direct delivery | `src/get-pipelines-green.ts`, `src/issues/pipeline-delivery-loop.ts`, `src/git/pipeline-delivery.ts` |
 | Pipeline state, bounded persistence, and resume reconciliation | `src/run/pipeline-state.ts` |
 | Complexity routing | `src/issues/executor.ts`, `src/issues/complexity.ts` |
-| Implementation/review/delivery | `src/issues/implementation-executor.ts` |
+| Implementation/review/delivery | `src/issues/implementation-executor.ts`, `src/issues/pull-request-review.ts`, `src/issues/pull-request-review-coordinator.ts`, `src/github/pull-requests.ts` |
 | Decomposition and GitHub mutations | `src/issues/decomposition-executor.ts`, `src/github/issue-mutations.ts`, `src/github/issue-relationships.ts` |
 | OpenCode sessions and structured results | `src/agent/`, `src/opencode/` |
 | Git checkpoints, safety, and branches | `src/git/` |

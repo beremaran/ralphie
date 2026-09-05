@@ -9,6 +9,7 @@ import {
     type ReviewDecision,
 } from "../../src/issues/decisions.ts";
 import {
+    IssueArtifactKind,
     makeIssueArtifactStore,
     type IssueArtifactStore,
 } from "../../src/issues/artifacts.ts";
@@ -20,6 +21,7 @@ import type {
 import type {
     GitRevisionDeliveryOutcome,
     GitRevisionDeliveryInput,
+    GitRevisionReconciliationInput,
 } from "../../src/git/revision-delivery.ts";
 import type { IssueVerificationService } from "../../src/issues/verification.ts";
 import type {
@@ -160,6 +162,8 @@ const confirmedDelivery = (
 
 type HarnessOptions = {
     readonly decisions: ReadonlyArray<ReviewDecision | Error>;
+    /** Offset used when the harness resumes after persisted attempts. */
+    readonly reviewAttemptOffset?: number;
     readonly reread?: (
         snapshot: PullRequestSnapshot,
         call: number,
@@ -168,6 +172,9 @@ type HarnessOptions = {
         input: GitRevisionDeliveryInput,
         call: number,
     ) => GitRevisionDeliveryOutcome;
+    readonly reconcile?: (
+        input: GitRevisionReconciliationInput,
+    ) => GitRevisionDeliveryOutcome | undefined;
 };
 
 const makeHarness = (options: HarnessOptions) => {
@@ -175,6 +182,7 @@ const makeHarness = (options: HarnessOptions) => {
     const reviewCalls: PullRequestReviewAttemptInput[] = [];
     const rereadCalls: PullRequestSnapshot[] = [];
     const deliveryCalls: GitRevisionDeliveryInput[] = [];
+    const reconciliationCalls: GitRevisionReconciliationInput[] = [];
     let rereadIndex = 0;
     let reviewIndex = 0;
     let deliveryIndex = 0;
@@ -186,7 +194,11 @@ const makeHarness = (options: HarnessOptions) => {
             const decision = options.decisions[reviewIndex++];
             if (decision instanceof Error) throw decision;
             if (decision === undefined) throw new Error("missing decision");
-            return reviewResultFor(input, reviewIndex, decision);
+            return reviewResultFor(
+                input,
+                (options.reviewAttemptOffset ?? 0) + reviewIndex,
+                decision,
+            );
         },
     };
     const pullRequests = {
@@ -233,6 +245,10 @@ const makeHarness = (options: HarnessOptions) => {
             const delivery = options.delivery?.(input, deliveryIndex++);
             return delivery ?? confirmedDelivery(input, REVISION_HEAD);
         },
+        reconcileRevision: async (input: GitRevisionReconciliationInput) => {
+            reconciliationCalls.push(input);
+            return options.reconcile?.(input);
+        },
     };
     const dependencies: PullRequestReviewCoordinatorDependencies = {
         pullRequests,
@@ -264,6 +280,7 @@ const makeHarness = (options: HarnessOptions) => {
         reviewCalls,
         rereadCalls,
         deliveryCalls,
+        reconciliationCalls,
     };
 };
 
@@ -290,6 +307,91 @@ describe("pull-request review coordinator", () => {
         expect(result.revisions).toHaveLength(0);
         expect(deliveryCalls).toHaveLength(0);
         expect(agent.calls).toHaveLength(0);
+    });
+
+    test("resumes a persisted same-head approval without starting another review session", async () => {
+        const harness = makeHarness({ decisions: [] });
+        const artifacts = await makeIssueArtifactStore(issue.number);
+        const input = harness.coordinatorInput(artifacts);
+        const persisted = reviewResultFor(input, 1, approved).attempt;
+        await artifacts.appendPullRequestReview(persisted);
+        await artifacts.write(
+            IssueArtifactKind.ApprovedPullRequestReviewEvidence,
+            persisted,
+        );
+
+        const coordinator = makePullRequestReviewCoordinatorService(
+            harness.dependencies,
+        );
+        const result = await coordinator.review(input);
+
+        expect(result.status).toBe("approved");
+        expect(result.reviews).toHaveLength(0);
+        expect(result.revisions).toHaveLength(0);
+        if (result.status !== "approved") throw new Error("expected approval");
+        expect(result.review.attempt).toEqual(persisted);
+        expect(harness.reviewCalls).toHaveLength(0);
+        expect(harness.rereadCalls).toHaveLength(0);
+        expect(harness.agent.calls).toHaveLength(0);
+    });
+
+    test("reconciles a persisted revision intent before reviewing the next PR head", async () => {
+        const harness = makeHarness({
+            decisions: [approved],
+            reviewAttemptOffset: 1,
+            reread: (snapshot) => ({
+                ...snapshot,
+                headSha: REVISION_HEAD,
+            }),
+            reconcile: () => ({
+                status: "confirmed",
+                repository: "owner/repository",
+                branch: "ralphie/issue-42",
+                headSha: REVISION_HEAD,
+                parentSha: INITIAL_HEAD,
+                treeSha: TREE,
+                remoteSha: REVISION_HEAD,
+                pushResponseLost: true,
+            }),
+        });
+        const artifacts = await makeIssueArtifactStore(issue.number);
+        const input = harness.coordinatorInput(artifacts);
+        const persisted = reviewResultFor(input, 1, changesRequested).attempt;
+        await artifacts.appendPullRequestReview(persisted);
+
+        const coordinator = makePullRequestReviewCoordinatorService(
+            harness.dependencies,
+        );
+        const result = await coordinator.review({
+            ...input,
+            resumeRevision: {
+                attempt: 1,
+                expectedPriorHeadSha: INITIAL_HEAD,
+                expectedStagedTreeSha: TREE,
+                message: commitMessage,
+            },
+        });
+
+        expect(result.status).toBe("approved");
+        expect(result.reviews).toHaveLength(1);
+        expect(result.revisions).toHaveLength(0);
+        expect(harness.reconciliationCalls).toHaveLength(1);
+        expect(harness.reconciliationCalls[0]).toMatchObject({
+            repository: "owner/repository",
+            repositoryPath: "/work/repository",
+            branch: "ralphie/issue-42",
+            baseSha: BASE,
+            expectedPriorHeadSha: INITIAL_HEAD,
+            expectedStagedTreeSha: TREE,
+        });
+        expect(
+            harness.reviewCalls.map(({ snapshot }) => snapshot.headSha),
+        ).toEqual([REVISION_HEAD]);
+        expect(harness.rereadCalls.map(({ headSha }) => headSha)).toEqual([
+            REVISION_HEAD,
+        ]);
+        if (result.status !== "approved") throw new Error("expected approval");
+        expect(result.review.attempt.attempt).toBe(2);
     });
 
     test("runs a fresh edit/test session, exact-tree preparation, and one non-force revision before re-reviewing", async () => {

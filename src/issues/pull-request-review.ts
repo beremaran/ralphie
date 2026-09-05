@@ -19,6 +19,7 @@ import type {
 import { RalphieError } from "../shared/error.ts";
 
 import {
+    commitMessageDecisionSchema,
     ReviewFindingSeverity,
     ReviewVerdict,
     reviewDecisionSchema,
@@ -36,6 +37,20 @@ const APPROVED_PULL_REQUEST_REVIEW_EVIDENCE_KIND =
 export const gitObjectIdSchema = z
     .string()
     .regex(/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/i);
+
+/** Durable intent for a revision whose commit/push boundary may be resumed. */
+export const pullRequestRevisionIntentSchema = z
+    .object({
+        attempt: z.number().int().positive(),
+        expectedPriorHeadSha: gitObjectIdSchema,
+        expectedStagedTreeSha: gitObjectIdSchema,
+        message: commitMessageDecisionSchema,
+    })
+    .strict();
+
+export type PullRequestRevisionIntent = z.infer<
+    typeof pullRequestRevisionIntentSchema
+>;
 
 export const pullRequestReviewAttemptSchema = z
     .object({

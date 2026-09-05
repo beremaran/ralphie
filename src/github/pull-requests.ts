@@ -3,6 +3,7 @@ import type { Octokit } from "octokit";
 import {
     gitObjectIdSchema,
     pullRequestReviewAttemptSchema,
+    type ApprovedPullRequestReviewEvidence,
     type PullRequestReviewAttempt,
 } from "../issues/pull-request-review.ts";
 import type { ReviewAttempt } from "../issues/recovery.ts";
@@ -35,6 +36,52 @@ export type GitHubPullRequest = {
     /** Present when the authoritative response surfaced the PR state. */
     readonly state?: "open" | "closed";
 };
+
+/** The only check result that can satisfy the final PR merge gate. */
+export type PullRequestCheckProof = {
+    readonly pullRequestNumber: number;
+    readonly headSha: string;
+    readonly status: "green" | "pending" | "failed" | "unknown";
+};
+
+/**
+ * Immutable evidence required before Ralphie may request a PR merge.
+ *
+ * The review is Ralphie's marked structured decision, not GitHub's review UI.
+ * The check proof is the terminal exact-head observation from the pipeline
+ * observer. Both are deliberately carried together so a caller cannot merge
+ * a reviewed head with checks from another head (or vice versa).
+ */
+export type PullRequestMergeProof = {
+    readonly pullRequestNumber: number;
+    readonly baseSha: string;
+    readonly headSha: string;
+    readonly review?: ApprovedPullRequestReviewEvidence;
+    readonly checks?: PullRequestCheckProof;
+};
+
+export type PullRequestMergeGateFailureKind =
+    | "missing-proof"
+    | "invalid-proof"
+    | "review-not-approved"
+    | "checks-not-green"
+    | "stale-proof";
+
+/** A fail-closed proof failure that is safe for workflow recovery. */
+export class PullRequestMergeGateError extends RalphieError {
+    override readonly _tag = "PullRequestMergeGateError" as const;
+    readonly kind: PullRequestMergeGateFailureKind;
+
+    constructor(input: {
+        readonly kind: PullRequestMergeGateFailureKind;
+        readonly message: string;
+        readonly cause?: unknown;
+    }) {
+        super(input);
+        this.name = "PullRequestMergeGateError";
+        this.kind = input.kind;
+    }
+}
 
 export type GitHubPullRequestService = {
     /** Find a matching pull request, creating it only when none exists. */
@@ -80,6 +127,16 @@ export type GitHubPullRequestService = {
         repository: string,
         pullRequestNumber: number,
         expectedHeadSha: string,
+    ) => Promise<GitHubPullRequest>;
+    /**
+     * Revalidate a complete same-head review/check proof before merging.
+     * Optional keeps small test doubles and older injected runtimes source
+     * compatible; the live service always supplies this method.
+     */
+    readonly mergeWithProof?: (
+        client: Octokit,
+        repository: string,
+        proof: PullRequestMergeProof | undefined,
     ) => Promise<GitHubPullRequest>;
 };
 
@@ -332,7 +389,7 @@ const requireExpectedHead = (
     expectedHeadSha: string,
 ): GitHubPullRequest => {
     const mapped = requireMappedPullRequest(pullRequest);
-    if (mapped.headSha !== expectedHeadSha) {
+    if (mapped.headSha.toLowerCase() !== expectedHeadSha.toLowerCase()) {
         throw new RalphieError({
             message: `Pull request #${mapped.number} head changed from ${expectedHeadSha} to ${mapped.headSha}.`,
         });
@@ -345,6 +402,7 @@ const mergePullRequest = async (
     parameters: PullRequestParameters,
     pullRequestNumber: number,
     expectedHeadSha: string,
+    expectedBaseSha?: string,
 ): Promise<GitHubPullRequest> => {
     if (!expectedHeadSha.trim()) {
         throw new RalphieError({
@@ -356,6 +414,17 @@ const mergePullRequest = async (
     if (current.data.state !== "open") {
         throw new RalphieError({
             message: `Pull request #${pullRequestNumber} is closed but not merged.`,
+        });
+    }
+    if (
+        expectedBaseSha !== undefined &&
+        current.data.base?.sha?.toLowerCase() !== expectedBaseSha.toLowerCase()
+    ) {
+        throw new PullRequestMergeGateError({
+            kind: "stale-proof",
+            message:
+                `Pull request #${pullRequestNumber} base changed before merge ` +
+                `(expected ${expectedBaseSha}, found ${current.data.base?.sha ?? "unknown"}).`,
         });
     }
     requireExpectedHead(current.data, expectedHeadSha);
@@ -381,6 +450,115 @@ const mergePullRequest = async (
         });
     }
     return requireMappedPullRequest(merged.data);
+};
+
+const sameSha = (left: string, right: string): boolean =>
+    left.toLowerCase() === right.toLowerCase();
+
+const invalidProof = (
+    kind: PullRequestMergeGateFailureKind,
+    message: string,
+): never => {
+    throw new PullRequestMergeGateError({ kind, message });
+};
+
+const requireMergeProof = (
+    pullRequestNumber: number,
+    proof: PullRequestMergeProof | undefined,
+): PullRequestMergeProof => {
+    if (proof === undefined) {
+        return invalidProof(
+            "missing-proof",
+            `Pull request #${pullRequestNumber} cannot be merged without a same-head approval and green-check proof.`,
+        );
+    }
+    if (
+        !Number.isInteger(proof.pullRequestNumber) ||
+        proof.pullRequestNumber !== pullRequestNumber ||
+        !gitObjectIdSchema.safeParse(proof.baseSha).success ||
+        !gitObjectIdSchema.safeParse(proof.headSha).success
+    ) {
+        return invalidProof(
+            "invalid-proof",
+            `Pull request #${pullRequestNumber} has an invalid merge proof identity.`,
+        );
+    }
+
+    const review = proof.review;
+    if (review === undefined || review.decision.verdict !== "approved") {
+        return invalidProof(
+            "review-not-approved",
+            `Pull request #${pullRequestNumber} has no approved structured review evidence.`,
+        );
+    }
+    if (
+        review.pullRequestNumber !== proof.pullRequestNumber ||
+        !sameSha(review.baseSha, proof.baseSha) ||
+        !sameSha(review.reviewedHeadSha, proof.headSha)
+    ) {
+        return invalidProof(
+            "stale-proof",
+            `Pull request #${pullRequestNumber} review evidence does not match the proof head/base.`,
+        );
+    }
+
+    const checks = proof.checks;
+    if (checks === undefined || checks.status !== "green") {
+        return invalidProof(
+            "checks-not-green",
+            `Pull request #${pullRequestNumber} does not have a green-check proof for its exact head.`,
+        );
+    }
+    if (
+        checks.pullRequestNumber !== proof.pullRequestNumber ||
+        !sameSha(checks.headSha, proof.headSha)
+    ) {
+        return invalidProof(
+            "stale-proof",
+            `Pull request #${pullRequestNumber} check evidence does not match the proof head.`,
+        );
+    }
+    return proof;
+};
+
+const mergePullRequestWithProof = async (
+    client: Octokit,
+    repository: string,
+    proofInput: PullRequestMergeProof | undefined,
+): Promise<GitHubPullRequest> => {
+    const proof = requireMergeProof(
+        proofInput?.pullRequestNumber ?? 0,
+        proofInput,
+    );
+    const parameters = repositoryParameters(repository);
+    const current = requirePullRequestSnapshot(
+        (
+            await client.rest.pulls.get({
+                ...parameters,
+                pull_number: proof.pullRequestNumber,
+            })
+        ).data,
+    );
+    if (
+        current.number !== proof.pullRequestNumber ||
+        !sameSha(current.baseSha, proof.baseSha) ||
+        !sameSha(current.headSha, proof.headSha)
+    ) {
+        throw new PullRequestMergeGateError({
+            kind: "stale-proof",
+            message:
+                `Pull request #${proof.pullRequestNumber} changed before merge ` +
+                `(expected base ${proof.baseSha}, head ${proof.headSha}; ` +
+                `found base ${current.baseSha}, head ${current.headSha}).`,
+        });
+    }
+    return await mergePullRequest(
+        client,
+        { ...parameters, pull_number: proof.pullRequestNumber },
+        proof.pullRequestNumber,
+        proof.headSha,
+        proof.baseSha,
+    );
 };
 
 export const makeGitHubPullRequestService = (): GitHubPullRequestService => ({
@@ -559,6 +737,17 @@ export const makeGitHubPullRequestService = (): GitHubPullRequestService => ({
         } catch (cause) {
             throw mutationError(
                 `Failed to merge pull request #${pullRequestNumber} in ${repository}.`,
+                cause,
+            );
+        }
+    },
+
+    mergeWithProof: async (client, repository, proof) => {
+        try {
+            return await mergePullRequestWithProof(client, repository, proof);
+        } catch (cause) {
+            throw mutationError(
+                `Failed to merge pull request #${proof?.pullRequestNumber ?? "unknown"} in ${repository}.`,
                 cause,
             );
         }

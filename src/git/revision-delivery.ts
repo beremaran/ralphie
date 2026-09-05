@@ -104,6 +104,24 @@ export type GitRevisionDeliveryInput = {
     readonly context?: GitRevisionCommitContext;
 };
 
+/**
+ * Resume-only input for a revision whose commit/push boundary was interrupted.
+ * The service discovers the existing local candidate instead of creating a
+ * second commit, then reconciles or performs the one safe non-force push.
+ */
+export type GitRevisionReconciliationInput = {
+    readonly repository: string;
+    readonly repositoryPath: string;
+    readonly branch: string;
+    readonly baseSha: string;
+    readonly expectedPriorHeadSha: string;
+    /** The exact tree recorded for the interrupted revision, when known. */
+    readonly expectedStagedTreeSha?: string;
+    /** Optional candidate head recorded after a prior reconciliation step. */
+    readonly expectedHeadSha?: string;
+    readonly context?: GitRevisionCommitContext;
+};
+
 export type GitRevisionDeliveryService = {
     /**
      * Deliver one approved revision as a single deterministic operation. The
@@ -128,9 +146,16 @@ export type GitRevisionDeliveryService = {
     readonly deliverRevision: (
         input: GitRevisionDeliveryInput,
     ) => Promise<GitRevisionDeliveryOutcome>;
+    /** Reconcile an already-created local revision without creating another commit. */
+    readonly reconcileRevision?: (
+        input: GitRevisionReconciliationInput,
+    ) => Promise<GitRevisionDeliveryOutcome | undefined>;
 };
 
 const validGitSha = /^[0-9a-f]{40}([0-9a-f]{24})?$/i;
+
+const sameSha = (left: string, right: string): boolean =>
+    left.toLowerCase() === right.toLowerCase();
 
 const fail = (
     kind: GitRevisionDeliveryFailureKind,
@@ -233,8 +258,13 @@ const checkoutStatus = async (
     }
 };
 
+type RevisionDeliveryIdentity = Pick<
+    GitRevisionDeliveryInput,
+    "repository" | "repositoryPath" | "branch" | "expectedPriorHeadSha"
+>;
+
 const deliveryBase = (
-    input: GitRevisionDeliveryInput,
+    input: RevisionDeliveryIdentity,
     headSha: string,
     parentSha: string,
 ) => ({
@@ -261,7 +291,7 @@ const ambiguousDelivery = (
 
 const externalMovement = (
     base: DeliveryBase,
-    input: GitRevisionDeliveryInput,
+    input: Pick<GitRevisionDeliveryInput, "expectedPriorHeadSha">,
     actualRemoteSha: string,
     pushFailureKind: GitPushFailureKind | undefined,
 ): GitRevisionDeliveryOutcome => ({
@@ -274,7 +304,7 @@ const externalMovement = (
 
 const classifyObservedRemote = async (
     runner: CommandRunnerService,
-    input: GitRevisionDeliveryInput,
+    input: RevisionDeliveryIdentity,
     isFirstDelivery: boolean,
     observed: string,
     base: DeliveryBase,
@@ -364,6 +394,180 @@ const classifyDelivery = async (
     );
 };
 
+const verifyReconciliationInput = (
+    input: GitRevisionReconciliationInput,
+): void => {
+    if (
+        input.repository.trim().length === 0 ||
+        input.repositoryPath.trim().length === 0 ||
+        input.branch.trim().length === 0 ||
+        !validGitSha.test(input.baseSha) ||
+        !validGitSha.test(input.expectedPriorHeadSha) ||
+        (input.expectedStagedTreeSha !== undefined &&
+            !validGitSha.test(input.expectedStagedTreeSha)) ||
+        (input.expectedHeadSha !== undefined &&
+            !validGitSha.test(input.expectedHeadSha))
+    ) {
+        fail(
+            "invalid-input",
+            "Revision reconciliation requires a repository, branch, base, and valid prior head.",
+        );
+    }
+};
+
+/**
+ * Reconcile a commit that may have been created before cancellation or a lost
+ * process response. The local candidate must be exactly one commit over the
+ * recorded prior head. If the remote already has it, no push is repeated; if
+ * the remote still has the prior head, one normal non-force push is attempted.
+ */
+const reconcileRevision = async (
+    input: GitRevisionReconciliationInput,
+    runner: CommandRunnerService,
+    remoteSafety: GitRemoteSafetyService,
+): Promise<GitRevisionDeliveryOutcome | undefined> => {
+    verifyReconciliationInput(input);
+    cancellationCheck(input.context?.isCancelled);
+
+    const actualBranch = await runGit(
+        runner,
+        input.repositoryPath,
+        ["rev-parse", "--abbrev-ref", "HEAD"],
+        "Failed to read the managed revision branch during reconciliation.",
+    );
+    if (actualBranch !== input.branch) {
+        fail(
+            "invalid-input",
+            `Managed checkout is on ${actualBranch}, expected ${input.branch}; refusing revision reconciliation.`,
+        );
+    }
+
+    const headSha = await runGit(
+        runner,
+        input.repositoryPath,
+        ["rev-parse", "--verify", "HEAD^{commit}"],
+        "Failed to read the local revision candidate.",
+    );
+    if (sameSha(headSha, input.expectedPriorHeadSha)) return undefined;
+    if (
+        input.expectedHeadSha !== undefined &&
+        !sameSha(headSha, input.expectedHeadSha)
+    ) {
+        fail(
+            "invalid-input",
+            `Local revision candidate ${headSha} does not match recorded candidate ${input.expectedHeadSha}.`,
+        );
+    }
+
+    const parentSha = await runGit(
+        runner,
+        input.repositoryPath,
+        ["rev-parse", "HEAD^"],
+        "Failed to read the local revision parent.",
+    );
+    if (!sameSha(parentSha, input.expectedPriorHeadSha)) {
+        fail(
+            "invalid-input",
+            `Local revision candidate ${headSha} is not exactly one commit over ${input.expectedPriorHeadSha}.`,
+        );
+    }
+    const treeSha = await runGit(
+        runner,
+        input.repositoryPath,
+        ["rev-parse", "HEAD^{tree}"],
+        "Failed to read the local revision tree.",
+    );
+    if (
+        input.expectedStagedTreeSha !== undefined &&
+        !sameSha(treeSha, input.expectedStagedTreeSha)
+    ) {
+        fail(
+            "invalid-input",
+            `Local revision candidate ${headSha} has tree ${treeSha}, expected ${input.expectedStagedTreeSha}.`,
+        );
+    }
+    const status = await checkoutStatus(runner, input.repositoryPath);
+    const remote = await readRemoteHead(
+        runner,
+        input.repositoryPath,
+        input.branch,
+    );
+    if (!remote.available) {
+        return ambiguousDelivery(
+            deliveryBase(input, headSha, parentSha),
+            "",
+            "remote-read-failed",
+            undefined,
+        );
+    }
+    const observed = remote.sha.toLowerCase();
+    if (observed === headSha.toLowerCase()) {
+        return await classifyObservedRemote(
+            runner,
+            input,
+            false,
+            observed,
+            deliveryBase(input, headSha, parentSha),
+            headSha,
+            treeSha,
+            { failed: true, failureKind: undefined },
+        );
+    }
+    if (observed !== input.expectedPriorHeadSha.toLowerCase()) {
+        return externalMovement(
+            deliveryBase(input, headSha, parentSha),
+            input,
+            observed,
+            undefined,
+        );
+    }
+    if (status !== "") {
+        return ambiguousDelivery(
+            deliveryBase(input, headSha, parentSha),
+            observed,
+            "checkout-not-clean",
+            undefined,
+        );
+    }
+
+    await remoteSafety.verifyManagedRevisionPrePush({
+        repository: input.repository,
+        repositoryPath: input.repositoryPath,
+        branch: input.branch,
+        baseSha: input.baseSha,
+        expectedPriorHeadSha: input.expectedPriorHeadSha,
+        expectedLocalHeadSha: headSha,
+        isFirstDelivery: false,
+        pushMode: "non-force",
+    });
+    cancellationCheck(input.context?.isCancelled);
+    const push = await pushNonForce(runner, input.repositoryPath, input.branch);
+    const afterPush = await readRemoteHead(
+        runner,
+        input.repositoryPath,
+        input.branch,
+    );
+    return await classifyDelivery(
+        runner,
+        {
+            repository: input.repository,
+            repositoryPath: input.repositoryPath,
+            branch: input.branch,
+            baseSha: input.baseSha,
+            expectedPriorHeadSha: input.expectedPriorHeadSha,
+            expectedStagedTreeSha: treeSha,
+            message: { subject: "reconciled revision" },
+            context: input.context,
+        },
+        false,
+        push,
+        afterPush,
+        headSha,
+        parentSha,
+        treeSha,
+    );
+};
+
 export const makeGitRevisionDeliveryService = (
     runner: CommandRunnerService = CommandRunnerLive,
     revisionCommit: GitRevisionCommitService,
@@ -439,6 +643,8 @@ export const makeGitRevisionDeliveryService = (
             commit.treeSha,
         );
     },
+    reconcileRevision: async (input) =>
+        await reconcileRevision(input, runner, remoteSafety),
 });
 
 export const GitRevisionDeliveryLive = makeGitRevisionDeliveryService;

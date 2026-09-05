@@ -12,7 +12,13 @@ import type { GitHubClientService } from "../src/github/client.ts";
 import type {
     GitHubPullRequest,
     GitHubPullRequestService,
+    PullRequestSnapshot,
 } from "../src/github/pull-requests.ts";
+import type {
+    PullRequestReviewCoordinatorResult,
+    PullRequestReviewCoordinatorService,
+} from "../src/issues/pull-request-review-coordinator.ts";
+import type { PullRequestReviewAttemptResult } from "../src/issues/pull-request-review.ts";
 import type {
     PipelineObservationOutcome,
     PipelineObservationRead,
@@ -78,6 +84,7 @@ import {
     GroundingDisposition,
     IssueResolutionStatus,
     NeedsAttentionReason,
+    ReviewVerdict,
 } from "../src/issues/decisions.ts";
 
 const firstIssue: GitHubIssue = {
@@ -146,6 +153,10 @@ type TestRuntimeOptions = {
     readonly parentSubIssues?: ReadonlyArray<GitHubIssue>;
     /** Result of creating or re-reading the matching pull request. */
     readonly prOverride?: GitHubPullRequest;
+    /** Optional post-creation review coordinator used by PR lifecycle tests. */
+    readonly pullRequestReviewCoordinator?: PullRequestReviewCoordinatorService;
+    /** Authoritative snapshot returned before a post-creation review. */
+    readonly prSnapshotOverride?: PullRequestSnapshot;
     /** Assign a stable fake PR number from its feature branch. */
     readonly prNumberForHead?: (head: string) => number;
     /** Result of the gate's pre-merge re-read. */
@@ -315,14 +326,22 @@ const testRuntime = (
                 }
             );
         },
-        readSnapshot: async () => {
-            throw new RalphieError({ message: "unused" });
+        readSnapshot: async (_client, _repo, number) => {
+            calls.push(`readPullRequestSnapshot:${number}`);
+            return (
+                options.prSnapshotOverride ?? {
+                    number,
+                    url: `https://github.com/owner/repo/pull/${number}`,
+                    baseSha: "a".repeat(40),
+                    headSha: options.prOverride?.headSha ?? "feature-head-sha",
+                }
+            );
         },
         rereadMatchingSnapshot: async () => {
             throw new RalphieError({ message: "unused" });
         },
-        publishPullRequestReviewAttempts: async () => {
-            throw new RalphieError({ message: "unused" });
+        publishPullRequestReviewAttempts: async (_client, repo, attempts) => {
+            calls.push(`publishPullRequestReviews:${repo}:${attempts.length}`);
         },
         publishReviewAttempts: async (_client, repo, number) => {
             calls.push(`publishReviews:${repo}:${number}`);
@@ -338,6 +357,22 @@ const testRuntime = (
                 url: `https://github.com/owner/repo/pull/${number}`,
                 merged: true,
                 headSha: expectedHeadSha,
+                state: "closed",
+            };
+        },
+        mergeWithProof: async (_client, repo, proof) => {
+            if (proof === undefined) {
+                throw new RalphieError({ message: "missing proof" });
+            }
+            calls.push(
+                `mergeWithProof:${repo}:${proof.pullRequestNumber}:${proof.headSha}`,
+            );
+            options.onMergeCall?.();
+            return {
+                number: proof.pullRequestNumber,
+                url: `https://github.com/owner/repo/pull/${proof.pullRequestNumber}`,
+                merged: true,
+                headSha: proof.headSha,
                 state: "closed",
             };
         },
@@ -539,7 +574,8 @@ const testRuntime = (
         }),
         githubPullRequests: pullRequests,
         pullRequestReviewAttempt: {} as never,
-        pullRequestReviewCoordinator: {} as never,
+        pullRequestReviewCoordinator:
+            options.pullRequestReviewCoordinator ?? ({} as never),
         githubNeedsAttentionNotification:
             options.needsAttentionNotification ?? {
                 notify: async () => {
@@ -602,6 +638,7 @@ const artifactMutationMethods = new Set<PropertyKey>([
     "recordNeedsAttentionDecision",
     "appendReview",
     "appendPullRequestReview",
+    "recordPullRequestDeliveryState",
     "recordCreatedIssue",
     "resetImplementationAttempt",
     "clearUnresolvedResolutionDecision",
@@ -769,6 +806,45 @@ const baseOptions = {
     onNeedsAttention: NeedsAttentionPolicy.Continue,
 } as const;
 
+const postPrSnapshot: PullRequestSnapshot = {
+    number: 1,
+    url: "https://github.com/owner/repo/pull/1",
+    baseSha: "a".repeat(40),
+    headSha: "b".repeat(40),
+};
+
+const postPrReviewFor = (
+    snapshot: PullRequestSnapshot,
+): PullRequestReviewAttemptResult => ({
+    identity: {
+        pullRequestNumber: snapshot.number,
+        baseSha: snapshot.baseSha,
+        reviewedHeadSha: snapshot.headSha,
+        attempt: 1,
+        sessionID: "post-pr-review-1",
+    },
+    attempt: {
+        pullRequestNumber: snapshot.number,
+        baseSha: snapshot.baseSha,
+        reviewedHeadSha: snapshot.headSha,
+        attempt: 1,
+        sessionID: "post-pr-review-1",
+        decision: {
+            verdict: ReviewVerdict.Approved,
+            summary: "The committed PR head is safe to merge.",
+            findings: [],
+        },
+    },
+    snapshot,
+    decision: {
+        verdict: ReviewVerdict.Approved,
+        summary: "The committed PR head is safe to merge.",
+        findings: [],
+    },
+    committedDiff: "diff --git a/file b/file\n+safe change\n",
+    approved: true,
+});
+
 describe("workflow", () => {
     test("executes an issue, persists completion, releases the agent, and cleans up", async () => {
         const calls: string[] = [];
@@ -925,6 +1001,176 @@ describe("workflow", () => {
             observedHeadSha: "feature-head-sha",
             gate: "merged",
         });
+    });
+
+    test("runs the resumable post-PR review lifecycle and merges only with a proof", async () => {
+        const calls: string[] = [];
+        const states: RunState[] = [];
+        const review = postPrReviewFor(postPrSnapshot);
+        const coordinatorResult: PullRequestReviewCoordinatorResult = {
+            reviews: [review],
+            revisions: [],
+            status: "approved",
+            snapshot: postPrSnapshot,
+            review,
+        };
+        const coordinator: PullRequestReviewCoordinatorService = {
+            review: async () => coordinatorResult,
+            execute: async () => coordinatorResult,
+        };
+        const summary = await workflow(
+            { ...baseOptions, workflow: WorkflowMode.Pr },
+            testRuntime(calls, states, {
+                pullRequestReviewCoordinator: coordinator,
+                prOverride: {
+                    number: 1,
+                    url: postPrSnapshot.url,
+                    merged: false,
+                    headSha: postPrSnapshot.headSha,
+                    state: "open",
+                },
+                prSnapshotOverride: postPrSnapshot,
+            }),
+        );
+
+        expect(summary.counts.completed).toBe(1);
+        expect(calls).not.toContain("publishReviews:owner/repo:1");
+        expect(calls).toContain("readPullRequestSnapshot:1");
+        expect(calls).toContain("publishPullRequestReviews:owner/repo:1");
+        expect(calls).toContain(
+            `mergeWithProof:owner/repo:1:${postPrSnapshot.headSha}`,
+        );
+        expect(calls).not.toContain("mergePullRequest:owner/repo:1");
+        expect(
+            calls.indexOf("publishPullRequestReviews:owner/repo:1"),
+        ).toBeLessThan(calls.indexOf("observePrGate"));
+        expect(
+            states.filter((state) => state.prClosure !== undefined).at(-1)
+                ?.prClosure,
+        ).toMatchObject({
+            baseSha: postPrSnapshot.baseSha,
+            observedHeadSha: postPrSnapshot.headSha,
+            review: {
+                status: "approved",
+                stage: "merge",
+                currentHeadSha: postPrSnapshot.headSha,
+                attempts: [],
+                approved: {
+                    pullRequestNumber: postPrSnapshot.number,
+                    baseSha: postPrSnapshot.baseSha,
+                    reviewedHeadSha: postPrSnapshot.headSha,
+                    attempt: 1,
+                },
+            },
+        });
+    });
+
+    test("carries an interrupted revision intent into the resumed PR coordinator", async () => {
+        const revisionIntent = {
+            attempt: 1,
+            expectedPriorHeadSha: "b".repeat(40),
+            expectedStagedTreeSha: "c".repeat(40),
+            message: {
+                subject: "Fix: resume the revision",
+                body: "Apply the already prepared revision.",
+            },
+        };
+        const resumeState: RunState = {
+            version: 9,
+            status: RunStateStatus.Active,
+            runId: "interrupted-pr-revision",
+            repository: baseOptions.repo,
+            branch: "develop",
+            workflow: WorkflowMode.Pr,
+            onNeedsAttention: NeedsAttentionPolicy.Continue,
+            dryRun: false,
+            notificationsEnabled: false,
+            selection: { agent: DEFAULT_AGENT },
+            maxIssues: 1,
+            queue: {
+                pending: [{ ...firstIssue, labels: [...firstIssue.labels] }],
+                completedIssueNumbers: [],
+                processedCount: 0,
+            },
+            outcomes: [
+                {
+                    issueNumber: 42,
+                    outcome: {
+                        kind: IssueExecutionOutcomeKind.Completed,
+                        completion: "pushed-commit",
+                        commitSha: "initial-commit",
+                    },
+                },
+            ],
+            activeIssue: { issueNumber: 42, stage: "issue-closure" },
+            prClosure: {
+                pullRequestNumber: 1,
+                baseSha: "a".repeat(40),
+                observedHeadSha: "b".repeat(40),
+                startedAt: "2026-09-05T00:00:00.000Z",
+                updatedAt: "2026-09-05T00:00:00.000Z",
+                gate: "pending",
+                review: {
+                    status: "failed",
+                    stage: "revision-delivery",
+                    attempts: [],
+                    revisionIntent,
+                    currentHeadSha: "b".repeat(40),
+                    revisionCount: 1,
+                },
+            },
+            checkout: { branch: "develop", head: "head-0" },
+            updatedAt: "2026-09-05T00:00:00.000Z",
+        };
+        let resumedRevision: unknown;
+        const review = postPrReviewFor(postPrSnapshot);
+        const coordinatorResult: PullRequestReviewCoordinatorResult = {
+            reviews: [],
+            revisions: [],
+            status: "approved",
+            snapshot: postPrSnapshot,
+            review,
+        };
+        const coordinator: PullRequestReviewCoordinatorService = {
+            review: async (input) => {
+                resumedRevision = input.resumeRevision;
+                return coordinatorResult;
+            },
+            execute: async (input) => {
+                resumedRevision = input.resumeRevision;
+                return coordinatorResult;
+            },
+        };
+        const calls: string[] = [];
+        const states: RunState[] = [];
+        const summary = await workflow(
+            {
+                ...baseOptions,
+                workflow: WorkflowMode.Pr,
+                resumeState,
+            },
+            testRuntime(calls, states, {
+                issueLists: [[]],
+                pullRequestReviewCoordinator: coordinator,
+                prOverride: {
+                    number: 1,
+                    url: postPrSnapshot.url,
+                    merged: false,
+                    headSha: postPrSnapshot.headSha,
+                    state: "open",
+                },
+                prSnapshotOverride: postPrSnapshot,
+            }),
+        );
+
+        expect(summary.counts.completed).toBe(1);
+        expect(resumedRevision).toEqual(revisionIntent);
+        expect(calls).toContain(
+            "prepareFeatureBranch:ralphie/issue-42:develop",
+        );
+        expect(calls).toContain(
+            `mergeWithProof:owner/repo:1:${postPrSnapshot.headSha}`,
+        );
     });
 
     test.each([
@@ -1308,6 +1554,9 @@ describe("workflow", () => {
         expect(
             calls.some((call) => call.startsWith("executeIssue:")),
         ).toBeFalse();
+        expect(calls).toContain(
+            "prepareFeatureBranch:ralphie/issue-42:develop",
+        );
         expect(calls).not.toContain(
             "createPullRequest:owner/repo:ralphie/issue-42:develop",
         );

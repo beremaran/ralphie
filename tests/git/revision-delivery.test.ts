@@ -49,6 +49,8 @@ type PostPushRemote =
 
 type RunnerOptions = {
     readonly branch?: string;
+    /** Local HEAD observed while reconciling an existing revision. */
+    readonly localHead?: string;
     /** Initial remote head for `git ls-remote`; "" means the branch is absent. */
     readonly remoteHead?: string;
     /** Remote head observed by the pre-push re-check (second `ls-remote` call). */
@@ -80,7 +82,7 @@ const makeRunner = (
 } => {
     const commands: string[] = [];
     const state = {
-        head: PRIOR_HEAD,
+        head: options.localHead ?? PRIOR_HEAD,
         remoteHead: options.remoteHead ?? PRIOR_HEAD,
         lsRemoteCalls: 0,
         pushed: false,
@@ -682,6 +684,122 @@ describe("managed feature-branch revision delivery", () => {
                 /reset|checkout|fetch|pull|--force/.test(command),
             ),
         ).toBe(false);
+    });
+
+    test("reconciles an interrupted revision by pushing the existing clean candidate once", async () => {
+        const { run, commands } = makeRunner({
+            localHead: NEW_HEAD,
+            remoteHead: PRIOR_HEAD,
+        });
+        const delivery = makeDeliveryService(run);
+
+        const outcome = (await delivery.reconcileRevision?.({
+            repository: REPOSITORY,
+            repositoryPath: REPOSITORY_PATH,
+            branch: BRANCH,
+            baseSha: BASE,
+            expectedPriorHeadSha: PRIOR_HEAD,
+            expectedStagedTreeSha: APPROVED_TREE,
+        })) as GitRevisionDeliveryOutcome;
+
+        expect(outcome).toEqual({
+            status: "confirmed",
+            repository: REPOSITORY,
+            branch: BRANCH,
+            headSha: NEW_HEAD,
+            parentSha: PRIOR_HEAD,
+            treeSha: APPROVED_TREE,
+            remoteSha: NEW_HEAD,
+            pushResponseLost: false,
+        });
+        expect(commands.some((command) => command.includes("add --all"))).toBe(
+            false,
+        );
+        expect(commands.some((command) => command.includes("commit -m"))).toBe(
+            false,
+        );
+        expect(
+            commands.filter((command) => command.includes("push --no-force")),
+        ).toHaveLength(1);
+    });
+
+    test("does not repeat a push when the interrupted revision is already remote", async () => {
+        const { run, commands } = makeRunner({
+            localHead: NEW_HEAD,
+            remoteHead: NEW_HEAD,
+        });
+        const delivery = makeDeliveryService(run);
+
+        const outcome = (await delivery.reconcileRevision?.({
+            repository: REPOSITORY,
+            repositoryPath: REPOSITORY_PATH,
+            branch: BRANCH,
+            baseSha: BASE,
+            expectedPriorHeadSha: PRIOR_HEAD,
+            expectedStagedTreeSha: APPROVED_TREE,
+            expectedHeadSha: NEW_HEAD,
+        })) as GitRevisionDeliveryOutcome;
+
+        expect(outcome).toEqual({
+            status: "confirmed",
+            repository: REPOSITORY,
+            branch: BRANCH,
+            headSha: NEW_HEAD,
+            parentSha: PRIOR_HEAD,
+            treeSha: APPROVED_TREE,
+            remoteSha: NEW_HEAD,
+            pushResponseLost: true,
+        });
+        expect(
+            commands.filter((command) => command.includes("push --no-force")),
+        ).toHaveLength(0);
+    });
+
+    test("leaves no reconciliation work when the checkout is still at the recorded prior head", async () => {
+        const { run, commands } = makeRunner({
+            localHead: PRIOR_HEAD,
+            remoteHead: PRIOR_HEAD,
+        });
+        const delivery = makeDeliveryService(run);
+
+        const outcome = await delivery.reconcileRevision?.({
+            repository: REPOSITORY,
+            repositoryPath: REPOSITORY_PATH,
+            branch: BRANCH,
+            baseSha: BASE,
+            expectedPriorHeadSha: PRIOR_HEAD,
+            expectedStagedTreeSha: APPROVED_TREE,
+        });
+
+        expect(outcome).toBeUndefined();
+        expect(commands).toHaveLength(2);
+        expect(commands.some((command) => command.includes("push"))).toBe(
+            false,
+        );
+    });
+
+    test("rejects an interrupted revision whose exact tree no longer matches", async () => {
+        const { run, commands } = makeRunner({
+            localHead: NEW_HEAD,
+            remoteHead: PRIOR_HEAD,
+        });
+        const delivery = makeDeliveryService(run);
+
+        await expectErrorKind(
+            delivery.reconcileRevision?.({
+                repository: REPOSITORY,
+                repositoryPath: REPOSITORY_PATH,
+                branch: BRANCH,
+                baseSha: BASE,
+                expectedPriorHeadSha: PRIOR_HEAD,
+                expectedStagedTreeSha: OTHER,
+            }) ?? Promise.resolve(undefined),
+            "invalid-input",
+        );
+
+        expect(commands.some((command) => command.includes("push"))).toBe(
+            false,
+        );
     });
 });
 

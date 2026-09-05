@@ -16,6 +16,7 @@ import { runGit } from "../git/run-git.ts";
 import type {
     GitRevisionDeliveryOutcome,
     GitRevisionDeliveryService,
+    GitRevisionReconciliationInput,
 } from "../git/revision-delivery.ts";
 import type { CommandRunnerService } from "../process/command-runner.ts";
 import { AgentSessionProfile, type AgentClient } from "../opencode/client.ts";
@@ -26,14 +27,21 @@ import type {
 } from "../github/pull-requests.ts";
 import { RalphieError } from "../shared/error.ts";
 
-import type { IssueArtifactStore } from "./artifacts.ts";
+import {
+    IssueArtifactKind,
+    type IssueArtifactStore,
+    type PullRequestDeliveryStateArtifact,
+} from "./artifacts.ts";
 import {
     commitMessageDecisionSchema,
     type CommitMessageDecision,
 } from "./decisions.ts";
 import type {
+    ApprovedPullRequestReviewEvidence,
+    PullRequestReviewAttempt,
     PullRequestReviewAttemptResult,
     PullRequestReviewAttemptService,
+    PullRequestRevisionIntent,
 } from "./pull-request-review.ts";
 import { REVIEW_ITERATION_LIMIT } from "./stage.ts";
 import type {
@@ -120,6 +128,35 @@ export type PullRequestReviewCoordinatorInput = {
     readonly runId?: string;
     readonly diagnostics?: AgentSessionDiagnostics;
     readonly signal?: AbortSignal;
+    /** Revision intent recovered from workflow state when delivery was interrupted. */
+    readonly resumeRevision?: PullRequestRevisionIntent;
+    /**
+     * Persist the next lifecycle boundary before an agent or Git mutation.
+     * The callback is intentionally semantic so workflow state owns durable
+     * serialization while this coordinator owns ordering.
+     */
+    readonly onStage?: (
+        stage: PullRequestReviewLifecycleEvent,
+    ) => Promise<void>;
+    /** Persist the outcome after a revision commit/push boundary returns. */
+    readonly onRevisionDelivery?: (
+        delivery: PullRequestReviewDeliveryEvent,
+    ) => Promise<void>;
+};
+
+export type PullRequestReviewLifecycleEvent = {
+    readonly stage: "review" | "revision-fix" | "revision-delivery";
+    readonly attempt: number;
+    readonly snapshot: PullRequestSnapshot;
+    readonly revisionIntent?: PullRequestRevisionIntent;
+};
+
+export type PullRequestReviewDeliveryEvent = {
+    readonly stage: "revision-delivery";
+    readonly attempt: number;
+    readonly snapshot: PullRequestSnapshot;
+    readonly revisionIntent: PullRequestRevisionIntent;
+    readonly delivery: GitRevisionDeliveryOutcome;
 };
 
 export type PullRequestReviewCoordinatorDependencies = {
@@ -131,12 +168,14 @@ export type PullRequestReviewCoordinatorDependencies = {
     readonly issueOperations: Pick<
         GitIssueOperationsService,
         "stageAll" | "hasStagedChanges" | "readStagedBinaryDiff"
-    >;
+    > &
+        Partial<Pick<GitIssueOperationsService, "readCommittedBinaryDiff">>;
     readonly verification: Pick<IssueVerificationService, "verify">;
     readonly revisionDelivery: Pick<
         GitRevisionDeliveryService,
         "deliverRevision"
-    >;
+    > &
+        Partial<Pick<GitRevisionDeliveryService, "reconcileRevision">>;
     readonly commandRunner: Pick<CommandRunnerService, "run">;
 };
 
@@ -157,6 +196,15 @@ const messageOf = (error: unknown): string =>
 
 const checkSignal = (signal: AbortSignal | undefined): void => {
     signal?.throwIfAborted();
+};
+
+const beforeStage = async (
+    input: PullRequestReviewCoordinatorInput,
+    event: PullRequestReviewLifecycleEvent,
+): Promise<void> => {
+    checkSignal(input.signal);
+    await input.onStage?.(event);
+    checkSignal(input.signal);
 };
 
 const clearIndex = async (
@@ -252,6 +300,11 @@ const runRevisionFix = async (
     attempt: number,
 ): Promise<RevisionFixStep> => {
     try {
+        await beforeStage(input, {
+            stage: "revision-fix",
+            attempt,
+            snapshot: review.snapshot,
+        });
         const fix = await runAgentTask(input.agent, {
             directory: input.repositoryPath,
             title: `Address pull request review for #${input.issue.number} (attempt ${attempt})`,
@@ -458,7 +511,19 @@ const deliverRevision = async (
     input: PullRequestReviewCoordinatorInput,
     revision: PreparedRevision,
 ): Promise<DeliveryStep> => {
+    const revisionIntent: PullRequestRevisionIntent = {
+        attempt: revision.review.attempt.attempt,
+        expectedPriorHeadSha: revision.review.attempt.reviewedHeadSha,
+        expectedStagedTreeSha: revision.verification.stagedTreeSha,
+        message: revision.commitMessage,
+    };
     try {
+        await beforeStage(input, {
+            stage: "revision-delivery",
+            attempt: revision.review.attempt.attempt,
+            snapshot: revision.review.snapshot,
+            revisionIntent,
+        });
         const delivery = await dependencies.revisionDelivery.deliverRevision({
             repository: input.repository,
             repositoryPath: input.repositoryPath,
@@ -471,6 +536,14 @@ const deliverRevision = async (
             context: {
                 isCancelled: () => input.signal?.aborted === true,
             },
+        });
+        checkSignal(input.signal);
+        await input.onRevisionDelivery?.({
+            stage: "revision-delivery",
+            attempt: revision.review.attempt.attempt,
+            snapshot: revision.review.snapshot,
+            revisionIntent,
+            delivery,
         });
         checkSignal(input.signal);
         return { kind: "delivered", delivery };
@@ -537,6 +610,11 @@ const runCoordinatorIteration = async (
     attempt: number,
     reviews: PullRequestReviewAttemptResult[],
 ): Promise<CoordinatorIteration> => {
+    await beforeStage(input, {
+        stage: "review",
+        attempt,
+        snapshot,
+    });
     const reviewStep = await invokeReviewAttempt(dependencies, input, snapshot);
     if (reviewStep.kind === "failed") {
         return attempt === REVIEW_ITERATION_LIMIT
@@ -686,6 +764,194 @@ const processPreparedRevision = async (
     return { status: "continue", snapshot: postDelivery.snapshot };
 };
 
+type StoredPullRequestReviewArtifacts = {
+    readonly attempts: ReadonlyArray<PullRequestReviewAttempt>;
+    readonly approved: ApprovedPullRequestReviewEvidence | undefined;
+    readonly deliveryState: PullRequestDeliveryStateArtifact | undefined;
+};
+
+const readStoredPullRequestReviewArtifacts = async (
+    artifacts: IssueArtifactStore,
+): Promise<StoredPullRequestReviewArtifacts> => ({
+    attempts: artifacts.has(IssueArtifactKind.PullRequestReviewAttempts)
+        ? await artifacts.read(IssueArtifactKind.PullRequestReviewAttempts)
+        : [],
+    approved: artifacts.has(IssueArtifactKind.ApprovedPullRequestReviewEvidence)
+        ? await artifacts.read(
+              IssueArtifactKind.ApprovedPullRequestReviewEvidence,
+          )
+        : undefined,
+    deliveryState: artifacts.has(IssueArtifactKind.PullRequestDeliveryState)
+        ? await artifacts.read(IssueArtifactKind.PullRequestDeliveryState)
+        : undefined,
+});
+
+type PendingRevisionReconciliation =
+    | { readonly status: "none" }
+    | {
+          readonly status: "continued";
+          readonly snapshot: PullRequestSnapshot;
+      }
+    | {
+          readonly status: "delivery-recoverable";
+          readonly snapshot: PullRequestSnapshot;
+          readonly delivery: Extract<
+              GitRevisionDeliveryOutcome,
+              { readonly status: "external-movement" | "ambiguous" }
+          >;
+      }
+    | {
+          readonly status: "failed";
+          readonly snapshot: PullRequestSnapshot;
+          readonly message: string;
+      };
+
+const reconcilePendingRevision = async (
+    dependencies: PullRequestReviewCoordinatorDependencies,
+    input: PullRequestReviewCoordinatorInput,
+    stored: StoredPullRequestReviewArtifacts,
+): Promise<PendingRevisionReconciliation> => {
+    const deliveryState = stored.deliveryState;
+    const intent =
+        deliveryState?.stage === "revision-delivery"
+            ? (deliveryState.revisionIntent ?? input.resumeRevision)
+            : input.resumeRevision;
+    if (intent === undefined) return { status: "none" };
+    const reconcile = dependencies.revisionDelivery.reconcileRevision;
+    if (reconcile === undefined) return { status: "none" };
+
+    const reconciliationInput: GitRevisionReconciliationInput = {
+        repository: input.repository,
+        repositoryPath: input.repositoryPath,
+        branch: input.branch,
+        baseSha: input.snapshot.baseSha,
+        expectedPriorHeadSha: intent.expectedPriorHeadSha,
+        expectedStagedTreeSha: intent.expectedStagedTreeSha,
+        ...(deliveryState?.delivery?.status === "confirmed"
+            ? { expectedHeadSha: deliveryState.delivery.headSha }
+            : {}),
+        context: {
+            isCancelled: () => input.signal?.aborted === true,
+        },
+    };
+    let delivery: GitRevisionDeliveryOutcome | undefined;
+    try {
+        delivery = await reconcile(reconciliationInput);
+        checkSignal(input.signal);
+    } catch (error) {
+        if (isCancellation(error, input.signal)) throw error;
+        return {
+            status: "failed",
+            snapshot: input.snapshot,
+            message: messageOf(error),
+        };
+    }
+    if (delivery === undefined) return { status: "none" };
+    if (delivery.status !== "confirmed") {
+        const current = await rereadSnapshot(
+            dependencies,
+            input,
+            input.snapshot,
+        );
+        return {
+            status: "delivery-recoverable",
+            snapshot: current,
+            delivery,
+        };
+    }
+    const current = await rereadSnapshot(dependencies, input, {
+        ...input.snapshot,
+        headSha: delivery.headSha,
+    });
+    return { status: "continued", snapshot: current };
+};
+
+const resumedApprovedReview = async (
+    dependencies: PullRequestReviewCoordinatorDependencies,
+    input: PullRequestReviewCoordinatorInput,
+    approvedEvidence: StoredPullRequestReviewArtifacts["approved"],
+): Promise<PullRequestReviewAttemptResult | undefined> => {
+    if (
+        approvedEvidence === undefined ||
+        approvedEvidence.pullRequestNumber !== input.snapshot.number ||
+        !sameSha(approvedEvidence.baseSha, input.snapshot.baseSha) ||
+        !sameSha(approvedEvidence.reviewedHeadSha, input.snapshot.headSha)
+    ) {
+        return undefined;
+    }
+    const committedDiff =
+        dependencies.issueOperations.readCommittedBinaryDiff === undefined
+            ? ""
+            : await dependencies.issueOperations.readCommittedBinaryDiff(
+                  input.repositoryPath,
+                  input.snapshot.baseSha,
+                  input.snapshot.headSha,
+                  input.signal,
+              );
+    return {
+        identity: {
+            pullRequestNumber: approvedEvidence.pullRequestNumber,
+            baseSha: approvedEvidence.baseSha,
+            reviewedHeadSha: approvedEvidence.reviewedHeadSha,
+            attempt: approvedEvidence.attempt,
+            sessionID: approvedEvidence.sessionID,
+        },
+        attempt: approvedEvidence,
+        snapshot: input.snapshot,
+        decision: approvedEvidence.decision,
+        committedDiff,
+        approved: true,
+    };
+};
+
+const runCoordinatorLoop = async (
+    dependencies: PullRequestReviewCoordinatorDependencies,
+    input: PullRequestReviewCoordinatorInput,
+    firstAttempt: number,
+): Promise<PullRequestReviewCoordinatorResult> => {
+    const reviews: PullRequestReviewAttemptResult[] = [];
+    const revisions: PullRequestRevisionRecord[] = [];
+    let currentSnapshot = input.snapshot;
+    const history = (): CoordinatorHistory => ({ reviews, revisions });
+
+    for (
+        let attempt = firstAttempt;
+        attempt <= REVIEW_ITERATION_LIMIT;
+        attempt += 1
+    ) {
+        checkSignal(input.signal);
+        const iteration = await runCoordinatorIteration(
+            dependencies,
+            input,
+            currentSnapshot,
+            attempt,
+            reviews,
+        );
+        if (iteration.status === "retry-head") {
+            currentSnapshot = iteration.snapshot;
+            continue;
+        }
+        if (iteration.status !== "prepared") {
+            return { ...history(), ...iteration };
+        }
+
+        const processed = await processPreparedRevision(
+            dependencies,
+            input,
+            iteration,
+            revisions,
+        );
+        if (processed.status !== "continue") {
+            return { ...history(), ...processed };
+        }
+        currentSnapshot = processed.snapshot;
+    }
+
+    throw new RalphieError({
+        message: "Pull request review coordinator exhausted unexpectedly.",
+    });
+};
+
 /**
  * Compose the post-creation review/revision state machine. Review attempts,
  * revision Git policy, and all mutable repository operations remain injected;
@@ -698,43 +964,77 @@ export const makePullRequestReviewCoordinatorService = (
     const review = async (
         input: PullRequestReviewCoordinatorInput,
     ): Promise<PullRequestReviewCoordinatorResult> => {
-        const reviews: PullRequestReviewAttemptResult[] = [];
-        const revisions: PullRequestRevisionRecord[] = [];
-        let currentSnapshot = input.snapshot;
-        const history = (): CoordinatorHistory => ({ reviews, revisions });
+        const stored = await readStoredPullRequestReviewArtifacts(
+            input.artifacts,
+        );
+        const pendingRevision = await reconcilePendingRevision(
+            dependencies,
+            input,
+            stored,
+        );
+        if (pendingRevision.status === "delivery-recoverable") {
+            return {
+                reviews: [],
+                revisions: [],
+                status: "delivery-recoverable",
+                snapshot: pendingRevision.snapshot,
+                delivery: pendingRevision.delivery,
+            };
+        }
+        if (pendingRevision.status === "failed") {
+            return {
+                reviews: [],
+                revisions: [],
+                status: "revision-failed",
+                snapshot: pendingRevision.snapshot,
+                message: pendingRevision.message,
+            };
+        }
+        const effectiveInput =
+            pendingRevision.status === "continued"
+                ? { ...input, snapshot: pendingRevision.snapshot }
+                : input;
+        const effectiveStored =
+            effectiveInput === input
+                ? stored
+                : await readStoredPullRequestReviewArtifacts(
+                      effectiveInput.artifacts,
+                  );
 
-        for (let attempt = 1; attempt <= REVIEW_ITERATION_LIMIT; attempt += 1) {
-            checkSignal(input.signal);
-            const iteration = await runCoordinatorIteration(
-                dependencies,
-                input,
-                currentSnapshot,
-                attempt,
-                reviews,
-            );
-            if (iteration.status === "retry-head") {
-                currentSnapshot = iteration.snapshot;
-                continue;
-            }
-            if (iteration.status !== "prepared") {
-                return { ...history(), ...iteration };
-            }
-
-            const processed = await processPreparedRevision(
-                dependencies,
-                input,
-                iteration,
-                revisions,
-            );
-            if (processed.status !== "continue") {
-                return { ...history(), ...processed };
-            }
-            currentSnapshot = processed.snapshot;
+        // A process can stop after review persistence but before publication
+        // or check observation. Reuse an approval that is still scoped to the
+        // exact captured PR/base/head; the final merge gate will reread the PR
+        // again before accepting it.
+        const resumedReview = await resumedApprovedReview(
+            dependencies,
+            effectiveInput,
+            effectiveStored.approved,
+        );
+        if (resumedReview !== undefined) {
+            return {
+                reviews: [],
+                revisions: [],
+                status: "approved",
+                snapshot: effectiveInput.snapshot,
+                review: resumedReview,
+            };
         }
 
-        throw new RalphieError({
-            message: "Pull request review coordinator exhausted unexpectedly.",
-        });
+        const firstAttempt = effectiveStored.attempts.length + 1;
+        if (firstAttempt > REVIEW_ITERATION_LIMIT) {
+            return {
+                reviews: [],
+                revisions: [],
+                status: "pr-review-exhausted",
+                snapshot: effectiveInput.snapshot,
+                reason: "review-attempt-budget-exhausted",
+            };
+        }
+        return await runCoordinatorLoop(
+            dependencies,
+            effectiveInput,
+            firstAttempt,
+        );
     };
 
     return { review, execute: review };

@@ -40,10 +40,11 @@ For task-oriented details, start with the [documentation index](./docs/README.md
   run in separate OpenCode sessions to reduce context bias.
 - **Deterministic delivery** — Ralphie stages, inspects, commits, and pushes the
   resulting changes itself; agents do not own the delivery protocol. In `pr`
-  mode, merged delivery is a **check gate**: the pull request is merged only
-  after the checks for its exact head SHA reach a stable green snapshot, the
-  head is re-read immediately before merging, and a moved head invalidates the
-  saved decision.
+  mode, the post-creation review/revision lifecycle runs against an immutable
+  PR base/head pair, publishes head-scoped evidence, and permits merging only
+  after the exact head has a stable green check snapshot plus an approved
+  structured review proof. The PR is re-read immediately before merging, and a
+  moved head invalidates all saved evidence.
 - **Crash-safe recovery** — versioned run state, issue checkpoints, artifacts,
   and idempotent reconciliation make interrupted runs resumable.
 - **Issue maintenance** — `--mode maintain-issues` uses read-only OpenCode
@@ -204,13 +205,16 @@ resume, and cleanup details; successful `--clean end` removes the workspace
 and its log, while failed runs retain diagnostics for recovery.
 
 PR delivery surfaces as `pr-gate` progress events: registration with the pull
-request number and exact head SHA, poll progress only for meaningful check
-transitions (registration, checked-in, disappeared, status changes), head
-invalidation, and terminal success or failure with the check summary and
-reason. Human and verbose output name the PR number, exact SHA, check summary,
-and reason; JSON events carry the structured normalized check snapshot and
-a timestamp; unchanged polls never emit, and quiet output suppresses the
-routine gate milestones while still reporting gate failures.
+request number and exact head SHA, post-creation review approval or failure,
+revision and publication progress, meaningful check transitions (registration,
+checked-in, disappeared, status changes), head invalidation, and terminal
+success or failure with the review/check summary and reason. Human and verbose
+output name the PR number and exact SHA; JSON events carry the structured
+review status, normalized check snapshot, attempt/revision counts, and a
+timestamp. Unchanged polls never emit, and quiet output suppresses routine gate
+milestones while still reporting review or gate failures. A merge request is
+accepted only when the approved review and green check proof both match the
+authoritative PR base and head.
 
 ## How issue routing works
 

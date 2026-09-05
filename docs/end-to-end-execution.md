@@ -488,7 +488,7 @@ the queue.
 | Mode | Issue checkout | Delivery | Source issue closure |
 | --- | --- | --- | --- |
 | `lgtm` | Selected base branch | Commit and non-force push directly to that branch; verify remote SHA and clean checkout | Close directly as `completed` after verified delivery. |
-| `pr` | `ralphie/issue-<number>` in the main checkout | Push feature branch, create/find matching PR, persist its number and head SHA, publish stored review attempts as marked comments, and gate merged delivery on the exact-head check observer: 30-second registration grace, 5s-to-60s bounded exponential backoff, a 30-minute deadline, and two stable green confirmations, with a re-read of the PR immediately before the expected-head merge | PR body contains `Closes #<issue>`; GitHub closes the issue on merge. A failed, cancelled, timed-out, absent, no-pipelines, unknown, changed-head, closed, or unmergeable gate retains the feature branch and PR, leaves the issue open, and persists recoverable run state. The serial run restores the base checkout afterward. |
+| `pr` | `ralphie/issue-<number>` in the main checkout | Push feature branch, create/find matching PR, persist its number and immutable base/head snapshot, run the resumable post-PR review/revision coordinator for at most five shared attempts, publish approved head-scoped attempts, and gate merged delivery on the exact-head check observer: 30-second registration grace, 5s-to-60s bounded exponential backoff, a 30-minute deadline, and two stable green confirmations, followed by a proof-bearing merge | PR body contains `Closes #<issue>`; GitHub closes the issue on merge. A failed, cancelled, timed-out, absent, no-pipelines, unknown, changed-head, stale-review, closed, or unmergeable review, revision, or check gate retains the feature branch and pull request, leaves the issue open, and persists recoverable run state. The serial run restores the base checkout afterward. |
 | `--dry-run` | Prepared normal checkout | Ground the issue, then assess complexity and report implementation or decomposition when actionable; report already-resolved and needs-attention routes otherwise. A decomposition dry run also performs the read-only breakdown session and reports the intended native sub-issue hierarchy, children to create or reuse, and dependency edges. No implementation, decomposition, delivery, commit, push, checkout, issue, or PR mutation | No issue is closed. The result is `skipped` except needs-attention, which remains a needs-attention outcome. |
 
 ### Maintenance mode
@@ -594,35 +594,79 @@ delivery mode because it has no commit to deliver. Unresolved, uncertain,
 malformed, or failed verification is a failed outcome, so it never reaches
 this delivery/closure boundary.
 
-In `pr` mode the merged delivery is gated: after the feature branch is pushed
-and the matching pull request is created or found, its number and head SHA are
-persisted, review attempts are published idempotently, and the read-only
-observer polls normalized snapshots for that exact SHA until it reaches its
-documented green state. The observer tolerates a 30-second registration grace
-period while no checks are visible, keeps polling while any check is pending,
-uses bounded exponential backoff from 5 seconds doubling to a 60-second cap,
-fails closed after a 30-minute deadline, and requires two consecutive identical
-green snapshots (stable terminal confirmations) plus a race-safe final remote
-HEAD read before reporting green. Neutral and skipped terminal states fail
-closed by policy: an absent no-checks set past the grace period, unknown
-states, cancelled checks, and failing checks never count as green, and the
-observation every time re-checks that the remote branch HEAD still points at
-the exact SHA being observed.
+In `pr` mode merged delivery is a resumable review-and-check lifecycle. After
+the feature branch is pushed and the matching pull request is created or
+found, Ralphie reads and persists its immutable number/base/head snapshot
+before starting post-PR review. The coordinator gives each exact committed
+head a fresh structured review. A requested change invokes a fresh fix session,
+re-verifies the repaired tree, creates an exact-tree revision, and delivers it
+through the non-force revision boundary. Review, fix, revision-delivery,
+publication, checks, and merge are explicit persisted stages; the per-issue
+delivery-state artifact records the current stage, head, attempt count,
+revision count, check proof, and terminal reason. Repeated execution can
+therefore reconcile a lost response or cancellation without repeating a
+head-scoped comment, revision, or merge. A head move invalidates saved review
+evidence and starts the new head's review; the old head is never merged based on
+stale approval.
+
+```mermaid
+sequenceDiagram
+    participant W as Workflow
+    participant S as Run state/artifacts
+    participant R as PR review coordinator
+    participant G as Git/GitHub
+    participant C as Check observer
+    W->>G: create or find PR; read base/head snapshot
+    W->>S: persist PR and review stage before mutation
+    loop approval or five shared attempts
+        W->>R: review exact committed head
+        alt changes requested
+            R->>R: fresh fix and verification session
+            R->>G: exact-tree commit and non-force revision push
+            G-->>R: reconciled new head or recoverable outcome
+        else approved
+            R-->>W: approved review evidence for PR/base/head
+        end
+        W->>S: persist stage and attempt/revision outcome
+    end
+    W->>G: publish deterministic head-scoped review attempts
+    W->>C: observe checks for approved exact head
+    C-->>W: stable green check proof
+    W->>G: reread PR; merge only with matching review/check proof
+    G-->>W: merged PR; restore base checkout
+```
+
+The coordinator stops after approval or five shared review attempts. Exhaustion
+is terminal for the run: the issue and pull request remain open, the feature
+branch and diagnostics are retained, and the check gate is not entered. An
+approved attempt is published idempotently using its deterministic PR/head
+marker. Only then does the read-only check observer poll normalized snapshots
+for the approved exact SHA until it reaches its documented green state. The
+observer tolerates a 30-second registration grace period while no checks are
+visible, keeps polling while any check is pending, uses bounded exponential
+backoff from 5 seconds doubling to a 60-second cap, fails closed after a
+30-minute deadline, and requires two consecutive identical green snapshots
+(stable terminal confirmations) plus a race-safe final remote HEAD read before
+reporting green. Neutral and skipped terminal states fail closed by policy: an
+absent no-checks set past the grace period, unknown states, cancelled checks,
+and failing checks never count as green, and observation always re-checks that
+the remote branch HEAD still points at the exact SHA being observed.
 
 The PR is re-read immediately before merging; a green decision is only acted
-on when the head is unchanged. Failed, cancelled, timed-out, no-pipelines,
-unknown, changed-head, closed, or unmergeable gates never merge and never
-close the source issue: the feature branch and PR are retained and an active,
-recoverable closure gate is persisted in run state. The persisted `prClosure`
-record is the audit trail for that gate: pull-request number, observed head
-SHA, the latest normalized check snapshot, observation start and last-update
-timestamps, the gate status (`pending`, `green`, `failed`, `cancelled`,
-`unknown`, `no-pipelines`, `timeout`, `aborted`, `stale`, `unmergeable`,
-`closed`, or `merged`), and the terminal reason; a merged record keeps the
-green snapshot as merge evidence. On resume the existing matching PR is
-located instead of duplicated, pending gates continue polling, saved green
-evidence is re-verified against the current head (a changed head invalidates
-it), failed gates can be re-observed on a later rerun, and an already-merged PR
+on when the head is unchanged and the approved structured review, PR base, and
+green check proof all match that authoritative snapshot. Failed, cancelled,
+timed-out, no-pipelines, unknown, changed-head, stale-review, closed, or
+unmergeable gates never merge and never close the source issue: the feature
+branch and PR are retained and an active, recoverable closure gate is
+persisted in run state. The persisted `prClosure` record is the audit trail for
+that gate and lifecycle: pull-request number, base/head, latest normalized
+check snapshot, review status/stage, bounded review attempts, approved
+evidence, revision count, observation timestamps, gate status, and terminal
+reason. A merged record keeps the green snapshot and merge-stage proof. On
+resume the existing matching PR is located instead of duplicated, same-head
+review evidence is reused only after the current snapshot is read, pending
+gates continue polling, saved green evidence is re-verified against the current
+head, failed gates can be re-observed on a later rerun, and an already-merged PR
 is reconciled without another merge call.
 
 Gate activity streams as `pr-gate` progress events: registration with the PR
@@ -1031,7 +1075,7 @@ stateDiagram-v2
 | Runtime dependency assembly | `src/runtime.ts` |
 | Run orchestration, queue, state transitions | `src/workflow.ts`, `src/issues/queue.ts` |
 | Complexity routing | `src/issues/executor.ts`, `src/issues/complexity.ts` |
-| Implementation/review/delivery | `src/issues/implementation-executor.ts` |
+| Implementation/review/delivery | `src/issues/implementation-executor.ts`, `src/issues/pull-request-review.ts`, `src/issues/pull-request-review-coordinator.ts`, `src/github/pull-requests.ts` |
 | Decomposition and GitHub mutations | `src/issues/decomposition-executor.ts`, `src/github/` |
 | Maintenance snapshot, planning, execution, and state | `src/maintain-issues-snapshot-service.ts`, `src/maintain-issues-candidates.ts`, `src/maintain-issues-plan.ts`, `src/maintain-issues.ts`, `src/maintain-issues-state.ts` |
 | Maintenance GitHub reconciliation | `src/github/issue-maintenance.ts`, `src/github/issue-maintenance-relationships.ts` |

@@ -362,6 +362,10 @@ const makeTrackedStore = async (
             throwIfFailing("appendPullRequestReview");
             await store.appendPullRequestReview(review, signal);
         },
+        recordPullRequestDeliveryState: async (value, signal) => {
+            throwIfFailing("recordPullRequestDeliveryState");
+            await store.recordPullRequestDeliveryState(value, signal);
+        },
         recordCreatedIssue: async (key, createdIssueNumber, signal) => {
             throwIfFailing("recordCreatedIssue");
             await store.recordCreatedIssue(key, createdIssueNumber, signal);

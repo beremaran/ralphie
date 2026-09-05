@@ -27,6 +27,19 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Changed
 
+- Complete the post-PR review and revision lifecycle. `pr` delivery now
+  persists the immutable pull-request base/head, runs a resumable coordinator
+  with one shared five-attempt review budget, performs fresh exact-tree
+  non-force revisions when findings require changes, publishes head-scoped
+  review attempts idempotently, and records review/revision/publication/check/
+  merge boundaries in RunState v9 and the per-issue delivery artifact.
+  Merging requires a fail-closed proof containing approved structured review
+  evidence and a stable green check snapshot for the same PR/base/head; stale
+  or incomplete proof cannot merge. Exhaustion and recoverable delivery
+  failures retain the open issue, branch, and PR. Added service, coordinator,
+  workflow, resume, failure-boundary, and end-to-end coverage plus the
+  lifecycle/recovery documentation.
+
 - Complete the first user-visible `--mode maintain-issues` release slice. The
   mode is a bounded one-shot issue-reconciliation pass separate from the
   default `--mode issues` delivery queue: read-only OpenCode planning feeds

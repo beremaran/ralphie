@@ -20,7 +20,11 @@ import {
     type IssueExecutionOutcome,
 } from "./issues/execution.ts";
 import { NeedsAttentionReason } from "./issues/decisions.ts";
-import { IssueArtifactKind } from "./issues/artifacts.ts";
+import {
+    IssueArtifactKind,
+    type IssueArtifactStore,
+    type PullRequestDeliveryStateArtifact,
+} from "./issues/artifacts.ts";
 import {
     createIssueQueue,
     IssueQueueState,
@@ -28,7 +32,20 @@ import {
 } from "./issues/queue.ts";
 import type { OpenCodeRuntime } from "./opencode/server.ts";
 import { validateModelVariants } from "./opencode/variants.ts";
-import type { GitHubPullRequest } from "./github/pull-requests.ts";
+import type {
+    GitHubPullRequest,
+    PullRequestMergeProof,
+    PullRequestSnapshot,
+} from "./github/pull-requests.ts";
+import type {
+    PullRequestReviewCoordinatorResult,
+    PullRequestReviewDeliveryEvent,
+    PullRequestReviewLifecycleEvent,
+} from "./issues/pull-request-review-coordinator.ts";
+import type {
+    PullRequestRevisionIntent,
+    PullRequestReviewAttempt,
+} from "./issues/pull-request-review.ts";
 import type {
     PipelineObservationOutcome,
     PipelineObservationResult,
@@ -67,6 +84,78 @@ import type { RalphieRuntime } from "./runtime.ts";
 
 const errorMessage = (error: unknown): string =>
     error instanceof Error ? error.message : String(error);
+
+type PersistedPrGateSnapshot = NonNullable<RunState["prClosure"]>["snapshot"];
+
+const preservedPrGateSnapshot = (
+    previous: RunState["prClosure"],
+    observedHeadSha: string,
+    snapshot: PersistedPrGateSnapshot | undefined,
+): PersistedPrGateSnapshot | undefined => {
+    if (snapshot !== undefined) return snapshot;
+    if (
+        previous === undefined ||
+        previous.observedHeadSha.toLowerCase() !== observedHeadSha.toLowerCase()
+    ) {
+        return undefined;
+    }
+    return previous.snapshot;
+};
+
+const optionalPrReviewField = <Key extends string, Value>(
+    key: Key,
+    value: Value | undefined,
+): Partial<Record<Key, Value>> =>
+    value === undefined ? {} : ({ [key]: value } as Record<Key, Value>);
+
+type WorkflowPrClosure = NonNullable<RunState["prClosure"]>;
+type WorkflowPrReview = NonNullable<WorkflowPrClosure["review"]>;
+type ApprovedReviewEvidence = NonNullable<PullRequestMergeProof["review"]>;
+type PostPrReviewFailureResult = Exclude<
+    PullRequestReviewCoordinatorResult,
+    Extract<PullRequestReviewCoordinatorResult, { status: "approved" }>
+>;
+
+const postPrReviewFailureDetailsFor = (
+    result: PostPrReviewFailureResult,
+    priorReview: WorkflowPrReview | undefined,
+): {
+    readonly status: WorkflowPrReview["status"];
+    readonly stage: NonNullable<WorkflowPrReview["stage"]>;
+    readonly revisionIntent?: PullRequestRevisionIntent;
+} => {
+    const status = (() => {
+        switch (result.status) {
+            case "pr-review-exhausted":
+                return "pr-review-exhausted";
+            case "needs-attention":
+                return "needs-attention";
+            case "head-moved":
+                return "stale";
+            case "delivery-recoverable":
+                return "delivery-recoverable";
+            case "review-failed":
+            case "revision-failed":
+                return "failed";
+        }
+    })() satisfies WorkflowPrReview["status"];
+    const revisionIntent =
+        result.status === "revision-failed" ||
+        result.status === "delivery-recoverable"
+            ? priorReview?.revisionIntent
+            : undefined;
+    const stage =
+        result.status === "delivery-recoverable" || revisionIntent !== undefined
+            ? "revision-delivery"
+            : result.status === "needs-attention" && result.phase !== "review"
+              ? "revision-fix"
+              : "review";
+    return {
+        status,
+        stage,
+        ...optionalPrReviewField("revisionIntent", revisionIntent),
+    };
+};
 
 /** Bounds and confirmation policy for the PR delivery check gate. */
 const PR_GATE_OBSERVATION_OPTIONS = {
@@ -989,6 +1078,7 @@ export const workflow = async (
         gitIssueOperations: issueOperations,
         parentCompletion,
         issueArtifactStore: artifactStores,
+        pullRequestReviewCoordinator,
         pipelineObservation,
         issueExecutor: normalIssueExecutor,
         dryRunIssueExecutor,
@@ -1248,7 +1338,9 @@ export const workflow = async (
             if (
                 !usesPullRequests ||
                 effectiveDryRun ||
-                resumedClosureOutcome !== undefined
+                (resumedClosureOutcome?.kind ===
+                    IssueExecutionOutcomeKind.Completed &&
+                    resumedClosureOutcome.completion === "already-resolved")
             ) {
                 return;
             }
@@ -1489,7 +1581,8 @@ export const workflow = async (
             );
         };
 
-        type WorkflowPrClosure = NonNullable<RunState["prClosure"]>;
+        const sameSha = (left: string, right: string): boolean =>
+            left.toLowerCase() === right.toLowerCase();
 
         const nowIso = (): string => new Date().toISOString();
 
@@ -1626,15 +1719,32 @@ export const workflow = async (
             issueContext: WorkflowIssueContext,
             update: {
                 readonly pullRequestNumber: number;
+                readonly baseSha?: string;
                 readonly observedHeadSha: string;
                 readonly gate: PrClosureGateStatus;
                 readonly snapshot?: WorkflowPrClosure["snapshot"];
                 readonly terminalReason?: string;
+                /** `null` explicitly invalidates review evidence on a head move. */
+                readonly review?: WorkflowPrClosure["review"] | null;
             },
         ): Promise<void> => {
+            const { review: reviewUpdate, baseSha, ...closureUpdate } = update;
+            const nextReview =
+                reviewUpdate === null
+                    ? undefined
+                    : (reviewUpdate ?? prClosure?.review);
+            const nextBaseSha = baseSha ?? prClosure?.baseSha;
+            const nextSnapshot = preservedPrGateSnapshot(
+                prClosure,
+                update.observedHeadSha,
+                update.snapshot,
+            );
             prClosure = {
                 startedAt: prClosure?.startedAt ?? nowIso(),
-                ...update,
+                ...closureUpdate,
+                ...optionalPrReviewField("baseSha", nextBaseSha),
+                ...optionalPrReviewField("snapshot", nextSnapshot),
+                ...optionalPrReviewField("review", nextReview),
                 updatedAt: nowIso(),
             };
             await persistState(RunStateStatus.Active, {
@@ -1643,12 +1753,48 @@ export const workflow = async (
             });
         };
 
+        const recordPrLifecycleArtifact = async (input: {
+            readonly issueContext: WorkflowIssueContext;
+            readonly pullRequestNumber: number;
+            readonly baseSha: string | undefined;
+            readonly headSha: string;
+            readonly stage: "checks" | "merge";
+            readonly status:
+                | "green"
+                | "merged"
+                | "failed"
+                | "stale"
+                | "delivery-recoverable";
+            readonly terminalReason?: string;
+        }): Promise<void> => {
+            if (input.baseSha === undefined) return;
+            const artifacts = await artifactStores.forIssue(
+                input.issueContext.issue.number,
+                { workspace, runId: actualRunId, repository: repo },
+                signal,
+            );
+            await artifacts.recordPullRequestDeliveryState({
+                pullRequestNumber: input.pullRequestNumber,
+                baseSha: input.baseSha,
+                headSha: input.headSha,
+                stage: input.stage,
+                status: input.status,
+                reviewAttempts: prClosure?.review?.attempts?.length ?? 0,
+                revisionCount: prClosure?.review?.revisionCount ?? 0,
+                ...optionalPrReviewField(
+                    "terminalReason",
+                    input.terminalReason,
+                ),
+                updatedAt: nowIso(),
+            });
+        };
+
         const recordMergedPrClosure = async (
             issueContext: WorkflowIssueContext,
             pullRequest: GitHubPullRequest,
             terminalReason?: string,
-        ): Promise<void> =>
-            setPrClosure(issueContext, {
+        ): Promise<void> => {
+            await setPrClosure(issueContext, {
                 pullRequestNumber: pullRequest.number,
                 observedHeadSha: pullRequest.headSha,
                 gate: "merged",
@@ -1658,30 +1804,69 @@ export const workflow = async (
                     : { snapshot: prClosure.snapshot }),
                 ...(terminalReason === undefined ? {} : { terminalReason }),
             });
+            await recordPrLifecycleArtifact({
+                issueContext,
+                pullRequestNumber: pullRequest.number,
+                baseSha: prClosure?.baseSha,
+                headSha: pullRequest.headSha,
+                stage: "merge",
+                status: "merged",
+                terminalReason,
+            });
+        };
 
         const recordClosedPrClosure = async (
             issueContext: WorkflowIssueContext,
             pullRequest: GitHubPullRequest,
             terminalReason: string,
-        ): Promise<void> =>
-            setPrClosure(issueContext, {
+        ): Promise<void> => {
+            await setPrClosure(issueContext, {
                 pullRequestNumber: pullRequest.number,
                 observedHeadSha: pullRequest.headSha,
                 gate: "closed",
                 terminalReason,
             });
+            await recordPrLifecycleArtifact({
+                issueContext,
+                pullRequestNumber: pullRequest.number,
+                baseSha: prClosure?.baseSha,
+                headSha: pullRequest.headSha,
+                stage: "merge",
+                status: "failed",
+                terminalReason,
+            });
+        };
 
         const recordStalePrClosure = async (
             issueContext: WorkflowIssueContext,
             pullRequest: GitHubPullRequest,
             terminalReason: string,
-        ): Promise<void> =>
-            setPrClosure(issueContext, {
+        ): Promise<void> => {
+            await setPrClosure(issueContext, {
                 pullRequestNumber: pullRequest.number,
                 observedHeadSha: pullRequest.headSha,
                 gate: "stale",
                 terminalReason,
+                review:
+                    prClosure?.review === undefined
+                        ? null
+                        : {
+                              status: "stale",
+                              currentHeadSha: pullRequest.headSha,
+                              revisionCount: prClosure.review.revisionCount,
+                              terminalReason,
+                          },
             });
+            await recordPrLifecycleArtifact({
+                issueContext,
+                pullRequestNumber: pullRequest.number,
+                baseSha: prClosure?.baseSha,
+                headSha: pullRequest.headSha,
+                stage: "merge",
+                status: "stale",
+                terminalReason,
+            });
+        };
 
         const observePullRequestGate = async (
             issueContext: WorkflowIssueContext,
@@ -1804,6 +1989,72 @@ export const workflow = async (
             };
         };
 
+        const prCheckArtifactFieldsFor = (
+            status: PrClosureGateStatus,
+            snapshot: PipelineSnapshot | undefined,
+            outcome: PipelineObservationResult["outcome"],
+        ): {
+            readonly status: "green" | "failed";
+            readonly checkStatus: "green" | "failed";
+            readonly checkFingerprint?: string;
+            readonly terminalReason?: string;
+        } => {
+            const green = status === "green";
+            return {
+                status: green ? "green" : "failed",
+                checkStatus: green ? "green" : "failed",
+                ...optionalPrReviewField(
+                    "checkFingerprint",
+                    snapshot?.fingerprint,
+                ),
+                ...optionalPrReviewField(
+                    "terminalReason",
+                    green ? undefined : terminalReasonForObservation(outcome),
+                ),
+            };
+        };
+
+        const recordPrCheckArtifact = async (
+            issueContext: WorkflowIssueContext,
+            pullRequest: GitHubPullRequest,
+            outcome: PipelineObservationResult["outcome"],
+            status: PrClosureGateStatus,
+        ): Promise<void> => {
+            const baseSha = prClosure?.baseSha;
+            if (baseSha === undefined) return;
+            const artifacts = await artifactStores.forIssue(
+                issueContext.issue.number,
+                { workspace, runId: actualRunId, repository: repo },
+                signal,
+            );
+            const snapshot = snapshotForObservation(outcome);
+            const checkFields = prCheckArtifactFieldsFor(
+                status,
+                snapshot,
+                outcome,
+            );
+            await artifacts.recordPullRequestDeliveryState({
+                pullRequestNumber: pullRequest.number,
+                baseSha,
+                headSha: pullRequest.headSha,
+                stage: "checks",
+                status: checkFields.status,
+                reviewAttempts: prClosure?.review?.attempts?.length ?? 0,
+                revisionCount: prClosure?.review?.revisionCount ?? 0,
+                checkHeadSha: pullRequest.headSha,
+                checkStatus: checkFields.checkStatus,
+                ...optionalPrReviewField(
+                    "checkFingerprint",
+                    checkFields.checkFingerprint,
+                ),
+                ...optionalPrReviewField(
+                    "terminalReason",
+                    checkFields.terminalReason,
+                ),
+                updatedAt: nowIso(),
+            });
+        };
+
         const applyPrGateObservation = async (
             issueContext: WorkflowIssueContext,
             pullRequest: GitHubPullRequest,
@@ -1817,6 +2068,12 @@ export const workflow = async (
                 gate: status,
                 ...observationEvidence(outcome, status),
             });
+            await recordPrCheckArtifact(
+                issueContext,
+                pullRequest,
+                outcome,
+                status,
+            );
             await emitPrGateObservationTerminal(
                 issueContext,
                 pullRequest,
@@ -1870,20 +2127,10 @@ export const workflow = async (
          * whether the exact-head observer must run. A matching saved green gate
          * skips the observation but is re-verified by the merge re-read.
          */
-        const preparePrGateObservation = async (
+        const publishStoredPreCommitReviews = async (
             issueContext: WorkflowIssueContext,
             pullRequest: GitHubPullRequest,
-        ): Promise<boolean> => {
-            const headChanged =
-                prClosure === undefined ||
-                prClosure.observedHeadSha !== pullRequest.headSha;
-            if (headChanged) {
-                await setPrClosure(issueContext, {
-                    pullRequestNumber: pullRequest.number,
-                    observedHeadSha: pullRequest.headSha,
-                    gate: "pending",
-                });
-            }
+        ): Promise<void> => {
             const artifacts = await artifactStores.forIssue(
                 issueContext.issue.number,
                 { workspace, runId: actualRunId, repository: repo },
@@ -1898,10 +2145,40 @@ export const workflow = async (
                 pullRequest.number,
                 reviews,
             );
-            const gate = headChanged
-                ? "pending"
-                : (prClosure?.gate ?? "pending");
-            return gate !== "green";
+        };
+
+        const markPrReviewChecksStage = async (
+            issueContext: WorkflowIssueContext,
+            pullRequest: GitHubPullRequest,
+        ): Promise<void> => {
+            if (prClosure?.review === undefined) return;
+            await setPrClosure(issueContext, {
+                pullRequestNumber: pullRequest.number,
+                observedHeadSha: pullRequest.headSha,
+                gate: prClosure.gate,
+                review: { ...prClosure.review, stage: "checks" },
+            });
+        };
+
+        const preparePrGateObservation = async (
+            issueContext: WorkflowIssueContext,
+            pullRequest: GitHubPullRequest,
+            publishPreCommitReviews = true,
+        ): Promise<boolean> => {
+            const headChanged =
+                prClosure === undefined ||
+                !sameSha(prClosure.observedHeadSha, pullRequest.headSha);
+            if (headChanged) {
+                await setPrClosure(issueContext, {
+                    pullRequestNumber: pullRequest.number,
+                    observedHeadSha: pullRequest.headSha,
+                    gate: "pending",
+                    review: null,
+                });
+            } else await markPrReviewChecksStage(issueContext, pullRequest);
+            if (publishPreCommitReviews)
+                await publishStoredPreCommitReviews(issueContext, pullRequest);
+            return headChanged || (prClosure?.gate ?? "pending") !== "green";
         };
 
         /**
@@ -1952,6 +2229,7 @@ export const workflow = async (
         const gatePullRequest = async (
             issueContext: WorkflowIssueContext,
             pullRequest: GitHubPullRequest,
+            publishPreCommitReviews = true,
         ): Promise<"reconciled" | undefined> => {
             if (pullRequest.merged) {
                 await recordMergedGateEvent(
@@ -1976,6 +2254,7 @@ export const workflow = async (
             const needsObservation = await preparePrGateObservation(
                 issueContext,
                 pullRequest,
+                publishPreCommitReviews,
             );
             if (!needsObservation) return undefined;
             const result = await observePullRequestGate(
@@ -1986,18 +2265,548 @@ export const workflow = async (
             return undefined;
         };
 
+        const readPostPrReviewArtifacts = async (
+            issueContext: WorkflowIssueContext,
+        ) => {
+            const artifacts = await artifactStores.forIssue(
+                issueContext.issue.number,
+                { workspace, runId: actualRunId, repository: repo },
+                signal,
+            );
+            const attempts = artifacts.has(
+                IssueArtifactKind.PullRequestReviewAttempts,
+            )
+                ? await artifacts.read(
+                      IssueArtifactKind.PullRequestReviewAttempts,
+                  )
+                : [];
+            const approved = artifacts.has(
+                IssueArtifactKind.ApprovedPullRequestReviewEvidence,
+            )
+                ? await artifacts.read(
+                      IssueArtifactKind.ApprovedPullRequestReviewEvidence,
+                  )
+                : undefined;
+            const deliveryState = artifacts.has(
+                IssueArtifactKind.PullRequestDeliveryState,
+            )
+                ? await artifacts.read(
+                      IssueArtifactKind.PullRequestDeliveryState,
+                  )
+                : undefined;
+            return { artifacts, attempts, approved, deliveryState };
+        };
+
+        const postPrReviewEventMessage = (
+            issueNumber: number,
+            result: PullRequestReviewCoordinatorResult,
+        ): string => {
+            switch (result.status) {
+                case "approved":
+                    return `Structured PR review approved PR #${result.snapshot.number} at head ${result.snapshot.headSha}.`;
+                case "pr-review-exhausted":
+                    return `PR review budget exhausted for PR #${result.snapshot.number} at head ${result.snapshot.headSha}; the issue and pull request remain open.`;
+                case "needs-attention":
+                    return `PR review needs attention for issue #${issueNumber} at head ${result.snapshot.headSha}: ${result.request.message}`;
+                case "review-failed":
+                    return `PR review failed for PR #${result.snapshot.number} at attempt ${result.attempt}: ${result.message}`;
+                case "head-moved":
+                    return `PR head moved during ${result.phase} for PR #${result.snapshot.number}; approval evidence is stale.`;
+                case "delivery-recoverable":
+                    return `PR revision delivery needs reconciliation for PR #${result.snapshot.number}: ${result.delivery.status}.`;
+                case "revision-failed":
+                    return `PR revision failed for PR #${result.snapshot.number}: ${result.message}`;
+            }
+        };
+
+        const throwPostPrReviewFailure = async (
+            issueContext: WorkflowIssueContext,
+            result: PostPrReviewFailureResult,
+            artifacts: IssueArtifactStore,
+            attempts: ReadonlyArray<PullRequestReviewAttempt>,
+            delivery?: PullRequestDeliveryStateArtifact["delivery"],
+        ): Promise<never> => {
+            const { status, stage, revisionIntent } =
+                postPrReviewFailureDetailsFor(result, prClosure?.review);
+            await setPrClosure(issueContext, {
+                pullRequestNumber: result.snapshot.number,
+                baseSha: result.snapshot.baseSha,
+                observedHeadSha: result.snapshot.headSha,
+                gate: "pending",
+                review: {
+                    status,
+                    stage,
+                    attempts: [...attempts],
+                    ...optionalPrReviewField("revisionIntent", revisionIntent),
+                    currentHeadSha: result.snapshot.headSha,
+                    revisionCount: prClosure?.review?.revisionCount ?? 0,
+                    terminalReason: postPrReviewEventMessage(
+                        issueContext.issue.number,
+                        result,
+                    ),
+                },
+                terminalReason: postPrReviewEventMessage(
+                    issueContext.issue.number,
+                    result,
+                ),
+            });
+            await artifacts.recordPullRequestDeliveryState({
+                pullRequestNumber: result.snapshot.number,
+                baseSha: result.snapshot.baseSha,
+                headSha: result.snapshot.headSha,
+                stage,
+                status:
+                    status === "pr-review-exhausted"
+                        ? "exhausted"
+                        : status === "needs-attention"
+                          ? "failed"
+                          : status,
+                reviewAttempts: attempts.length,
+                revisionCount: prClosure?.review?.revisionCount ?? 0,
+                ...optionalPrReviewField("revisionIntent", revisionIntent),
+                ...optionalPrReviewField("delivery", delivery),
+                terminalReason: postPrReviewEventMessage(
+                    issueContext.issue.number,
+                    result,
+                ),
+                updatedAt: nowIso(),
+            });
+            await emitPrGate(
+                issueContext,
+                "failed",
+                postPrReviewEventMessage(issueContext.issue.number, result),
+                {
+                    pullRequestNumber: result.snapshot.number,
+                    observedHeadSha: result.snapshot.headSha,
+                    gate: status,
+                    reviewStatus: status,
+                    attempts: attempts.length,
+                },
+            );
+            throw new RalphieError({
+                message: `Post-PR review did not pass for issue #${issueContext.issue.number}: ${postPrReviewEventMessage(issueContext.issue.number, result)}`,
+            });
+        };
+
+        const postPrArtifactStatusFor = (
+            status: WorkflowPrReview["status"],
+        ):
+            | "pending"
+            | "approved"
+            | "failed"
+            | "stale"
+            | "delivery-recoverable" =>
+            status === "pr-review-exhausted"
+                ? "failed"
+                : status === "needs-attention"
+                  ? "failed"
+                  : status;
+
+        const persistPostPrReviewStage = async (input: {
+            readonly issueContext: WorkflowIssueContext;
+            readonly snapshot: PullRequestSnapshot;
+            readonly artifacts?: IssueArtifactStore;
+            readonly status: WorkflowPrReview["status"];
+            readonly gate?: PrClosureGateStatus;
+            readonly attempts: Awaited<
+                ReturnType<typeof readPostPrReviewArtifacts>
+            >["attempts"];
+            readonly stage?: WorkflowPrReview["stage"];
+            readonly approved?: ApprovedReviewEvidence;
+            readonly revisionIntent?: PullRequestRevisionIntent;
+            readonly delivery?: PullRequestDeliveryStateArtifact["delivery"];
+            readonly revisionCount: number;
+            readonly terminalReason?: string;
+        }): Promise<void> => {
+            await setPrClosure(input.issueContext, {
+                pullRequestNumber: input.snapshot.number,
+                baseSha: input.snapshot.baseSha,
+                observedHeadSha: input.snapshot.headSha,
+                gate: input.gate ?? "pending",
+                review: {
+                    status: input.status,
+                    ...optionalPrReviewField("stage", input.stage),
+                    attempts: [...input.attempts],
+                    ...optionalPrReviewField("approved", input.approved),
+                    ...optionalPrReviewField(
+                        "revisionIntent",
+                        input.revisionIntent,
+                    ),
+                    currentHeadSha: input.snapshot.headSha,
+                    revisionCount: input.revisionCount,
+                    ...optionalPrReviewField(
+                        "terminalReason",
+                        input.terminalReason,
+                    ),
+                },
+            });
+            if (input.artifacts === undefined) return;
+            await input.artifacts.recordPullRequestDeliveryState({
+                pullRequestNumber: input.snapshot.number,
+                baseSha: input.snapshot.baseSha,
+                headSha: input.snapshot.headSha,
+                stage: input.stage ?? "review",
+                status: postPrArtifactStatusFor(input.status),
+                reviewAttempts: input.attempts.length,
+                revisionCount: input.revisionCount,
+                ...optionalPrReviewField(
+                    "revisionIntent",
+                    input.revisionIntent,
+                ),
+                ...optionalPrReviewField("delivery", input.delivery),
+                ...optionalPrReviewField(
+                    "terminalReason",
+                    input.terminalReason,
+                ),
+                updatedAt: nowIso(),
+            });
+        };
+
+        const persistCoordinatorStage = async (
+            issueContext: WorkflowIssueContext,
+            event: PullRequestReviewLifecycleEvent,
+        ): Promise<void> => {
+            const { artifacts, attempts } =
+                await readPostPrReviewArtifacts(issueContext);
+            await persistPostPrReviewStage({
+                issueContext,
+                snapshot: event.snapshot,
+                status: "pending",
+                stage: event.stage,
+                artifacts,
+                attempts,
+                revisionIntent: event.revisionIntent,
+                revisionCount: prClosure?.review?.revisionCount ?? 0,
+            });
+        };
+
+        const deliveryArtifactFor = (
+            delivery: PullRequestReviewDeliveryEvent["delivery"],
+        ): NonNullable<PullRequestDeliveryStateArtifact["delivery"]> => ({
+            status: delivery.status,
+            headSha: delivery.headSha,
+            parentSha: delivery.parentSha,
+            ...(delivery.status === "confirmed"
+                ? {
+                      remoteSha: delivery.remoteSha,
+                      pushResponseLost: delivery.pushResponseLost,
+                  }
+                : delivery.actualRemoteSha.length === 0
+                  ? {}
+                  : { remoteSha: delivery.actualRemoteSha }),
+        });
+
+        const persistCoordinatorDelivery = async (
+            issueContext: WorkflowIssueContext,
+            event: PullRequestReviewDeliveryEvent,
+        ): Promise<void> => {
+            const { artifacts, attempts } =
+                await readPostPrReviewArtifacts(issueContext);
+            const confirmed = event.delivery.status === "confirmed";
+            await persistPostPrReviewStage({
+                issueContext,
+                snapshot: confirmed
+                    ? { ...event.snapshot, headSha: event.delivery.headSha }
+                    : event.snapshot,
+                status: "pending",
+                stage: "revision-delivery",
+                gate: "pending",
+                artifacts,
+                attempts,
+                ...optionalPrReviewField(
+                    "revisionIntent",
+                    confirmed ? undefined : event.revisionIntent,
+                ),
+                delivery: deliveryArtifactFor(event.delivery),
+                revisionCount: (prClosure?.review?.revisionCount ?? 0) + 1,
+            });
+        };
+
+        const failIfPostPrReviewAlreadyExhausted = async (
+            issueContext: WorkflowIssueContext,
+            priorReview: WorkflowPrReview | undefined,
+            snapshot: PullRequestSnapshot,
+        ): Promise<void> => {
+            if (
+                priorReview?.status !== "pr-review-exhausted" ||
+                priorReview.currentHeadSha === undefined ||
+                !sameSha(priorReview.currentHeadSha, snapshot.headSha)
+            ) {
+                return;
+            }
+            const { artifacts, attempts } =
+                await readPostPrReviewArtifacts(issueContext);
+            await throwPostPrReviewFailure(
+                issueContext,
+                {
+                    reviews: [],
+                    revisions: [],
+                    status: "pr-review-exhausted",
+                    snapshot,
+                    reason: "review-attempt-budget-exhausted",
+                },
+                artifacts,
+                attempts,
+            );
+        };
+
+        const uniquePullRequestReviewAttempts = (
+            attempts: ReadonlyArray<PullRequestReviewAttempt>,
+        ): ReadonlyArray<PullRequestReviewAttempt> => {
+            const seen = new Set<string>();
+            return attempts.filter((attempt) => {
+                const key = [
+                    attempt.pullRequestNumber,
+                    attempt.baseSha.toLowerCase(),
+                    attempt.reviewedHeadSha.toLowerCase(),
+                    attempt.attempt,
+                    attempt.sessionID,
+                ].join("\u0000");
+                if (seen.has(key)) return false;
+                seen.add(key);
+                return true;
+            });
+        };
+
+        const completePostPrReview = async (
+            issueContext: WorkflowIssueContext,
+            pullRequest: GitHubPullRequest,
+            result: Extract<
+                PullRequestReviewCoordinatorResult,
+                { readonly status: "approved" }
+            >,
+            priorReview: WorkflowPrReview | undefined,
+            finalArtifacts: Awaited<
+                ReturnType<typeof readPostPrReviewArtifacts>
+            >,
+        ): Promise<{
+            readonly pullRequest: GitHubPullRequest;
+            readonly review: ApprovedReviewEvidence;
+        }> => {
+            const resultApproval = result.review
+                .attempt as ApprovedReviewEvidence;
+            const storedApproval = finalArtifacts.approved;
+            const approval =
+                storedApproval !== undefined &&
+                storedApproval.pullRequestNumber === result.snapshot.number &&
+                sameSha(storedApproval.baseSha, result.snapshot.baseSha) &&
+                sameSha(storedApproval.reviewedHeadSha, result.snapshot.headSha)
+                    ? storedApproval
+                    : resultApproval;
+            const attempts = uniquePullRequestReviewAttempts([
+                ...finalArtifacts.attempts,
+                ...result.reviews.map(({ attempt }) => attempt),
+                result.review.attempt,
+            ]);
+            const revisionCount =
+                (priorReview?.revisionCount ?? 0) + result.revisions.length;
+            const savedGreenGate =
+                prClosure?.gate === "green" &&
+                sameSha(prClosure.observedHeadSha, result.snapshot.headSha)
+                    ? "green"
+                    : "pending";
+            await persistPostPrReviewStage({
+                issueContext,
+                snapshot: result.snapshot,
+                status: "pending",
+                gate: savedGreenGate,
+                stage: "publication",
+                artifacts: finalArtifacts.artifacts,
+                attempts,
+                approved: approval,
+                revisionCount,
+            });
+            await githubPullRequests.publishPullRequestReviewAttempts(
+                octokit,
+                repo,
+                attempts,
+            );
+            await persistPostPrReviewStage({
+                issueContext,
+                snapshot: result.snapshot,
+                status: "approved",
+                gate: savedGreenGate,
+                artifacts: finalArtifacts.artifacts,
+                attempts,
+                approved: approval,
+                revisionCount,
+            });
+            await emitPrGate(
+                issueContext,
+                "info",
+                postPrReviewEventMessage(issueContext.issue.number, result),
+                {
+                    pullRequestNumber: result.snapshot.number,
+                    observedHeadSha: result.snapshot.headSha,
+                    reviewStatus: "approved",
+                    reviewAttempts: attempts.length,
+                    revisions: revisionCount,
+                },
+            );
+            return {
+                pullRequest: {
+                    ...pullRequest,
+                    headSha: result.snapshot.headSha,
+                },
+                review: approval,
+            };
+        };
+
+        const persistPostPrReviewStart = async (
+            issueContext: WorkflowIssueContext,
+            snapshot: PullRequestSnapshot,
+            priorReview: WorkflowPrReview | undefined,
+            initialArtifacts: Awaited<
+                ReturnType<typeof readPostPrReviewArtifacts>
+            >,
+        ): Promise<PullRequestRevisionIntent | undefined> => {
+            // The state write replaces the nested review object, so capture
+            // the intent before persisting the new review boundary.
+            const resumeRevision =
+                priorReview?.revisionIntent ??
+                initialArtifacts.deliveryState?.revisionIntent;
+            const savedGreenGate =
+                priorReview?.status === "approved" &&
+                prClosure?.gate === "green" &&
+                sameSha(prClosure.observedHeadSha, snapshot.headSha)
+                    ? "green"
+                    : "pending";
+            await persistPostPrReviewStage({
+                issueContext,
+                snapshot,
+                status: "pending",
+                stage: "review",
+                artifacts: initialArtifacts.artifacts,
+                gate: savedGreenGate,
+                attempts: initialArtifacts.attempts,
+                revisionIntent: resumeRevision,
+                revisionCount: priorReview?.revisionCount ?? 0,
+            });
+            return resumeRevision;
+        };
+
+        /**
+         * Run the post-creation review/revision coordinator when the runtime
+         * supplies the production service. Small legacy fakes intentionally
+         * omit it and continue through the original check-gate path.
+         */
+        const runPostPrReview = async (
+            issueContext: WorkflowIssueContext,
+            pullRequest: GitHubPullRequest,
+            server: OpenCodeRuntime,
+        ): Promise<
+            | {
+                  readonly pullRequest: GitHubPullRequest;
+                  readonly review: ApprovedReviewEvidence;
+              }
+            | undefined
+        > => {
+            const execute = pullRequestReviewCoordinator?.execute;
+            if (typeof execute !== "function") return undefined;
+
+            const currentSnapshot = await githubPullRequests.readSnapshot(
+                octokit,
+                repo,
+                pullRequest.number,
+            );
+            const priorReview = prClosure?.review;
+            await failIfPostPrReviewAlreadyExhausted(
+                issueContext,
+                priorReview,
+                currentSnapshot,
+            );
+
+            const initialArtifacts =
+                await readPostPrReviewArtifacts(issueContext);
+            const resumeRevision = await persistPostPrReviewStart(
+                issueContext,
+                currentSnapshot,
+                priorReview,
+                initialArtifacts,
+            );
+
+            const result = await execute({
+                client: octokit,
+                repository: repo,
+                repositoryPath:
+                    issueContext.issueRepositories[0]!.repositoryPath,
+                branch: issueContext.featureBranch,
+                targetBranch: branch,
+                issue: issueContext.issue,
+                snapshot: currentSnapshot,
+                agent: server.client,
+                agentSelection: selection,
+                artifacts: initialArtifacts.artifacts,
+                verificationCommands: config.verificationCommands,
+                runId: actualRunId,
+                diagnostics,
+                signal,
+                resumeRevision,
+                onStage: (event) =>
+                    persistCoordinatorStage(issueContext, event),
+                onRevisionDelivery: (event) =>
+                    persistCoordinatorDelivery(issueContext, event),
+            });
+            const finalArtifacts =
+                await readPostPrReviewArtifacts(issueContext);
+            if (result.status !== "approved") {
+                await throwPostPrReviewFailure(
+                    issueContext,
+                    result,
+                    finalArtifacts.artifacts,
+                    finalArtifacts.attempts,
+                    result.status === "delivery-recoverable"
+                        ? finalArtifacts.deliveryState?.delivery
+                        : undefined,
+                );
+                return undefined;
+            }
+            return await completePostPrReview(
+                issueContext,
+                pullRequest,
+                result,
+                priorReview,
+                finalArtifacts,
+            );
+        };
+
         const mergeFailureGate = (
             current: GitHubPullRequest,
             observedHeadSha: string,
             cause: unknown,
         ): PrClosureGateStatus => {
-            if (current.headSha !== observedHeadSha) return "stale";
+            if (!sameSha(current.headSha, observedHeadSha)) return "stale";
             if (current.state === "closed") return "closed";
             if (errorMessage(cause).includes("not definitively mergeable")) {
                 return "unmergeable";
             }
             return "unknown";
         };
+
+        const staleReviewUpdateForMergeFailure = (
+            gate: PrClosureGateStatus,
+            reconciled: GitHubPullRequest,
+            cause: unknown,
+        ): Pick<NonNullable<RunState["prClosure"]>, "review"> =>
+            gate === "stale" && prClosure?.review !== undefined
+                ? {
+                      review: {
+                          status: "stale",
+                          currentHeadSha: reconciled.headSha,
+                          revisionCount: prClosure.review.revisionCount,
+                          terminalReason: `Merge rejected: ${errorMessage(cause)}.`,
+                      },
+                  }
+                : {};
+
+        const mergeArtifactStatusFor = (
+            gate: PrClosureGateStatus,
+        ): "failed" | "stale" | "delivery-recoverable" =>
+            gate === "stale"
+                ? "stale"
+                : gate === "unknown" || gate === "unmergeable"
+                  ? "delivery-recoverable"
+                  : "failed";
 
         const resolveMergeFailure = async (
             issueContext: WorkflowIssueContext,
@@ -2026,6 +2835,17 @@ export const workflow = async (
                     gate === "stale" ? reconciled.headSha : observedHeadSha,
                 gate,
                 terminalReason: `Merge rejected: ${errorMessage(cause)}.`,
+                ...staleReviewUpdateForMergeFailure(gate, reconciled, cause),
+            });
+            await recordPrLifecycleArtifact({
+                issueContext,
+                pullRequestNumber: reconciled.number,
+                baseSha: prClosure?.baseSha,
+                headSha:
+                    gate === "stale" ? reconciled.headSha : observedHeadSha,
+                stage: "merge",
+                status: mergeArtifactStatusFor(gate),
+                terminalReason: `Merge rejected: ${errorMessage(cause)}.`,
             });
             await emitPrGate(
                 issueContext,
@@ -2049,8 +2869,36 @@ export const workflow = async (
             issueContext: WorkflowIssueContext,
             current: GitHubPullRequest,
             observedHeadSha: string,
+            approvedReview?: ApprovedReviewEvidence,
         ): Promise<GitHubPullRequest> => {
             try {
+                if (approvedReview !== undefined) {
+                    const mergeWithProof = githubPullRequests.mergeWithProof;
+                    const observedChecks = prClosure?.snapshot;
+                    if (
+                        typeof mergeWithProof !== "function" ||
+                        prClosure?.gate !== "green" ||
+                        observedChecks === undefined ||
+                        observedChecks.commitSha.length === 0 ||
+                        !sameSha(observedChecks.commitSha, observedHeadSha)
+                    ) {
+                        throw new RalphieError({
+                            message: `PR #${current.number} is missing a green-check proof for head ${observedHeadSha}.`,
+                        });
+                    }
+                    const proof: PullRequestMergeProof = {
+                        pullRequestNumber: current.number,
+                        baseSha: approvedReview.baseSha,
+                        headSha: observedHeadSha,
+                        review: approvedReview,
+                        checks: {
+                            pullRequestNumber: current.number,
+                            headSha: observedHeadSha,
+                            status: "green",
+                        },
+                    };
+                    return await mergeWithProof(octokit, repo, proof);
+                }
                 return await githubPullRequests.merge(
                     octokit,
                     repo,
@@ -2126,6 +2974,41 @@ export const workflow = async (
             return false;
         };
 
+        const persistMergeStage = async (
+            issueContext: WorkflowIssueContext,
+            pullRequest: GitHubPullRequest,
+            observedHeadSha: string,
+            approvedReview: ApprovedReviewEvidence,
+        ): Promise<void> => {
+            const { artifacts, attempts } =
+                await readPostPrReviewArtifacts(issueContext);
+            await persistPostPrReviewStage({
+                issueContext,
+                snapshot: {
+                    number: pullRequest.number,
+                    url: pullRequest.url,
+                    baseSha: approvedReview.baseSha,
+                    headSha: observedHeadSha,
+                },
+                status: "approved",
+                gate: "green",
+                stage: "merge",
+                artifacts,
+                attempts,
+                approved: approvedReview,
+                revisionCount: prClosure?.review?.revisionCount ?? 0,
+            });
+        };
+
+        const ensureMergeHeadIsCurrent = async (
+            issueContext: WorkflowIssueContext,
+            current: GitHubPullRequest,
+            observedHeadSha: string,
+        ): Promise<void> => {
+            if (sameSha(current.headSha, observedHeadSha)) return;
+            await recordStaleGateEvent(issueContext, current, observedHeadSha);
+        };
+
         /**
          * Re-read the PR immediately before merging. A moved head invalidates
          * the saved green decision; a merged or closed PR is reconciled.
@@ -2133,6 +3016,7 @@ export const workflow = async (
         const mergeGatedPullRequest = async (
             issueContext: WorkflowIssueContext,
             pullRequest: GitHubPullRequest,
+            approvedReview?: ApprovedReviewEvidence,
         ): Promise<void> => {
             const current = await githubPullRequests.read(
                 octokit,
@@ -2144,17 +3028,24 @@ export const workflow = async (
             }
             const observedHeadSha =
                 prClosure?.observedHeadSha ?? pullRequest.headSha;
-            if (current.headSha !== observedHeadSha) {
-                await recordStaleGateEvent(
+            await ensureMergeHeadIsCurrent(
+                issueContext,
+                current,
+                observedHeadSha,
+            );
+            if (approvedReview !== undefined) {
+                await persistMergeStage(
                     issueContext,
                     current,
                     observedHeadSha,
+                    approvedReview,
                 );
             }
             const merged = await attemptPrMerge(
                 issueContext,
                 current,
                 observedHeadSha,
+                approvedReview,
             );
             await recordMergedPrClosure(issueContext, merged);
             const mergedHeadSha = merged.headSha;
@@ -2174,29 +3065,80 @@ export const workflow = async (
             );
         };
 
+        const restorePrCheckoutAfterFailure = async (
+            issueContext: WorkflowIssueContext,
+            checkoutRestored: boolean,
+        ): Promise<void> => {
+            if (checkoutRestored) return;
+            await issueOperations
+                .restoreBaseCheckout(
+                    issueContext.issueRepositories[0]!.repositoryPath,
+                    branch,
+                )
+                .catch(() => undefined);
+        };
+
         const deliverPullRequest = async (
             issueContext: WorkflowIssueContext,
+            server: OpenCodeRuntime,
         ): Promise<void> => {
-            const pullRequest = await resolvePullRequestForGate(issueContext);
-            await emitPrGate(
-                issueContext,
-                "started",
-                `Registering delivery check gate for PR #${pullRequest.number} head ${pullRequest.headSha}...`,
-                {
-                    pullRequestNumber: pullRequest.number,
-                    observedHeadSha: pullRequest.headSha,
-                    registration: true,
-                },
-            );
-            const reconciled = await gatePullRequest(issueContext, pullRequest);
-            if (reconciled !== "reconciled") {
-                await mergeGatedPullRequest(issueContext, pullRequest);
+            let checkoutRestored = false;
+            try {
+                const pullRequest =
+                    await resolvePullRequestForGate(issueContext);
+                if (
+                    await reconcileMergedOrClosedGate(issueContext, pullRequest)
+                ) {
+                    await issueOperations.restoreBaseCheckout(
+                        issueContext.issueRepositories[0]!.repositoryPath,
+                        branch,
+                    );
+                    checkoutRestored = true;
+                    return;
+                }
+                await emitPrGate(
+                    issueContext,
+                    "started",
+                    `Registering delivery check gate for PR #${pullRequest.number} head ${pullRequest.headSha}...`,
+                    {
+                        pullRequestNumber: pullRequest.number,
+                        observedHeadSha: pullRequest.headSha,
+                        registration: true,
+                    },
+                );
+                const postPrReview = await runPostPrReview(
+                    issueContext,
+                    pullRequest,
+                    server,
+                );
+                const currentPullRequest =
+                    postPrReview === undefined
+                        ? pullRequest
+                        : postPrReview.pullRequest;
+                const reconciled = await gatePullRequest(
+                    issueContext,
+                    currentPullRequest,
+                    postPrReview === undefined,
+                );
+                if (reconciled !== "reconciled") {
+                    await mergeGatedPullRequest(
+                        issueContext,
+                        currentPullRequest,
+                        postPrReview?.review,
+                    );
+                }
+                const issueRepository = issueContext.issueRepositories[0]!;
+                await issueOperations.restoreBaseCheckout(
+                    issueRepository.repositoryPath,
+                    branch,
+                );
+                checkoutRestored = true;
+            } finally {
+                await restorePrCheckoutAfterFailure(
+                    issueContext,
+                    checkoutRestored,
+                );
             }
-            const issueRepository = issueContext.issueRepositories[0]!;
-            await issueOperations.restoreBaseCheckout(
-                issueRepository.repositoryPath,
-                branch,
-            );
         };
 
         const closeCompletedIssue = async (
@@ -2205,6 +3147,7 @@ export const workflow = async (
                 IssueExecutionOutcome,
                 { readonly kind: IssueExecutionOutcomeKind.Completed }
             >,
+            server: OpenCodeRuntime,
         ): Promise<void> => {
             if (effectiveDryRun) return;
             if (usesPullRequests && outcome.completion === "pushed-commit") {
@@ -2212,7 +3155,7 @@ export const workflow = async (
                     progress,
                     "issue-closure",
                     `Gating pull request delivery for issue #${issueContext.issue.number}...`,
-                    () => deliverPullRequest(issueContext),
+                    () => deliverPullRequest(issueContext, server),
                     "Pull request merged; GitHub will close the issue.",
                     {
                         issue: {
@@ -2249,6 +3192,7 @@ export const workflow = async (
         const completeIssue = async (
             issueContext: WorkflowIssueContext,
             outcome: IssueExecutionOutcome,
+            server: OpenCodeRuntime,
         ): Promise<void> => {
             if (outcome.kind !== IssueExecutionOutcomeKind.Completed) return;
             checkout = await captureCheckout();
@@ -2258,7 +3202,7 @@ export const workflow = async (
                 stage: "issue-closure",
             };
             await persistState(RunStateStatus.Active, activeIssue);
-            await closeCompletedIssue(issueContext, outcome);
+            await closeCompletedIssue(issueContext, outcome, server);
             await reconcileParentOfCompletedChild(issueContext);
         };
 
@@ -2567,6 +3511,7 @@ export const workflow = async (
         const finalizeIssue = async (
             issueContext: WorkflowIssueContext,
             outcome: IssueExecutionOutcome,
+            server: OpenCodeRuntime,
         ): Promise<void> => {
             if (issueContext.resumedClosureOutcome === undefined) {
                 recordIssueOutcome(issueContext.issue.number, outcome);
@@ -2580,7 +3525,7 @@ export const workflow = async (
                 await finishSuccessfulIssue(issueContext, outcome);
                 return;
             }
-            await completeIssue(issueContext, outcome);
+            await completeIssue(issueContext, outcome, server);
             completeQueueItem(issueContext.issue.number, outcome);
             await finishSuccessfulIssue(issueContext, outcome);
             await refreshAfterDecomposition(outcome);
@@ -2698,7 +3643,7 @@ export const workflow = async (
             activeQueueIssues.set(issue.number, issue);
             const issueContext = await prepareIssue(issue);
             const outcome = await executeIssue(issueContext, server);
-            await finalizeIssue(issueContext, outcome);
+            await finalizeIssue(issueContext, outcome, server);
             return true;
         };
 

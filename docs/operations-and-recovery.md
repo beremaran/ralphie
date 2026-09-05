@@ -106,9 +106,12 @@ A normal issue execution obtains a durable per-issue artifact store at:
 ```
 
 The store prevents accidental overwrites and records readiness deferrals,
-complexity decisions, checkpoints, review attempts, commit messages, created
+complexity decisions, checkpoints, review attempts, approved PR review proof,
+post-PR review/revision/publication/check/merge state, commit messages, created
 commits, resolution proof, decomposition decisions, and created child-number
-mappings.
+mappings. The post-PR delivery-state record is replaced idempotently as the
+latest compact lifecycle projection; head, attempt, revision, check, and
+terminal-reason fields keep it safe to reconcile after interruption.
 
 A successful or interrupted run uses this more detailed layout (OpenCode
 configuration is not stored in this tree):
@@ -154,10 +157,14 @@ contains the repository/branch/workflow, selected `onNeedsAttention` policy,
 notification settings and any pending notification intent, OpenCode selection,
 budget, pending and completed queue numbers, processed count, outcomes, active
 issue/stage, checkout invariant, update time, and, for an active `pr`
-closure, the pull request number, observed head SHA, latest normalized check
-snapshot, gate status, and terminal reason. State is saved before the queue
-starts, when an issue becomes active, after outcomes and queue refreshes, at
-each PR gate transition, and at final completion.
+closure, the pull request number, base/head snapshot, latest normalized check
+snapshot, review status and stage, bounded attempts, approved review evidence,
+revision count, gate status, and terminal reason. State is saved before the
+queue starts, when an issue becomes active, before and after review/revision/
+publication/check/merge boundaries, after outcomes and queue refreshes, at
+each PR gate transition, and at final completion. Version 9 accepts and
+migrates the previous version-8 closure shape while preserving resumable
+evidence.
 
 ## Failure, cancellation, and exit status
 
@@ -177,16 +184,17 @@ stateDiagram-v2
 
 - One issue failure uses the current halt policy: Ralphie persists the active
   issue, releases OpenCode, retains artifacts, and stops before later issues.
-- A `pr` gate that is failed, cancelled, timed out, absent, unknown, closed,
-  or unmergeable never merges and never closes the source issue: Ralphie
-  retains the feature branch and pull request, persists the active
-  recoverable closure gate (PR number, observed head SHA, latest normalized
-  check snapshot, observation and last-update timestamps, gate status, and
-  terminal reason), and stops before merging. Resuming locates the existing
-  matching pull request, continues polling pending gates, re-verifies saved
-  green evidence against the current head, re-observes failed gates on a
-  later rerun, and reconciles an already-merged PR without another merge
-  call.
+- A `pr` review, revision-delivery, publication, check, or merge gate that is
+  failed, cancelled, timed out, absent, unknown, stale, exhausted, closed, or
+  unmergeable never merges and never closes the source issue. Ralphie retains
+  the feature branch and pull request, persists the active recoverable closure
+  gate (PR number, base/head, review stage and attempts, approved evidence,
+  check snapshot, revision count, gate status, and terminal reason), and stops
+  before merging. Review exhaustion is terminal for that run and leaves the
+  issue/PR open. Resuming locates the existing matching pull request, reuses
+  only same-head approval evidence, continues or re-observes pending/failed
+  gates, reconciles ambiguous revision delivery using the remote-head boundary,
+  and reconciles an already-merged PR without another merge call.
 - A `get-pipelines-green` outcome is green only when a non-empty complete
   snapshot has every visible item in `passing` state, has no source or
   completeness error, and the final authoritative remote-HEAD read still
