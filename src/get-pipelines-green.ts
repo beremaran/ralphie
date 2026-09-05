@@ -35,6 +35,7 @@ import type {
 } from "./progress/progress.ts";
 import type { OpenCodeRuntime } from "./opencode/server.ts";
 import type { RalphieRuntime } from "./runtime.ts";
+import { reconcilePipelinePush } from "./git/push-reconciliation.ts";
 import {
     makePipelineRunState,
     makePipelineRunStatePersistence,
@@ -399,25 +400,16 @@ const resumedPushStatus = (input: {
     readonly priorSha: string;
     readonly response: "accepted" | "rejected";
     readonly failureKind?: "non-fast-forward" | "other";
-}): NonNullable<PipelineDeliveryAttempt["push"]>["status"] => {
-    if (
-        validSha(input.remoteSha) &&
-        sameSha(input.remoteSha, input.createdSha)
-    ) {
-        return input.response === "accepted"
-            ? "confirmed"
-            : "confirmed-after-response-loss";
-    }
-    if (input.remoteSha === "") {
-        return "external-movement";
-    }
-    if (validSha(input.remoteSha) && sameSha(input.remoteSha, input.priorSha)) {
-        return input.failureKind === "non-fast-forward"
-            ? "rejected"
-            : "ambiguous";
-    }
-    return "external-movement";
-};
+}): NonNullable<PipelineDeliveryAttempt["push"]>["status"] =>
+    reconcilePipelinePush({
+        remoteSha: input.remoteSha,
+        expectedSha: input.createdSha,
+        priorSha: input.priorSha,
+        response: input.response,
+        ...(input.failureKind === undefined
+            ? {}
+            : { failureKind: input.failureKind }),
+    });
 
 const resumedPushAttempt = (input: {
     readonly state: PipelineRunState;

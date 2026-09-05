@@ -29,6 +29,7 @@ import type {
     PipelinePushAttempt,
 } from "../git/pipeline-delivery.ts";
 import type { GitRemoteSafetyService } from "../git/remote-safety.ts";
+import { reconcilePipelinePush } from "../git/push-reconciliation.ts";
 import type { GitRepositoryInvariantService } from "../git/repository-invariant.ts";
 import type {
     ProgressIssue,
@@ -513,19 +514,16 @@ const pushStatusFor = (
     remoteSha: string,
     expectedSha: string,
     priorSha: string,
-): PipelineDeliveryPushOutcome["status"] => {
-    if (sameSha(remoteSha, expectedSha)) {
-        return push.response === "accepted"
-            ? "confirmed"
-            : "confirmed-after-response-loss";
-    }
-    if (sameSha(remoteSha, priorSha)) {
-        return push.failureKind === "non-fast-forward"
-            ? "rejected"
-            : "ambiguous";
-    }
-    return "external-movement";
-};
+): PipelineDeliveryPushOutcome["status"] =>
+    reconcilePipelinePush({
+        remoteSha,
+        expectedSha,
+        priorSha,
+        response: push.response,
+        ...(push.failureKind === undefined
+            ? {}
+            : { failureKind: push.failureKind }),
+    });
 
 const output = (
     kind: PipelineDeliveryOutcomeKind,
