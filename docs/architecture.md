@@ -145,16 +145,18 @@ services under `src/git/` and `src/github/` perform those side effects and
 verify their invariants. The explicit runtime object makes these boundaries
 testable without a framework-specific execution model.
 
-OpenCode configuration is separate from persistent workspace state: it is read from
-the default or explicitly supplied `--opencode-url`, or generated in a private
-system-temporary directory when model environment variables are used. Run state
-and recovery artifacts belong under the workspace's `.ralphie` directory.
+OpenCode configuration is separate from persistent workspace state: Ralphie uses
+the explicitly supplied `--opencode-url`/`OPENCODE_URL` and optional
+`--opencode-token`/`OPENCODE_TOKEN`, or discovers the operator-run local
+background service. Ralphie never stores the server configuration under the
+workspace; run state and recovery artifacts belong under the workspace's
+`.ralphie` directory.
 
 For workflow behavior and the agent/deterministic boundary, see [Workflows](workflows.md)
 and [Safety](safety.md). For state transitions and reconciliation, see
 [Operations and recovery](operations-and-recovery.md).
 
-## Standalone target consumer renderers
+## Distribution boundary
 
 Ralphie's only distribution channel is the published npm package (see
 [Getting started](getting-started.md#published-package)); the former native

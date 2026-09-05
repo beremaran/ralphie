@@ -126,7 +126,7 @@ export type PullRequestReviewAttemptInput = {
     readonly targetBranch: string;
     readonly issue: GitHubIssue;
     readonly snapshot: PullRequestSnapshot;
-    /** OpenCode/Pi client; the service creates one new session per call. */
+    /** OpenCode client; the service creates one new session per call. */
     readonly agent: AgentClient;
     readonly agentSelection: AgentSelection;
     readonly artifacts: IssueArtifactStore;
@@ -237,7 +237,7 @@ const requestReviewDecision = async (
 
 /**
  * Assemble one immutable, fresh-session PR review attempt. GitHub reread,
- * committed-diff loading, Pi execution, and artifact writes are deliberately
+ * committed-diff loading, OpenCode execution, and artifact writes are deliberately
  * injected so the orchestration policy remains outside this service.
  */
 export const makePullRequestReviewAttemptService = (

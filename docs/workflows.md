@@ -45,7 +45,7 @@ flowchart TD
     B -->|4–5| I[Structured decomposition]
     H --> I
     I --> J[Create and cross-link child issues]
-    J --> K[Rewrite and close original issue]
+    J --> K[Rewrite original issue and keep it open]
     K --> L[Refresh issue queue]
     F --> M[Commit and non-force push]
     M --> O

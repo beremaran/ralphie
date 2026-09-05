@@ -86,9 +86,10 @@ reporting boundary.
 ## State and artifacts
 
 The workspace's `.ralphie` directory contains only repository checkouts and
-Ralphie's run state, events, and recovery artifacts. OpenCode configuration is kept
-in the default or explicitly supplied `--opencode-url`, or in a private temporary
-credential directory, never under this path.
+Ralphie's run state, events, and recovery artifacts. OpenCode configuration is
+supplied through `--opencode-url`/`OPENCODE_URL` and
+`--opencode-token`/`OPENCODE_TOKEN`, or through the operator-run local
+background service; it is never written under this path.
 
 Run artifacts live under:
 

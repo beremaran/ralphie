@@ -131,7 +131,7 @@ sequentially, which keeps the live transcript ordered.
 
 ```mermaid
 flowchart TD
-    A["Start embedded OpenCode runtime"] --> B{"Queue has a ready issue and budget?"}
+    A["Connect to external OpenCode runtime"] --> B{"Queue has a ready issue and budget?"}
     B -->|no| C{"Pending issues blocked by open dependencies?"}
     C -->|yes| R2["Record needs-attention outcomes with open-dependency evidence"]
     R2 --> Q2{"onNeedsAttention policy"}
@@ -199,9 +199,10 @@ invariant service, and `AbortSignal`. The worker persists its outcome and the
 resulting checkout/queue transition before moving to another item.
 
 The workspace `.ralphie` tree contains repositories plus Ralphie's run state,
-events, and recovery artifacts only. OpenCode configuration is kept in the default
-or explicitly supplied `--opencode-url`, or in a private temporary credential
-directory outside the workspace.
+events, and recovery artifacts only. OpenCode configuration is supplied through
+`--opencode-url`/`OPENCODE_URL` and `--opencode-token`/`OPENCODE_TOKEN`, or
+through the operator-run local background service; it is never written under
+the workspace.
 
 Dry-run issue execution uses a read-only view of existing per-issue artifacts.
 New complexity and needs-attention decisions remain in memory; the dry-run
@@ -258,18 +259,18 @@ failure policy; none automatically closes it or converts it into a
 needs-attention deferral.
 
 The needs-attention recovery contract bounds the agent side channel. Every
-structured task/decision session provides the `request_needs_attention` tool;
-the signal is a schema-validated `{ reason, message }` object whose `reason`
-is one of `outdated_premise`, `conflicting_requirements`,
-`missing_information`, `external_dependency`, or `cannot_reproduce`, with an
-optional message capped at 2,000 characters. It is a bounded request to the
-caller — never a final implementation, review, or decision verdict — and the
-prompt guidance forbids it for work that is merely hard, large, slow, or
-uncertain. Grounding, complexity, implementation, review-fix,
-commit-message, review, and decomposition sessions may raise it; the OpenCode task
-gate parses and Zod-validates the side channel, so an invalid value is
-ignored rather than trusted, and no session can raise it outside Ralphie's
-own gate.
+OpenCode task/decision response may include a fenced `needs-attention` block
+with a schema-validated `{ reason, message }` object. The `reason` is one of
+`outdated_premise`, `conflicting_requirements`, `missing_information`,
+`external_dependency`, or `cannot_reproduce`, with an optional message capped
+at 2,000 characters. It is a bounded request to the caller — never a final
+implementation, review, or decision verdict — and the prompt guidance forbids
+it for work that is merely hard, large, slow, or uncertain. Grounding,
+complexity, implementation, review-fix, commit-message, review, and
+decomposition sessions may raise it. Ralphie parses and Zod-validates this
+block independently from the required fenced `json` result; invalid values are
+ignored rather than trusted, and no session can raise it outside Ralphie's own
+gate.
 
 A raised signal is confirmed by exactly one fresh, read-only verifier session
 before the next artifact, Git, or GitHub mutation. The verifier re-reads the
@@ -298,8 +299,8 @@ decision when its freshness fingerprint matches the live issue. Otherwise
 1. captures the repository invariant and confirms the expected branch;
 2. creates a fresh read-only OpenCode session;
 3. sends the issue and repository context with the 0–5 complexity rubric;
-4. requires a `complexityDecisionSchema` result through the terminating
-   `submit_result` tool; and
+4. requires a schema-valid `complexityDecisionSchema` result through
+   OpenCode's structured JSON response; and
 5. verifies that branch and `HEAD` did not change, records the session id, and
    persists the decision.
 
@@ -322,34 +323,27 @@ flowchart LR
 ```
 
 Structured decision sessions deny edits/writes and mutating Git/GitHub
-commands, and OpenCode sessions cannot close issues, create or merge pull requests,
-or push: Ralphie's deterministic domain services perform every Git and GitHub
-mutation. PR reviews use an explicit immutable session profile whose only active
-tools are `submit_result` and the non-repository `request_needs_attention`
-side channel; the reviewer receives the exact staged patch and verification
-evidence in its prompt and cannot inspect the checkout or run shell/Git/GitHub
-commands. Every decision task is schema-validated at both the tool and response
-boundaries; invalid output or OpenCode failure becomes a failed issue outcome without
-proceeding to the next operation.
+commands, and OpenCode sessions cannot close issues, create or merge pull
+requests, or push: Ralphie's deterministic domain services perform every Git
+and GitHub mutation. PR reviews use an explicit immutable session profile; the
+reviewer receives the exact committed patch and verification evidence in its
+prompt and cannot inspect the checkout or run shell/Git/GitHub commands. Every
+decision task is schema-validated at the OpenCode response and Ralphie domain
+boundaries; invalid output or OpenCode failure becomes a failed issue outcome
+without proceeding to the next operation.
 
 Decision schemas that are discriminated unions (issue grounding and its
-needs-attention route) are flattened into a single object schema for the
-`submit_result` tool contract: the disposition literal becomes an enum, the
-branch-specific fields stay declared but optional, and the authoritative Zod
-validation still enforces each branch exactly. Some models and providers
-silently drop tool-call arguments for root-level `oneOf` schemas, and the
-flattened shape keeps those providers compliant. The flattened branch-only
-properties are declared explicitly nullable where the schema language allows
-it (scalar fields as `anyOf` unions with a null variant, object/array fields
-with a widened `type`) because strict constrained samplers materialize every
-declared property; the literal string `"null"` that such samplers can emit for
-enum-typed fields is normalized back to a real null before tool validation,
-and explicit `null` argument values are treated as absent before validation.
-Calls that still never produce a schema-valid result are bounded by a circuit
-breaker: after five consecutive failed `submit_result` attempts, the session
-is aborted and the decision fails fast with a diagnostic naming the likely
-cause instead of letting the model retry until the prompt-attempt budget is
-exhausted.
+needs-attention route) are flattened into a single JSON schema for the
+OpenCode structured-output request: the disposition literal becomes an enum,
+the branch-specific fields stay declared but optional, and authoritative Zod
+validation still enforces each branch exactly. The client asks the server for a
+fenced `json` result and retries with the validation error when parsing or
+schema validation fails; explicit nulls are normalized away before validation.
+An optional fenced `needs-attention` block is extracted separately so a blocker
+does not weaken validation of the primary decision. A turn with no assistant
+message is reported as a silent-turn failure, while a response that never
+produces a schema-valid result fails with a bounded diagnostic rather than
+being treated as a decision.
 
 ## 5. Implementation path: complexity 0–3
 
@@ -509,8 +503,8 @@ The maintenance path is deliberately split at the agent boundary:
    selected source revision/guidance used for grounding. It computes a
    fingerprint for the relevant observation.
 2. A read-only OpenCode session proposes a schema-validated plan for each
-   issue. Pi receives no Octokit client, GitHub credentials, or mutation-capable
-   tool.
+   issue. OpenCode receives no Octokit client, GitHub credentials, or
+   mutation-capable task context.
 3. Independent policy validation checks every issue, comment, label, candidate,
    evidence field, action conflict, and snapshot fingerprint. Unsupported or
    insufficiently evidenced suggestions are explicit skips.
@@ -518,7 +512,7 @@ The maintenance path is deliberately split at the agent boundary:
    target issue/comment or relationship pair. A changed issue, comment,
    candidate, canonical issue, or grounding HEAD invalidates the action and
    causes bounded re-planning. The service then performs and reconciles the
-   mutation; Pi never performs the write.
+   mutation; OpenCode never performs the write.
 5. The runner persists the action result, evidence, identifiers, and skip/failure
    reason, then advances to the next action and issue.
 

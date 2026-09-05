@@ -51,7 +51,7 @@ All notable changes to Ralphie are documented here. The project follows
   skip or replan instead of guessing. Versioned maintenance state checkpoints
   every action for exact resume, and maintenance dry runs perform no workspace,
   GitHub, state-file, artifact, or event-log mutation. Added offline
-  fake-GitHub/stub-Pi integration coverage for reconciliation, ambiguity,
+  fake-GitHub/OpenCode integration coverage for reconciliation, ambiguity,
   interruption/resume, output modes, permissions, dry-run isolation, and exit
   codes (`tests/integration/maintain-issues.test.ts`). The documentation records
   the required permissions, output/recovery contract, and first-release
@@ -106,7 +106,7 @@ All notable changes to Ralphie are documented here. The project follows
   interactive region, concise completion/error summaries, and the
   noninteractive fallback.
 
-- Route the Pi event stream and progress updates through the compact activity
+- Route the OpenCode event stream and progress updates through the compact activity
   surface in the real coordinator/CLI path: tool-call start/delta/end, tool
   execution start/update/end, bash execution updates, streamed thinking,
   compaction/retry lifecycle, and active progress changes map to bounded
@@ -115,7 +115,7 @@ All notable changes to Ralphie are documented here. The project follows
   each tool completion emits at most one concise `✓ <tool> done` line, and a
   failure emits one sanitized, 140-character-bounded line with enough error
   detail to act. Assistant text deltas, session headers, durable breadcrumbs,
-  and lossless JSON `pi_event` records are unchanged, the region never clears
+  and lossless JSON `opencode_event` records are unchanged, the region never clears
   or corrupts assistant response bytes, and `--output verbose` keeps the live
   row count at its fixed three-row cap. Plain, JSON, and quiet modes retain
   their append-only/structured/failure-only contracts. Coordinator-level tests
@@ -182,14 +182,14 @@ All notable changes to Ralphie are documented here. The project follows
   streams still report background totals (total characters and lines with a
   `truncated` marker). JSON and durable logs remain lossless.
 
-- Add the needs-attention recovery contract across the Pi boundary, issue
-  executor, recovery service, and local end-to-end path: bounded
-  `request_needs_attention` signals (`reason` one of `outdated_premise`,
+- Add the needs-attention recovery contract across the OpenCode boundary, issue
+  executor, recovery service, and local end-to-end path: bounded fenced
+  `needs-attention` blocks (`reason` one of `outdated_premise`,
   `conflicting_requirements`, `missing_information`, `external_dependency`, or
   `cannot_reproduce`, plus an optional message capped at 2,000 characters)
-  reach the caller only through the schema-validated Pi side channel from
-  grounding, complexity, implementation, review-fix, commit-message, review,
-  and decomposition sessions; each signal is confirmed by exactly one fresh
+  accompany the required schema-valid fenced `json` result from grounding,
+  complexity, implementation, review-fix, commit-message, review, and
+  decomposition sessions; each signal is confirmed by exactly one fresh
   read-only verifier session before any further artifact, Git, or GitHub
   mutation. A confirmed `needs_attention` disposition persists the structured
   decision with its summary, evidence, questions, and issue-freshness
@@ -204,7 +204,7 @@ All notable changes to Ralphie are documented here. The project follows
   exact matches.
 
 - Bound every command execution with a hard deadline so a hung process cannot
-  stall an unattended issue run: Pi task shell commands default to a
+  stall an unattended issue run: OpenCode task shell commands default to a
   120-second timeout with a 600-second maximum (an omitted `timeout` gets the
   default and a larger declared timeout is clamped), Ralphie-owned git/gh and
   workspace commands default to a 10-minute timeout via `CommandRunnerLive`,
@@ -236,22 +236,21 @@ All notable changes to Ralphie are documented here. The project follows
   and the fixture rejects unknown/public-shaped paths instead of forwarding them.
 
 ### Fixed
-- Live Pi transcript streaming renders every `thinking_delta` / `text_delta`
+- Live OpenCode transcript streaming renders every `thinking_delta` / `text_delta`
   (and tool output update) inline on the already-open `⋯ thinking` / `✦ assistant`
   row instead of forcing one token per `│`-prefixed line; incremental deltas no
   longer break the open stream, so interactive output wraps naturally at the
   terminal width and durable progress/breadcrumb lines still interleave cleanly.
-- Structured decision tools now hand providers a flattened single-object schema
-  for discriminated-union decisions (issue grounding, needs attention), and
-  explicit `null` arguments are stripped before validation. Providers and models
-  that silently drop tool-call arguments for root-level `oneOf` tool schemas
-  (for example, GLM relays failing every `submit_result` with empty arguments)
-  can now comply, while branch-strict requirements remain enforced by the Zod
-  decision validation.
-- Repeated `submit_result` attempts that never produce a schema-valid result now
-  trip a circuit breaker that aborts the Pi session after five consecutive
-  failures and reports the likely cause (including dropped tool-call arguments)
-  instead of letting the model retry until the prompt-attempt budget expires.
+- Structured decision prompts now hand providers a flattened single-object JSON
+  schema for discriminated-union decisions (issue grounding, needs attention),
+  and explicit `null` values are stripped before validation. Providers and
+  models that return incomplete or malformed structured output can retry against
+  the prompt contract, while branch-strict requirements remain enforced by the
+  Zod decision validation.
+- Repeated structured-output attempts that never produce a schema-valid result
+  now trip a circuit breaker that aborts the OpenCode session after five
+  consecutive failures and reports the likely cause instead of letting the
+  model retry until the prompt-attempt budget expires.
 - Flattened decision schemas now declare every branch-only property explicitly
   nullable (scalar fields as `anyOf` unions with a null variant, object/array
   fields with a widened `type`) and annotate each with the dispositions it
@@ -260,7 +259,7 @@ All notable changes to Ralphie are documented here. The project follows
   values; the literal string `"null"` that some samplers emit for enum-typed
   fields is normalized to a real null before tool validation. These cross the
   tool boundary as absents, so a grounding or needs-attention decision can no
-  longer get stuck in the `submit_result` retry loop when the provider fills
+  longer get stuck in the structured-output retry loop when the provider fills
   every flattened field.
 
 ### Changed
@@ -271,7 +270,7 @@ All notable changes to Ralphie are documented here. The project follows
   continues independent queued work instead of failing and halting the run;
   dependent issues remain blocked.
 
-- Pi implementation sessions now allow ordinary composed shell commands,
+- OpenCode implementation sessions now allow ordinary composed shell commands,
   pipes, redirection, and interpreters while continuing to reject explicit
   orchestration-owned Git/GitHub mutations.
 - Implementation completion is schema validated. Unresolved empty diffs enter
@@ -301,7 +300,7 @@ All notable changes to Ralphie are documented here. The project follows
   recovery marker and dependency list, and decomposed parents are never
   re-queued for execution. Native relationships are reconciled idempotently on
   resume; conflicting hierarchy or markers halt with a recovery diagnostic.
-- Dequeued issues are refreshed from GitHub before branch or Pi work; closed or
+- Dequeued issues are refreshed from GitHub before branch or OpenCode work; closed or
   label-ineligible issues are durably skipped without mutations, and cached
   grounding, complexity, and resolution decisions now require matching live
   issue freshness metadata.
@@ -419,7 +418,7 @@ All notable changes to Ralphie are documented here. The project follows
   state alone.
 
 - A single package-version authority with build-time commit metadata and plain
-  or JSON `--version` output that works without repository or Pi configuration.
+  or JSON `--version` output that works without repository or OpenCode configuration.
 - An isolated package smoke check that inspects the tarball allowlist, installs
   production dependencies in a fresh project, and verifies scoped identity and
   manifest-backed `--version` output.
@@ -451,7 +450,7 @@ All notable changes to Ralphie are documented here. The project follows
   trimmed `--needs-attention-label`; label-only usage is rejected, dry runs
   never notify, and failed notifications retain their intent for safe resume
   and retry.
-- Native Bun CLI foundation with GitHub, Git, workspace, and Pi domain
+- Native Bun CLI foundation with GitHub, Git, workspace, and OpenCode domain
   services.
 - Resumable issue execution with complexity routing, bounded review loops,
   deterministic commits and pushes, and dependency-aware decomposition.
@@ -465,7 +464,7 @@ All notable changes to Ralphie are documented here. The project follows
   already-resolved closure, and keep needs-attention outcomes out of closure
   and PR delivery. Complexity is never a needs-attention reason.
 - Document the cross-mode display contract: interactive sticky footer and
-  contextual Pi session output, periodic and lifecycle breadcrumbs, the
+  contextual OpenCode session output, periodic and lifecycle breadcrumbs, the
   `LIVE_OUTPUT_LIMIT` character threshold and human-preview defaults, active
   leaf-stage status, append-only plain/CI output, quiet output limited to
   failures and handled needs-attention stops,
@@ -480,10 +479,10 @@ All notable changes to Ralphie are documented here. The project follows
 - Refresh live issue and comment metadata when resuming pending work, and reuse
   needs-attention grounding only while its freshness fingerprint matches;
   changed or invalid artifacts are atomically invalidated before regrounding.
-- Keep Pi configuration separate from persistent workspace state: explicit
-  `--pi-dir` directories remain operator-owned, while environment-generated
-  configuration uses a private temporary directory with secure permissions and
-  cleanup on close or startup failure.
+- Keep OpenCode configuration separate from persistent workspace state:
+  `--opencode-url`/`OPENCODE_URL` and `--opencode-token`/`OPENCODE_TOKEN` are
+  operator-owned inputs, while local background-service discovery remains
+  outside the workspace state tree.
 - Define noninteractive `github.com` authentication through the preferred
   `GH_TOKEN` and fallback `GITHUB_TOKEN` environment variables, without
   requiring `gh auth login` or a mounted GitHub CLI profile.
@@ -494,39 +493,37 @@ All notable changes to Ralphie are documented here. The project follows
 - Resolve dependencies on decomposed closed issues to their open descendants,
   stop repeated identical review findings early, permit safe compound shell
   inspection commands, and use GitHub REST API version `2026-03-10`.
-- Polish human-readable Pi streaming with grouped session blocks, readable tool
+- Polish human-readable OpenCode streaming with grouped session blocks, readable tool
   calls, indented de-duplicated tool output, bounded previews, and safe handling
   of terminal control sequences while preserving the lossless JSON event stream.
-- Stream the complete Pi event transcript, including token-level thinking and
-  assistant output plus tool calls and results, and remove parallel issue and
-  Pi session execution.
+- Stream the complete OpenCode event transcript, including token-level thinking
+  and assistant output plus tool calls and results, and remove parallel issue
+  and OpenCode session execution.
 - Consolidate the CLI surface: fold `--issue-order` into
-  `--issue-sort <field>[:asc|desc]`; replace
-  `--model-variant` with `--thinking` and `--agent-dir` with `--pi-dir`;
+  `--issue-sort <field>[:asc|desc]`; use `--thinking` for the selected OpenCode
+  variant and `--opencode-url`/`--opencode-token` for the external server;
   replace `--start-clean` and `--cleanup` with `--clean <start|end|both>`;
   and replace `--verbose`, `--json`, and `--quiet` with
   `--output <default|verbose|quiet|json>`.
-- Drop the `--agent` compatibility label and the `--model-base-url`,
-  `--api-key`, `--model-provider`, and `--model-id` flags: model selection is
-  owned by `--model <provider/model>` and credentials come from the
-  `RALPHIE_MODEL_BASE_URL` and `RALPHIE_MODEL_API_KEY` environment variables.
+- Keep model selection under `--model <provider/model>` and server credentials
+  under `OPENCODE_URL` and `OPENCODE_TOKEN`; the retired embedded-agent flags
+  and `RALPHIE_MODEL_*` environment variables are no longer part of the CLI.
 
 ### Added
 
-- Native Bun CLI foundation with GitHub, Git, workspace, and Pi domain
+- Native Bun CLI foundation with GitHub, Git, workspace, and OpenCode domain
   explicit service factories, and an ordinary runtime dependency object.
 - Focus execution on one required repository and accept all configuration through
   CLI arguments and flags; remove JSON configuration, named projects, repository
   patterns, and multi-repository orchestration.
-- Replace the OpenCode SDK and local server with the upstream
-  `@earendil-works/pi-coding-agent` SDK, an embedded shared `ModelRuntime`,
-  isolated in-memory Pi sessions, guarded tools, and terminating structured-output
-  tools validated by Zod.
+- Use the external `@opencode-ai/client` server integration, operator-run
+  OpenCode sessions, a permission watcher and denylist for defense in depth,
+  and fenced structured-output/needs-attention responses validated by Zod.
 - Rely on the authoritative non-force Git push for GitHub branch policy and
   permission enforcement while retaining destination, commit, and divergence
   safety checks.
-- Render interactive progress through one stderr status line with nested-stage
-  tracking instead of creating OpenTUI spinner renderers.
+- Render interactive progress through a bounded replaceable terminal region with
+  nested-stage tracking instead of creating an OpenTUI renderer.
 - Close completed implementation issues after verified delivery, with
   idempotent recovery for interrupted or ambiguous GitHub responses.
 

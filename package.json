@@ -42,7 +42,8 @@
     "github-issues",
     "automation",
     "ai",
-    "opencode"
+    "opencode",
+    "npm"
   ],
   "engines": {
     "bun": ">=1.3.0"

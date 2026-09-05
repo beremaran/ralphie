@@ -127,10 +127,12 @@ Tracked modifications and untracked, non-ignored files inside that checkout are
 discarded. Keep unrelated work outside Ralphie's workspace.
 
 The workspace's `.ralphie` directory contains only repository checkouts and
-Ralphie's run state, events, and recovery artifacts. OpenCode configuration is kept
-in the default or explicitly supplied `--opencode-url`, or in a private temporary
-credential directory, never under this path. An explicitly supplied `--opencode-url`
-is operator-owned and is never removed; mount it outside the workspace.
+Ralphie's run state, events, and recovery artifacts. OpenCode configuration is
+supplied through `--opencode-url`/`OPENCODE_URL` and
+`--opencode-token`/`OPENCODE_TOKEN`, or through the operator-run local
+background service; it is never written under this path. An explicitly supplied
+server endpoint is operator-owned and is never removed; keep any server-side
+configuration outside the workspace.
 
 `--clean start` and `--clean end` recursively delete the workspace after
 protected-path checks. Use a path dedicated to Ralphie:
@@ -188,16 +190,17 @@ check the proposed pass before granting Issues write permission.
 ## Agent and mutation boundaries
 
 Structured decision sessions deny edits/writes and mutating Git/GitHub commands.
-PR-review sessions use an explicit immutable profile: the staged patch and
-verification evidence are supplied in the prompt, and only `submit_result` and
-the non-repository `request_needs_attention` side channel are active. They
-cannot inspect the checkout or run shell/Git/GitHub commands. The implementation
-agent may edit the checkout, but it is denied commits, pushes, branch/reset/clean
-operations, and `gh` commands. Ralphie stages, verifies, commits, pushes, and
-mutates GitHub through deterministic domain services. Every decision task is
-schema-validated at both the tool and response boundaries; invalid output or
-OpenCode failure becomes a failed issue outcome without proceeding to the next
-operation.
+Their required result is returned through OpenCode's structured JSON format and
+Ralphie's fenced-JSON parser; a repository-backed blocker is an optional fenced
+`needs-attention` block, not a mutation-capable tool. PR-review sessions use an
+explicit immutable profile: the committed patch and verification evidence are
+supplied in the prompt, and the reviewer cannot inspect the checkout or run
+shell/Git/GitHub commands. The implementation agent may edit the checkout, but
+it is denied commits, pushes, branch/reset/clean operations, and `gh` commands.
+Ralphie stages, verifies, commits, pushes, and mutates GitHub through
+deterministic domain services. Every decision task is schema-validated at the
+OpenCode response and Ralphie domain boundaries; invalid output or OpenCode
+failure becomes a failed issue outcome without proceeding to the next operation.
 
 Verification commands are run against the staged tree and their evidence is
 bound to that tree before review or commit. A non-zero command exit is treated

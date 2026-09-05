@@ -1,8 +1,8 @@
 # Development
 
 This page is for contributors and maintainers working on the Ralphie checkout.
-It is the authoritative home for local setup, validation commands, network smoke
-tests, and contribution expectations. Return to the [documentation
+It is the authoritative home for local setup, validation commands, optional
+registry checks, and contribution expectations. Return to the [documentation
 index](README.md) for the other documentation paths.
 
 ## Local setup and checks
@@ -21,7 +21,7 @@ Useful individual commands:
 
 | Command | Purpose |
 | --- | --- |
-| `bun run test` | Run the unit test suite: ~130 fast, in-memory tests across 9 files (CLI surface, workflow orchestration, runtime assembly, safety, and a GitHub-issue/pipeline slice). No network, no process spawns, no temporary repositories. |
+| `bun run test` | Run the full Bun test suite, including offline unit tests, local integration/PTY coverage, and in-memory GitHub REST fixtures. The suite does not require live GitHub, OpenCode, or registry credentials; some tests use temporary checkouts and local subprocesses. |
 | `bun run typecheck` | Type-check without emitting JavaScript. |
 | `bun run format` | Format the repository with Biome. |
 | `bun run format:check` | Verify formatting without modifying files. |
@@ -83,11 +83,13 @@ Ralphie state volume. Unknown or public-shaped paths are rejected with a loud
 HTTP 500 and are never proxied. The unit suite drives the production domain
 services against the fixture (see `tests/github/issues.test.ts`).
 
-The `bun run test` suite is deliberately small: fast, in-memory unit tests
-only. The former disposable integration suites (temporary Git repositories,
-installer, docker image, Homebrew reconciliation, release processes, and the
-opt-in network smoke tests) were removed to keep the gate under a few seconds;
-git history preserves them if they are ever needed again.
+The `bun run test` suite is deliberately offline: it combines fast in-memory
+unit tests with local integration, PTY, temporary-checkout, and REST-fixture
+coverage. It does not contact GitHub, OpenCode, npm, or a container registry.
+The former distribution-channel and live network smoke suites (standalone
+installer, Docker image, Homebrew reconciliation, and release publication)
+were removed from the default gate; the package registry check remains an
+explicit opt-in using `--registry` with an exact `--package-spec`.
 
 ## Contribution expectations
 
@@ -122,7 +124,7 @@ landing page, and place changes in the page that owns the fact:
 - mutation boundaries: [Safety](safety.md);
 - output, state, and recovery: [Operations and recovery](operations-and-recovery.md);
 - components and source locations: [Architecture](architecture.md); and
-- versioning and publishing: [Releases](releases.md).
+- versioning and publishing: [Development](development.md#publishing).
 
 Keep the [end-to-end execution trace](end-to-end-execution.md) synchronized
 when source-level sequencing changes, and update the [documentation index](README.md)

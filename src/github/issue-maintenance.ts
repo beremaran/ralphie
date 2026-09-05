@@ -2,7 +2,7 @@
  * Deterministic GitHub reconciliation for non-relationship maintenance
  * actions.
  *
- * This module is the mutation seam for maintenance. Pi supplies a validated
+ * This module is the mutation seam for maintenance. OpenCode supplies a validated
  * action, but it never receives this adapter or an Octokit client. Every
  * mutation is preceded by an authoritative read; a lost response is
  * reconciled by a fresh read and is never retried blindly. Managed comments

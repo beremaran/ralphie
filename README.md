@@ -271,20 +271,21 @@ opt-in (with optional `--needs-attention-label`) publishes one idempotent
 structured comment and label per issue, saved as resumable intent before any
 GitHub mutation; dry runs never notify.
 
-**Needs-attention recovery contract.** Every OpenCode session is a bounded
-`request_needs_attention` signal channel for repository-backed blockers. The
-signal is a schema-validated `{ reason, message }` object whose `reason` is one
-of `outdated_premise`, `conflicting_requirements`, `missing_information`,
+**Needs-attention recovery contract.** Every OpenCode task or decision response
+may include an optional fenced `needs-attention` block carrying a
+schema-validated `{ reason, message }` object. The `reason` is one of
+`outdated_premise`, `conflicting_requirements`, `missing_information`,
 `external_dependency`, or `cannot_reproduce`, with an optional message capped
-at 2,000 characters; it is a request to the caller, never a final
+at 2,000 characters. It is a request to the caller, never a final
 implementation or review decision, and the prompt guidance forbids it for work
-that is merely hard, large, slow, or uncertain. Only structured decision and
-task sessions (grounding, complexity, implementation, review-fix,
-commit-message, review, and decomposition) can raise it, and only through
-Ralphie's OpenCode task/decision gate. Each signal is confirmed by exactly one
-fresh, read-only verifier session before any further artifact, Git, or GitHub
-mutation. A confirmed `needs_attention` disposition persists the structured
-decision with its summary, evidence, questions, and issue-freshness
+that is merely hard, large, slow, or uncertain. Structured sessions still have
+to return their required schema-valid fenced `json` result; Ralphie parses and
+validates the two blocks independently. Only structured decision and task
+sessions (grounding, complexity, implementation, review-fix, commit-message,
+review, and decomposition) can raise it. Each signal is confirmed by exactly
+one fresh, read-only verifier session before any further artifact, Git, or
+GitHub mutation. A confirmed `needs_attention` disposition persists the
+structured decision with its summary, evidence, questions, and issue-freshness
 fingerprint, leaves the source issue open, performs no GitHub mutation and no
 commit or push, and restores the exact clean checkpoint (`git reset --hard`
 plus `git clean -fd`), removing every staged, unstaged, and untracked agent
@@ -331,8 +332,9 @@ bunx @beremaran/ralphie owner/repository --mode maintain-issues \
 
 The mode captures one bounded open-issue snapshot using the shared label,
 sort, order, and `--max-issues` selectors, then processes the selected issues
-sequentially and exits. Pi receives only read-only issue, repository, and
-candidate context and returns a schema-validated plan. Independent policy
+sequentially and exits. A read-only OpenCode session receives only issue,
+repository, and candidate context and returns a schema-validated plan.
+Independent policy
 validation and deterministic GitHub services perform any allowed labels,
 comments, related links, or duplicate actions after a fresh live revalidation
 of the affected issue pair. The default duplicate policy is `link`, which
