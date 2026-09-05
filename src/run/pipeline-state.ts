@@ -11,13 +11,14 @@ import { dirname, join } from "node:path";
 import { z } from "zod";
 
 import type { PipelineSnapshot } from "../github/pipeline-snapshot.ts";
-import { pipelineFailureFingerprint } from "../issues/pipeline-delivery-loop.ts";
+import { pipelineFailureFingerprint } from "../pipeline/snapshot-identity.ts";
 import type {
     PipelineDeliveryAttempt,
+    PipelineDeliveryEvent,
     PipelineDeliveryOutcome,
-    PipelineDeliveryPersistenceEvent,
+    PipelineDeliveryPhaseEvent,
     PipelineDeliveryPhase,
-} from "../issues/pipeline-delivery-loop.ts";
+} from "../pipeline/delivery-types.ts";
 import { RalphieError } from "../shared/error.ts";
 import { resolveWorkspacePath } from "../workspace/workspace.ts";
 
@@ -385,19 +386,41 @@ export type PipelineRunStateStoreService = {
     readonly remove: (path: string) => Promise<void>;
 };
 
-export type PipelineRunStatePersistence = {
+/** The lifecycle-facing state seam. It consumes semantic events, not storage patches. */
+export type PipelineDeliveryStateSession = {
     readonly getState: () => PipelineRunState;
-    readonly onPhase: (
-        event: PipelineDeliveryPersistenceEvent,
-    ) => Promise<void>;
-    readonly onOutcome: (outcome: PipelineDeliveryOutcome) => Promise<void>;
+    readonly emit: (event: PipelineDeliveryEvent) => Promise<void>;
 };
 
-export type PipelineRunStatePersistenceInput = {
-    readonly path: string;
-    readonly initialState: PipelineRunState;
-    readonly store?: PipelineRunStateStoreService;
-    readonly now?: () => Date;
+export type PipelineDeliveryStateOpenInput =
+    | {
+          readonly mode: "new";
+          readonly path: string;
+          readonly runId: string;
+          readonly repository: string;
+          readonly branch: string;
+          readonly workspace: string;
+          readonly deadlineAtMs: number;
+          readonly maxAttempts: number;
+          readonly currentRemoteSha: string;
+      }
+    | {
+          readonly mode: "resume";
+          readonly path: string;
+          readonly state: PipelineRunState;
+          readonly remoteSha: string;
+          readonly now?: Date;
+      };
+
+export type PipelineDeliveryStateAdapter = {
+    readonly load: (
+        path: string,
+        expected: PipelineResumeExpectations,
+    ) => Promise<PipelineRunState>;
+    readonly open: (input: PipelineDeliveryStateOpenInput) => Promise<{
+        readonly session: PipelineDeliveryStateSession;
+        readonly reconciliation?: PipelineResumeReconciliation;
+    }>;
 };
 
 const validFullSha = (value: string | undefined): value is string =>
@@ -498,7 +521,7 @@ const diagnosticReferenceFrom = (input: {
 };
 
 const createdCommitFrom = (
-    event: PipelineDeliveryPersistenceEvent,
+    event: PipelineDeliveryPhaseEvent,
 ): PipelineCreatedCommit | undefined => {
     const commit = event.commit;
     if (
@@ -530,7 +553,7 @@ const createdCommitFrom = (
 };
 
 const confirmedPushShaFrom = (
-    event: PipelineDeliveryPersistenceEvent,
+    event: PipelineDeliveryPhaseEvent,
 ): string | undefined => {
     const push = event.attemptState?.push;
     if (
@@ -559,14 +582,14 @@ const terminalOutcomeFrom = (
 
 const phaseRemoteShaFrom = (
     state: PipelineRunState,
-    event: PipelineDeliveryPersistenceEvent,
+    event: PipelineDeliveryPhaseEvent,
 ): string =>
     validFullSha(event.currentRemoteSha)
         ? event.currentRemoteSha
         : state.currentRemoteSha;
 
 const phaseSnapshotFrom = (
-    event: PipelineDeliveryPersistenceEvent,
+    event: PipelineDeliveryPhaseEvent,
 ): PipelineSafeSnapshot | undefined =>
     event.snapshot === undefined
         ? undefined
@@ -587,7 +610,7 @@ const phaseEvidencePatch = (
 };
 
 const phaseFailurePatch = (
-    event: PipelineDeliveryPersistenceEvent,
+    event: PipelineDeliveryPhaseEvent,
 ): PipelineRunStatePatch =>
     event.failureFingerprint === undefined
         ? {}
@@ -597,7 +620,7 @@ const phaseFailurePatch = (
 
 const phaseAttemptPatch = (
     state: PipelineRunState,
-    event: PipelineDeliveryPersistenceEvent,
+    event: PipelineDeliveryPhaseEvent,
 ): PipelineRunStatePatch =>
     event.attemptState === undefined
         ? {}
@@ -610,7 +633,7 @@ const phaseAttemptPatch = (
 
 const phasePushState = (input: {
     readonly state: PipelineRunState;
-    readonly event: PipelineDeliveryPersistenceEvent;
+    readonly event: PipelineDeliveryPhaseEvent;
     readonly confirmedSha?: string;
 }): number => {
     const alreadyConfirmed =
@@ -629,7 +652,7 @@ const phasePushState = (input: {
 
 const phasePatchFrom = (
     state: PipelineRunState,
-    event: PipelineDeliveryPersistenceEvent,
+    event: PipelineDeliveryPhaseEvent,
     now: Date,
 ): PipelineRunStatePatch => {
     const currentRemoteSha = phaseRemoteShaFrom(state, event);
@@ -755,46 +778,75 @@ const outcomePatchFrom = (
 };
 
 /**
- * Turn delivery-loop boundary events into one atomic, resume-safe state file.
- * The adapter is intentionally separate from the loop: tests and other
- * callers can use the loop without opting into persistence, while the CLI can
- * attach this sink before the first observation boundary.
+ * Open the durable state session owned by the Pipeline delivery lifecycle.
+ * Storage remains a file-backed implementation detail; the lifecycle only
+ * observes load/open and emits semantic delivery events.
  */
-export const makePipelineRunStatePersistence = (
-    input: PipelineRunStatePersistenceInput,
-): PipelineRunStatePersistence => {
+export const makePipelineDeliveryStateAdapter = (
+    input: {
+        readonly store?: PipelineRunStateStoreService;
+        readonly now?: () => Date;
+    } = {},
+): PipelineDeliveryStateAdapter => {
     const store = input.store ?? PipelineRunStateStoreLive;
     const now = input.now ?? (() => new Date());
-    let state = input.initialState;
 
-    const onPhase = async (
-        event: PipelineDeliveryPersistenceEvent,
-    ): Promise<void> => {
-        const nextState = updatePipelineRunState(
-            state,
-            phasePatchFrom(state, event, now()),
-            now(),
-        );
-        await store.save(input.path, nextState);
-        state = nextState;
-    };
+    const openSession = async (path: string, initial: PipelineRunState) => {
+        let state = initial;
+        await store.save(path, state);
 
-    const onOutcome = async (
-        outcome: PipelineDeliveryOutcome,
-    ): Promise<void> => {
-        const nextState = updatePipelineRunState(
-            state,
-            outcomePatchFrom(state, outcome),
-            now(),
-        );
-        await store.save(input.path, nextState);
-        state = nextState;
+        const session: PipelineDeliveryStateSession = {
+            getState: () => state,
+            emit: async (event) => {
+                const currentTime = now();
+                const patch =
+                    event.kind === "phase"
+                        ? phasePatchFrom(state, event.event, currentTime)
+                        : outcomePatchFrom(state, event.outcome);
+                const nextState = updatePipelineRunState(
+                    state,
+                    patch,
+                    currentTime,
+                );
+                await store.save(path, nextState);
+                state = nextState;
+            },
+        };
+        return session;
     };
 
     return {
-        getState: () => state,
-        onPhase,
-        onOutcome,
+        load: (path, expected) => loadPipelineRunState(path, expected, store),
+        open: async (openInput) => {
+            if (openInput.mode === "new") {
+                const state = makePipelineRunState({
+                    runId: openInput.runId,
+                    repository: openInput.repository,
+                    branch: openInput.branch,
+                    workspace: openInput.workspace,
+                    deadlineAtMs: openInput.deadlineAtMs,
+                    maxAttempts: openInput.maxAttempts,
+                    currentRemoteSha: openInput.currentRemoteSha,
+                    now: now(),
+                });
+                return {
+                    session: await openSession(openInput.path, state),
+                };
+            }
+
+            const reconciliation = reconcilePipelineRunStateOnResume({
+                state: openInput.state,
+                remoteSha: openInput.remoteSha,
+                now: openInput.now ?? now(),
+            });
+            return {
+                session: await openSession(
+                    openInput.path,
+                    reconciliation.state,
+                ),
+                reconciliation,
+            };
+        },
     };
 };
 

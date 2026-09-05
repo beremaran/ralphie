@@ -89,10 +89,11 @@ import {
     type PipelineRepairExecutorService,
 } from "./issues/pipeline-repair-executor.ts";
 import {
-    makePipelineDeliveryLoopService,
-    type PipelineDeliveryLoopService,
-} from "./issues/pipeline-delivery-loop.ts";
+    makePipelineDeliveryLifecycle,
+    type PipelineDeliveryLifecycle,
+} from "./pipeline/delivery-lifecycle.ts";
 import {
+    makePipelineDeliveryStateAdapter,
     PipelineRunStateStoreLive,
     type PipelineRunStateStoreService,
 } from "./run/pipeline-state.ts";
@@ -186,9 +187,9 @@ export type RalphieRuntime = {
     readonly pipelineDiagnostics: PipelineDiagnosticsService;
     /** Pipeline-only diagnose/edit/review boundary; never commits or pushes. */
     readonly pipelineRepairExecutor: PipelineRepairExecutorService;
-    /** Direct base-branch pipeline delivery with non-force remote reconciliation. */
-    readonly pipelineDeliveryLoop: PipelineDeliveryLoopService;
-    /** Git boundary used by the pipeline command before and during resume. */
+    /** Complete Pipeline delivery lifecycle, including state and resume. */
+    readonly pipelineDeliveryLifecycle: PipelineDeliveryLifecycle;
+    /** Lower-level Git adapter used by the lifecycle and deterministic tests. */
     readonly pipelineDeliveryGit: PipelineDeliveryGitService;
     readonly githubIssues: GitHubIssuesService;
     readonly githubIssueMutations: GitHubIssueMutationService;
@@ -251,8 +252,8 @@ export type RuntimeOverrides = {
     readonly pipelineDiagnosticsDependencies?: PipelineDiagnosticsServiceDependencies;
     /** Optional deterministic pipeline repair executor for orchestration tests. */
     readonly pipelineRepairExecutor?: PipelineRepairExecutorService;
-    /** Optional deterministic pipeline delivery loop for orchestration tests. */
-    readonly pipelineDeliveryLoop?: PipelineDeliveryLoopService;
+    /** Optional deterministic Pipeline delivery lifecycle for orchestration tests. */
+    readonly pipelineDeliveryLifecycle?: PipelineDeliveryLifecycle;
     /** Optional deterministic Git boundary for pipeline orchestration tests. */
     readonly pipelineDeliveryGit?: PipelineDeliveryGitService;
     /** Optional deterministic state store for pipeline orchestration tests. */
@@ -285,7 +286,7 @@ export const makeLiveRuntime = ({
     pipelineObservationDependencies,
     pipelineDiagnosticsDependencies,
     pipelineRepairExecutor: pipelineRepairExecutorOverride,
-    pipelineDeliveryLoop: pipelineDeliveryLoopOverride,
+    pipelineDeliveryLifecycle: pipelineDeliveryLifecycleOverride,
     pipelineDeliveryGit: pipelineDeliveryGitOverride,
     pipelineRunStateStore: pipelineRunStateStoreOverride,
     maintenanceSnapshot: maintenanceSnapshotOverride,
@@ -373,9 +374,12 @@ export const makeLiveRuntime = ({
     const pipelineDeliveryGit: PipelineDeliveryGitService =
         pipelineDeliveryGitOverride ??
         makePipelineDeliveryGitService(commandRunner);
-    const pipelineDeliveryLoop =
-        pipelineDeliveryLoopOverride ??
-        makePipelineDeliveryLoopService({
+    const actualPipelineRunStateStore =
+        pipelineRunStateStoreOverride ?? pipelineRunStateStore;
+    const pipelineDeliveryLifecycle =
+        pipelineDeliveryLifecycleOverride ??
+        makePipelineDeliveryLifecycle({
+            repository: gitRepository,
             git: pipelineDeliveryGit,
             observation: pipelineObservation,
             diagnostics: async (input) => {
@@ -385,6 +389,10 @@ export const makeLiveRuntime = ({
             repair: pipelineRepairExecutor,
             repositoryInvariant: gitRepositoryInvariant,
             remoteSafety: gitRemoteSafety,
+            state: makePipelineDeliveryStateAdapter({
+                store: actualPipelineRunStateStore,
+            }),
+            progress,
         });
     const pullRequestReviewCoordinator =
         makePullRequestReviewCoordinatorService({
@@ -443,7 +451,7 @@ export const makeLiveRuntime = ({
         pipelineObservation,
         pipelineDiagnostics,
         pipelineRepairExecutor,
-        pipelineDeliveryLoop,
+        pipelineDeliveryLifecycle,
         pipelineDeliveryGit,
         githubIssues,
         githubIssueMutations,
@@ -482,8 +490,7 @@ export const makeLiveRuntime = ({
         opencode,
         progress,
         runStateStore,
-        pipelineRunStateStore:
-            pipelineRunStateStoreOverride ?? pipelineRunStateStore,
+        pipelineRunStateStore: actualPipelineRunStateStore,
         workspace,
     };
 };

@@ -146,7 +146,7 @@ around every observable phase and mutation boundary, after a reconciled push,
 and on failure or cancellation. It records the repository and branch, the
 absolute original deadline, maximum and confirmed-push attempt counts, current
 remote SHA, phase, external-movement count, clean checkpoint, bounded snapshot
-projection, diagnostic reference, normalized failure fingerprint,
+projection, diagnostic reference, normalized failure identity,
 created/pushed commit evidence, ordered attempt records, and terminal outcome.
 Raw provider payloads and unbounded CI text do not enter this state file.
 Diagnostics are stored at `pipeline/diagnostics.json` by the read-only collector;

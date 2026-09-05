@@ -7,7 +7,7 @@ import { describe, expect, test } from "bun:test";
 import { normalizePipelineSnapshot } from "../../src/github/pipeline-snapshot.ts";
 import {
     makePipelineRunState,
-    makePipelineRunStatePersistence,
+    makePipelineDeliveryStateAdapter,
     PipelineRunStateStoreLive,
     pipelineRunStateSchema,
     reconcilePipelineRunStateOnResume,
@@ -18,8 +18,8 @@ import {
 } from "../../src/run/pipeline-state.ts";
 import type {
     PipelineDeliveryOutcome,
-    PipelineDeliveryPersistenceEvent,
-} from "../../src/issues/pipeline-delivery-loop.ts";
+    PipelineDeliveryPhaseEvent,
+} from "../../src/pipeline/delivery-types.ts";
 
 const BASE = "a".repeat(40);
 const CREATED = "b".repeat(40);
@@ -301,9 +301,7 @@ describe("pipeline run state", () => {
     test("persists phase boundaries and terminal outcome without charging a push twice", async () => {
         const writes: ReturnType<typeof stateFor>[] = [];
         const state = stateFor();
-        const persistence = makePipelineRunStatePersistence({
-            path: "/tmp/pipeline-state.json",
-            initialState: state,
+        const adapter = makePipelineDeliveryStateAdapter({
             now: () => NOW,
             store: {
                 save: async (_path, next) => {
@@ -312,6 +310,17 @@ describe("pipeline run state", () => {
                 load: async () => state,
                 remove: async () => {},
             },
+        });
+        const { session } = await adapter.open({
+            mode: "new",
+            path: "/tmp/pipeline-state.json",
+            runId: state.runId,
+            repository: state.repository,
+            branch: state.branch,
+            workspace: state.workspace,
+            deadlineAtMs: state.deadlineAtMs,
+            maxAttempts: state.maxAttempts,
+            currentRemoteSha: state.currentRemoteSha,
         });
         const createdSha = CREATED;
         const attempt = {
@@ -331,20 +340,20 @@ describe("pipeline run state", () => {
                 remoteSha: createdSha,
             },
         };
-        const prepare: PipelineDeliveryPersistenceEvent = {
+        const prepare: PipelineDeliveryPhaseEvent = {
             phase: "prepare",
             status: "before",
             currentRemoteSha: BASE,
             pushedAttempts: 0,
             externalMovements: 0,
         };
-        await persistence.onPhase(prepare);
-        expect(persistence.getState().checkpoint).toEqual({
+        await session.emit({ kind: "phase", event: prepare });
+        expect(session.getState().checkpoint).toEqual({
             branch: "main",
             sha: BASE,
         });
 
-        const push: PipelineDeliveryPersistenceEvent = {
+        const push: PipelineDeliveryPhaseEvent = {
             phase: "push",
             status: "reconciled",
             currentRemoteSha: BASE,
@@ -361,11 +370,11 @@ describe("pipeline run state", () => {
                 treeSha: TREE,
             },
         };
-        await persistence.onPhase(push);
-        await persistence.onPhase(push);
-        expect(persistence.getState().pushedAttempts).toBe(1);
-        expect(persistence.getState().createdCommit?.sha).toBe(createdSha);
-        expect(persistence.getState().diagnostics?.path).toBe(
+        await session.emit({ kind: "phase", event: push });
+        await session.emit({ kind: "phase", event: push });
+        expect(session.getState().pushedAttempts).toBe(1);
+        expect(session.getState().createdCommit?.sha).toBe(createdSha);
+        expect(session.getState().diagnostics?.path).toBe(
             "/tmp/diagnostics.json",
         );
 
@@ -387,14 +396,12 @@ describe("pipeline run state", () => {
                 commitSha: createdSha,
             },
         };
-        await persistence.onOutcome(outcome);
-        expect(persistence.getState().status).toBe("complete");
-        expect(persistence.getState().phase).toBe("complete");
-        expect(persistence.getState().pushedAttempts).toBe(1);
-        expect(persistence.getState().outcome?.kind).toBe("green");
-        expect(writes.length).toBe(4);
-        expect(JSON.stringify(persistence.getState())).not.toContain(
-            "rawValues",
-        );
+        await session.emit({ kind: "outcome", outcome });
+        expect(session.getState().status).toBe("complete");
+        expect(session.getState().phase).toBe("complete");
+        expect(session.getState().pushedAttempts).toBe(1);
+        expect(session.getState().outcome?.kind).toBe("green");
+        expect(writes.length).toBe(5);
+        expect(JSON.stringify(session.getState())).not.toContain("rawValues");
     });
 });

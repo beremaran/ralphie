@@ -49,10 +49,6 @@ import {
     loadMaintenanceRunState,
     type MaintenanceRunState,
 } from "./maintain-issues-state.ts";
-import {
-    loadPipelineRunState,
-    type PipelineRunState,
-} from "./run/pipeline-state.ts";
 import { reconcileRunState } from "./run/reconciliation.ts";
 import { resolveWorkspacePath } from "./workspace/workspace.ts";
 import { RalphieError } from "./shared/error.ts";
@@ -449,14 +445,7 @@ export type CommandFactories = {
     readonly runPipelinesGreen?: typeof getPipelinesGreen;
 };
 
-type CommandResumeState = RunState | MaintenanceRunState | PipelineRunState;
-
-const isPipelineResumeState = (
-    state: CommandResumeState | undefined,
-): state is PipelineRunState =>
-    state !== undefined &&
-    "mode" in state &&
-    state.mode === "get-pipelines-green";
+type CommandResumeState = RunState | MaintenanceRunState;
 
 const isMaintenanceResumeState = (
     state: CommandResumeState | undefined,
@@ -579,7 +568,6 @@ const resumeStateForConfig = async (
     explicitPolicy?: NeedsAttentionPolicy,
     explicitMaxDecompositionDepth?: number,
     explicitDuplicateAction?: DuplicateAction,
-    explicitWorkspace?: string,
 ): Promise<CommandResumeState | undefined> => {
     if (config.mode === ExecutionMode.Issues) {
         return await loadResumeState(
@@ -588,24 +576,13 @@ const resumeStateForConfig = async (
             explicitMaxDecompositionDepth,
         );
     }
-    if (
-        config.mode !== ExecutionMode.MaintainIssues ||
-        config.resume === undefined
-    ) {
-        if (
-            config.mode !== ExecutionMode.GetPipelinesGreen ||
-            config.resume === undefined
-        ) {
-            return undefined;
-        }
-        return await loadPipelineRunState(config.resume, {
-            repository: config.repo,
-            ...(config.branch === undefined ? {} : { branch: config.branch }),
-            ...(explicitWorkspace === undefined
-                ? {}
-                : { workspace: config.workspace }),
-        });
+    if (config.mode === ExecutionMode.GetPipelinesGreen) {
+        // Pipeline state is deliberately loaded by the delivery lifecycle so
+        // branch preparation, remote reconciliation, and state projection are
+        // one module-owned sequence.
+        return undefined;
     }
+    if (config.resume === undefined) return undefined;
     return await loadMaintenanceRunState(config.resume, {
         repository: config.repo,
         branch: config.branch,
@@ -674,16 +651,10 @@ const dispatchCommand = async (
     factories: Required<CommandFactories>,
 ): Promise<void> => {
     if (config.mode === ExecutionMode.GetPipelinesGreen) {
-        const pipelineResumeState = isPipelineResumeState(resumeState)
-            ? resumeState
-            : undefined;
         const pipelineOptions: GetPipelinesGreenOptions = {
             config,
             runId,
             signal: input.signal,
-            ...(pipelineResumeState === undefined
-                ? {}
-                : { resumeState: pipelineResumeState }),
         };
         await factories.runPipelinesGreen(pipelineOptions, runtime);
         return;
@@ -774,7 +745,6 @@ export const runCommand = async (
         parsed.options.onNeedsAttention,
         parsed.options.maxDecompositionDepth,
         parsed.explicitDuplicateAction,
-        parsed.options.workspace,
     );
 
     const terminal = input.terminal ?? terminalInfo();

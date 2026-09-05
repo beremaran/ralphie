@@ -18,12 +18,11 @@ import type {
     PipelinePushAttempt,
 } from "../../src/git/pipeline-delivery.ts";
 import type { GitRepositoryInvariantService } from "../../src/git/repository-invariant.ts";
-import {
-    makePipelineDeliveryLoopService,
-    pipelineFailureFingerprint,
-    type PipelineDeliveryLoopInput,
-    type PipelineDeliveryOutcome,
-} from "../../src/issues/pipeline-delivery-loop.ts";
+import { makePipelineDeliveryLifecycle } from "../../src/pipeline/delivery-lifecycle.ts";
+import type { PipelineDeliveryOutcome } from "../../src/pipeline/delivery-types.ts";
+import { makePipelineDeliveryStateAdapter } from "../../src/run/pipeline-state.ts";
+import type { PipelineRunState } from "../../src/run/pipeline-state.ts";
+import { pipelineFailureFingerprint } from "../../src/pipeline/snapshot-identity.ts";
 import type {
     PipelineRepairExecutorService,
     PipelineRepairOutcome,
@@ -144,9 +143,10 @@ type HarnessOptions = {
 };
 
 type Harness = {
-    readonly execute: (
-        overrides?: Partial<PipelineDeliveryLoopInput>,
-    ) => Promise<PipelineDeliveryOutcome>;
+    readonly execute: (overrides?: {
+        readonly maxAttempts?: number;
+        readonly pipelineTimeoutMs?: number;
+    }) => Promise<PipelineDeliveryOutcome>;
     readonly observations: PipelineSnapshotRequest[];
     readonly repairs: PipelineSnapshotRequest[];
     readonly prepares: string[];
@@ -155,6 +155,7 @@ type Harness = {
 };
 
 const makeHarness = (options: HarnessOptions): Harness => {
+    const clock = options.now ?? (() => Date.now());
     let remote = BASE;
     let local = BASE;
     let localStatus = "";
@@ -260,29 +261,62 @@ const makeHarness = (options: HarnessOptions): Harness => {
         boundary: boundary(request),
         path: `/tmp/${request.commitSha}.json`,
     });
-    const service = makePipelineDeliveryLoopService({
+    const stateByPath = new Map<string, PipelineRunState>();
+    const state = makePipelineDeliveryStateAdapter({
+        now: () => new Date(clock()),
+        store: {
+            save: async (path, next) => {
+                stateByPath.set(path, structuredClone(next));
+            },
+            load: async (path) => {
+                const saved = stateByPath.get(path);
+                if (saved === undefined)
+                    throw new Error(`Missing state ${path}`);
+                return structuredClone(saved);
+            },
+            remove: async (path) => {
+                stateByPath.delete(path);
+            },
+        },
+    });
+    const service = makePipelineDeliveryLifecycle({
+        repository: {
+            prepare: async () => ({
+                path: "/tmp/pipeline-checkout",
+                branch: BRANCH,
+                cloned: false,
+                branchChanged: false,
+                cleaned: false,
+            }),
+        },
         git,
         observation,
         diagnostics,
         repair,
         repositoryInvariant,
         maxExternalMovements: options.maxExternalMovements,
-        now: options.now,
+        now: clock,
+        state,
     });
-    const input: PipelineDeliveryLoopInput = {
-        repository: REPOSITORY,
-        repositoryPath: "/tmp/pipeline-checkout",
-        workspace: "/tmp/pipeline-workspace",
-        branch: BRANCH,
-        runId: "pipeline-run",
-        agent: AGENT,
-        agentSelection: AGENT_SELECTION,
-        maxAttempts: 3,
-        deadlineAtMs: Date.now() + 60_000,
-    };
     return {
-        execute: (overrides = {}) =>
-            service.execute({ ...input, ...overrides }),
+        execute: async (overrides = {}) => {
+            const result = await service.execute({
+                mode: "live",
+                context: {
+                    repository: REPOSITORY,
+                    branch: BRANCH,
+                    workspace: "/tmp/pipeline-workspace",
+                    runId: "pipeline-run",
+                    maxAttempts: overrides.maxAttempts ?? 3,
+                    pipelineTimeoutMs: overrides.pipelineTimeoutMs ?? 60_000,
+                },
+                acquireAgent: async () => ({
+                    agent: AGENT,
+                    agentSelection: AGENT_SELECTION,
+                }),
+            });
+            return result.outcome;
+        },
         observations,
         repairs,
         prepares,
@@ -291,7 +325,7 @@ const makeHarness = (options: HarnessOptions): Harness => {
     };
 };
 
-describe("pipeline delivery loop", () => {
+describe("pipeline delivery lifecycle", () => {
     test("returns already-green without diagnostics, repair, commit, or push", async () => {
         const harness = makeHarness({ observations: [green(BASE)] });
         const result = await harness.execute();
@@ -463,7 +497,7 @@ describe("pipeline delivery loop", () => {
             observations: [green(BASE)],
             now: () => 10,
         });
-        const result = await harness.execute({ deadlineAtMs: 1 });
+        const result = await harness.execute({ pipelineTimeoutMs: 0 });
 
         expect(result.kind).toBe("timeout");
         expect(harness.observations).toHaveLength(0);
@@ -473,7 +507,7 @@ describe("pipeline delivery loop", () => {
         const harness = makeHarness({ observations: [green(BASE)] });
         await expect(harness.execute({ maxAttempts: 0 })).rejects.toMatchObject(
             {
-                _tag: "PipelineDeliveryLoopError",
+                _tag: "PipelineDeliveryLifecycleError",
                 kind: "invalid-input",
             },
         );

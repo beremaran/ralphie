@@ -14,13 +14,12 @@ import type {
     PipelineSnapshot,
     PipelineSnapshotRequest,
 } from "../github/pipeline-snapshot.ts";
-import type { IssueArtifactScope } from "./artifacts.ts";
+import type { IssueArtifactScope } from "../issues/artifacts.ts";
 import type {
-    PipelineRepairExecutorInput,
     PipelineRepairExecutorService,
     PipelineRepairOutcome,
-} from "./pipeline-repair-executor.ts";
-import type { CommitMessageDecision } from "./decisions.ts";
+} from "../issues/pipeline-repair-executor.ts";
+import type { CommitMessageDecision } from "../issues/decisions.ts";
 import type { AgentClient } from "../opencode/client.ts";
 import type {
     PipelineCheckoutState,
@@ -30,112 +29,45 @@ import type {
 } from "../git/pipeline-delivery.ts";
 import type { GitRemoteSafetyService } from "../git/remote-safety.ts";
 import { reconcilePipelinePush } from "../git/push-reconciliation.ts";
+import type { GitRepositoryService } from "../git/repository.ts";
 import type { GitRepositoryInvariantService } from "../git/repository-invariant.ts";
 import type {
     ProgressIssue,
+    ProgressStage,
+    ProgressStatus,
     ProgressReporterService,
 } from "../progress/progress.ts";
 import { RalphieError } from "../shared/error.ts";
+import {
+    DEFAULT_PIPELINE_TIMEOUT,
+    durationToMilliseconds,
+} from "../options.ts";
+import {
+    pipelineRunStatePath,
+    type PipelineAttemptState,
+    type PipelineDeliveryStateSession,
+    type PipelineRunState,
+} from "../run/pipeline-state.ts";
 
-export const PIPELINE_DELIVERY_EXTERNAL_MOVEMENT_LIMIT = 3;
+import {
+    PIPELINE_DELIVERY_EXTERNAL_MOVEMENT_LIMIT,
+    type PipelineDeliveryAttempt,
+    type PipelineDeliveryEvent,
+    type PipelineDeliveryOutcome,
+    type PipelineDeliveryOutcomeKind,
+    type PipelineDeliveryPhaseEvent,
+    type PipelineDeliveryPhase,
+    type PipelineDeliveryPhaseOutcome,
+    type PipelineDeliveryPushOutcome,
+    type PipelineDeliveryRequest,
+    type PipelineDeliveryResult,
+    type PipelineDeliveryContext,
+    type PipelineDeliveryLifecycle,
+} from "./delivery-types.ts";
+import { pipelineFailureFingerprint } from "./snapshot-identity.ts";
+import type { PipelineDeliveryStateAdapter } from "../run/pipeline-state.ts";
 
-export type PipelineDeliveryPhase =
-    | "remote-read"
-    | "observation"
-    | "prepare"
-    | "diagnostics"
-    | "repair"
-    | "commit-message"
-    | "commit"
-    | "push"
-    | "reconcile"
-    | "final-verification";
-
-export type PipelineDeliveryPhaseOutcome = {
-    readonly phase: PipelineDeliveryPhase;
-    readonly outcome: "succeeded" | "failed";
-    readonly attempt?: number;
-    readonly message?: string;
-};
-
-export type PipelineDeliveryCommitOutcome = {
-    readonly status: "created" | "failed";
-    readonly sha?: string;
-    readonly parentSha?: string;
-    readonly treeSha?: string;
-    readonly message?: string;
-};
-
-export type PipelineDeliveryPushOutcome = {
-    readonly status:
-        | "confirmed"
-        | "confirmed-after-response-loss"
-        | "rejected"
-        | "ambiguous"
-        | "external-movement";
-    readonly response: PipelinePushAttempt["response"];
-    readonly failureKind?: PipelinePushAttempt["failureKind"];
-    readonly remoteSha?: string;
-    readonly message?: string;
-};
-
-export type PipelineDeliveryAttempt = {
-    /** One-based prospective repair number; external movements do not charge it. */
-    readonly attempt: number;
-    readonly baseSha: string;
-    readonly failureFingerprint: string;
-    readonly repair?: PipelineRepairOutcome["status"];
-    readonly commit?: PipelineDeliveryCommitOutcome;
-    readonly push?: PipelineDeliveryPushOutcome;
-};
-
-export type PipelineDeliveryOutcomeKind =
-    | "green"
-    | "no-pipelines-discovered"
-    | "no-change"
-    | "review-exhausted"
-    | "identical-failure"
-    | "attempts-exhausted"
-    | "external-movement"
-    | "ambiguous-push"
-    | "non-fast-forward"
-    | "timeout"
-    | "cancelled"
-    | "dry-run"
-    | "failed";
-
-export type PipelineDeliveryOutcome = {
-    readonly kind: PipelineDeliveryOutcomeKind;
-    /** Alias used by durable state consumers that call terminal results status. */
-    readonly status: PipelineDeliveryOutcomeKind;
-    readonly source?: "already-green" | "pushed-repair";
-    readonly repository: string;
-    readonly branch: string;
-    readonly remoteSha?: string;
-    readonly failureFingerprint?: string;
-    readonly diagnosticsPath?: string;
-    readonly message?: string;
-    readonly pushedAttempts: number;
-    readonly externalMovements: number;
-    readonly attempts: ReadonlyArray<PipelineDeliveryAttempt>;
-    readonly phases: ReadonlyArray<PipelineDeliveryPhaseOutcome>;
-    readonly snapshot?: PipelineSnapshot;
-};
-
-export type PipelineDeliveryPersistenceEvent = {
-    readonly phase: PipelineDeliveryPhase;
-    readonly status: "before" | "succeeded" | "failed" | "reconciled";
-    readonly attempt?: number;
-    readonly currentRemoteSha?: string;
-    readonly pushedAttempts: number;
-    readonly externalMovements: number;
-    readonly failureFingerprint?: string;
-    readonly snapshot?: PipelineSnapshot;
-    readonly diagnosticsPath?: string;
-    readonly message?: string;
-    readonly attemptState?: PipelineDeliveryAttempt;
-    readonly commit?: PipelineCommitResult;
-};
+export type { PipelineDeliveryLifecycle } from "./delivery-types.ts";
 
 export type PipelineDiagnosticsRunnerInput = {
     readonly request: PipelineSnapshotRequest;
@@ -172,7 +104,7 @@ export type PipelineCommitMessageRunner = (
     input: PipelineCommitMessageInput,
 ) => Promise<CommitMessageDecision>;
 
-export type PipelineDeliveryLoopInput = {
+type PipelineDeliveryExecutionInput = {
     readonly repository: string;
     readonly repositoryPath: string;
     readonly workspace: string;
@@ -199,14 +131,12 @@ export type PipelineDeliveryLoopInput = {
     /** A caller-provided validated message is useful for deterministic resume. */
     readonly commitMessage?: CommitMessageDecision;
     /** Optional durable sink invoked around every observable phase boundary. */
-    readonly onPhase?: (
-        event: PipelineDeliveryPersistenceEvent,
-    ) => Promise<void>;
+    readonly onPhase?: (event: PipelineDeliveryPhaseEvent) => Promise<void>;
     /** Optional durable sink for terminal success, stop, failure, or cancel. */
     readonly onOutcome?: (outcome: PipelineDeliveryOutcome) => Promise<void>;
 };
 
-export type PipelineDeliveryLoopDependencies = {
+export type PipelineDeliveryEngineDependencies = {
     readonly git: PipelineDeliveryGitService;
     readonly observation: Pick<PipelineObservationService, "observe">;
     readonly diagnostics: PipelineDiagnosticsRunner;
@@ -219,14 +149,14 @@ export type PipelineDeliveryLoopDependencies = {
     readonly maxExternalMovements?: number;
 };
 
-export type PipelineDeliveryLoopService = {
+type PipelineDeliveryEngine = {
     readonly execute: (
-        input: PipelineDeliveryLoopInput,
+        input: PipelineDeliveryExecutionInput,
     ) => Promise<PipelineDeliveryOutcome>;
 };
 
-export class PipelineDeliveryLoopError extends RalphieError {
-    override readonly _tag = "PipelineDeliveryLoopError" as const;
+export class PipelineDeliveryLifecycleError extends RalphieError {
+    override readonly _tag = "PipelineDeliveryLifecycleError" as const;
     readonly kind: "invalid-input" | "safety-failed";
 
     constructor(input: {
@@ -235,7 +165,7 @@ export class PipelineDeliveryLoopError extends RalphieError {
         readonly cause?: unknown;
     }) {
         super(input);
-        this.name = "PipelineDeliveryLoopError";
+        this.name = "PipelineDeliveryLifecycleError";
         this.kind = input.kind;
     }
 }
@@ -258,33 +188,6 @@ export const isValidPipelineCommitMessage = (
     message.subject.length <= 72 &&
     (message.body === undefined || nonBlank(message.body));
 
-/**
- * Normalize a failure for loop detection without baking the immutable commit
- * identity into the fingerprint.  Provider IDs and raw records are omitted:
- * they are useful diagnostics, but run/commit-specific values must not allow
- * the same failing check to spin through every newly pushed SHA.
- */
-export const pipelineFailureFingerprint = (
-    snapshot: PipelineSnapshot,
-): string =>
-    JSON.stringify({
-        state: snapshot.state,
-        reason: snapshot.reason,
-        items: snapshot.items.map((item) => ({
-            source: item.source,
-            provider: item.provider,
-            name: item.name,
-            status: item.status,
-            rawState: item.rawState,
-            errors: item.diagnostic.errors,
-        })),
-        sourceErrors: snapshot.sourceErrors.map(({ source, message }) => ({
-            source,
-            message,
-        })),
-        completenessErrors: snapshot.completenessErrors,
-    });
-
 const defaultCommitMessage = (
     branch: string,
     failureFingerprint: string,
@@ -298,7 +201,7 @@ const defaultCommitMessage = (
     };
 };
 
-const assertInput = (input: PipelineDeliveryLoopInput): void => {
+const assertInput = (input: PipelineDeliveryExecutionInput): void => {
     if (
         !nonBlank(input.repository) ||
         !nonBlank(input.repositoryPath) ||
@@ -306,21 +209,21 @@ const assertInput = (input: PipelineDeliveryLoopInput): void => {
         !nonBlank(input.branch) ||
         !nonBlank(input.runId)
     ) {
-        throw new PipelineDeliveryLoopError({
+        throw new PipelineDeliveryLifecycleError({
             kind: "invalid-input",
             message:
                 "Pipeline delivery requires non-empty repository, checkout, workspace, branch, and run identifiers.",
         });
     }
     if (!Number.isSafeInteger(input.maxAttempts) || input.maxAttempts <= 0) {
-        throw new PipelineDeliveryLoopError({
+        throw new PipelineDeliveryLifecycleError({
             kind: "invalid-input",
             message:
                 "Pipeline delivery maxAttempts must be a positive integer.",
         });
     }
     if (!Number.isFinite(input.deadlineAtMs) || input.deadlineAtMs <= 0) {
-        throw new PipelineDeliveryLoopError({
+        throw new PipelineDeliveryLifecycleError({
             kind: "invalid-input",
             message:
                 "Pipeline delivery deadlineAtMs must be a positive epoch time.",
@@ -330,7 +233,7 @@ const assertInput = (input: PipelineDeliveryLoopInput): void => {
         input.initialRemoteSha !== undefined &&
         !validSha(input.initialRemoteSha)
     ) {
-        throw new PipelineDeliveryLoopError({
+        throw new PipelineDeliveryLifecycleError({
             kind: "invalid-input",
             message:
                 "Pipeline delivery initialRemoteSha must be a full Git object ID.",
@@ -342,7 +245,7 @@ const assertInput = (input: PipelineDeliveryLoopInput): void => {
             input.initialPushedAttempts < 0 ||
             input.initialPushedAttempts > input.maxAttempts)
     ) {
-        throw new PipelineDeliveryLoopError({
+        throw new PipelineDeliveryLifecycleError({
             kind: "invalid-input",
             message:
                 "Pipeline delivery initialPushedAttempts must be a non-negative integer within maxAttempts.",
@@ -353,7 +256,7 @@ const assertInput = (input: PipelineDeliveryLoopInput): void => {
         (!Number.isSafeInteger(input.initialExternalMovements) ||
             input.initialExternalMovements < 0)
     ) {
-        throw new PipelineDeliveryLoopError({
+        throw new PipelineDeliveryLifecycleError({
             kind: "invalid-input",
             message:
                 "Pipeline delivery initialExternalMovements must be a non-negative integer.",
@@ -363,7 +266,7 @@ const assertInput = (input: PipelineDeliveryLoopInput): void => {
         input.commitMessage !== undefined &&
         !isValidPipelineCommitMessage(input.commitMessage)
     ) {
-        throw new PipelineDeliveryLoopError({
+        throw new PipelineDeliveryLifecycleError({
             kind: "invalid-input",
             message: "Pipeline delivery received an invalid commit message.",
         });
@@ -380,7 +283,7 @@ type DeadlineControl = {
 type ReconcileResult = PipelineDeliveryOutcome | "moved" | undefined;
 
 const makeDeadlineControl = (
-    input: PipelineDeliveryLoopInput,
+    input: PipelineDeliveryExecutionInput,
     now: () => number,
 ): DeadlineControl => {
     const controller = new AbortController();
@@ -447,7 +350,7 @@ const observationSnapshot = (
 
 const safeRemoteRead = async (
     git: PipelineDeliveryGitService,
-    input: PipelineDeliveryLoopInput,
+    input: PipelineDeliveryExecutionInput,
 ): Promise<string | undefined> => {
     try {
         return await git.readRemoteHead(input.repositoryPath, input.branch);
@@ -478,8 +381,8 @@ const checkoutAt = (
 
 /** Restore only an uncommitted repair after cancellation/timeout. */
 const restoreUncommittedCheckpoint = async (
-    dependencies: PipelineDeliveryLoopDependencies,
-    input: PipelineDeliveryLoopInput,
+    dependencies: PipelineDeliveryEngineDependencies,
+    input: PipelineDeliveryExecutionInput,
     checkpointSha: string | undefined,
 ): Promise<void> => {
     if (checkpointSha === undefined) return;
@@ -527,7 +430,7 @@ const pushStatusFor = (
 
 const output = (
     kind: PipelineDeliveryOutcomeKind,
-    input: PipelineDeliveryLoopInput,
+    input: PipelineDeliveryExecutionInput,
     state: {
         readonly remoteSha?: string;
         readonly source?: "already-green" | "pushed-repair";
@@ -562,27 +465,27 @@ const output = (
 });
 
 /**
- * Coordinate one direct base-branch repair loop.  The service owns the
+ * Implement the direct base-branch repair safety machine. The lifecycle owns the
  * ordering of observation, diagnosis, repair, commit, push, and final proof;
  * Git and agent details remain behind injected seams for deterministic tests.
  */
-export const makePipelineDeliveryLoopService = (
-    dependencies: PipelineDeliveryLoopDependencies,
-): PipelineDeliveryLoopService => {
+const makePipelineDeliveryEngine = (
+    dependencies: PipelineDeliveryEngineDependencies,
+): PipelineDeliveryEngine => {
     const now = dependencies.now ?? (() => Date.now());
     const externalMovementLimit =
         dependencies.maxExternalMovements ??
         PIPELINE_DELIVERY_EXTERNAL_MOVEMENT_LIMIT;
 
     const executeOnce = async (
-        input: PipelineDeliveryLoopInput,
+        input: PipelineDeliveryExecutionInput,
     ): Promise<PipelineDeliveryOutcome> => {
         assertInput(input);
         if (
             !Number.isSafeInteger(externalMovementLimit) ||
             externalMovementLimit < 0
         ) {
-            throw new PipelineDeliveryLoopError({
+            throw new PipelineDeliveryLifecycleError({
                 kind: "invalid-input",
                 message:
                     "Pipeline delivery external movement limit must be a non-negative integer.",
@@ -602,7 +505,7 @@ export const makePipelineDeliveryLoopService = (
 
         const notifyPhase = async (event: {
             readonly phase: PipelineDeliveryPhase;
-            readonly status: PipelineDeliveryPersistenceEvent["status"];
+            readonly status: PipelineDeliveryPhaseEvent["status"];
             readonly attempt?: number;
             readonly snapshot?: PipelineSnapshot;
             readonly diagnosticsPath?: string;
@@ -640,7 +543,7 @@ export const makePipelineDeliveryLoopService = (
         ): void => {
             const existing = attempts[attempts.length - 1];
             if (existing === undefined) {
-                throw new PipelineDeliveryLoopError({
+                throw new PipelineDeliveryLifecycleError({
                     kind: "safety-failed",
                     message:
                         "Pipeline delivery lost its current attempt record.",
@@ -690,7 +593,7 @@ export const makePipelineDeliveryLoopService = (
 
         const checkDeadline = (): void => {
             if (deadline.isDeadlineExpired()) {
-                throw new PipelineDeliveryLoopError({
+                throw new PipelineDeliveryLifecycleError({
                     kind: "safety-failed",
                     message: "Pipeline delivery deadline expired.",
                 });
@@ -713,7 +616,7 @@ export const makePipelineDeliveryLoopService = (
                 ),
             );
             if (sha === "" || !validSha(sha)) {
-                throw new PipelineDeliveryLoopError({
+                throw new PipelineDeliveryLifecycleError({
                     kind: "safety-failed",
                     message: `origin/${input.branch} did not provide a full remote commit SHA.`,
                 });
@@ -835,7 +738,7 @@ export const makePipelineDeliveryLoopService = (
                     ),
             );
             if (!isValidPipelineCommitMessage(message)) {
-                throw new PipelineDeliveryLoopError({
+                throw new PipelineDeliveryLifecycleError({
                     kind: "safety-failed",
                     message:
                         "Pipeline commit message service returned an invalid message.",
@@ -1521,7 +1424,7 @@ export const makePipelineDeliveryLoopService = (
     };
 
     const execute = async (
-        input: PipelineDeliveryLoopInput,
+        input: PipelineDeliveryExecutionInput,
     ): Promise<PipelineDeliveryOutcome> => {
         const outcome = await executeOnce(input);
         await input.onOutcome?.(outcome);
@@ -1531,4 +1434,1063 @@ export const makePipelineDeliveryLoopService = (
     return { execute };
 };
 
-export const PipelineDeliveryLoopLive = makePipelineDeliveryLoopService;
+const stateAttemptsToDelivery = (
+    attempts: ReadonlyArray<PipelineAttemptState>,
+): ReadonlyArray<PipelineDeliveryAttempt> =>
+    attempts.map((attempt) => ({
+        attempt: attempt.attempt,
+        baseSha: attempt.baseSha,
+        failureFingerprint: attempt.failureFingerprint,
+        ...(attempt.repair === undefined ? {} : { repair: attempt.repair }),
+        ...(attempt.commit === undefined
+            ? {}
+            : {
+                  commit: {
+                      status: attempt.commit.status,
+                      ...(attempt.commit.sha === undefined
+                          ? {}
+                          : { sha: attempt.commit.sha }),
+                      ...(attempt.commit.parentSha === undefined
+                          ? {}
+                          : { parentSha: attempt.commit.parentSha }),
+                      ...(attempt.commit.treeSha === undefined
+                          ? {}
+                          : { treeSha: attempt.commit.treeSha }),
+                      ...(attempt.commit.message === undefined
+                          ? {}
+                          : { message: attempt.commit.message }),
+                  },
+              }),
+        ...(attempt.push === undefined
+            ? {}
+            : {
+                  push: {
+                      status: attempt.push.status,
+                      response: attempt.push.response,
+                      ...(attempt.push.failureKind === undefined
+                          ? {}
+                          : { failureKind: attempt.push.failureKind }),
+                      ...(attempt.push.remoteSha === undefined
+                          ? {}
+                          : { remoteSha: attempt.push.remoteSha }),
+                      ...(attempt.push.message === undefined
+                          ? {}
+                          : { message: attempt.push.message }),
+                  },
+              }),
+    }));
+
+const outcomeFromState = (input: {
+    readonly state: PipelineRunState;
+    readonly remoteSha: string;
+    readonly kind: PipelineDeliveryOutcome["kind"];
+    readonly message?: string;
+}): PipelineDeliveryOutcome => ({
+    kind: input.kind,
+    status: input.kind,
+    repository: input.state.repository,
+    branch: input.state.branch,
+    remoteSha: input.remoteSha,
+    ...(input.state.failureFingerprint === undefined
+        ? {}
+        : { failureFingerprint: input.state.failureFingerprint }),
+    ...(input.state.diagnostics?.path === undefined
+        ? {}
+        : { diagnosticsPath: input.state.diagnostics.path }),
+    ...(input.message === undefined ? {} : { message: input.message }),
+    pushedAttempts: input.state.pushedAttempts,
+    externalMovements: input.state.externalMovements,
+    attempts: stateAttemptsToDelivery(input.state.attempts),
+    phases: [],
+});
+
+const outcomeForObservation = (input: {
+    readonly observation: PipelineObservationResult["outcome"];
+    readonly state: PipelineRunState;
+    readonly remoteSha: string;
+}): PipelineDeliveryOutcome => {
+    const base = {
+        repository: input.state.repository,
+        branch: input.state.branch,
+        remoteSha: input.remoteSha,
+        pushedAttempts: input.state.pushedAttempts,
+        externalMovements: input.state.externalMovements,
+        attempts: stateAttemptsToDelivery(input.state.attempts),
+        phases: [],
+    } as const;
+    switch (input.observation.kind) {
+        case "green":
+            return {
+                ...base,
+                kind: "green",
+                status: "green",
+                source: "already-green",
+                snapshot: input.observation.snapshot,
+            };
+        case "no-pipelines-discovered":
+            return {
+                ...base,
+                kind: "no-pipelines-discovered",
+                status: "no-pipelines-discovered",
+                message:
+                    "No pipeline checks were discovered within the observation grace period.",
+            };
+        case "timeout":
+            return {
+                ...base,
+                kind: "timeout",
+                status: "timeout",
+                message: "Pipeline observation timed out.",
+                ...(input.observation.lastSnapshot === undefined
+                    ? {}
+                    : { snapshot: input.observation.lastSnapshot }),
+            };
+        case "aborted":
+            return {
+                ...base,
+                kind: "cancelled",
+                status: "cancelled",
+                message: "Pipeline observation was cancelled.",
+            };
+        case "stale":
+            return {
+                ...base,
+                kind: "external-movement",
+                status: "external-movement",
+                remoteSha: input.observation.headAfter,
+                externalMovements: input.state.externalMovements + 1,
+                message:
+                    "Pipeline observation saw the branch advance before the result could be used.",
+                snapshot: input.observation.snapshot,
+            };
+        case "failed":
+            return {
+                ...base,
+                kind: "failed",
+                status: "failed",
+                message:
+                    input.observation.message ??
+                    "Pipeline observation did not establish a repairable result.",
+                ...(input.observation.snapshot === undefined
+                    ? {}
+                    : { snapshot: input.observation.snapshot }),
+            };
+    }
+};
+
+const resumedPushStatus = (input: {
+    readonly remoteSha: string;
+    readonly createdSha: string;
+    readonly priorSha: string;
+    readonly response: "accepted" | "rejected";
+    readonly failureKind?: "non-fast-forward" | "other";
+}): NonNullable<PipelineDeliveryAttempt["push"]>["status"] =>
+    reconcilePipelinePush({
+        remoteSha: input.remoteSha,
+        expectedSha: input.createdSha,
+        priorSha: input.priorSha,
+        response: input.response,
+        ...(input.failureKind === undefined
+            ? {}
+            : { failureKind: input.failureKind }),
+    });
+
+const resumedPushAttempt = (input: {
+    readonly state: PipelineRunState;
+    readonly createdSha: string;
+    readonly parentSha: string;
+    readonly push: {
+        readonly response: "accepted" | "rejected";
+        readonly failureKind?: "non-fast-forward" | "other";
+        readonly remoteSha: string;
+    };
+}): PipelineDeliveryAttempt => {
+    const prior = [...input.state.attempts]
+        .reverse()
+        .find((attempt) => attempt.commit?.sha === input.createdSha);
+    const priorAttempt =
+        prior === undefined ? {} : (stateAttemptsToDelivery([prior])[0] ?? {});
+    const priorSha =
+        input.state.checkpoint?.sha ?? prior?.baseSha ?? input.parentSha;
+    return {
+        ...priorAttempt,
+        attempt: prior?.attempt ?? input.state.pushedAttempts + 1,
+        baseSha: prior?.baseSha ?? input.parentSha,
+        failureFingerprint:
+            prior?.failureFingerprint ??
+            input.state.failureFingerprint ??
+            "resumed-pipeline-push",
+        push: {
+            status: resumedPushStatus({
+                remoteSha: input.push.remoteSha,
+                createdSha: input.createdSha,
+                priorSha,
+                response: input.push.response,
+                failureKind: input.push.failureKind,
+            }),
+            response: input.push.response,
+            ...(input.push.failureKind === undefined
+                ? {}
+                : { failureKind: input.push.failureKind }),
+            ...(validSha(input.push.remoteSha)
+                ? { remoteSha: input.push.remoteSha }
+                : {}),
+        },
+    };
+};
+
+const stageForPhase: Record<PipelineDeliveryPhase, ProgressStage> = {
+    "remote-read": "pipeline-remote-read",
+    observation: "pipeline-observation",
+    prepare: "repository-preparation",
+    diagnostics: "pipeline-diagnostics",
+    repair: "pipeline-repair",
+    "commit-message": "pipeline-commit-message",
+    commit: "pipeline-commit",
+    push: "pipeline-push",
+    reconcile: "pipeline-reconcile",
+    "final-verification": "pipeline-final-verification",
+};
+
+const progressStatusFor = (
+    status: PipelineDeliveryPhaseEvent["status"],
+): ProgressStatus => {
+    switch (status) {
+        case "before":
+            return "started";
+        case "succeeded":
+            return "succeeded";
+        case "failed":
+            return "failed";
+        case "reconciled":
+            return "info";
+    }
+};
+
+const phaseMessageFor = (event: PipelineDeliveryPhaseEvent): string => {
+    if (event.message !== undefined) return event.message;
+    if (event.status === "before") return `Pipeline ${event.phase} started.`;
+    if (event.status === "reconciled")
+        return `Pipeline ${event.phase} state reconciled.`;
+    return `Pipeline ${event.phase} ${event.status}.`;
+};
+
+const trackLifecycle = async <Value>(input: {
+    readonly progress?: ProgressReporterService;
+    readonly stage: ProgressStage;
+    readonly message: string;
+    readonly operation: () => Promise<Value>;
+    readonly success: string | ((value: Value) => string);
+    readonly repository?: string;
+    readonly details?: Readonly<Record<string, unknown>>;
+}): Promise<Value> => {
+    if (input.progress === undefined) return await input.operation();
+    await input.progress.emit({
+        stage: input.stage,
+        status: "started",
+        message: input.message,
+        ...(input.repository === undefined
+            ? {}
+            : { repository: input.repository }),
+        ...(input.details === undefined ? {} : { details: input.details }),
+    });
+    try {
+        const value = await input.operation();
+        await input.progress.emit({
+            stage: input.stage,
+            status: "succeeded",
+            message:
+                typeof input.success === "function"
+                    ? input.success(value)
+                    : input.success,
+            ...(input.repository === undefined
+                ? {}
+                : { repository: input.repository }),
+            ...(input.details === undefined ? {} : { details: input.details }),
+        });
+        return value;
+    } catch (error) {
+        await input.progress.emit({
+            stage: input.stage,
+            status: "failed",
+            message: `${input.message.replace(/\.{3}$/, "")} failed: ${phaseMessage(error)}`,
+            ...(input.repository === undefined
+                ? {}
+                : { repository: input.repository }),
+            ...(input.details === undefined ? {} : { details: input.details }),
+        });
+        throw error;
+    }
+};
+
+const emitOutcomeProgress = async (input: {
+    readonly progress?: ProgressReporterService;
+    readonly outcome: PipelineDeliveryOutcome;
+    readonly statePath: string;
+    readonly dryRun: boolean;
+}): Promise<void> => {
+    if (input.progress === undefined) return;
+    await input.progress.emit({
+        stage: "pipeline-outcome",
+        status: input.outcome.kind === "green" ? "succeeded" : "failed",
+        message:
+            input.outcome.message ??
+            (input.outcome.kind === "green"
+                ? "All observed pipelines are green."
+                : `Pipeline delivery ended with ${input.outcome.kind}.`),
+        repository: input.outcome.repository,
+        details: {
+            kind: input.outcome.kind,
+            status: input.outcome.status,
+            branch: input.outcome.branch,
+            ...(input.outcome.remoteSha === undefined
+                ? {}
+                : { remoteSha: input.outcome.remoteSha }),
+            pushedAttempts: input.outcome.pushedAttempts,
+            externalMovements: input.outcome.externalMovements,
+            attempts: input.outcome.attempts.length,
+            ...(input.outcome.failureFingerprint === undefined
+                ? {}
+                : { failureFingerprint: input.outcome.failureFingerprint }),
+            ...(input.outcome.diagnosticsPath === undefined
+                ? {}
+                : { diagnosticsPath: input.outcome.diagnosticsPath }),
+            statePath: input.statePath,
+            dryRun: input.dryRun,
+        },
+    });
+};
+
+export type PipelineDeliveryLifecycleDependencies =
+    PipelineDeliveryEngineDependencies & {
+        readonly repository: Pick<GitRepositoryService, "prepare">;
+        readonly state: PipelineDeliveryStateAdapter;
+        readonly progress?: ProgressReporterService;
+    };
+
+const makeEventEmitter =
+    (input: {
+        readonly session: PipelineDeliveryStateSession;
+        readonly context: PipelineDeliveryContext;
+        readonly progress?: ProgressReporterService;
+        readonly statePath: string;
+        readonly dryRun: boolean;
+    }): ((event: PipelineDeliveryEvent) => Promise<void>) =>
+    async (event) => {
+        await input.session.emit(event);
+        if (input.progress === undefined) return;
+        if (event.kind === "phase") {
+            const phase = event.event;
+            await input.progress.emit({
+                stage: stageForPhase[phase.phase],
+                status: progressStatusFor(phase.status),
+                message: phaseMessageFor(phase),
+                repository:
+                    phase.snapshot?.repository ?? input.context.repository,
+                ...(phase.attempt === undefined
+                    ? {}
+                    : { attempt: phase.attempt }),
+                ...(phase.attempt === undefined
+                    ? {}
+                    : { maxAttempts: input.session.getState().maxAttempts }),
+                details: {
+                    phase: phase.phase,
+                    boundary: phase.status,
+                    ...(phase.currentRemoteSha === undefined
+                        ? {}
+                        : { remoteSha: phase.currentRemoteSha }),
+                    pushedAttempts: phase.pushedAttempts,
+                    externalMovements: phase.externalMovements,
+                    ...(phase.failureFingerprint === undefined
+                        ? {}
+                        : { failureFingerprint: phase.failureFingerprint }),
+                    ...(phase.diagnosticsPath === undefined
+                        ? {}
+                        : { diagnosticsPath: phase.diagnosticsPath }),
+                    dryRun: input.dryRun,
+                },
+            });
+            return;
+        }
+        await emitOutcomeProgress({
+            progress: input.progress,
+            outcome: event.outcome,
+            statePath: input.statePath,
+            dryRun: input.dryRun,
+        });
+    };
+
+const emitPhase = async (input: {
+    readonly emit: (event: PipelineDeliveryEvent) => Promise<void>;
+    readonly session: PipelineDeliveryStateSession;
+    readonly event: Omit<
+        PipelineDeliveryPhaseEvent,
+        "pushedAttempts" | "externalMovements"
+    > & {
+        readonly pushedAttempts?: number;
+        readonly externalMovements?: number;
+    };
+}): Promise<void> => {
+    const state = input.session.getState();
+    await input.emit({
+        kind: "phase",
+        event: {
+            ...input.event,
+            pushedAttempts: input.event.pushedAttempts ?? state.pushedAttempts,
+            externalMovements:
+                input.event.externalMovements ?? state.externalMovements,
+        },
+    });
+};
+
+const dryRunOutcome = async (input: {
+    readonly dependencies: PipelineDeliveryLifecycleDependencies;
+    readonly context: PipelineDeliveryContext;
+    readonly repositoryPath: string;
+    readonly branch: string;
+    readonly session: PipelineDeliveryStateSession;
+    readonly emit: (event: PipelineDeliveryEvent) => Promise<void>;
+}): Promise<{
+    readonly outcome: PipelineDeliveryOutcome;
+    readonly wouldRepair: boolean;
+}> => {
+    const { dependencies, context, repositoryPath, branch, session, emit } =
+        input;
+    const initialState = session.getState();
+    const request: PipelineSnapshotRequest = {
+        repository: context.repository,
+        branch,
+        commitSha: initialState.currentRemoteSha,
+    };
+    await emitPhase({
+        emit,
+        session,
+        event: { phase: "observation", status: "before" },
+    });
+    let observed: PipelineObservationResult;
+    try {
+        const remaining = Math.max(
+            1,
+            session.getState().deadlineAtMs -
+                (dependencies.now?.() ?? Date.now()),
+        );
+        observed = await dependencies.observation.observe({
+            request,
+            client: context.client,
+            options: {
+                ...context.observationOptions,
+                deadlineMs: remaining,
+            },
+            signal: context.signal,
+        });
+        await emitPhase({
+            emit,
+            session,
+            event: {
+                phase: "observation",
+                status: "succeeded",
+                ...(observed.outcome.kind === "green" ||
+                observed.outcome.kind === "failed" ||
+                observed.outcome.kind === "stale"
+                    ? { snapshot: observed.outcome.snapshot }
+                    : {}),
+            },
+        });
+    } catch (error) {
+        await emitPhase({
+            emit,
+            session,
+            event: {
+                phase: "observation",
+                status: "failed",
+                message: phaseMessage(error),
+            },
+        });
+        throw error;
+    }
+
+    await emitPhase({
+        emit,
+        session,
+        event: { phase: "final-verification", status: "before" },
+    });
+    let remoteAfter: string;
+    try {
+        remoteAfter = await dependencies.git.readRemoteHead(
+            repositoryPath,
+            branch,
+            context.signal,
+        );
+        await emitPhase({
+            emit,
+            session,
+            event: {
+                phase: "final-verification",
+                status: "succeeded",
+                currentRemoteSha: remoteAfter,
+            },
+        });
+    } catch (error) {
+        await emitPhase({
+            emit,
+            session,
+            event: {
+                phase: "final-verification",
+                status: "failed",
+                message: phaseMessage(error),
+            },
+        });
+        throw error;
+    }
+
+    const state = session.getState();
+    if (!validSha(remoteAfter)) {
+        return {
+            outcome: outcomeFromState({
+                state,
+                remoteSha: state.currentRemoteSha,
+                kind: "failed",
+                message:
+                    "The remote branch could not be read after dry-run observation.",
+            }),
+            wouldRepair: false,
+        };
+    }
+    if (!sameSha(remoteAfter, initialState.currentRemoteSha)) {
+        return {
+            outcome: outcomeFromState({
+                state,
+                remoteSha: remoteAfter,
+                kind: "external-movement",
+                message:
+                    "The remote branch advanced during dry-run observation; no stale repair would be applied.",
+            }),
+            wouldRepair: false,
+        };
+    }
+    if (observed.outcome.kind === "green") {
+        return {
+            outcome: outcomeForObservation({
+                observation: observed.outcome,
+                state,
+                remoteSha: remoteAfter,
+            }),
+            wouldRepair: false,
+        };
+    }
+    if (
+        observed.outcome.kind !== "failed" ||
+        observed.outcome.reason !== "failing" ||
+        observed.outcome.snapshot === undefined
+    ) {
+        return {
+            outcome: outcomeForObservation({
+                observation: observed.outcome,
+                state,
+                remoteSha: remoteAfter,
+            }),
+            wouldRepair: false,
+        };
+    }
+
+    const snapshot = observed.outcome.snapshot;
+    const failureFingerprint = pipelineFailureFingerprint(snapshot);
+    await emitPhase({
+        emit,
+        session,
+        event: {
+            phase: "diagnostics",
+            status: "before",
+            currentRemoteSha: remoteAfter,
+            snapshot,
+            failureFingerprint,
+        },
+    });
+    let diagnosticsPath: string | undefined;
+    try {
+        const diagnostics = await dependencies.diagnostics({
+            request,
+            snapshot,
+            observation: observed.outcome,
+            scope: {
+                workspace: context.workspace,
+                runId: session.getState().runId,
+                repository: context.repository,
+            },
+            client: context.client,
+            signal: context.signal,
+        });
+        diagnosticsPath = diagnostics.path;
+        await emitPhase({
+            emit,
+            session,
+            event: {
+                phase: "diagnostics",
+                status: "reconciled",
+                currentRemoteSha: remoteAfter,
+                snapshot,
+                failureFingerprint,
+                ...(diagnostics.path === undefined
+                    ? {}
+                    : { diagnosticsPath: diagnostics.path }),
+            },
+        });
+    } catch (error) {
+        await emitPhase({
+            emit,
+            session,
+            event: {
+                phase: "diagnostics",
+                status: "failed",
+                currentRemoteSha: remoteAfter,
+                snapshot,
+                failureFingerprint,
+                message: phaseMessage(error),
+            },
+        });
+        throw error;
+    }
+    return {
+        outcome: {
+            ...outcomeForObservation({
+                observation: observed.outcome,
+                state: session.getState(),
+                remoteSha: remoteAfter,
+            }),
+            kind: "dry-run",
+            status: "dry-run",
+            failureFingerprint,
+            ...(diagnosticsPath === undefined ? {} : { diagnosticsPath }),
+            message:
+                "Dry run found a failing pipeline; a repair would be attempted, but no agent or Git mutation was performed.",
+            snapshot,
+        },
+        wouldRepair: true,
+    };
+};
+
+const resumePendingPush = async (input: {
+    readonly dependencies: PipelineDeliveryLifecycleDependencies;
+    readonly context: PipelineDeliveryContext;
+    readonly repositoryPath: string;
+    readonly branch: string;
+    readonly session: PipelineDeliveryStateSession;
+    readonly emit: (event: PipelineDeliveryEvent) => Promise<void>;
+}): Promise<PipelineDeliveryOutcome | undefined> => {
+    const { dependencies, context, repositoryPath, branch, session, emit } =
+        input;
+    const state = session.getState();
+    const created = state.createdCommit;
+    const checkpoint = state.checkpoint;
+    if (created === undefined || checkpoint === undefined) {
+        return outcomeFromState({
+            state,
+            remoteSha: state.currentRemoteSha,
+            kind: "failed",
+            message:
+                "A pending pipeline push had no complete checkpoint and cannot be resumed safely.",
+        });
+    }
+    const checkout = await dependencies.git.readCheckout(
+        repositoryPath,
+        context.signal,
+    );
+    if (
+        checkout.branch !== branch ||
+        !sameSha(checkout.head, created.sha) ||
+        checkout.status !== ""
+    ) {
+        return outcomeFromState({
+            state,
+            remoteSha: state.currentRemoteSha,
+            kind: "failed",
+            message:
+                "The recorded pipeline commit is not the clean local checkout; the pending push was not retried.",
+        });
+    }
+    await dependencies.remoteSafety?.verifyDirectPush({
+        repository: context.repository,
+        repositoryPath,
+        branch,
+        intendedBaseSha: checkpoint.sha,
+        expectedCommitSha: created.sha,
+        pushMode: "non-force",
+    });
+    const push = await dependencies.git.pushNonForce({
+        repositoryPath,
+        branch,
+        expectedCommitSha: created.sha,
+        signal: context.signal,
+    });
+    const remoteAfter = await dependencies.git.readRemoteHead(
+        repositoryPath,
+        branch,
+        context.signal,
+    );
+    const attemptState = resumedPushAttempt({
+        state,
+        createdSha: created.sha,
+        parentSha: created.parentSha,
+        push: {
+            response: push.response,
+            ...(push.failureKind === undefined
+                ? {}
+                : { failureKind: push.failureKind }),
+            remoteSha: remoteAfter,
+        },
+    });
+    const confirmed =
+        validSha(remoteAfter) && sameSha(remoteAfter, created.sha);
+    await emit({
+        kind: "phase",
+        event: {
+            phase: "push",
+            status: "reconciled",
+            currentRemoteSha: validSha(remoteAfter)
+                ? remoteAfter
+                : state.currentRemoteSha,
+            pushedAttempts: state.pushedAttempts,
+            externalMovements: state.externalMovements,
+            attempt: attemptState.attempt,
+            attemptState,
+            commit: created,
+            ...(confirmed
+                ? {}
+                : { message: "The resumed non-force push was not confirmed." }),
+        },
+    });
+    if (confirmed) return undefined;
+    const nextState = session.getState();
+    const pushStatus = attemptState.push?.status;
+    return outcomeFromState({
+        state: nextState,
+        remoteSha: validSha(remoteAfter)
+            ? remoteAfter
+            : nextState.currentRemoteSha,
+        kind:
+            pushStatus === "external-movement"
+                ? "external-movement"
+                : push.failureKind === "non-fast-forward"
+                  ? "non-fast-forward"
+                  : "ambiguous-push",
+        message:
+            pushStatus === "external-movement"
+                ? "The remote branch moved to an unrelated SHA during push reconciliation; delivery halted without overwriting it."
+                : push.failureKind === "non-fast-forward"
+                  ? "The resumed non-force push was rejected as non-fast-forward."
+                  : "The resumed push outcome could not be reconciled; no retry was attempted.",
+    });
+};
+
+const assertLifecycleRequest = (request: PipelineDeliveryRequest): void => {
+    const context = request.context;
+    if (
+        !nonBlank(context.repository) ||
+        !nonBlank(context.workspace) ||
+        !nonBlank(context.runId)
+    ) {
+        throw new PipelineDeliveryLifecycleError({
+            kind: "invalid-input",
+            message:
+                "Pipeline delivery requires non-empty repository, workspace, and run identifiers.",
+        });
+    }
+    if (context.branch !== undefined && !nonBlank(context.branch)) {
+        throw new PipelineDeliveryLifecycleError({
+            kind: "invalid-input",
+            message:
+                "Pipeline delivery branch must be non-empty when supplied.",
+        });
+    }
+    if (
+        !Number.isSafeInteger(context.maxAttempts) ||
+        context.maxAttempts <= 0
+    ) {
+        throw new PipelineDeliveryLifecycleError({
+            kind: "invalid-input",
+            message:
+                "Pipeline delivery maxAttempts must be a positive integer.",
+        });
+    }
+    if (
+        context.pipelineTimeoutMs !== undefined &&
+        (!Number.isSafeInteger(context.pipelineTimeoutMs) ||
+            context.pipelineTimeoutMs < 0)
+    ) {
+        throw new PipelineDeliveryLifecycleError({
+            kind: "invalid-input",
+            message:
+                "Pipeline delivery pipelineTimeoutMs must be a non-negative safe integer.",
+        });
+    }
+    if (request.mode === "resume" && !nonBlank(request.resumePath)) {
+        throw new PipelineDeliveryLifecycleError({
+            kind: "invalid-input",
+            message: "Pipeline delivery resumePath must be non-empty.",
+        });
+    }
+};
+
+/**
+ * Coordinate the complete Pipeline delivery lifecycle. The command supplies
+ * normalized context and, for live mode, an agent; this module owns branch
+ * preparation, state transitions, observation, repair, delivery, resume, and
+ * the terminal result.
+ */
+export const makePipelineDeliveryLifecycle = (
+    dependencies: PipelineDeliveryLifecycleDependencies,
+): PipelineDeliveryLifecycle => {
+    const engine = makePipelineDeliveryEngine(dependencies);
+    const now = dependencies.now ?? (() => Date.now());
+
+    const execute = async (
+        request: PipelineDeliveryRequest,
+    ): Promise<PipelineDeliveryResult> => {
+        assertLifecycleRequest(request);
+        const context = request.context;
+        context.signal?.throwIfAborted();
+        const dryRun =
+            request.mode === "dry-run" ||
+            (request.mode === "resume" && request.dryRun === true);
+        const resumePath =
+            request.mode === "resume" ? request.resumePath : undefined;
+        const saved =
+            resumePath === undefined
+                ? undefined
+                : await dependencies.state.load(resumePath, {
+                      repository: context.repository,
+                      ...(context.branch === undefined
+                          ? {}
+                          : { branch: context.branch }),
+                  });
+        const prepared = await trackLifecycle({
+            progress: dependencies.progress,
+            stage: "repository-preparation",
+            message: `Preparing ${context.repository} on ${saved?.branch ?? context.branch ?? "main/master"}...`,
+            operation: () =>
+                dependencies.repository.prepare(
+                    context.repository,
+                    saved?.branch ?? context.branch,
+                    context.workspace,
+                ),
+            success: (value) => `Repository ready: ${value.path}.`,
+            repository: context.repository,
+            details: {
+                branch: saved?.branch ?? context.branch ?? "main/master",
+                workspace: context.workspace,
+            },
+        });
+        if (saved !== undefined && prepared.branch !== saved.branch) {
+            throw new RalphieError({
+                message: `Cannot resume pipeline run ${saved.runId}: prepared branch is ${prepared.branch}, saved branch is ${saved.branch}.`,
+            });
+        }
+        const remoteSha = await trackLifecycle({
+            progress: dependencies.progress,
+            stage: "pipeline-remote-read",
+            message: `Reading origin/${prepared.branch}...`,
+            operation: () =>
+                dependencies.git.readRemoteHead(
+                    prepared.path,
+                    prepared.branch,
+                    context.signal,
+                ),
+            success: (value) => `Remote pipeline head: ${value}.`,
+            repository: context.repository,
+            details: { branch: prepared.branch },
+        });
+        if (!validSha(remoteSha)) {
+            throw new RalphieError({
+                message: `origin/${prepared.branch} did not provide a full remote commit SHA.`,
+            });
+        }
+
+        const statePath =
+            resumePath ??
+            pipelineRunStatePath(context.workspace, context.runId);
+        const opened =
+            saved === undefined
+                ? await dependencies.state.open({
+                      mode: "new",
+                      path: statePath,
+                      runId: context.runId,
+                      repository: context.repository,
+                      branch: prepared.branch,
+                      workspace: context.workspace,
+                      deadlineAtMs:
+                          now() +
+                          (context.pipelineTimeoutMs ??
+                              durationToMilliseconds(DEFAULT_PIPELINE_TIMEOUT)),
+                      maxAttempts: context.maxAttempts,
+                      currentRemoteSha: remoteSha,
+                  })
+                : await dependencies.state.open({
+                      mode: "resume",
+                      path: statePath,
+                      state: saved,
+                      remoteSha,
+                  });
+        const session = opened.session;
+        const emit = makeEventEmitter({
+            session,
+            context,
+            progress: dependencies.progress,
+            statePath,
+            dryRun,
+        });
+        try {
+            await emitPhase({
+                emit,
+                session,
+                event: {
+                    phase: "remote-read",
+                    status: "succeeded",
+                    currentRemoteSha: remoteSha,
+                },
+            });
+            if (opened.reconciliation?.message !== undefined) {
+                await dependencies.progress?.emit({
+                    stage: "pipeline-resume",
+                    status: "info",
+                    message: opened.reconciliation.message,
+                    repository: context.repository,
+                    details: {
+                        action: opened.reconciliation.action,
+                        branch: prepared.branch,
+                        remoteSha,
+                        deadlineAtMs: session.getState().deadlineAtMs,
+                    },
+                });
+            }
+
+            const finish = async (
+                outcome: PipelineDeliveryOutcome,
+                wouldRepair: boolean,
+            ): Promise<PipelineDeliveryResult> => {
+                await emit({ kind: "outcome", outcome });
+                const state = session.getState();
+                return {
+                    runId: state.runId,
+                    repository: state.repository,
+                    branch: state.branch,
+                    statePath,
+                    outcome,
+                    wouldRepair,
+                };
+            };
+
+            const action = opened.reconciliation?.action;
+            if (action === "already-complete") {
+                return await finish(
+                    outcomeFromState({
+                        state: session.getState(),
+                        remoteSha,
+                        kind: "green",
+                        message: "The saved green result is still current.",
+                    }),
+                    false,
+                );
+            }
+            if (action === "deadline-expired" || action === "stale-remote") {
+                return await finish(
+                    outcomeFromState({
+                        state: session.getState(),
+                        remoteSha,
+                        kind:
+                            action === "deadline-expired"
+                                ? "timeout"
+                                : "external-movement",
+                        message: session.getState().lastError,
+                    }),
+                    false,
+                );
+            }
+            if (action === "resume-push" && !dryRun) {
+                const resumedOutcome = await resumePendingPush({
+                    dependencies,
+                    context,
+                    repositoryPath: prepared.path,
+                    branch: prepared.branch,
+                    session,
+                    emit,
+                });
+                if (resumedOutcome !== undefined) {
+                    return await finish(resumedOutcome, false);
+                }
+            }
+            if (dryRun) {
+                const dryRunResult = await dryRunOutcome({
+                    dependencies,
+                    context,
+                    repositoryPath: prepared.path,
+                    branch: prepared.branch,
+                    session,
+                    emit,
+                });
+                return await finish(
+                    dryRunResult.outcome,
+                    dryRunResult.wouldRepair,
+                );
+            }
+
+            if (request.mode === "resume" && request.dryRun === true) {
+                throw new PipelineDeliveryLifecycleError({
+                    kind: "invalid-input",
+                    message:
+                        "Live pipeline delivery requires an agent and agent selection.",
+                });
+            }
+            const agentRequest = await request.acquireAgent();
+            const state = session.getState();
+            const outcome = await engine.execute({
+                repository: context.repository,
+                repositoryPath: prepared.path,
+                workspace: context.workspace,
+                branch: prepared.branch,
+                runId: state.runId,
+                client: context.client,
+                agent: agentRequest.agent,
+                agentSelection: agentRequest.agentSelection,
+                initialRemoteSha: state.currentRemoteSha,
+                initialPushedAttempts: state.pushedAttempts,
+                initialExternalMovements: state.externalMovements,
+                initialAttempts: stateAttemptsToDelivery(state.attempts),
+                maxAttempts: state.maxAttempts,
+                deadlineAtMs: state.deadlineAtMs,
+                observationOptions: context.observationOptions,
+                agentDiagnostics: agentRequest.agentDiagnostics,
+                signal: context.signal,
+                progress: dependencies.progress,
+                progressIssue: context.progressIssue,
+                reviewBudget: context.reviewBudget,
+                commitMessage: context.commitMessage,
+                onPhase: async (event) => await emit({ kind: "phase", event }),
+                onOutcome: async (result) =>
+                    await emit({ kind: "outcome", outcome: result }),
+            });
+            return {
+                runId: state.runId,
+                repository: state.repository,
+                branch: state.branch,
+                statePath,
+                outcome,
+                wouldRepair: false,
+            };
+        } catch (error) {
+            const state = session.getState();
+            const outcome = outcomeFromState({
+                state,
+                remoteSha: state.currentRemoteSha,
+                kind: context.signal?.aborted === true ? "cancelled" : "failed",
+                message:
+                    context.signal?.aborted === true
+                        ? "Pipeline delivery was cancelled; resumable state was preserved."
+                        : phaseMessage(error),
+            });
+            await emit({ kind: "outcome", outcome }).catch(() => undefined);
+            throw error;
+        }
+    };
+
+    return { execute };
+};

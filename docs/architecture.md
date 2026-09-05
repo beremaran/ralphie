@@ -49,7 +49,7 @@ effects and validate their invariants at the boundary.
 | `src/workspace/` | Path expansion and protected workspace removal. |
 | `src/process/` | External command execution and process exit semantics. |
 
-`src/workflow.ts` orchestrates the domain services. `src/runtime.ts` assembles
+`src/workflow.ts` orchestrates the issue modules. `src/runtime.ts` assembles
 their live implementations into one explicit runtime object.
 
 ## Read-only pipeline observation contract
@@ -109,33 +109,42 @@ cannot escape those markers or inject a second closing marker.
 ## Pipeline delivery orchestration and state
 
 `--mode get-pipelines-green` is deliberately not a branch in the issue queue.
-`src/get-pipelines-green.ts` owns the top-level lifecycle: authentication,
-workspace and branch preparation, remote-head capture, deadline creation,
-progress, dry-run isolation, resume decisions, OpenCode lifetime, and terminal
-exit outcomes. `src/issues/pipeline-delivery-loop.ts` owns the repeated
-observation/diagnostic/repair/commit/push/final-proof safety machine. The
-boundary is explicit in `RalphieRuntime`: the runner receives
-`pipelineDeliveryGit`, `pipelineDeliveryLoop`, `pipelineDiagnostics`,
-`gitRemoteSafety`, and `pipelineRunStateStore` as injectable services.
+`src/get-pipelines-green.ts` is a thin command adapter for authentication,
+workspace cleanup, OpenCode lifetime, and terminal exit semantics. The public
+Pipeline module is `src/pipeline/delivery-lifecycle.ts`; its single
+discriminated `execute` entry point accepts live, dry-run, or resume requests
+and owns repository preparation, remote-head capture, deadline creation, state
+reconciliation, observation, repair, commit delivery, and terminal outcomes.
+`src/pipeline/delivery-types.ts` holds the lifecycle domain types and
+evidence-bearing events, while `src/pipeline/snapshot-identity.ts` holds the
+commit-independent identity used to detect a repeated normalized failure.
+
+`RalphieRuntime` exposes `pipelineDeliveryLifecycle` as the lifecycle seam and
+retains the lower-level Git, observation, diagnostics, repair, and remote-safety
+modules for injection and reuse. The lifecycle fans each semantic
+`PipelineDeliveryEvent` to the state session and progress reporter; neither
+consumer reconstructs state from display updates. `src/run/pipeline-state.ts`
+provides the state adapter that creates/loads a version-one pipeline state,
+reconciles the remote before mutation, and atomically projects lifecycle events
+to `.ralphie/runs/<run-id>/pipeline/state.json`.
 
 The pipeline state store in `src/run/pipeline-state.ts` is a versioned adapter,
 not a second issue queue. It persists a bounded projection of the current
-remote SHA, normalized statuses, failure fingerprint, checkpoint, attempt
-history, diagnostic reference, and created/pushed commit evidence at
-`.ralphie/runs/<run-id>/pipeline/state.json`. Writes use a unique temporary
-file followed by an atomic rename. Resume re-reads the remote before any
-mutation, invalidates evidence for a changed SHA, reconciles a created commit
-that already arrived, and retains the original absolute deadline. This keeps
-the state seam small and makes failure, ambiguous-push, cancellation, and
+remote SHA, normalized statuses, failure identity, checkpoint, attempt history,
+diagnostic reference, and created/pushed commit evidence. Writes use a unique
+temporary file followed by an atomic rename. Resume re-reads the remote before
+any mutation, invalidates evidence for a changed SHA, reconciles a created
+commit that already arrived, and retains the original absolute deadline. This
+keeps the state seam small and makes failure, ambiguous-push, cancellation, and
 stale-head cases directly testable without an OpenCode server or GitHub write.
 
-The runner exposes the same typed progress contract as the other modes. Pipeline
-phase events carry the phase boundary, exact remote SHA when known, pushed
-attempt count, external-movement count, failure fingerprint, diagnostic path,
-and terminal outcome details. The output renderer determines whether those
-events are interactive, append-only, quiet, or JSON Lines; it does not alter
-the underlying safety state machine. A green outcome is the only successful
-terminal state.
+The lifecycle exposes the same typed progress contract as the other modes.
+Pipeline phase events carry the phase boundary, exact remote SHA when known,
+pushed attempt count, external-movement count, failure identity, diagnostic
+path, and terminal outcome details. The output renderer determines whether
+those events are interactive, append-only, quiet, or JSON Lines; it does not
+alter the underlying safety state machine. A green outcome is the only
+successful terminal state.
 
 ## Dependency and side-effect rules
 
@@ -172,7 +181,7 @@ binary, installer, Homebrew, and container distribution machinery was removed.
 | Pipeline snapshot normalization and collection | `src/github/pipeline-snapshot.ts`, `src/github/pipeline-snapshot-collector.ts` |
 | Bounded, deadline-aware pipeline observation, paginated exact-SHA reads, retries, and final HEAD check | `src/github/pipeline-observation.ts`, `src/github/pipeline-snapshot-collector.ts` |
 | Pipeline diagnostics collection, persistence, and repair boundary | `src/github/pipeline-diagnostics-collector.ts`, `src/github/pipeline-diagnostics-service.ts`, `src/github/pipeline-diagnostics-artifact.ts`, `src/github/pipeline-diagnostics-boundary.ts` |
-| Pipeline mode orchestration and direct delivery | `src/get-pipelines-green.ts`, `src/issues/pipeline-delivery-loop.ts`, `src/git/pipeline-delivery.ts` |
+| Pipeline delivery lifecycle and direct delivery | `src/pipeline/delivery-lifecycle.ts`, `src/pipeline/delivery-types.ts`, `src/pipeline/snapshot-identity.ts`, `src/git/pipeline-delivery.ts` |
 | Pipeline state, bounded persistence, and resume reconciliation | `src/run/pipeline-state.ts` |
 | Complexity routing | `src/issues/executor.ts`, `src/issues/complexity.ts` |
 | Implementation/review/delivery | `src/issues/implementation-executor.ts`, `src/issues/pull-request-review.ts`, `src/issues/pull-request-review-coordinator.ts`, `src/github/pull-requests.ts` |

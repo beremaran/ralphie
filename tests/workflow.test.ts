@@ -549,7 +549,7 @@ const testRuntime = (
         pipelineObservation,
         pipelineDiagnostics: {} as never,
         pipelineRepairExecutor: {} as never,
-        pipelineDeliveryLoop: {} as never,
+        pipelineDeliveryLifecycle: {} as never,
         pipelineDeliveryGit: {} as never,
         maintenanceSnapshot: {} as never,
         githubIssues,

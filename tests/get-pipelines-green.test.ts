@@ -8,6 +8,7 @@ import type { Octokit } from "octokit";
 import type { AgentClient } from "../src/opencode/client.ts";
 import type { PipelineDiagnosticsService } from "../src/github/pipeline-diagnostics-service.ts";
 import type {
+    PipelineObservationInput,
     PipelineObservationOutcome,
     PipelineObservationService,
 } from "../src/github/pipeline-observation.ts";
@@ -16,10 +17,7 @@ import type {
     PipelineDeliveryGitService,
     PipelinePushAttempt,
 } from "../src/git/pipeline-delivery.ts";
-import type {
-    PipelineDeliveryLoopService,
-    PipelineDeliveryOutcome,
-} from "../src/issues/pipeline-delivery-loop.ts";
+import { makePipelineDeliveryLifecycle } from "../src/pipeline/delivery-lifecycle.ts";
 import {
     getPipelinesGreen,
     PipelineDeliveryOutcomeError,
@@ -33,7 +31,10 @@ import {
     makeProgressRecorder,
     type ProgressUpdate,
 } from "../src/progress/progress.ts";
-import { PipelineRunStateStoreLive } from "../src/run/pipeline-state.ts";
+import {
+    makePipelineDeliveryStateAdapter,
+    PipelineRunStateStoreLive,
+} from "../src/run/pipeline-state.ts";
 import type { RalphieRuntime } from "../src/runtime.ts";
 
 const BASE = "a".repeat(40);
@@ -75,6 +76,7 @@ const failingSnapshot = (sha: string) =>
 const configFor = (
     workspace: string,
     dryRun = false,
+    resume?: string,
 ): GetPipelinesGreenRalphieConfig => {
     const config = resolveRalphieConfig({
         repo: "owner/repository",
@@ -83,6 +85,7 @@ const configFor = (
         workspace,
         dryRun,
         maxAttempts: 3,
+        ...(resume === undefined ? {} : { resume }),
     });
     if (config.mode !== ExecutionMode.GetPipelinesGreen) {
         throw new Error("Expected a pipeline configuration.");
@@ -122,33 +125,60 @@ const makeRuntime = (input: {
     readonly calls: string[];
     readonly observation?: PipelineObservationService;
     readonly diagnostics?: PipelineDiagnosticsService;
-    readonly loop?: PipelineDeliveryLoopService;
     readonly progressEvents: ProgressUpdate[];
 }): RalphieRuntime => {
     const { workspace, calls } = input;
-    const loop =
-        input.loop ??
-        ({
-            execute: async (request): Promise<PipelineDeliveryOutcome> => {
-                calls.push("loop");
-                const outcome: PipelineDeliveryOutcome = {
-                    kind: "green",
-                    status: "green",
-                    source: "already-green",
-                    repository: "owner/repository",
-                    branch: "main",
-                    remoteSha: BASE,
-                    pushedAttempts: 0,
-                    externalMovements: 0,
-                    attempts: [],
-                    phases: [],
-                    snapshot: greenSnapshot(BASE),
-                };
-                await request.onOutcome?.(outcome);
-                return outcome;
-            },
-        } satisfies PipelineDeliveryLoopService);
     const progress = makeProgressRecorder(input.progressEvents);
+    const pipelineDeliveryGit = fakeGit(calls);
+    const gitRepository = {
+        verifyInstalled: async () => {
+            calls.push("verifyGitInstalled");
+        },
+        prepare: async () => ({
+            path: join(workspace, "repo"),
+            branch: "main",
+            cloned: false,
+            branchChanged: false,
+            cleaned: false,
+        }),
+    };
+    const pipelineDeliveryLifecycle = makePipelineDeliveryLifecycle({
+        repository: gitRepository,
+        git: pipelineDeliveryGit,
+        observation:
+            input.observation ??
+            ({
+                observe: async (input: PipelineObservationInput) => ({
+                    outcome: {
+                        kind: "green",
+                        observedSha: input.request.commitSha,
+                        snapshot: greenSnapshot(input.request.commitSha),
+                        elapsedMs: 1,
+                        polls: 1,
+                    },
+                    transitions: [],
+                }),
+            } as never),
+        diagnostics: async (request) => {
+            const result = await (
+                input.diagnostics ?? ({} as never)
+            ).collectAndStore(request);
+            return { boundary: result.boundary, path: result.path };
+        },
+        repair: {
+            execute: async () => {
+                throw new Error("repair not expected");
+            },
+        },
+        repositoryInvariant: {
+            capture: async () => ({ branch: "main", head: BASE }),
+            verify: async () => {},
+        },
+        state: makePipelineDeliveryStateAdapter({
+            store: PipelineRunStateStoreLive,
+        }),
+        progress,
+    });
     return {
         githubClient: {
             initialize: async () => {
@@ -156,20 +186,9 @@ const makeRuntime = (input: {
                 return {} as Octokit;
             },
         },
-        gitRepository: {
-            verifyInstalled: async () => {
-                calls.push("verifyGitInstalled");
-            },
-            prepare: async () => ({
-                path: join(workspace, "repo"),
-                branch: "main",
-                cloned: false,
-                branchChanged: false,
-                cleaned: false,
-            }),
-        },
-        pipelineDeliveryGit: fakeGit(calls),
-        pipelineDeliveryLoop: loop,
+        gitRepository,
+        pipelineDeliveryGit,
+        pipelineDeliveryLifecycle,
         pipelineObservation:
             input.observation ?? ({ observe: async () => ({}) } as never),
         pipelineDiagnostics: input.diagnostics ?? ({} as never),
@@ -200,7 +219,7 @@ const makeRuntime = (input: {
 };
 
 describe("get-pipelines-green orchestration", () => {
-    test("runs an already-green remote through the pipeline loop and persists completion", async () => {
+    test("runs an already-green remote through the delivery lifecycle and persists completion", async () => {
         const workspace = await mkdtemp(join(tmpdir(), "ralphie-gpgreen-"));
         const calls: string[] = [];
         const progressEvents: ProgressUpdate[] = [];
@@ -214,7 +233,7 @@ describe("get-pipelines-green orchestration", () => {
             );
             expect(summary.outcome.kind).toBe("green");
             expect(summary.wouldRepair).toBe(false);
-            expect(calls).toContain("loop");
+            expect(calls).not.toContain("loop");
             expect(calls).toContain("startOpenCode");
             const state = JSON.parse(
                 await readFile(
@@ -300,6 +319,42 @@ describe("get-pipelines-green orchestration", () => {
             expect(state.outcome.kind).toBe("dry-run");
             expect(state.diagnostics.path).toBe("/tmp/dry-run.json");
             expect(state.snapshot.fingerprint).not.toContain("rawValues");
+        } finally {
+            await rm(workspace, { recursive: true, force: true });
+        }
+    });
+
+    test("resumes a current green result through the lifecycle without re-observing it", async () => {
+        const workspace = await mkdtemp(join(tmpdir(), "ralphie-gpgreen-"));
+        const firstCalls: string[] = [];
+        try {
+            const first = await getPipelinesGreen(
+                {
+                    config: configFor(workspace),
+                    runId: "resume-source",
+                },
+                makeRuntime({
+                    workspace,
+                    calls: firstCalls,
+                    progressEvents: [],
+                }),
+            );
+            const resumeCalls: string[] = [];
+            const resumed = await getPipelinesGreen(
+                {
+                    config: configFor(workspace, false, first.statePath),
+                    runId: "resume-invocation",
+                },
+                makeRuntime({
+                    workspace,
+                    calls: resumeCalls,
+                    progressEvents: [],
+                }),
+            );
+
+            expect(resumed.runId).toBe(first.runId);
+            expect(resumed.outcome.kind).toBe("green");
+            expect(resumeCalls).not.toContain("startOpenCode");
         } finally {
             await rm(workspace, { recursive: true, force: true });
         }

@@ -90,7 +90,7 @@ export type PipelineRepairOutcome = PipelineRepairHistory & {
 } & (
         | {
               readonly status: "approved";
-              /** Exact staged patch that the outer delivery loop may commit. */
+              /** Exact staged patch that the delivery lifecycle may commit. */
               readonly stagedDiff: string;
               /** Available when the caller supplied a staged-tree reader. */
               readonly stagedTreeSha?: string;
@@ -122,7 +122,7 @@ export type PipelineRepairExecutorDependencies = {
     >;
     /** Optional clean-checkpoint assertion for production and temp-checkout tests. */
     readonly captureCheckpoint?: GitIssueCheckpointService["capture"];
-    /** Read the exact index tree for the outer deterministic delivery loop. */
+    /** Read the exact index tree for the outer deterministic delivery lifecycle. */
     readonly stagedTreeSha?: Pick<
         IssueVerificationService,
         "stagedTreeSha"
@@ -877,7 +877,7 @@ const failureAfterCleanup = async (
  * Assemble the pipeline-only diagnose/edit/review boundary.
  *
  * This service deliberately has no GitHub client and no commit/push methods in
- * its dependency surface. The outer pipeline delivery loop receives only an
+ * its dependency surface. The Pipeline delivery lifecycle receives only an
  * approved staged patch (or a recoverable, restored outcome).
  */
 export const makePipelineRepairExecutorService = (
