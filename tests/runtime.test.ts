@@ -37,6 +37,10 @@ describe("runtime factory", () => {
         expect(runtime.pipelineRepairExecutor.execute).toBeFunction();
         expect(runtime.pipelineDeliveryLoop).toBeDefined();
         expect(runtime.pipelineDeliveryLoop.execute).toBeFunction();
+        expect(runtime.pipelineDeliveryGit).toBeDefined();
+        expect(runtime.pipelineDeliveryGit.readRemoteHead).toBeFunction();
+        expect(runtime.pipelineRunStateStore).toBeDefined();
+        expect(runtime.pipelineRunStateStore.save).toBeFunction();
         expect(runtime.maintenanceSnapshot).toBeDefined();
         expect(runtime.maintenanceSnapshot.capture).toBeFunction();
         expect(runtime.maintenanceSnapshot.read).toBe(

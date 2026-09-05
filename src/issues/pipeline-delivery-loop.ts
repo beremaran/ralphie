@@ -100,6 +100,7 @@ export type PipelineDeliveryOutcomeKind =
     | "non-fast-forward"
     | "timeout"
     | "cancelled"
+    | "dry-run"
     | "failed";
 
 export type PipelineDeliveryOutcome = {
@@ -118,6 +119,21 @@ export type PipelineDeliveryOutcome = {
     readonly attempts: ReadonlyArray<PipelineDeliveryAttempt>;
     readonly phases: ReadonlyArray<PipelineDeliveryPhaseOutcome>;
     readonly snapshot?: PipelineSnapshot;
+};
+
+export type PipelineDeliveryPersistenceEvent = {
+    readonly phase: PipelineDeliveryPhase;
+    readonly status: "before" | "succeeded" | "failed" | "reconciled";
+    readonly attempt?: number;
+    readonly currentRemoteSha?: string;
+    readonly pushedAttempts: number;
+    readonly externalMovements: number;
+    readonly failureFingerprint?: string;
+    readonly snapshot?: PipelineSnapshot;
+    readonly diagnosticsPath?: string;
+    readonly message?: string;
+    readonly attemptState?: PipelineDeliveryAttempt;
+    readonly commit?: PipelineCommitResult;
 };
 
 export type PipelineDiagnosticsRunnerInput = {
@@ -164,6 +180,11 @@ export type PipelineDeliveryLoopInput = {
     readonly client?: Octokit;
     readonly agent: AgentClient;
     readonly agentSelection: AgentSelection;
+    /** Resume inputs are already reconciled by the state layer. */
+    readonly initialRemoteSha?: string;
+    readonly initialPushedAttempts?: number;
+    readonly initialExternalMovements?: number;
+    readonly initialAttempts?: ReadonlyArray<PipelineDeliveryAttempt>;
     /** Number of repairs that may actually be confirmed on the remote. */
     readonly maxAttempts: number;
     /** Absolute Unix epoch deadline; it is not restarted after a push. */
@@ -176,6 +197,12 @@ export type PipelineDeliveryLoopInput = {
     readonly reviewBudget?: number;
     /** A caller-provided validated message is useful for deterministic resume. */
     readonly commitMessage?: CommitMessageDecision;
+    /** Optional durable sink invoked around every observable phase boundary. */
+    readonly onPhase?: (
+        event: PipelineDeliveryPersistenceEvent,
+    ) => Promise<void>;
+    /** Optional durable sink for terminal success, stop, failure, or cancel. */
+    readonly onOutcome?: (outcome: PipelineDeliveryOutcome) => Promise<void>;
 };
 
 export type PipelineDeliveryLoopDependencies = {
@@ -299,6 +326,39 @@ const assertInput = (input: PipelineDeliveryLoopInput): void => {
         });
     }
     if (
+        input.initialRemoteSha !== undefined &&
+        !validSha(input.initialRemoteSha)
+    ) {
+        throw new PipelineDeliveryLoopError({
+            kind: "invalid-input",
+            message:
+                "Pipeline delivery initialRemoteSha must be a full Git object ID.",
+        });
+    }
+    if (
+        input.initialPushedAttempts !== undefined &&
+        (!Number.isSafeInteger(input.initialPushedAttempts) ||
+            input.initialPushedAttempts < 0 ||
+            input.initialPushedAttempts > input.maxAttempts)
+    ) {
+        throw new PipelineDeliveryLoopError({
+            kind: "invalid-input",
+            message:
+                "Pipeline delivery initialPushedAttempts must be a non-negative integer within maxAttempts.",
+        });
+    }
+    if (
+        input.initialExternalMovements !== undefined &&
+        (!Number.isSafeInteger(input.initialExternalMovements) ||
+            input.initialExternalMovements < 0)
+    ) {
+        throw new PipelineDeliveryLoopError({
+            kind: "invalid-input",
+            message:
+                "Pipeline delivery initialExternalMovements must be a non-negative integer.",
+        });
+    }
+    if (
         input.commitMessage !== undefined &&
         !isValidPipelineCommitMessage(input.commitMessage)
     ) {
@@ -415,6 +475,35 @@ const checkoutAt = (
     sha: string,
 ): boolean => checkout.branch === branch && sameSha(checkout.head, sha);
 
+/** Restore only an uncommitted repair after cancellation/timeout. */
+const restoreUncommittedCheckpoint = async (
+    dependencies: PipelineDeliveryLoopDependencies,
+    input: PipelineDeliveryLoopInput,
+    checkpointSha: string | undefined,
+): Promise<void> => {
+    if (checkpointSha === undefined) return;
+    try {
+        const checkout = await dependencies.git.readCheckout(
+            input.repositoryPath,
+        );
+        if (
+            !checkoutAt(checkout, input.branch, checkpointSha) ||
+            checkout.status === ""
+        ) {
+            return;
+        }
+        await dependencies.git.discardToExactCheckout(
+            input.repositoryPath,
+            input.branch,
+            checkpointSha,
+        );
+    } catch {
+        // The original cancellation/timeout result is safer than replacing it
+        // with a cleanup error. A moved branch or committed local head is left
+        // intact for the state-layer reconciliation path.
+    }
+};
+
 const repairStatus = (
     repair: PipelineRepairOutcome,
 ): PipelineRepairOutcome["status"] => repair.status;
@@ -487,7 +576,7 @@ export const makePipelineDeliveryLoopService = (
         dependencies.maxExternalMovements ??
         PIPELINE_DELIVERY_EXTERNAL_MOVEMENT_LIMIT;
 
-    const execute = async (
+    const executeOnce = async (
         input: PipelineDeliveryLoopInput,
     ): Promise<PipelineDeliveryOutcome> => {
         assertInput(input);
@@ -504,12 +593,49 @@ export const makePipelineDeliveryLoopService = (
 
         const deadline = makeDeadlineControl(input, now);
         const phases: PipelineDeliveryPhaseOutcome[] = [];
-        const attempts: PipelineDeliveryAttempt[] = [];
-        let pushedAttempts = 0;
-        let externalMovements = 0;
-        let currentSha: string | undefined;
+        const attempts: PipelineDeliveryAttempt[] = [
+            ...(input.initialAttempts ?? []),
+        ];
+        let pushedAttempts = input.initialPushedAttempts ?? 0;
+        let externalMovements = input.initialExternalMovements ?? 0;
+        let currentSha: string | undefined = input.initialRemoteSha;
         let lastFailureFingerprint: string | undefined;
         let lastDiagnosticsPath: string | undefined;
+
+        const notifyPhase = async (event: {
+            readonly phase: PipelineDeliveryPhase;
+            readonly status: PipelineDeliveryPersistenceEvent["status"];
+            readonly attempt?: number;
+            readonly snapshot?: PipelineSnapshot;
+            readonly diagnosticsPath?: string;
+            readonly message?: string;
+            readonly attemptState?: PipelineDeliveryAttempt;
+            readonly commit?: PipelineCommitResult;
+        }): Promise<void> => {
+            await input.onPhase?.({
+                ...event,
+                ...(currentSha === undefined
+                    ? {}
+                    : { currentRemoteSha: currentSha }),
+                pushedAttempts,
+                externalMovements,
+                ...(lastFailureFingerprint === undefined
+                    ? {}
+                    : { failureFingerprint: lastFailureFingerprint }),
+                ...(lastDiagnosticsPath === undefined
+                    ? {}
+                    : { diagnosticsPath: lastDiagnosticsPath }),
+                ...(event.snapshot === undefined
+                    ? {}
+                    : { snapshot: event.snapshot }),
+                ...(event.diagnosticsPath === undefined
+                    ? {}
+                    : { diagnosticsPath: event.diagnosticsPath }),
+                ...(event.message === undefined
+                    ? {}
+                    : { message: event.message }),
+            });
+        };
 
         const replaceLastAttempt = (
             update: Partial<PipelineDeliveryAttempt>,
@@ -547,11 +673,19 @@ export const makePipelineDeliveryLoopService = (
             work: () => Promise<Value>,
         ): Promise<Value> => {
             try {
+                await notifyPhase({ phase, status: "before", attempt });
                 const value = await work();
                 addPhase(phase, "succeeded", attempt, undefined);
+                await notifyPhase({ phase, status: "succeeded", attempt });
                 return value;
             } catch (error) {
                 addPhase(phase, "failed", attempt, phaseMessage(error));
+                await notifyPhase({
+                    phase,
+                    status: "failed",
+                    attempt,
+                    message: phaseMessage(error),
+                }).catch(() => undefined);
                 throw error;
             }
         };
@@ -733,7 +867,7 @@ export const makePipelineDeliveryLoopService = (
 
         try {
             checkDeadline();
-            currentSha = await readRemote();
+            if (currentSha === undefined) currentSha = await readRemote();
 
             while (true) {
                 checkDeadline();
@@ -887,6 +1021,11 @@ export const makePipelineDeliveryLoopService = (
                     });
                 }
                 lastFailureFingerprint = failureFingerprint;
+                await notifyPhase({
+                    phase: "observation",
+                    status: "reconciled",
+                    snapshot,
+                });
                 if (pushedAttempts >= input.maxAttempts) {
                     return complete("attempts-exhausted", {
                         remoteSha: currentSha,
@@ -957,6 +1096,13 @@ export const makePipelineDeliveryLoopService = (
                         }),
                 );
                 lastDiagnosticsPath = diagnostics.path;
+                await notifyPhase({
+                    phase: "diagnostics",
+                    status: "reconciled",
+                    attempt: attemptNumber,
+                    snapshot,
+                    diagnosticsPath: diagnostics.path,
+                });
 
                 const repair = await runPhase("repair", attemptNumber, () =>
                     dependencies.repair.execute({
@@ -990,6 +1136,13 @@ export const makePipelineDeliveryLoopService = (
                     }),
                 );
                 replaceLastAttempt({ repair: repairStatus(repair) });
+                await notifyPhase({
+                    phase: "repair",
+                    status: "reconciled",
+                    attempt: attemptNumber,
+                    snapshot,
+                    attemptState: attempts[attempts.length - 1],
+                });
 
                 const afterRepair = await readRemote(attemptNumber);
                 if (!sameSha(afterRepair, currentSha ?? "")) {
@@ -1164,6 +1317,14 @@ export const makePipelineDeliveryLoopService = (
                         treeSha: commit.treeSha,
                     },
                 });
+                await notifyPhase({
+                    phase: "commit",
+                    status: "reconciled",
+                    attempt: attemptNumber,
+                    snapshot,
+                    commit,
+                    attemptState: attempts[attempts.length - 1],
+                });
 
                 const movementAfterCommit = await reconcileIfMoved({
                     expectedRemoteSha: currentSha,
@@ -1262,6 +1423,14 @@ export const makePipelineDeliveryLoopService = (
                               }),
                     },
                 });
+                await notifyPhase({
+                    phase: "push",
+                    status: "reconciled",
+                    attempt: attemptNumber,
+                    snapshot,
+                    commit,
+                    attemptState: attempts[attempts.length - 1],
+                });
                 if (
                     pushStatus === "confirmed" ||
                     pushStatus === "confirmed-after-response-loss"
@@ -1298,6 +1467,11 @@ export const makePipelineDeliveryLoopService = (
             }
         } catch (error) {
             if (deadline.isDeadlineExpired()) {
+                await restoreUncommittedCheckpoint(
+                    dependencies,
+                    input,
+                    currentSha,
+                );
                 return complete("timeout", {
                     remoteSha: currentSha,
                     failureFingerprint: lastFailureFingerprint,
@@ -1306,6 +1480,11 @@ export const makePipelineDeliveryLoopService = (
                 });
             }
             if (deadline.isCallerCancelled()) {
+                await restoreUncommittedCheckpoint(
+                    dependencies,
+                    input,
+                    currentSha,
+                );
                 return complete("cancelled", {
                     remoteSha: currentSha,
                     failureFingerprint: lastFailureFingerprint,
@@ -1321,6 +1500,14 @@ export const makePipelineDeliveryLoopService = (
         } finally {
             deadline.dispose();
         }
+    };
+
+    const execute = async (
+        input: PipelineDeliveryLoopInput,
+    ): Promise<PipelineDeliveryOutcome> => {
+        const outcome = await executeOnce(input);
+        await input.onOutcome?.(outcome);
+        return outcome;
     };
 
     return { execute };

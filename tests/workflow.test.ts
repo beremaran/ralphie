@@ -515,6 +515,7 @@ const testRuntime = (
         pipelineDiagnostics: {} as never,
         pipelineRepairExecutor: {} as never,
         pipelineDeliveryLoop: {} as never,
+        pipelineDeliveryGit: {} as never,
         maintenanceSnapshot: {} as never,
         githubIssues,
         githubIssueMutations: mutations,
@@ -566,6 +567,7 @@ const testRuntime = (
         opencode,
         progress,
         runStateStore: stateStore,
+        pipelineRunStateStore: {} as never,
         workspace,
     };
 };

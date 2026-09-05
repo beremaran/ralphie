@@ -93,6 +93,10 @@ import {
     type PipelineDeliveryLoopService,
 } from "./issues/pipeline-delivery-loop.ts";
 import {
+    PipelineRunStateStoreLive,
+    type PipelineRunStateStoreService,
+} from "./run/pipeline-state.ts";
+import {
     makeGitHubNeedsAttentionNotificationService,
     type GitHubNeedsAttentionNotificationService,
 } from "./github/needs-attention.ts";
@@ -184,6 +188,8 @@ export type RalphieRuntime = {
     readonly pipelineRepairExecutor: PipelineRepairExecutorService;
     /** Direct base-branch pipeline delivery with non-force remote reconciliation. */
     readonly pipelineDeliveryLoop: PipelineDeliveryLoopService;
+    /** Git boundary used by the pipeline command before and during resume. */
+    readonly pipelineDeliveryGit: PipelineDeliveryGitService;
     readonly githubIssues: GitHubIssuesService;
     readonly githubIssueMutations: GitHubIssueMutationService;
     readonly githubIssueRelationships: GitHubIssueRelationshipService;
@@ -231,6 +237,8 @@ export type RalphieRuntime = {
     readonly opencode: OpenCodeService;
     readonly progress: ProgressReporterService;
     readonly runStateStore: RunStateStoreService;
+    /** Pipeline-only state; never shared with issue-mode state. */
+    readonly pipelineRunStateStore: PipelineRunStateStoreService;
     readonly workspace: WorkspaceService;
 };
 
@@ -245,6 +253,10 @@ export type RuntimeOverrides = {
     readonly pipelineRepairExecutor?: PipelineRepairExecutorService;
     /** Optional deterministic pipeline delivery loop for orchestration tests. */
     readonly pipelineDeliveryLoop?: PipelineDeliveryLoopService;
+    /** Optional deterministic Git boundary for pipeline orchestration tests. */
+    readonly pipelineDeliveryGit?: PipelineDeliveryGitService;
+    /** Optional deterministic state store for pipeline orchestration tests. */
+    readonly pipelineRunStateStore?: PipelineRunStateStoreService;
     /** Optional deterministic seam for maintenance snapshot tests. */
     readonly maintenanceSnapshot?: MaintenanceSnapshotService;
     /** Optional deterministic maintenance planner used by runner tests. */
@@ -268,11 +280,14 @@ export const makeLiveRuntime = ({
     progress,
     commandRunner = CommandRunnerLive,
     runStateStore = RunStateStoreLive,
+    pipelineRunStateStore = PipelineRunStateStoreLive,
     workspace = WorkspaceLive,
     pipelineObservationDependencies,
     pipelineDiagnosticsDependencies,
     pipelineRepairExecutor: pipelineRepairExecutorOverride,
     pipelineDeliveryLoop: pipelineDeliveryLoopOverride,
+    pipelineDeliveryGit: pipelineDeliveryGitOverride,
+    pipelineRunStateStore: pipelineRunStateStoreOverride,
     maintenanceSnapshot: maintenanceSnapshotOverride,
     maintenancePlanner: maintenancePlannerOverride,
     maintenancePlannerForAgent: maintenancePlannerForAgentOverride,
@@ -356,6 +371,7 @@ export const makeLiveRuntime = ({
             stagedTreeSha: issueVerification.stagedTreeSha,
         });
     const pipelineDeliveryGit: PipelineDeliveryGitService =
+        pipelineDeliveryGitOverride ??
         makePipelineDeliveryGitService(commandRunner);
     const pipelineDeliveryLoop =
         pipelineDeliveryLoopOverride ??
@@ -428,6 +444,7 @@ export const makeLiveRuntime = ({
         pipelineDiagnostics,
         pipelineRepairExecutor,
         pipelineDeliveryLoop,
+        pipelineDeliveryGit,
         githubIssues,
         githubIssueMutations,
         githubIssueRelationships,
@@ -465,6 +482,8 @@ export const makeLiveRuntime = ({
         opencode,
         progress,
         runStateStore,
+        pipelineRunStateStore:
+            pipelineRunStateStoreOverride ?? pipelineRunStateStore,
         workspace,
     };
 };
