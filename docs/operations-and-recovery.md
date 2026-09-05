@@ -125,6 +125,30 @@ configuration is not stored in this tree):
             └── metadata.json
 ```
 
+The `get-pipelines-green` mode keeps a separate pipeline state machine under
+the same run directory:
+
+```text
+<workspace>/.ralphie/runs/<run-id>/
+├── state.json                 # issue-mode state, when applicable
+├── events.jsonl               # output-independent progress log
+└── pipeline/
+    ├── state.json             # pipeline run state
+    └── diagnostics.json       # bounded failure evidence, when collected
+```
+
+Pipeline `state.json` is versioned and atomically replaced before observation,
+around every observable phase and mutation boundary, after a reconciled push,
+and on failure or cancellation. It records the repository and branch, the
+absolute original deadline, maximum and confirmed-push attempt counts, current
+remote SHA, phase, external-movement count, clean checkpoint, bounded snapshot
+projection, diagnostic reference, normalized failure fingerprint,
+created/pushed commit evidence, ordered attempt records, and terminal outcome.
+Raw provider payloads and unbounded CI text do not enter this state file.
+Diagnostics are stored at `pipeline/diagnostics.json` by the read-only collector;
+they retain only bounded, terminal-sanitized evidence and are wrapped as
+untrusted input when supplied to OpenCode. Values are not redacted.
+
 `state.json` is versioned, schema-validated, and atomically replaced. It
 contains the repository/branch/workflow, selected `onNeedsAttention` policy,
 notification settings and any pending notification intent, OpenCode selection,
@@ -163,6 +187,13 @@ stateDiagram-v2
   green evidence against the current head, re-observes failed gates on a
   later rerun, and reconciles an already-merged PR without another merge
   call.
+- A `get-pipelines-green` outcome is green only when a non-empty complete
+  snapshot has every visible item in `passing` state, has no source or
+  completeness error, and the final authoritative remote-HEAD read still
+  equals the observed SHA. `pending`, `acceptable`, `failing`, `cancelled`,
+  `unknown`, `no-pipelines-discovered`, stale-head, ambiguous-push, timeout,
+  and repair failures remain non-green and retain pipeline state and
+  diagnostics. Successful cleanup is not attempted for these outcomes.
 - OpenCode is closed on success, failure, cancellation, and scoped defects. Ordinary
   failures set process exit code `1`.
 - Cancellation is checked before long-running boundaries and passed into OpenCode.
@@ -287,6 +318,24 @@ Examples of resumable boundaries:
   are reconciled idempotently, and a child attached to the wrong parent or a
   native relationship that disagrees with a child's marker halts with a
   recovery diagnostic instead of silently reparenting or duplicating issues.
+
+Pipeline resume boundaries are reconciled independently from issue state:
+
+- a saved green result is returned as green only when the live remote SHA is
+  unchanged; a changed branch invalidates the old snapshot and starts a fresh
+  observation rather than reporting stale success;
+- a saved snapshot or diagnostic reference for another SHA is discarded while
+  the original deadline and attempt history remain;
+- a clean created commit already present at the remote is recorded as one
+  confirmed push without issuing another push or charging another attempt;
+- a pending created commit with the remote still at its checkpoint may retry
+  one non-force push after local clean-checkout and repository-safety proof;
+  an unrelated remote movement stops the run without following, resetting, or
+  force-pushing over it; and
+- a saved deadline is authoritative. Resume never extends it, and cancellation
+  or timeout restores only an uncommitted repair when the local branch and head
+  still match the clean checkpoint. A committed local repair is retained for
+  explicit reconciliation.
 
 Native sub-issue and dependency endpoints require a compatible GitHub host. On
 unsupported servers (for example older GitHub Enterprise Server versions) or

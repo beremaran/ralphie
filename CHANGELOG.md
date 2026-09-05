@@ -348,6 +348,23 @@ All notable changes to Ralphie are documented here. The project follows
   meaningful state transitions, and finishes with a race-safe remote-HEAD
   check that reports a stale result when the branch advances so callers can
   follow a newly advanced HEAD.
+- Complete the `--mode get-pipelines-green` release slice. The dedicated
+  direct base-branch runner authenticates and prepares one selected branch,
+  observes every supported Check Run, Check Suite, legacy status, and Actions
+  workflow source for one exact SHA, collects bounded terminal-sanitized
+  diagnostics, and runs a persisted repair/verify/commit/non-force-push loop.
+  A green exit requires a non-empty all-passing snapshot with no source or
+  completeness errors and a final current-HEAD proof; pending, acceptable,
+  failing, cancelled, unknown, and no-pipeline outcomes fail closed. The
+  versioned pipeline state adapter records absolute deadlines, confirmed-push
+  attempts, checkpoints, fingerprints, diagnostic references, and commit
+  evidence atomically; resume invalidates stale snapshots, reconciles an
+  ambiguous push without duplicate charging, and preserves the original
+  deadline. Dry-run performs authentication, preparation, observation, and
+  diagnostics only. The CLI reference, end-to-end trace, safety model,
+  operations/recovery guide, architecture map, and README document the mode,
+  output/exit contract, incompatible flags, provider limitations, untrusted CI
+  handling, artifact paths, cancellation, and recovery behavior.
 - An opt-in `RALPHIE_RUN_GITHUB_SUB_ISSUES_SMOKE` integration test that
   exercises the real native sub-issue and dependency API in a configured
   sandbox repository: attachment and dependency idempotency, reads, live

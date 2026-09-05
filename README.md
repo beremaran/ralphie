@@ -22,6 +22,11 @@ described below. `--mode maintain-issues` is a separate, bounded one-shot
 backlog-reconciliation mode: it improves issue metadata and discussion but
 never implements or delivers code. A scheduler can invoke that command
 periodically; Ralphie does not run an in-process daemon or watch loop.
+`--mode get-pipelines-green` is a third, independent mode for observing every
+supported check on one exact base-branch commit and, when checks fail, asking
+OpenCode for a bounded repair before Ralphie commits and pushes the repair
+directly to that same branch. It does not discover issues or create pull
+requests.
 
 For task-oriented details, start with the [documentation index](./docs/README.md).
 
@@ -45,6 +50,10 @@ For task-oriented details, start with the [documentation index](./docs/README.md
   planning and deterministic GitHub services to add existing labels, ask or
   answer grounded questions, link related issues, and link likely duplicates.
   Duplicate closure is a separate explicit opt-in.
+- **Pipeline recovery** — `--mode get-pipelines-green` observes Check Runs,
+  legacy commit statuses, Check Suites, and Actions workflow runs for one
+  immutable commit SHA, repairs failing checks within a persisted attempt and
+  time budget, and proves the current remote HEAD is green before succeeding.
 - **Observable, bounded autonomy** — transcripts, progress, JSON Lines output,
   a five-attempt review limit, and non-force pushes are
   built in.
@@ -349,6 +358,124 @@ outcome around every action. Resume with `--resume <state.json>` to reconcile
 the exact pending action; changed snapshots, comments, candidates, or
 grounding HEADs invalidate stale plans, and an ambiguous response is resolved
 from live state before any retry.
+
+## Get pipelines green mode
+
+`get-pipelines-green` is a direct base-branch operation. It authenticates,
+prepares the repository, reads the selected branch's remote HEAD, and observes
+all supported pipeline sources for that exact commit. If the snapshot is
+failing, Ralphie collects bounded diagnostics, starts a fresh OpenCode repair
+session, reviews and verifies the staged tree, creates one non-force-deliverable
+commit, and proves that the repaired commit is the current remote HEAD with a
+green final observation. It never runs issue discovery, complexity routing,
+decomposition, issue closure, pull-request creation/merge, or workflow reruns.
+
+Choose a branch explicitly when possible; without `--branch`, Ralphie uses
+`main` when it exists and otherwise `master`:
+
+```bash
+bunx @beremaran/ralphie owner/repository \
+  --mode get-pipelines-green --branch main
+```
+
+The mode has its own budgets. `--max-attempts` defaults to `3` and counts only
+repairs confirmed on the remote; an external branch movement does not consume
+an attempt. `--pipeline-timeout` defaults to `30m` and accepts exactly a
+positive integer followed immediately by one unit: `s` for seconds, `m` for
+minutes, or `h` for hours. Examples are `30s`, `10m`, and `2h`; decimals,
+compound durations, spaces, and a zero duration are invalid. The deadline is
+absolute across observation, agent work, verification, commit, push, and final
+proof; resume never starts a new clock.
+
+The all-visible-checks policy reads the GitHub Check Runs, Check Suites, legacy
+commit-status contexts, and Actions workflow-run sources that can be associated
+with the exact SHA and branch. Their provider values are normalized to these
+states:
+
+| State | Meaning in the pipeline mode |
+| --- | --- |
+| `passing` | The check reports a known successful result. |
+| `acceptable` | A known neutral or skipped result; it is retained as evidence but does not prove green. |
+| `pending` | The check is queued, requested, waiting, or in progress; observation continues until the deadline. |
+| `failing` | A known failure, timeout, error, startup failure, or action-required result. |
+| `cancelled` | The check was cancelled, stale, or superseded. |
+| `unknown` | The provider value is unrecognized, contradictory, malformed, or lacks enough exact scope to classify safely. |
+
+Exit `0` is reserved for a non-empty complete snapshot in which every
+normalized item is `passing`, no source or completeness error exists, and the
+final remote-HEAD read still equals the observed SHA. Neutral, skipped,
+cancelled, unknown, failing, and pending results are not green. An empty
+snapshot is held only for the observer's bounded registration-grace window;
+when no checks appear after that window the outcome is
+`no-pipelines-discovered` and the command exits `1`. Terminal snapshots can
+also require a quiescence window or repeated identical confirmations when the
+embedding observer is configured; the top-level command uses the current
+observer defaults (zero extra grace/quiescence and one green confirmation) and
+still performs the final current-HEAD proof.
+
+The GitHub APIs are the authority for this policy. A missing endpoint,
+insufficient token scope, pagination failure, ambiguous provider identity, or
+unknown status becomes a non-green result; Ralphie does not scrape rendered
+web pages, infer hidden checks, or turn a partial source read into success.
+Diagnostics may retrieve only bounded, allowlisted job-log evidence. CI text is
+untrusted evidence enclosed in `<untrusted-pipeline-diagnostics>` markers for
+the repair agent; it is never treated as instructions. Values are bounded and
+terminal-sanitized at the artifact boundary, not redacted.
+
+Pipeline delivery is guarded by exact local and remote invariants. Ralphie
+captures a clean checkpoint, confirms the repository and branch, stages and
+reviews only the repair tree, rechecks the remote immediately before the
+mutation, and uses a non-force push to the explicit branch ref. A concurrent
+branch advance invalidates the stale repair; Ralphie observes the new HEAD
+instead of resetting over it. A push response is not proof: the authoritative
+remote read must prove the new SHA. Ralphie never force-pushes, reruns a
+workflow, creates a PR, or delegates commit/push authority to OpenCode.
+
+Pipeline state and diagnostics remain available after a failed or cancelled
+run:
+
+```text
+<workspace>/.ralphie/runs/<run-id>/pipeline/state.json
+<workspace>/.ralphie/runs/<run-id>/pipeline/diagnostics.json
+<workspace>/.ralphie/runs/<run-id>/events.jsonl
+```
+
+State is atomically persisted before observation and at each repair, commit,
+push, reconciliation, failure, and cancellation boundary. `--resume` validates
+the saved repository and branch, refetches the remote HEAD, invalidates a stale
+snapshot, and reconciles an ambiguous push. If the recorded clean commit is
+already the remote HEAD, resume records the push once and never charges it
+again; if the remote moved elsewhere, resume stops rather than guessing. An
+uncommitted repair is restored to its clean checkpoint when safe. Successful
+completion is the only path eligible for `--clean end`; failed and cancelled
+runs retain their workspace and artifacts.
+
+`--dry-run` is the read-only pipeline preview. It authenticates, prepares and
+inspects the checkout, observes the current HEAD through the same all-visible
+checks policy, waits/classifies within the observation boundary, and collects
+diagnostics for a failing snapshot. It does not start OpenCode, edit or stage
+files, commit, push, rerun Actions, mutate GitHub, or create a PR. A failing
+preview reports that a repair would be attempted and exits `1`; a green preview
+still does not perform delivery and is reported as a dry-run outcome. Use JSON
+output when a scheduler needs the exact state transitions:
+
+```bash
+bunx @beremaran/ralphie owner/repository \
+  --mode get-pipelines-green --branch main --dry-run \
+  --pipeline-timeout 10m --output json
+```
+
+Pipeline progress uses typed stages for remote read, observation, diagnostics,
+repair, commit-message generation, commit, push, reconciliation, final
+verification, resume, and outcome. Default output is interactive only on a
+TTY; otherwise it is deterministic append-only plain text. `--output verbose`
+adds details without expanding the three-row interactive region,
+`--output quiet` still prints failures, and `--output json` emits parseable JSON
+Lines containing the same phase, SHA, attempt, diagnostic-path, and final-outcome
+details.
+Pipeline failures and setup failures exit `1`; caller cancellation exits
+`130`. The issue and maintenance modes keep their existing queue, output, and
+exit contracts unchanged.
 
 ## Documentation
 

@@ -106,6 +106,37 @@ text is generated from the same typed projection as the structured result and
 is enclosed in `<untrusted-pipeline-diagnostics>` markers; provider content
 cannot escape those markers or inject a second closing marker.
 
+## Pipeline delivery orchestration and state
+
+`--mode get-pipelines-green` is deliberately not a branch in the issue queue.
+`src/get-pipelines-green.ts` owns the top-level lifecycle: authentication,
+workspace and branch preparation, remote-head capture, deadline creation,
+progress, dry-run isolation, resume decisions, OpenCode lifetime, and terminal
+exit outcomes. `src/issues/pipeline-delivery-loop.ts` owns the repeated
+observation/diagnostic/repair/commit/push/final-proof safety machine. The
+boundary is explicit in `RalphieRuntime`: the runner receives
+`pipelineDeliveryGit`, `pipelineDeliveryLoop`, `pipelineDiagnostics`,
+`gitRemoteSafety`, and `pipelineRunStateStore` as injectable services.
+
+The pipeline state store in `src/run/pipeline-state.ts` is a versioned adapter,
+not a second issue queue. It persists a bounded projection of the current
+remote SHA, normalized statuses, failure fingerprint, checkpoint, attempt
+history, diagnostic reference, and created/pushed commit evidence at
+`.ralphie/runs/<run-id>/pipeline/state.json`. Writes use a unique temporary
+file followed by an atomic rename. Resume re-reads the remote before any
+mutation, invalidates evidence for a changed SHA, reconciles a created commit
+that already arrived, and retains the original absolute deadline. This keeps
+the state seam small and makes failure, ambiguous-push, cancellation, and
+stale-head cases directly testable without an OpenCode server or GitHub write.
+
+The runner exposes the same typed progress contract as the other modes. Pipeline
+phase events carry the phase boundary, exact remote SHA when known, pushed
+attempt count, external-movement count, failure fingerprint, diagnostic path,
+and terminal outcome details. The output renderer determines whether those
+events are interactive, append-only, quiet, or JSON Lines; it does not alter
+the underlying safety state machine. A green outcome is the only successful
+terminal state.
+
 ## Dependency and side-effect rules
 
 Agents own reasoning and edits within their permitted tool boundary. They do not
@@ -139,6 +170,8 @@ binary, installer, Homebrew, and container distribution machinery was removed.
 | Pipeline snapshot normalization and collection | `src/github/pipeline-snapshot.ts`, `src/github/pipeline-snapshot-collector.ts` |
 | Bounded, deadline-aware pipeline observation, paginated exact-SHA reads, retries, and final HEAD check | `src/github/pipeline-observation.ts`, `src/github/pipeline-snapshot-collector.ts` |
 | Pipeline diagnostics collection, persistence, and repair boundary | `src/github/pipeline-diagnostics-collector.ts`, `src/github/pipeline-diagnostics-service.ts`, `src/github/pipeline-diagnostics-artifact.ts`, `src/github/pipeline-diagnostics-boundary.ts` |
+| Pipeline mode orchestration and direct delivery | `src/get-pipelines-green.ts`, `src/issues/pipeline-delivery-loop.ts`, `src/git/pipeline-delivery.ts` |
+| Pipeline state, bounded persistence, and resume reconciliation | `src/run/pipeline-state.ts` |
 | Complexity routing | `src/issues/executor.ts`, `src/issues/complexity.ts` |
 | Implementation/review/delivery | `src/issues/implementation-executor.ts` |
 | Decomposition and GitHub mutations | `src/issues/decomposition-executor.ts`, `src/github/issue-mutations.ts`, `src/github/issue-relationships.ts` |

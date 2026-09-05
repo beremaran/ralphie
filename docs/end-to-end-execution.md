@@ -16,6 +16,9 @@ The top-level `--mode` defaults to `issues`; inside that mode the default
 delivery workflow is `lgtm`. `--mode maintain-issues` selects a separate
 one-shot issue-reconciliation path and does not deliver code. `pr`, `--dry-run`,
 and `--resume` change the path at the points called out below.
+`--mode get-pipelines-green` selects a separate direct base-branch pipeline
+state machine; it does not enter issue discovery, complexity routing, or PR
+delivery.
 
 ## 1. Trigger and bootstrap
 
@@ -68,6 +71,15 @@ maintenance progress coordinator, and dispatches to `maintainIssues`. A
 maintenance dry run has no event-log path and does not create persisted state;
 the non-dry-run path owns its separate state file and closes the read-only
 planning session after the pass or a recoverable failure.
+
+For `--mode get-pipelines-green`, the command loads the pipeline-specific state
+when resuming, creates the same output/progress boundary, and dispatches to the
+dedicated pipeline runner. The runner owns the pipeline state file under the
+`pipeline/` directory, uses the injected Git and diagnostics services, and
+starts OpenCode only after authentication, repository preparation, remote-head
+capture, and state persistence have succeeded. A dry run stops before starting
+OpenCode; a non-green terminal outcome is reported as an ordinary failure,
+while caller cancellation retains state and maps to exit `130`.
 
 ## 2. Workflow preflight
 
@@ -629,6 +641,140 @@ the open PR and source issue for a later rerun.
 The direct-push path never uses force. A push rejection is authoritative: the
 created commit and artifacts are retained, the run halts, and resume can
 reconcile a commit that may already have reached the remote.
+
+### Get-pipelines-green mode
+
+The pipeline mode is a separate top-level path. Its trigger is:
+
+```bash
+bunx @beremaran/ralphie owner/repository \
+  --mode get-pipelines-green --branch main \
+  --max-attempts 3 --pipeline-timeout 30m
+```
+
+The runner selects the explicit branch, or `main` followed by `master` when no
+branch is supplied. It authenticates with the same GitHub client as the issue
+workflows, prepares the repository checkout, reads `origin/<branch>` through
+the pipeline Git boundary, and persists a pipeline state record before the
+first observation. It bypasses issue discovery, issue budgets, complexity
+assessment, decomposition, issue closure, pull-request creation/merge, and
+workflow reruns.
+
+#### Observation and classification
+
+One observation is always scoped to the immutable commit SHA captured from the
+remote branch. The collector reads the supported GitHub sources for that SHA
+and branch: Check Runs, Check Suites, legacy commit-status contexts, and
+Actions workflow runs. Pagination and source failures are preserved as source
+errors. A green candidate must have at least one complete item, no source or
+completeness errors, every item normalized to `passing`, and a final branch
+HEAD read equal to the observed SHA.
+
+The normalizer uses this closed vocabulary:
+
+| Normalized state | Classification |
+| --- | --- |
+| `passing` | A known successful conclusion for the selected check. |
+| `acceptable` | Known `neutral` or `skipped`; terminal evidence that is deliberately not green. |
+| `pending` | Queued, requested, waiting, or in-progress work; the observer continues polling. |
+| `failing` | Failure, timeout, error, startup failure, or action-required work. |
+| `cancelled` | Cancelled, stale, or superseded work. |
+| `unknown` | An unrecognized, contradictory, malformed, or insufficiently scoped provider value. |
+
+An empty snapshot is subject to the observer's registration-grace boundary;
+when that grace expires without a check, the outcome is
+`no-pipelines-discovered`, not green. Pending snapshots continue until the
+absolute observation deadline. A terminal snapshot may be held through a
+quiescence window and may require repeated identical green confirmations when
+the observer is embedded with those settings. The top-level pipeline runner
+uses the observer's current defaults (zero extra registration grace,
+quiescence, and one green confirmation) while still performing the final
+current-HEAD proof. The outer `--pipeline-timeout` is the total run deadline,
+not a fresh timeout per poll or repair.
+
+The provider boundary is intentionally conservative. Missing API scope,
+unsupported endpoints, pagination or transport errors, ambiguous identities,
+malformed records, and unknown statuses are non-green. GitHub API responses are
+the only check authority: the runner does not scrape HTML, infer checks that
+the API did not return, or silently ignore a failed source. Diagnostics may
+retrieve only bounded, allowlisted job-log evidence. Provider text is retained
+as evidence, sanitized for terminal controls at persistence, and wrapped in
+`<untrusted-pipeline-diagnostics>` markers before it reaches the repair agent;
+it cannot provide instructions or escape the evidence boundary.
+
+#### Repair and direct delivery
+
+For a failing snapshot, the loop records the normalized failure fingerprint,
+collects bounded diagnostics, captures the clean checkout, and starts a fresh
+repair session. The agent can edit only the permitted worktree; Ralphie owns
+staging, review, deterministic verification, commit-message validation, commit,
+push, and final observation. The delivery sequence is:
+
+1. Re-read the remote and verify the repository, branch, and clean checkpoint.
+2. Persist the failure and diagnostic references before repair work.
+3. Let the repair executor produce and review a candidate staged tree.
+4. Reconcile the remote before committing; a branch movement invalidates the
+   candidate instead of charging an attempt or creating a stale commit.
+5. Create one commit from the approved exact tree and persist its SHA, parent,
+   and tree identity.
+6. Recheck the local/remote invariants and issue one non-force push to the
+   explicit `HEAD:refs/heads/<branch>` destination.
+7. Read the authoritative remote HEAD after the push. Only a read proving the
+   created SHA is remote can confirm the attempt; a push response alone is not
+   proof.
+8. Observe the pushed SHA again and require the final current-HEAD green proof.
+
+`--max-attempts` defaults to three confirmed remote repairs. External branch
+movement, an ambiguous push, and an unconfirmed repair do not authorize a
+blind retry or force push. A repeated normalized failure fingerprint stops the
+loop rather than spending attempts on the same evidence. The final outcome
+vocabulary includes `green`, `no-pipelines-discovered`, `no-change`,
+`review-exhausted`, `identical-failure`, `attempts-exhausted`,
+`external-movement`, `ambiguous-push`, `non-fast-forward`, `timeout`,
+`cancelled`, `dry-run`, and `failed`; every outcome other than `green` exits
+non-zero.
+
+#### Dry run, output, and recovery
+
+Pipeline dry run authenticates and prepares/inspects the checkout, reads and
+observes the current remote HEAD, waits/classifies according to the observer,
+and collects diagnostics for a failing result. It does not start OpenCode,
+edit/stage/commit/push, rerun Actions, mutate GitHub, or create a PR. A failing
+preview reports `dry-run` with `wouldRepair: true` in the runner summary and
+exits `1`; a green preview still performs no delivery. Use
+`--output json` when a scheduler needs the same transitions as human output.
+
+Pipeline progress stages are typed as `pipeline-remote-read`,
+`pipeline-observation`, `pipeline-diagnostics`, `pipeline-repair`,
+`pipeline-commit-message`, `pipeline-commit`, `pipeline-push`,
+`pipeline-reconcile`, `pipeline-final-verification`, `pipeline-resume`, and
+`pipeline-outcome`. Human/verbose output reports the phase, branch, SHA,
+attempt, diagnostic path, and outcome. JSON output emits those details as
+parseable JSON Lines; quiet output suppresses routine phases but retains
+failures. Ordinary pipeline failures exit `1`; an operator cancellation exits
+`130`; only green exits `0`.
+
+Pipeline state is stored separately from issue and maintenance state:
+
+```text
+<workspace>/.ralphie/runs/<run-id>/pipeline/state.json
+<workspace>/.ralphie/runs/<run-id>/pipeline/diagnostics.json
+<workspace>/.ralphie/runs/<run-id>/events.jsonl
+```
+
+The state file is versioned and atomically replaced before observation, at each
+phase/mutation boundary, after a reconciled push, and on terminal failure or
+cancellation. It contains the repository, branch, original absolute deadline,
+attempt counters, checkpoint, bounded snapshot, diagnostic reference,
+failure fingerprint, created/pushed commit evidence, and ordered attempt
+records. `--resume` validates the saved repository and branch, refetches the
+remote HEAD, invalidates evidence for a different SHA, and reconciles a
+possibly lost push response. If the recorded clean commit is already remote,
+resume records it once and does not duplicate the push or charge the attempt;
+if the remote moved elsewhere, resume stops safely. An uncommitted repair is
+restored to the clean checkpoint when the local branch/head still match;
+committed work is retained for explicit reconciliation. The saved deadline is
+never restarted, and `--clean end` runs only after a green outcome.
 
 ## 8. State, progress, and resume
 
