@@ -324,6 +324,7 @@ const classifyObservedRemote = async (
                 pushResponseLost: push.failed,
             };
         }
+        // Stricter than pipeline delivery by design: a managed revision confirms only on a clean checkout.
         // The commit arrived but the clean-checkout half of confirmed
         // success cannot be proven; require safe reconciliation.
         return ambiguousDelivery(

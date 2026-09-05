@@ -736,7 +736,7 @@ export const makePipelineDeliveryLoopService = (
                 phases,
             });
 
-        /** Rebase the clean local checkpoint onto a newer remote head. */
+        /** Rebase the clean local checkpoint onto a newer remote head. Unpushed commits are orphaned locally but retained in the attempt record; revision delivery intentionally never follows. */
         const reconcileMovement = async (options: {
             readonly expectedRemoteSha: string;
             readonly actualRemoteSha: string;
