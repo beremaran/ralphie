@@ -33,6 +33,8 @@ describe("runtime factory", () => {
         expect(runtime.pipelineObservation.observe).toBeFunction();
         expect(runtime.pipelineDiagnostics).toBeDefined();
         expect(runtime.pipelineDiagnostics.collectAndStore).toBeFunction();
+        expect(runtime.pipelineRepairExecutor).toBeDefined();
+        expect(runtime.pipelineRepairExecutor.execute).toBeFunction();
         expect(runtime.maintenanceSnapshot).toBeDefined();
         expect(runtime.maintenanceSnapshot.capture).toBeFunction();
         expect(runtime.maintenanceSnapshot.read).toBe(

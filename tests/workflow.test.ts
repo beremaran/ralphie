@@ -513,6 +513,7 @@ const testRuntime = (
         pipelineSnapshot: {} as never,
         pipelineObservation,
         pipelineDiagnostics: {} as never,
+        pipelineRepairExecutor: {} as never,
         maintenanceSnapshot: {} as never,
         githubIssues,
         githubIssueMutations: mutations,

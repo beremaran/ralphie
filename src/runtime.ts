@@ -81,6 +81,10 @@ import {
     type PipelineDiagnosticsServiceDependencies,
 } from "./github/pipeline-diagnostics-service.ts";
 import {
+    makePipelineRepairExecutorService,
+    type PipelineRepairExecutorService,
+} from "./issues/pipeline-repair-executor.ts";
+import {
     makeGitHubNeedsAttentionNotificationService,
     type GitHubNeedsAttentionNotificationService,
 } from "./github/needs-attention.ts";
@@ -168,6 +172,8 @@ export type RalphieRuntime = {
     readonly pipelineObservation: PipelineObservationService;
     /** Collects, persists, and prompt-bounds diagnostics for a failed run. */
     readonly pipelineDiagnostics: PipelineDiagnosticsService;
+    /** Pipeline-only diagnose/edit/review boundary; never commits or pushes. */
+    readonly pipelineRepairExecutor: PipelineRepairExecutorService;
     readonly githubIssues: GitHubIssuesService;
     readonly githubIssueMutations: GitHubIssueMutationService;
     readonly githubIssueRelationships: GitHubIssueRelationshipService;
@@ -225,6 +231,8 @@ export type RuntimeOverrides = {
     readonly pipelineObservationDependencies?: PipelineObservationServiceDependencies;
     /** Optional deterministic seams for the pipeline diagnostics runtime path. */
     readonly pipelineDiagnosticsDependencies?: PipelineDiagnosticsServiceDependencies;
+    /** Optional deterministic pipeline repair executor for orchestration tests. */
+    readonly pipelineRepairExecutor?: PipelineRepairExecutorService;
     /** Optional deterministic seam for maintenance snapshot tests. */
     readonly maintenanceSnapshot?: MaintenanceSnapshotService;
     /** Optional deterministic maintenance planner used by runner tests. */
@@ -251,6 +259,7 @@ export const makeLiveRuntime = ({
     workspace = WorkspaceLive,
     pipelineObservationDependencies,
     pipelineDiagnosticsDependencies,
+    pipelineRepairExecutor: pipelineRepairExecutorOverride,
     maintenanceSnapshot: maintenanceSnapshotOverride,
     maintenancePlanner: maintenancePlannerOverride,
     maintenancePlannerForAgent: maintenancePlannerForAgentOverride,
@@ -325,6 +334,14 @@ export const makeLiveRuntime = ({
     );
     const needsAttentionRouter = makeNeedsAttentionRouterService(issueRecovery);
     const issueVerification = makeIssueVerificationService(commandRunner);
+    const pipelineRepairExecutor =
+        pipelineRepairExecutorOverride ??
+        makePipelineRepairExecutorService({
+            issueOperations: gitIssueOperations,
+            checkpoint: gitIssueCheckpoint,
+            captureCheckpoint: gitIssueCheckpoint.capture,
+            stagedTreeSha: issueVerification.stagedTreeSha,
+        });
     const pullRequestReviewCoordinator =
         makePullRequestReviewCoordinatorService({
             pullRequests: githubPullRequests,
@@ -381,6 +398,7 @@ export const makeLiveRuntime = ({
         pipelineSnapshot,
         pipelineObservation,
         pipelineDiagnostics,
+        pipelineRepairExecutor,
         githubIssues,
         githubIssueMutations,
         githubIssueRelationships,
