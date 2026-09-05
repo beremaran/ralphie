@@ -87,7 +87,7 @@ const makeRunner = (
         lsRemoteCalls: 0,
         pushed: false,
     };
-    const readRemoteHead = (joined: string): CommandResult => {
+    const readRemoteHead = (): CommandResult => {
         state.lsRemoteCalls += 1;
         if (options.postPushRemote !== undefined && state.lsRemoteCalls >= 3) {
             if (options.postPushRemote.kind === "unparseable") {

@@ -21,10 +21,7 @@ import type {
 import type { PullRequestReviewAttemptResult } from "../src/issues/pull-request-review.ts";
 import type {
     PipelineObservationOutcome,
-    PipelineObservationRead,
     PipelineObservationService,
-    PipelineObservationTransition,
-    PipelineRemoteHeadReader,
     PipelineSnapshot,
     PipelineSnapshotFetcher,
 } from "../src/github/pipeline-observation.ts";
@@ -34,7 +31,6 @@ import { makeParentCompletionService } from "../src/github/parent-completion.ts"
 import type { GitHubNeedsAttentionNotificationService } from "../src/github/needs-attention.ts";
 import type { GitHubIssue, GitHubIssuesService } from "../src/github/issues.ts";
 import {
-    type IssueCompletionKind,
     type IssueExecutionContext,
     type IssueExecutionOutcome,
     IssueExecutionOutcomeKind,
@@ -60,8 +56,6 @@ import {
     makeProgressRecorder,
     type ProgressReporterService,
     type ProgressUpdate,
-    type ProgressStage,
-    type ProgressStatus,
 } from "../src/progress/progress.ts";
 import {
     type RunState,
@@ -710,7 +704,7 @@ const groundedRouteExecutor = (
         Awaited<ReturnType<typeof makeIssueArtifactStore>>
     >();
     const artifacts: IssueArtifactStoreService = {
-        forIssue: async (issueNumber, _scope, signal) => {
+        forIssue: async (issueNumber, _scope) => {
             const existing = stores.get(issueNumber);
             if (existing !== undefined) return existing;
             const created = await makeIssueArtifactStore(issueNumber);
@@ -1016,7 +1010,6 @@ describe("workflow", () => {
         };
         const coordinator: PullRequestReviewCoordinatorService = {
             review: async () => coordinatorResult,
-            execute: async () => coordinatorResult,
         };
         const summary = await workflow(
             { ...baseOptions, workflow: WorkflowMode.Pr },
@@ -1133,10 +1126,6 @@ describe("workflow", () => {
         };
         const coordinator: PullRequestReviewCoordinatorService = {
             review: async (input) => {
-                resumedRevision = input.resumeRevision;
-                return coordinatorResult;
-            },
-            execute: async (input) => {
                 resumedRevision = input.resumeRevision;
                 return coordinatorResult;
             },

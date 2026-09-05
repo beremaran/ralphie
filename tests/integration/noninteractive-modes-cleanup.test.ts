@@ -6,7 +6,6 @@ import { join } from "node:path";
 import {
     runCommand,
     type CliTerminalInfo,
-    type CommandFactories,
     type CommandOutput,
     type CommandRuntime,
 } from "../../src/command.ts";

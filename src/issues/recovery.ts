@@ -9,11 +9,7 @@ import {
 import type { GitRepositoryInvariantService } from "../git/repository-invariant.ts";
 import type { NeedsAttentionRequest } from "../agent/task-session.ts";
 import type { GitHubIssue } from "../github/issues.ts";
-import {
-    type ProgressStage,
-    type ProgressStatus,
-    type ProgressReporterService,
-} from "../progress/progress.ts";
+import { type ProgressReporterService } from "../progress/progress.ts";
 import { RalphieError } from "../shared/error.ts";
 import {
     needsAttentionDecisionSchema,
@@ -22,11 +18,7 @@ import {
     ReviewVerdict,
 } from "./decisions.ts";
 import { resolveWorkspacePath } from "../workspace/workspace.ts";
-import {
-    IssueQueueResumeStrategy,
-    type IssueWorkflowKind,
-    REVIEW_ITERATION_LIMIT,
-} from "./stage.ts";
+import { IssueQueueResumeStrategy, REVIEW_ITERATION_LIMIT } from "./stage.ts";
 import type { VerificationEvidence } from "./verification.ts";
 import type { IssueFreshnessFingerprint } from "./artifacts.ts";
 

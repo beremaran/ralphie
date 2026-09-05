@@ -21,7 +21,6 @@ import type { GitHubIssuesService } from "../../src/github/issues.ts";
 import { DEFAULT_AGENT } from "../../src/agent/model.ts";
 import { requestStructuredOutput } from "../../src/agent/structured-output.ts";
 import {
-    AGENT_DECISION_PERMISSION_POLICY,
     makeAgentSessionDiagnostics,
     type NeedsAttentionRequest,
 } from "../../src/agent/task-session.ts";
@@ -311,7 +310,7 @@ const makeFakeRecovery = (
 };
 
 const makeRealRouter = (
-    progress: ProgressReporterService,
+    _progress: ProgressReporterService,
 ): {
     readonly router: NeedsAttentionRouterService;
     readonly recovery: IssueRecoveryService;
@@ -895,8 +894,6 @@ describe("needs-attention router", () => {
     );
 
     test("confirms with one fresh read-only verifier session and invokes recovery once", async () => {
-        const events: ProgressUpdate[] = [];
-        const progress = makeProgressRecorder(events);
         const { client, prompts, creates } = fakePi([
             {
                 titlePrefix: VERIFIER_TITLE,
@@ -1084,7 +1081,7 @@ describe("issue executor needs-attention routing", () => {
         const harness = await makeExecutorHarness({
             trace,
             grounding: {
-                assess: async (context) => ({
+                assess: async () => ({
                     decision: attentionDecision,
                     sessionID: "grounding-1",
                     needsAttention: attentionRequest,
@@ -1189,7 +1186,7 @@ describe("issue executor needs-attention routing", () => {
     test("ignores a complexity side-channel without confirmation or routing", async () => {
         const harness = await makeExecutorHarness({
             complexity: {
-                assess: async (context) => ({
+                assess: async () => ({
                     decision: {
                         complexity: ComplexityLevel.Level2,
                         rationale: "Directly actionable.",
@@ -1438,7 +1435,7 @@ describe("issue executor needs-attention routing", () => {
         const harness = await makeExecutorHarness({
             withRouter: false,
             grounding: {
-                assess: async (context) => ({
+                assess: async () => ({
                     decision: attentionDecision,
                     sessionID: "grounding-1",
                     needsAttention: attentionRequest,

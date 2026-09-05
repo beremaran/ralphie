@@ -428,7 +428,7 @@ const verifyManagedBaseAncestry = async (
         );
         throw new Error("unreachable");
     }
-    const [behind, ahead] = counts;
+    const [behind] = counts;
     if (behind !== 0) {
         failManaged(
             "invalid-managed-checkout",

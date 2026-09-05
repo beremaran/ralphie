@@ -4,12 +4,10 @@ import { z } from "zod";
 
 import {
     DRY_RUN_ROUTES,
-    type IssueCompletionKind,
     IssueExecutionOutcomeKind,
 } from "../issues/execution.ts";
 import {
     NeedsAttentionReason,
-    commitMessageDecisionSchema,
     nonBlankStringSchema,
 } from "../issues/decisions.ts";
 import {

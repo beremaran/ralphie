@@ -12,7 +12,6 @@ import {
     pipelineRunStateSchema,
     reconcilePipelineRunStateOnResume,
     safePipelineSnapshot,
-    setPipelineRunPhase,
     updatePipelineRunState,
     validatePipelineResumeState,
 } from "../../src/run/pipeline-state.ts";

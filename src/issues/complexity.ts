@@ -1,10 +1,6 @@
 import { requestStructuredOutput } from "../agent/structured-output.ts";
 import { buildComplexityPrompt } from "../agent/prompts.ts";
-import {
-    type ProgressStage,
-    type ProgressStatus,
-    type ProgressReporterService,
-} from "../progress/progress.ts";
+import { type ProgressReporterService } from "../progress/progress.ts";
 import { RalphieError } from "../shared/error.ts";
 import {
     complexityDecisionSchema,

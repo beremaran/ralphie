@@ -21,7 +21,7 @@ Useful individual commands:
 
 | Command | Purpose |
 | --- | --- |
-| `bun run test` | Run the full Bun test suite, including offline unit tests, local integration/PTY coverage, and in-memory GitHub REST fixtures. The suite does not require live GitHub, OpenCode, or registry credentials; some tests use temporary checkouts and local subprocesses. |
+| `bun run test` | Run the full Bun test suite, including offline unit tests, local integration/PTY coverage, and in-memory GitHub clients and stubs. The suite does not require live GitHub, OpenCode, or registry credentials; some tests use temporary checkouts and local subprocesses. |
 | `bun run typecheck` | Type-check without emitting JavaScript. |
 | `bun run format` | Format the repository with Biome. |
 | `bun run format:check` | Verify formatting without modifying files. |
@@ -62,30 +62,9 @@ tag, and the tag-triggered publish workflow validates the tag/package version
 (`scripts/validate-npm-context.ts`), builds, smoke-checks, and runs
 `bun publish`. No other distribution channel exists.
 
-## Local GitHub REST fixture
-
-`src/github/rest-fixture.ts` provides a reusable, deterministic in-memory HTTP
-fixture serving the GitHub-shaped issue, comment, and native sub-issue and
-dependency endpoints used by `makeGitHubIssuesService`,
-`makeGitHubIssueMutationsService`, and
-`makeGitHubIssueRelationshipService`: list/paginate issues, read issues and
-comments, create/update/close issues (with lost-response reconciliation), and
-the `client.request` relationship routes. Start one with
-`startGitHubRestFixture()`, seed repository records and relationships, point a
-real Octokit client at `fixture.baseUrl` (pass it to the explicit
-`makeGitHubClientService` seam or set `RALPHIE_GITHUB_REST_FIXTURE_URL`), and
-drive the actual domain services against it.
-
-Per-operation response sequences (`fixture.enqueue`) can force controlled
-HTTP, malformed, or lost-response failures; every request is recorded as a
-method/path/body/authorization observation in fixture memory, outside the
-Ralphie state volume. Unknown or public-shaped paths are rejected with a loud
-HTTP 500 and are never proxied. The unit suite drives the production domain
-services against the fixture (see `tests/github/issues.test.ts`).
-
 The `bun run test` suite is deliberately offline: it combines fast in-memory
-unit tests with local integration, PTY, temporary-checkout, and REST-fixture
-coverage. It does not contact GitHub, OpenCode, npm, or a container registry.
+unit tests with local integration, PTY, and temporary-checkout coverage. It does
+not contact GitHub, OpenCode, npm, or a container registry.
 The former distribution-channel and live network smoke suites (standalone
 installer, Docker image, Homebrew reconciliation, and release publication)
 were removed from the default gate; the package registry check remains an
@@ -107,8 +86,7 @@ Before submitting a change:
    recovery contract changes.
 
 Add in-memory unit tests for new behavior, following the patterns in the
-remaining files under `tests/` (use `src/github/rest-fixture.ts` for GitHub
-paths). Do not
+remaining files under `tests/`. Do not
 run the mutating CLI against an uncontrolled repository while developing; use
 `--dry-run --max-issues 1` and a repository you control when a command-level
 check is needed. Reusing a workspace can reset and clean that checkout, and

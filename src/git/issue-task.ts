@@ -1,6 +1,3 @@
-import { type IssueStageKind } from "../issues/stage.ts";
-import { type StructuredOutputName } from "../agent/session.ts";
-
 export type GitIssueAction =
     | "capture-issue-base"
     | "stage-all"

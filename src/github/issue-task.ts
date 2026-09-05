@@ -1,6 +1,3 @@
-import { type IssueStageKind } from "../issues/stage.ts";
-import { type StructuredOutputName } from "../agent/session.ts";
-
 export type GitHubIssueAction =
     | "create-breakdown-issues"
     | "attach-native-sub-issues"

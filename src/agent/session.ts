@@ -1,5 +1,3 @@
-import { type IssueStageKind } from "../issues/stage.ts";
-
 export type StructuredOutputName =
     | "grounding-decision"
     | "issue-resolution-decision"

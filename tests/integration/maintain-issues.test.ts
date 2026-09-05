@@ -51,7 +51,6 @@ import { RalphieExitCode } from "../../src/process/exit-code.ts";
 import {
     makeProgressRecorder,
     type ProgressReporterService,
-    type ProgressUpdate,
 } from "../../src/progress/progress.ts";
 import type { MaintenanceRunStateStoreService } from "../../src/maintain-issues-state.ts";
 import type { AgentClient } from "../../src/opencode/client.ts";

@@ -32,8 +32,6 @@ export type PipelineItemStatus =
     | "failing"
     | "cancelled"
     | "unknown";
-export type PipelineStatus = PipelineItemStatus;
-
 export type PipelineSnapshotReason =
     | "success"
     | "pending"
@@ -1455,29 +1453,3 @@ export function normalizePipelineSnapshot(
         fingerprint: pipelineSnapshotFingerprint(withReason),
     };
 }
-
-export const normalizePipelineObservations = normalizePipelineSnapshot;
-export const isGreenCandidate = isPipelineGreenCandidate;
-export const normalizePipelineStatus = classifyPipelineStatus;
-
-export {
-    collectPipelineChecksSnapshot,
-    collectPipelineSnapshot,
-    GitHubPipelineSnapshotLive,
-    makeGitHubChecksSnapshotService,
-    makeGitHubPipelineSnapshotService,
-    makePipelineCheckSnapshotService,
-    makePipelineChecksSnapshotCollectorService,
-    makePipelineSnapshotCollector,
-    makePipelineSnapshotCollectorService,
-    makePipelineSnapshotService,
-    PipelineSnapshotCollectorLive,
-} from "./pipeline-snapshot-collector.ts";
-export type {
-    GitHubPipelineSnapshotService,
-    PipelineChecksSnapshotCollectorService,
-    PipelineSnapshotCollectorDependencies,
-    PipelineSnapshotCollectorOperation,
-    PipelineSnapshotCollectorService,
-    PipelineSnapshotRequestExecutor,
-} from "./pipeline-snapshot-collector.ts";

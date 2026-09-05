@@ -3,7 +3,6 @@ import { z } from "zod";
 
 import {
     type ProgressStage,
-    type ProgressStatus,
     type ProgressIssue,
     type ProgressReporterService,
 } from "../progress/progress.ts";

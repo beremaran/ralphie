@@ -65,8 +65,6 @@ export type MaintainableIssueState =
 export type IssueState = MaintainableIssueState;
 export type MaintainableState = MaintainableIssueState;
 
-const KNOWN_ISSUE_STATES: ReadonlyArray<string> = ["open", "closed"];
-
 export const normalizeMaintainableIssueState = (
     value: unknown,
 ): MaintainableIssueState => {
@@ -116,13 +114,6 @@ export type MaintainableActorType =
     | MaintainableUnknownValue;
 export type ActorType = MaintainableActorType;
 export type MaintainableActorKind = MaintainableActorType;
-
-const KNOWN_ACTOR_TYPES: ReadonlyArray<string> = [
-    "User",
-    "Bot",
-    "Organization",
-    "Mannequin",
-];
 
 export const normalizeMaintainableActorType = (
     value: unknown,

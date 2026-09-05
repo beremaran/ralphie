@@ -332,18 +332,15 @@ decision task is schema-validated at the OpenCode response and Ralphie domain
 boundaries; invalid output or OpenCode failure becomes a failed issue outcome
 without proceeding to the next operation.
 
-Decision schemas that are discriminated unions (issue grounding and its
-needs-attention route) are flattened into a single JSON schema for the
-OpenCode structured-output request: the disposition literal becomes an enum,
-the branch-specific fields stay declared but optional, and authoritative Zod
-validation still enforces each branch exactly. The client asks the server for a
-fenced `json` result and retries with the validation error when parsing or
-schema validation fails; explicit nulls are normalized away before validation.
-An optional fenced `needs-attention` block is extracted separately so a blocker
-does not weaken validation of the primary decision. A turn with no assistant
-message is reported as a silent-turn failure, while a response that never
-produces a schema-valid result fails with a bounded diagnostic rather than
-being treated as a decision.
+The canonical Zod decision schemas are passed directly to the OpenCode
+structured-output request as JSON Schema, and the same schemas validate the
+returned value at the domain boundary. The client asks the server for a fenced
+`json` result and retries with the validation error when parsing or schema
+validation fails. An optional fenced `needs-attention` block is extracted
+separately so a blocker does not weaken validation of the primary decision. A
+turn with no assistant message is reported as a silent-turn failure, while a
+response that never produces a schema-valid result fails with a bounded
+diagnostic rather than being treated as a decision.
 
 ## 5. Implementation path: complexity 0–3
 

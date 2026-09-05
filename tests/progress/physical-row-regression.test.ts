@@ -60,8 +60,6 @@ const makeResizeSource = () => {
     };
 };
 
-type Harness = ReturnType<typeof makeHarness>;
-
 /**
  * Interactive coordinator harness with a strategy recorder, fake refresh
  * timer, and fake resize source, mirroring `command.ts` wiring.

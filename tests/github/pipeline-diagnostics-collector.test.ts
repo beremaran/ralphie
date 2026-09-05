@@ -524,14 +524,14 @@ describe("composed pipeline diagnostics collector", () => {
         expect(truncatedResult.truncated).toBe(true);
     });
 
-    test("exposes the explicit read service", async () => {
+    test("exposes the diagnostics collection service", async () => {
         const service = makePipelineDiagnosticsService({
             checks: {
                 getCheck: async () => checkResponse(200),
                 listAnnotations: async () => annotationsResponse(),
             },
         });
-        const result = await service.read({
+        const result = await service.collect({
             request,
             diagnostics: [checkDiagnostic()],
         });

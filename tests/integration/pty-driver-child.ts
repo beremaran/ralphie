@@ -35,11 +35,7 @@ import { appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 
-import {
-    runCommand,
-    type CommandFactories,
-    type CommandRuntime,
-} from "../../src/command.ts";
+import { runCommand, type CommandFactories } from "../../src/command.ts";
 import type {
     AgentEventContext,
     AgentEventListener,

@@ -54,13 +54,11 @@
   "devDependencies": {
     "@biomejs/biome": "^2.5.10",
     "@types/bun": "latest",
-    "ajv": "8.17.1",
     "typescript": "^5"
   },
   "dependencies": {
     "@opencode-ai/client": "^0.0.0-beta-18999",
     "octokit": "^5.0.5",
-    "simple-git": "^3.36.0",
     "zod": "^4.4.3"
   },
   "scripts": {

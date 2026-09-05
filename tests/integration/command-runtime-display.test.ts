@@ -84,9 +84,6 @@ const context: AgentEventContext = {
 /** Fixed clock so every rendered duration and footer is byte-identical. */
 const FIXED_NOW = () => new Date("2026-01-01T00:00:00.000Z");
 
-const asEvent = (value: unknown): AgentSessionEvent =>
-    value as AgentSessionEvent;
-
 type FakeTimer = FooterTimer & { readonly run: () => void };
 
 const makeFakeTimer = (): FakeTimer => {
@@ -1122,10 +1119,7 @@ const HUMAN_GLYPHS = [
  * Parse every non-empty stdout line as one complete JSON record: the stream
  * is newline-delimited with no partial lines and no trailing garbage.
  */
-const parseJsonRecords = (
-    stdout: string,
-    scenario: ScenarioName,
-): readonly JsonRecord[] => {
+const parseJsonRecords = (stdout: string): readonly JsonRecord[] => {
     expect(stdout.endsWith("\n")).toBe(true);
     const lines = stdout.split("\n");
     expect(lines.at(-1)).toBe("");
@@ -1402,7 +1396,7 @@ describe("command runtime display: noninteractive fallback", () => {
                 expect(result.stderrBytes()).toBe("");
 
                 // (1) Every non-empty line parses as one complete JSON record.
-                const records = parseJsonRecords(stdout, scenario);
+                const records = parseJsonRecords(stdout);
 
                 // (2) Every record is exactly one of two shapes.
                 const { progressRecords, opencodeRecords } =

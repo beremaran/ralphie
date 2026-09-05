@@ -152,12 +152,9 @@ export type JobLogExcerptsResult = JsonObject & {
     readonly errors: ReadonlyArray<DiagnosticError>;
 };
 
-/** Service shape matching the repository's explicit read-only services. */
+/** Service shape for bounded job-log excerpt collection. */
 export type JobLogExcerptsService = {
     readonly collect: (
-        input: JobLogExcerptsInput,
-    ) => Promise<JobLogExcerptsResult>;
-    readonly read: (
         input: JobLogExcerptsInput,
     ) => Promise<JobLogExcerptsResult>;
 };
@@ -340,7 +337,6 @@ const truncatedError = (
  * classified disposition is pinned by the caller and never "ok".
  */
 const pinnedOutcome = (
-    job: JobLogExcerptJob,
     message: string,
     evidence: unknown,
     disposition: DiagnosticFailureDisposition,
@@ -358,7 +354,6 @@ const pinnedOutcome = (
  * is reported "unavailable", never "ok".
  */
 const transportOutcome = (
-    job: JobLogExcerptJob,
     message: string,
     evidence: unknown,
     cause: unknown,
@@ -426,7 +421,6 @@ const resolveLocation = async (
         return {
             kind: "outcome",
             outcome: pinnedOutcome(
-                job,
                 "job-log endpoint is not callable.",
                 { jobId: job.jobId },
                 "unavailable",
@@ -436,7 +430,6 @@ const resolveLocation = async (
         return {
             kind: "outcome",
             outcome: pinnedOutcome(
-                job,
                 "job-log request executor is not callable.",
                 { jobId: job.jobId },
                 "unavailable",
@@ -454,7 +447,6 @@ const resolveLocation = async (
         return {
             kind: "outcome",
             outcome: transportOutcome(
-                job,
                 "job-log request failed.",
                 { jobId: job.jobId },
                 cause,
@@ -466,7 +458,6 @@ const resolveLocation = async (
         return {
             kind: "outcome",
             outcome: transportOutcome(
-                job,
                 `job-log endpoint responded with a non-success status ${String(status)}.`,
                 { jobId: job.jobId, status },
                 response,
@@ -477,7 +468,6 @@ const resolveLocation = async (
         return {
             kind: "outcome",
             outcome: pinnedOutcome(
-                job,
                 "job-log response did not include the documented Location redirect.",
                 { jobId: job.jobId },
                 "malformed",
@@ -490,7 +480,6 @@ const resolveLocation = async (
         return {
             kind: "outcome",
             outcome: pinnedOutcome(
-                job,
                 "job-log Location header is not a usable URL.",
                 { jobId: job.jobId, location },
                 "malformed",
@@ -501,7 +490,6 @@ const resolveLocation = async (
         return {
             kind: "outcome",
             outcome: pinnedOutcome(
-                job,
                 "job-log Location header is not an https URL.",
                 { jobId: job.jobId, location },
                 "malformed",
@@ -521,14 +509,12 @@ const fetchJobOutcome = async (
     const url = resolved.url;
     if (!isGithubLogHostAllowed(url.hostname, transport.allowedHosts))
         return pinnedOutcome(
-            job,
             "Signed job-log URL host is outside the GitHub allowlist and was never fetched.",
             { jobId: job.jobId, host: url.hostname },
             "unavailable",
         );
     if (!transport.fetchCallable)
         return pinnedOutcome(
-            job,
             "job-log transport is not callable.",
             { jobId: job.jobId },
             "unavailable",
@@ -539,7 +525,6 @@ const fetchJobOutcome = async (
     } catch (cause) {
         if (signal?.aborted === true) throw cause;
         return transportOutcome(
-            job,
             "job-log body fetch failed.",
             { jobId: job.jobId },
             cause,
@@ -548,7 +533,6 @@ const fetchJobOutcome = async (
     const status = responseStatus(delivered);
     if (status !== undefined && (status < 200 || status >= 300))
         return transportOutcome(
-            job,
             `job-log body responded with a non-success status ${String(status)}.`,
             { jobId: job.jobId, status },
             delivered,
@@ -556,7 +540,6 @@ const fetchJobOutcome = async (
     const body = responseBody(delivered);
     if (body === undefined)
         return pinnedOutcome(
-            job,
             "job-log body is not readable text.",
             { jobId: job.jobId },
             "malformed",
@@ -676,17 +659,11 @@ export const collectJobLogExcerpts = (
 ): Promise<JobLogExcerptsResult> =>
     collectWithDependencies(input, dependencies);
 
-/** Alias emphasizing that the retriever returns bounded excerpts per job. */
-export const collectJobLogExcerptsForJobs = collectJobLogExcerpts;
-
-/** Factory for the job-log excerpt read service. */
+/** Factory for the job-log excerpt service. */
 export const makePipelineDiagnosticsLogsService = (
     dependencies: JobLogExcerptsDependencies = {},
 ): JobLogExcerptsService => {
     const collect = (input: JobLogExcerptsInput) =>
         collectWithDependencies(input, dependencies);
-    return { collect, read: collect };
+    return { collect };
 };
-
-/** Compatibility alias naming the retriever rather than the service. */
-export const makeJobLogExcerptRetriever = makePipelineDiagnosticsLogsService;

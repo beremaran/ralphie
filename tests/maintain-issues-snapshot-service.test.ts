@@ -15,7 +15,6 @@ import type { MaintainableSnapshot } from "../src/maintain/github-reader.ts";
 import type { MaintainableIssueSummary } from "../src/maintain/github-reader/lists.ts";
 import {
     createMaintainableIssue,
-    createMaintainableThread,
     type MaintainableIssue,
     type MaintainableSkip,
 } from "../src/maintain-issues-snapshot.ts";

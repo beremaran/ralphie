@@ -164,10 +164,6 @@ export type PullRequestReviewAttemptService = {
     readonly review: (
         input: PullRequestReviewAttemptInput,
     ) => Promise<PullRequestReviewAttemptResult>;
-    /** Compatibility name for orchestrators that model each call as execution. */
-    readonly execute: (
-        input: PullRequestReviewAttemptInput,
-    ) => Promise<PullRequestReviewAttemptResult>;
 };
 
 const checkSignal = (signal: AbortSignal | undefined): void => {
@@ -335,5 +331,5 @@ export const makePullRequestReviewAttemptService = (
         };
     };
 
-    return { review, execute: review };
+    return { review };
 };

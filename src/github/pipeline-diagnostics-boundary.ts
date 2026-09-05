@@ -289,8 +289,6 @@ const errorsFor = (
         ...artifact.errors,
         ...artifact.jobs.errors,
         ...artifact.checks.errors,
-        ...artifact.workflowRun.errors,
-        ...artifact.checkRuns.errors,
         ...artifact.logs.errors,
         ...artifact.records.flatMap((record) =>
             isRecord(record) && Array.isArray(record.errors)
@@ -372,9 +370,6 @@ export const projectRepairDiagnostics = (
         omitted: false,
         omittedCounts: { records: 0, logs: 0, errors: 0, fields: 0 },
     }) as RepairDiagnostics;
-
-export const createRepairDiagnostics = projectRepairDiagnostics;
-export const makeRepairDiagnostics = projectRepairDiagnostics;
 
 type OmissionState = {
     records: number;
@@ -568,15 +563,8 @@ export const buildPipelineDiagnosticsBoundary = (
     return { structured, text: completeText(encoded(structured)) };
 };
 
-export const createPipelineDiagnosticsBoundary =
-    buildPipelineDiagnosticsBoundary;
-export const makePipelineDiagnosticsBoundary = buildPipelineDiagnosticsBoundary;
-export const serializePipelineDiagnostics = buildPipelineDiagnosticsBoundary;
-
 /** Render only the marked textual form for prompt interpolation. */
 export const renderPipelineDiagnostics = (
     artifact: PipelineDiagnosticsArtifact,
     options: PipelineDiagnosticsBoundaryOptions = {},
 ): string => buildPipelineDiagnosticsBoundary(artifact, options).text;
-
-export const renderRepairDiagnostics = renderPipelineDiagnostics;

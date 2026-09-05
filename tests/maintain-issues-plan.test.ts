@@ -193,25 +193,6 @@ const candidateSummaries = (): ReadonlyArray<MaintainableIssueSummary> => [
 const candidateSnapshot = (subject = baseIssue()): MaintenanceSnapshot =>
     makeSnapshot([subject], candidateSummaries());
 
-const candidateFor = (
-    snapshot: MaintenanceSnapshot,
-    targetIssueNumber: number,
-) =>
-    validateIssueMaintenancePlan(snapshot, 1, {
-        issueNumber: 1,
-        snapshotFingerprint: snapshot.fingerprint,
-        summary: "skip",
-        actions: [
-            {
-                action: "skip",
-                issueNumber: 1,
-                reason: "uncertain",
-                rationale: "fixture",
-                candidateId: `issue:1->${String(targetIssueNumber)}`,
-            },
-        ],
-    });
-
 const actionBase = (
     snapshot: MaintenanceSnapshot,
 ): {

@@ -1,7 +1,6 @@
 import { RunStateStatus, type RunState } from "./state.ts";
 import { RalphieError } from "../shared/error.ts";
 import { IssueExecutionOutcomeKind } from "../issues/execution.ts";
-import { type ProgressStage } from "../progress/progress.ts";
 
 export type RunReconciliationStatus =
     | "compatible"

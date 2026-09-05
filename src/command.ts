@@ -3,7 +3,6 @@ import { dirname, join } from "node:path";
 import { z } from "zod";
 
 import {
-    type CleanWhen,
     DEFAULT_EXECUTION_MODE,
     DuplicateAction,
     ExecutionMode,

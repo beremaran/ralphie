@@ -54,8 +54,6 @@ const artifactFor = (
         errors,
         jobs,
         checks,
-        workflowRun: jobs,
-        checkRuns: checks,
     } as PipelineDiagnosticsCollectionResult;
     return createPipelineDiagnosticsArtifact({
         collection,

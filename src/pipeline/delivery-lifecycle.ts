@@ -2272,6 +2272,8 @@ export const makePipelineDeliveryLifecycle = (
                     context.repository,
                     saved?.branch ?? context.branch,
                     context.workspace,
+                    undefined,
+                    context.signal,
                 ),
             success: (value) => `Repository ready: ${value.path}.`,
             repository: context.repository,

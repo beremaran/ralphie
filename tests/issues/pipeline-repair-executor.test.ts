@@ -139,7 +139,7 @@ const fakeAgent = (plans: ReadonlyArray<AgentPlan>) => {
     let promptIndex = 0;
     const client: AgentClient = {
         session: {
-            create: async (input, options) => {
+            create: async (input) => {
                 creates.push(input as unknown as Record<string, unknown>);
                 return { data: { id: `session-${creates.length}` } };
             },

@@ -183,9 +183,6 @@ export type PullRequestReviewCoordinatorService = {
     readonly review: (
         input: PullRequestReviewCoordinatorInput,
     ) => Promise<PullRequestReviewCoordinatorResult>;
-    readonly execute: (
-        input: PullRequestReviewCoordinatorInput,
-    ) => Promise<PullRequestReviewCoordinatorResult>;
 };
 
 const sameSha = (left: string, right: string): boolean =>
@@ -1037,7 +1034,7 @@ export const makePullRequestReviewCoordinatorService = (
         );
     };
 
-    return { review, execute: review };
+    return { review };
 };
 
 export const PullRequestReviewCoordinatorLive =

@@ -85,8 +85,6 @@ export const pipelineDiagnosticsArtifactSchema = z
         errors: z.array(z.unknown()),
         jobs: collectionSchema,
         checks: collectionSchema,
-        workflowRun: collectionSchema,
-        checkRuns: collectionSchema,
         logs: logsSchema,
     })
     .passthrough();
@@ -150,8 +148,6 @@ export const pipelineDiagnosticsPath = (scope: IssueArtifactScope): string =>
         "pipeline",
         "diagnostics.json",
     );
-
-export const getPipelineDiagnosticsPath = pipelineDiagnosticsPath;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
     typeof value === "object" && value !== null && !Array.isArray(value);
@@ -463,34 +459,17 @@ const artifactFrom = (
     const errors = Array.isArray(sanitized.errors) ? [...sanitized.errors] : [];
     const jobs = boundCollection(sanitized.jobs, "pipeline.jobs", true);
     const checks = boundCollection(sanitized.checks, "pipeline.checks", false);
-    const workflowRun = boundCollection(
-        sanitized.workflowRun,
-        "pipeline.workflow-run",
-        true,
-    );
-    const checkRuns = boundCollection(
-        sanitized.checkRuns,
-        "pipeline.check-runs",
-        false,
-    );
     const logs = boundedLogRecords(sanitized.logs);
     const truncated =
         sanitized.truncated === true ||
         jobs.truncated ||
         checks.truncated ||
-        workflowRun.truncated ||
-        checkRuns.truncated ||
         logs.truncated;
     const propagatedErrors = [
         ...propagatedTruncationError(
             jobs,
             "pipeline.jobs",
             "Serialized job diagnostics were truncated.",
-        ),
-        ...propagatedTruncationError(
-            workflowRun,
-            "pipeline.workflow-run",
-            "Serialized workflow-run diagnostics were truncated.",
         ),
         ...propagatedTruncationError(
             logs,
@@ -503,8 +482,6 @@ const artifactFrom = (
         version: PIPELINE_DIAGNOSTICS_ARTIFACT_VERSION,
         jobs: jobs.collection,
         checks: checks.collection,
-        workflowRun: workflowRun.collection,
-        checkRuns: checkRuns.collection,
         logs: logs.logs,
         errors: [...errors, ...propagatedErrors],
         truncated,
@@ -515,7 +492,6 @@ const artifactFrom = (
 };
 
 export const createPipelineDiagnosticsArtifact = artifactFrom;
-export const normalizePipelineDiagnosticsArtifact = artifactFrom;
 
 const persistAtomically = async (
     filePath: string,
@@ -604,5 +580,3 @@ export const makePipelineDiagnosticsStore = (
         read: async () => await readPipelineDiagnostics(filePath, fileSystem),
     };
 };
-
-export const PipelineDiagnosticsStoreLive = makePipelineDiagnosticsStore;

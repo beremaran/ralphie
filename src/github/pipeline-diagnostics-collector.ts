@@ -58,10 +58,6 @@ export type PipelineDiagnosticsCollectorInput = {
     readonly signal?: AbortSignal;
 };
 
-export type PipelineDiagnosticsInput = PipelineDiagnosticsCollectorInput;
-export type PipelineDiagnosticsCollectionInput =
-    PipelineDiagnosticsCollectorInput;
-
 /**
  * Dependencies for the composed operation.  A child can be supplied either
  * as its explicit service or as its endpoint dependency object; this keeps
@@ -72,35 +68,12 @@ export type PipelineDiagnosticsCollectorDependencies = {
     readonly client?: Octokit;
     readonly request?: PipelineSnapshotRequestExecutor;
 
-    readonly workflowRun?:
-        | WorkflowRunDiagnosticsService
-        | WorkflowRunDiagnosticsDependencies;
     readonly jobs?:
         | WorkflowRunDiagnosticsService
         | WorkflowRunDiagnosticsDependencies;
-    readonly workflowRunCollector?: WorkflowRunDiagnosticsService;
-    readonly jobsCollector?: WorkflowRunDiagnosticsService;
-    readonly workflowRunDependencies?: WorkflowRunDiagnosticsDependencies;
-    readonly jobsDependencies?: WorkflowRunDiagnosticsDependencies;
-    readonly workflowRunOptions?: WorkflowRunDiagnosticsDependencies;
-    readonly jobsOptions?: WorkflowRunDiagnosticsDependencies;
-
-    readonly checkRun?:
-        | CheckRunDiagnosticsService
-        | CheckRunDiagnosticsDependencies;
     readonly checks?:
         | CheckRunDiagnosticsService
         | CheckRunDiagnosticsDependencies;
-    readonly checkRuns?:
-        | CheckRunDiagnosticsService
-        | CheckRunDiagnosticsDependencies;
-    readonly checkRunCollector?: CheckRunDiagnosticsService;
-    readonly checksCollector?: CheckRunDiagnosticsService;
-    readonly checkRunDependencies?: CheckRunDiagnosticsDependencies;
-    readonly checksDependencies?: CheckRunDiagnosticsDependencies;
-    readonly checkRunsDependencies?: CheckRunDiagnosticsDependencies;
-    readonly checkRunOptions?: CheckRunDiagnosticsDependencies;
-    readonly checksOptions?: CheckRunDiagnosticsDependencies;
 };
 
 /** The two child results plus the deterministic aggregate. */
@@ -118,25 +91,13 @@ export type PipelineDiagnosticsCollectionResult = {
     readonly jobs: CollectionResult;
     /** Check runs and annotations collected by the check-run child. */
     readonly checks: CollectionResult;
-    /** Explicit aliases for callers that use the source names. */
-    readonly workflowRun: CollectionResult;
-    readonly checkRuns: CollectionResult;
 };
-
-export type PipelineDiagnosticsResult = PipelineDiagnosticsCollectionResult;
-export type PipelineDiagnosticsCollectorResult =
-    PipelineDiagnosticsCollectionResult;
 
 export type PipelineDiagnosticsCollectorService = {
     readonly collect: (
         input: PipelineDiagnosticsCollectorInput,
     ) => Promise<PipelineDiagnosticsCollectionResult>;
-    readonly read: (
-        input: PipelineDiagnosticsCollectorInput,
-    ) => Promise<PipelineDiagnosticsCollectionResult>;
 };
-
-export type PipelineDiagnosticsService = PipelineDiagnosticsCollectorService;
 
 const EXACT_COMMIT_SHA = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/i;
 const FALLBACK_REQUEST: PipelineSnapshotRequest = {
@@ -168,9 +129,6 @@ type RankedRecord = {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
     typeof value === "object" && value !== null && !Array.isArray(value);
-
-const hasOwn = (value: object, key: string): boolean =>
-    Object.prototype.hasOwnProperty.call(value, key);
 
 const text = (value: unknown): string | undefined =>
     typeof value === "string" && value.trim().length > 0
@@ -608,19 +566,6 @@ const isWorkflowService = (
 const isCheckService = (value: unknown): value is CheckRunDiagnosticsService =>
     isRecord(value) && typeof value.collect === "function";
 
-const hasWorkflowService = (
-    dependencies: PipelineDiagnosticsCollectorDependencies,
-): boolean =>
-    isWorkflowService(dependencies.workflowRun) ||
-    isWorkflowService(dependencies.jobs);
-
-const hasCheckService = (
-    dependencies: PipelineDiagnosticsCollectorDependencies,
-): boolean =>
-    isCheckService(dependencies.checkRun) ||
-    isCheckService(dependencies.checks) ||
-    isCheckService(dependencies.checkRuns);
-
 const childRequest = (
     dependencies: { readonly request?: PipelineSnapshotRequestExecutor },
     signal: AbortSignal | undefined,
@@ -656,16 +601,9 @@ const workflowDependencies = (
         ...(dependencies.request === undefined
             ? {}
             : { request: dependencies.request }),
-        ...(dependencies.workflowRunDependencies ?? {}),
-        ...(dependencies.jobsDependencies ?? {}),
-        ...(dependencies.workflowRunOptions ?? {}),
-        ...(dependencies.jobsOptions ?? {}),
-        ...(!hasWorkflowService(dependencies)
-            ? {
-                  ...(dependencies.workflowRun ?? {}),
-                  ...(dependencies.jobs ?? {}),
-              }
-            : {}),
+        ...(isWorkflowService(dependencies.jobs)
+            ? {}
+            : (dependencies.jobs ?? {})),
     } as WorkflowRunDiagnosticsDependencies;
     const request = childRequest(merged, signal);
     return request === undefined ? merged : { ...merged, request };
@@ -682,18 +620,9 @@ const checkDependencies = (
         ...(dependencies.request === undefined
             ? {}
             : { request: dependencies.request }),
-        ...(dependencies.checkRunDependencies ?? {}),
-        ...(dependencies.checksDependencies ?? {}),
-        ...(dependencies.checkRunsDependencies ?? {}),
-        ...(dependencies.checkRunOptions ?? {}),
-        ...(dependencies.checksOptions ?? {}),
-        ...(!hasCheckService(dependencies)
-            ? {
-                  ...(dependencies.checkRun ?? {}),
-                  ...(dependencies.checks ?? {}),
-                  ...(dependencies.checkRuns ?? {}),
-              }
-            : {}),
+        ...(isCheckService(dependencies.checks)
+            ? {}
+            : (dependencies.checks ?? {})),
     } as CheckRunDiagnosticsDependencies;
     const request = childRequest(merged, signal);
     return request === undefined ? merged : { ...merged, request };
@@ -703,12 +632,6 @@ const workflowServiceFor = (
     dependencies: PipelineDiagnosticsCollectorDependencies,
     signal: AbortSignal | undefined,
 ): WorkflowRunDiagnosticsService => {
-    if (dependencies.workflowRunCollector !== undefined)
-        return dependencies.workflowRunCollector;
-    if (dependencies.jobsCollector !== undefined)
-        return dependencies.jobsCollector;
-    if (isWorkflowService(dependencies.workflowRun))
-        return dependencies.workflowRun;
     if (isWorkflowService(dependencies.jobs)) return dependencies.jobs;
     return makeWorkflowRunDiagnosticsService(
         workflowDependencies(dependencies, signal),
@@ -719,13 +642,7 @@ const checkServiceFor = (
     dependencies: PipelineDiagnosticsCollectorDependencies,
     signal: AbortSignal | undefined,
 ): CheckRunDiagnosticsService => {
-    if (dependencies.checkRunCollector !== undefined)
-        return dependencies.checkRunCollector;
-    if (dependencies.checksCollector !== undefined)
-        return dependencies.checksCollector;
-    if (isCheckService(dependencies.checkRun)) return dependencies.checkRun;
     if (isCheckService(dependencies.checks)) return dependencies.checks;
-    if (isCheckService(dependencies.checkRuns)) return dependencies.checkRuns;
     return makeCheckRunDiagnosticsService(
         checkDependencies(dependencies, signal),
     );
@@ -944,8 +861,6 @@ const aggregate = (
             : { observation: input.observation }),
         jobs,
         checks,
-        workflowRun: jobs,
-        checkRuns: checks,
     };
 };
 
@@ -1024,20 +939,11 @@ export const collectPipelineDiagnostics = async (
     return aggregate(resolved, jobs, checks);
 };
 
-/** Alias emphasizing that the operation is an explicit read. */
-export const readPipelineDiagnostics = collectPipelineDiagnostics;
-export const collectPipelineDiagnosticsForFailure = collectPipelineDiagnostics;
-export const collectPipelineDiagnosticsSnapshot = collectPipelineDiagnostics;
-
-/** Factory for the composed read-only diagnostics service. */
+/** Factory for the composed diagnostics service. */
 export const makePipelineDiagnosticsService = (
     dependencies: PipelineDiagnosticsCollectorDependencies = {},
 ): PipelineDiagnosticsCollectorService => {
     const collect = (input: PipelineDiagnosticsCollectorInput) =>
         collectPipelineDiagnostics(input, dependencies);
-    return { collect, read: collect };
+    return { collect };
 };
-
-export const makePipelineDiagnosticsCollector = makePipelineDiagnosticsService;
-export const makePipelineDiagnosticsAssemblyService =
-    makePipelineDiagnosticsService;

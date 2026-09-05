@@ -74,11 +74,9 @@ describe("committed-diff cancellation boundary", () => {
 
     test("propagates an in-flight abort of the subprocess as CommandAbortedError", async () => {
         const controller = new AbortController();
-        let rejectRun: ((error: unknown) => void) | undefined;
         const runner: CommandRunnerService = {
             run: (_command, _args, options) =>
                 new Promise((_resolve, reject) => {
-                    rejectRun = reject;
                     options?.signal?.addEventListener(
                         "abort",
                         () =>

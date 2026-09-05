@@ -3,7 +3,6 @@ import type { Octokit } from "octokit";
 
 import {
     normalizePipelineSnapshot,
-    type ExactCommitSha,
     type JsonObject,
     type JsonValue,
     type PipelineObservationKind,
@@ -568,48 +567,16 @@ const collectSnapshot = async (
     });
 };
 
-const requestForArguments = (
-    requestOrRepository: PipelineSnapshotRequest | string,
-    branch?: string,
-    commitSha?: ExactCommitSha,
-): PipelineSnapshotRequest =>
-    typeof requestOrRepository === "string"
-        ? {
-              repository: requestOrRepository,
-              branch: branch ?? "",
-              commitSha: commitSha ?? "",
-          }
-        : requestOrRepository;
-
-const isAbortSignal = (value: unknown): value is AbortSignal =>
-    isRecord(value) && typeof value.aborted === "boolean";
-
 const collectOperation = (
     requestExecutor: PipelineSnapshotRequestExecutor,
     checksOnly: boolean,
 ): PipelineSnapshotCollectorOperation => {
     const collect = (
         client: Octokit,
-        requestOrRepository: PipelineSnapshotRequest | string,
-        branchOrSignal?: string | AbortSignal,
-        commitSha?: ExactCommitSha,
+        request: PipelineSnapshotRequest,
         signal?: AbortSignal,
-    ): Promise<PipelineSnapshot> => {
-        const objectSignal =
-            typeof requestOrRepository !== "string" &&
-            isAbortSignal(branchOrSignal)
-                ? branchOrSignal
-                : signal;
-        const branch =
-            typeof branchOrSignal === "string" ? branchOrSignal : undefined;
-        return collectSnapshot(
-            client,
-            requestForArguments(requestOrRepository, branch, commitSha),
-            objectSignal,
-            requestExecutor,
-            checksOnly,
-        );
-    };
+    ): Promise<PipelineSnapshot> =>
+        collectSnapshot(client, request, signal, requestExecutor, checksOnly);
     return collect;
 };
 
@@ -619,59 +586,21 @@ export type PipelineSnapshotCollectorOperation = {
         request: PipelineSnapshotRequest,
         signal?: AbortSignal,
     ): Promise<PipelineSnapshot>;
-    (
-        client: Octokit,
-        repository: string,
-        branch: string,
-        commitSha: ExactCommitSha,
-        signal?: AbortSignal,
-    ): Promise<PipelineSnapshot>;
 };
 
-export function collectPipelineSnapshot(
+export const collectPipelineSnapshot = (
     client: Octokit,
     request: PipelineSnapshotRequest,
     signal?: AbortSignal,
-): Promise<PipelineSnapshot>;
-export function collectPipelineSnapshot(
-    client: Octokit,
-    repository: string,
-    branch: string,
-    commitSha: ExactCommitSha,
-    signal?: AbortSignal,
-): Promise<PipelineSnapshot>;
-export function collectPipelineSnapshot(
-    client: Octokit,
-    requestOrRepository: PipelineSnapshotRequest | string,
-    branchOrSignal?: string | AbortSignal,
-    commitSha?: ExactCommitSha,
-    signal?: AbortSignal,
-): Promise<PipelineSnapshot> {
-    const objectSignal =
-        typeof requestOrRepository !== "string" && isAbortSignal(branchOrSignal)
-            ? branchOrSignal
-            : signal;
-    const branch =
-        typeof branchOrSignal === "string" ? branchOrSignal : undefined;
-    return collectSnapshot(
-        client,
-        requestForArguments(requestOrRepository, branch, commitSha),
-        objectSignal,
-        requestDirectly,
-        false,
-    );
-}
+): Promise<PipelineSnapshot> =>
+    collectSnapshot(client, request, signal, requestDirectly, false);
 
 export type PipelineSnapshotCollectorService = {
     readonly collect: PipelineSnapshotCollectorOperation;
-    readonly read: PipelineSnapshotCollectorOperation;
 };
-
-export type GitHubPipelineSnapshotService = PipelineSnapshotCollectorService;
 
 export type PipelineChecksSnapshotCollectorService = {
     readonly collect: PipelineSnapshotCollectorOperation;
-    readonly read: PipelineSnapshotCollectorOperation;
 };
 
 export const makePipelineSnapshotCollectorService = (
@@ -679,7 +608,7 @@ export const makePipelineSnapshotCollectorService = (
 ): PipelineSnapshotCollectorService => {
     const request = dependencies.request ?? requestDirectly;
     const collect = collectOperation(request, false);
-    return { collect, read: collect };
+    return { collect };
 };
 
 export const makePipelineChecksSnapshotCollectorService = (
@@ -687,24 +616,8 @@ export const makePipelineChecksSnapshotCollectorService = (
 ): PipelineChecksSnapshotCollectorService => {
     const request = dependencies.request ?? requestDirectly;
     const collect = collectOperation(request, true);
-    return { collect, read: collect };
+    return { collect };
 };
-
-export const collectPipelineChecksSnapshot: PipelineSnapshotCollectorOperation =
-    collectOperation(requestDirectly, true);
-
-export const makeGitHubPipelineSnapshotService =
-    makePipelineSnapshotCollectorService;
-export const makePipelineSnapshotService = makePipelineSnapshotCollectorService;
-export const makePipelineSnapshotCollector =
-    makePipelineSnapshotCollectorService;
-export const makeGitHubChecksSnapshotService =
-    makePipelineChecksSnapshotCollectorService;
-export const makePipelineCheckSnapshotService =
-    makePipelineChecksSnapshotCollectorService;
-export const GitHubPipelineSnapshotLive = makePipelineSnapshotCollectorService;
-export const PipelineSnapshotCollectorLive =
-    makePipelineSnapshotCollectorService;
 
 export type {
     ExactCommitSha,

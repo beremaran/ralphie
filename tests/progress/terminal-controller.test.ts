@@ -76,8 +76,6 @@ const makeFakeStrategy = (): TerminalOutputStrategy & {
     };
 };
 
-type Harness = ReturnType<typeof makeHarness>;
-
 /**
  * Interactive controller harness backed by a fake strategy, fake resize
  * source, and fake refresh timer. `setFooter` drives the displayed

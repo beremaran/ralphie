@@ -23,7 +23,6 @@ import {
     type DiagnosticError,
     type DiagnosticRecordDisposition,
     type JobContext,
-    type JsonObject,
     type JsonValue,
     type PipelineDiagnostic,
     type PipelineIdentifier,
@@ -81,12 +80,9 @@ export type WorkflowRunDiagnosticsDependencies = {
     readonly maxStepsPerJob?: number;
 };
 
-/** Service shape matching the repository's explicit read-only services. */
+/** Service shape for bounded workflow-run diagnostics collection. */
 export type WorkflowRunDiagnosticsService = {
     readonly collect: (
-        input: WorkflowRunDiagnosticsInput,
-    ) => Promise<CollectionResult>;
-    readonly read: (
         input: WorkflowRunDiagnosticsInput,
     ) => Promise<CollectionResult>;
 };
@@ -1088,22 +1084,11 @@ export const collectWorkflowRunDiagnostics = (
     dependencies: WorkflowRunDiagnosticsDependencies = {},
 ): Promise<CollectionResult> => collectWithDependencies(input, dependencies);
 
-/** Alias emphasizing that the collector's records are jobs and steps. */
-export const collectWorkflowRunJobsAndSteps = collectWorkflowRunDiagnostics;
-
-/** Factory for the workflow-run diagnostics read service. */
+/** Factory for the workflow-run diagnostics service. */
 export const makeWorkflowRunDiagnosticsService = (
     dependencies: WorkflowRunDiagnosticsDependencies = {},
 ): WorkflowRunDiagnosticsService => {
     const collect = (input: WorkflowRunDiagnosticsInput) =>
         collectWithDependencies(input, dependencies);
-    return { collect, read: collect };
+    return { collect };
 };
-
-/** Compatibility alias for callers naming the collector rather than service. */
-export const makeWorkflowRunDiagnosticsCollector =
-    makeWorkflowRunDiagnosticsService;
-
-/** Compatibility alias for the jobs-and-steps decomposition child. */
-export const makePipelineDiagnosticsJobsCollector =
-    makeWorkflowRunDiagnosticsService;

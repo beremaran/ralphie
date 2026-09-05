@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 
 import {
     MAX_EXCERPT_BYTES,
-    MAX_TOTAL_BYTES,
     type PipelineSnapshotRequest,
 } from "../../src/github/pipeline-diagnostics-contracts.ts";
 import {
@@ -469,7 +468,7 @@ describe("bounded job-log excerpt retrieval", () => {
         });
     });
 
-    test("supports the explicit read service and Octokit endpoint discovery", async () => {
+    test("supports collection through Octokit endpoint discovery", async () => {
         const endpoint = async () => redirectResponse(signedUrl);
         const client = {
             rest: { actions: { downloadJobLogsForWorkflowRun: endpoint } },
@@ -478,7 +477,7 @@ describe("bounded job-log excerpt retrieval", () => {
             client,
             fetch: async () => "discovered",
         });
-        const result = await service.read({
+        const result = await service.collect({
             request,
             jobs: [jobContext(7)],
         });

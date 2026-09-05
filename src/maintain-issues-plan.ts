@@ -16,7 +16,7 @@ import {
     requestStructuredOutput,
     type StructuredOutputResult,
 } from "./agent/structured-output.ts";
-import type { AgentModel, AgentSelection } from "./agent/model.ts";
+import type { AgentSelection } from "./agent/model.ts";
 import type { AgentRepositoryInvariant } from "./agent/task-session.ts";
 import {
     analyzeMaintenanceCandidates,

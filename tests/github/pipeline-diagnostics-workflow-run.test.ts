@@ -455,13 +455,13 @@ describe("workflow-run pipeline diagnostics", () => {
         );
     });
 
-    test("supports the explicit read service and Octokit endpoint discovery", async () => {
+    test("supports collection through Octokit endpoint discovery", async () => {
         const endpoint = async () => jobsResponse([job(1)]);
         const client = {
             rest: { actions: { listJobsForWorkflowRun: endpoint } },
         } as unknown as import("octokit").Octokit;
         const service = makeWorkflowRunDiagnosticsService({ client });
-        const result = await service.read({
+        const result = await service.collect({
             request,
             diagnostics: [workflowDiagnostic()],
         });

@@ -1,6 +1,5 @@
 import { mkdir, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import simpleGit from "simple-git";
 
 import {
     parseRepositorySlug,
@@ -29,6 +28,7 @@ export type GitRepositoryService = {
         branch: string | undefined,
         workspace: string,
         destinationPath?: string,
+        signal?: AbortSignal,
     ) => Promise<PreparedRepository>;
 };
 
@@ -81,13 +81,13 @@ const cloneRepository = async (
     runner: CommandRunnerService,
     parsed: RepositorySlug,
     repositoryPath: string,
+    signal: AbortSignal | undefined,
 ): Promise<void> => {
-    const clone = await runner.run("gh", [
-        "repo",
-        "clone",
-        parsed.slug,
-        repositoryPath,
-    ]);
+    const clone = await runner.run(
+        "gh",
+        ["repo", "clone", parsed.slug, repositoryPath],
+        signal === undefined ? undefined : { signal },
+    );
     if (clone.exitCode !== 0) {
         const detail = clone.stderr ? `\n${clone.stderr}` : "";
         throw new RalphieError({
@@ -96,35 +96,86 @@ const cloneRepository = async (
     }
 };
 
+const runGit = (
+    runner: CommandRunnerService,
+    repositoryPath: string,
+    args: ReadonlyArray<string>,
+    signal?: AbortSignal,
+) =>
+    runner.run(
+        "git",
+        ["-C", repositoryPath, ...args],
+        signal === undefined ? undefined : { signal },
+    );
+
+const requireGit = async (
+    runner: CommandRunnerService,
+    repositoryPath: string,
+    args: ReadonlyArray<string>,
+    failureMessage: string,
+    signal?: AbortSignal,
+) =>
+    await requireSuccess(
+        runner,
+        "git",
+        ["-C", repositoryPath, ...args],
+        failureMessage,
+        signal === undefined ? undefined : { signal },
+    );
+
 const selectBranch = async (
-    git: ReturnType<typeof simpleGit>,
+    runner: CommandRunnerService,
+    repositoryPath: string,
     branch: string | undefined,
+    signal: AbortSignal | undefined,
 ): Promise<string> => {
     if (branch !== undefined) return branch;
-    try {
-        await git.revparse(["--verify", "refs/remotes/origin/main"]);
-        return "main";
-    } catch {
-        await git.revparse(["--verify", "refs/remotes/origin/master"]);
-        return "master";
-    }
+    const main = await runGit(
+        runner,
+        repositoryPath,
+        ["rev-parse", "--verify", "refs/remotes/origin/main"],
+        signal,
+    );
+    if (main.exitCode === 0) return "main";
+    const master = await runGit(
+        runner,
+        repositoryPath,
+        ["rev-parse", "--verify", "refs/remotes/origin/master"],
+        signal,
+    );
+    if (master.exitCode === 0) return "master";
+    throw new Error("Neither origin/main nor origin/master exists.");
 };
 
 const prepareRepositoryState = async (
+    runner: CommandRunnerService,
     parsed: RepositorySlug,
     repositoryPath: string,
     branch: string | undefined,
     exists: boolean,
+    signal: AbortSignal | undefined,
 ): Promise<Omit<PreparedRepository, "path" | "cloned">> => {
     try {
-        const git = simpleGit(repositoryPath);
-        if (!(await git.checkIsRepo())) {
+        const repositoryCheck = await runGit(
+            runner,
+            repositoryPath,
+            ["rev-parse", "--is-inside-work-tree"],
+            signal,
+        );
+        if (
+            repositoryCheck.exitCode !== 0 ||
+            repositoryCheck.stdout.trim() !== "true"
+        ) {
             throw new Error(`${repositoryPath} is not a Git repository.`);
         }
 
-        const remotes = await git.getRemotes(true);
-        const origin = remotes.find((remote) => remote.name === "origin");
-        const originUrl = origin?.refs.fetch;
+        const origin = await runGit(
+            runner,
+            repositoryPath,
+            ["remote", "get-url", "origin"],
+            signal,
+        );
+        const originUrl = origin.exitCode === 0 ? origin.stdout.trim() : "";
         if (!originUrl) {
             throw new Error(`${repositoryPath} has no origin remote.`);
         }
@@ -136,25 +187,80 @@ const prepareRepositoryState = async (
             );
         }
 
-        if (exists) await git.raw(["fetch", "--prune", "origin"]);
+        if (exists)
+            await requireGit(
+                runner,
+                repositoryPath,
+                ["fetch", "--prune", "origin"],
+                `Failed to fetch ${parsed.slug}.`,
+                signal,
+            );
 
-        const status = await git.status();
-        const cleaned = exists && !status.isClean();
+        const status = await requireGit(
+            runner,
+            repositoryPath,
+            ["status", "--porcelain"],
+            `Failed to inspect ${parsed.slug}.`,
+            signal,
+        );
+        const cleaned = exists && status.stdout.trim().length > 0;
         if (cleaned) {
-            await git.raw(["reset", "--hard"]);
-            await git.raw(["clean", "-fd"]);
+            await requireGit(
+                runner,
+                repositoryPath,
+                ["reset", "--hard"],
+                `Failed to clean ${parsed.slug}.`,
+                signal,
+            );
+            await requireGit(
+                runner,
+                repositoryPath,
+                ["clean", "-fd"],
+                `Failed to clean ${parsed.slug}.`,
+                signal,
+            );
         }
 
-        const selectedBranch = await selectBranch(git, branch);
+        const selectedBranch = await selectBranch(
+            runner,
+            repositoryPath,
+            branch,
+            signal,
+        );
         const currentBranch = (
-            await git.revparse(["--abbrev-ref", "HEAD"])
-        ).trim();
+            await requireGit(
+                runner,
+                repositoryPath,
+                ["rev-parse", "--abbrev-ref", "HEAD"],
+                `Failed to read the current branch for ${parsed.slug}.`,
+                signal,
+            )
+        ).stdout.trim();
         const branchChanged = currentBranch !== selectedBranch;
-        if (branchChanged) await git.checkout(selectedBranch);
+        if (branchChanged)
+            await requireGit(
+                runner,
+                repositoryPath,
+                ["checkout", selectedBranch],
+                `Failed to select branch ${selectedBranch} for ${parsed.slug}.`,
+                signal,
+            );
 
         if (cleaned) {
-            await git.raw(["reset", "--hard", `origin/${selectedBranch}`]);
-            await git.raw(["clean", "-fd"]);
+            await requireGit(
+                runner,
+                repositoryPath,
+                ["reset", "--hard", `origin/${selectedBranch}`],
+                `Failed to reset ${parsed.slug} to origin/${selectedBranch}.`,
+                signal,
+            );
+            await requireGit(
+                runner,
+                repositoryPath,
+                ["clean", "-fd"],
+                `Failed to clean ${parsed.slug}.`,
+                signal,
+            );
         }
 
         return {
@@ -182,7 +288,7 @@ export const makeGitRepositoryService = (
         );
     },
 
-    prepare: async (repository, branch, workspace, destinationPath) => {
+    prepare: async (repository, branch, workspace, destinationPath, signal) => {
         const parsed = parseRepository(repository);
         const { path: repositoryPath, exists } = await prepareRepositoryPath(
             parsed,
@@ -191,14 +297,16 @@ export const makeGitRepositoryService = (
         );
 
         if (!exists) {
-            await cloneRepository(runner, parsed, repositoryPath);
+            await cloneRepository(runner, parsed, repositoryPath, signal);
         }
 
         const repositoryState = await prepareRepositoryState(
+            runner,
             parsed,
             repositoryPath,
             branch,
             exists,
+            signal,
         );
 
         return {

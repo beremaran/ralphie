@@ -113,10 +113,7 @@ import {
     makeDecompositionExecutorService,
     type DecompositionExecutorService,
 } from "./issues/decomposition-executor.ts";
-import {
-    makeDecompositionPlannerService,
-    type DecompositionPlannerService,
-} from "./issues/decomposition-planner.ts";
+import { makeDecompositionPlannerService } from "./issues/decomposition-planner.ts";
 import {
     makeDryRunIssueExecutorService,
     type DryRunIssueExecutorService,

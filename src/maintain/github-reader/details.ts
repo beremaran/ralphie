@@ -22,7 +22,6 @@ import {
     createMaintainableComment,
     createMaintainableIssue,
     createMaintainableThread,
-    type MaintainableComment,
     type MaintainableIssue,
     type MaintainableSkip,
     type MaintainableSelectedThread,
@@ -40,9 +39,6 @@ const isRecord = (value: unknown): value is RecordLike =>
 
 const hasOwn = (value: object, key: string): boolean =>
     Object.prototype.hasOwnProperty.call(value, key);
-
-const text = (value: unknown): string =>
-    typeof value === "string" ? value : "";
 
 const statusFrom = (value: unknown): number | undefined => {
     if (!isRecord(value)) return undefined;

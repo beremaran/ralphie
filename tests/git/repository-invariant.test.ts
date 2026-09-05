@@ -58,11 +58,9 @@ describe("repository-invariant cancellation boundary", () => {
 
     test("propagates an in-flight abort during invariant capture", async () => {
         const controller = new AbortController();
-        let rejectRun: ((error: unknown) => void) | undefined;
         const runner: CommandRunnerService = {
             run: (_command, _args, options) =>
                 new Promise((_resolve, reject) => {
-                    rejectRun = reject;
                     options?.signal?.addEventListener(
                         "abort",
                         () =>

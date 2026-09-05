@@ -24,7 +24,7 @@ const assertLiveFrame = (
     label: string,
 ): void => {
     const frame = inspectLiveFooterFrame(session);
-    const { screen, footer, footerIndex, region } = frame;
+    const { screen, footer, region } = frame;
     expect(
         screen.filter((row) => row.trim() !== "").at(-1),
         `${label}: footer is last`,

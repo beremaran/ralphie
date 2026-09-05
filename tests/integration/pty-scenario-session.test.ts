@@ -374,8 +374,6 @@ describe("PTY scenario agent session", () => {
     });
 });
 
-type FakeTimer = FooterTimer & { readonly run: () => boolean };
-
 const makeFakeTimer = (): {
     readonly timer: FooterTimer;
     readonly run: () => boolean;

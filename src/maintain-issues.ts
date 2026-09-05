@@ -9,7 +9,6 @@
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
 
-import { type AgentClient } from "./opencode/client.ts";
 import {
     makeMaintenancePlanService,
     maintenanceActionKey,
@@ -22,10 +21,7 @@ import type {
     MaintenanceCandidate,
     MaintenanceCandidateAnalysis,
 } from "./maintain-issues-candidates.ts";
-import {
-    type MaintenanceSnapshot,
-    type MaintenanceSnapshotService,
-} from "./maintain-issues-snapshot-service.ts";
+import { type MaintenanceSnapshot } from "./maintain-issues-snapshot-service.ts";
 import {
     MaintenanceRunStateStoreLive,
     type MaintenanceActionState,
@@ -38,14 +34,8 @@ import {
     loadMaintenanceRunState,
     validateMaintenanceResumeState,
 } from "./maintain-issues-state.ts";
-import {
-    type GitHubIssueMaintenanceRelationshipService,
-    type RelationshipMutationResult,
-} from "./github/issue-maintenance-relationships.ts";
-import {
-    type GitHubIssueMaintenanceService,
-    type MaintenanceMutationResult,
-} from "./github/issue-maintenance.ts";
+import { type RelationshipMutationResult } from "./github/issue-maintenance-relationships.ts";
+import { type MaintenanceMutationResult } from "./github/issue-maintenance.ts";
 import { type RalphieRuntime } from "./runtime.ts";
 import {
     DuplicateAction,
@@ -1642,6 +1632,8 @@ const prepareMaintenanceRepository = async (input: {
         config.repo,
         requestedBranch,
         config.workspace,
+        undefined,
+        signal,
     );
     await emit({
         stage: "repository-preparation",

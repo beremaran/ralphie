@@ -84,8 +84,6 @@ const makeStrategyRecorder = (): StrategyRecorder => {
     };
 };
 
-type InteractiveHarness = ReturnType<typeof makeInteractiveHarness>;
-
 /**
  * Coordinator harness in interactive mode backed by a fake strategy, fake
  * resize source, and fake refresh timer, mirroring `command.ts` wiring.

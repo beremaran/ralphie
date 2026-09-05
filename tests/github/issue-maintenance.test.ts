@@ -376,7 +376,7 @@ describe("maintenance label reconciliation", () => {
 
     test("reconciles a lost label response from authoritative membership without retrying", async () => {
         const calls: string[] = [];
-        const { client, issue } = makeClient({
+        const { client } = makeClient({
             calls,
             addLabels: (current, labels) => {
                 for (const name of labels) current.labels.push({ name });

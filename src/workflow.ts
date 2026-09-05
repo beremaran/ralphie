@@ -2,7 +2,6 @@ import { join } from "node:path";
 
 import { makeAgentSessionDiagnostics } from "./agent/task-session.ts";
 import type { AgentModel, AgentSelection } from "./agent/model.ts";
-import { type GitHubIssueCloseReason } from "./github/issue-mutations.ts";
 import {
     GitHubNeedsAttentionNotificationRecoveryError,
     type NeedsAttentionNotificationInput,
@@ -15,7 +14,6 @@ import {
 import { isDecomposedParent } from "./github/decomposition-markdown.ts";
 import {
     type IssueExecutionContext,
-    type IssueCompletionKind,
     IssueExecutionOutcomeKind,
     type IssueExecutionOutcome,
 } from "./issues/execution.ts";
@@ -1036,7 +1034,6 @@ export const workflow = async (
 ): Promise<WorkflowSummary> => {
     const config = makeWorkflowConfiguration(options);
     const {
-        requestedWorkflow,
         repo,
         requestedBranch,
         maxIssues,
@@ -1049,14 +1046,11 @@ export const workflow = async (
         cleanup,
         startClean,
         signal,
-        runId,
         resumeState,
-        resumePath,
         issueFailurePolicy,
         onNeedsAttention,
         notificationsEnabled,
         needsAttentionLabel,
-        dryRun,
         actualRunId,
         effectiveDryRun,
         workflowMode,
@@ -1140,7 +1134,14 @@ export const workflow = async (
                 progress,
                 "repository-preparation",
                 `Preparing ${repo} on ${requestedBranch ?? "main/master"}...`,
-                () => repository.prepare(repo, requestedBranch, workspace),
+                () =>
+                    repository.prepare(
+                        repo,
+                        requestedBranch,
+                        workspace,
+                        undefined,
+                        signal,
+                    ),
                 (result) => `Repository ready: ${result.path}.`,
                 {
                     details: {
@@ -1152,7 +1153,6 @@ export const workflow = async (
                     },
                 },
             );
-            const branch = prepared.branch;
             checkCancellation(signal);
 
             const discoveredIssues = await track(
@@ -2701,8 +2701,8 @@ export const workflow = async (
               }
             | undefined
         > => {
-            const execute = pullRequestReviewCoordinator?.execute;
-            if (typeof execute !== "function") return undefined;
+            const review = pullRequestReviewCoordinator?.review;
+            if (typeof review !== "function") return undefined;
 
             const currentSnapshot = await githubPullRequests.readSnapshot(
                 octokit,
@@ -2725,7 +2725,7 @@ export const workflow = async (
                 initialArtifacts,
             );
 
-            const result = await execute({
+            const result = await review({
                 client: octokit,
                 repository: repo,
                 repositoryPath:
@@ -3456,7 +3456,6 @@ export const workflow = async (
 
         const finishSuccessfulIssue = async (
             issueContext: WorkflowIssueContext,
-            outcome: IssueExecutionOutcome,
         ): Promise<void> => {
             activeIssue = undefined;
             activeQueueIssues.delete(issueContext.issue.number);
@@ -3522,12 +3521,12 @@ export const workflow = async (
             }
             if (outcome.kind === IssueExecutionOutcomeKind.NeedsAttention) {
                 await handleNeedsAttentionIssue(issueContext, outcome);
-                await finishSuccessfulIssue(issueContext, outcome);
+                await finishSuccessfulIssue(issueContext);
                 return;
             }
             await completeIssue(issueContext, outcome, server);
             completeQueueItem(issueContext.issue.number, outcome);
-            await finishSuccessfulIssue(issueContext, outcome);
+            await finishSuccessfulIssue(issueContext);
             await refreshAfterDecomposition(outcome);
         };
 

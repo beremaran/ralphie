@@ -76,8 +76,6 @@ const collection = (
         errors: [],
         jobs: jobCollection,
         checks,
-        workflowRun: jobCollection,
-        checkRuns: checks,
         ...(logs === undefined ? {} : { logs }),
     } as PipelineDiagnosticsCollectionResult;
 };

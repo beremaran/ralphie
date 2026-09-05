@@ -7,7 +7,6 @@ import {
     MAX_STEPS_PER_JOB,
 } from "../../src/github/pipeline-diagnostics-contracts.ts";
 import {
-    ANNOTATIONS_ENVELOPE,
     JOBS_ENVELOPE,
     collectPaginationPages,
     paginateAnnotations,
@@ -15,10 +14,7 @@ import {
     paginateJobs,
     paginateSteps,
 } from "../../src/github/pipeline-diagnostics-pagination.ts";
-import type {
-    Endpoint,
-    PaginationResult,
-} from "../../src/github/pipeline-diagnostics-pagination.ts";
+import type { Endpoint } from "../../src/github/pipeline-diagnostics-pagination.ts";
 import type { PipelineSnapshotRequestExecutor } from "../../src/github/pipeline-snapshot-collector.ts";
 
 const NEXT_URL = "https://api.github.com/repos/o/r/actions/runs/9/jobs";

@@ -4,10 +4,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import {
-    executeMaintenanceRun,
-    type MaintainIssuesOptions,
-} from "../src/maintain-issues.ts";
+import { executeMaintenanceRun } from "../src/maintain-issues.ts";
 import type { MaintenanceCandidateAnalysis } from "../src/maintain-issues-candidates.ts";
 import type { MaintenancePlanRunResult } from "../src/maintain-issues-plan.ts";
 import { maintenanceActionKey } from "../src/maintain-issues-plan.ts";

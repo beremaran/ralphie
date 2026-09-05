@@ -112,12 +112,9 @@ export type CheckRunDiagnosticsDependencies = {
     readonly maxOutputChars?: number;
 };
 
-/** Service shape matching the repository's explicit read-only services. */
+/** Service shape for bounded check-run diagnostics collection. */
 export type CheckRunDiagnosticsService = {
     readonly collect: (
-        input: CheckRunDiagnosticsInput,
-    ) => Promise<CollectionResult>;
-    readonly read: (
         input: CheckRunDiagnosticsInput,
     ) => Promise<CollectionResult>;
 };
@@ -1136,21 +1133,11 @@ export const collectCheckRunDiagnostics = (
     dependencies: CheckRunDiagnosticsDependencies = {},
 ): Promise<CollectionResult> => collectWithDependencies(input, dependencies);
 
-/** Alias emphasizing the collected evidence is output and annotations. */
-export const collectCheckRunOutputAndAnnotations = collectCheckRunDiagnostics;
-
-/** Factory for the failing check-run diagnostics read service. */
+/** Factory for the failing check-run diagnostics service. */
 export const makeCheckRunDiagnosticsService = (
     dependencies: CheckRunDiagnosticsDependencies = {},
 ): CheckRunDiagnosticsService => {
     const collect = (input: CheckRunDiagnosticsInput) =>
         collectWithDependencies(input, dependencies);
-    return { collect, read: collect };
+    return { collect };
 };
-
-/** Compatibility alias for callers naming the collector rather than service. */
-export const makeCheckRunDiagnosticsCollector = makeCheckRunDiagnosticsService;
-
-/** Compatibility alias for the check-run decomposition child. */
-export const makePipelineDiagnosticsChecksCollector =
-    makeCheckRunDiagnosticsService;

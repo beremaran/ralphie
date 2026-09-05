@@ -606,14 +606,14 @@ describe("failing check-run pipeline diagnostics", () => {
         }
     });
 
-    test("supports the explicit read service and Octokit endpoint discovery", async () => {
+    test("supports collection through Octokit endpoint discovery", async () => {
         const getCheck = async () => checkResponse();
         const listAnnotations = async () => annotationsPage([annotation(1)]);
         const client = {
             rest: { checks: { get: getCheck, listAnnotations } },
         } as unknown as import("octokit").Octokit;
         const service = makeCheckRunDiagnosticsService({ client });
-        const result = await service.read({
+        const result = await service.collect({
             request,
             diagnostics: [checkRunDiagnostic()],
         });

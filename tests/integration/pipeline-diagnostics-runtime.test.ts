@@ -25,7 +25,6 @@ import {
     UNTRUSTED_PIPELINE_DIAGNOSTICS_OPEN,
 } from "../../src/github/pipeline-diagnostics-boundary.ts";
 import { pipelineDiagnosticsPath } from "../../src/github/pipeline-diagnostics-artifact.ts";
-import { makePipelineDiagnosticsLogsService } from "../../src/github/pipeline-diagnostics-logs.ts";
 import { makeProgressRecorder } from "../../src/progress/progress.ts";
 import { makeLiveRuntime } from "../../src/runtime.ts";
 
@@ -71,8 +70,6 @@ const collectionFor = (
         errors: [],
         jobs,
         checks,
-        workflowRun: jobs,
-        checkRuns: checks,
     } as PipelineDiagnosticsCollectionResult;
 };
 
@@ -97,7 +94,6 @@ const fakeCollector = (
         if (input.request !== undefined) requests.push(input.request);
         return collection;
     },
-    read: async () => collection,
 });
 
 const emptyLogs = (logs: ReadonlyArray<unknown> = []): JobLogExcerptsResult =>
@@ -253,7 +249,6 @@ describe("pipeline diagnostics runtime assembly", () => {
                             fetchedBytes: MAX_EXCERPT_BYTES + 100,
                         })),
                     ),
-                read: async () => emptyLogs(),
             };
             const runtime = makeLiveRuntime({
                 opencode: { start: async () => ({}) as never },

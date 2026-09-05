@@ -76,10 +76,6 @@ export const makeRecordingStrategy = (): RecordingStrategy => {
     };
 };
 
-const graphemeSegmenter = new Intl.Segmenter(undefined, {
-    granularity: "grapheme",
-});
-
 const isCsiFinal = (code: number): boolean => code >= 0x40 && code <= 0x7e;
 const isCsiParam = (code: number): boolean => code >= 0x30 && code <= 0x3f;
 const isCsiIntermediate = (code: number): boolean =>

@@ -246,7 +246,7 @@ describe("pull-request review attempt service", () => {
         const agent = fakeAgent([changesRequested, approved]);
         const service = makePullRequestReviewAttemptService(makeDependencies());
 
-        const first = await service.execute(
+        const first = await service.review(
             makeInput({ artifacts, agent: agent.client }),
         );
         const second = await service.review(

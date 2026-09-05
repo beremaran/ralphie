@@ -228,12 +228,6 @@ All notable changes to Ralphie are documented here. The project follows
 - Pin grounding and resolution-verification evidence to the exact
   checked-out commit: the read-only prompts now name the checked-out SHA
   alongside the repository path and target branch.
-- Add an explicit local Octokit test seam and a deterministic in-memory GitHub
-  REST fixture (`src/github/rest-fixture.ts`). The production client with no
-  test configuration still targets `api.github.com` with its existing `gh`
-  authentication and REST-version header; only an explicit loopback fixture URL
-  (option or `RALPHIE_GITHUB_REST_FIXTURE_URL`/`_TOKEN`) redirects REST traffic,
-  and the fixture rejects unknown/public-shaped paths instead of forwarding them.
 
 ### Fixed
 - Live OpenCode transcript streaming renders every `thinking_delta` / `text_delta`
@@ -241,27 +235,10 @@ All notable changes to Ralphie are documented here. The project follows
   row instead of forcing one token per `│`-prefixed line; incremental deltas no
   longer break the open stream, so interactive output wraps naturally at the
   terminal width and durable progress/breadcrumb lines still interleave cleanly.
-- Structured decision prompts now hand providers a flattened single-object JSON
-  schema for discriminated-union decisions (issue grounding, needs attention),
-  and explicit `null` values are stripped before validation. Providers and
-  models that return incomplete or malformed structured output can retry against
-  the prompt contract, while branch-strict requirements remain enforced by the
-  Zod decision validation.
 - Repeated structured-output attempts that never produce a schema-valid result
   now trip a circuit breaker that aborts the OpenCode session after five
   consecutive failures and reports the likely cause instead of letting the
   model retry until the prompt-attempt budget expires.
-- Flattened decision schemas now declare every branch-only property explicitly
-  nullable (scalar fields as `anyOf` unions with a null variant, object/array
-  fields with a widened `type`) and annotate each with the dispositions it
-  applies to, so strict constrained samplers that materialize every property
-  can express "not applicable" as a real `null` instead of forcing invalid
-  values; the literal string `"null"` that some samplers emit for enum-typed
-  fields is normalized to a real null before tool validation. These cross the
-  tool boundary as absents, so a grounding or needs-attention decision can no
-  longer get stuck in the structured-output retry loop when the provider fills
-  every flattened field.
-
 ### Changed
 
 - Added `--max-decomposition-depth` (default `3`) and persisted it in run state.
@@ -325,9 +302,8 @@ All notable changes to Ralphie are documented here. The project follows
 ### Added
 
 - `bun run probe:structured-output` accepts `--union` to pre-flight a model
-  against the exact grounding decision contract (flattened as production sends
-  it) plus `--model provider/model`, `--agent`, and `--variant` for targeting a
-  specific model before a run.
+  against the exact grounding decision contract plus `--model provider/model`,
+  `--agent`, and `--variant` for targeting a specific model before a run.
 - The `pr` gate now streams dedicated `pr-gate` progress events for
   registration (pull-request number and exact head SHA), poll progress only
   for meaningful check transitions (registration, checks registering,

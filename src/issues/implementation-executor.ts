@@ -3,10 +3,7 @@ import {
     type GitIssueOperationsService,
 } from "../git/issue-operations.ts";
 import type { GitIssuePreparationService } from "../git/issue-preparation.ts";
-import {
-    type GitPushMode,
-    type GitRemoteSafetyService,
-} from "../git/remote-safety.ts";
+import { type GitRemoteSafetyService } from "../git/remote-safety.ts";
 import {
     buildCommitMessagePrompt,
     buildImplementationAfterResolutionCorrectionPrompt,
@@ -25,7 +22,6 @@ import {
 import { z } from "zod";
 import {
     type ProgressStage,
-    type ProgressStatus,
     type ProgressReporterService,
 } from "../progress/progress.ts";
 import { RalphieError } from "../shared/error.ts";
@@ -36,16 +32,12 @@ import type {
 import { IssueArtifactKind, issueFreshnessFingerprint } from "./artifacts.ts";
 import {
     commitMessageDecisionSchema,
-    issueResolutionDecisionSchema,
     type IssueResolutionDecision,
     IssueResolutionStatus,
     reviewDecisionSchema,
     ReviewVerdict,
 } from "./decisions.ts";
-import {
-    type IssueCompletionKind,
-    IssueExecutionOutcomeKind,
-} from "./execution.ts";
+import { IssueExecutionOutcomeKind } from "./execution.ts";
 import { type IssueRecoveryService, type ReviewAttempt } from "./recovery.ts";
 import { REVIEW_ITERATION_LIMIT } from "./stage.ts";
 import { assertProtectedDecisionsAuthorized } from "./scope-policy.ts";

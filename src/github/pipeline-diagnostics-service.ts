@@ -174,6 +174,3 @@ export const makePipelineDiagnosticsService = (
 
     return { collectAndStore };
 };
-
-export const makePipelineDiagnosticsRuntimeService =
-    makePipelineDiagnosticsService;
