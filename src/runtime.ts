@@ -31,6 +31,10 @@ import {
     type GitRepositoryInvariantService,
 } from "./git/repository-invariant.ts";
 import {
+    makePipelineDeliveryGitService,
+    type PipelineDeliveryGitService,
+} from "./git/pipeline-delivery.ts";
+import {
     makeGitRepositoryService,
     type GitRepositoryService,
 } from "./git/repository.ts";
@@ -84,6 +88,10 @@ import {
     makePipelineRepairExecutorService,
     type PipelineRepairExecutorService,
 } from "./issues/pipeline-repair-executor.ts";
+import {
+    makePipelineDeliveryLoopService,
+    type PipelineDeliveryLoopService,
+} from "./issues/pipeline-delivery-loop.ts";
 import {
     makeGitHubNeedsAttentionNotificationService,
     type GitHubNeedsAttentionNotificationService,
@@ -174,6 +182,8 @@ export type RalphieRuntime = {
     readonly pipelineDiagnostics: PipelineDiagnosticsService;
     /** Pipeline-only diagnose/edit/review boundary; never commits or pushes. */
     readonly pipelineRepairExecutor: PipelineRepairExecutorService;
+    /** Direct base-branch pipeline delivery with non-force remote reconciliation. */
+    readonly pipelineDeliveryLoop: PipelineDeliveryLoopService;
     readonly githubIssues: GitHubIssuesService;
     readonly githubIssueMutations: GitHubIssueMutationService;
     readonly githubIssueRelationships: GitHubIssueRelationshipService;
@@ -233,6 +243,8 @@ export type RuntimeOverrides = {
     readonly pipelineDiagnosticsDependencies?: PipelineDiagnosticsServiceDependencies;
     /** Optional deterministic pipeline repair executor for orchestration tests. */
     readonly pipelineRepairExecutor?: PipelineRepairExecutorService;
+    /** Optional deterministic pipeline delivery loop for orchestration tests. */
+    readonly pipelineDeliveryLoop?: PipelineDeliveryLoopService;
     /** Optional deterministic seam for maintenance snapshot tests. */
     readonly maintenanceSnapshot?: MaintenanceSnapshotService;
     /** Optional deterministic maintenance planner used by runner tests. */
@@ -260,6 +272,7 @@ export const makeLiveRuntime = ({
     pipelineObservationDependencies,
     pipelineDiagnosticsDependencies,
     pipelineRepairExecutor: pipelineRepairExecutorOverride,
+    pipelineDeliveryLoop: pipelineDeliveryLoopOverride,
     maintenanceSnapshot: maintenanceSnapshotOverride,
     maintenancePlanner: maintenancePlannerOverride,
     maintenancePlannerForAgent: maintenancePlannerForAgentOverride,
@@ -342,6 +355,21 @@ export const makeLiveRuntime = ({
             captureCheckpoint: gitIssueCheckpoint.capture,
             stagedTreeSha: issueVerification.stagedTreeSha,
         });
+    const pipelineDeliveryGit: PipelineDeliveryGitService =
+        makePipelineDeliveryGitService(commandRunner);
+    const pipelineDeliveryLoop =
+        pipelineDeliveryLoopOverride ??
+        makePipelineDeliveryLoopService({
+            git: pipelineDeliveryGit,
+            observation: pipelineObservation,
+            diagnostics: async (input) => {
+                const result = await pipelineDiagnostics.collectAndStore(input);
+                return { boundary: result.boundary, path: result.path };
+            },
+            repair: pipelineRepairExecutor,
+            repositoryInvariant: gitRepositoryInvariant,
+            remoteSafety: gitRemoteSafety,
+        });
     const pullRequestReviewCoordinator =
         makePullRequestReviewCoordinatorService({
             pullRequests: githubPullRequests,
@@ -399,6 +427,7 @@ export const makeLiveRuntime = ({
         pipelineObservation,
         pipelineDiagnostics,
         pipelineRepairExecutor,
+        pipelineDeliveryLoop,
         githubIssues,
         githubIssueMutations,
         githubIssueRelationships,
