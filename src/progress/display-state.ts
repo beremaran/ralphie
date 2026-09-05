@@ -98,6 +98,17 @@ export const PROGRESS_STAGE_LABELS: Readonly<Record<ProgressStage, string>> = {
     "maintenance-recovery": "Saving maintenance recovery",
     "pr-gate": "Waiting for PR checks",
     "notification-recovery": "Publishing needs-attention notification",
+    "pipeline-remote-read": "Reading pipeline remote",
+    "pipeline-observation": "Observing pipeline checks",
+    "pipeline-diagnostics": "Collecting pipeline diagnostics",
+    "pipeline-repair": "Repairing failing pipeline",
+    "pipeline-commit-message": "Generating pipeline commit message",
+    "pipeline-commit": "Creating pipeline commit",
+    "pipeline-push": "Pushing pipeline repair",
+    "pipeline-reconcile": "Reconciling pipeline remote",
+    "pipeline-final-verification": "Verifying green pipeline",
+    "pipeline-resume": "Reconciling pipeline resume",
+    "pipeline-outcome": "Recording pipeline outcome",
 };
 
 /** Stable labels for activities that do not carry a dynamic name. */

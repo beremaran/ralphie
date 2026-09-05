@@ -426,6 +426,58 @@ describe("native CLI parser", () => {
         });
     });
 
+    test("dispatches pipeline mode through its dedicated runner", async () => {
+        let received: Record<string, unknown> | undefined;
+        process.exitCode = 0;
+        try {
+            await runCommand(
+                [
+                    "owner/repository",
+                    "--mode",
+                    "get-pipelines-green",
+                    "--branch",
+                    "main",
+                    "--max-attempts",
+                    "2",
+                ],
+                {
+                    factories: {
+                        makeCoordinator: () => ({
+                            progress: makeProgressRecorder([]),
+                            piListener: () => {},
+                            listener: () => {},
+                            piEventListener: () => {},
+                            getDisplayState: () => ({}) as never,
+                            dispose: async () => {},
+                        }),
+                        makeOpenCode: () => ({
+                            start: async () => undefined as never,
+                        }),
+                        makeRuntime: () => ({}) as never,
+                        runPipelinesGreen: async (options) => {
+                            received = options as unknown as Record<
+                                string,
+                                unknown
+                            >;
+                            return undefined as never;
+                        },
+                    },
+                },
+            );
+            expect(received).toMatchObject({
+                runId: expect.any(String),
+                config: {
+                    mode: ExecutionMode.GetPipelinesGreen,
+                    branch: "main",
+                    maxAttempts: 2,
+                },
+            });
+            expect(process.exitCode).toBe(RalphieExitCode.Success);
+        } finally {
+            process.exitCode = 0;
+        }
+    });
+
     test("rejects unknown and extra arguments", () => {
         expect(() => parseCliArgs(["owner/repository", "extra"])).toThrow(
             "Unexpected argument",

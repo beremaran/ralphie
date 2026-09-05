@@ -14,6 +14,7 @@ import {
     resolveRalphieConfig,
     type IssueRalphieConfig,
     type MaintainIssuesRalphieConfig,
+    type GetPipelinesGreenRalphieConfig,
     validateExplicitRalphieCliOptions,
     validateRalphieCliOptions,
     WorkflowMode,
@@ -48,9 +49,17 @@ import {
     loadMaintenanceRunState,
     type MaintenanceRunState,
 } from "./maintain-issues-state.ts";
+import {
+    loadPipelineRunState,
+    type PipelineRunState,
+} from "./run/pipeline-state.ts";
 import { reconcileRunState } from "./run/reconciliation.ts";
 import { resolveWorkspacePath } from "./workspace/workspace.ts";
 import { RalphieError } from "./shared/error.ts";
+import {
+    getPipelinesGreen,
+    type GetPipelinesGreenOptions,
+} from "./get-pipelines-green.ts";
 
 const cliOptions = {
     mode: { type: "string" },
@@ -437,9 +446,22 @@ export type CommandFactories = {
     }) => CommandRuntime;
     readonly runWorkflow?: typeof workflow;
     readonly runMaintenance?: typeof maintainIssues;
+    readonly runPipelinesGreen?: typeof getPipelinesGreen;
 };
 
-type CommandResumeState = RunState | MaintenanceRunState;
+type CommandResumeState = RunState | MaintenanceRunState | PipelineRunState;
+
+const isPipelineResumeState = (
+    state: CommandResumeState | undefined,
+): state is PipelineRunState =>
+    state !== undefined &&
+    "mode" in state &&
+    state.mode === "get-pipelines-green";
+
+const isMaintenanceResumeState = (
+    state: CommandResumeState | undefined,
+): state is MaintenanceRunState =>
+    state !== undefined && "mode" in state && state.mode === "maintain-issues";
 
 export type CommandOutput = {
     readonly stdout: (text: string) => void;
@@ -468,6 +490,7 @@ const resolveCommandFactories = (
     makeRuntime: factories.makeRuntime ?? makeLiveRuntime,
     runWorkflow: factories.runWorkflow ?? workflow,
     runMaintenance: factories.runMaintenance ?? maintainIssues,
+    runPipelinesGreen: factories.runPipelinesGreen ?? getPipelinesGreen,
 });
 
 const loadResumeState = async (
@@ -556,6 +579,7 @@ const resumeStateForConfig = async (
     explicitPolicy?: NeedsAttentionPolicy,
     explicitMaxDecompositionDepth?: number,
     explicitDuplicateAction?: DuplicateAction,
+    explicitWorkspace?: string,
 ): Promise<CommandResumeState | undefined> => {
     if (config.mode === ExecutionMode.Issues) {
         return await loadResumeState(
@@ -568,7 +592,19 @@ const resumeStateForConfig = async (
         config.mode !== ExecutionMode.MaintainIssues ||
         config.resume === undefined
     ) {
-        return undefined;
+        if (
+            config.mode !== ExecutionMode.GetPipelinesGreen ||
+            config.resume === undefined
+        ) {
+            return undefined;
+        }
+        return await loadPipelineRunState(config.resume, {
+            repository: config.repo,
+            ...(config.branch === undefined ? {} : { branch: config.branch }),
+            ...(explicitWorkspace === undefined
+                ? {}
+                : { workspace: config.workspace }),
+        });
     }
     return await loadMaintenanceRunState(config.resume, {
         repository: config.repo,
@@ -626,7 +662,10 @@ const workflowOptionsFor = (
 
 /** Execute one Ralphie command. */
 const dispatchCommand = async (
-    config: IssueRalphieConfig | MaintainIssuesRalphieConfig,
+    config:
+        | IssueRalphieConfig
+        | MaintainIssuesRalphieConfig
+        | GetPipelinesGreenRalphieConfig,
     input: RunCommandInput,
     runId: string,
     resumeState: CommandResumeState | undefined,
@@ -634,6 +673,21 @@ const dispatchCommand = async (
     runtime: CommandRuntime,
     factories: Required<CommandFactories>,
 ): Promise<void> => {
+    if (config.mode === ExecutionMode.GetPipelinesGreen) {
+        const pipelineResumeState = isPipelineResumeState(resumeState)
+            ? resumeState
+            : undefined;
+        const pipelineOptions: GetPipelinesGreenOptions = {
+            config,
+            runId,
+            signal: input.signal,
+            ...(pipelineResumeState === undefined
+                ? {}
+                : { resumeState: pipelineResumeState }),
+        };
+        await factories.runPipelinesGreen(pipelineOptions, runtime);
+        return;
+    }
     if (config.mode === ExecutionMode.Issues) {
         const issueResumeState =
             resumeState === undefined || !("mode" in resumeState)
@@ -653,9 +707,7 @@ const dispatchCommand = async (
             ...(explicitDuplicateAction === undefined
                 ? {}
                 : { explicitDuplicateAction }),
-            ...(resumeState !== undefined && "mode" in resumeState
-                ? { resumeState }
-                : {}),
+            ...(isMaintenanceResumeState(resumeState) ? { resumeState } : {}),
         } satisfies MaintainIssuesOptions,
         runtime,
     );
@@ -717,16 +769,12 @@ export const runCommand = async (
     }
 
     const config = resolveRalphieConfig(parsed.options);
-    if (config.mode === ExecutionMode.GetPipelinesGreen) {
-        throw new Error(
-            "The get-pipelines-green execution mode is not implemented yet.",
-        );
-    }
     const resumeState = await resumeStateForConfig(
         config,
         parsed.options.onNeedsAttention,
         parsed.options.maxDecompositionDepth,
         parsed.explicitDuplicateAction,
+        parsed.options.workspace,
     );
 
     const terminal = input.terminal ?? terminalInfo();

@@ -46,7 +46,18 @@ export type ProgressStage =
     | "maintenance-outcome"
     | "maintenance-recovery"
     | "pr-gate"
-    | "notification-recovery";
+    | "notification-recovery"
+    | "pipeline-remote-read"
+    | "pipeline-observation"
+    | "pipeline-diagnostics"
+    | "pipeline-repair"
+    | "pipeline-commit-message"
+    | "pipeline-commit"
+    | "pipeline-push"
+    | "pipeline-reconcile"
+    | "pipeline-final-verification"
+    | "pipeline-resume"
+    | "pipeline-outcome";
 
 export type ProgressStatus =
     | "started"

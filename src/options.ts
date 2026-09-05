@@ -65,6 +65,12 @@ export type Duration = {
 
 export type PipelineTimeout = Duration;
 
+/** Total wall-clock budget used when --pipeline-timeout is omitted. */
+export const DEFAULT_PIPELINE_TIMEOUT = {
+    value: 30,
+    unit: "minutes",
+} as const satisfies PipelineTimeout;
+
 const durationMultipliers: Record<DurationUnit, number> = {
     seconds: 1_000,
     minutes: 60_000,
