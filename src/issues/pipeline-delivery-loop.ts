@@ -1380,7 +1380,7 @@ export const makePipelineDeliveryLoopService = (
                     dependencies.git,
                     input,
                 );
-                if (remoteAfterPush === undefined || remoteAfterPush === "") {
+                if (remoteAfterPush === undefined) {
                     replaceLastAttempt({
                         push: {
                             status: "ambiguous",
@@ -1393,10 +1393,30 @@ export const makePipelineDeliveryLoopService = (
                         },
                     });
                     return complete("ambiguous-push", {
-                        remoteSha: remoteAfterPush ?? currentSha,
+                        remoteSha: currentSha,
                         failureFingerprint,
                         message:
                             "Push outcome is ambiguous because origin branch HEAD could not be read; no retry was attempted.",
+                        snapshot,
+                    });
+                }
+                if (remoteAfterPush === "") {
+                    replaceLastAttempt({
+                        push: {
+                            status: "external-movement",
+                            response: push.response,
+                            ...(push.failureKind === undefined
+                                ? {}
+                                : { failureKind: push.failureKind }),
+                            remoteSha: remoteAfterPush,
+                            message:
+                                "The remote branch is missing after the push; delivery halted without overwriting it.",
+                        },
+                    });
+                    return complete("external-movement", {
+                        failureFingerprint,
+                        message:
+                            "The remote branch disappeared during push reconciliation; delivery halted without overwriting it.",
                         snapshot,
                     });
                 }

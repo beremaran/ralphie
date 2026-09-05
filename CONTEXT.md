@@ -23,3 +23,12 @@ matches the created commit.
 An authoritative remote branch result that matches neither the expected prior
 commit nor the created pipeline commit.
 _Avoid_: Ambiguous push (when this remote evidence is available)
+
+**Pipeline repair attempt**:
+One prospective repair cycle for a failing pipeline snapshot; only a
+Confirmed pipeline push charges the budget.
+_Avoid_: attempt, implementation attempt, review attempt, transport retry, run attempt
+
+**Pipeline snapshot**:
+Normalized all-visible-checks evidence for one exact commit.
+_Avoid_: maintenance snapshot, PR snapshot, check snapshot

@@ -396,16 +396,28 @@ const outcomeForObservation = (input: {
 const resumedPushStatus = (input: {
     readonly remoteSha: string;
     readonly createdSha: string;
+    readonly priorSha: string;
     readonly response: "accepted" | "rejected";
     readonly failureKind?: "non-fast-forward" | "other";
-}): NonNullable<PipelineDeliveryAttempt["push"]>["status"] =>
-    validSha(input.remoteSha) && sameSha(input.remoteSha, input.createdSha)
-        ? input.response === "accepted"
+}): NonNullable<PipelineDeliveryAttempt["push"]>["status"] => {
+    if (
+        validSha(input.remoteSha) &&
+        sameSha(input.remoteSha, input.createdSha)
+    ) {
+        return input.response === "accepted"
             ? "confirmed"
-            : "confirmed-after-response-loss"
-        : input.failureKind === "non-fast-forward"
-          ? "rejected"
-          : "ambiguous";
+            : "confirmed-after-response-loss";
+    }
+    if (input.remoteSha === "") {
+        return "external-movement";
+    }
+    if (validSha(input.remoteSha) && sameSha(input.remoteSha, input.priorSha)) {
+        return input.failureKind === "non-fast-forward"
+            ? "rejected"
+            : "ambiguous";
+    }
+    return "external-movement";
+};
 
 const resumedPushAttempt = (input: {
     readonly state: PipelineRunState;
@@ -421,6 +433,8 @@ const resumedPushAttempt = (input: {
         .reverse()
         .find((attempt) => attempt.commit?.sha === input.createdSha);
     const priorAttempt = prior === undefined ? {} : deliveryAttemptFrom(prior);
+    const priorSha =
+        input.state.checkpoint?.sha ?? prior?.baseSha ?? input.parentSha;
     return {
         ...priorAttempt,
         attempt: prior?.attempt ?? input.state.pushedAttempts + 1,
@@ -433,6 +447,7 @@ const resumedPushAttempt = (input: {
             status: resumedPushStatus({
                 remoteSha: input.push.remoteSha,
                 createdSha: input.createdSha,
+                priorSha,
                 response: input.push.response,
                 failureKind: input.push.failureKind,
             }),
@@ -776,6 +791,7 @@ const resumePendingPush = async (input: {
     await input.persistence.onPhase(resumedEvent);
     const nextState = input.persistence.getState();
     if (confirmed) return { state: nextState };
+    const pushStatus = attemptState.push?.status;
     return {
         state: nextState,
         outcome: outcomeFromState({
@@ -784,13 +800,17 @@ const resumePendingPush = async (input: {
                 ? remoteAfter
                 : nextState.currentRemoteSha,
             kind:
-                push.failureKind === "non-fast-forward"
-                    ? "non-fast-forward"
-                    : "ambiguous-push",
+                pushStatus === "external-movement"
+                    ? "external-movement"
+                    : push.failureKind === "non-fast-forward"
+                      ? "non-fast-forward"
+                      : "ambiguous-push",
             message:
-                push.failureKind === "non-fast-forward"
-                    ? "The resumed non-force push was rejected as non-fast-forward."
-                    : "The resumed push outcome could not be reconciled; no retry was attempted.",
+                pushStatus === "external-movement"
+                    ? "The remote branch moved to an unrelated SHA during push reconciliation; delivery halted without overwriting it."
+                    : push.failureKind === "non-fast-forward"
+                      ? "The resumed non-force push was rejected as non-fast-forward."
+                      : "The resumed push outcome could not be reconciled; no retry was attempted.",
         }),
     };
 };
