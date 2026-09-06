@@ -71,6 +71,10 @@ import {
     type PullRequestReviewCoordinatorService,
 } from "./issues/pull-request-review-coordinator.ts";
 import {
+    makePullRequestClosureService,
+    type PullRequestClosureService,
+} from "./issues/pull-request-closure.ts";
+import {
     makePipelineSnapshotCollectorService,
     type PipelineSnapshotCollectorService,
 } from "./github/pipeline-snapshot-collector.ts";
@@ -197,6 +201,8 @@ export type RalphieRuntime = {
     readonly pullRequestReviewAttempt: PullRequestReviewAttemptService;
     /** Shared-budget post-creation PR review/revision coordinator. */
     readonly pullRequestReviewCoordinator: PullRequestReviewCoordinatorService;
+    /** Focused post-PR closure seam; owns durable projection, merge proof, and cleanup. */
+    readonly pullRequestClosure: PullRequestClosureService;
     /** Publishes structured needs-attention outcomes outside issue execution. */
     readonly githubNeedsAttentionNotification: GitHubNeedsAttentionNotificationService;
     /** Fresh, immutable, read-only maintenance context for one run. */
@@ -248,16 +254,14 @@ export type IssueWorkflowRuntime = {
     readonly githubClient: GitHubClientService;
     readonly githubIssues: GitHubIssuesService;
     readonly githubIssueMutations: GitHubIssueMutationService;
-    readonly githubPullRequests: GitHubPullRequestService;
     readonly githubNeedsAttentionNotification: GitHubNeedsAttentionNotificationService;
     readonly gitRepository: GitRepositoryService;
     readonly gitRepositoryInvariant: GitRepositoryInvariantService;
     readonly gitIssueCheckpoint: GitIssueCheckpointService;
     readonly gitIssueOperations: GitIssueOperationsService;
     readonly parentCompletion: ParentCompletionService;
-    readonly issueArtifactStore: IssueArtifactStoreService;
-    readonly pullRequestReviewCoordinator: PullRequestReviewCoordinatorService;
-    readonly pipelineObservation: PipelineObservationService;
+    /** Focused post-PR closure seam; the workflow never touches review or check internals. */
+    readonly pullRequestClosure: PullRequestClosureService;
     readonly issueExecutor: IssueExecutorService;
     readonly dryRunIssueExecutor: DryRunIssueExecutorService;
     readonly opencode: OpenCodeService;
@@ -457,6 +461,13 @@ export const makeLiveRuntime = ({
             revisionDelivery: gitRevisionDelivery,
             commandRunner,
         });
+    const pullRequestClosure = makePullRequestClosureService({
+        pullRequests: githubPullRequests,
+        reviewCoordinator: pullRequestReviewCoordinator,
+        observation: pipelineObservation,
+        artifacts: issueArtifactStore,
+        issueOperations: gitIssueOperations,
+    });
     const complexityAssessment = makeComplexityAssessmentService(progress);
     const groundingAssessment = makeGroundingAssessmentService(progress);
     const resolutionVerification = makeResolutionVerificationService(progress);
@@ -514,6 +525,7 @@ export const makeLiveRuntime = ({
         githubPullRequests,
         pullRequestReviewAttempt,
         pullRequestReviewCoordinator,
+        pullRequestClosure,
         githubNeedsAttentionNotification,
         maintenanceSnapshot,
         ...(maintenancePlannerOverride === undefined

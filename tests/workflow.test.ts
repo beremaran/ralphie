@@ -25,6 +25,7 @@ import type {
     PipelineSnapshotFetcher,
 } from "../src/github/pipeline-observation.ts";
 import { makePipelineObservationService } from "../src/github/pipeline-observation.ts";
+import { makePullRequestClosureService } from "../src/issues/pull-request-closure.ts";
 import type { GitHubIssueMutationService } from "../src/github/issue-mutations.ts";
 import { makeParentCompletionService } from "../src/github/parent-completion.ts";
 import type { GitHubNeedsAttentionNotificationService } from "../src/github/needs-attention.ts";
@@ -542,9 +543,17 @@ const testRuntime = (
         listBlockedBy: async () => [],
         addBlockedBy: async () => {},
     };
+    const pullRequestClosure = makePullRequestClosureService({
+        pullRequests,
+        ...(options.pullRequestReviewCoordinator === undefined
+            ? {}
+            : { reviewCoordinator: options.pullRequestReviewCoordinator }),
+        observation: pipelineObservation,
+        artifacts: artifactStore,
+        issueOperations: operations,
+    });
     return {
         githubClient,
-        pipelineObservation,
         githubIssues,
         githubIssueMutations: mutations,
         parentCompletion: makeParentCompletionService({
@@ -552,10 +561,7 @@ const testRuntime = (
             relationships,
             mutations,
         }),
-        githubPullRequests: pullRequests,
-        pullRequestReviewCoordinator:
-            options.pullRequestReviewCoordinator ??
-            ({} as IssueWorkflowRuntime["pullRequestReviewCoordinator"]),
+        pullRequestClosure,
         githubNeedsAttentionNotification:
             options.needsAttentionNotification ?? {
                 notify: async () => {
@@ -566,7 +572,6 @@ const testRuntime = (
         gitRepositoryInvariant: invariant,
         gitIssueCheckpoint: checkpoint,
         gitIssueOperations: operations,
-        issueArtifactStore: artifactStore,
         dryRunIssueExecutor,
         issueExecutor,
         opencode,
