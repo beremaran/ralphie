@@ -173,7 +173,7 @@ import { type ProgressReporterService } from "./progress/progress.ts";
 import { RunStateStoreLive, type RunStateStoreService } from "./run/state.ts";
 import { WorkspaceLive, type WorkspaceService } from "./workspace/workspace.ts";
 
-/** All dependencies needed by a workflow run. */
+/** Concrete adapter assembly for one run. Only the command wiring consumes this broad shape; execution modes depend on their focused seams. */
 export type RalphieRuntime = {
     readonly commandRunner: CommandRunnerService;
     readonly githubClient: GitHubClientService;
@@ -241,123 +241,61 @@ export type RalphieRuntime = {
 };
 
 /** Focused dependencies consumed directly by the issue workflow entrypoint. */
-export type IssueWorkflowRuntime = Pick<
-    RalphieRuntime,
-    | "progress"
-    | "runStateStore"
-    | "workspace"
-    | "githubClient"
-    | "githubIssues"
-    | "githubIssueMutations"
-    | "githubPullRequests"
-    | "githubNeedsAttentionNotification"
-    | "gitRepository"
-    | "gitRepositoryInvariant"
-    | "gitIssueCheckpoint"
-    | "gitIssueOperations"
-    | "parentCompletion"
-    | "issueArtifactStore"
-    | "pullRequestReviewCoordinator"
-    | "pipelineObservation"
-    | "issueExecutor"
-    | "dryRunIssueExecutor"
-    | "opencode"
->;
+export type IssueWorkflowRuntime = {
+    readonly progress: ProgressReporterService;
+    readonly runStateStore: RunStateStoreService;
+    readonly workspace: WorkspaceService;
+    readonly githubClient: GitHubClientService;
+    readonly githubIssues: GitHubIssuesService;
+    readonly githubIssueMutations: GitHubIssueMutationService;
+    readonly githubPullRequests: GitHubPullRequestService;
+    readonly githubNeedsAttentionNotification: GitHubNeedsAttentionNotificationService;
+    readonly gitRepository: GitRepositoryService;
+    readonly gitRepositoryInvariant: GitRepositoryInvariantService;
+    readonly gitIssueCheckpoint: GitIssueCheckpointService;
+    readonly gitIssueOperations: GitIssueOperationsService;
+    readonly parentCompletion: ParentCompletionService;
+    readonly issueArtifactStore: IssueArtifactStoreService;
+    readonly pullRequestReviewCoordinator: PullRequestReviewCoordinatorService;
+    readonly pipelineObservation: PipelineObservationService;
+    readonly issueExecutor: IssueExecutorService;
+    readonly dryRunIssueExecutor: DryRunIssueExecutorService;
+    readonly opencode: OpenCodeService;
+};
 
 /** Focused dependencies consumed directly by maintenance execution. */
-export type MaintenanceRuntime = Pick<
-    RalphieRuntime,
-    | "progress"
-    | "workspace"
-    | "githubClient"
-    | "gitRepository"
-    | "gitRepositoryInvariant"
-    | "commandRunner"
-    | "maintenanceSnapshot"
-    | "maintenancePlanner"
-    | "maintenancePlannerForAgent"
-    | "maintenanceMutation"
-    | "maintenanceRelationships"
-    | "maintenanceRunStateStore"
-    | "opencode"
->;
+export type MaintenanceRuntime = {
+    readonly progress: ProgressReporterService;
+    readonly workspace: WorkspaceService;
+    readonly githubClient: GitHubClientService;
+    readonly gitRepository: GitRepositoryService;
+    readonly gitRepositoryInvariant: GitRepositoryInvariantService;
+    readonly commandRunner: CommandRunnerService;
+    readonly maintenanceSnapshot: MaintenanceSnapshotService;
+    /** Optional injected maintenance planner; production creates one per agent session. */
+    readonly maintenancePlanner?: MaintenancePlanService;
+    /** Build a planner around the agent client created for one run. */
+    readonly maintenancePlannerForAgent?: (
+        agent: AgentClient,
+    ) => MaintenancePlanService;
+    /** Deterministic additive/comment maintenance mutation boundary. */
+    readonly maintenanceMutation?: GitHubIssueMaintenanceService;
+    /** Deterministic duplicate/related relationship mutation boundary. */
+    readonly maintenanceRelationships?: GitHubIssueMaintenanceRelationshipService;
+    /** Mode-specific state store; it is never shared with issue queue state. */
+    readonly maintenanceRunStateStore?: MaintenanceRunStateStoreService;
+    readonly opencode: OpenCodeService;
+};
 
 /** Focused dependencies consumed directly by Pipeline delivery. */
-export type PipelineDeliveryRuntime = Pick<
-    RalphieRuntime,
-    | "progress"
-    | "workspace"
-    | "githubClient"
-    | "gitRepository"
-    | "opencode"
-    | "pipelineDeliveryLifecycle"
->;
-
-/** Project the assembled runtime onto the issue workflow shape. */
-export const toIssueWorkflowRuntime = (
-    runtime: RalphieRuntime,
-): IssueWorkflowRuntime => ({
-    progress: runtime.progress,
-    runStateStore: runtime.runStateStore,
-    workspace: runtime.workspace,
-    githubClient: runtime.githubClient,
-    githubIssues: runtime.githubIssues,
-    githubIssueMutations: runtime.githubIssueMutations,
-    githubPullRequests: runtime.githubPullRequests,
-    githubNeedsAttentionNotification: runtime.githubNeedsAttentionNotification,
-    gitRepository: runtime.gitRepository,
-    gitRepositoryInvariant: runtime.gitRepositoryInvariant,
-    gitIssueCheckpoint: runtime.gitIssueCheckpoint,
-    gitIssueOperations: runtime.gitIssueOperations,
-    parentCompletion: runtime.parentCompletion,
-    issueArtifactStore: runtime.issueArtifactStore,
-    pullRequestReviewCoordinator: runtime.pullRequestReviewCoordinator,
-    pipelineObservation: runtime.pipelineObservation,
-    issueExecutor: runtime.issueExecutor,
-    dryRunIssueExecutor: runtime.dryRunIssueExecutor,
-    opencode: runtime.opencode,
-});
-
-/** Project the assembled runtime onto the maintenance execution shape. */
-export const toMaintenanceRuntime = (
-    runtime: RalphieRuntime,
-): MaintenanceRuntime => ({
-    progress: runtime.progress,
-    workspace: runtime.workspace,
-    githubClient: runtime.githubClient,
-    gitRepository: runtime.gitRepository,
-    gitRepositoryInvariant: runtime.gitRepositoryInvariant,
-    commandRunner: runtime.commandRunner,
-    maintenanceSnapshot: runtime.maintenanceSnapshot,
-    ...(runtime.maintenancePlanner === undefined
-        ? {}
-        : { maintenancePlanner: runtime.maintenancePlanner }),
-    ...(runtime.maintenancePlannerForAgent === undefined
-        ? {}
-        : { maintenancePlannerForAgent: runtime.maintenancePlannerForAgent }),
-    ...(runtime.maintenanceMutation === undefined
-        ? {}
-        : { maintenanceMutation: runtime.maintenanceMutation }),
-    ...(runtime.maintenanceRelationships === undefined
-        ? {}
-        : { maintenanceRelationships: runtime.maintenanceRelationships }),
-    ...(runtime.maintenanceRunStateStore === undefined
-        ? {}
-        : { maintenanceRunStateStore: runtime.maintenanceRunStateStore }),
-    opencode: runtime.opencode,
-});
-
-/** Project the assembled runtime onto the Pipeline delivery shape. */
-export const toPipelineDeliveryRuntime = (
-    runtime: RalphieRuntime,
-): PipelineDeliveryRuntime => ({
-    progress: runtime.progress,
-    workspace: runtime.workspace,
-    githubClient: runtime.githubClient,
-    gitRepository: runtime.gitRepository,
-    opencode: runtime.opencode,
-    pipelineDeliveryLifecycle: runtime.pipelineDeliveryLifecycle,
-});
+export type PipelineDeliveryRuntime = {
+    readonly progress: ProgressReporterService;
+    readonly workspace: WorkspaceService;
+    readonly githubClient: GitHubClientService;
+    readonly gitRepository: GitRepositoryService;
+    readonly opencode: OpenCodeService;
+    readonly pipelineDeliveryLifecycle: PipelineDeliveryLifecycle;
+};
 
 export type RuntimeOverrides = {
     readonly opencode: OpenCodeService;

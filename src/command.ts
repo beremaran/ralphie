@@ -31,10 +31,9 @@ import { type OpenCodeProviderConfig } from "./opencode/config.ts";
 import { makeOpenCodeService } from "./opencode/server.ts";
 import {
     makeLiveRuntime,
-    toIssueWorkflowRuntime,
-    toMaintenanceRuntime,
-    toPipelineDeliveryRuntime,
-    type RalphieRuntime,
+    type IssueWorkflowRuntime,
+    type MaintenanceRuntime,
+    type PipelineDeliveryRuntime,
 } from "./runtime.ts";
 import type { OpenCodeService } from "./opencode/server.ts";
 import type { AgentEventListener } from "./opencode/client.ts";
@@ -429,9 +428,11 @@ Environment:
   OPENCODE_TOKEN               OpenCode server token (environment only)
 `;
 
-export type CommandRuntime = RalphieRuntime & {
-    readonly dispose?: () => Promise<void>;
-};
+export type CommandRuntime = IssueWorkflowRuntime &
+    MaintenanceRuntime &
+    PipelineDeliveryRuntime & {
+        readonly dispose?: () => Promise<void>;
+    };
 
 export type CommandFactories = {
     readonly makeCoordinator?: (
@@ -661,10 +662,7 @@ const dispatchCommand = async (
             runId,
             signal: input.signal,
         };
-        await factories.runPipelinesGreen(
-            pipelineOptions,
-            toPipelineDeliveryRuntime(runtime),
-        );
+        await factories.runPipelinesGreen(pipelineOptions, runtime);
         return;
     }
     if (config.mode === ExecutionMode.Issues) {
@@ -674,7 +672,7 @@ const dispatchCommand = async (
                 : undefined;
         await factories.runWorkflow(
             workflowOptionsFor(config, input, runId, issueResumeState),
-            toIssueWorkflowRuntime(runtime),
+            runtime,
         );
         return;
     }
@@ -688,7 +686,7 @@ const dispatchCommand = async (
                 : { explicitDuplicateAction }),
             ...(isMaintenanceResumeState(resumeState) ? { resumeState } : {}),
         } satisfies MaintainIssuesOptions,
-        toMaintenanceRuntime(runtime),
+        runtime,
     );
 };
 

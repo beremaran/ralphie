@@ -35,7 +35,11 @@ import { appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 
-import { runCommand, type CommandFactories } from "../../src/command.ts";
+import {
+    runCommand,
+    type CommandFactories,
+    type CommandRuntime,
+} from "../../src/command.ts";
 import type {
     AgentEventContext,
     AgentEventListener,
@@ -60,10 +64,7 @@ import type {
     ProgressUpdate,
 } from "../../src/progress/progress.ts";
 import type { TerminalOutputController } from "../../src/progress/terminal-controller.ts";
-import type {
-    IssueWorkflowRuntime,
-    RalphieRuntime,
-} from "../../src/runtime.ts";
+import type { IssueWorkflowRuntime } from "../../src/runtime.ts";
 import type { WorkflowOptions } from "../../src/workflow.ts";
 
 /** Marker written after the interactive footer paints for the first time. */
@@ -373,9 +374,7 @@ type EventLogEntry =
     | { readonly kind: "done" }
     | { readonly kind: "config"; readonly options: PtyScenarioOptions };
 
-type ChildRalphieRuntime = RalphieRuntime & {
-    readonly dispose?: () => Promise<void>;
-};
+type ChildCommandRuntime = CommandRuntime;
 
 const LIFECYCLE_PROGRESS_STARTS = [
     {
@@ -585,7 +584,7 @@ export const runPtyDriverChild = async (
     let agentListener: AgentEventListener | undefined;
     let coordinator: ProgressCoordinator | undefined;
     let controller: TerminalOutputController | undefined;
-    let runtime: ChildRalphieRuntime | undefined;
+    let runtime: ChildCommandRuntime | undefined;
 
     /** Fake agent service: only the event listener is ever used. */
     const makeFakeAgentService = (): OpenCodeService => {
@@ -979,7 +978,7 @@ export const runPtyDriverChild = async (
             return makeFakeAgentService();
         },
         makeRuntime: ({ opencode, progress }) => {
-            runtime = { opencode, progress } as unknown as ChildRalphieRuntime;
+            runtime = { opencode, progress } as unknown as ChildCommandRuntime;
             return runtime;
         },
         runWorkflow: (

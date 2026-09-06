@@ -2,25 +2,11 @@ import { describe, expect, test } from "bun:test";
 
 import {
     makeLiveRuntime,
-    toIssueWorkflowRuntime,
-    toMaintenanceRuntime,
-    toPipelineDeliveryRuntime,
     type IssueWorkflowRuntime,
     type MaintenanceRuntime,
     type PipelineDeliveryRuntime,
-    type RalphieRuntime,
 } from "../src/runtime.ts";
 import { makeProgressRecorder } from "../src/progress/progress.ts";
-
-const liveRuntime = (): RalphieRuntime =>
-    makeLiveRuntime({
-        opencode: {
-            start: async () => {
-                throw new Error("The agent must not start while projecting");
-            },
-        },
-        progress: makeProgressRecorder([]),
-    });
 
 const ISSUE_KEYS = [
     "progress",
@@ -65,22 +51,6 @@ const PIPELINE_KEYS = [
 ] as const;
 
 describe("mode-local runtime seams", () => {
-    test("projects the issue workflow shape without unrelated dependencies", () => {
-        const runtime = liveRuntime();
-        const narrow = toIssueWorkflowRuntime(runtime);
-
-        expect(Object.keys(narrow).sort()).toEqual([...ISSUE_KEYS].sort());
-        for (const key of ISSUE_KEYS) {
-            expect(narrow[key]).toBe(runtime[key]);
-        }
-        expect("pipelineDeliveryLifecycle" in narrow).toBe(false);
-        expect("pipelineDeliveryGit" in narrow).toBe(false);
-        expect("maintenanceSnapshot" in narrow).toBe(false);
-        expect("maintenanceMutation" in narrow).toBe(false);
-        expect("commandRunner" in narrow).toBe(false);
-        expect("gitRemoteSafety" in narrow).toBe(false);
-    });
-
     test("constructs the issue workflow shape without unrelated placeholders", () => {
         const narrow: IssueWorkflowRuntime = {
             progress: {} as never,
@@ -109,21 +79,6 @@ describe("mode-local runtime seams", () => {
         expect("maintenanceSnapshot" in narrow).toBe(false);
     });
 
-    test("projects the maintenance shape without unrelated dependencies", () => {
-        const runtime = liveRuntime();
-        const narrow = toMaintenanceRuntime(runtime);
-
-        for (const key of MAINTENANCE_REQUIRED_KEYS) {
-            expect(narrow[key]).toBe(runtime[key]);
-        }
-        expect("pipelineDeliveryLifecycle" in narrow).toBe(false);
-        expect("pipelineObservation" in narrow).toBe(false);
-        expect("issueExecutor" in narrow).toBe(false);
-        expect("githubIssues" in narrow).toBe(false);
-        expect("gitIssueOperations" in narrow).toBe(false);
-        expect("runStateStore" in narrow).toBe(false);
-    });
-
     test("constructs the maintenance shape without unrelated placeholders", () => {
         const narrow: MaintenanceRuntime = {
             progress: {} as never,
@@ -144,21 +99,6 @@ describe("mode-local runtime seams", () => {
         expect("githubIssues" in narrow).toBe(false);
     });
 
-    test("projects the pipeline delivery shape without unrelated dependencies", () => {
-        const runtime = liveRuntime();
-        const narrow = toPipelineDeliveryRuntime(runtime);
-
-        expect(Object.keys(narrow).sort()).toEqual([...PIPELINE_KEYS].sort());
-        for (const key of PIPELINE_KEYS) {
-            expect(narrow[key]).toBe(runtime[key]);
-        }
-        expect("pipelineObservation" in narrow).toBe(false);
-        expect("pipelineDiagnostics" in narrow).toBe(false);
-        expect("issueExecutor" in narrow).toBe(false);
-        expect("maintenanceSnapshot" in narrow).toBe(false);
-        expect("gitIssueOperations" in narrow).toBe(false);
-    });
-
     test("constructs the pipeline delivery shape without unrelated placeholders", () => {
         const narrow: PipelineDeliveryRuntime = {
             progress: {} as never,
@@ -172,5 +112,31 @@ describe("mode-local runtime seams", () => {
         expect(Object.keys(narrow).sort()).toEqual([...PIPELINE_KEYS].sort());
         expect("pipelineObservation" in narrow).toBe(false);
         expect("maintenanceSnapshot" in narrow).toBe(false);
+    });
+
+    test("centralized assembly satisfies every focused seam without projection", () => {
+        const runtime = makeLiveRuntime({
+            opencode: {
+                start: async () => {
+                    throw new Error(
+                        "The agent must not start while assembling",
+                    );
+                },
+            },
+            progress: makeProgressRecorder([]),
+        });
+        const issue: IssueWorkflowRuntime = runtime;
+        const maintenance: MaintenanceRuntime = runtime;
+        const pipeline: PipelineDeliveryRuntime = runtime;
+
+        for (const key of ISSUE_KEYS) {
+            expect(issue[key]).toBe(runtime[key]);
+        }
+        for (const key of MAINTENANCE_REQUIRED_KEYS) {
+            expect(maintenance[key]).toBe(runtime[key]);
+        }
+        for (const key of PIPELINE_KEYS) {
+            expect(pipeline[key]).toBe(runtime[key]);
+        }
     });
 });
