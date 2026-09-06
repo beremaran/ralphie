@@ -3,7 +3,6 @@ import type { Octokit } from "octokit";
 import type { AgentClient } from "../src/opencode/client.ts";
 import type { OpenCodeModelInfo } from "../src/opencode/client.ts";
 
-import { CommandRunnerLive } from "../src/process/command-runner.ts";
 import type { GitRepositoryService } from "../src/git/repository.ts";
 import type { GitRepositoryInvariantService } from "../src/git/repository-invariant.ts";
 import type { GitIssueCheckpointService } from "../src/git/issue-checkpoint.ts";
@@ -70,7 +69,7 @@ import {
     WorkflowMode,
 } from "../src/options.ts";
 import { IssueOrder, IssueSort } from "../src/github/issues.ts";
-import type { RalphieRuntime } from "../src/runtime.ts";
+import type { IssueWorkflowRuntime } from "../src/runtime.ts";
 import { RalphieError } from "../src/shared/error.ts";
 import {
     ComplexityLevel,
@@ -178,7 +177,7 @@ const testRuntime = (
     savedStates: RunState[],
     options: TestRuntimeOptions = {},
     progressEvents: ProgressUpdate[] = [],
-): RalphieRuntime => {
+): IssueWorkflowRuntime => {
     let listIndex = 0;
     let refreshIndex = 0;
     let outcomeIndex = 0;
@@ -536,40 +535,27 @@ const testRuntime = (
                 return { outcome, transitions: [] };
             },
         };
+    const relationships = {
+        listSubIssues: async () => options.parentSubIssues ?? [],
+        parentOf: async () => undefined,
+        attachSubIssue: async () => {},
+        listBlockedBy: async () => [],
+        addBlockedBy: async () => {},
+    };
     return {
-        commandRunner: CommandRunnerLive,
         githubClient,
-        pipelineSnapshot: {} as never,
         pipelineObservation,
-        pipelineDiagnostics: {} as never,
-        pipelineRepairExecutor: {} as never,
-        pipelineDeliveryLifecycle: {} as never,
-        pipelineDeliveryGit: {} as never,
-        maintenanceSnapshot: {} as never,
         githubIssues,
         githubIssueMutations: mutations,
-        githubIssueRelationships: {
-            listSubIssues: async () => options.parentSubIssues ?? [],
-            parentOf: async () => undefined,
-            attachSubIssue: async () => {},
-            listBlockedBy: async () => [],
-            addBlockedBy: async () => {},
-        },
         parentCompletion: makeParentCompletionService({
             issues: githubIssues,
-            relationships: {
-                listSubIssues: async () => options.parentSubIssues ?? [],
-                parentOf: async () => undefined,
-                attachSubIssue: async () => {},
-                listBlockedBy: async () => [],
-                addBlockedBy: async () => {},
-            },
+            relationships,
             mutations,
         }),
         githubPullRequests: pullRequests,
-        pullRequestReviewAttempt: {} as never,
         pullRequestReviewCoordinator:
-            options.pullRequestReviewCoordinator ?? ({} as never),
+            options.pullRequestReviewCoordinator ??
+            ({} as IssueWorkflowRuntime["pullRequestReviewCoordinator"]),
         githubNeedsAttentionNotification:
             options.needsAttentionNotification ?? {
                 notify: async () => {
@@ -580,24 +566,12 @@ const testRuntime = (
         gitRepositoryInvariant: invariant,
         gitIssueCheckpoint: checkpoint,
         gitIssueOperations: operations,
-        gitIssuePreparation: {} as never,
-        gitRemoteSafety: {} as never,
-        gitRevisionCommit: {} as never,
-        gitRevisionDelivery: {} as never,
         issueArtifactStore: artifactStore,
-        complexityAssessment: {} as never,
-        groundingAssessment: {} as never,
-        resolutionVerification: {} as never,
-        decompositionExecutor: {} as never,
-        implementationExecutor: {} as never,
         dryRunIssueExecutor,
         issueExecutor,
-        issueRecovery: {} as never,
-        needsAttentionRouter: {} as never,
         opencode,
         progress,
         runStateStore: stateStore,
-        pipelineRunStateStore: {} as never,
         workspace,
     };
 };

@@ -60,7 +60,10 @@ import type {
     ProgressUpdate,
 } from "../../src/progress/progress.ts";
 import type { TerminalOutputController } from "../../src/progress/terminal-controller.ts";
-import type { RalphieRuntime } from "../../src/runtime.ts";
+import type {
+    IssueWorkflowRuntime,
+    RalphieRuntime,
+} from "../../src/runtime.ts";
 import type { WorkflowOptions } from "../../src/workflow.ts";
 
 /** Marker written after the interactive footer paints for the first time. */
@@ -666,7 +669,7 @@ export const runPtyDriverChild = async (
 
     const runSmokeWorkflow = async (
         _options: WorkflowOptions,
-        smokeRuntime: RalphieRuntime,
+        smokeRuntime: IssueWorkflowRuntime,
     ): Promise<never> => {
         const listener = agentListener as AgentEventListener;
         const { progress } = smokeRuntime;
@@ -786,7 +789,7 @@ export const runPtyDriverChild = async (
      */
     const settleCompletionWorkflow = async (
         listener: AgentEventListener,
-        progress: RalphieRuntime["progress"],
+        progress: IssueWorkflowRuntime["progress"],
     ): Promise<never> => {
         listener(
             asEvent({
@@ -850,7 +853,7 @@ export const runPtyDriverChild = async (
 
     const runLifecycleWorkflow = async (
         workflowOptions: WorkflowOptions,
-        childRuntime: RalphieRuntime,
+        childRuntime: IssueWorkflowRuntime,
     ): Promise<never> => {
         const listener = agentListener as AgentEventListener;
         const { progress } = childRuntime;
@@ -981,7 +984,7 @@ export const runPtyDriverChild = async (
         },
         runWorkflow: (
             workflowOptions: WorkflowOptions,
-            childRuntime: RalphieRuntime,
+            childRuntime: IssueWorkflowRuntime,
         ) =>
             (scenario === "smoke" ? runSmokeWorkflow : runLifecycleWorkflow)(
                 workflowOptions,

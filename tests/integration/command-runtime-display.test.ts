@@ -28,7 +28,7 @@ import {
 import { breadcrumbCandidateFor } from "../../src/progress/breadcrumb.ts";
 import type { FooterTimer } from "../../src/progress/footer.ts";
 import type { ProgressRenderMode } from "../../src/progress/progress.ts";
-import type { RalphieRuntime } from "../../src/runtime.ts";
+import type { IssueWorkflowRuntime } from "../../src/runtime.ts";
 import { stripTerminalControls } from "../../src/shared/terminal.ts";
 import type { WorkflowOptions } from "../../src/workflow.ts";
 import {
@@ -262,7 +262,7 @@ const runInteractiveCommand = async ({
                 ({ opencode, progress }) as unknown as CommandRuntime,
             runWorkflow: async (
                 _options: WorkflowOptions,
-                runtime: RalphieRuntime,
+                runtime: IssueWorkflowRuntime,
             ) => {
                 const piListener = listener as AgentEventListener;
                 const settle = (): void => {
@@ -356,7 +356,7 @@ const runNoninteractiveCommand = async ({
                 ({ opencode, progress }) as unknown as CommandRuntime,
             runWorkflow: async (
                 _options: WorkflowOptions,
-                runtime: RalphieRuntime,
+                runtime: IssueWorkflowRuntime,
             ) => {
                 await playScriptedScenario(scenario, outputModeOf(args), {
                     listener: listener as AgentEventListener,

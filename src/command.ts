@@ -29,7 +29,11 @@ import {
 import { type ProgressRenderMode } from "./progress/progress.ts";
 import { type OpenCodeProviderConfig } from "./opencode/config.ts";
 import { makeOpenCodeService } from "./opencode/server.ts";
-import { makeLiveRuntime, type RalphieRuntime } from "./runtime.ts";
+import {
+    makeLiveRuntime,
+    toIssueWorkflowRuntime,
+    type RalphieRuntime,
+} from "./runtime.ts";
 import type { OpenCodeService } from "./opencode/server.ts";
 import type { AgentEventListener } from "./opencode/client.ts";
 import {
@@ -665,7 +669,7 @@ const dispatchCommand = async (
                 : undefined;
         await factories.runWorkflow(
             workflowOptionsFor(config, input, runId, issueResumeState),
-            runtime,
+            toIssueWorkflowRuntime(runtime),
         );
         return;
     }

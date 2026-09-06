@@ -28,7 +28,7 @@ import type {
     ProgressUpdate,
 } from "../../src/progress/progress.ts";
 import { RalphieExitCode } from "../../src/process/exit-code.ts";
-import type { RalphieRuntime } from "../../src/runtime.ts";
+import type { IssueWorkflowRuntime } from "../../src/runtime.ts";
 import { stripTerminalControls } from "../../src/shared/terminal.ts";
 import type { WorkflowOptions } from "../../src/workflow.ts";
 import {
@@ -398,7 +398,7 @@ const runCell = async (
                         ({ opencode, progress }) as unknown as CommandRuntime,
                     runWorkflow: async (
                         options: WorkflowOptions,
-                        runtime: RalphieRuntime,
+                        runtime: IssueWorkflowRuntime,
                     ) => {
                         await playLifecycleSteps(row, {
                             listener: listener as AgentEventListener,

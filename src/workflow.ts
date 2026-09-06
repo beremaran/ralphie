@@ -78,7 +78,7 @@ import {
     IssueFailurePolicy,
     WorkflowMode,
 } from "./options.ts";
-import type { RalphieRuntime } from "./runtime.ts";
+import type { IssueWorkflowRuntime } from "./runtime.ts";
 
 const errorMessage = (error: unknown): string =>
     error instanceof Error ? error.message : String(error);
@@ -455,7 +455,7 @@ type WorkflowCheckout = NonNullable<RunState["checkout"]>;
 type WorkflowOutcomeEntry = WorkflowSummary["outcomes"][number];
 
 type PersistWorkflowStateInput = {
-    readonly stateStore: RalphieRuntime["runStateStore"];
+    readonly stateStore: IssueWorkflowRuntime["runStateStore"];
     readonly statePath: string;
     readonly queue: ReturnType<typeof createIssueQueue>;
     readonly activeQueueIssues: ReadonlyMap<number, GitHubIssue>;
@@ -1030,7 +1030,7 @@ const validateRuntimeModelVariants = async (
 /** Run Ralphie using an explicit dependency object. */
 export const workflow = async (
     options: WorkflowOptions,
-    runtime: RalphieRuntime,
+    runtime: IssueWorkflowRuntime,
 ): Promise<WorkflowSummary> => {
     const config = makeWorkflowConfiguration(options);
     const {
