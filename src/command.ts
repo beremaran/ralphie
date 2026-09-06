@@ -33,6 +33,7 @@ import {
     makeLiveRuntime,
     toIssueWorkflowRuntime,
     toMaintenanceRuntime,
+    toPipelineDeliveryRuntime,
     type RalphieRuntime,
 } from "./runtime.ts";
 import type { OpenCodeService } from "./opencode/server.ts";
@@ -660,7 +661,10 @@ const dispatchCommand = async (
             runId,
             signal: input.signal,
         };
-        await factories.runPipelinesGreen(pipelineOptions, runtime);
+        await factories.runPipelinesGreen(
+            pipelineOptions,
+            toPipelineDeliveryRuntime(runtime),
+        );
         return;
     }
     if (config.mode === ExecutionMode.Issues) {

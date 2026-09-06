@@ -35,7 +35,7 @@ import {
     makePipelineDeliveryStateAdapter,
     PipelineRunStateStoreLive,
 } from "../src/run/pipeline-state.ts";
-import type { RalphieRuntime } from "../src/runtime.ts";
+import type { PipelineDeliveryRuntime } from "../src/runtime.ts";
 
 const BASE = "a".repeat(40);
 const NEXT = "b".repeat(40);
@@ -126,7 +126,7 @@ const makeRuntime = (input: {
     readonly observation?: PipelineObservationService;
     readonly diagnostics?: PipelineDiagnosticsService;
     readonly progressEvents: ProgressUpdate[];
-}): RalphieRuntime => {
+}): PipelineDeliveryRuntime => {
     const { workspace, calls } = input;
     const progress = makeProgressRecorder(input.progressEvents);
     const pipelineDeliveryGit = fakeGit(calls);
@@ -187,13 +187,7 @@ const makeRuntime = (input: {
             },
         },
         gitRepository,
-        pipelineDeliveryGit,
         pipelineDeliveryLifecycle,
-        pipelineObservation:
-            input.observation ?? ({ observe: async () => ({}) } as never),
-        pipelineDiagnostics: input.diagnostics ?? ({} as never),
-        pipelineRunStateStore: PipelineRunStateStoreLive,
-        gitRemoteSafety: { verifyDirectPush: async () => ({}) } as never,
         workspace: {
             prepare: async () => {
                 calls.push("prepareWorkspace");
@@ -215,7 +209,7 @@ const makeRuntime = (input: {
             },
         },
         progress,
-    } as unknown as RalphieRuntime;
+    };
 };
 
 describe("get-pipelines-green orchestration", () => {

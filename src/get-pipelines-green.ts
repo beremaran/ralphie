@@ -18,7 +18,7 @@ import type {
     ProgressStage,
 } from "./progress/progress.ts";
 import type { OpenCodeRuntime } from "./opencode/server.ts";
-import type { RalphieRuntime } from "./runtime.ts";
+import type { PipelineDeliveryRuntime } from "./runtime.ts";
 import type {
     PipelineDeliveryContext,
     PipelineDeliveryOutcome,
@@ -46,7 +46,7 @@ export type PipelineRunSummary = {
 
 export type GetPipelinesGreenEntryPoint = (
     options: GetPipelinesGreenOptions,
-    runtime: RalphieRuntime,
+    runtime: PipelineDeliveryRuntime,
 ) => Promise<PipelineRunSummary>;
 
 export class PipelineDeliveryOutcomeError extends RalphieError {
@@ -123,7 +123,7 @@ const requestFor = (input: {
     readonly runId: string;
     readonly signal?: AbortSignal;
     readonly client: Awaited<
-        ReturnType<RalphieRuntime["githubClient"]["initialize"]>
+        ReturnType<PipelineDeliveryRuntime["githubClient"]["initialize"]>
     >;
     readonly startServer: () => Promise<OpenCodeRuntime>;
 }): PipelineDeliveryRequest => {
