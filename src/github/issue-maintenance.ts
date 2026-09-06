@@ -20,7 +20,26 @@ import {
 import type { MaintenanceSnapshot } from "../maintain-issues-snapshot-service.ts";
 import type { MaintainableComment } from "../maintain-issues-snapshot.ts";
 import { RalphieError } from "../shared/error.ts";
-import { parseRepositorySlug } from "./repository.ts";
+import {
+    canCommentOnLockedIssue,
+    detailOf,
+    endpointFor,
+    fetchAuthenticatedActor,
+    invalidRepositoryDetail,
+    isAbortCause,
+    isRecord,
+    type ActorResult,
+    type LockedCommentPermissionChecker,
+    type LockedCommentPermissionInput,
+    recordValue,
+    repositoryParameters,
+    requestOptions,
+    responseData,
+    statusOf,
+    text,
+    throwIfAborted,
+    type RecordLike,
+} from "./maintenance-reconciliation.ts";
 
 export const MAINTENANCE_ACTION_MARKER_VERSION = 1;
 export const RALPHIE_MAINTENANCE_ACTION_MARKER = "ralphie:maintain-action";
@@ -192,90 +211,17 @@ export const normalizeMaintenanceCommentText = normalizeComparableText;
 const normalizedLabel = (value: string): string =>
     value.normalize("NFKC").trim().toLocaleLowerCase("en-US");
 
-const text = (value: unknown): string =>
-    typeof value === "string" ? value : "";
+const MAINTENANCE_ABORT_MESSAGE = "maintenance reconciliation aborted";
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-    typeof value === "object" && value !== null && !Array.isArray(value);
+const MAINTENANCE_ACTOR_MESSAGES = {
+    unavailable:
+        "GitHub users.getAuthenticated is unavailable; ownership cannot be confirmed.",
+    missingLogin: "GitHub did not return an authenticated actor login.",
+    failurePrefix: "authenticated actor lookup failed",
+} as const;
 
-const recordValue = (value: unknown, key: string): unknown =>
-    isRecord(value) ? value[key] : undefined;
-
-const responseData = (value: unknown): unknown =>
-    isRecord(value) && Object.prototype.hasOwnProperty.call(value, "data")
-        ? value.data
-        : undefined;
-
-const statusOf = (value: unknown): number | undefined => {
-    if (!isRecord(value)) return undefined;
-    const nested = isRecord(value.response) ? value.response.status : undefined;
-    const status = nested ?? value.status;
-    return typeof status === "number" && Number.isFinite(status)
-        ? status
-        : undefined;
-};
-
-const detailOf = (value: unknown): string => {
-    if (value instanceof Error && value.message.length > 0) {
-        return value.message;
-    }
-    if (isRecord(value) && typeof value.message === "string") {
-        return value.message;
-    }
-    try {
-        return JSON.stringify(value);
-    } catch {
-        return String(value);
-    }
-};
-
-const requestOptions = (signal: AbortSignal | undefined): RecordLike =>
-    signal === undefined ? {} : { request: { signal } };
-
-const isAbortCause = (
-    cause: unknown,
-    signal: AbortSignal | undefined,
-): boolean =>
-    signal?.aborted === true ||
-    (isRecord(cause) && cause.name === "AbortError");
-
-const throwIfAborted = (signal: AbortSignal | undefined): void => {
-    if (!signal?.aborted) return;
-    throw (
-        signal.reason ??
-        Object.assign(new Error("maintenance reconciliation aborted"), {
-            name: "AbortError",
-        })
-    );
-};
-
-type RecordLike = Record<string, unknown>;
-type Endpoint = (parameters: RecordLike) => Promise<unknown>;
-
-const endpointFor = (
-    client: Octokit,
-    namespace: string,
-    name: string,
-): Endpoint | undefined => {
-    const rest = (client as unknown as RecordLike).rest;
-    const group = isRecord(rest) ? rest[namespace] : undefined;
-    const endpoint = isRecord(group) ? group[name] : undefined;
-    return typeof endpoint === "function"
-        ? (
-              endpoint as (...args: ReadonlyArray<unknown>) => Promise<unknown>
-          ).bind(group)
-        : undefined;
-};
-
-const repositoryParameters = (
-    repository: string,
-): {
-    readonly owner: string;
-    readonly repo: string;
-} => {
-    const parsed = parseRepositorySlug(repository);
-    return { owner: parsed.owner, repo: parsed.name };
-};
+export type { LockedCommentPermissionChecker, LockedCommentPermissionInput };
+export type { ActorResult };
 
 const hasPullRequestShape = (value: RecordLike): boolean =>
     Object.prototype.hasOwnProperty.call(value, "pull_request");
@@ -766,122 +712,16 @@ const readComments = async (
     return { status: "ok", comments: Object.freeze(comments) };
 };
 
-type ActorResult =
-    | { readonly status: "ok"; readonly login: string }
-    | { readonly status: "skipped"; readonly detail: string };
-
-const authenticatedActor = async (
+const authenticatedActor = (
     client: Octokit,
     signal: AbortSignal | undefined,
-): Promise<ActorResult> => {
-    const endpoint = endpointFor(client, "users", "getAuthenticated");
-    if (endpoint === undefined) {
-        return {
-            status: "skipped",
-            detail: "GitHub users.getAuthenticated is unavailable; ownership cannot be confirmed.",
-        };
-    }
-    try {
-        const response = await endpoint({ ...requestOptions(signal) });
-        const login = text(recordValue(responseData(response), "login")).trim();
-        return login.length === 0
-            ? {
-                  status: "skipped",
-                  detail: "GitHub did not return an authenticated actor login.",
-              }
-            : { status: "ok", login };
-    } catch (cause) {
-        if (isAbortCause(cause, signal)) throw cause;
-        return {
-            status: "skipped",
-            detail: `authenticated actor lookup failed: ${detailOf(cause)}`,
-        };
-    }
-};
+): Promise<ActorResult> =>
+    fetchAuthenticatedActor(client, signal, MAINTENANCE_ACTOR_MESSAGES);
 
 const sameActor = (left: string | undefined, right: string): boolean =>
     left !== undefined &&
     normalizedLabel(left) === normalizedLabel(right) &&
     left.trim().length > 0;
-
-export type LockedCommentPermissionInput = {
-    readonly client: Octokit;
-    readonly repository: string;
-    readonly issueNumber: number;
-    readonly actorLogin: string;
-    readonly issue: RecordLike;
-};
-
-export type LockedCommentPermissionChecker = (
-    input: LockedCommentPermissionInput,
-) => Promise<boolean>;
-
-const permissionGranted = (value: RecordLike | undefined): boolean =>
-    value?.admin === true ||
-    value?.maintain === true ||
-    value?.push === true ||
-    value?.triage === true;
-
-const runLockedPermissionChecker = async (
-    checker: LockedCommentPermissionChecker,
-    input: LockedCommentPermissionInput,
-    signal: AbortSignal | undefined,
-): Promise<boolean | undefined> => {
-    try {
-        return await checker(input);
-    } catch (cause) {
-        if (isAbortCause(cause, signal)) throw cause;
-        return undefined;
-    }
-};
-
-const readRepositoryPermissions = async (
-    client: Octokit,
-    repository: string,
-    signal: AbortSignal | undefined,
-): Promise<boolean | undefined> => {
-    const endpoint = endpointFor(client, "repos", "get");
-    if (endpoint === undefined) return undefined;
-    try {
-        const response = await endpoint({
-            ...repositoryParameters(repository),
-            ...requestOptions(signal),
-        });
-        const permissions = recordValue(responseData(response), "permissions");
-        return isRecord(permissions)
-            ? permissionGranted(permissions)
-            : undefined;
-    } catch (cause) {
-        if (isAbortCause(cause, signal)) throw cause;
-        return undefined;
-    }
-};
-
-const canCommentOnLockedIssue = async (
-    client: Octokit,
-    repository: string,
-    issue: LiveIssue,
-    actorLogin: string,
-    checker: LockedCommentPermissionChecker | undefined,
-    signal: AbortSignal | undefined,
-): Promise<boolean | undefined> => {
-    if (!issue.locked) return true;
-    if (checker !== undefined) {
-        return runLockedPermissionChecker(
-            checker,
-            {
-                client,
-                repository,
-                issueNumber: issue.number,
-                actorLogin,
-                issue: issue.raw,
-            },
-            signal,
-        );
-    }
-    if (permissionGranted(issue.permissions)) return true;
-    return readRepositoryPermissions(client, repository, signal);
-};
 
 const snapshotComment = (
     snapshot: MaintenanceSnapshot | undefined,
@@ -1390,15 +1230,8 @@ const validateRepository = (
 ):
     | { readonly valid: true }
     | { readonly valid: false; readonly detail: string } => {
-    try {
-        repositoryParameters(repository);
-        return { valid: true };
-    } catch (cause) {
-        return {
-            valid: false,
-            detail: `invalid GitHub repository: ${detailOf(cause)}`,
-        };
-    }
+    const detail = invalidRepositoryDetail(repository);
+    return detail === undefined ? { valid: true } : { valid: false, detail };
 };
 
 const matchIssueUrl = (
@@ -2115,7 +1948,7 @@ const reconcileValidatedAction = async (
 export const makeGitHubIssueMaintenanceService =
     (): GitHubIssueMaintenanceService => ({
         reconcile: async (client, repository, request) => {
-            throwIfAborted(request.signal);
+            throwIfAborted(request.signal, MAINTENANCE_ABORT_MESSAGE);
             const validation = validateAction(request.action);
             if (validation.status !== "ok") {
                 return skipped(

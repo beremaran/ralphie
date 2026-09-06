@@ -21,7 +21,25 @@ import {
     normalizeMaintenanceCommentText,
 } from "./issue-maintenance.ts";
 import { RalphieError } from "../shared/error.ts";
-import { parseRepositorySlug } from "./repository.ts";
+import {
+    canCommentOnLockedIssue,
+    detailOf,
+    endpointFor,
+    fetchAuthenticatedActor,
+    invalidRepositoryDetail,
+    isAbortCause,
+    isRecord,
+    type ActorResult,
+    type LockedCommentPermissionChecker,
+    recordValue,
+    repositoryParameters,
+    requestOptions,
+    responseData,
+    statusOf,
+    text,
+    throwIfAborted,
+    type RecordLike,
+} from "./maintenance-reconciliation.ts";
 
 export const MAINTENANCE_RELATIONSHIP_MARKER_VERSION = 1;
 export const RALPHIE_MAINTENANCE_RELATIONSHIP_MARKER =
@@ -567,89 +585,18 @@ const unchanged = (
             : { completedSides: Object.freeze([...extra.completedSides]) }),
     });
 
-type RecordLike = Record<string, unknown>;
-type Endpoint = (parameters: RecordLike) => Promise<unknown>;
+const RELATIONSHIP_ABORT_MESSAGE =
+    "maintenance relationship reconciliation aborted";
 
-const isRecord = (value: unknown): value is RecordLike =>
-    typeof value === "object" && value !== null && !Array.isArray(value);
+const RELATIONSHIP_ACTOR_MESSAGES = {
+    unavailable:
+        "GitHub users.getAuthenticated is unavailable; relationship ownership cannot be confirmed.",
+    missingLogin:
+        "GitHub did not return an authenticated relationship actor login.",
+    failurePrefix: "authenticated relationship actor lookup failed",
+} as const;
 
-const text = (value: unknown): string =>
-    typeof value === "string" ? value : "";
-
-const recordValue = (value: unknown, key: string): unknown =>
-    isRecord(value) ? value[key] : undefined;
-
-const responseData = (value: unknown): unknown =>
-    isRecord(value) && Object.prototype.hasOwnProperty.call(value, "data")
-        ? value.data
-        : undefined;
-
-const statusOf = (value: unknown): number | undefined => {
-    if (!isRecord(value)) return undefined;
-    const nested = isRecord(value.response) ? value.response.status : undefined;
-    const status = nested ?? value.status;
-    return typeof status === "number" && Number.isFinite(status)
-        ? status
-        : undefined;
-};
-
-const detailOf = (value: unknown): string => {
-    if (value instanceof Error && value.message.length > 0)
-        return value.message;
-    if (isRecord(value) && typeof value.message === "string") {
-        return value.message;
-    }
-    try {
-        return JSON.stringify(value);
-    } catch {
-        return String(value);
-    }
-};
-
-const isAbortCause = (
-    cause: unknown,
-    signal: AbortSignal | undefined,
-): boolean =>
-    signal?.aborted === true ||
-    (isRecord(cause) && cause.name === "AbortError");
-
-const throwIfAborted = (signal: AbortSignal | undefined): void => {
-    if (!signal?.aborted) return;
-    throw (
-        signal.reason ??
-        Object.assign(
-            new Error("maintenance relationship reconciliation aborted"),
-            {
-                name: "AbortError",
-            },
-        )
-    );
-};
-
-const requestOptions = (signal: AbortSignal | undefined): RecordLike =>
-    signal === undefined ? {} : { request: { signal } };
-
-const endpointFor = (
-    client: Octokit,
-    namespace: string,
-    name: string,
-): Endpoint | undefined => {
-    const rest = recordValue(client, "rest");
-    const group = isRecord(rest) ? rest[namespace] : undefined;
-    const endpoint = isRecord(group) ? group[name] : undefined;
-    return typeof endpoint === "function"
-        ? (
-              endpoint as (...args: ReadonlyArray<unknown>) => Promise<unknown>
-          ).bind(group)
-        : undefined;
-};
-
-const repositoryParameters = (
-    repository: string,
-): { readonly owner: string; readonly repo: string } => {
-    const parsed = parseRepositorySlug(repository);
-    return { owner: parsed.owner, repo: parsed.name };
-};
+export type { ActorResult };
 
 type LiveComment = {
     readonly id: number;
@@ -1659,19 +1606,7 @@ const sameActor = (left: string | undefined, right: string): boolean =>
     normalizeMaintenanceCommentText(left) ===
         normalizeMaintenanceCommentText(right);
 
-const permissionGranted = (value: RecordLike | undefined): boolean =>
-    value?.admin === true ||
-    value?.maintain === true ||
-    value?.push === true ||
-    value?.triage === true;
-
-export type LockedPermissionChecker = (input: {
-    readonly client: Octokit;
-    readonly repository: string;
-    readonly issue: RecordLike;
-    readonly issueNumber: number;
-    readonly actorLogin: string;
-}) => Promise<boolean>;
+export type LockedPermissionChecker = LockedCommentPermissionChecker;
 
 export type MaintenanceRelationshipMutationRequest = {
     readonly action: RelationshipAction;
@@ -1686,38 +1621,11 @@ export type MaintenanceRelationshipMutationRequest = {
 export type IssueMaintenanceRelationshipMutationRequest =
     MaintenanceRelationshipMutationRequest;
 
-type ActorResult =
-    | { readonly status: "ok"; readonly login: string }
-    | { readonly status: "skipped"; readonly detail: string };
-
-const authenticatedActor = async (
+const authenticatedActor = (
     client: Octokit,
     signal: AbortSignal | undefined,
-): Promise<ActorResult> => {
-    const endpoint = endpointFor(client, "users", "getAuthenticated");
-    if (endpoint === undefined) {
-        return {
-            status: "skipped",
-            detail: "GitHub users.getAuthenticated is unavailable; relationship ownership cannot be confirmed.",
-        };
-    }
-    try {
-        const response = await endpoint({ ...requestOptions(signal) });
-        const login = text(recordValue(responseData(response), "login")).trim();
-        return login.length === 0
-            ? {
-                  status: "skipped",
-                  detail: "GitHub did not return an authenticated relationship actor login.",
-              }
-            : { status: "ok", login };
-    } catch (cause) {
-        if (isAbortCause(cause, signal)) throw cause;
-        return {
-            status: "skipped",
-            detail: `authenticated relationship actor lookup failed: ${detailOf(cause)}`,
-        };
-    }
-};
+): Promise<ActorResult> =>
+    fetchAuthenticatedActor(client, signal, RELATIONSHIP_ACTOR_MESSAGES);
 
 const actorFor = async (
     client: Octokit,
@@ -1726,55 +1634,6 @@ const actorFor = async (
     request.authenticatedActorLogin?.trim()
         ? { status: "ok", login: request.authenticatedActorLogin.trim() }
         : authenticatedActor(client, request.signal);
-
-const readRepositoryPermission = async (
-    client: Octokit,
-    repository: string,
-    signal: AbortSignal | undefined,
-): Promise<boolean | undefined> => {
-    const endpoint = endpointFor(client, "repos", "get");
-    if (endpoint === undefined) return undefined;
-    try {
-        const response = await endpoint({
-            ...repositoryParameters(repository),
-            ...requestOptions(signal),
-        });
-        const permissions = recordValue(responseData(response), "permissions");
-        return isRecord(permissions)
-            ? permissionGranted(permissions)
-            : undefined;
-    } catch (cause) {
-        if (isAbortCause(cause, signal)) throw cause;
-        return undefined;
-    }
-};
-
-const canCommentOnLockedIssue = async (
-    client: Octokit,
-    repository: string,
-    issue: LiveIssue,
-    actorLogin: string,
-    checker: LockedPermissionChecker | undefined,
-    signal: AbortSignal | undefined,
-): Promise<boolean | undefined> => {
-    if (!issue.locked) return true;
-    if (checker !== undefined) {
-        try {
-            return await checker({
-                client,
-                repository,
-                issue: issue.raw,
-                issueNumber: issue.number,
-                actorLogin,
-            });
-        } catch (cause) {
-            if (isAbortCause(cause, signal)) throw cause;
-            return undefined;
-        }
-    }
-    if (permissionGranted(issue.permissions)) return true;
-    return readRepositoryPermission(client, repository, signal);
-};
 
 type CommentMutationResult =
     | {
@@ -3117,16 +2976,8 @@ const unsupportedTarget = (action: IssueMaintenanceAction): number =>
         ? action.targetIssueNumber
         : 0;
 
-const repositoryValidationFailure = (
-    repository: string,
-): string | undefined => {
-    try {
-        repositoryParameters(repository);
-        return undefined;
-    } catch (cause) {
-        return `invalid GitHub repository: ${detailOf(cause)}`;
-    }
-};
+const repositoryValidationFailure = (repository: string): string | undefined =>
+    invalidRepositoryDetail(repository);
 
 const reconcileValidatedRelationshipAction = async (input: {
     readonly client: Octokit;
@@ -3181,7 +3032,7 @@ const reconcileValidatedRelationshipAction = async (input: {
 export const makeGitHubIssueMaintenanceRelationshipService =
     (): GitHubIssueMaintenanceRelationshipService => ({
         reconcile: async (client, repository, request) => {
-            throwIfAborted(request.signal);
+            throwIfAborted(request.signal, RELATIONSHIP_ABORT_MESSAGE);
             const parsed = issueMaintenanceActionSchema.safeParse(
                 request.action,
             );
