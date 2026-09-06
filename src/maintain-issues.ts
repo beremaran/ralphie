@@ -36,7 +36,7 @@ import {
 } from "./maintain-issues-state.ts";
 import { type RelationshipMutationResult } from "./github/issue-maintenance-relationships.ts";
 import { type MaintenanceMutationResult } from "./github/issue-maintenance.ts";
-import { type RalphieRuntime } from "./runtime.ts";
+import { type MaintenanceRuntime } from "./runtime.ts";
 import {
     DuplicateAction,
     type MaintainIssuesRalphieConfig,
@@ -70,7 +70,7 @@ export type MaintainIssuesOptions = {
 /** Typed dispatch seam for maintenance runs. */
 export type MaintainIssuesEntryPoint = (
     options: MaintainIssuesOptions,
-    runtime: RalphieRuntime,
+    runtime: MaintenanceRuntime,
 ) => Promise<void>;
 
 export type MaintenanceActionCounts = {
@@ -375,7 +375,7 @@ const commandSucceeded = (value: CommandResult): boolean =>
     value.exitCode === 0;
 
 const readOnlyFallbackBranch = async (
-    runtime: RalphieRuntime,
+    runtime: MaintenanceRuntime,
     repositoryPath: string,
     currentBranch: string,
     signal: AbortSignal | undefined,
@@ -507,7 +507,7 @@ const evidenceFromResult = (
 ): ReadonlyArray<unknown> => ("evidence" in result ? [result.evidence] : []);
 
 const groundedAtSnapshot = async (input: {
-    readonly runtime: RalphieRuntime;
+    readonly runtime: MaintenanceRuntime;
     readonly snapshot: MaintenanceSnapshot;
     readonly repositoryPath: string;
     readonly branch: string;
@@ -645,7 +645,7 @@ const mutationFailure = (
     });
 
 type MaintenanceClient = Awaited<
-    ReturnType<RalphieRuntime["githubClient"]["initialize"]>
+    ReturnType<MaintenanceRuntime["githubClient"]["initialize"]>
 >;
 
 type MaintenanceEmit = (
@@ -654,7 +654,7 @@ type MaintenanceEmit = (
 
 type MaintenanceIssueExecutionContext = {
     readonly config: MaintainIssuesRalphieConfig;
-    readonly runtime: RalphieRuntime;
+    readonly runtime: MaintenanceRuntime;
     readonly signal: AbortSignal | undefined;
     readonly statePath: string;
     readonly actualRunId: string;
@@ -1536,7 +1536,7 @@ const reportsFromResumeState = (
 
 const prepareMaintenanceWorkspace = async (input: {
     readonly config: MaintainIssuesRalphieConfig;
-    readonly runtime: RalphieRuntime;
+    readonly runtime: MaintenanceRuntime;
     readonly dryRun: boolean;
     readonly resumeState: MaintenanceRunState | undefined;
     readonly emit: MaintenanceEmit;
@@ -1575,7 +1575,7 @@ const prepareMaintenanceWorkspace = async (input: {
 
 const prepareMaintenanceRepository = async (input: {
     readonly config: MaintainIssuesRalphieConfig;
-    readonly runtime: RalphieRuntime;
+    readonly runtime: MaintenanceRuntime;
     readonly dryRun: boolean;
     readonly requestedBranch: string | undefined;
     readonly signal: AbortSignal | undefined;
@@ -1672,7 +1672,7 @@ const pendingIssuesAfterSnapshotChange = (
 
 const captureMaintenanceContext = async (input: {
     readonly config: MaintainIssuesRalphieConfig;
-    readonly runtime: RalphieRuntime;
+    readonly runtime: MaintenanceRuntime;
     readonly signal: AbortSignal | undefined;
     readonly statePath: string;
     readonly actualRunId: string;
@@ -1797,12 +1797,12 @@ const captureMaintenanceContext = async (input: {
 };
 
 type StartedMaintenanceOpenCode = Awaited<
-    ReturnType<RalphieRuntime["opencode"]["start"]>
+    ReturnType<MaintenanceRuntime["opencode"]["start"]>
 >;
 
 const startMaintenancePlanner = async (input: {
     readonly config: MaintainIssuesRalphieConfig;
-    readonly runtime: RalphieRuntime;
+    readonly runtime: MaintenanceRuntime;
     readonly emit: MaintenanceEmit;
     readonly onStarted: (service: StartedMaintenanceOpenCode) => void;
 }): Promise<MaintenancePlanService> => {
@@ -1835,8 +1835,8 @@ const startMaintenancePlanner = async (input: {
 
 const finishMaintenanceRun = async (input: {
     readonly config: MaintainIssuesRalphieConfig;
-    readonly runtime: RalphieRuntime;
-    readonly progress: RalphieRuntime["progress"];
+    readonly runtime: MaintenanceRuntime;
+    readonly progress: MaintenanceRuntime["progress"];
     readonly dryRun: boolean;
     readonly statePath: string;
     readonly captured: MaintenanceSnapshot;
@@ -1902,8 +1902,8 @@ const finishMaintenanceRun = async (input: {
 
 const executeMaintenanceIssues = async (input: {
     readonly config: MaintainIssuesRalphieConfig;
-    readonly runtime: RalphieRuntime;
-    readonly progress: RalphieRuntime["progress"];
+    readonly runtime: MaintenanceRuntime;
+    readonly progress: MaintenanceRuntime["progress"];
     readonly signal: AbortSignal | undefined;
     readonly statePath: string;
     readonly actualRunId: string;
@@ -2036,7 +2036,7 @@ type MaintenanceRunInputs = {
 
 const maintenanceRunInputsFor = async (
     options: MaintainIssuesOptions,
-    runtime: RalphieRuntime,
+    runtime: MaintenanceRuntime,
 ): Promise<MaintenanceRunInputs> => {
     const { config, signal } = options;
     checkCancellation(signal);
@@ -2133,7 +2133,7 @@ const handleMaintenanceFailure = async (input: {
 /** Run one bounded maintenance pass and return its summary internally. */
 export const executeMaintenanceRun = async (
     options: MaintainIssuesOptions,
-    runtime: RalphieRuntime,
+    runtime: MaintenanceRuntime,
 ): Promise<MaintenanceRunSummary> => {
     const { config, signal } = options;
     const {

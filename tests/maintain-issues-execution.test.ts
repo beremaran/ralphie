@@ -23,7 +23,7 @@ import {
     type ProgressUpdate,
 } from "../src/progress/progress.ts";
 import { ExecutionMode, resolveRalphieConfig } from "../src/options.ts";
-import type { RalphieRuntime } from "../src/runtime.ts";
+import type { MaintenanceRuntime } from "../src/runtime.ts";
 
 const timestamp = "2026-09-05T00:00:00.000Z";
 const repositoryPath = "/tmp/ralphie-maintenance-test/owner/repository";
@@ -181,13 +181,13 @@ const acceptedPlan = (): MaintenancePlanRunResult =>
 
 const baseRuntime = (input: {
     readonly progressEvents: ProgressUpdate[];
-    readonly snapshotService?: RalphieRuntime["maintenanceSnapshot"];
-    readonly planner?: RalphieRuntime["maintenancePlanner"];
+    readonly snapshotService?: MaintenanceRuntime["maintenanceSnapshot"];
+    readonly planner?: MaintenanceRuntime["maintenancePlanner"];
     readonly mutation?: GitHubIssueMaintenanceService;
     readonly relationships?: GitHubIssueMaintenanceRelationshipService;
     readonly stateStore?: MaintenanceRunStateStoreService;
     readonly calls?: string[];
-}): RalphieRuntime => {
+}): MaintenanceRuntime => {
     const calls = input.calls ?? [];
     return {
         progress: makeProgressRecorder(input.progressEvents),
@@ -213,9 +213,21 @@ const baseRuntime = (input: {
             capture: async () => ({ branch: "main", head: "test-head" }),
             verify: async () => {},
         },
+        commandRunner: {
+            run: async () => ({ exitCode: 1, stdout: "", stderr: "" }),
+        },
+        opencode: {
+            start: async () => {
+                throw new Error("OpenCode must not start in this test");
+            },
+        },
         workspace: {
-            prepare: async () => calls.push("workspace-prepare"),
-            remove: async () => calls.push("workspace-remove"),
+            prepare: async () => {
+                calls.push("workspace-prepare");
+            },
+            remove: async () => {
+                calls.push("workspace-remove");
+            },
         },
         maintenanceSnapshot: input.snapshotService ?? {
             capture: async () => snapshot(),
@@ -233,7 +245,7 @@ const baseRuntime = (input: {
         ...(input.stateStore === undefined
             ? {}
             : { maintenanceRunStateStore: input.stateStore }),
-    } as unknown as RalphieRuntime;
+    };
 };
 
 const appliedMutation = (calls: string[]): GitHubIssueMaintenanceService => ({

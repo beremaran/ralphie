@@ -32,6 +32,7 @@ import { makeOpenCodeService } from "./opencode/server.ts";
 import {
     makeLiveRuntime,
     toIssueWorkflowRuntime,
+    toMaintenanceRuntime,
     type RalphieRuntime,
 } from "./runtime.ts";
 import type { OpenCodeService } from "./opencode/server.ts";
@@ -683,7 +684,7 @@ const dispatchCommand = async (
                 : { explicitDuplicateAction }),
             ...(isMaintenanceResumeState(resumeState) ? { resumeState } : {}),
         } satisfies MaintainIssuesOptions,
-        runtime,
+        toMaintenanceRuntime(runtime),
     );
 };
 

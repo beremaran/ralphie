@@ -58,7 +58,7 @@ import type {
     OpenCodeRuntime,
     OpenCodeService,
 } from "../../src/opencode/server.ts";
-import type { RalphieRuntime } from "../../src/runtime.ts";
+import type { MaintenanceRuntime } from "../../src/runtime.ts";
 
 const REPOSITORY = "owner/repository";
 const TIMESTAMP = "2026-09-05T00:00:00.000Z";
@@ -656,7 +656,7 @@ const makeRuntime = (input: {
     readonly calls: string[];
     readonly progress?: ProgressReporterService;
     readonly opencode?: OpenCodeService;
-}): RalphieRuntime => {
+}): MaintenanceRuntime => {
     const progress = input.progress ?? makeProgressRecorder([]);
     const opencode = input.opencode ?? makeStubPi(input.calls);
     return {
@@ -669,7 +669,9 @@ const makeRuntime = (input: {
             },
         },
         gitRepository: {
-            verifyInstalled: async () => input.calls.push("git-verify"),
+            verifyInstalled: async () => {
+                input.calls.push("git-verify");
+            },
             prepare: async () => {
                 input.calls.push("git-prepare");
                 return {
@@ -688,9 +690,16 @@ const makeRuntime = (input: {
             },
             verify: async () => {},
         },
+        commandRunner: {
+            run: async () => ({ exitCode: 1, stdout: "", stderr: "" }),
+        },
         workspace: {
-            prepare: async () => input.calls.push("workspace-prepare"),
-            remove: async () => input.calls.push("workspace-remove"),
+            prepare: async () => {
+                input.calls.push("workspace-prepare");
+            },
+            remove: async () => {
+                input.calls.push("workspace-remove");
+            },
         },
         maintenanceSnapshot: {
             capture: async () => input.snapshot,
@@ -700,7 +709,7 @@ const makeRuntime = (input: {
         maintenanceMutation: input.github.mutation,
         maintenanceRelationships: input.github.relationships,
         maintenanceRunStateStore: input.stateStore,
-    } as unknown as RalphieRuntime;
+    };
 };
 
 const runOffline = async (input: {
