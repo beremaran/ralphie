@@ -240,6 +240,125 @@ export type RalphieRuntime = {
     readonly workspace: WorkspaceService;
 };
 
+/** Focused dependencies consumed directly by the issue workflow entrypoint. */
+export type IssueWorkflowRuntime = Pick<
+    RalphieRuntime,
+    | "progress"
+    | "runStateStore"
+    | "workspace"
+    | "githubClient"
+    | "githubIssues"
+    | "githubIssueMutations"
+    | "githubPullRequests"
+    | "githubNeedsAttentionNotification"
+    | "gitRepository"
+    | "gitRepositoryInvariant"
+    | "gitIssueCheckpoint"
+    | "gitIssueOperations"
+    | "parentCompletion"
+    | "issueArtifactStore"
+    | "pullRequestReviewCoordinator"
+    | "pipelineObservation"
+    | "issueExecutor"
+    | "dryRunIssueExecutor"
+    | "opencode"
+>;
+
+/** Focused dependencies consumed directly by maintenance execution. */
+export type MaintenanceRuntime = Pick<
+    RalphieRuntime,
+    | "progress"
+    | "workspace"
+    | "githubClient"
+    | "gitRepository"
+    | "gitRepositoryInvariant"
+    | "commandRunner"
+    | "maintenanceSnapshot"
+    | "maintenancePlanner"
+    | "maintenancePlannerForAgent"
+    | "maintenanceMutation"
+    | "maintenanceRelationships"
+    | "maintenanceRunStateStore"
+    | "opencode"
+>;
+
+/** Focused dependencies consumed directly by Pipeline delivery. */
+export type PipelineDeliveryRuntime = Pick<
+    RalphieRuntime,
+    | "progress"
+    | "workspace"
+    | "githubClient"
+    | "gitRepository"
+    | "opencode"
+    | "pipelineDeliveryLifecycle"
+>;
+
+/** Project the assembled runtime onto the issue workflow shape. */
+export const toIssueWorkflowRuntime = (
+    runtime: RalphieRuntime,
+): IssueWorkflowRuntime => ({
+    progress: runtime.progress,
+    runStateStore: runtime.runStateStore,
+    workspace: runtime.workspace,
+    githubClient: runtime.githubClient,
+    githubIssues: runtime.githubIssues,
+    githubIssueMutations: runtime.githubIssueMutations,
+    githubPullRequests: runtime.githubPullRequests,
+    githubNeedsAttentionNotification: runtime.githubNeedsAttentionNotification,
+    gitRepository: runtime.gitRepository,
+    gitRepositoryInvariant: runtime.gitRepositoryInvariant,
+    gitIssueCheckpoint: runtime.gitIssueCheckpoint,
+    gitIssueOperations: runtime.gitIssueOperations,
+    parentCompletion: runtime.parentCompletion,
+    issueArtifactStore: runtime.issueArtifactStore,
+    pullRequestReviewCoordinator: runtime.pullRequestReviewCoordinator,
+    pipelineObservation: runtime.pipelineObservation,
+    issueExecutor: runtime.issueExecutor,
+    dryRunIssueExecutor: runtime.dryRunIssueExecutor,
+    opencode: runtime.opencode,
+});
+
+/** Project the assembled runtime onto the maintenance execution shape. */
+export const toMaintenanceRuntime = (
+    runtime: RalphieRuntime,
+): MaintenanceRuntime => ({
+    progress: runtime.progress,
+    workspace: runtime.workspace,
+    githubClient: runtime.githubClient,
+    gitRepository: runtime.gitRepository,
+    gitRepositoryInvariant: runtime.gitRepositoryInvariant,
+    commandRunner: runtime.commandRunner,
+    maintenanceSnapshot: runtime.maintenanceSnapshot,
+    ...(runtime.maintenancePlanner === undefined
+        ? {}
+        : { maintenancePlanner: runtime.maintenancePlanner }),
+    ...(runtime.maintenancePlannerForAgent === undefined
+        ? {}
+        : { maintenancePlannerForAgent: runtime.maintenancePlannerForAgent }),
+    ...(runtime.maintenanceMutation === undefined
+        ? {}
+        : { maintenanceMutation: runtime.maintenanceMutation }),
+    ...(runtime.maintenanceRelationships === undefined
+        ? {}
+        : { maintenanceRelationships: runtime.maintenanceRelationships }),
+    ...(runtime.maintenanceRunStateStore === undefined
+        ? {}
+        : { maintenanceRunStateStore: runtime.maintenanceRunStateStore }),
+    opencode: runtime.opencode,
+});
+
+/** Project the assembled runtime onto the Pipeline delivery shape. */
+export const toPipelineDeliveryRuntime = (
+    runtime: RalphieRuntime,
+): PipelineDeliveryRuntime => ({
+    progress: runtime.progress,
+    workspace: runtime.workspace,
+    githubClient: runtime.githubClient,
+    gitRepository: runtime.gitRepository,
+    opencode: runtime.opencode,
+    pipelineDeliveryLifecycle: runtime.pipelineDeliveryLifecycle,
+});
+
 export type RuntimeOverrides = {
     readonly opencode: OpenCodeService;
     readonly progress: ProgressReporterService;
