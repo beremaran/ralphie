@@ -5,7 +5,6 @@ import type {
     AgentSessionEvent,
 } from "../../src/opencode/client.ts";
 import { makeProgressCoordinator } from "../../src/progress/coordinator.ts";
-import type { FooterTimer } from "../../src/progress/footer.ts";
 import { INTERACTIVE_REGION_MAX_ROWS } from "../../src/progress/terminal-controller.ts";
 import { makeTerminalOutputController } from "../../src/progress/terminal-controller.ts";
 import {
@@ -24,26 +23,6 @@ const context: AgentEventContext = {
 const asEvent = (value: unknown): AgentSessionEvent =>
     value as AgentSessionEvent;
 
-type FakeTimer = FooterTimer & { readonly run: () => void };
-
-const makeFakeTimer = (): FakeTimer => {
-    let scheduled: (() => void) | undefined;
-    return {
-        schedule: (callback) => {
-            scheduled = callback;
-            return scheduled;
-        },
-        cancel: () => {
-            scheduled = undefined;
-        },
-        run: () => {
-            const callback = scheduled;
-            scheduled = undefined;
-            callback?.();
-        },
-    };
-};
-
 const makeResizeSource = () => {
     const listeners: Array<() => void> = [];
     return {
@@ -61,12 +40,11 @@ const makeResizeSource = () => {
 };
 
 /**
- * Interactive coordinator harness with a strategy recorder, fake refresh
- * timer, and fake resize source, mirroring `command.ts` wiring.
+ * Interactive coordinator harness with a strategy recorder and fake resize
+ * source, mirroring `command.ts` wiring.
  */
 const makeHarness = (options: { readonly width?: () => number } = {}) => {
     const strategy = makeRecordingStrategy();
-    const timer = makeFakeTimer();
     const resize = makeResizeSource();
     let width = 80;
     const coordinator = makeProgressCoordinator({
@@ -76,18 +54,16 @@ const makeHarness = (options: { readonly width?: () => number } = {}) => {
         width: options.width ?? (() => width),
         strategy,
         resize,
-        footer: { timer },
         write: () => {},
     });
     return {
         coordinator,
         strategy,
-        timer,
         resize,
         width: (value: number) => {
             width = value;
         },
-        settle: () => timer.run(),
+        settle: () => Bun.sleep(150),
     };
 };
 
@@ -150,7 +126,7 @@ describe("interactive activity region physical-row regression", () => {
     test("repeated tool calls never exceed three physical rows at any instant", async () => {
         const harness = makeHarness();
         harness.coordinator.listener(asEvent({ type: "agent_start" }), context);
-        harness.settle();
+        await harness.settle();
         for (let cycle = 0; cycle < 15; cycle += 1) {
             harness.coordinator.listener(
                 toolStart(`tool-${cycle}`, "bash", {
@@ -185,7 +161,7 @@ describe("interactive activity region physical-row regression", () => {
                     message: "change written",
                 });
             }
-            harness.settle();
+            await harness.settle();
             expect(harness.strategy.currentRegion().length).toBeLessThanOrEqual(
                 INTERACTIVE_REGION_MAX_ROWS,
             );
@@ -225,7 +201,7 @@ describe("interactive activity region physical-row regression", () => {
             }),
             context,
         );
-        harness.settle();
+        await harness.settle();
 
         const region = harness.strategy.currentRegion();
         expect(region.length).toBeLessThanOrEqual(INTERACTIVE_REGION_MAX_ROWS);
@@ -242,7 +218,7 @@ describe("interactive activity region physical-row regression", () => {
             toolEnd("bash-1", "bash", { content: "done" }, false),
             context,
         );
-        harness.settle();
+        await harness.settle();
         expect(harness.strategy.peakRegionRows()).toBeLessThanOrEqual(
             INTERACTIVE_REGION_MAX_ROWS,
         );
@@ -256,7 +232,7 @@ describe("interactive activity region physical-row regression", () => {
         for (const width of widths) {
             harness.width(width);
             harness.resize.emit();
-            harness.settle();
+            await harness.settle();
             for (let index = 0; index < 3; index += 1) {
                 harness.coordinator.listener(
                     toolStart(`resize-${width}-${index}`, "bash", {
@@ -274,7 +250,7 @@ describe("interactive activity region physical-row regression", () => {
                     context,
                 );
             }
-            harness.settle();
+            await harness.settle();
             expect(harness.strategy.currentRegion().length).toBeLessThanOrEqual(
                 INTERACTIVE_REGION_MAX_ROWS,
             );
@@ -309,7 +285,7 @@ describe("interactive activity region physical-row regression", () => {
         for (const delta of deltas) {
             harness.coordinator.listener(textDelta(delta), context);
         }
-        harness.settle();
+        await harness.settle();
 
         const block = deltas.join("");
         const output = harness.strategy.output();
@@ -334,7 +310,7 @@ describe("interactive activity region physical-row regression", () => {
             toolEnd("mid-1", "grep", { content: "match" }, false),
             context,
         );
-        harness.settle();
+        await harness.settle();
         const after = harness.strategy.output();
         expect(after.split(block)).toHaveLength(2);
         expect(after).toContain(" tail.");
@@ -370,7 +346,7 @@ describe("interactive activity region physical-row regression", () => {
             ),
             context,
         );
-        harness.settle();
+        await harness.settle();
         const output = harness.strategy.output();
         // Concise completion and failure summaries, one bounded line each.
         expect(output.split("✓ bash done")).toHaveLength(2);
@@ -397,30 +373,27 @@ describe("interactive activity region physical-row regression", () => {
 describe("terminal stream boundaries never grow the region", () => {
     const makeBoundaryHarness = () => {
         const strategy = makeRecordingStrategy();
-        const timer = makeFakeTimer();
         const resize = makeResizeSource();
         const controller = makeTerminalOutputController({
             mode: "interactive",
             strategy,
             width: () => 80,
-            footer: { timer },
             resize,
         });
         return {
             controller,
             strategy,
-            timer,
             resize,
-            settle: () => timer.run(),
+            settle: () => Bun.sleep(150),
         };
     };
 
-    test("region repaints never cross a split control-sequence boundary", () => {
+    test("region repaints never cross a split control-sequence boundary", async () => {
         const harness = makeBoundaryHarness();
         // A styled transcript fragment split mid-sequence by the stream.
         harness.controller.writeTranscript("plain\x1b[31");
         harness.controller.setFooter("status");
-        harness.settle();
+        await harness.settle();
         // Nothing paints while the CSI sequence is incomplete.
         expect(harness.strategy.currentRegion()).toEqual([]);
         harness.controller.writeTranscript("mred\x1b[0m\n");
@@ -433,10 +406,10 @@ describe("terminal stream boundaries never grow the region", () => {
         // The same deferral holds across an OSC boundary (title change).
         harness.controller.writeTranscript("\x1b]0;title");
         harness.controller.setFooter("updated");
-        harness.settle();
+        await harness.settle();
         expect(harness.strategy.currentRegion()).toEqual([]);
         harness.controller.writeTranscript("\x07done\n");
-        harness.settle();
+        await harness.settle();
         expect(harness.strategy.currentRegion().length).toBeLessThanOrEqual(
             INTERACTIVE_REGION_MAX_ROWS,
         );

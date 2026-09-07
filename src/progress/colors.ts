@@ -12,8 +12,20 @@ const RED = "\x1b[31m";
 const YELLOW = "\x1b[33m";
 const CYAN = "\x1b[36m";
 
-export const dim = (text: string): string => `${DIM}${text}${RESET}`;
-export const green = (text: string): string => `${GREEN}${text}${RESET}`;
-export const red = (text: string): string => `${RED}${text}${RESET}`;
-export const yellow = (text: string): string => `${YELLOW}${text}${RESET}`;
-export const cyan = (text: string): string => `${CYAN}${text}${RESET}`;
+const colorsEnabled = (): boolean => {
+    if (process.env.NO_COLOR !== undefined) return false;
+    const stderr = process.stderr as { readonly isTTY?: unknown };
+    if (stderr.isTTY !== true) return false;
+    return true;
+};
+
+const makeColor =
+    (code: string) =>
+    (text: string): string =>
+        colorsEnabled() ? `${code}${text}${RESET}` : text;
+
+export const dim = makeColor(DIM);
+export const green = makeColor(GREEN);
+export const red = makeColor(RED);
+export const yellow = makeColor(YELLOW);
+export const cyan = makeColor(CYAN);

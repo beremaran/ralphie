@@ -119,9 +119,34 @@ describe("breadcrumb labels", () => {
             activityLabel: "Using Bearer super-secret",
         });
 
-        expect(renderBreadcrumbLine(candidate, { colors: true })).toBe(
-            "│  \u001b[90m› Using Bearer super-secret\u001b[0m\n",
+        const originalDescriptor = Object.getOwnPropertyDescriptor(
+            process.stderr,
+            "isTTY",
         );
+        const originalNoColor = process.env.NO_COLOR;
+        delete process.env.NO_COLOR;
+        Object.defineProperty(process.stderr, "isTTY", {
+            value: true,
+            configurable: true,
+        });
+        try {
+            expect(renderBreadcrumbLine(candidate, { colors: true })).toBe(
+                "│  \u001b[90m› Using Bearer super-secret\u001b[0m\n",
+            );
+        } finally {
+            if (originalDescriptor === undefined) {
+                delete (process.stderr as unknown as Record<string, unknown>)
+                    .isTTY;
+            } else {
+                Object.defineProperty(
+                    process.stderr,
+                    "isTTY",
+                    originalDescriptor,
+                );
+            }
+            if (originalNoColor === undefined) delete process.env.NO_COLOR;
+            else process.env.NO_COLOR = originalNoColor;
+        }
     });
 });
 

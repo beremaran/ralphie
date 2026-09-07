@@ -5,7 +5,6 @@ import type {
     AgentSessionEvent,
 } from "../../src/opencode/client.ts";
 import { makeProgressCoordinator } from "../../src/progress/coordinator.ts";
-import type { FooterTimer } from "../../src/progress/footer.ts";
 import { INTERACTIVE_REGION_MAX_ROWS } from "../../src/progress/terminal-controller.ts";
 import type { TerminalOutputStrategy } from "../../src/progress/terminal-controller.ts";
 
@@ -19,26 +18,6 @@ const context: AgentEventContext = {
 
 const asEvent = (value: unknown): AgentSessionEvent =>
     value as AgentSessionEvent;
-
-type FakeTimer = FooterTimer & { readonly run: () => void };
-
-const makeFakeTimer = (): FakeTimer => {
-    let scheduled: (() => void) | undefined;
-    return {
-        schedule: (callback) => {
-            scheduled = callback;
-            return scheduled;
-        },
-        cancel: () => {
-            scheduled = undefined;
-        },
-        run: () => {
-            const callback = scheduled;
-            scheduled = undefined;
-            callback?.();
-        },
-    };
-};
 
 const makeResizeSource = () => {
     const listeners: Array<() => void> = [];
@@ -85,14 +64,13 @@ const makeStrategyRecorder = (): StrategyRecorder => {
 };
 
 /**
- * Coordinator harness in interactive mode backed by a fake strategy, fake
- * resize source, and fake refresh timer, mirroring `command.ts` wiring.
+ * Coordinator harness in interactive mode backed by a fake strategy and fake
+ * resize source, mirroring `command.ts` wiring.
  */
 const makeInteractiveHarness = (
     options: { readonly verbose?: boolean } = {},
 ) => {
     const strategy = makeStrategyRecorder();
-    const timer = makeFakeTimer();
     const resize = makeResizeSource();
     let fallback = "";
     const coordinator = makeProgressCoordinator({
@@ -102,7 +80,6 @@ const makeInteractiveHarness = (
         width: () => 80,
         strategy,
         resize,
-        footer: { timer },
         write: (text) => {
             fallback += text;
         },
@@ -110,10 +87,9 @@ const makeInteractiveHarness = (
     return {
         coordinator,
         strategy,
-        timer,
         resize,
         fallback: () => fallback,
-        settle: () => timer.run(),
+        settle: () => Bun.sleep(150),
     };
 };
 
@@ -189,7 +165,7 @@ describe("coordinator activity wiring", () => {
             toolEnd("tool-1", "bash", { content: "final output" }, false),
             context,
         );
-        settle();
+        await settle();
         const output = strategy.output();
         // The transcript records the call and one bounded outcome row only.
         expect(output).toContain("│  $ echo work");
@@ -236,7 +212,7 @@ describe("coordinator activity wiring", () => {
             );
         }
         coordinator.listener(asEvent({ type: "agent_settled" }), context);
-        settle();
+        await settle();
         await coordinator.dispose();
 
         const output = strategy.output();
@@ -290,7 +266,7 @@ describe("coordinator activity wiring", () => {
             }),
             context,
         );
-        settle();
+        await settle();
         await coordinator.dispose();
 
         const output = strategy.output();
@@ -315,7 +291,7 @@ describe("coordinator activity wiring", () => {
             toolEnd("t1", "bash", { content: "ok" }, false),
             context,
         );
-        settle();
+        await settle();
         const output = strategy.output();
         expect(output).toContain("│  ✓ bash done");
         expect(output).not.toContain("✓ bash failed");
@@ -348,7 +324,7 @@ describe("coordinator activity wiring", () => {
             ),
             context,
         );
-        settle();
+        await settle();
         const output = strategy.output();
         expect(output).toContain(
             "✗ grep failed — error: no matches for a very long pattern",
@@ -392,7 +368,7 @@ describe("coordinator activity wiring", () => {
             status: "succeeded" as const,
             message: "fix written",
         });
-        settle();
+        await settle();
         const output = strategy.output();
         // Settled milestone remains a durable row.
         expect(output).toContain("fix written");
@@ -433,7 +409,7 @@ describe("coordinator activity wiring", () => {
             message: "fix written",
             details: { attempt: 1, mode: "full" },
         });
-        settle();
+        await settle();
         const output = strategy.output();
         // Verbose durable rows may carry details…
         expect(output).toContain('"attempt":1');
@@ -461,7 +437,7 @@ describe("coordinator activity wiring", () => {
             toolEnd("t1", "bash", { content: "hi" }, false),
             context,
         );
-        settle();
+        await settle();
         // All content flows through the strategy surface, not the `write` sink.
         expect(strategy.output()).toContain("│  $ echo hi");
         expect(fallback()).toBe("");
@@ -485,7 +461,7 @@ describe("coordinator dispose safety", () => {
             toolEnd("t1", "bash", { content: "hi" }, false),
             context,
         );
-        settle();
+        await settle();
         expect(strategy.output()).toContain("│  $ echo hi");
         expect(strategy.finalRegion().length).toBeGreaterThan(0);
 
@@ -514,7 +490,7 @@ describe("coordinator dispose safety", () => {
             status: "succeeded",
             message: "stale done",
         });
-        settle();
+        await settle();
         expect(strategy.output()).toBe(afterDispose);
         expect(strategy.finalRegion()).toEqual([]);
         expect(fallback()).toBe("");

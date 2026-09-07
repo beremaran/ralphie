@@ -5,7 +5,6 @@ import type {
     AgentSessionEvent,
 } from "../../src/opencode/client.ts";
 import { makeProgressCoordinator } from "../../src/progress/coordinator.ts";
-import type { FooterTimer } from "../../src/progress/footer.ts";
 import {
     INTERACTIVE_FOOTER_LAYOUT_STRATEGY,
     INTERACTIVE_FOOTER_USES_RESERVED_ROW,
@@ -105,26 +104,6 @@ const textEnd = (contentIndex: number) =>
         type: "message_update",
         assistantMessageEvent: { type: "text_end", contentIndex },
     });
-
-type FakeTimer = FooterTimer & { readonly run: () => void };
-
-const makeFakeTimer = (): FakeTimer => {
-    let scheduled: (() => void) | undefined;
-    return {
-        schedule: (callback) => {
-            scheduled = callback;
-            return scheduled;
-        },
-        cancel: () => {
-            scheduled = undefined;
-        },
-        run: () => {
-            const callback = scheduled;
-            scheduled = undefined;
-            callback?.();
-        },
-    };
-};
 
 const makeResizeSource = () => {
     const listeners: Array<() => void> = [];
@@ -262,8 +241,7 @@ describe("interactive footer layout strategy lock (issue #313)", () => {
         );
     });
 
-    test("the controller default strategy is the locked durable strategy", () => {
-        const timer = makeFakeTimer();
+    test("the controller default strategy is the locked durable strategy", async () => {
         const resize = makeResizeSource();
         let implicit = "";
         const implicitController = makeTerminalOutputController({
@@ -271,24 +249,21 @@ describe("interactive footer layout strategy lock (issue #313)", () => {
             write: (text) => {
                 implicit += text;
             },
-            footer: { timer },
             resize,
         });
         const recording = makeRecordingStrategy();
-        const explicitTimer = makeFakeTimer();
         const explicitResize = makeResizeSource();
         const explicitController = makeTerminalOutputController({
             mode: "interactive",
             strategy: recording.strategy,
-            footer: { timer: explicitTimer },
             resize: explicitResize,
             width: () => 80,
         });
         try {
             implicitController.setFooter("locked default");
-            timer.run();
+            await Bun.sleep(150);
             explicitController.setFooter("locked default");
-            explicitTimer.run();
+            await Bun.sleep(150);
             // Both surfaces paint the same footer row through the durable
             // path; the implicit default never takes an untested branch.
             expect(implicit).toBe("locked default");
@@ -302,7 +277,6 @@ describe("interactive footer layout strategy lock (issue #313)", () => {
     });
 
     test("high-rate writes, narrow/dynamic resize, and split ANSI stay scroll-region-free without leaking footer bytes", async () => {
-        const timer = makeFakeTimer();
         const resize = makeResizeSource();
         let currentWidth = 80;
         const recording = makeRecordingStrategy();
@@ -314,7 +288,6 @@ describe("interactive footer layout strategy lock (issue #313)", () => {
             width: () => currentWidth,
             strategy: recording.strategy,
             resize,
-            footer: { timer },
             write: (text) => {
                 fallback += text;
             },
@@ -335,22 +308,22 @@ describe("interactive footer layout strategy lock (issue #313)", () => {
                 if (index === 40) {
                     currentWidth = 16;
                     resize.emit();
-                    timer.run();
+                    await Bun.sleep(150);
                 }
                 if (index === 80) {
                     currentWidth = 80;
                     resize.emit();
-                    timer.run();
+                    await Bun.sleep(150);
                 }
             }
             coordinator.piListener(textEnd(0), CONTEXT);
-            timer.run();
+            await Bun.sleep(150);
             await coordinator.progress.emit({
                 stage: "implementation",
                 status: "succeeded",
                 message: "layout locked",
             });
-            timer.run();
+            await Bun.sleep(150);
 
             // Coordinator routing stays intact: every byte flows through the
             // strategy surface, never the fallback sink.
@@ -367,7 +340,6 @@ describe("interactive footer layout strategy lock (issue #313)", () => {
 
             // Direct split-sequence proof on the same locked strategy: an
             // incomplete CSI defers the footer without scroll-region bytes.
-            const splitTimer = makeFakeTimer();
             const splitResize = makeResizeSource();
             const splitRecording = makeRecordingStrategy();
             const splitController = makeTerminalOutputController({
@@ -376,14 +348,13 @@ describe("interactive footer layout strategy lock (issue #313)", () => {
                 width: () => 40,
                 footer: {
                     footerLine: () => "SPLIT_LOCK",
-                    timer: splitTimer,
                 },
                 resize: splitResize,
             });
             try {
                 splitController.writeTranscript("\x1b[31");
                 splitController.invalidate();
-                splitTimer.run();
+                await Bun.sleep(150);
                 expect(splitRecording.raw()).toBe("\x1b[31");
                 splitController.writeTranscript("mred\x1b[0m\n");
                 expect(splitRecording.raw()).toBe(
@@ -406,13 +377,12 @@ describe("interactive footer layout strategy lock (issue #313)", () => {
         expect(recording.restoreCount()).toBe(1);
         const settled = recording.raw();
         resize.emit();
-        timer.run();
+        await Bun.sleep(150);
         expect(recording.raw()).toBe(settled);
     });
 
     test("completion and failure dispose paths clear stale status and restore terminal state", async () => {
         for (const ending of ["completion", "failure"] as const) {
-            const timer = makeFakeTimer();
             const resize = makeResizeSource();
             const recording = makeRecordingStrategy();
             const coordinator = makeProgressCoordinator({
@@ -422,7 +392,6 @@ describe("interactive footer layout strategy lock (issue #313)", () => {
                 width: () => 80,
                 strategy: recording.strategy,
                 resize,
-                footer: { timer },
                 write: () => {},
             });
             try {
@@ -440,7 +409,7 @@ describe("interactive footer layout strategy lock (issue #313)", () => {
                 coordinator.piListener(textDelta(0, "fragment"), CONTEXT);
                 coordinator.piListener(textDelta(0, " closed\n"), CONTEXT);
                 coordinator.piListener(textEnd(0), CONTEXT);
-                timer.run();
+                await Bun.sleep(150);
                 expect(recording.paints().length).toBeGreaterThan(0);
                 if (ending === "completion") {
                     await coordinator.progress.emit({
@@ -455,7 +424,7 @@ describe("interactive footer layout strategy lock (issue #313)", () => {
                         message: "verification failed",
                     });
                 }
-                timer.run();
+                await Bun.sleep(150);
             } finally {
                 await coordinator.dispose();
             }
@@ -468,7 +437,7 @@ describe("interactive footer layout strategy lock (issue #313)", () => {
             // write no further bytes.
             const settled = recording.raw();
             resize.emit();
-            timer.run();
+            await Bun.sleep(150);
             expect(recording.raw()).toBe(settled);
             await coordinator.dispose();
             expect(recording.raw()).toBe(settled);

@@ -1,9 +1,5 @@
 import type { ProgressOutput, ProgressRenderMode } from "./progress.ts";
-import {
-    clipFooter,
-    makeFooterRefreshScheduler,
-    type FooterTimer,
-} from "./footer.ts";
+import { clipFooter, makeFooterRefreshScheduler } from "./footer.ts";
 import { makeTerminalStreamBoundaryTracker } from "./terminal-stream-boundary.ts";
 
 /**
@@ -50,8 +46,6 @@ export type TerminalFooterOptions = {
     readonly width?: () => number;
     /** Region refresh cadence; forwarded to the footer view scheduler. */
     readonly intervalMs?: number;
-    /** Injectable timer for deterministic scheduler tests. */
-    readonly timer?: FooterTimer;
 };
 
 export type TerminalOutputControllerOptions = {
@@ -311,7 +305,6 @@ export const makeTerminalOutputController = ({
                   renderRegion();
               },
               intervalMs: footer?.intervalMs,
-              timer: footer?.timer,
           })
         : undefined;
 

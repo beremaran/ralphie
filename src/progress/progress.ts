@@ -484,7 +484,6 @@ export {
 export type {
     FooterRefreshScheduler,
     FooterRefreshSchedulerOptions,
-    FooterTimer,
     FooterViewOptions,
 } from "./footer.ts";
 export {

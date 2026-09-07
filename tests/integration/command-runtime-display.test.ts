@@ -26,7 +26,6 @@ import {
     type ProgressCoordinatorOptions,
 } from "../../src/progress/coordinator.ts";
 import { breadcrumbCandidateFor } from "../../src/progress/breadcrumb-label.ts";
-import type { FooterTimer } from "../../src/progress/footer.ts";
 import type { ProgressRenderMode } from "../../src/progress/progress.ts";
 import type { IssueWorkflowRuntime } from "../../src/runtime.ts";
 import { stripTerminalControls } from "../../src/shared/terminal.ts";
@@ -83,26 +82,6 @@ const context: AgentEventContext = {
 
 /** Fixed clock so every rendered duration and footer is byte-identical. */
 const FIXED_NOW = () => new Date("2026-01-01T00:00:00.000Z");
-
-type FakeTimer = FooterTimer & { readonly run: () => void };
-
-const makeFakeTimer = (): FakeTimer => {
-    let scheduled: (() => void) | undefined;
-    return {
-        schedule: (callback) => {
-            scheduled = callback;
-            return scheduled;
-        },
-        cancel: () => {
-            scheduled = undefined;
-        },
-        run: () => {
-            const callback = scheduled;
-            scheduled = undefined;
-            callback?.();
-        },
-    };
-};
 
 /** Fake TTY stderr so `runCommand` selects interactive mode and resize works. */
 const makeFakeStderr = (initialWidth: number) => {
@@ -174,8 +153,7 @@ const makeFakePi = (): OpenCodeService => {
 
 type DisplaySession = {
     readonly strategy: RecordingStrategy;
-    readonly timer: FakeTimer;
-    readonly settle: () => void;
+    readonly settle: () => Promise<void>;
     readonly samples: number[];
     /** Terminal width sampled when each painted region row was emitted. */
     readonly paintWidths: readonly number[];
@@ -227,7 +205,6 @@ const runInteractiveCommand = async ({
             return strategy.paintFooter(text);
         },
     };
-    const timer = makeFakeTimer();
     const samples: number[] = [];
     const fakeStderr = makeFakeStderr(width);
     const abortController = new AbortController();
@@ -248,7 +225,6 @@ const runInteractiveCommand = async ({
                 const made = makeProgressCoordinator({
                     ...options,
                     strategy: measuredStrategy,
-                    footer: { timer },
                     now: FIXED_NOW,
                 });
                 coordinator = made;
@@ -265,8 +241,8 @@ const runInteractiveCommand = async ({
                 runtime: IssueWorkflowRuntime,
             ) => {
                 const piListener = listener as AgentEventListener;
-                const settle = (): void => {
-                    timer.run();
+                const settle = async (): Promise<void> => {
+                    await Bun.sleep(150);
                     samples.push(strategy.currentRegion().length);
                 };
                 await playScriptedScenario(scenario, "interactive", {
@@ -286,7 +262,6 @@ const runInteractiveCommand = async ({
                 if (onSession !== undefined) {
                     await onSession({
                         strategy: measuredStrategy,
-                        timer,
                         settle,
                         samples,
                         paintWidths: widthAtPaint,

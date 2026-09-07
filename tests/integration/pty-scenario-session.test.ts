@@ -5,7 +5,6 @@ import type {
     AgentSessionEvent,
 } from "../../src/opencode/client.ts";
 import { makeProgressCoordinator } from "../../src/progress/coordinator.ts";
-import type { FooterTimer } from "../../src/progress/footer.ts";
 import type { TerminalOutputStrategy } from "../../src/progress/terminal-controller.ts";
 import {
     ACTIVE_MARKER,
@@ -256,7 +255,7 @@ describe("PTY scenario agent session", () => {
             expect(forbiddenPayloadJson()).not.toContain(FAKE_TOKEN);
         });
 
-        test("the visible surface stays credential-free while the JSON event stream keeps the literal", () => {
+        test("the visible surface stays credential-free while the JSON event stream keeps the literal", async () => {
             // Plain mode: the human transcript and breadcrumb rows never
             // render the token.
             const plainOutput = runScenarioIn(
@@ -279,7 +278,6 @@ describe("PTY scenario agent session", () => {
                 clearFooter: () => {},
                 restore: () => {},
             };
-            const timer = makeFakeTimer();
             const coordinator = makeProgressCoordinator({
                 mode: "interactive",
                 verbose: false,
@@ -287,7 +285,6 @@ describe("PTY scenario agent session", () => {
                 width: () => OPTIONS.columns,
                 breadcrumbThreshold: OPTIONS.threshold,
                 strategy,
-                footer: { timer: timer.timer },
                 write: (text) => {
                     paints += text;
                 },
@@ -298,9 +295,7 @@ describe("PTY scenario agent session", () => {
             for (const event of scriptEvents()) {
                 coordinator.piListener(event, CONTEXT);
             }
-            while (timer.run()) {
-                // Drain every scheduled footer repaint.
-            }
+            await Bun.sleep(200);
             expect(paints).not.toContain(FAKE_TOKEN);
 
             // JSON mode is lossless: the raw event stream contains the token.
@@ -373,28 +368,3 @@ describe("PTY scenario agent session", () => {
         });
     });
 });
-
-const makeFakeTimer = (): {
-    readonly timer: FooterTimer;
-    readonly run: () => boolean;
-} => {
-    let scheduled: (() => void) | undefined;
-    return {
-        timer: {
-            schedule: (callback) => {
-                scheduled = callback;
-                return scheduled;
-            },
-            cancel: () => {
-                scheduled = undefined;
-            },
-        },
-        run: () => {
-            const callback = scheduled;
-            scheduled = undefined;
-            if (callback === undefined) return false;
-            callback();
-            return true;
-        },
-    };
-};

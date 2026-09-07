@@ -626,7 +626,7 @@ export type ScriptedScenarioDeps = {
     readonly context: AgentEventContext;
     readonly progress: ProgressReporterService;
     /** Flush the interactive refresh timer and observe the live region. */
-    readonly settle?: () => void;
+    readonly settle?: () => void | Promise<void>;
     /** Insert one breadcrumb derived from the coordinator's display state. */
     readonly insertBreadcrumb?: () => void;
     /** Resize the fake terminal surface to a new width. */
@@ -661,7 +661,7 @@ export const playScriptedScenario = async (
                 deps.progress.writeRaw?.(step.text);
                 break;
             case "settle":
-                deps.settle?.();
+                await deps.settle?.();
                 break;
             case "resize":
                 deps.resize?.(step.width);

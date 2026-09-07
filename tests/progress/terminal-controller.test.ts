@@ -8,36 +8,9 @@ import type {
     TerminalOutputStrategy,
     TerminalResizeSubscription,
 } from "../../src/progress/terminal-controller.ts";
-import type { FooterTimer } from "../../src/progress/footer.ts";
 
 const CLEAR = "\r\x1b[2K";
 const UP = "\x1b[1A";
-
-type FakeTimer = FooterTimer & {
-    readonly run: () => void;
-    readonly cancelCount: () => number;
-};
-
-const makeFakeTimer = (): FakeTimer => {
-    let scheduled: (() => void) | undefined;
-    let cancelled = 0;
-    return {
-        schedule: (callback) => {
-            scheduled = callback;
-            return scheduled;
-        },
-        cancel: () => {
-            cancelled += 1;
-            scheduled = undefined;
-        },
-        run: () => {
-            const callback = scheduled;
-            scheduled = undefined;
-            callback?.();
-        },
-        cancelCount: () => cancelled,
-    };
-};
 
 const makeResizeSource = () => {
     const listeners: Array<() => void> = [];
@@ -77,8 +50,8 @@ const makeFakeStrategy = (): TerminalOutputStrategy & {
 };
 
 /**
- * Interactive controller harness backed by a fake strategy, fake resize
- * source, and fake refresh timer. `setFooter` drives the displayed
+ * Interactive controller harness backed by a fake strategy and fake resize
+ * source. `setFooter` drives the displayed
  * stage/status line through both the surface `setFooter` path and the
  * injected `footerLine` closure, mirroring the coordinator wiring.
  */
@@ -91,7 +64,6 @@ const makeHarness = (
     } = {},
 ) => {
     const strategy = makeFakeStrategy();
-    const timer = makeFakeTimer();
     const resize = makeResizeSource();
     let footerTarget: string | undefined;
     const controller = makeTerminalOutputController({
@@ -101,17 +73,15 @@ const makeHarness = (
         footer: {
             footerLine: options.footerLine ?? (() => footerTarget),
             activityLines: options.activityLines,
-            timer,
         },
         resize,
     });
     return {
         controller,
         strategy,
-        timer,
         resize,
         output: () => strategy.output(),
-        settle: () => timer.run(),
+        settle: () => Bun.sleep(150),
         setFooter: (line: string) => {
             footerTarget = line;
             controller.setFooter(line);
@@ -120,99 +90,99 @@ const makeHarness = (
 };
 
 describe("terminal output controller region", () => {
-    test("repaints a one-row region in place", () => {
+    test("repaints a one-row region in place", async () => {
         const { output, settle, setFooter } = makeHarness();
         setFooter("◐ working");
-        settle();
+        await settle();
         expect(output()).toBe("◐ working");
         setFooter("✓ done");
-        settle();
+        await settle();
         expect(output()).toBe(`◐ working${CLEAR}✓ done`);
         expect(output()).not.toContain(UP);
     });
 
-    test("repaints a two-row region in place", () => {
+    test("repaints a two-row region in place", async () => {
         let activity: string[] = [];
         const { controller, output, settle, setFooter } = makeHarness({
             activityLines: () => (activity.length === 0 ? undefined : activity),
         });
         setFooter("A");
-        settle();
+        await settle();
         expect(output()).toBe("A");
 
         activity = ["run bash"];
         controller.invalidate();
-        settle();
+        await settle();
         expect(output()).toBe(`A${CLEAR}run bash\nA`);
 
         activity = ["run read"];
         controller.invalidate();
-        settle();
+        await settle();
         expect(output()).toBe(
             `A${CLEAR}run bash\nA${CLEAR}${UP}${CLEAR}run read\nA`,
         );
     });
 
-    test("repaints a three-row region in place", () => {
+    test("repaints a three-row region in place", async () => {
         let activity = ["bash", "read"];
         const { controller, output, settle, setFooter } = makeHarness({
             activityLines: () => activity,
         });
         setFooter("stage");
-        settle();
+        await settle();
         expect(output()).toBe("bash\nread\nstage");
 
         activity = ["write", "grep"];
         controller.invalidate();
-        settle();
+        await settle();
         expect(output()).toBe(
             `bash\nread\nstage${CLEAR}${UP}${CLEAR}${UP}${CLEAR}write\ngrep\nstage`,
         );
     });
 
-    test("caps the region at three rows including the stage/status line", () => {
+    test("caps the region at three rows including the stage/status line", async () => {
         const activity = ["a", "b", "c", "d"];
         const { output, settle, setFooter } = makeHarness({
             activityLines: () => activity,
         });
         setFooter("status");
-        settle();
+        await settle();
         expect(output()).toBe("a\nb\nstatus");
         expect(output()).not.toContain("c");
         expect(INTERACTIVE_REGION_MAX_ROWS).toBe(3);
     });
 
-    test("renders only the bounded activity rows when no stage/status line exists", () => {
+    test("renders only the bounded activity rows when no stage/status line exists", async () => {
         const activity = ["a", "b", "c", "d"];
         const { controller, output, settle } = makeHarness({
             activityLines: () => activity,
         });
         controller.invalidate();
-        settle();
+        await settle();
         expect(output()).toBe("a\nb\nc");
     });
 
-    test("clips every region row before it can wrap", () => {
+    test("clips every region row before it can wrap", async () => {
         const long = "x".repeat(120);
         const { output, settle, setFooter } = makeHarness({
             width: () => 20,
         });
         setFooter(long);
-        settle();
+        await settle();
         expect(Bun.stringWidth(output())).toBeLessThanOrEqual(20);
         expect(output()).toEndWith("…");
         expect(output()).not.toContain("x".repeat(21));
         expect(output()).not.toContain("\n");
     });
 
-    test("clips long activity rows to the terminal width", () => {
+    test("clips long activity rows to the terminal width", async () => {
         const activity = ["a".repeat(50), "b".repeat(50)];
         const { output, settle, setFooter } = makeHarness({
             width: () => 10,
             activityLines: () => activity,
         });
         setFooter("status");
-        settle();
+        await settle();
         const painted = output();
         for (const row of painted.split("\n")) {
             expect(Bun.stringWidth(row)).toBeLessThanOrEqual(10);
@@ -220,41 +190,41 @@ describe("terminal output controller region", () => {
         expect(painted).not.toContain("a".repeat(11));
     });
 
-    test("narrow terminals still fit one physical row per region line", () => {
+    test("narrow terminals still fit one physical row per region line", async () => {
         const { output, settle, setFooter } = makeHarness({
             width: () => 2,
         });
         setFooter("abcd");
-        settle();
+        await settle();
         expect(Bun.stringWidth(output())).toBeLessThanOrEqual(2);
         expect(output()).not.toContain("\n");
     });
 
-    test("defers region repaints while a transcript line is open", () => {
+    test("defers region repaints while a transcript line is open", async () => {
         const { controller, output, settle, setFooter } = makeHarness();
         controller.writeTranscript("half");
         setFooter("F");
-        settle();
+        await settle();
         expect(output()).toBe("half");
         controller.writeTranscript(" line\n");
         expect(output()).toBe("half line\nF");
         expect(output()).not.toContain(UP);
     });
 
-    test("never inserts region bytes into a split control sequence", () => {
+    test("never inserts region bytes into a split control sequence", async () => {
         const { controller, output, settle, setFooter } = makeHarness();
         controller.writeTranscript("\x1b[31");
         setFooter("F");
-        settle();
+        await settle();
         expect(output()).toBe("\x1b[31");
         controller.writeTranscript("mred\x1b[0m\n");
         expect(output()).toBe("\x1b[31mred\x1b[0m\nF");
     });
 
-    test("streamed assistant text is never overwritten by the region", () => {
+    test("streamed assistant text is never overwritten by the region", async () => {
         const { controller, output, settle, setFooter } = makeHarness();
         setFooter("live");
-        settle();
+        await settle();
         expect(output()).toBe("live");
 
         controller.writeTranscript("user text\nnext");
@@ -265,45 +235,45 @@ describe("terminal output controller region", () => {
         expect(output()).toContain("user text\nnext complete\n");
     });
 
-    test("completion removal shrinks the region and clears stale rows", () => {
+    test("completion removal shrinks the region and clears stale rows", async () => {
         let activity = ["a", "b"];
         const { controller, output, settle, setFooter } = makeHarness({
             activityLines: () => activity,
         });
         setFooter("S");
-        settle();
+        await settle();
         expect(output()).toBe("a\nb\nS");
 
         activity = [];
         controller.invalidate();
-        settle();
+        await settle();
         expect(output()).toBe(`a\nb\nS${CLEAR}${UP}${CLEAR}${UP}${CLEAR}S`);
     });
 
-    test("replaces a failed row in place when the operation settles", () => {
+    test("replaces a failed row in place when the operation settles", async () => {
         let activity = ["✗ failed op"];
         const { controller, output, settle, setFooter } = makeHarness({
             activityLines: () => activity,
         });
         setFooter("S");
-        settle();
+        await settle();
         expect(output()).toBe("✗ failed op\nS");
 
         activity = ["✓ settled op"];
         controller.invalidate();
-        settle();
+        await settle();
         expect(output()).toBe(
             `✗ failed op\nS${CLEAR}${UP}${CLEAR}✓ settled op\nS`,
         );
     });
 
-    test("repaints the region at the new width on resize", () => {
+    test("repaints the region at the new width on resize", async () => {
         let currentWidth = 20;
         const { output, settle, setFooter, resize } = makeHarness({
             width: () => currentWidth,
         });
         setFooter("abcdefghijklmnop");
-        settle();
+        await settle();
         expect(Bun.stringWidth(output())).toBeLessThanOrEqual(20);
 
         currentWidth = 6;
@@ -314,14 +284,14 @@ describe("terminal output controller region", () => {
         expect(Bun.stringWidth(lastPaint)).toBeLessThanOrEqual(6);
     });
 
-    test("resize during an open line defers until the line closes", () => {
+    test("resize during an open line defers until the line closes", async () => {
         let currentWidth = 40;
         const { controller, output, resize, settle, setFooter } = makeHarness({
             width: () => currentWidth,
         });
         controller.writeTranscript("partial");
         setFooter("status");
-        settle();
+        await settle();
         expect(output()).toBe("partial");
 
         currentWidth = 10;
@@ -335,13 +305,13 @@ describe("terminal output controller region", () => {
         expect(Bun.stringWidth(paint)).toBeLessThanOrEqual(10);
     });
 
-    test("disposal erases the region in place, settles the cursor, and restores the strategy", () => {
+    test("disposal erases the region in place, settles the cursor, and restores the strategy", async () => {
         const activity = ["run bash", "run read"];
         const { output, settle, setFooter, controller } = makeHarness({
             activityLines: () => activity,
         });
         setFooter("stage");
-        settle();
+        await settle();
         expect(output()).toBe("run bash\nrun read\nstage");
         controller.writeTranscript("assistant text\n");
         expect(output()).toBe(
@@ -365,11 +335,11 @@ describe("terminal output controller region", () => {
         // A disposed controller ignores further region updates entirely.
         setFooter("stale");
         controller.invalidate();
-        settle();
+        await settle();
         expect(output()).toBe(afterFirstDispose);
     });
 
-    test("disposal flushes lines deferred by an open transcript line", () => {
+    test("disposal flushes lines deferred by an open transcript line", async () => {
         const { controller, output } = makeHarness();
         controller.writeTranscript("partial");
         controller.writeLine("deferred durable");
@@ -381,10 +351,10 @@ describe("terminal output controller region", () => {
 });
 
 describe("dispose safety", () => {
-    test("double dispose is harmless: no bytes, no throw, later updates never repaint", () => {
-        const { controller, output, timer, settle, setFooter } = makeHarness();
+    test("double dispose is harmless: no bytes, no throw, later updates never repaint", async () => {
+        const { controller, output, settle, setFooter } = makeHarness();
         setFooter("live");
-        settle();
+        await settle();
         expect(output()).toBe("live");
         expect(controller.isFooterVisible()).toBe(true);
 
@@ -405,33 +375,29 @@ describe("dispose safety", () => {
         controller.writeTranscript("stream after dispose");
         controller.beginLive("live after dispose");
         controller.appendLine("append after dispose", "live after dispose");
-        timer.run();
+        await Bun.sleep(150);
         expect(controller.isFooterVisible()).toBe(false);
         expect(output()).toBe(afterFirstDispose);
     });
 
-    test("a pending footer timer is cancelled on dispose and cannot repaint", () => {
-        const { controller, output, timer, settle, setFooter } = makeHarness();
+    test("a pending footer timer is cancelled on dispose and cannot repaint", async () => {
+        const { controller, output, settle, setFooter } = makeHarness();
         setFooter("live");
-        settle();
+        await settle();
         expect(output()).toBe("live");
 
-        // A repaint is pending when dispose runs: dispose cancels exactly
-        // the one pending handle.
+        // A repaint is pending when dispose runs: dispose cancels it.
         controller.invalidate();
-        const cancelsBeforeDispose = timer.cancelCount();
         controller.dispose();
-        expect(timer.cancelCount()).toBe(cancelsBeforeDispose + 1);
         const afterDispose = output();
 
-        // Firing the pending timer after dispose writes nothing more.
-        timer.run();
+        // The pending timer never fires after dispose.
+        await Bun.sleep(150);
         expect(output()).toBe(afterDispose);
         expect(controller.isFooterVisible()).toBe(false);
-        expect(timer.cancelCount()).toBe(cancelsBeforeDispose + 1);
     });
 
-    test("an injected resize subscription is detached exactly once on dispose", () => {
+    test("an injected resize subscription is detached exactly once on dispose", async () => {
         const listeners: Array<() => void> = [];
         let unsubscribeCalls = 0;
         const resize: TerminalResizeSubscription & {
@@ -450,16 +416,14 @@ describe("dispose safety", () => {
             },
         };
         const strategy = makeFakeStrategy();
-        const timer = makeFakeTimer();
         const controller = makeTerminalOutputController({
             mode: "interactive",
             strategy,
-            footer: { timer },
             resize,
         });
         // Paint a visible region so a stale resize would be observable.
         controller.setFooter("live");
-        timer.run();
+        await Bun.sleep(150);
         expect(strategy.output()).toBe("live");
         resize.emit();
         expect(strategy.output()).toBe(`live${CLEAR}live`);
@@ -480,13 +444,12 @@ describe("dispose safety", () => {
         expect(strategy.output()).toBe(afterDispose);
     });
 
-    test("the default resize listener is removed from process.stderr on dispose", () => {
+    test("the default resize listener is removed from process.stderr on dispose", async () => {
         const before = process.stderr.listenerCount("resize");
         const strategy = makeFakeStrategy();
         const controller = makeTerminalOutputController({
             mode: "interactive",
             strategy,
-            footer: { timer: makeFakeTimer() },
         });
         expect(process.stderr.listenerCount("resize")).toBe(before + 1);
 
@@ -500,14 +463,13 @@ describe("dispose safety", () => {
 
 describe("append-only surfaces emit no cursor controls", () => {
     for (const mode of ["plain", "json", "quiet"] as const) {
-        test(`${mode} mode stays append-only even through region calls`, () => {
+        test(`${mode} mode stays append-only even through region calls`, async () => {
             const strategy = makeFakeStrategy();
             const controller = makeTerminalOutputController({
                 mode,
                 strategy,
                 footer: {
                     activityLines: () => ["a", "b", "c"],
-                    timer: makeFakeTimer(),
                 },
             });
             controller.beginLive("live");
@@ -525,28 +487,26 @@ describe("append-only surfaces emit no cursor controls", () => {
 });
 
 describe("region visibility", () => {
-    test("isFooterVisible tracks the painted region", () => {
+    test("isFooterVisible tracks the painted region", async () => {
         const { controller, settle, setFooter } = makeHarness();
         expect(controller.isFooterVisible()).toBe(false);
         setFooter("A");
         expect(controller.isFooterVisible()).toBe(false);
-        settle();
+        await settle();
         expect(controller.isFooterVisible()).toBe(true);
         controller.dispose();
         expect(controller.isFooterVisible()).toBe(false);
     });
 
-    test("surface setFooter paints when no footerLine is injected", () => {
+    test("surface setFooter paints when no footerLine is injected", async () => {
         const strategy = makeFakeStrategy();
-        const timer = makeFakeTimer();
         const controller = makeTerminalOutputController({
             mode: "interactive",
             strategy,
-            footer: { timer },
         });
         controller.setFooter("direct");
         expect(strategy.output()).toBe("");
-        timer.run();
+        await Bun.sleep(150);
         expect(strategy.output()).toBe("direct");
         // Dispose detaches the default process.stderr resize listener.
         controller.dispose();

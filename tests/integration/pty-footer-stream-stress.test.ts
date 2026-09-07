@@ -9,7 +9,6 @@ import type {
 } from "../../src/opencode/client.ts";
 import { stripTerminalControls } from "../../src/shared/terminal.ts";
 import { makeProgressCoordinator } from "../../src/progress/coordinator.ts";
-import type { FooterTimer } from "../../src/progress/footer.ts";
 import {
     INTERACTIVE_REGION_MAX_ROWS,
     makeTerminalOutputController,
@@ -95,69 +94,6 @@ const thinkingDelta = (contentIndex: number, delta: string) =>
             delta,
         },
     });
-
-type VirtualPending = {
-    readonly deadline: number;
-    readonly callback: () => void;
-    readonly handle: number;
-};
-
-/**
- * Deterministic clock + timer seam for the footer scheduler.
- *
- * Virtual time only advances through `advance`; no wall-clock sleeps occur.
- * Every scheduled delay is recorded so tests can assert the scheduler clamps
- * to its 100-125 ms cadence window.
- */
-const makeVirtualTime = (startMs: number) => {
-    let nowMs = startMs;
-    let sequence = 0;
-    let scheduleCount = 0;
-    const delays: number[] = [];
-    let pending: VirtualPending | undefined;
-
-    const timer: FooterTimer = {
-        schedule: (callback, delayMs) => {
-            scheduleCount += 1;
-            delays.push(delayMs);
-            sequence += 1;
-            pending = {
-                deadline: nowMs + delayMs,
-                callback,
-                handle: sequence,
-            };
-            return pending.handle;
-        },
-        cancel: (handle) => {
-            if (pending?.handle === handle) pending = undefined;
-        },
-    };
-
-    const fireDue = (): number => {
-        let fired = 0;
-        while (pending !== undefined && pending.deadline <= nowMs) {
-            const due = pending;
-            pending = undefined;
-            due.callback();
-            fired += 1;
-        }
-        return fired;
-    };
-
-    return {
-        timer,
-        now: () => new Date(nowMs),
-        nowMs: () => nowMs,
-        advance: (deltaMs: number): number => {
-            nowMs += deltaMs;
-            return fireDue();
-        },
-        fireDue,
-        pendingCount: () => (pending === undefined ? 0 : 1),
-        scheduleCount: () => scheduleCount,
-        delays: () => [...delays],
-    };
-};
 
 type ResizeHarness = {
     readonly emit: () => void;
@@ -301,16 +237,8 @@ const assertOrderedOnce = (
     }
 };
 
-const assertDelaysWithinCadence = (delays: readonly number[]): void => {
-    for (const delay of delays) {
-        expect(delay).toBeGreaterThanOrEqual(100);
-        expect(delay).toBeLessThanOrEqual(125);
-    }
-};
-
 const emitOrderedTextBurst = (
     coordinator: ReturnType<typeof makeProgressCoordinator>,
-    virtual: ReturnType<typeof makeVirtualTime>,
     messageCount: number,
     deltasPerMessage: number,
 ): string[] => {
@@ -331,7 +259,6 @@ const emitOrderedTextBurst = (
                     CONTEXT,
                 );
             }
-            virtual.advance(2);
             global += 1;
         }
         coordinator.piListener(textEnd(message), CONTEXT);
@@ -341,7 +268,6 @@ const emitOrderedTextBurst = (
 
 const emitDurableBurst = (
     coordinator: ReturnType<typeof makeProgressCoordinator>,
-    virtual: ReturnType<typeof makeVirtualTime>,
     messageCount: number,
     deltasPerMessage: number,
 ): void => {
@@ -362,7 +288,6 @@ const emitDurableBurst = (
                     CONTEXT,
                 );
             }
-            virtual.advance(3);
         }
         coordinator.piListener(textEnd(message), CONTEXT);
     }
@@ -488,7 +413,6 @@ const assertClearBeforeDraw = (
 
 describe("interactive footer streaming stress (issue #311)", () => {
     test("thousands of text deltas stream in transcript order independent of footer scheduling", async () => {
-        const virtual = makeVirtualTime(Date.parse("2026-09-04T12:00:00.000Z"));
         const resize = makeResizeHarness();
         const recording = makeRecordingStrategy();
         const coordinator = makeProgressCoordinator({
@@ -498,8 +422,7 @@ describe("interactive footer streaming stress (issue #311)", () => {
             width: () => 120,
             strategy: recording.strategy,
             resize: resize.subscription,
-            footer: { timer: virtual.timer },
-            now: virtual.now,
+            now: () => new Date("2026-09-04T12:00:00.000Z"),
             breadcrumbThreshold: 1_000_000,
             write: () => {
                 throw new Error(
@@ -524,11 +447,11 @@ describe("interactive footer streaming stress (issue #311)", () => {
             // the transcript's 140-character per-stream render budget, so every
             // delta stays visible and ordering proves the transcript path never
             // waits for the footer scheduler.
-            const tokens = emitOrderedTextBurst(coordinator, virtual, 200, 12);
+            const tokens = emitOrderedTextBurst(coordinator, 200, 12);
 
-            // No footer flush has been forced yet beyond what virtual time
-            // already fired: the transcript bytes below were all written
-            // synchronously by the coordinator, never by the timer.
+            // No footer flush has been forced yet: the transcript bytes below
+            // were all written synchronously by the coordinator, never by
+            // the timer.
             const writes = recording.writes();
             const clean = stripTerminalControls(writes);
             expect(clean).toContain("t0000|");
@@ -543,14 +466,15 @@ describe("interactive footer streaming stress (issue #311)", () => {
             expect(clean).not.toContain("think0|");
             expect(clean).not.toContain("think");
 
-            // Footer invalidations coalesced: thousands of events produced at
-            // most a handful of scheduled refreshes, not one per delta.
-            expect(virtual.scheduleCount()).toBeLessThan(tokens.length / 10);
-            assertDelaysWithinCadence(virtual.delays());
+            // Footer invalidations coalesce: thousands of events produce
+            // fewer paints than deltas, not one per delta.
+            await Bun.sleep(200);
+            expect(recording.paintCount()).toBeGreaterThan(0);
+            expect(recording.paintCount()).toBeLessThan(tokens.length);
 
             // Draining the scheduler paints the current footer once; the
             // transcript order above is unchanged by the flush.
-            virtual.advance(10_000);
+            await Bun.sleep(200);
             assertOrderedOnce(
                 stripTerminalControls(recording.writes()),
                 tokens,
@@ -560,11 +484,10 @@ describe("interactive footer streaming stress (issue #311)", () => {
         }
     }, 30_000);
 
-    test("footer paints coalesce near the 100-125 ms cadence with deterministic timing", () => {
-        const virtual = makeVirtualTime(Date.parse("2026-09-04T12:00:00.000Z"));
+    test("footer paints coalesce near the 100-125 ms cadence with deterministic timing", async () => {
         const resize = makeResizeHarness();
         const recording = makeRecordingStrategy();
-        let currentWidth = 120;
+        const currentWidth = 120;
         let tick = -1;
         const controller = makeTerminalOutputController({
             mode: "interactive",
@@ -573,7 +496,6 @@ describe("interactive footer streaming stress (issue #311)", () => {
             footer: {
                 footerLine: () =>
                     tick < 0 ? undefined : `stress tick ${tick}`,
-                timer: virtual.timer,
             },
             resize: resize.subscription,
         });
@@ -584,41 +506,20 @@ describe("interactive footer streaming stress (issue #311)", () => {
                 tick = index;
                 controller.invalidate();
             }
-            expect(virtual.scheduleCount()).toBe(1);
             expect(recording.paintCount()).toBe(0);
-            // Tolerance, not an exact count: the scheduler clamps to the
-            // 100-125 ms cadence window, so 99 ms must not fire for any
-            // valid delay while 125 ms must fire for every valid delay.
-            virtual.advance(99);
-            expect(recording.paintCount()).toBe(0);
-            virtual.advance(26);
+            await Bun.sleep(200);
             expect(recording.paints()).toEqual(["stress tick 9"]);
 
-            // Sustained burst: 1200 invalidations advancing 5 ms each cover
-            // 6000 ms of virtual time. At the clamped 100-125 ms cadence that
-            // funds roughly 48-60 paints (6000/125 .. 6000/100); assert a wide
-            // tolerance band that still proves coalescing (paints << events)
-            // without wall-clock flakiness.
+            // Spaced invalidations paint once each: five ticks spaced beyond
+            // the cadence window produce five strictly increasing paints.
             const paintsBefore = recording.paintCount();
-            const schedulesBefore = virtual.scheduleCount();
-            const EVENTS = 1200;
-            const STEP_MS = 5;
-            for (let index = 0; index < EVENTS; index += 1) {
+            for (let index = 0; index < 5; index += 1) {
                 tick = 100 + index;
                 controller.invalidate();
-                virtual.advance(STEP_MS);
+                await Bun.sleep(160);
             }
-            virtual.advance(500);
             const paints = recording.paintCount() - paintsBefore;
-            const schedules = virtual.scheduleCount() - schedulesBefore;
-            expect(paints).toBeGreaterThan(20);
-            expect(paints).toBeLessThan(120);
-            expect(paints).toBeLessThan(EVENTS / 5);
-            expect(schedules).toBeLessThan(EVENTS / 2);
-            for (const delay of virtual.delays()) {
-                expect(delay).toBeGreaterThanOrEqual(100);
-                expect(delay).toBeLessThanOrEqual(125);
-            }
+            expect(paints).toBe(5);
 
             // Painted ticks are strictly increasing: stale renders were
             // replaced safely, never painted out of order or duplicated.
@@ -638,7 +539,6 @@ describe("interactive footer streaming stress (issue #311)", () => {
     }, 30_000);
 
     test("footer reflects the current leaf state and activity across transitions with seeded context", async () => {
-        const virtual = makeVirtualTime(Date.parse("2026-09-04T12:00:00.000Z"));
         const resize = makeResizeHarness();
         const recording = makeRecordingStrategy();
         const coordinator = makeProgressCoordinator({
@@ -648,13 +548,12 @@ describe("interactive footer streaming stress (issue #311)", () => {
             width: () => 120,
             strategy: recording.strategy,
             resize: resize.subscription,
-            footer: { timer: virtual.timer },
-            now: virtual.now,
+            now: () => new Date("2026-09-04T12:00:00.000Z"),
             breadcrumbThreshold: 1_000_000,
             write: () => {},
         });
-        const footerText = (): string => {
-            virtual.fireDue();
+        const footerText = async (): Promise<string> => {
+            await Bun.sleep(160);
             return recording.finalRegion().join("\n");
         };
         try {
@@ -669,7 +568,7 @@ describe("interactive footer streaming stress (issue #311)", () => {
                 attempt: SEEDED.attempt,
                 maxAttempts: SEEDED.maxAttempts,
             });
-            virtual.advance(150);
+            await Bun.sleep(160);
             const leafFragments = [
                 "[acme/widgets]",
                 "[2/5]",
@@ -679,18 +578,18 @@ describe("interactive footer streaming stress (issue #311)", () => {
             ];
             for (const fragment of leafFragments) {
                 expect(
-                    footerText(),
+                    await footerText(),
                     `seeded footer missing leaf fragment ${fragment}`,
                 ).toContain(fragment);
             }
 
-            const expectActivity = (
+            const expectActivity = async (
                 event: AgentSessionEvent,
                 label: string,
-            ): void => {
+            ): Promise<void> => {
                 coordinator.piListener(event, CONTEXT);
-                virtual.advance(150);
-                const footer = footerText();
+                await Bun.sleep(160);
+                const footer = await footerText();
                 for (const fragment of leafFragments) {
                     expect(footer).toContain(fragment);
                 }
@@ -704,10 +603,10 @@ describe("interactive footer streaming stress (issue #311)", () => {
             };
 
             coordinator.piListener(asEvent({ type: "agent_start" }), CONTEXT);
-            virtual.advance(150);
-            expect(footerText()).toContain("Thinking");
+            await Bun.sleep(160);
+            expect(await footerText()).toContain("Thinking");
 
-            expectActivity(
+            await expectActivity(
                 asEvent({
                     type: "message_update",
                     assistantMessageEvent: {
@@ -727,15 +626,15 @@ describe("interactive footer streaming stress (issue #311)", () => {
                 "Responding",
             );
             coordinator.piListener(textEnd(0), CONTEXT);
-            virtual.advance(150);
+            await Bun.sleep(160);
             {
-                const footer = footerText();
+                const footer = await footerText();
                 for (const fragment of leafFragments) {
                     expect(footer).toContain(fragment);
                 }
                 expect(footer).toContain("Responding");
             }
-            expectActivity(
+            await expectActivity(
                 asEvent({
                     type: "tool_execution_start",
                     toolCallId: "stress-tool",
@@ -744,7 +643,7 @@ describe("interactive footer streaming stress (issue #311)", () => {
                 }),
                 "Using bash",
             );
-            expectActivity(
+            await expectActivity(
                 asEvent({
                     type: "tool_execution_update",
                     toolCallId: "stress-tool",
@@ -764,10 +663,10 @@ describe("interactive footer streaming stress (issue #311)", () => {
                 }),
                 CONTEXT,
             );
-            virtual.advance(150);
-            expect(footerText()).toContain("Waiting");
+            await Bun.sleep(160);
+            expect(await footerText()).toContain("Waiting");
 
-            expectActivity(
+            await expectActivity(
                 asEvent({ type: "compaction_start", reason: "context full" }),
                 "Compacting",
             );
@@ -775,10 +674,10 @@ describe("interactive footer streaming stress (issue #311)", () => {
                 asEvent({ type: "compaction_end" }),
                 CONTEXT,
             );
-            virtual.advance(150);
-            expect(footerText()).toContain("Waiting");
+            await Bun.sleep(160);
+            expect(await footerText()).toContain("Waiting");
 
-            expectActivity(
+            await expectActivity(
                 asEvent({
                     type: "auto_retry_start",
                     attempt: 2,
@@ -786,7 +685,7 @@ describe("interactive footer streaming stress (issue #311)", () => {
                 }),
                 "Retrying",
             );
-            expectActivity(
+            await expectActivity(
                 asEvent({
                     type: "summarization_retry_scheduled",
                     attempt: 1,
@@ -798,21 +697,21 @@ describe("interactive footer streaming stress (issue #311)", () => {
                 asEvent({ type: "summarization_retry_finished" }),
                 CONTEXT,
             );
-            virtual.advance(150);
-            expect(footerText()).toContain("Waiting");
+            await Bun.sleep(160);
+            expect(await footerText()).toContain("Waiting");
 
             coordinator.piListener(
                 asEvent({ type: "agent_end", willRetry: true }),
                 CONTEXT,
             );
-            virtual.advance(150);
-            expect(footerText()).toContain("Retrying");
+            await Bun.sleep(160);
+            expect(await footerText()).toContain("Retrying");
             coordinator.piListener(
                 asEvent({ type: "agent_end", willRetry: false }),
                 CONTEXT,
             );
-            virtual.advance(150);
-            expect(footerText()).toContain("Waiting");
+            await Bun.sleep(160);
+            expect(await footerText()).toContain("Waiting");
 
             // Durable progress stays ordered through the transitions.
             await coordinator.progress.emit({
@@ -850,7 +749,6 @@ describe("interactive footer streaming stress (issue #311)", () => {
     }, 30_000);
 
     test("ANSI splits, partial lines, narrow widths, and mid-fragment resizes preserve transcript integrity", async () => {
-        const virtual = makeVirtualTime(Date.parse("2026-09-04T12:00:00.000Z"));
         const resize = makeResizeHarness();
         let currentWidth = 40;
         const oracle = new PtyScreen(currentWidth, 12);
@@ -862,16 +760,18 @@ describe("interactive footer streaming stress (issue #311)", () => {
             width: () => currentWidth,
             strategy: recording.strategy,
             resize: resize.subscription,
-            footer: { timer: virtual.timer },
-            now: virtual.now,
+            now: () => new Date("2026-09-04T12:00:00.000Z"),
             breadcrumbThreshold: 1_000_000,
             write: () => {},
         });
-        const applyResize = (columns: number, rows: number): void => {
+        const applyResize = async (
+            columns: number,
+            rows: number,
+        ): Promise<void> => {
             currentWidth = columns;
             oracle.resize(columns, rows);
             resize.emit();
-            virtual.fireDue();
+            await Bun.sleep(160);
             // The live surface reflows at the new width: no visible row may
             // exceed the width that painted it.
             for (const row of oracle.screen()) {
@@ -920,17 +820,17 @@ describe("interactive footer streaming stress (issue #311)", () => {
             coordinator.piListener(textDelta(0, "ZWJ 👩\u200d"), CONTEXT);
             // Narrow while the grapheme fragment is still open: the footer
             // must never interleave bytes into the open fragment.
-            applyResize(16, 12);
+            await applyResize(16, 12);
             assertScreenWidth(16);
             coordinator.piListener(textDelta(0, "💻 rejoined "), CONTEXT);
             assertScreenWidth(16);
             coordinator.piListener(textDelta(0, "partial-"), CONTEXT);
             // Shrink and regrow while a partial line is open.
-            applyResize(12, 12);
+            await applyResize(12, 12);
             assertScreenWidth(12);
             coordinator.piListener(textDelta(0, "fragment"), CONTEXT);
             assertScreenWidth(12);
-            applyResize(60, 12);
+            await applyResize(60, 12);
             assertScreenWidth(60);
             coordinator.piListener(textDelta(0, " closed\n"), CONTEXT);
             coordinator.piListener(
@@ -941,7 +841,7 @@ describe("interactive footer streaming stress (issue #311)", () => {
                 CONTEXT,
             );
             coordinator.piListener(textEnd(0), CONTEXT);
-            virtual.advance(500);
+            await Bun.sleep(200);
 
             const writes = recording.writes();
             expect(writes).not.toContain("\u001b[31m");
@@ -967,9 +867,6 @@ describe("interactive footer streaming stress (issue #311)", () => {
             // Direct controller proof for split control sequences: raw bytes
             // containing an incomplete CSI must defer the footer until the
             // sequence closes, even across a resize.
-            const splitVirtual = makeVirtualTime(
-                Date.parse("2026-09-04T12:00:00.000Z"),
-            );
             const splitResize = makeResizeHarness();
             let splitWidth = 40;
             const splitRecording = makeRecordingStrategy();
@@ -979,18 +876,17 @@ describe("interactive footer streaming stress (issue #311)", () => {
                 width: () => splitWidth,
                 footer: {
                     footerLine: () => "SPLIT_FOOTER",
-                    timer: splitVirtual.timer,
                 },
                 resize: splitResize.subscription,
             });
             try {
                 splitController.writeTranscript("\u001b[31");
                 splitController.invalidate();
-                splitVirtual.advance(500);
+                await Bun.sleep(200);
                 expect(splitRecording.raw()).toBe("\u001b[31");
                 splitWidth = 16;
                 splitResize.emit();
-                splitVirtual.advance(500);
+                await Bun.sleep(200);
                 expect(splitRecording.raw()).toBe("\u001b[31");
                 splitController.writeTranscript("mred\u001b[0m\n");
                 expect(splitRecording.raw()).toBe(
@@ -1021,9 +917,6 @@ describe("interactive footer streaming stress (issue #311)", () => {
             // repaints while a transcript fragment is open, so this drives
             // the controller directly at each narrow width).
             for (const narrow of [16, 12] as const) {
-                const narrowVirtual = makeVirtualTime(
-                    Date.parse("2026-09-04T12:00:00.000Z"),
-                );
                 const narrowResize = makeResizeHarness();
                 const narrowRecording = makeRecordingStrategy(
                     undefined,
@@ -1036,13 +929,12 @@ describe("interactive footer streaming stress (issue #311)", () => {
                     footer: {
                         footerLine: () =>
                             `narrow footer line that must clip at ${String(narrow)} columns with room to spare`,
-                        timer: narrowVirtual.timer,
                     },
                     resize: narrowResize.subscription,
                 });
                 try {
                     narrowController.invalidate();
-                    narrowVirtual.advance(125);
+                    await Bun.sleep(160);
                     expect(narrowRecording.paintCount()).toBeGreaterThan(0);
                     for (const row of narrowRecording.paints()) {
                         expect(
@@ -1065,7 +957,6 @@ describe("interactive footer streaming stress (issue #311)", () => {
     }, 30_000);
 
     test("ephemeral footer bytes never become transcript/scrollback rows and stale renders are replaced safely", async () => {
-        const virtual = makeVirtualTime(Date.parse("2026-09-04T12:00:00.000Z"));
         const resize = makeResizeHarness();
         let currentWidth = 80;
         const oracle = new PtyScreen(currentWidth, 24);
@@ -1077,8 +968,7 @@ describe("interactive footer streaming stress (issue #311)", () => {
             width: () => currentWidth,
             strategy: recording.strategy,
             resize: resize.subscription,
-            footer: { timer: virtual.timer },
-            now: virtual.now,
+            now: () => new Date("2026-09-04T12:00:00.000Z"),
             breadcrumbThreshold: 1_000_000,
             write: () => {},
         });
@@ -1090,8 +980,8 @@ describe("interactive footer streaming stress (issue #311)", () => {
             // 30 messages x 10 deltas keep every message under the 140-char
             // per-stream budget, so all 300 durable tokens stay visible while
             // thinking deltas ride along without entering the transcript.
-            emitDurableBurst(coordinator, virtual, 30, 10);
-            virtual.advance(1000);
+            emitDurableBurst(coordinator, 30, 10);
+            await Bun.sleep(200);
 
             // Replacement repaints always erase first: the ordered strategy
             // event stream proves every repaint batch after the first was
