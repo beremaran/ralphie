@@ -19,7 +19,7 @@
  * exported constants from the contracts module so the artifact step can
  * re-validate). The reader stops retaining bytes once its granted budget is
  * exhausted, so neither budget can be exceeded. Bodies are sanitized through
- * `sanitizeDiagnosticExcerpt` (terminal control sequences only; all supplied
+ * `stripTerminalControls` (terminal control sequences only; all supplied
  * values pass through verbatim per the GH-180 unredacted output contract)
  * before they enter the typed record.
  *
@@ -47,8 +47,8 @@ import type {
     PipelineSnapshotRequest,
 } from "./pipeline-diagnostics-contracts.ts";
 import type { Endpoint } from "./pipeline-diagnostics-pagination.ts";
-import { sanitizeDiagnosticExcerpt } from "./pipeline-diagnostics-sanitize.ts";
 import type { PipelineSnapshotRequestExecutor } from "./pipeline-snapshot-collector.ts";
+import { stripTerminalControls } from "../shared/terminal.ts";
 import { parseRepositorySlug } from "./repository.ts";
 
 /** Source label carried by job-log dispositions and errors. */
@@ -544,7 +544,7 @@ const fetchJobOutcome = async (
             { jobId: job.jobId },
             "malformed",
         );
-    const read = readBoundedLogBody(sanitizeDiagnosticExcerpt(body), granted);
+    const read = readBoundedLogBody(stripTerminalControls(body), granted);
     return {
         disposition: read.truncated ? "truncated" : "ok",
         excerpt: read.excerpt,

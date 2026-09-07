@@ -11,7 +11,7 @@ import { dirname, join } from "node:path";
 import { z } from "zod";
 
 import type { PipelineSnapshot } from "../github/pipeline-snapshot.ts";
-import { pipelineFailureFingerprint } from "../pipeline/snapshot-identity.ts";
+import { pipelineFailureFingerprint } from "../pipeline/delivery-lifecycle.ts";
 import type {
     PipelineDeliveryAttempt,
     PipelineDeliveryEvent,

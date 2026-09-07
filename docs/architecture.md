@@ -116,7 +116,7 @@ discriminated `execute` entry point accepts live, dry-run, or resume requests
 and owns repository preparation, remote-head capture, deadline creation, state
 reconciliation, observation, repair, commit delivery, and terminal outcomes.
 `src/pipeline/delivery-types.ts` holds the lifecycle domain types and
-evidence-bearing events, while `src/pipeline/snapshot-identity.ts` holds the
+evidence-bearing events, while `src/pipeline/delivery-lifecycle.ts` holds the
 commit-independent identity used to detect a repeated normalized failure.
 
 `RalphieRuntime` exposes `pipelineDeliveryLifecycle` as the lifecycle seam and
@@ -181,7 +181,7 @@ binary, installer, Homebrew, and container distribution machinery was removed.
 | Pipeline snapshot normalization and collection | `src/github/pipeline-snapshot.ts`, `src/github/pipeline-snapshot-collector.ts` |
 | Bounded, deadline-aware pipeline observation, paginated exact-SHA reads, retries, and final HEAD check | `src/github/pipeline-observation.ts`, `src/github/pipeline-snapshot-collector.ts` |
 | Pipeline diagnostics collection, persistence, and repair boundary | `src/github/pipeline-diagnostics-collector.ts`, `src/github/pipeline-diagnostics-service.ts`, `src/github/pipeline-diagnostics-artifact.ts`, `src/github/pipeline-diagnostics-boundary.ts` |
-| Pipeline delivery lifecycle and direct delivery | `src/pipeline/delivery-lifecycle.ts`, `src/pipeline/delivery-types.ts`, `src/pipeline/snapshot-identity.ts`, `src/git/pipeline-delivery.ts` |
+| Pipeline delivery lifecycle and direct delivery | `src/pipeline/delivery-lifecycle.ts`, `src/pipeline/delivery-types.ts`, `src/git/pipeline-delivery.ts` |
 | Pipeline state, bounded persistence, and resume reconciliation | `src/run/pipeline-state.ts` |
 | Complexity routing | `src/issues/executor.ts`, `src/issues/complexity.ts` |
 | Implementation/review/delivery | `src/issues/implementation-executor.ts`, `src/issues/pull-request-review.ts`, `src/issues/pull-request-review-coordinator.ts`, `src/github/pull-requests.ts` |

@@ -18,11 +18,13 @@ import type {
     PipelinePushAttempt,
 } from "../../src/git/pipeline-delivery.ts";
 import type { GitRepositoryInvariantService } from "../../src/git/repository-invariant.ts";
-import { makePipelineDeliveryLifecycle } from "../../src/pipeline/delivery-lifecycle.ts";
+import {
+    makePipelineDeliveryLifecycle,
+    pipelineFailureFingerprint,
+} from "../../src/pipeline/delivery-lifecycle.ts";
 import type { PipelineDeliveryOutcome } from "../../src/pipeline/delivery-types.ts";
 import { makePipelineDeliveryStateAdapter } from "../../src/run/pipeline-state.ts";
 import type { PipelineRunState } from "../../src/run/pipeline-state.ts";
-import { pipelineFailureFingerprint } from "../../src/pipeline/snapshot-identity.ts";
 import type {
     PipelineRepairExecutorService,
     PipelineRepairOutcome,

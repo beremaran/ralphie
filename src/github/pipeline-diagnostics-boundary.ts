@@ -23,7 +23,7 @@ import {
     MAX_TOTAL_BYTES,
 } from "./pipeline-diagnostics-contracts.ts";
 import type { PipelineDiagnosticsArtifact } from "./pipeline-diagnostics-artifact.ts";
-import { sanitizeDiagnosticExcerpt } from "./pipeline-diagnostics-sanitize.ts";
+import { stripTerminalControls } from "../shared/terminal.ts";
 
 /** Opening marker used for every prompt-facing diagnostics payload. */
 export const UNTRUSTED_PIPELINE_DIAGNOSTICS_OPEN =
@@ -89,7 +89,7 @@ const safeDisposition = (value: unknown): DiagnosticRecordDisposition =>
         : "unavailable";
 
 const safeString = (value: unknown): string | undefined =>
-    typeof value === "string" ? sanitizeDiagnosticExcerpt(value) : undefined;
+    typeof value === "string" ? stripTerminalControls(value) : undefined;
 
 const safeIdentifier = (value: unknown): PipelineIdentifier | undefined =>
     typeof value === "string" ||
@@ -100,7 +100,7 @@ const safeIdentifier = (value: unknown): PipelineIdentifier | undefined =>
 /** Re-apply terminal sanitization without retaining object references. */
 const safeJson = (value: unknown, seen: Set<object> = new Set()): JsonValue => {
     if (value === null) return null;
-    if (typeof value === "string") return sanitizeDiagnosticExcerpt(value);
+    if (typeof value === "string") return stripTerminalControls(value);
     if (typeof value === "boolean") return value;
     if (typeof value === "number")
         return Number.isFinite(value) ? value : String(value);
@@ -112,7 +112,7 @@ const safeJson = (value: unknown, seen: Set<object> = new Set()): JsonValue => {
         ? value.map((entry) => safeJson(entry, seen))
         : Object.fromEntries(
               Object.entries(value).map(([key, entry]) => [
-                  sanitizeDiagnosticExcerpt(key),
+                  stripTerminalControls(key),
                   safeJson(entry, seen),
               ]),
           );
@@ -342,9 +342,9 @@ export type RepairDiagnostics = JsonObject & {
 const requestFor = (
     request: PipelineSnapshotRequest,
 ): PipelineSnapshotRequest => ({
-    repository: sanitizeDiagnosticExcerpt(request.repository),
-    branch: sanitizeDiagnosticExcerpt(request.branch),
-    commitSha: sanitizeDiagnosticExcerpt(request.commitSha),
+    repository: stripTerminalControls(request.repository),
+    branch: stripTerminalControls(request.branch),
+    commitSha: stripTerminalControls(request.commitSha),
 });
 
 /** Create the unbounded typed projection before applying the prompt cap. */

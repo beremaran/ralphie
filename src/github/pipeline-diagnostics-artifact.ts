@@ -23,7 +23,7 @@ import {
 } from "./pipeline-diagnostics-contracts.ts";
 import type { JobLogExcerptsResult } from "./pipeline-diagnostics-logs.ts";
 import type { PipelineDiagnosticsCollectionResult } from "./pipeline-diagnostics-collector.ts";
-import { sanitizeDiagnosticExcerpt } from "./pipeline-diagnostics-sanitize.ts";
+import { stripTerminalControls } from "../shared/terminal.ts";
 import { resolveWorkspacePath } from "../workspace/workspace.ts";
 import { RalphieError } from "../shared/error.ts";
 
@@ -160,7 +160,7 @@ const sanitizedJson = (
     seen: Set<object> = new Set(),
 ): unknown => {
     if (value === null) return null;
-    if (typeof value === "string") return sanitizeDiagnosticExcerpt(value);
+    if (typeof value === "string") return stripTerminalControls(value);
     if (typeof value === "boolean") return value;
     if (typeof value === "number")
         return Number.isFinite(value) ? value : String(value);
@@ -173,7 +173,7 @@ const sanitizedJson = (
         ? value.map((entry) => sanitizedJson(entry, seen))
         : Object.fromEntries(
               Object.entries(value).map(([key, entry]) => [
-                  sanitizeDiagnosticExcerpt(key),
+                  stripTerminalControls(key),
                   sanitizedJson(entry, seen),
               ]),
           );
@@ -369,7 +369,7 @@ const boundedLogRecords = (
         const record = asRecord(entry);
         const rawExcerpt =
             typeof record.excerpt === "string" ? record.excerpt : "";
-        const excerpt = sanitizeDiagnosticExcerpt(rawExcerpt);
+        const excerpt = stripTerminalControls(rawExcerpt);
         const availableBytes = bytes(excerpt);
         const remaining = Math.max(0, MAX_TOTAL_BYTES - used);
         const allowed = Math.min(MAX_EXCERPT_BYTES, remaining);
