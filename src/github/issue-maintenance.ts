@@ -30,7 +30,6 @@ import {
     isRecord,
     type ActorResult,
     type LockedCommentPermissionChecker,
-    type LockedCommentPermissionInput,
     recordValue,
     repositoryParameters,
     requestOptions,
@@ -43,8 +42,6 @@ import {
 
 export const MAINTENANCE_ACTION_MARKER_VERSION = 1;
 export const RALPHIE_MAINTENANCE_ACTION_MARKER = "ralphie:maintain-action";
-export const MAINTENANCE_ACTION_MARKER_PREFIX =
-    RALPHIE_MAINTENANCE_ACTION_MARKER;
 
 export type MaintenanceCommentActionKind = "ask-question" | "answer-question";
 
@@ -118,9 +115,6 @@ export const parseMaintenanceActionMarkers = (
     return Object.freeze(markers);
 };
 
-export const parseAllMaintenanceActionMarkers = parseMaintenanceActionMarkers;
-export const parseManagedMaintenanceMarkers = parseMaintenanceActionMarkers;
-
 /**
  * Parse one marker only. A body with duplicate markers, a malformed marker,
  * or a marker embedded after other content is intentionally not accepted as
@@ -135,8 +129,6 @@ export const parseMaintenanceActionMarker = (
     if (marker === undefined || markers.length !== 1) return undefined;
     return body.startsWith(marker.normalized) ? marker : undefined;
 };
-
-export const parseManagedMaintenanceMarker = parseMaintenanceActionMarker;
 
 const bodySha256 = (body: string): string =>
     createHash("sha256").update(body, "utf8").digest("hex");
@@ -173,9 +165,6 @@ export const renderMaintenanceActionMarker = (
     return `<!-- ${RALPHIE_MAINTENANCE_ACTION_MARKER} version=${String(MAINTENANCE_ACTION_MARKER_VERSION)} issue=${String(input.issueNumber)} action=${input.action} key=${JSON.stringify(input.actionKey)} body-sha256=${input.bodySha256} -->`;
 };
 
-export const maintenanceActionMarker = renderMaintenanceActionMarker;
-export const managedMaintenanceActionMarker = renderMaintenanceActionMarker;
-
 const contentAfterMarker = (
     body: string,
     marker: MaintenanceActionMarker,
@@ -194,9 +183,6 @@ export const maintenanceActionMarkerOwnsBody = (
     const content = contentAfterMarker(body, marker);
     return content !== undefined && bodySha256(content) === marker.bodySha256;
 };
-
-export const isUnchangedMaintenanceManagedBody =
-    maintenanceActionMarkerOwnsBody;
 
 const normalizeComparableText = (value: string): string =>
     value
@@ -219,9 +205,6 @@ const MAINTENANCE_ACTOR_MESSAGES = {
     missingLogin: "GitHub did not return an authenticated actor login.",
     failurePrefix: "authenticated actor lookup failed",
 } as const;
-
-export type { LockedCommentPermissionChecker, LockedCommentPermissionInput };
-export type { ActorResult };
 
 const hasPullRequestShape = (value: RecordLike): boolean =>
     Object.prototype.hasOwnProperty.call(value, "pull_request");
@@ -385,9 +368,6 @@ const catalogByName = (input: AdditiveLabelPlanInput): CatalogResult => {
     return { status: "ok", catalog: catalogByName };
 };
 
-export const reconcileAdditiveLabels = planAdditiveLabels;
-export const additiveLabelPlan = planAdditiveLabels;
-
 const questionContent = (question: string, rationale: string): string =>
     [
         "### Ralphie clarification question",
@@ -456,8 +436,6 @@ export const renderMaintenanceActionComment = (
     });
     return `${marker}\n${content}`;
 };
-
-export const renderManagedMaintenanceComment = renderMaintenanceActionComment;
 
 const contentForMarker = (
     body: string | null,
@@ -816,9 +794,6 @@ export type MaintenanceMutationResult =
           readonly changed: false;
       });
 
-export type IssueMaintenanceMutationResult = MaintenanceMutationResult;
-export type MaintenanceMutationOutcome = MaintenanceMutationResult;
-
 const freezeResult = <Result extends MaintenanceMutationResult>(
     result: Result,
 ): Result => Object.freeze(result);
@@ -946,12 +921,8 @@ export type MaintenanceMutationRequest = {
     /** Test/replay seam; production resolves the authenticated GitHub actor. */
     readonly authenticatedActorLogin?: string;
     readonly confirmLockedCommentPermission?: LockedCommentPermissionChecker;
-    /** Alias retained for callers that phrase the seam as a capability check. */
-    readonly canCommentOnLockedIssue?: LockedCommentPermissionChecker;
     readonly signal?: AbortSignal;
 };
-
-export type IssueMaintenanceMutationRequest = MaintenanceMutationRequest;
 
 const readLabelsCatalog = async (
     client: Octokit,
@@ -1790,9 +1761,7 @@ const reconcileCommentAction = async (input: {
             actor.detail,
         );
     }
-    const checker =
-        input.request.confirmLockedCommentPermission ??
-        input.request.canCommentOnLockedIssue;
+    const checker = input.request.confirmLockedCommentPermission;
     const lockedPermission = await canCommentOnLockedIssue(
         input.client,
         input.repository,
@@ -1884,8 +1853,6 @@ export type GitHubIssueMaintenanceService = {
     ) => Promise<MaintenanceMutationResult>;
 };
 
-export type IssueMaintenanceService = GitHubIssueMaintenanceService;
-
 const reconcileValidatedAction = async (
     client: Octokit,
     repository: string,
@@ -1975,5 +1942,3 @@ export const makeGitHubIssueMaintenanceService =
             );
         },
     });
-
-export const makeIssueMaintenanceService = makeGitHubIssueMaintenanceService;

@@ -64,8 +64,6 @@ const normalizeTitleValue = (value: string): string =>
 export const normalizeMaintenanceTitle = (value: string): string =>
     normalizeTitleValue(boundedText(value, MAX_TITLE_LENGTH));
 
-export const normalizeCandidateTitle = normalizeMaintenanceTitle;
-
 const tokensFor = (value: string): ReadonlyArray<string> => {
     const tokens = new Set<string>();
     for (const token of normalizeTitleValue(value).split(" ")) {
@@ -309,7 +307,6 @@ export type MaintenanceCandidateAnalysis = {
 export type MaintenanceCandidateAnalysisOptions = {
     /** Maximum number of returned candidates across all kinds. */
     readonly maxCandidates?: number;
-    readonly limit?: number;
 };
 
 export type MaintenanceCandidateService = {
@@ -1053,9 +1050,7 @@ const analyzeSnapshot = (
         }
     }
     candidates.sort(compareCandidates);
-    const limit = validateLimit(
-        input.options?.maxCandidates ?? input.options?.limit,
-    );
+    const limit = validateLimit(input.options?.maxCandidates);
     return Object.freeze({
         status: "analyzed",
         subjectIssueNumber,
@@ -1073,15 +1068,7 @@ export const analyzeMaintenanceCandidates = (
 ): MaintenanceCandidateAnalysis =>
     analyzeSnapshot({ snapshot, subjectIssueNumber, options });
 
-export const findMaintenanceCandidates = analyzeMaintenanceCandidates;
-export const analyzeIssueCandidates = analyzeMaintenanceCandidates;
-
 export const makeMaintenanceCandidateService =
     (): MaintenanceCandidateService => ({
         analyze: analyzeSnapshot,
     });
-
-export const makeMaintainIssuesCandidateService =
-    makeMaintenanceCandidateService;
-export const MaintenanceCandidateAnalysisLive =
-    makeMaintenanceCandidateService();

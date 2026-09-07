@@ -3,7 +3,6 @@ import type { Octokit } from "octokit";
 
 import {
     maintenanceActionBodySha256,
-    maintenanceActionMarker,
     maintenanceActionMarkerOwnsBody,
     makeGitHubIssueMaintenanceService,
     normalizeMaintenanceCommentText,
@@ -440,7 +439,6 @@ describe("maintenance action markers", () => {
         expect(
             parseMaintenanceActionMarker(`${marker} extra-field=x\n${content}`),
         ).toBe(undefined);
-        expect(maintenanceActionMarker).toBe(renderMaintenanceActionMarker);
     });
 
     test("renders marker-owned question and answer bodies with stable action keys", () => {

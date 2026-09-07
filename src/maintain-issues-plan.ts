@@ -205,8 +205,6 @@ export const issueMaintenanceActionSchema = z.discriminatedUnion("action", [
     skipActionSchema,
 ]);
 
-export const maintenanceActionSchema = issueMaintenanceActionSchema;
-
 export type IssueMaintenanceAction = z.infer<
     typeof issueMaintenanceActionSchema
 >;
@@ -222,11 +220,7 @@ export const issueMaintenancePlanSchema = z
     })
     .strict();
 
-export const maintenancePlanSchema = issueMaintenancePlanSchema;
-export const IssueMaintenancePlanSchema = issueMaintenancePlanSchema;
-
 export type IssueMaintenancePlan = z.infer<typeof issueMaintenancePlanSchema>;
-export type MaintenancePlan = IssueMaintenancePlan;
 
 type ActionWithKey<Action extends IssueMaintenanceAction> = Omit<
     Action,
@@ -245,8 +239,6 @@ export type ValidatedIssueMaintenancePlan = Omit<
 > & {
     readonly actions: ReadonlyArray<ValidatedIssueMaintenanceAction>;
 };
-
-export type NormalizedIssueMaintenancePlan = ValidatedIssueMaintenancePlan;
 
 export type MaintenancePlanSkipReason =
     | "invalid-schema"
@@ -300,8 +292,6 @@ export type MaintenancePlanValidation =
           readonly plan: undefined;
           readonly skips: ReadonlyArray<MaintenancePlanSkip>;
       };
-
-export type IssueMaintenancePlanValidation = MaintenancePlanValidation;
 
 type PlanComment = {
     readonly id: number;
@@ -730,9 +720,6 @@ export const maintenanceActionKey = (
         .update(material, "utf8")
         .digest("hex")}`;
 };
-
-export const deriveMaintenanceActionKey = maintenanceActionKey;
-export const actionKeyForMaintenancePlan = maintenanceActionKey;
 
 const keyedAction = (
     action: IssueMaintenanceAction,
@@ -1411,9 +1398,6 @@ export const validateIssueMaintenancePlan = (
     };
 };
 
-export const validateMaintenancePlan = validateIssueMaintenancePlan;
-export const parseIssueMaintenancePlan = validateIssueMaintenancePlan;
-
 type PromptIssue = {
     readonly number: number;
     readonly title: string;
@@ -1636,9 +1620,6 @@ ${context}
 </untrusted-maintenance-context>`;
 };
 
-export const buildMaintenancePlannerPrompt = buildMaintenancePlanPrompt;
-export const maintenancePlanPrompt = buildMaintenancePlanPrompt;
-
 export type MaintenancePlanRequest = {
     readonly snapshot: MaintenanceSnapshot;
     readonly subjectIssueNumber: number;
@@ -1649,8 +1630,6 @@ export type MaintenancePlanRequest = {
     readonly agentSelection?: AgentSelection;
     readonly candidateOptions?: MaintenanceCandidateAnalysisOptions;
 };
-
-export type IssueMaintenancePlanRequest = MaintenancePlanRequest;
 
 export type MaintenancePlanServiceDependencies = {
     readonly agent: AgentClient;
@@ -1673,8 +1652,6 @@ export type MaintenancePlanRunResult =
           readonly skips: ReadonlyArray<MaintenancePlanSkip>;
       };
 
-export type IssueMaintenancePlanResult = MaintenancePlanRunResult;
-
 export type MaintenancePlanService = {
     readonly plan: (
         input: MaintenancePlanRequest,
@@ -1688,9 +1665,7 @@ const candidateAnalysisFor = (
 ): MaintenanceCandidateAnalysis =>
     analyzeMaintenanceCandidates(snapshot, subjectIssueNumber, {
         maxCandidates:
-            options?.maxCandidates ??
-            options?.limit ??
-            MAX_MAINTENANCE_VALIDATION_CANDIDATES,
+            options?.maxCandidates ?? MAX_MAINTENANCE_VALIDATION_CANDIDATES,
     });
 
 const invariantError = (
@@ -1826,6 +1801,3 @@ export const makeMaintenancePlanService = (
         };
     },
 });
-
-export const makeMaintenancePlannerService = makeMaintenancePlanService;
-export const makeIssueMaintenancePlanService = makeMaintenancePlanService;

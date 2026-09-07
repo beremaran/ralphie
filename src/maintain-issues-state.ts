@@ -16,7 +16,6 @@ import { DuplicateAction } from "./options.ts";
 import { RalphieError } from "./shared/error.ts";
 
 export const MAINTENANCE_RUN_STATE_VERSION = 1 as const;
-export const MAINTENANCE_STATE_VERSION = MAINTENANCE_RUN_STATE_VERSION;
 
 export const MAINTENANCE_RUN_STATUSES = [
     "active",
@@ -225,8 +224,6 @@ export const MaintenanceRunStateStoreLive: MaintenanceRunStateStoreService = {
     },
 };
 
-export const MaintenanceStateStoreLive = MaintenanceRunStateStoreLive;
-
 export type MaintenanceResumeExpectations = {
     readonly repository: string;
     readonly branch?: string;
@@ -285,5 +282,3 @@ export const loadMaintenanceRunState = async (
     store: MaintenanceRunStateStoreService = MaintenanceRunStateStoreLive,
 ): Promise<MaintenanceRunState> =>
     validateMaintenanceResumeState(await store.load(path), expected);
-
-export const loadMaintenanceState = loadMaintenanceRunState;

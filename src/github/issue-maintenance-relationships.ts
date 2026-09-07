@@ -44,8 +44,6 @@ import {
 export const MAINTENANCE_RELATIONSHIP_MARKER_VERSION = 1;
 export const RALPHIE_MAINTENANCE_RELATIONSHIP_MARKER =
     "ralphie:maintain-relationship";
-export const MAINTENANCE_RELATIONSHIP_MARKER_PREFIX =
-    RALPHIE_MAINTENANCE_RELATIONSHIP_MARKER;
 
 export type MaintenanceRelationshipKind = "duplicate" | "related";
 
@@ -129,11 +127,6 @@ export const parseMaintenanceRelationshipMarkers = (
     return Object.freeze(markers);
 };
 
-export const parseAllMaintenanceRelationshipMarkers =
-    parseMaintenanceRelationshipMarkers;
-export const parseManagedRelationshipMarkers =
-    parseMaintenanceRelationshipMarkers;
-
 /** Parse one marker only; duplicates and embedded markers are not owned. */
 export const parseMaintenanceRelationshipMarker = (
     body: string | null | undefined,
@@ -144,9 +137,6 @@ export const parseMaintenanceRelationshipMarker = (
     if (marker === undefined || markers.length !== 1) return undefined;
     return body.startsWith(marker.normalized) ? marker : undefined;
 };
-
-export const parseManagedRelationshipMarker =
-    parseMaintenanceRelationshipMarker;
 
 export type MaintenanceRelationshipMarkerInput = {
     readonly issueNumber: number;
@@ -183,9 +173,6 @@ export const maintenanceRelationshipPairKey = (
     return `relationship:${relation}:${String(first)}:${String(second)}`;
 };
 
-export const relationshipPairKey = maintenanceRelationshipPairKey;
-export const stableRelationshipPairKey = maintenanceRelationshipPairKey;
-
 /** Render the exact versioned relationship marker line. */
 export const renderMaintenanceRelationshipMarker = (
     input: MaintenanceRelationshipMarkerInput,
@@ -221,10 +208,6 @@ export const renderMaintenanceRelationshipMarker = (
     return `<!-- ${RALPHIE_MAINTENANCE_RELATIONSHIP_MARKER} version=${String(MAINTENANCE_RELATIONSHIP_MARKER_VERSION)} issue=${String(input.issueNumber)} relation=${input.relation} target=${String(input.targetIssueNumber)} pair-key=${JSON.stringify(input.pairKey)} body-sha256=${input.bodySha256} -->`;
 };
 
-export const maintenanceRelationshipMarker =
-    renderMaintenanceRelationshipMarker;
-export const managedRelationshipMarker = renderMaintenanceRelationshipMarker;
-
 const contentAfterMarker = (
     body: string,
     marker: MaintenanceRelationshipMarker,
@@ -246,9 +229,6 @@ export const maintenanceRelationshipMarkerOwnsBody = (
         maintenanceActionBodySha256(content) === marker.bodySha256
     );
 };
-
-export const isUnchangedMaintenanceRelationshipBody =
-    maintenanceRelationshipMarkerOwnsBody;
 
 export type DuplicateAction = Extract<
     IssueMaintenanceAction,
@@ -334,9 +314,6 @@ export const renderMaintenanceRelationshipComment = (
     });
     return `${marker}\n${content}`;
 };
-
-export const renderManagedRelationshipComment =
-    renderMaintenanceRelationshipComment;
 
 export type RelationshipMutationSkipReason =
     | "invalid-action"
@@ -445,10 +422,6 @@ type RelationshipRecoveryOperation =
     | "relationship-comment"
     | "related-pair"
     | "close-duplicate";
-
-export type IssueMaintenanceRelationshipMutationResult =
-    RelationshipMutationResult;
-export type MaintenanceRelationshipMutationOutcome = RelationshipMutationResult;
 
 type WorkingContext = {
     readonly actionKey: string;
@@ -595,8 +568,6 @@ const RELATIONSHIP_ACTOR_MESSAGES = {
         "GitHub did not return an authenticated relationship actor login.",
     failurePrefix: "authenticated relationship actor lookup failed",
 } as const;
-
-export type { ActorResult };
 
 type LiveComment = {
     readonly id: number;
@@ -1606,20 +1577,15 @@ const sameActor = (left: string | undefined, right: string): boolean =>
     normalizeMaintenanceCommentText(left) ===
         normalizeMaintenanceCommentText(right);
 
-export type LockedPermissionChecker = LockedCommentPermissionChecker;
-
 export type MaintenanceRelationshipMutationRequest = {
     readonly action: RelationshipAction;
     /** Immutable candidate evidence used to validate the relationship pair. */
     readonly candidate?: MaintenanceCandidate;
     readonly snapshotFingerprint?: string;
     readonly authenticatedActorLogin?: string;
-    readonly confirmLockedCommentPermission?: LockedPermissionChecker;
+    readonly confirmLockedCommentPermission?: LockedCommentPermissionChecker;
     readonly signal?: AbortSignal;
 };
-
-export type IssueMaintenanceRelationshipMutationRequest =
-    MaintenanceRelationshipMutationRequest;
 
 const authenticatedActor = (
     client: Octokit,
@@ -2043,7 +2009,7 @@ const lockedPermissionFailure = async (input: {
     readonly repository: string;
     readonly issues: ReadonlyArray<LiveIssue>;
     readonly actorLogin: string;
-    readonly checker: LockedPermissionChecker | undefined;
+    readonly checker: LockedCommentPermissionChecker | undefined;
     readonly signal?: AbortSignal;
     readonly context: WorkingContext;
 }): Promise<RelationshipMutationResult | undefined> => {
@@ -2965,11 +2931,6 @@ export type GitHubIssueMaintenanceRelationshipService = {
     ) => Promise<RelationshipMutationResult>;
 };
 
-export type IssueMaintenanceRelationshipService =
-    GitHubIssueMaintenanceRelationshipService;
-export type MaintenanceRelationshipPolicyService =
-    GitHubIssueMaintenanceRelationshipService;
-
 const unsupportedTarget = (action: IssueMaintenanceAction): number =>
     "targetIssueNumber" in action &&
     typeof action.targetIssueNumber === "number"
@@ -3094,10 +3055,3 @@ export const makeGitHubIssueMaintenanceRelationshipService =
             });
         },
     });
-
-export const makeIssueMaintenanceRelationshipService =
-    makeGitHubIssueMaintenanceRelationshipService;
-export const makeGitHubMaintenanceRelationshipService =
-    makeGitHubIssueMaintenanceRelationshipService;
-export const makeMaintenanceRelationshipPolicyService =
-    makeGitHubIssueMaintenanceRelationshipService;
