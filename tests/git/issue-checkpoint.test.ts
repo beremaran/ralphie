@@ -115,7 +115,7 @@ describe("git issue checkpoint restoration", () => {
         const service = makeGitIssueCheckpointService({ run });
         await expect(service.restore(REPOSITORY, CHECKPOINT)).rejects.toEqual(
             expect.objectContaining({
-                _tag: "RalphieError",
+                name: "RalphieError",
                 message: expect.stringContaining(
                     "did not produce the expected clean state",
                 ),

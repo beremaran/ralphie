@@ -2064,7 +2064,7 @@ describe("needs-attention recovery diagnostics", () => {
             await expect(
                 recovery.handleNeedsAttention(input),
             ).rejects.toMatchObject({
-                _tag: "RalphieError",
+                name: "RalphieError",
                 message: expect.stringContaining(
                     "Failed to capture needs-attention diagnostics",
                 ),
@@ -2109,7 +2109,7 @@ describe("needs-attention recovery diagnostics", () => {
             await expect(
                 recovery.handleNeedsAttention(input),
             ).rejects.toMatchObject({
-                _tag: "RalphieError",
+                name: "RalphieError",
                 message: expect.stringContaining(
                     "Failed to restore the clean checkout",
                 ),
@@ -2161,7 +2161,7 @@ describe("needs-attention recovery diagnostics", () => {
             await expect(
                 recovery.handleNeedsAttention(input),
             ).rejects.toMatchObject({
-                _tag: "RalphieError",
+                name: "RalphieError",
                 message: expect.stringContaining("branch changed"),
             });
             expect(events).toContainEqual(

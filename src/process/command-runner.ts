@@ -52,7 +52,6 @@ export type CommandRunnerService = {
 
 /** The spawned command exceeded its deadline and was killed by the runner. */
 export class CommandTimeoutError extends RalphieError {
-    override readonly _tag = "CommandTimeoutError" as const;
     readonly timeoutMs: number;
 
     constructor(input: {
@@ -73,8 +72,6 @@ export class CommandTimeoutError extends RalphieError {
  * reported as cancellation instead of a defect.
  */
 export class CommandAbortedError extends RalphieError {
-    override readonly _tag = "CommandAbortedError" as const;
-
     constructor(input: {
         readonly command: string;
         readonly cause?: unknown;

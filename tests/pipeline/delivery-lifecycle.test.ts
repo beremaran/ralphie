@@ -509,7 +509,7 @@ describe("pipeline delivery lifecycle", () => {
         const harness = makeHarness({ observations: [green(BASE)] });
         await expect(harness.execute({ maxAttempts: 0 })).rejects.toMatchObject(
             {
-                _tag: "PipelineDeliveryLifecycleError",
+                name: "PipelineDeliveryLifecycleError",
                 kind: "invalid-input",
             },
         );

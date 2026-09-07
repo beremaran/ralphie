@@ -90,7 +90,6 @@ export type AgentAssistantErrorKind =
     | "other";
 
 export class AgentAssistantError extends Error {
-    readonly _tag = "AgentAssistantError";
     readonly kind: AgentAssistantErrorKind;
     readonly errorName: string;
     readonly retries?: number;

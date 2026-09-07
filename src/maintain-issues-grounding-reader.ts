@@ -225,8 +225,6 @@ export type GuidanceReadOptions = {
 
 /** The caller cancelled a grounding read. */
 export class GroundingReadAbortedError extends RalphieError {
-    override readonly _tag = "GroundingReadAbortedError" as const;
-
     constructor(input: { readonly cause?: unknown }) {
         super({
             message: "Grounding read was aborted.",

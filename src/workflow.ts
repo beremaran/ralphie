@@ -58,8 +58,6 @@ const errorMessage = (error: unknown): string =>
 
 /** Durable boundary reached after core needs-attention work was saved. */
 export class NeedsAttentionNotificationRecoveryBoundaryError extends RalphieError {
-    override readonly _tag =
-        "NeedsAttentionNotificationRecoveryBoundaryError" as const;
     readonly issueNumber: number;
 
     constructor(input: {

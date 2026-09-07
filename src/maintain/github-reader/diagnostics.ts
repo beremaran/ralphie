@@ -52,7 +52,6 @@ const statusFrom = (value: unknown): number | undefined => {
  * diagnostic message.
  */
 export class MaintainGitHubReaderDiagnosticError extends RalphieError {
-    override readonly _tag = "MaintainGitHubReaderDiagnosticError" as const;
     readonly repository: string;
     readonly endpoint: string;
     readonly page: number | undefined;

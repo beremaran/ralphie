@@ -225,7 +225,7 @@ describe("pipeline Git delivery", () => {
                 ),
             ).rejects.toEqual(
                 expect.objectContaining({
-                    _tag: "PipelineDeliveryGitError",
+                    name: "PipelineDeliveryGitError",
                     kind: "remote-moved",
                 }),
             );

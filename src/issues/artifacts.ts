@@ -285,7 +285,6 @@ export type ArtifactPersistenceAbortPhase =
  * reconciled in-memory state in the latter case.
  */
 export class IssueArtifactWriteAbortedError extends RalphieError {
-    override readonly _tag = "IssueArtifactWriteAbortedError" as const;
     readonly committed: boolean;
     readonly phase: ArtifactPersistenceAbortPhase;
     readonly issueNumber?: number;

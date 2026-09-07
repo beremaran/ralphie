@@ -12,8 +12,6 @@ export type DecompositionLineage = {
 };
 
 export class DecompositionDepthLimitError extends RalphieError {
-    override readonly _tag = "DecompositionDepthLimitError" as const;
-
     constructor(
         readonly depth: number,
         readonly maximumDepth: number,

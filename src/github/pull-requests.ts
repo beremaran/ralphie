@@ -69,7 +69,6 @@ export type PullRequestMergeGateFailureKind =
 
 /** A fail-closed proof failure that is safe for workflow recovery. */
 export class PullRequestMergeGateError extends RalphieError {
-    override readonly _tag = "PullRequestMergeGateError" as const;
     readonly kind: PullRequestMergeGateFailureKind;
 
     constructor(input: {

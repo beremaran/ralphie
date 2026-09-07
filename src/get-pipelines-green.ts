@@ -50,7 +50,6 @@ export type GetPipelinesGreenEntryPoint = (
 ) => Promise<PipelineRunSummary>;
 
 export class PipelineDeliveryOutcomeError extends RalphieError {
-    override readonly _tag = "PipelineDeliveryOutcomeError" as const;
     readonly outcome: PipelineDeliveryOutcome;
 
     constructor(outcome: PipelineDeliveryOutcome) {

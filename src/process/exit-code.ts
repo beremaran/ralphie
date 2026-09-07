@@ -9,7 +9,6 @@ export enum RalphieExitCode {
 
 /** A handled stop raised when the selected policy halts on an issue needing attention. */
 export class NeedsAttentionStop extends RalphieError {
-    override readonly _tag = "NeedsAttentionStop" as const;
     readonly issueNumber: number;
 
     constructor(input: {
@@ -26,11 +25,7 @@ export class NeedsAttentionStop extends RalphieError {
 
 export const isNeedsAttentionStop = (
     error: unknown,
-): error is NeedsAttentionStop =>
-    typeof error === "object" &&
-    error !== null &&
-    "_tag" in error &&
-    error._tag === "NeedsAttentionStop";
+): error is NeedsAttentionStop => error instanceof NeedsAttentionStop;
 
 export const exitCodeForFailure = (signal: AbortSignal): RalphieExitCode => {
     return signal.aborted ? RalphieExitCode.Cancelled : RalphieExitCode.Failure;

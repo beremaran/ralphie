@@ -202,7 +202,7 @@ describe("managed feature-branch revision safety", () => {
             }),
         ).rejects.toEqual(
             expect.objectContaining({
-                _tag: "GitManagedRevisionSafetyError",
+                name: "GitManagedRevisionSafetyError",
                 kind: "remote-moved",
                 policy: "require-expected-remote-head",
             }),
@@ -227,7 +227,7 @@ describe("managed feature-branch revision safety", () => {
             }),
         ).rejects.toEqual(
             expect.objectContaining({
-                _tag: "GitManagedRevisionSafetyError",
+                name: "GitManagedRevisionSafetyError",
                 kind: "remote-moved",
             }),
         );
@@ -252,7 +252,7 @@ describe("managed feature-branch revision safety", () => {
             }),
         ).rejects.toEqual(
             expect.objectContaining({
-                _tag: "GitManagedRevisionSafetyError",
+                name: "GitManagedRevisionSafetyError",
                 kind: "stale-prior-head",
                 policy: "require-expected-prior-head",
             }),
@@ -284,7 +284,7 @@ describe("managed feature-branch revision safety", () => {
             }),
         ).rejects.toEqual(
             expect.objectContaining({
-                _tag: "GitManagedRevisionSafetyError",
+                name: "GitManagedRevisionSafetyError",
                 kind: "invalid-managed-checkout",
                 policy: "require-valid-managed-checkout",
             }),
@@ -310,7 +310,7 @@ describe("managed feature-branch revision safety", () => {
             }),
         ).rejects.toEqual(
             expect.objectContaining({
-                _tag: "GitManagedRevisionSafetyError",
+                name: "GitManagedRevisionSafetyError",
                 kind: "invalid-managed-checkout",
             }),
         );
@@ -335,7 +335,7 @@ describe("managed feature-branch revision safety", () => {
             }),
         ).rejects.toEqual(
             expect.objectContaining({
-                _tag: "GitManagedRevisionSafetyError",
+                name: "GitManagedRevisionSafetyError",
                 kind: "invalid-managed-checkout",
             }),
         );
@@ -356,7 +356,7 @@ describe("managed feature-branch revision safety", () => {
             }),
         ).rejects.toEqual(
             expect.objectContaining({
-                _tag: "GitManagedRevisionSafetyError",
+                name: "GitManagedRevisionSafetyError",
                 kind: "invalid-push-mode",
                 policy: "non-force-only",
             }),
@@ -436,7 +436,7 @@ describe("managed revision pre-push re-check", () => {
             }),
         ).rejects.toEqual(
             expect.objectContaining({
-                _tag: "GitManagedRevisionSafetyError",
+                name: "GitManagedRevisionSafetyError",
                 kind: "stale-prior-head",
                 policy: "require-expected-prior-head",
             }),
@@ -469,7 +469,7 @@ describe("managed revision pre-push re-check", () => {
             }),
         ).rejects.toEqual(
             expect.objectContaining({
-                _tag: "GitManagedRevisionSafetyError",
+                name: "GitManagedRevisionSafetyError",
                 kind: "stale-prior-head",
             }),
         );
@@ -495,7 +495,7 @@ describe("managed revision pre-push re-check", () => {
             }),
         ).rejects.toEqual(
             expect.objectContaining({
-                _tag: "GitManagedRevisionSafetyError",
+                name: "GitManagedRevisionSafetyError",
                 kind: "remote-moved",
                 policy: "require-expected-remote-head",
             }),
@@ -521,7 +521,7 @@ describe("managed revision pre-push re-check", () => {
             }),
         ).rejects.toEqual(
             expect.objectContaining({
-                _tag: "GitManagedRevisionSafetyError",
+                name: "GitManagedRevisionSafetyError",
                 kind: "remote-moved",
             }),
         );
@@ -543,7 +543,7 @@ describe("managed revision pre-push re-check", () => {
             }),
         ).rejects.toEqual(
             expect.objectContaining({
-                _tag: "GitManagedRevisionSafetyError",
+                name: "GitManagedRevisionSafetyError",
                 kind: "invalid-push-mode",
                 policy: "non-force-only",
             }),
@@ -565,7 +565,7 @@ describe("managed revision pre-push re-check", () => {
             }),
         ).rejects.toEqual(
             expect.objectContaining({
-                _tag: "GitManagedRevisionSafetyError",
+                name: "GitManagedRevisionSafetyError",
                 kind: "invalid-managed-checkout",
                 policy: "require-valid-managed-checkout",
             }),
@@ -612,7 +612,7 @@ describe("direct-push safety regression", () => {
             }),
         ).rejects.toEqual(
             expect.objectContaining({
-                _tag: "GitRemoteSafetyError",
+                name: "GitRemoteSafetyError",
                 kind: "invalid-push-mode",
                 policy: "non-force-only",
             }),
@@ -637,7 +637,7 @@ describe("direct-push safety regression", () => {
             }),
         ).rejects.toEqual(
             expect.objectContaining({
-                _tag: "GitRemoteSafetyError",
+                name: "GitRemoteSafetyError",
                 kind: "diverged-base",
                 policy: "require-expected-base",
             }),
@@ -660,7 +660,7 @@ describe("direct-push safety regression", () => {
             }),
         ).rejects.toEqual(
             expect.objectContaining({
-                _tag: "GitRemoteSafetyError",
+                name: "GitRemoteSafetyError",
                 kind: "diverged-base",
             }),
         );
@@ -702,7 +702,7 @@ describe("direct-push safety regression", () => {
             }),
         ).rejects.toEqual(
             expect.objectContaining({
-                _tag: "GitRemoteSafetyError",
+                name: "GitRemoteSafetyError",
                 kind: "diverged-base",
             }),
         );
@@ -724,7 +724,7 @@ describe("direct-push safety regression", () => {
             }),
         ).rejects.toEqual(
             expect.objectContaining({
-                _tag: "GitRemoteSafetyError",
+                name: "GitRemoteSafetyError",
                 kind: "diverged-base",
             }),
         );
@@ -748,7 +748,7 @@ describe("direct-push safety regression", () => {
             }),
         ).rejects.toEqual(
             expect.objectContaining({
-                _tag: "GitRemoteSafetyError",
+                name: "GitRemoteSafetyError",
                 kind: "diverged-base",
             }),
         );
@@ -772,7 +772,7 @@ describe("direct-push safety regression", () => {
             }),
         ).rejects.toEqual(
             expect.objectContaining({
-                _tag: "GitRemoteSafetyError",
+                name: "GitRemoteSafetyError",
                 kind: "origin-mismatch",
                 policy: "require-owned-origin",
             }),
@@ -798,7 +798,7 @@ describe("direct-push safety regression", () => {
             }),
         ).rejects.toEqual(
             expect.objectContaining({
-                _tag: "GitRemoteSafetyError",
+                name: "GitRemoteSafetyError",
                 kind: "origin-mismatch",
             }),
         );
@@ -816,7 +816,7 @@ describe("direct-push safety regression", () => {
             }),
         ).rejects.toEqual(
             expect.objectContaining({
-                _tag: "GitRemoteSafetyError",
+                name: "GitRemoteSafetyError",
                 kind: "diverged-base",
                 policy: "require-expected-base",
             }),

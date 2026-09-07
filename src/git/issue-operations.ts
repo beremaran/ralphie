@@ -14,7 +14,6 @@ export const GitPushFailurePolicy = "halt" as const;
 export type GitPushFailurePolicy = typeof GitPushFailurePolicy;
 
 export class GitPushError extends RalphieError {
-    override readonly _tag = "GitPushError";
     readonly kind: GitPushFailureKind;
     readonly policy: GitPushFailurePolicy;
     readonly branch: string;

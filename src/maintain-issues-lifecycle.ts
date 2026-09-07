@@ -88,9 +88,7 @@ export type MaintenanceLifecycleOutcome = {
     readonly state: MaintenanceRunState;
 };
 
-class MaintenanceLifecycleError extends RalphieError {
-    override readonly _tag = "MaintenanceLifecycleError" as const;
-}
+class MaintenanceLifecycleError extends RalphieError {}
 
 type MaintenanceResult = MaintenanceMutationResult | RelationshipMutationResult;
 

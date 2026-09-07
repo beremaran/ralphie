@@ -136,7 +136,6 @@ export type PipelineRepairExecutorService = {
 };
 
 export class PipelineRepairExecutorError extends RalphieError {
-    override readonly _tag = "PipelineRepairExecutorError" as const;
     readonly kind: "invalid-input" | "repository-invariant" | "cleanup-failed";
 
     constructor(input: {

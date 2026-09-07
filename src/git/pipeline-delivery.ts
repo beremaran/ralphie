@@ -94,7 +94,6 @@ export type PipelineDeliveryGitService = {
 };
 
 export class PipelineDeliveryGitError extends RalphieError {
-    override readonly _tag = "PipelineDeliveryGitError" as const;
     readonly kind:
         | "invalid-input"
         | "dirty-checkout"

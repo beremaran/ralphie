@@ -19,7 +19,6 @@ export type GitDirectPushPolicy =
 export type GitPushMode = "non-force" | "force";
 
 export class GitRemoteSafetyError extends RalphieError {
-    override readonly _tag = "GitRemoteSafetyError";
     readonly kind: GitRemoteSafetyFailureKind;
     readonly policy: GitDirectPushPolicy;
 
@@ -49,7 +48,6 @@ export type GitManagedRevisionPolicy =
     | "non-force-only";
 
 export class GitManagedRevisionSafetyError extends RalphieError {
-    override readonly _tag = "GitManagedRevisionSafetyError";
     readonly kind: GitManagedRevisionFailureKind;
     readonly policy: GitManagedRevisionPolicy;
 

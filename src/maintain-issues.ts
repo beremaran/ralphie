@@ -77,9 +77,7 @@ export type MaintenanceRunSummary = {
     /** Lossless action/skip evidence for JSON callers and verbose output. */
     readonly evidence: ReadonlyArray<unknown>;
 };
-class MaintenanceExecutionError extends RalphieError {
-    override readonly _tag = "MaintenanceExecutionError" as const;
-}
+class MaintenanceExecutionError extends RalphieError {}
 type MaintenanceReportResult = MaintenanceLifecycleReport;
 
 type MutableMaintenanceState = MaintenanceRunState;

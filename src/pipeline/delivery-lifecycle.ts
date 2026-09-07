@@ -182,7 +182,6 @@ type PipelineDeliveryEngine = {
 };
 
 export class PipelineDeliveryLifecycleError extends RalphieError {
-    override readonly _tag = "PipelineDeliveryLifecycleError" as const;
     readonly kind: "invalid-input" | "safety-failed";
 
     constructor(input: {

@@ -73,7 +73,6 @@ export type VerificationEvidence = z.infer<typeof verificationEvidenceSchema>;
 
 /** A deterministic command rejected an otherwise intact staged tree. */
 export class VerificationCommandError extends RalphieError {
-    override readonly _tag = "VerificationCommandError" as const;
     readonly verification: VerificationEvidence;
 
     constructor(verification: VerificationEvidence) {

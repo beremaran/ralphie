@@ -19,7 +19,6 @@ import {
 export type GitRevisionDeliveryFailureKind = "invalid-input" | "cancelled";
 
 export class GitRevisionDeliveryError extends RalphieError {
-    override readonly _tag = "GitRevisionDeliveryError";
     readonly kind: GitRevisionDeliveryFailureKind;
 
     constructor(input: {

@@ -210,7 +210,7 @@ describe("durable issue artifact cancellation", () => {
             await expect(
                 store.appendReview(reviewFor(1), controller.signal),
             ).rejects.toMatchObject({
-                _tag: "IssueArtifactWriteAbortedError",
+                name: "IssueArtifactWriteAbortedError",
                 committed: false,
                 phase: "before-write",
                 issueNumber,

@@ -17,7 +17,6 @@ export type GitRevisionCommitFailureKind =
     | "commit-verification-failed";
 
 export class GitRevisionCommitError extends RalphieError {
-    override readonly _tag = "GitRevisionCommitError";
     readonly kind: GitRevisionCommitFailureKind;
 
     constructor(input: {

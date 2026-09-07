@@ -2745,7 +2745,7 @@ describe("workflow", () => {
                     events,
                 ),
             ),
-        ).rejects.toMatchObject({ _tag: "NeedsAttentionStop" });
+        ).rejects.toMatchObject({ name: "NeedsAttentionStop" });
         expect(states.at(-1)?.status).toBe(RunStateStatus.Active);
         expect(states.at(-1)?.onNeedsAttention).toBe(NeedsAttentionPolicy.Halt);
         expect(states.at(-1)?.activeIssue?.issueNumber).toBe(42);
@@ -2834,7 +2834,7 @@ describe("workflow", () => {
                     events,
                 ),
             ),
-        ).rejects.toMatchObject({ _tag: "NeedsAttentionStop" });
+        ).rejects.toMatchObject({ name: "NeedsAttentionStop" });
 
         // The dependency never completed, so the blocked issue was never
         // handed to the executor, never closed, and never notified unless the
@@ -3031,7 +3031,7 @@ describe("workflow", () => {
                         events,
                     ),
                 ),
-            ).rejects.toMatchObject({ _tag: "NeedsAttentionStop" });
+            ).rejects.toMatchObject({ name: "NeedsAttentionStop" });
 
             const haltState = states.at(-1);
             if (haltState === undefined)
@@ -3112,7 +3112,7 @@ describe("workflow", () => {
                         resumedEvents,
                     ),
                 ),
-            ).rejects.toMatchObject({ _tag: "NeedsAttentionStop" });
+            ).rejects.toMatchObject({ name: "NeedsAttentionStop" });
 
             expect(
                 calls.filter((call) => call === "grounding:42"),
@@ -3265,7 +3265,7 @@ describe("workflow", () => {
                     ],
                 }),
             ),
-        ).rejects.toMatchObject({ _tag: "NeedsAttentionStop" });
+        ).rejects.toMatchObject({ name: "NeedsAttentionStop" });
 
         const state = states.at(-1);
         if (state === undefined) throw new Error("Missing halted state");
@@ -3308,7 +3308,7 @@ describe("workflow", () => {
                 }),
             ),
         ).rejects.toMatchObject({
-            _tag: "NeedsAttentionNotificationRecoveryBoundaryError",
+            name: "NeedsAttentionNotificationRecoveryBoundaryError",
         });
 
         const failedState = firstStates.at(-1);
@@ -3392,7 +3392,7 @@ describe("workflow", () => {
                 }),
             ),
         ).rejects.toMatchObject({
-            _tag: "NeedsAttentionNotificationRecoveryBoundaryError",
+            name: "NeedsAttentionNotificationRecoveryBoundaryError",
         });
         expect(notified).toBeFalse();
         expect(calls).not.toContain("startServer");
@@ -3510,7 +3510,7 @@ describe("workflow", () => {
                     outcomes: [needsAttention],
                 }),
             ),
-        ).rejects.toMatchObject({ _tag: "NeedsAttentionStop" });
+        ).rejects.toMatchObject({ name: "NeedsAttentionStop" });
         const resumeState = firstStates.at(-1);
         if (resumeState === undefined)
             throw new Error("Missing resumable state");
@@ -3536,7 +3536,7 @@ describe("workflow", () => {
                     captureStart: 1,
                 }),
             ),
-        ).rejects.toMatchObject({ _tag: "NeedsAttentionStop" });
+        ).rejects.toMatchObject({ name: "NeedsAttentionStop" });
 
         expect(contexts[0]?.issue).toEqual(currentIssue);
     });
