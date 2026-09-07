@@ -9,7 +9,7 @@ import {
     makeBreadcrumbPolicy,
     type BreadcrumbArbitrationCandidate,
     type BreadcrumbPolicy,
-} from "./breadcrumb.ts";
+} from "./breadcrumb-label.ts";
 import {
     prepareBreadcrumbCandidate,
     type BreadcrumbLabelCandidate,
@@ -59,10 +59,6 @@ export type ProgressCoordinatorOptions = Omit<
 > & {
     /** Visible transcript rows required between breadcrumb opportunities. */
     readonly breadcrumbThreshold?: number;
-    /** Alias for callers that use a generic cadence threshold. */
-    readonly threshold?: number;
-    /** Visible rendered rows required by the coordinator's breadcrumb policy. */
-    readonly renderedLineThreshold?: number;
     /** Shared output sink, primarily useful for deterministic tests. */
     readonly output?: ProgressOutput;
     /** Injectable sticky-footer scheduler and view settings. */
@@ -314,12 +310,6 @@ export const makeProgressCoordinator = (
         ...(options.breadcrumbThreshold === undefined
             ? {}
             : { breadcrumbThreshold: options.breadcrumbThreshold }),
-        ...(options.threshold === undefined
-            ? {}
-            : { threshold: options.threshold }),
-        ...(options.renderedLineThreshold === undefined
-            ? {}
-            : { renderedLineThreshold: options.renderedLineThreshold }),
     });
     let eventOutputBaseline = 0;
     let transcript: AgentTranscriptRenderer | undefined;

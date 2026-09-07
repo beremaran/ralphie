@@ -31,30 +31,12 @@ export type TerminalStreamBoundaryState = {
 export type TerminalStreamBoundaryTracker = {
     /** Consume one arbitrary stream chunk and return the resulting state. */
     readonly write: (chunk: string) => TerminalStreamBoundaryState;
-    /** Compatibility aliases for callers that describe writes as stream input. */
-    readonly append: (chunk: string) => TerminalStreamBoundaryState;
-    readonly feed: (chunk: string) => TerminalStreamBoundaryState;
-    readonly track: (chunk: string) => TerminalStreamBoundaryState;
-    readonly consume: (chunk: string) => TerminalStreamBoundaryState;
     readonly getState: () => TerminalStreamBoundaryState;
-    readonly state: () => TerminalStreamBoundaryState;
-    /** True even when an incomplete non-printing sequence follows the newline. */
-    readonly isAtLineBoundary: () => boolean;
     /** True only when the line boundary is also safe for a redraw. */
-    readonly isSafeLineBoundary: () => boolean;
-    readonly isAtSafeLineBoundary: () => boolean;
-    readonly isSafeToRedraw: () => boolean;
     readonly isRedrawSafe: () => boolean;
-    readonly canRedraw: () => boolean;
     readonly hasOpenControlSequence: () => boolean;
-    readonly isControlSequenceOpen: () => boolean;
-    readonly hasOpenControlString: () => boolean;
-    readonly isControlStringOpen: () => boolean;
     readonly reset: () => void;
 };
-
-export type TerminalBoundaryState = TerminalStreamBoundaryState;
-export type TerminalBoundaryTracker = TerminalStreamBoundaryTracker;
 
 const isC0 = (code: number): boolean => code <= 0x1f || code === 0x7f;
 
@@ -267,10 +249,8 @@ export const makeTerminalStreamBoundaryTracker =
             return getState();
         };
 
-        const isAtLineBoundary = (): boolean => atLineBoundary;
-        const isSafeLineBoundary = (): boolean => getState().redrawSafe;
+        const isRedrawSafe = (): boolean => getState().redrawSafe;
         const hasOpenControlSequence = (): boolean => mode !== "ground";
-        const hasOpenControlString = (): boolean => mode === "string";
         const reset = (): void => {
             closeControl();
             atLineBoundary = true;
@@ -278,27 +258,9 @@ export const makeTerminalStreamBoundaryTracker =
 
         return {
             write,
-            append: write,
-            feed: write,
-            track: write,
-            consume: write,
             getState,
-            state: getState,
-            isAtLineBoundary,
-            isSafeLineBoundary,
-            isAtSafeLineBoundary: isSafeLineBoundary,
-            isSafeToRedraw: isSafeLineBoundary,
-            isRedrawSafe: isSafeLineBoundary,
-            canRedraw: isSafeLineBoundary,
+            isRedrawSafe,
             hasOpenControlSequence,
-            isControlSequenceOpen: hasOpenControlSequence,
-            hasOpenControlString,
-            isControlStringOpen: hasOpenControlString,
             reset,
         };
     };
-
-export const createTerminalStreamBoundaryTracker =
-    makeTerminalStreamBoundaryTracker;
-export const makeTerminalBoundaryTracker = makeTerminalStreamBoundaryTracker;
-export const createTerminalBoundaryTracker = makeTerminalStreamBoundaryTracker;

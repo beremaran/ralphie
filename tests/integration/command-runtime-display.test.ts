@@ -25,7 +25,7 @@ import {
     type ProgressCoordinator,
     type ProgressCoordinatorOptions,
 } from "../../src/progress/coordinator.ts";
-import { breadcrumbCandidateFor } from "../../src/progress/breadcrumb.ts";
+import { breadcrumbCandidateFor } from "../../src/progress/breadcrumb-label.ts";
 import type { FooterTimer } from "../../src/progress/footer.ts";
 import type { ProgressRenderMode } from "../../src/progress/progress.ts";
 import type { IssueWorkflowRuntime } from "../../src/runtime.ts";

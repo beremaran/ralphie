@@ -79,7 +79,7 @@ const runScenarioIn = (
         verbose: false,
         colors: false,
         width: () => width,
-        renderedLineThreshold: threshold,
+        breadcrumbThreshold: threshold,
         write: (text) => {
             output += text;
         },
@@ -285,7 +285,7 @@ describe("PTY scenario agent session", () => {
                 verbose: false,
                 colors: false,
                 width: () => OPTIONS.columns,
-                renderedLineThreshold: OPTIONS.threshold,
+                breadcrumbThreshold: OPTIONS.threshold,
                 strategy,
                 footer: { timer: timer.timer },
                 write: (text) => {

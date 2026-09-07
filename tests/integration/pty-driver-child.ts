@@ -53,7 +53,7 @@ import type {
 import {
     breadcrumbCandidateFor,
     DEFAULT_BREADCRUMB_THRESHOLD,
-} from "../../src/progress/breadcrumb.ts";
+} from "../../src/progress/breadcrumb-label.ts";
 import {
     makeProgressCoordinator,
     type ProgressCoordinator,
@@ -485,7 +485,7 @@ export const makeScenarioCoordinator =
         threshold: number,
     ): ((options: ProgressCoordinatorOptions) => ProgressCoordinator) =>
     (options) =>
-        base({ ...options, renderedLineThreshold: threshold });
+        base({ ...options, breadcrumbThreshold: threshold });
 
 /**
  * The smoke workflow's deterministic progress emission, derived entirely

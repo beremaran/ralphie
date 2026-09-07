@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { DEFAULT_BREADCRUMB_THRESHOLD } from "../../src/progress/breadcrumb.ts";
+import { DEFAULT_BREADCRUMB_THRESHOLD } from "../../src/progress/breadcrumb-label.ts";
 import type {
     ProgressCoordinator,
     ProgressCoordinatorOptions,
@@ -90,7 +90,7 @@ describe("PTY scenario CLI options", () => {
         }
     });
 
-    test("makeScenarioCoordinator injects the configured rendered-line threshold", () => {
+    test("makeScenarioCoordinator injects the configured breadcrumb threshold", () => {
         const received: ProgressCoordinatorOptions[] = [];
         const base = (
             options: ProgressCoordinatorOptions,
@@ -109,11 +109,11 @@ describe("PTY scenario CLI options", () => {
             colors: false,
             runId: "pty-run",
             eventLogPath: "/tmp/pty-events.jsonl",
-            renderedLineThreshold: 99,
+            breadcrumbThreshold: 99,
         });
 
         expect(received).toHaveLength(1);
-        expect(received[0]?.renderedLineThreshold).toBe(ALL_OPTIONS.threshold);
+        expect(received[0]?.breadcrumbThreshold).toBe(ALL_OPTIONS.threshold);
         expect(received[0]?.mode).toBe("plain");
         expect(received[0]?.runId).toBe("pty-run");
     });

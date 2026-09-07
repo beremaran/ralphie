@@ -471,15 +471,8 @@ export type {
     DisplayStateOptions,
     DisplayTimestamp,
 } from "./display-state.ts";
-export {
-    createTerminalBoundaryTracker,
-    createTerminalStreamBoundaryTracker,
-    makeTerminalBoundaryTracker,
-    makeTerminalStreamBoundaryTracker,
-} from "./terminal-stream-boundary.ts";
+export { makeTerminalStreamBoundaryTracker } from "./terminal-stream-boundary.ts";
 export type {
-    TerminalBoundaryState,
-    TerminalBoundaryTracker,
     TerminalStreamBoundaryState,
     TerminalStreamBoundaryTracker,
 } from "./terminal-stream-boundary.ts";
@@ -518,33 +511,17 @@ export {
     DEFAULT_BREADCRUMB_THRESHOLD,
     arbitrateBreadcrumbCandidates,
     breadcrumbCandidateFor,
-    breadcrumbCandidateFromDisplayState,
-    breadcrumbForDisplayState,
     breadcrumbLabelFor,
-    breadcrumbLabelForDisplayState,
     canonicalBreadcrumbKey,
-    createBreadcrumbCandidate,
-    createBreadcrumbLabel,
-    createBreadcrumbPolicy,
     createBreadcrumbPolicyState,
-    evaluateBreadcrumbCandidate,
     initialBreadcrumbPolicyState,
-    displayContextBreadcrumbLabel,
-    makeBreadcrumbCandidate,
-    makeBreadcrumbLabel,
-    makeBreadcrumbCadencePolicy,
     makeBreadcrumbPolicy,
-    makeBreadcrumbPolicyEngine,
-    normalizeBreadcrumbKey,
     normalizeBreadcrumbLabel,
     prepareBreadcrumbCandidate,
-    prepareBreadcrumbLabel,
     reduceBreadcrumbPolicy,
-    renderBreadcrumb,
-    renderBreadcrumbCandidate,
     renderBreadcrumbLabel,
     renderBreadcrumbLine,
-} from "./breadcrumb.ts";
+} from "./breadcrumb-label.ts";
 export type {
     ApprovedBreadcrumbCandidate,
     BreadcrumbCandidate,
@@ -563,7 +540,7 @@ export type {
     BreadcrumbArbitrationCandidate,
     BreadcrumbArbitrationResult,
     BreadcrumbCandidateKind,
-} from "./breadcrumb.ts";
+} from "./breadcrumb-label.ts";
 export {
     makeDisplayCoordinator,
     makeProgressCoordinator,

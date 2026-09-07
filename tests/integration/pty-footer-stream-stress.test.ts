@@ -500,7 +500,7 @@ describe("interactive footer streaming stress (issue #311)", () => {
             resize: resize.subscription,
             footer: { timer: virtual.timer },
             now: virtual.now,
-            renderedLineThreshold: 1_000_000,
+            breadcrumbThreshold: 1_000_000,
             write: () => {
                 throw new Error(
                     "interactive path must not use the fallback sink",
@@ -650,7 +650,7 @@ describe("interactive footer streaming stress (issue #311)", () => {
             resize: resize.subscription,
             footer: { timer: virtual.timer },
             now: virtual.now,
-            renderedLineThreshold: 1_000_000,
+            breadcrumbThreshold: 1_000_000,
             write: () => {},
         });
         const footerText = (): string => {
@@ -864,7 +864,7 @@ describe("interactive footer streaming stress (issue #311)", () => {
             resize: resize.subscription,
             footer: { timer: virtual.timer },
             now: virtual.now,
-            renderedLineThreshold: 1_000_000,
+            breadcrumbThreshold: 1_000_000,
             write: () => {},
         });
         const applyResize = (columns: number, rows: number): void => {
@@ -1079,7 +1079,7 @@ describe("interactive footer streaming stress (issue #311)", () => {
             resize: resize.subscription,
             footer: { timer: virtual.timer },
             now: virtual.now,
-            renderedLineThreshold: 1_000_000,
+            breadcrumbThreshold: 1_000_000,
             write: () => {},
         });
         try {

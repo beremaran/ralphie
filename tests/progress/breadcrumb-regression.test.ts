@@ -4,7 +4,7 @@ import { HELP_TEXT, parseCliArgs } from "../../src/command.ts";
 import type { AgentSessionEvent } from "../../src/opencode/client.ts";
 import { makeProgressCoordinator } from "../../src/progress/coordinator.ts";
 import { breadcrumbCandidateFor } from "../../src/progress/breadcrumb-label.ts";
-import { makeBreadcrumbPolicy } from "../../src/progress/breadcrumb.ts";
+import { makeBreadcrumbPolicy } from "../../src/progress/breadcrumb-label.ts";
 
 const context = {
     sessionID: "session-1",
