@@ -316,5 +316,3 @@ export const makeGitRepositoryService = (
         };
     },
 });
-
-export const GitRepositoryLive = makeGitRepositoryService;

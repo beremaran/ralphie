@@ -1328,7 +1328,6 @@ export const makePipelineObservationService = (
     return { observe };
 };
 
-export const PipelineObservationLive = makePipelineObservationService;
 export const makePipelineObserver = makePipelineObservationService;
 export const makeGitHubPipelineObservationService =
     makePipelineObservationService;

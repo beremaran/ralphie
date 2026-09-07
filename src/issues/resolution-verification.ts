@@ -109,8 +109,5 @@ export const makeResolutionVerificationService = (
     },
 });
 
-export const ResolutionVerificationLive = makeResolutionVerificationService;
 export const makeIssueResolutionVerificationService =
-    makeResolutionVerificationService;
-export const IssueResolutionVerificationLive =
     makeResolutionVerificationService;

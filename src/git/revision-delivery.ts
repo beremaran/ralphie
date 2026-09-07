@@ -647,5 +647,3 @@ export const makeGitRevisionDeliveryService = (
     reconcileRevision: async (input) =>
         await reconcileRevision(input, runner, remoteSafety),
 });
-
-export const GitRevisionDeliveryLive = makeGitRevisionDeliveryService;

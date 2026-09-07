@@ -181,5 +181,3 @@ export const makeGitIssueCheckpointService = (
         },
     };
 };
-
-export const GitIssueCheckpointLive = makeGitIssueCheckpointService;

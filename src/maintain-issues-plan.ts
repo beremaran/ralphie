@@ -1828,4 +1828,3 @@ export const makeMaintenancePlanService = (
 
 export const makeMaintenancePlannerService = makeMaintenancePlanService;
 export const makeIssueMaintenancePlanService = makeMaintenancePlanService;
-export const MaintenancePlanLive = makeMaintenancePlanService;

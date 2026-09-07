@@ -195,5 +195,3 @@ export const makeNeedsAttentionRouterService = (
         return await recoverHandoff(input, handoff, decision, recovery);
     },
 });
-
-export const NeedsAttentionRouterLive = makeNeedsAttentionRouterService;

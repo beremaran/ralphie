@@ -662,5 +662,3 @@ export const makeGitRemoteSafetyService = (
         };
     },
 });
-
-export const GitRemoteSafetyLive = makeGitRemoteSafetyService;

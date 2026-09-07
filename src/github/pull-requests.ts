@@ -753,5 +753,3 @@ export const makeGitHubPullRequestService = (): GitHubPullRequestService => ({
         }
     },
 });
-
-export const GitHubPullRequestsLive = makeGitHubPullRequestService;

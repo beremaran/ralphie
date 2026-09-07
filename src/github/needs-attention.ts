@@ -394,12 +394,7 @@ export const makeGitHubNeedsAttentionNotificationService =
         },
     });
 
-export const GitHubNeedsAttentionNotificationLive =
-    makeGitHubNeedsAttentionNotificationService;
-
 export type GitHubNeedsAttentionService =
     GitHubNeedsAttentionNotificationService;
 export const makeGitHubNeedsAttentionService =
-    makeGitHubNeedsAttentionNotificationService;
-export const GitHubNeedsAttentionLive =
     makeGitHubNeedsAttentionNotificationService;

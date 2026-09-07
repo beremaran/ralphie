@@ -96,5 +96,3 @@ export const makeParentCompletionService = (input: {
 
     return { reconcileParent, reconcileAfterChildCompletion };
 };
-
-export const ParentCompletionLive = makeParentCompletionService;

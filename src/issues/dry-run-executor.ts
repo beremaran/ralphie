@@ -556,5 +556,3 @@ export function makeDryRunIssueExecutorService(
         },
     };
 }
-
-export const DryRunIssueExecutorLive = makeDryRunIssueExecutorService;

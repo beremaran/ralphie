@@ -103,5 +103,3 @@ export const makeGroundingAssessmentService = (
         }
     },
 });
-
-export const GroundingAssessmentLive = makeGroundingAssessmentService;

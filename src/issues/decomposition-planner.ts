@@ -116,5 +116,3 @@ export const makeDecompositionPlannerService = (
         };
     },
 });
-
-export const DecompositionPlannerLive = makeDecompositionPlannerService;

@@ -402,5 +402,3 @@ export const makeGitRevisionCommitService = (
         },
     };
 };
-
-export const GitRevisionCommitLive = makeGitRevisionCommitService;

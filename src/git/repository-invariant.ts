@@ -73,5 +73,3 @@ export const makeGitRepositoryInvariantService = (
         }
     },
 });
-
-export const GitRepositoryInvariantLive = makeGitRepositoryInvariantService;

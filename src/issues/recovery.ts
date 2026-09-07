@@ -476,5 +476,3 @@ export const makeIssueRecoveryService = (
         },
     };
 };
-
-export const IssueRecoveryLive = makeIssueRecoveryService;

@@ -263,5 +263,3 @@ export const makeGitHubIssueRelationshipService =
         listBlockedBy,
         addBlockedBy,
     });
-
-export const GitHubIssueRelationshipsLive = makeGitHubIssueRelationshipService;

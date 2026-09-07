@@ -582,5 +582,3 @@ export const makePipelineDeliveryGitService = (
         };
     },
 });
-
-export const PipelineDeliveryGitLive = makePipelineDeliveryGitService;

@@ -108,5 +108,3 @@ export const makeComplexityAssessmentService = (
         }
     },
 });
-
-export const ComplexityAssessmentLive = makeComplexityAssessmentService;

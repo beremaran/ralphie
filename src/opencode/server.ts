@@ -238,5 +238,3 @@ export const makeOpenCodeService = (
         }
     },
 });
-
-export const OpenCodeLive = makeOpenCodeService;

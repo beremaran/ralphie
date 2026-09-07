@@ -1689,5 +1689,3 @@ export const makePullRequestClosureService = (
 
     return { close };
 };
-
-export const PullRequestClosureLive = makePullRequestClosureService;

@@ -319,5 +319,3 @@ export const makeIssueExecutorService = (
         },
     };
 };
-
-export const IssueExecutorLive = makeIssueExecutorService;

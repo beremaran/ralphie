@@ -177,5 +177,3 @@ export const makeGitHubIssueMutationsService =
             }
         },
     });
-
-export const GitHubIssueMutationsLive = makeGitHubIssueMutationsService;

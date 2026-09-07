@@ -610,5 +610,3 @@ export const makeGitIssueOperationsService = (
         },
     };
 };
-
-export const GitIssueOperationsLive = makeGitIssueOperationsService;

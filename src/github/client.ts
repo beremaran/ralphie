@@ -80,5 +80,3 @@ export const makeGitHubClientService = (
         },
     };
 };
-
-export const GitHubClientLive = makeGitHubClientService;

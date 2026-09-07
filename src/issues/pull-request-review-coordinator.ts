@@ -1036,6 +1036,3 @@ export const makePullRequestReviewCoordinatorService = (
 
     return { review };
 };
-
-export const PullRequestReviewCoordinatorLive =
-    makePullRequestReviewCoordinatorService;

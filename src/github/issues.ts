@@ -375,5 +375,3 @@ export const makeGitHubIssuesService = (): GitHubIssuesService => ({
         }
     },
 });
-
-export const GitHubIssuesLive = makeGitHubIssuesService;

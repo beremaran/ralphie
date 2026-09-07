@@ -1977,5 +1977,3 @@ export const makeGitHubIssueMaintenanceService =
     });
 
 export const makeIssueMaintenanceService = makeGitHubIssueMaintenanceService;
-export const GitHubIssueMaintenanceLive = makeGitHubIssueMaintenanceService;
-export const IssueMaintenanceLive = makeGitHubIssueMaintenanceService;

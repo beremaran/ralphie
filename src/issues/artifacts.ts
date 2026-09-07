@@ -1493,5 +1493,3 @@ export const makeIssueArtifactStoreService = (): IssueArtifactStoreService => {
         },
     };
 };
-
-export const IssueArtifactStoreLive = makeIssueArtifactStoreService;

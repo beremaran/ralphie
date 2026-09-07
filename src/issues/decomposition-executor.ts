@@ -703,5 +703,3 @@ class RoutedNeedsAttention extends Error {
         super("Needs attention");
     }
 }
-
-export const DecompositionExecutorLive = makeDecompositionExecutorService;

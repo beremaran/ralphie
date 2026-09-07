@@ -3101,7 +3101,3 @@ export const makeGitHubMaintenanceRelationshipService =
     makeGitHubIssueMaintenanceRelationshipService;
 export const makeMaintenanceRelationshipPolicyService =
     makeGitHubIssueMaintenanceRelationshipService;
-export const GitHubIssueMaintenanceRelationshipsLive =
-    makeGitHubIssueMaintenanceRelationshipService;
-export const MaintenanceRelationshipPolicyLive =
-    makeGitHubIssueMaintenanceRelationshipService;

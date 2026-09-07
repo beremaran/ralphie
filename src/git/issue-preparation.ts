@@ -54,5 +54,3 @@ export const makeGitIssuePreparationService = (
         return checkpoint;
     },
 });
-
-export const GitIssuePreparationLive = makeGitIssuePreparationService;
