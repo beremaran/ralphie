@@ -10,11 +10,15 @@
  * so ordinary decisions stay strict.
  */
 
-const FENCED_BLOCK_PATTERN = /```(?:json|needs-attention)\s*\n([\s\S]*?)```/gi;
+const fencedPatternFor = (tags: string, flags: string): RegExp =>
+    new RegExp(`\`\`\`(?:${tags})\\s*\\n([\\s\\S]*?)\`\`\``, flags);
 
-const NEEDS_ATTENTION_FENCE_PATTERN = /```needs-attention\s*\n([\s\S]*?)```/i;
+const FENCED_BLOCK_PATTERN = fencedPatternFor("json|needs-attention", "gi");
 
-const JSON_FENCE_PATTERN = /```json\s*\n([\s\S]*?)```/i;
+const fencedContent = (
+    text: string,
+    tag: "json" | "needs-attention",
+): string | undefined => fencedPatternFor(tag, "i").exec(text)?.[1]?.trim();
 
 type JsonScanState = {
     depth: number;
@@ -22,43 +26,22 @@ type JsonScanState = {
     escaped: boolean;
 };
 
-const initialScanState = (): JsonScanState => ({
-    depth: 0,
-    inString: false,
-    escaped: false,
-});
-
-const stepInString = (
-    state: JsonScanState,
-    character: string,
-): JsonScanState => {
-    if (state.escaped) return { ...state, escaped: false };
-    if (character === "\\") return { ...state, escaped: true };
-    if (character === '"') return { ...state, inString: false };
-    return state;
+const advanceScanState = (state: JsonScanState, character: string): void => {
+    if (state.inString) {
+        if (state.escaped) state.escaped = false;
+        else if (character === "\\") state.escaped = true;
+        else if (character === '"') state.inString = false;
+    } else if (character === '"') state.inString = true;
+    else if (character === "{") state.depth += 1;
+    else if (character === "}") state.depth -= 1;
 };
-
-const stepOutOfString = (
-    state: JsonScanState,
-    character: string,
-): JsonScanState => {
-    if (character === '"') return { ...state, inString: true };
-    if (character === "{") return { ...state, depth: state.depth + 1 };
-    if (character === "}") return { ...state, depth: state.depth - 1 };
-    return state;
-};
-
-const stepScan = (state: JsonScanState, character: string): JsonScanState =>
-    state.inString
-        ? stepInString(state, character)
-        : stepOutOfString(state, character);
 
 const balancedJsonCandidate = (text: string): string | undefined => {
     const start = text.indexOf("{");
     if (start === -1) return undefined;
-    let state = initialScanState();
+    const state: JsonScanState = { depth: 0, inString: false, escaped: false };
     for (let index = start; index < text.length; index += 1) {
-        state = stepScan(state, text[index]!);
+        advanceScanState(state, text[index]!);
         if (!state.inString && state.depth === 0 && index > start) {
             return text.slice(start, index + 1);
         }
@@ -75,7 +58,7 @@ const tryParseJson = (candidate: string): unknown | undefined => {
 };
 
 /** All fenced JSON candidates in source order (json + needs-attention). */
-export const fencedJsonCandidates = (text: string): string[] => {
+const fencedJsonCandidates = (text: string): string[] => {
     const candidates: string[] = [];
     FENCED_BLOCK_PATTERN.lastIndex = 0;
     let match: RegExpExecArray | null;
@@ -93,7 +76,7 @@ export const fencedJsonCandidates = (text: string): string[] => {
  * balanced `{...}` span. Returns undefined when nothing parses as JSON.
  */
 export const extractStructuredJson = (text: string): unknown | undefined => {
-    const jsonFence = JSON_FENCE_PATTERN.exec(text)?.[1]?.trim();
+    const jsonFence = fencedContent(text, "json");
     if (jsonFence !== undefined) {
         const parsed = tryParseJson(jsonFence);
         if (parsed !== undefined) return parsed;
@@ -114,7 +97,7 @@ export const extractStructuredJson = (text: string): unknown | undefined => {
 export const extractNeedsAttentionJson = (
     text: string,
 ): unknown | undefined => {
-    const fenced = NEEDS_ATTENTION_FENCE_PATTERN.exec(text)?.[1]?.trim();
+    const fenced = fencedContent(text, "needs-attention");
     if (fenced !== undefined) {
         const parsed = tryParseJson(fenced);
         if (parsed !== undefined) return parsed;

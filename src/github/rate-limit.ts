@@ -141,16 +141,14 @@ const directMetadata = (
     const retryAfterMs = finiteNonNegative(
         typeof value.retryAfterMs === "number"
             ? value.retryAfterMs
-            : typeof value.retry_after_ms === "number"
-              ? value.retry_after_ms
-              : Number.NaN,
+            : Number.NaN,
     );
-    const rawRetryAfter = value.retryAfter ?? value.retry_after;
+    const rawRetryAfter = value.retryAfter;
     const retryAfter =
         rawRetryAfter === undefined
             ? retryAfterMs
             : parseRetryAfter(rawRetryAfter, nowMs);
-    const rawResetAt = value.resetAt ?? value.reset_at;
+    const rawResetAt = value.resetAt;
     const resetAtMs =
         rawResetAt === undefined
             ? finiteNonNegative(
@@ -171,7 +169,7 @@ const metadataFromRecord = (
     value: RecordLike,
     nowMs: number,
 ): RateLimitMetadata | undefined => {
-    const nested = value.rateLimit ?? value.rate_limit;
+    const nested = value.rateLimit;
     const nestedMetadata = isRecord(nested)
         ? metadataFromRecord(nested, nowMs)
         : undefined;

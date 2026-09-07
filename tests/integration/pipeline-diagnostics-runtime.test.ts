@@ -19,6 +19,7 @@ import type {
     JobLogExcerptsResult,
     JobLogExcerptsService,
 } from "../../src/github/pipeline-diagnostics-logs.ts";
+import { makePipelineDiagnosticsLogsService } from "../../src/github/pipeline-diagnostics-logs.ts";
 import {
     MAX_REPAIR_DIAGNOSTICS_CHARS,
     UNTRUSTED_PIPELINE_DIAGNOSTICS_CLOSE,
@@ -138,7 +139,7 @@ describe("pipeline diagnostics runtime assembly", () => {
                 progress: makeProgressRecorder([]),
                 pipelineDiagnosticsDependencies: {
                     collector: fakeCollector(collectionFor(records), requests),
-                    logsDependencies: {
+                    logs: makePipelineDiagnosticsLogsService({
                         endpoint: async () => undefined,
                         request: async (_endpoint, parameters) => {
                             if (parameters.job_id === 1)
@@ -160,7 +161,7 @@ describe("pipeline diagnostics runtime assembly", () => {
                             fetches += 1;
                             throw new Error("third-party URL was fetched");
                         },
-                    },
+                    }),
                 },
             });
 
