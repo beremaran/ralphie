@@ -1884,22 +1884,18 @@ describe("workflow", () => {
             sleep: async () => {},
         });
         const observedService: PipelineObservationService = {
-            observe: async (input) => {
-                if (!("request" in input) || input.request === undefined) {
-                    throw new Error("expected coordinate observation input");
-                }
-                return fakeCheckService.observe({
+            observe: async (input) =>
+                fakeCheckService.observe({
                     client: input.client,
                     request: input.request,
-                    options: input.options ?? input.settings,
+                    options: input.options,
                     signal: input.signal,
                     fetchSnapshot,
                     readHead: async () => gateHeadSha,
                     ...(input.onTransition === undefined
                         ? {}
                         : { onTransition: input.onTransition }),
-                });
-            },
+                }),
         };
 
         const calls: string[] = [];

@@ -66,53 +66,23 @@ export type PipelineObservationRead =
 export type PipelineObservationOptions = {
     /** Keep polling while no checks are visible during this window. */
     readonly registrationGraceMs?: number;
-    /** Alias for registrationGraceMs. */
-    readonly registrationGracePeriodMs?: number;
     /** Optional time for which a terminal snapshot must remain unchanged. */
     readonly quiescenceMs?: number;
-    /** Alias for quiescenceMs. */
-    readonly stableTerminalConfirmationMs?: number;
     /** Absolute observation timeout measured from observe() start. */
     readonly deadlineMs?: number;
-    /** Alias for deadlineMs used by callers describing a total timeout. */
-    readonly totalTimeoutMs?: number;
-    /** Alias for deadlineMs. */
-    readonly timeoutMs?: number;
     /** First ordinary polling backoff delay. */
     readonly initialBackoffMs?: number;
-    /** Alias for initialBackoffMs. */
-    readonly pollingBackoffMs?: number;
-    /** Alias for initialBackoffMs. */
-    readonly pollBackoffMs?: number;
     /** Upper bound for ordinary polling backoff. */
     readonly maxBackoffMs?: number;
-    /** Alias for maxBackoffMs. */
-    readonly maximumBackoffMs?: number;
-    /** Alias for maxBackoffMs. */
-    readonly maxPollingBackoffMs?: number;
     /** Exponential ordinary-backoff multiplier. */
     readonly backoffFactor?: number;
     /** Maximum retries of a rate-limited read, per poll. */
     readonly rateLimitRetries?: number;
-    /** Alias for rateLimitRetries. */
-    readonly maxRateLimitRetries?: number;
-    /** Alias for rateLimitRetries. */
-    readonly rateLimitRetryCount?: number;
     /** Maximum permitted server-directed retry delay. */
     readonly maxRateLimitDelayMs?: number;
-    /** Alias for maxRateLimitDelayMs. */
-    readonly maxRateLimitRetryDelayMs?: number;
     /** Number of identical green terminal observations required. */
     readonly stableTerminalConfirmations?: number;
-    /** Alias for stableTerminalConfirmations. */
-    readonly stableTerminalConfirmation?: number;
-    /** Alias for stableTerminalConfirmations. */
-    readonly stableTerminalPolls?: number;
-    /** Alias for stableTerminalConfirmations. */
-    readonly stableTerminalChecks?: number;
 };
-
-export type PipelineObservationSettings = PipelineObservationOptions;
 
 export type PipelineObservationTransition =
     | { readonly kind: "registration" }
@@ -168,8 +138,6 @@ export type AbortedPipelineObservation = {
     readonly observedSha: ExactCommitSha;
     /** The caller's original AbortSignal.reason, when available. */
     readonly reason?: unknown;
-    /** Explicit alias for consumers that prefer a named abort field. */
-    readonly abortReason?: unknown;
     readonly elapsedMs: number;
     readonly polls: number;
 };
@@ -200,37 +168,12 @@ export type PipelineObservationInput = {
     readonly readHead?: PipelineRemoteHeadReader;
     readonly client?: Octokit;
     readonly options?: PipelineObservationOptions;
-    readonly settings?: PipelineObservationOptions;
     readonly signal?: AbortSignal;
     /**
      * Invoked synchronously when a poll produces a meaningful transition
      * (registration, registered, checked-in, disappeared, or status-changed).
      * Unchanged polls never invoke it, so callers can stream progress without
      * emitting noisy identical events during long waits.
-     */
-    readonly onTransition?: (transition: PipelineObservationTransition) => void;
-};
-
-/** Coordinate-shaped input for using the built-in paginated GitHub reader. */
-export type GitHubPipelineObservationInput = {
-    readonly client?: Octokit;
-    readonly fetchSnapshot?: PipelineSnapshotFetcher;
-    readonly request?: PipelineSnapshotRequest;
-    readonly repository?: string;
-    readonly owner?: string;
-    readonly repo?: string;
-    readonly branch?: string;
-    readonly commitSha?: ExactCommitSha;
-    readonly sha?: ExactCommitSha;
-    /** Optional when the supplied Octokit client can provide repos.getBranch. */
-    readonly readHead?: PipelineRemoteHeadReader;
-    readonly options?: PipelineObservationOptions;
-    readonly settings?: PipelineObservationOptions;
-    readonly signal?: AbortSignal;
-    /**
-     * Invoked synchronously when a poll produces a meaningful transition
-     * (registration, registered, checked-in, disappeared, or status-changed).
-     * Unchanged polls never invoke it.
      */
     readonly onTransition?: (transition: PipelineObservationTransition) => void;
 };
@@ -242,7 +185,7 @@ export type PipelineObservationResult = {
 
 export type PipelineObservationService = {
     readonly observe: (
-        input: PipelineObservationInput | GitHubPipelineObservationInput,
+        input: PipelineObservationInput,
     ) => Promise<PipelineObservationResult>;
 };
 
@@ -319,36 +262,27 @@ const resolveObservationOptions = (
     options: PipelineObservationOptions,
 ): ResolvedPipelineObservationOptions => {
     const registrationGraceMs = finiteAtLeast(
-        options.registrationGraceMs ?? options.registrationGracePeriodMs ?? 0,
+        options.registrationGraceMs ?? 0,
         0,
         "registrationGraceMs must be a non-negative number of milliseconds.",
     );
     const quiescenceMs = finiteAtLeast(
-        options.quiescenceMs ?? options.stableTerminalConfirmationMs ?? 0,
+        options.quiescenceMs ?? 0,
         0,
         "quiescenceMs must be a non-negative number of milliseconds.",
     );
     const deadlineMs = finiteAtLeast(
-        options.deadlineMs ??
-            options.totalTimeoutMs ??
-            options.timeoutMs ??
-            30_000,
+        options.deadlineMs ?? 30_000,
         1,
         "deadlineMs must be a positive number of milliseconds.",
     );
     const initialBackoffMs = finiteAtLeast(
-        options.initialBackoffMs ??
-            options.pollingBackoffMs ??
-            options.pollBackoffMs ??
-            DEFAULT_INITIAL_BACKOFF_MS,
+        options.initialBackoffMs ?? DEFAULT_INITIAL_BACKOFF_MS,
         0,
         "initialBackoffMs must be a non-negative number of milliseconds.",
     );
     const maxBackoffMs = finiteAtLeast(
-        options.maxBackoffMs ??
-            options.maximumBackoffMs ??
-            options.maxPollingBackoffMs ??
-            DEFAULT_MAX_BACKOFF_MS,
+        options.maxBackoffMs ?? DEFAULT_MAX_BACKOFF_MS,
         initialBackoffMs,
         "maxBackoffMs must be at least initialBackoffMs.",
     );
@@ -358,24 +292,16 @@ const resolveObservationOptions = (
         "backoffFactor must be at least 1.",
     );
     const rateLimitRetries = nonNegativeInteger(
-        options.rateLimitRetries ??
-            options.maxRateLimitRetries ??
-            options.rateLimitRetryCount ??
-            DEFAULT_RATE_LIMIT_RETRIES,
+        options.rateLimitRetries ?? DEFAULT_RATE_LIMIT_RETRIES,
         "rateLimitRetries must be a non-negative integer.",
     );
     const maxRateLimitDelayMs = finiteAtLeast(
-        options.maxRateLimitDelayMs ??
-            options.maxRateLimitRetryDelayMs ??
-            maxBackoffMs,
+        options.maxRateLimitDelayMs ?? maxBackoffMs,
         0,
         "maxRateLimitDelayMs must be a non-negative number of milliseconds.",
     );
     const stableTerminalConfirmations = positiveInteger(
         options.stableTerminalConfirmations ??
-            options.stableTerminalConfirmation ??
-            options.stableTerminalPolls ??
-            options.stableTerminalChecks ??
             DEFAULT_STABLE_TERMINAL_CONFIRMATIONS,
         "stableTerminalConfirmations must be a positive integer.",
     );
@@ -521,7 +447,7 @@ const isDeadlineMarker = (
 ): value is DeadlineMarker => value === marker;
 
 type ObserveContext = {
-    readonly input: PipelineObservationInput | GitHubPipelineObservationInput;
+    readonly input: PipelineObservationInput;
     readonly request: PipelineSnapshotRequest;
     readonly fetchSnapshot: PipelineSnapshotFetcher;
     readonly readHead?: PipelineRemoteHeadReader;
@@ -738,9 +664,6 @@ const abortedOutcome = (
     kind: "aborted",
     observedSha: ctx.observedSha,
     ...(callerReason(ctx) === undefined ? {} : { reason: callerReason(ctx) }),
-    ...(callerReason(ctx) === undefined
-        ? {}
-        : { abortReason: callerReason(ctx) }),
     elapsedMs: elapsedMsFor(ctx),
     polls: st.polls,
 });
@@ -1115,30 +1038,20 @@ const exactCommitSha = (value: string): boolean =>
     /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/i.test(value);
 
 const requestForInput = (
-    input: PipelineObservationInput | GitHubPipelineObservationInput,
-): PipelineSnapshotRequest => {
-    if ("request" in input && input.request !== undefined)
-        return {
-            repository: input.request.repository,
-            branch: input.request.branch,
-            commitSha: input.request.commitSha,
-        };
-    const coordinates = input as GitHubPipelineObservationInput;
-    const repository =
-        coordinates.repository ??
-        ([coordinates.owner, coordinates.repo].filter(Boolean).join("/") || "");
-    const branch = coordinates.branch ?? "";
-    const commitSha = coordinates.commitSha ?? coordinates.sha ?? "";
-    return { repository, branch, commitSha };
-};
+    input: PipelineObservationInput,
+): PipelineSnapshotRequest => ({
+    repository: input.request.repository,
+    branch: input.request.branch,
+    commitSha: input.request.commitSha,
+});
 
 const clientForInput = (
-    input: PipelineObservationInput | GitHubPipelineObservationInput,
+    input: PipelineObservationInput,
     defaultClient?: Octokit,
 ): Octokit | undefined => input.client ?? defaultClient;
 
 const fetcherForInput = (
-    input: PipelineObservationInput | GitHubPipelineObservationInput,
+    input: PipelineObservationInput,
     collector: ReturnType<typeof makePipelineChecksSnapshotCollectorService>,
     defaultClient?: Octokit,
 ): PipelineSnapshotFetcher => {
@@ -1176,7 +1089,7 @@ const recordFor = (value: unknown): Record<string, unknown> | undefined =>
         : undefined;
 
 const readHeadForInput = (
-    input: PipelineObservationInput | GitHubPipelineObservationInput,
+    input: PipelineObservationInput,
     defaultClient: Octokit | undefined,
     requestExecutor: PipelineSnapshotRequestExecutor | undefined,
 ): PipelineRemoteHeadReader | undefined => {
@@ -1230,7 +1143,7 @@ const makeDeadlineTimer = (
 };
 
 const makeContext = (
-    input: PipelineObservationInput | GitHubPipelineObservationInput,
+    input: PipelineObservationInput,
     options: ResolvedPipelineObservationOptions,
     now: PipelineObservationClock,
     sleep: PipelineObservationSleep,
@@ -1281,15 +1194,14 @@ export const makePipelineObservationService = (
     });
 
     const observe = async (
-        input: PipelineObservationInput | GitHubPipelineObservationInput,
+        input: PipelineObservationInput,
     ): Promise<PipelineObservationResult> => {
-        const options = resolveObservationOptions(
-            input.options ?? input.settings ?? {},
-        );
+        const options = resolveObservationOptions(input.options ?? {});
         const request = requestForInput(input);
-        const normalizedInput = { ...input, request } as
-            | PipelineObservationInput
-            | GitHubPipelineObservationInput;
+        const normalizedInput = {
+            ...input,
+            request,
+        } as PipelineObservationInput;
         const ctx = makeContext(
             normalizedInput,
             options,
@@ -1328,24 +1240,7 @@ export const makePipelineObservationService = (
     return { observe };
 };
 
-export const makePipelineObserver = makePipelineObservationService;
-export const makeGitHubPipelineObservationService =
-    makePipelineObservationService;
-export const makeGitHubCheckObserver = makePipelineObservationService;
-export const makeGitHubPipelineObserver = makePipelineObservationService;
-export const makeGitHubPipelineCheckObserver = makePipelineObservationService;
-export const makePipelineCheckObserver = makePipelineObservationService;
-
-export {
-    parseRetryAfter,
-    rateLimitFromHeaders,
-    rateLimitFromUnknown,
-} from "./rate-limit.ts";
-export type { PipelineSnapshotRequestExecutor } from "./pipeline-snapshot-collector.ts";
 export type {
-    ExactCommitSha,
-    PipelineItemStatus,
     PipelineSnapshot,
     PipelineSnapshotRequest,
 } from "./pipeline-snapshot.ts";
-export type { RateLimitMetadata } from "./rate-limit.ts";
