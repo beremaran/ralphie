@@ -10,6 +10,8 @@ import {
     RESIZE_MARKER_PREFIX,
     SCENARIO_DONE_MARKER,
     STREAM_FINALIZED_MARKER,
+    type ChildScenario,
+    type PtyOutputMode,
     type PtyScenarioOptions,
 } from "./pty-driver-child.ts";
 import { stripTerminalControls } from "../../src/shared/terminal.ts";
@@ -29,10 +31,14 @@ export const DEFAULT_PTY_SCENARIO_OPTIONS: PtyScenarioOptions = {
     threshold: 30,
 };
 
-/** Clean TTY context for child processes, with no CI/GitHub leakage. */
-const childEnv = (): Record<string, string | undefined> => {
+/** Clean TTY context for child processes, with an optional output-mode pin. */
+const childEnv = (
+    outputMode?: PtyOutputMode,
+): Record<string, string | undefined> => {
     const env: Record<string, string | undefined> = {
         TERM: "xterm-256color",
+        RALPHIE_PTY_OUTPUT: outputMode,
+        CI: outputMode === "plain" ? "true" : undefined,
         // PTY markers are synchronized through the durable event log. Writing
         // marker text to the live PTY would move the terminal cursor and make
         // the fixture itself look like a stale footer or transcript row.
@@ -44,7 +50,8 @@ const childEnv = (): Record<string, string | undefined> => {
             key === "CI" ||
             key === "GITHUB_ACTIONS" ||
             key.startsWith("GITHUB_") ||
-            key === "RALPHIE_PTY_MARKERS"
+            key === "RALPHIE_PTY_MARKERS" ||
+            key === "RALPHIE_PTY_OUTPUT"
         ) {
             continue;
         }
@@ -64,6 +71,10 @@ export type PtyScenarioHandle = {
 /** Launch the shared active-stream child with out-of-band marker logging. */
 export const launchPtyScenario = async (
     overrides: Partial<PtyScenarioOptions> = {},
+    launchOptions: {
+        readonly outputMode?: PtyOutputMode;
+        readonly scenario?: ChildScenario;
+    } = {},
 ): Promise<PtyScenarioHandle> => {
     const options = {
         ...DEFAULT_PTY_SCENARIO_OPTIONS,
@@ -95,10 +106,12 @@ export const launchPtyScenario = async (
                 argumentFor(options.maxAttempts),
                 "--threshold",
                 argumentFor(options.threshold),
+                "--scenario",
+                launchOptions.scenario ?? "smoke",
             ],
             columns: options.columns,
             rows: options.rows,
-            env: childEnv(),
+            env: childEnv(launchOptions.outputMode),
         });
         return { workspace, options, session };
     } catch (error) {

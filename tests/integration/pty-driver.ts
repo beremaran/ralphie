@@ -233,6 +233,11 @@ type PtyRow = {
     softWrap: boolean;
 };
 
+export type PtyScreenRow = {
+    readonly text: string;
+    readonly softWrap: boolean;
+};
+
 const blankPtyRow = (width: number): PtyRow => ({
     cells: Array.from({ length: width }, () => ""),
     softWrap: false,
@@ -491,7 +496,7 @@ export class PtyScreen {
         ) {
             index += 1;
         }
-        if (index >= text.length) return text.length;
+        if (index >= text.length) return -1;
         const final = text.charCodeAt(index);
         if (!isCsiFinal(final)) return index + 1;
         this.applyCsi(parameters, text[index] as string);
@@ -507,7 +512,7 @@ export class PtyScreen {
                 return index + 2;
             }
         }
-        return text.length;
+        return -1;
     };
 
     /** Reverse index (ESC M): move up, inserting a line at the top. */
@@ -529,6 +534,7 @@ export class PtyScreen {
     };
 
     private readonly consumeEscape = (text: string, start: number): number => {
+        if (start + 1 >= text.length) return -1;
         const first = text.charCodeAt(start + 1);
         if (first === 0x5b) return this.consumeCsi(text, start);
         if ([0x5d, 0x50, 0x58, 0x5e, 0x5f].includes(first)) {
@@ -585,11 +591,20 @@ export class PtyScreen {
         return index + character.length;
     };
 
+    private pending = "";
+
     /** Feed raw PTY bytes exactly as a terminal would render them. */
     readonly feed = (text: string): void => {
+        text = this.pending + text;
+        this.pending = "";
         let index = 0;
         while (index < text.length) {
-            index = this.consumeCharacter(text, index);
+            const next = this.consumeCharacter(text, index);
+            if (next < 0) {
+                this.pending = text.slice(index);
+                return;
+            }
+            index = next;
         }
     };
 
@@ -652,6 +667,13 @@ export class PtyScreen {
     /** The currently visible screen rows, trailing whitespace trimmed. */
     readonly screen = (): readonly string[] => this.rows.map(ptyRowText);
 
+    /** Visible rows with the terminal's soft-wrap state for layout assertions. */
+    readonly screenRows = (): readonly PtyScreenRow[] =>
+        this.rows.map((row) => ({
+            text: ptyRowText(row),
+            softWrap: row.softWrap,
+        }));
+
     /** Rows that scrolled past the bottom of the visible screen. */
     readonly scrollback = (): readonly string[] => this.history.map(ptyRowText);
 }
@@ -694,6 +716,8 @@ export type PtySession = {
     readonly raw: () => string;
     /** Visible rows of the terminal screen, per the embedded oracle. */
     readonly screen: () => readonly string[];
+    /** Visible rows with physical soft-wrap state, per the embedded oracle. */
+    readonly screenRows: () => readonly PtyScreenRow[];
     /** Rows that scrolled past the bottom of the visible screen. */
     readonly scrollback: () => readonly string[];
     /** Resolve with the raw capture once `marker` is present in it. */
@@ -995,6 +1019,7 @@ export const launchPtyCommand = async (
         childPgid: () => childPgid,
         raw: () => raw,
         screen: () => oracle.screen(),
+        screenRows: () => oracle.screenRows(),
         scrollback: () => oracle.scrollback(),
         waitFor: (marker, waitOptions) =>
             registerMarkerWait(
