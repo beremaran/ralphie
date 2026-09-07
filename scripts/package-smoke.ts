@@ -342,7 +342,6 @@ const allowedDocumentationEntries = new Set([
     "docs/architecture.md",
     "docs/cli-reference.md",
     "docs/development.md",
-    "docs/end-to-end-execution.md",
     "docs/getting-started.md",
     "docs/operations-and-recovery.md",
     "docs/public-distribution.md",

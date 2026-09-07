@@ -26,8 +26,6 @@ buried in a landing page.
    inspect artifacts, resume interrupted runs, and clean up safely.
 4. [Workflows](workflows.md) — understand implementation, decomposition, and
    `lgtm` versus `pr` delivery.
-5. [End-to-end execution trace](end-to-end-execution.md) — follow the source
-   code from CLI trigger through exit.
 
 ### Contributor
 
@@ -37,8 +35,6 @@ buried in a landing page.
 3. [Workflows](workflows.md) — behavior and mutation boundaries to preserve.
 4. [Operations and recovery](operations-and-recovery.md) — state and recovery
    contracts that changes must not break.
-5. [End-to-end execution trace](end-to-end-execution.md) — the detailed source
-   map and execution sequence.
 
 ### Release maintainer
 
@@ -60,7 +56,6 @@ buried in a landing page.
 | [Operations and recovery](operations-and-recovery.md) | Document progress, artifacts, state, resume, cancellation, failure, and cleanup. |
 | [Architecture](architecture.md) | Map runtime, orchestrator, domain services, and source locations. |
 | [Development](development.md) | Explain local development, test commands, optional registry checks, and contribution rules. |
-| [End-to-end execution trace](end-to-end-execution.md) | Preserve the detailed source-level trigger-to-exit trace. |
 
 ## Keeping documentation current
 

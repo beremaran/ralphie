@@ -4,8 +4,7 @@ This page is for operators and contributors who need to understand how Ralphie
 routes issues, performs implementation and decomposition, and delivers the
 result. It is the authoritative description of workflow semantics and diagrams;
 see the [documentation index](README.md) for setup, CLI, safety, and recovery
-references. For the source-level trigger-to-exit sequence, see the
-[end-to-end execution trace](end-to-end-execution.md).
+references.
 
 > [!CAUTION]
 > The default `lgtm` workflow commits and pushes directly to the selected
@@ -19,6 +18,8 @@ Before normal execution, every matching open issue is checked by a read-only,
 schema-validated grounding session. Actionable issues then receive a complexity
 score from 0 through 5. An issue whose prerequisite is still open, or which
 otherwise needs human attention, is left open and recorded with its reason. The
+grounding prompt pins the exact checked-out commit so evidence is never
+mistaken for a newer revision. The
 `halt` policy stops at that handled boundary by default; `continue` advances
 with the next queue item without closing or marking the issue complete.
 
@@ -66,7 +67,8 @@ flowchart TD
    staging and review.
 7. Stop after approval or five review attempts. Reverify immediately before
    commit; if repair changes an approved tree, review the repaired tree again.
-8. Generate a validated commit message and commit the changes.
+8. Generate a validated commit message — the subject is non-empty and at most
+   72 characters, with an optional body — and commit the changes.
 9. In `lgtm` mode, recheck the remote and push the commit without force, then
    close the source issue after the push is verified. In `pr` mode, create a
    feature branch, push it, open or find the pull request linked with
@@ -287,7 +289,10 @@ is terminal for that run: the issue and pull request remain open, the feature
 branch and diagnostics are retained, and no check-gate merge is attempted.
 After approval, head-scoped review attempts are published idempotently. The
 read-only check observer then polls checks for the approved exact SHA until it
-reaches its documented green state. Immediately before merging, Ralphie
+reaches its documented green state. The gate uses a 30-second registration
+grace, bounded exponential backoff from 5 seconds to a 60-second cap, a
+30-minute deadline, and two stable green confirmations; a head move
+invalidates the observation. Immediately before merging, Ralphie
 re-reads the PR and requires a proof containing the approved review and green
 checks for the same PR number, base, and head. A changed head, stale review,
 non-green check, failed/cancelled/timed-out/no-pipelines/unknown gate, closed

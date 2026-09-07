@@ -201,6 +201,15 @@ Ralphie stages, verifies, commits, pushes, and mutates GitHub through
 deterministic domain services. Every decision task is schema-validated at the
 OpenCode response and Ralphie domain boundaries; invalid output or OpenCode
 failure becomes a failed issue outcome without proceeding to the next operation.
+The canonical Zod decision schemas are sent to OpenCode as JSON Schema with
+validation retries, and the returned value is re-validated at the Ralphie
+domain boundary. A turn that produces no assistant message fails instead of
+producing a decision.
+
+Protected maintainer choices are also enforced before verification: a staged
+change that selects a project license fails closed unless that exact license
+is authorized by the issue text, deferring to a maintainer decision instead of
+silently establishing policy.
 
 Verification commands are run against the staged tree and their evidence is
 bound to that tree before review or commit. A non-zero command exit is treated

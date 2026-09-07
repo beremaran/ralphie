@@ -17,7 +17,7 @@ bunx @beremaran/ralphie <repository> [options]
 ```
 
 `<repository>` is required and accepts an `owner/name` slug or a GitHub
-HTTPS/SSH clone URL. When running from a source checkout, replace the package
+HTTPS/SSH clone URL. Extra positional arguments are rejected. When running from a source checkout, replace the package
 runner with `bun run index.ts`.
 
 Run `bunx @beremaran/ralphie --help` for the help generated from the current
@@ -77,9 +77,10 @@ snapshot, asks a read-only OpenCode planner for a schema-validated plan, and
 reconciles allowed labels/comments/relationships through deterministic GitHub
 services after live revalidation. It never runs issue implementation,
 decomposition, commit/push, pull-request delivery, or completed closure. Issue
-workflow and implementation-only options are rejected in this mode. See the
-[maintenance execution trace](end-to-end-execution.md#maintenance-mode) for
-the action, safety, and recovery contract.
+workflow and implementation-only options are rejected in this mode. See
+[Workflows](workflows.md#modes-and-queue-behavior) for the maintenance action
+contract and [Operations and recovery](operations-and-recovery.md) for its
+state and recovery contract.
 
 Use `--duplicate-action close` only when the operator accepts the additional
 issue-closure risk. The default `link` policy leaves both duplicate candidates

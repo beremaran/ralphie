@@ -104,6 +104,5 @@ landing page, and place changes in the page that owns the fact:
 - components and source locations: [Architecture](architecture.md); and
 - versioning and publishing: [Development](development.md#publishing).
 
-Keep the [end-to-end execution trace](end-to-end-execution.md) synchronized
-when source-level sequencing changes, and update the [documentation index](README.md)
+Update the [documentation index](README.md)
 when pages or reading paths change.

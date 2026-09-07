@@ -100,6 +100,11 @@ Run artifacts live under:
 └── issues/
 ```
 
+New runs write the durable event log to
+`<workspace>/.ralphie/runs/<run-id>/events.jsonl`; a resumed run reuses the
+directory containing its supplied state file. A maintenance dry run has no
+event-log path and writes no event log.
+
 A normal issue execution obtains a durable per-issue artifact store at:
 
 ```text
@@ -112,7 +117,9 @@ post-PR review/revision/publication/check/merge state, commit messages, created
 commits, resolution proof, decomposition decisions, and created child-number
 mappings. The post-PR delivery-state record is replaced idempotently as the
 latest compact lifecycle projection; head, attempt, revision, check, and
-terminal-reason fields keep it safe to reconcile after interruption.
+terminal-reason fields keep it safe to reconcile after interruption. Stale or
+legacy un-fingerprinted decisions are removed on load without disturbing the
+other artifacts for the issue.
 
 A successful or interrupted run uses this more detailed layout (OpenCode
 configuration is not stored in this tree):

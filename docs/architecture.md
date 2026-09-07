@@ -2,9 +2,7 @@
 
 This page is for contributors and maintainers who need the runtime and domain
 boundaries, component map, or source locations. It is the authoritative
-architecture overview. Return to the [documentation index](README.md), and see
-the [end-to-end execution trace](end-to-end-execution.md) for the detailed
-source-level sequence.
+architecture overview. Return to the [documentation index](README.md).
 
 ## Runtime boundaries
 
@@ -163,7 +161,8 @@ workspace; run state and recovery artifacts belong under the workspace's
 
 For workflow behavior and the agent/deterministic boundary, see [Workflows](workflows.md)
 and [Safety](safety.md). For state transitions and reconciliation, see
-[Operations and recovery](operations-and-recovery.md).
+[Operations and recovery](operations-and-recovery.md). For maintenance
+behavior, see [Workflows](workflows.md#modes-and-queue-behavior).
 
 ## Distribution boundary
 
@@ -186,11 +185,9 @@ binary, installer, Homebrew, and container distribution machinery was removed.
 | Complexity routing | `src/issues/executor.ts`, `src/issues/complexity.ts` |
 | Implementation/review/delivery | `src/issues/implementation-executor.ts`, `src/issues/pull-request-review.ts`, `src/issues/pull-request-review-coordinator.ts`, `src/github/pull-requests.ts` |
 | Decomposition and GitHub mutations | `src/issues/decomposition-executor.ts`, `src/github/issue-mutations.ts`, `src/github/issue-relationships.ts` |
+| Maintenance snapshot, planning, execution, and state | `src/maintain-issues.ts`, `src/maintain-issues-lifecycle.ts`, `src/maintain-issues-snapshot.ts`, `src/maintain-issues-snapshot-service.ts`, `src/maintain-issues-candidates.ts`, `src/maintain-issues-plan.ts`, `src/maintain-issues-state.ts` |
+| Maintenance GitHub reconciliation | `src/github/issue-maintenance.ts`, `src/github/issue-maintenance-relationships.ts`, `src/maintain-issues-grounding-reader.ts` |
 | OpenCode sessions and structured results | `src/agent/`, `src/opencode/` |
 | Git checkpoints, safety, and branches | `src/git/` |
 | Durable state and reconciliation | `src/run/`, `src/issues/artifacts.ts` |
 | Progress and exit semantics | `src/progress/`, `src/process/exit-code.ts` |
-
-The source-level trigger-to-exit path is maintained in the [end-to-end
-execution trace](end-to-end-execution.md), which cross-references these
-components by stage.

@@ -502,8 +502,6 @@ The main references are:
   component map.
 - [Development](./docs/development.md) — local setup, tests, and contribution
   expectations.
-- [End-to-end execution trace](./docs/end-to-end-execution.md) — the detailed
-  source-level trigger-to-exit path.
 
 ## Version and build metadata
 
