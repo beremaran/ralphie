@@ -19,13 +19,17 @@ import {
     classifyRecordUnavailable,
 } from "./skips.ts";
 import {
-    createMaintainableComment,
-    createMaintainableIssue,
-    createMaintainableThread,
-    type MaintainableIssue,
-    type MaintainableSkip,
-    type MaintainableSelectedThread,
-} from "../../maintain-issues-snapshot.ts";
+    createMaintenanceComment,
+    createMaintenanceCommentThread,
+    createMaintenanceIssue,
+    type MaintenanceCommentThread,
+    type MaintenanceIssue,
+    type MaintenanceSkip,
+} from "../snapshot.ts";
+import {
+    maintenanceCommentInputFromRest,
+    maintenanceIssueInputFromRest,
+} from "./translate.ts";
 import {
     projectThreadPrompt,
     type ThreadPromptProjectionResult,
@@ -68,42 +72,6 @@ const endpointFor = (
     return endpoint.bind(group) as MaintainReaderEndpoint;
 };
 
-const detailInputFor = (
-    value: RecordLike,
-    fallbackNumber: number,
-): RecordLike => ({
-    number: value.number ?? fallbackNumber,
-    nodeId: value.node_id ?? value.nodeId,
-    title: value.title,
-    body: value.body,
-    url: value.html_url ?? value.htmlUrl ?? value.url,
-    state: value.state,
-    author: value.user ?? value.author ?? null,
-    authorAssociation: value.author_association ?? value.authorAssociation,
-    labels: value.labels,
-    assignees: value.assignees,
-    milestone: value.milestone,
-    locked: value.locked,
-    createdAt: value.created_at ?? value.createdAt,
-    updatedAt: value.updated_at ?? value.updatedAt,
-});
-
-const commentInputFor = (value: unknown): RecordLike => {
-    const source = isRecord(value) ? value : {};
-    return {
-        id: source.id ?? source.database_id ?? source.databaseId,
-        nodeId: source.node_id ?? source.nodeId,
-        url: source.html_url ?? source.htmlUrl ?? source.url,
-        author: source.user ?? source.author ?? null,
-        authorAssociation:
-            source.author_association ?? source.authorAssociation,
-        body: source.body ?? source.content,
-        content: source.body ?? source.content,
-        createdAt: source.created_at ?? source.createdAt,
-        updatedAt: source.updated_at ?? source.updatedAt,
-    };
-};
-
 const responseData = (
     response: unknown,
     repository: string,
@@ -143,8 +111,8 @@ export const DEFAULT_MAINTAIN_THREAD_PROMPT_LIMIT = 32_000;
 export const DEFAULT_MAINTAIN_AGGREGATE_PROMPT_LIMIT = 2_000;
 
 export type MaintainableIssueDetail = {
-    readonly issue: MaintainableIssue;
-    readonly thread: MaintainableSelectedThread;
+    readonly issue: MaintenanceIssue;
+    readonly thread: MaintenanceCommentThread;
     readonly threadProjection: ThreadPromptProjectionResult;
 };
 
@@ -152,11 +120,15 @@ export type MaintainIssueDetail = MaintainableIssueDetail;
 
 export type MaintainReaderDetails = {
     readonly details: ReadonlyArray<MaintainableIssueDetail>;
-    readonly issues: ReadonlyArray<MaintainableIssue>;
-    readonly skips: ReadonlyArray<MaintainableSkip>;
+    readonly issues: ReadonlyArray<MaintenanceIssue>;
+    readonly skips: ReadonlyArray<MaintenanceSkip>;
 };
 
 export type MaintainableDetailCollection = MaintainReaderDetails;
+
+export type MaintainableSelectedThread = MaintenanceCommentThread;
+export type MaintainableIssue = MaintenanceIssue;
+export type MaintainableSkip = MaintenanceSkip;
 
 const uniqueIssueNumbers = (
     issueNumbers: ReadonlyArray<number>,
@@ -167,8 +139,8 @@ const uniqueIssueNumbers = (
             .sort((left, right) => left - right),
     );
 
-const skipThread = (skip: MaintainableSkip): MaintainableSelectedThread =>
-    createMaintainableThread({
+const skipThread = (skip: MaintenanceSkip): MaintenanceCommentThread =>
+    createMaintenanceCommentThread({
         comments: [],
         totalCount: 0,
         complete: false,
@@ -180,7 +152,7 @@ const skipThread = (skip: MaintainableSkip): MaintainableSelectedThread =>
     });
 
 const project = (
-    thread: MaintainableSelectedThread,
+    thread: MaintenanceCommentThread,
     options: MaintainReaderDetailOptions,
 ): ThreadPromptProjectionResult =>
     projectThreadPrompt({
@@ -196,10 +168,10 @@ const project = (
 
 const skippedDetail = (
     issueNumber: number,
-    skip: MaintainableSkip,
+    skip: MaintenanceSkip,
 ): MaintainableIssueDetail => {
     const thread = skipThread(skip);
-    const issue = createMaintainableIssue({
+    const issue = createMaintenanceIssue({
         number: issueNumber,
         skip,
         selectedThread: thread,
@@ -220,7 +192,7 @@ const readDetailRecord = async (
     signal: AbortSignal | undefined,
 ): Promise<
     | { readonly kind: "record"; readonly value: RecordLike }
-    | { readonly kind: "skip"; readonly skip: MaintainableSkip }
+    | { readonly kind: "skip"; readonly skip: MaintenanceSkip }
 > => {
     const endpointName = `repos/{owner}/{repo}/issues/${String(issueNumber)}`;
     let response: unknown;
@@ -266,7 +238,7 @@ const readComments = async (
     repo: string,
     issueNumber: number,
     signal: AbortSignal | undefined,
-): Promise<MaintainableSelectedThread> => {
+): Promise<MaintenanceCommentThread> => {
     const endpoint = endpointFor(client, "issues", "listComments", repository);
     const endpointName = `repos/{owner}/{repo}/issues/${String(issueNumber)}/comments`;
     let reportedTotal: number | undefined;
@@ -276,7 +248,8 @@ const readComments = async (
         requestEndpoint: endpoint,
         parameters: { owner, repo, issue_number: issueNumber },
         signal,
-        map: (value) => createMaintainableComment(commentInputFor(value)),
+        map: (value) =>
+            createMaintenanceComment(maintenanceCommentInputFromRest(value)),
         onPage: ({ totalCount }) => {
             if (totalCount !== undefined) reportedTotal = totalCount;
         },
@@ -289,7 +262,7 @@ const readComments = async (
             message: "comment total_count was smaller than fetched comments.",
         });
     }
-    return createMaintainableThread({
+    return createMaintenanceCommentThread({
         comments,
         totalCount,
         complete: true,
@@ -306,7 +279,7 @@ const collectOneDetail = async (
     options: MaintainReaderDetailOptions,
 ): Promise<{
     readonly detail: MaintainableIssueDetail;
-    readonly skip?: MaintainableSkip;
+    readonly skip?: MaintenanceSkip;
 }> => {
     throwIfAborted(signal);
     const detailEndpoint = endpointFor(client, "issues", "get", repository);
@@ -325,9 +298,12 @@ const collectOneDetail = async (
         };
     }
 
-    const detailInput = detailInputFor(result.value, issueNumber);
-    let thread: MaintainableSelectedThread;
-    let threadSkip: MaintainableSkip | undefined;
+    const detailInput = maintenanceIssueInputFromRest(
+        result.value,
+        issueNumber,
+    );
+    let thread: MaintenanceCommentThread;
+    let threadSkip: MaintenanceSkip | undefined;
     try {
         thread = await readComments(
             client,
@@ -342,7 +318,7 @@ const collectOneDetail = async (
         threadSkip = classifyRecordUnavailable(cause, issueNumber, repository);
         thread = skipThread(threadSkip);
     }
-    const issue = createMaintainableIssue({
+    const issue = createMaintenanceIssue({
         ...detailInput,
         selectedThread: thread,
         ...(threadSkip === undefined ? {} : { skip: threadSkip }),
@@ -368,7 +344,7 @@ export const collectMaintainReaderDetails = async (
 ): Promise<MaintainReaderDetails> => {
     const { owner, name } = parseRepositorySlug(repository);
     const details: MaintainableIssueDetail[] = [];
-    const skips: MaintainableSkip[] = [];
+    const skips: MaintenanceSkip[] = [];
     for (const issueNumber of uniqueIssueNumbers(issueNumbers)) {
         const result = await collectOneDetail(
             client,

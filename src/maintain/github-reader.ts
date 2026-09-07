@@ -23,10 +23,10 @@ import {
 } from "./github-reader/lists.ts";
 import { throwIfAborted } from "./github-reader/diagnostics.ts";
 import type {
-    MaintainableIssue,
-    MaintainableLabel,
-    MaintainableSkip,
-} from "../maintain-issues-snapshot.ts";
+    MaintenanceIssue,
+    MaintenanceLabel,
+    MaintenanceSkip,
+} from "./github-reader/../snapshot.ts";
 
 export type MaintainSelectionInput = {
     readonly maxIssues?: number;
@@ -126,14 +126,14 @@ export const selectMaintainableIssues = selectMaintainableIssueNumbers;
 
 export type MaintainableSnapshot = {
     readonly repository: MaintainRepositoryIdentity;
-    readonly labels: ReadonlyArray<MaintainableLabel>;
+    readonly labels: ReadonlyArray<MaintenanceLabel>;
     readonly openIssueSummaries: ReadonlyArray<MaintainableIssueSummary>;
     readonly selectedIssueNumbers: ReadonlyArray<number>;
     readonly selectedDetails: ReadonlyArray<
         MaintainReaderDetails["details"][number]
     >;
-    readonly selectedIssues: ReadonlyArray<MaintainableIssue>;
-    readonly skips: ReadonlyArray<MaintainableSkip>;
+    readonly selectedIssues: ReadonlyArray<MaintenanceIssue>;
+    readonly skips: ReadonlyArray<MaintenanceSkip>;
     readonly selection: MaintainSelectionInput;
 };
 

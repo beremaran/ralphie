@@ -2,8 +2,8 @@
  * Deterministic bounded comment-thread prompt projections.
  *
  * Pure read-model/planner surface over the full thread contract in
- * `maintain-issues-snapshot.ts` (`MaintainableSelectedThread`,
- * `MaintainableComment`). `projectThreadPrompt` bounds three explicit prompt
+ * `maintain-issues-snapshot.ts` (`MaintenanceCommentThread`,
+ * `MaintenanceComment`). `projectThreadPrompt` bounds three explicit prompt
  * budgets - per comment, per thread transcript, and per aggregate summary -
  * with explicit truncation metadata, and never mutates the fetched thread:
  * the result carries the unchanged thread alongside its bounded projections,
@@ -27,9 +27,9 @@
  * This module performs no network, filesystem, Git, or GitHub work.
  */
 import type {
-    MaintainableComment,
-    MaintainableSelectedThread,
-} from "./maintain-issues-snapshot.ts";
+    MaintenanceComment,
+    MaintenanceCommentThread,
+} from "./maintain/snapshot.ts";
 
 /** Stable truncation marker appended to retained content when a body is cut. */
 export const THREAD_PROMPT_TRUNCATION_MARKER = "[truncated]";
@@ -181,7 +181,7 @@ const projectCommentContent = (
 };
 
 export const projectCommentPrompt = (
-    comment: MaintainableComment,
+    comment: MaintenanceComment,
     limit: number,
 ): CommentPromptProjection => {
     const validated = validateThreadPromptLimit("comment prompt limit", limit);
@@ -201,6 +201,7 @@ export const projectCommentPrompt = (
     });
 };
 
+export const projectMaintenanceCommentPrompt = projectCommentPrompt;
 export const projectMaintainableCommentPrompt = projectCommentPrompt;
 
 export type ThreadPromptProjection = {
@@ -389,9 +390,9 @@ const projectAggregatePrompt = (
     });
 };
 
-export type MaintainableThreadPromptInput = {
+export type MaintenanceThreadPromptInput = {
     /** The unchanged full fetched thread from the snapshot contract. */
-    readonly thread: MaintainableSelectedThread;
+    readonly thread: MaintenanceCommentThread;
     /** Maximum characters emitted for each comment's content. */
     readonly commentPromptLimit: number;
     /** Maximum characters of the projected thread transcript text. */
@@ -402,7 +403,7 @@ export type MaintainableThreadPromptInput = {
 
 export type ThreadPromptProjectionResult = {
     /** The full fetched thread, unchanged: a bounded projection never downgrades a complete fetch. */
-    readonly fetchedThread: MaintainableSelectedThread;
+    readonly fetchedThread: MaintenanceCommentThread;
     /** One projection per fetched comment, identity and original order preserved. */
     readonly comments: ReadonlyArray<CommentPromptProjection>;
     /** The bounded thread transcript plus truncation metadata. */
@@ -415,7 +416,7 @@ export type ThreadPromptProjectionResult = {
 };
 
 export const projectThreadPrompt = (
-    input: MaintainableThreadPromptInput,
+    input: MaintenanceThreadPromptInput,
 ): ThreadPromptProjectionResult => {
     const commentLimit = validateThreadPromptLimit(
         "comment prompt limit",
@@ -445,4 +446,8 @@ export const projectThreadPrompt = (
     });
 };
 
+export const projectMaintenanceThreadPrompt = projectThreadPrompt;
 export const projectMaintainableThreadPrompt = projectThreadPrompt;
+export type MaintainableThreadPromptInput = MaintenanceThreadPromptInput;
+export type MaintainableComment = MaintenanceComment;
+export type MaintainableSelectedThread = MaintenanceCommentThread;

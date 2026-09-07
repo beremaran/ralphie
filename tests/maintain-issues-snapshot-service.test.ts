@@ -12,12 +12,12 @@ import {
     type MaintenanceSnapshotGitHubReader,
 } from "../src/maintain-issues-snapshot-service.ts";
 import type { MaintainableSnapshot } from "../src/maintain/github-reader.ts";
-import type { MaintainableIssueSummary } from "../src/maintain/github-reader/lists.ts";
+import type { MaintainIssueSummary } from "../src/maintain/github-reader/lists.ts";
 import {
-    createMaintainableIssue,
-    type MaintainableIssue,
-    type MaintainableSkip,
-} from "../src/maintain-issues-snapshot.ts";
+    createMaintenanceIssue,
+    type MaintenanceIssue,
+    type MaintenanceSkip,
+} from "../src/maintain/snapshot.ts";
 
 const CLIENT = {} as Octokit;
 const REPOSITORY = "owner/repository";
@@ -73,8 +73,8 @@ const comment = (body: string) => ({
     marker: undefined,
 });
 
-const makeIssue = (body = "issue body"): MaintainableIssue =>
-    createMaintainableIssue({
+const makeIssue = (body = "issue body"): MaintenanceIssue =>
+    createMaintenanceIssue({
         number: 7,
         nodeId: "I_7",
         title: "Maintenance subject",
@@ -97,7 +97,7 @@ const makeIssue = (body = "issue body"): MaintainableIssue =>
         },
     });
 
-const makeSummary = (description = "Ready"): MaintainableIssueSummary =>
+const makeSummary = (description = "Ready"): MaintainIssueSummary =>
     ({
         number: 7,
         nodeId: "I_7",
@@ -112,18 +112,18 @@ const makeSummary = (description = "Ready"): MaintainableIssueSummary =>
         state: "open",
         isOpen: true,
         raw: {},
-    }) as MaintainableIssueSummary;
+    }) as MaintainIssueSummary;
 
 const makeSource = (
     input: {
-        readonly issue?: MaintainableIssue;
+        readonly issue?: MaintenanceIssue;
         readonly summaryDescription?: string;
         readonly labels?: ReadonlyArray<{
             readonly name: string;
             readonly description: string | null;
             readonly color: string | null;
         }>;
-        readonly skips?: ReadonlyArray<MaintainableSkip>;
+        readonly skips?: ReadonlyArray<MaintenanceSkip>;
     } = {},
 ): MaintainableSnapshot => {
     const issue = input.issue ?? makeIssue();

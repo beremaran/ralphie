@@ -16,14 +16,20 @@ import {
     type MaintainReaderEndpoint,
 } from "./diagnostics.ts";
 import {
-    normalizeMaintainableActor,
-    normalizeMaintainableIssueState,
-    normalizeMaintainableLabel,
-    type MaintainableActor,
-    type MaintainableIssueState,
-    type MaintainableLabel,
-} from "../../maintain-issues-snapshot.ts";
+    createMaintenanceRepository,
+    normalizeMaintenanceActor,
+    normalizeMaintenanceIssueState,
+    normalizeMaintenanceLabel,
+    type MaintenanceActor,
+    type MaintenanceIssueState,
+    type MaintenanceLabel,
+    type MaintenanceRepository,
+} from "../snapshot.ts";
 import { parseRepositorySlug } from "../../github/repository.ts";
+import {
+    maintenanceIssueSummaryInputFromRest,
+    maintenanceRepositoryInputFromRest,
+} from "./translate.ts";
 
 type RecordLike = Record<string, unknown>;
 
@@ -63,15 +69,7 @@ const frozenRaw = (value: unknown): Readonly<Record<string, unknown>> =>
         ? cloneAndFreeze(value)
         : Object.freeze({ value: cloneAndFreeze(value) });
 
-export type MaintainRepositoryIdentity = {
-    readonly fullName: string;
-    readonly defaultBranch: string;
-    readonly htmlUrl: string;
-    /** The unmodified REST `default_branch` value, including unknown shapes. */
-    readonly rawDefaultBranch: unknown;
-    /** A deep-frozen copy retaining every unknown REST response field. */
-    readonly raw: Readonly<Record<string, unknown>>;
-};
+export type MaintainRepositoryIdentity = MaintenanceRepository;
 
 export type MaintainableRepositoryIdentity = MaintainRepositoryIdentity;
 
@@ -80,16 +78,18 @@ export const mapMaintainRepositoryIdentity = (
     repository = "",
 ): MaintainRepositoryIdentity => {
     const source = isRecord(value) ? value : {};
-    const rawDefaultBranch = source.default_branch;
-    const defaultBranch = text(rawDefaultBranch);
-    const fullName =
-        text(source.full_name) || text(source.fullName) || text(repository);
-    const htmlUrl = text(source.html_url) || text(source.htmlUrl);
+    // Single REST translation: provider variations become canonical inputs
+    // here; canonical construction never reads REST keys.
+    const canonicalInput = maintenanceRepositoryInputFromRest(
+        value,
+        repository,
+    );
+    const canonical = createMaintenanceRepository(canonicalInput, repository);
     return Object.freeze({
-        fullName,
-        defaultBranch,
-        htmlUrl,
-        rawDefaultBranch: cloneAndFreeze(rawDefaultBranch),
+        fullName: canonical.fullName,
+        defaultBranch: canonical.defaultBranch,
+        htmlUrl: canonical.htmlUrl,
+        rawDefaultBranch: cloneAndFreeze(source.default_branch),
         raw: frozenRaw(source),
     });
 };
@@ -104,12 +104,12 @@ export type MaintainableIssueSummary = {
     readonly title: string;
     readonly url: string;
     readonly htmlUrl: string;
-    readonly labels: ReadonlyArray<MaintainableLabel>;
-    readonly author: MaintainableActor | null;
+    readonly labels: ReadonlyArray<MaintenanceLabel>;
+    readonly author: MaintenanceActor | null;
     readonly createdAt: string;
     readonly updatedAt: string;
     readonly commentCount: number;
-    readonly state: MaintainableIssueState;
+    readonly state: MaintenanceIssueState;
     readonly isOpen: boolean;
     /** Deep-frozen REST evidence, including fields not used by comparisons. */
     readonly raw: Readonly<Record<string, unknown>>;
@@ -117,9 +117,13 @@ export type MaintainableIssueSummary = {
 
 export type MaintainIssueSummary = MaintainableIssueSummary;
 
-const sortedLabels = (value: unknown): ReadonlyArray<MaintainableLabel> => {
+export type MaintainableLabelAlias = MaintenanceLabel;
+export type MaintainableActorAlias = MaintenanceActor;
+export type MaintainableIssueStateAlias = MaintenanceIssueState;
+
+const sortedLabels = (value: unknown): ReadonlyArray<MaintenanceLabel> => {
     if (!Array.isArray(value)) return Object.freeze([]);
-    const labels = value.map((entry) => normalizeMaintainableLabel(entry));
+    const labels = value.map((entry) => normalizeMaintenanceLabel(entry));
     labels.sort((left, right) =>
         left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
     );
@@ -130,21 +134,21 @@ export const mapMaintainableIssueSummary = (
     value: unknown,
 ): MaintainableIssueSummary => {
     const source = isRecord(value) ? value : {};
-    const state = normalizeMaintainableIssueState(source.state);
+    // Single REST translation: provider variations become canonical fields
+    // here; canonical normalization never reads REST keys.
+    const canonical = maintenanceIssueSummaryInputFromRest(value);
+    const state = normalizeMaintenanceIssueState(canonical.state);
     return Object.freeze({
-        number: numberValue(source.number),
-        nodeId: text(source.node_id) || text(source.nodeId),
-        title: text(source.title),
-        url: text(source.html_url) || text(source.url),
-        htmlUrl:
-            text(source.html_url) || text(source.htmlUrl) || text(source.url),
-        labels: sortedLabels(source.labels),
-        author: normalizeMaintainableActor(
-            source.user ?? source.author ?? null,
-        ),
-        createdAt: text(source.created_at) || text(source.createdAt),
-        updatedAt: text(source.updated_at) || text(source.updatedAt),
-        commentCount: numberValue(source.comments),
+        number: numberValue(canonical.number),
+        nodeId: text(canonical.nodeId),
+        title: text(canonical.title),
+        url: text(canonical.url),
+        htmlUrl: text(canonical.htmlUrl),
+        labels: sortedLabels(canonical.labels),
+        author: normalizeMaintenanceActor(canonical.author),
+        createdAt: text(canonical.createdAt),
+        updatedAt: text(canonical.updatedAt),
+        commentCount: numberValue(canonical.commentCount),
         state,
         isOpen: state === "open",
         raw: frozenRaw(source),
@@ -156,7 +160,7 @@ export const mapIssueSummary = mapMaintainableIssueSummary;
 
 export type MaintainReaderLists = {
     readonly repository: MaintainRepositoryIdentity;
-    readonly labels: ReadonlyArray<MaintainableLabel>;
+    readonly labels: ReadonlyArray<MaintenanceLabel>;
     readonly openIssueSummaries: ReadonlyArray<MaintainableIssueSummary>;
 };
 
@@ -247,8 +251,8 @@ const readRepository = async (
 };
 
 const sortedCatalog = (
-    labels: ReadonlyArray<MaintainableLabel>,
-): ReadonlyArray<MaintainableLabel> =>
+    labels: ReadonlyArray<MaintenanceLabel>,
+): ReadonlyArray<MaintenanceLabel> =>
     Object.freeze(
         [...labels].sort((left, right) =>
             left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
@@ -295,7 +299,7 @@ export const collectMaintainReaderLists = async (
         requestEndpoint: labelsEndpoint,
         parameters: { owner, repo: name },
         signal,
-        map: (value) => normalizeMaintainableLabel(value),
+        map: (value) => normalizeMaintenanceLabel(value),
     });
     throwIfAborted(signal);
 

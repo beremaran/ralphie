@@ -13,13 +13,14 @@ import {
     MaintainGitHubReaderDiagnosticError,
 } from "./diagnostics.ts";
 import {
-    createMaintainableIssue,
-    createMaintainableSkip,
-    type MaintainableIssue,
-    type MaintainableIssueInput,
-    type MaintainableSkipReason,
-    type MaintainableSkip,
-} from "../../maintain-issues-snapshot.ts";
+    createMaintenanceIssue,
+    normalizeMaintenanceSkip,
+    type MaintenanceIssue,
+    type MaintenanceIssueInput,
+    type MaintenanceSkip,
+    type MaintenanceSkipInput,
+    type MaintenanceSkipReason,
+} from "../snapshot.ts";
 
 type RecordLike = Record<string, unknown>;
 
@@ -61,11 +62,11 @@ const detailFor = (cause: unknown, fallback: string): string => {
 };
 
 const skip = (
-    reason: MaintainableSkipReason,
+    reason: MaintenanceSkipReason,
     detail: string,
     issueNumber: number,
-): MaintainableSkip => {
-    const result = createMaintainableSkip({ reason, detail, issueNumber });
+): MaintenanceSkip => {
+    const result = normalizeMaintenanceSkip({ reason, detail, issueNumber });
     // The arguments are fixed by this module, so the contract creator cannot
     // reject them. Keep a defensive failure for future contract changes.
     if (result === undefined)
@@ -114,7 +115,7 @@ export const isPullRequestRecord = (value: unknown): boolean =>
 export const classifyPullRequestRecord = (
     value: unknown,
     issueNumber: number,
-): MaintainableSkip | undefined =>
+): MaintenanceSkip | undefined =>
     isPullRequestRecord(value)
         ? skip(
               "unavailable",
@@ -132,7 +133,7 @@ export const classifyRecordUnavailable = (
     cause: unknown,
     issueNumber: number,
     repository = "unknown/unknown",
-): MaintainableSkip => {
+): MaintenanceSkip => {
     if (cause instanceof MaintainGitHubReaderDiagnosticError) throw cause;
     if (isMaintainReaderRateLimited(cause))
         throw diagnosticForHardFailure(
@@ -179,7 +180,7 @@ export const classifyMaintainableRecordUnavailable = classifyRecordUnavailable;
 export const classifyMaintenanceRecordUnavailable = classifyRecordUnavailable;
 
 /**
- * Classify a detail payload before it reaches `createMaintainableIssue`.
+ * Classify a detail payload before it reaches `createMaintenanceIssue`.
  * Presence of `pull_request` is significant even when its value is null or
  * undefined; the REST list/detail contract uses the key to distinguish PRs.
  */
@@ -187,7 +188,7 @@ export const classifyRecord = (
     value: unknown,
     issueNumber: number,
     repository = "unknown/unknown",
-): MaintainableSkip | undefined =>
+): MaintenanceSkip | undefined =>
     classifyPullRequestRecord(value, issueNumber) ??
     (isRecord(value)
         ? undefined
@@ -199,9 +200,9 @@ export const classifyMaintainableRecord = classifyRecord;
 export const mapMaintainableIssueRecord = (
     value: unknown,
     issueNumber?: number,
-): MaintainableIssue => {
-    const input = (isRecord(value) ? value : {}) as MaintainableIssueInput;
-    return createMaintainableIssue({
+): MaintenanceIssue => {
+    const input = (isRecord(value) ? value : {}) as MaintenanceIssueInput;
+    return createMaintenanceIssue({
         ...input,
         ...(issueNumber === undefined ? {} : { number: issueNumber }),
         ...(isRecord(value) && value.author === null ? { author: null } : {}),
@@ -209,3 +210,7 @@ export const mapMaintainableIssueRecord = (
 };
 
 export const mapRecordToMaintainableIssue = mapMaintainableIssueRecord;
+export type MaintainableSkip = MaintenanceSkip;
+export type MaintainableIssue = MaintenanceIssue;
+export type MaintainableIssueInput = MaintenanceIssueInput;
+export type MaintainableSkipInput = MaintenanceSkipInput;

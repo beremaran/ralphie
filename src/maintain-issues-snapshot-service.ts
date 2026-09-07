@@ -20,7 +20,7 @@ import {
     type MaintainSelectionInput,
     type MaintainableSnapshot,
 } from "./maintain/github-reader.ts";
-import type { MaintainableIssueSummary } from "./maintain/github-reader/lists.ts";
+import type { MaintainIssueSummary } from "./maintain/github-reader/lists.ts";
 import {
     DEFAULT_GUIDANCE_AGGREGATE_BYTE_LIMIT,
     DEFAULT_GUIDANCE_PER_FILE_BYTE_LIMIT,
@@ -36,21 +36,20 @@ import {
     validateGuidanceLimit,
 } from "./maintain-issues-grounding-reader.ts";
 import {
-    createMaintainableIssue,
-    createMaintainableSkip,
-    normalizeMaintainableActor,
-    normalizeMaintainableAvailability,
-    normalizeMaintainableIssueState,
-    normalizeMaintainableLabel,
-    normalizeMaintainableSkip,
-    type MaintainableActor,
-    type MaintainableAvailability,
-    type MaintainableComment,
-    type MaintainableIssue,
-    type MaintainableLabel,
-    type MaintainableSelectedThread,
-    type MaintainableSkip,
-} from "./maintain-issues-snapshot.ts";
+    createMaintenanceIssue,
+    normalizeMaintenanceActor,
+    normalizeMaintenanceAvailability,
+    normalizeMaintenanceIssueState,
+    normalizeMaintenanceLabel,
+    normalizeMaintenanceSkip,
+    type MaintenanceActor,
+    type MaintenanceAvailability,
+    type MaintenanceComment,
+    type MaintenanceCommentThread,
+    type MaintenanceIssue,
+    type MaintenanceLabel,
+    type MaintenanceSkip,
+} from "./maintain/snapshot.ts";
 import {
     DEFAULT_MAINTAIN_AGGREGATE_PROMPT_LIMIT,
     DEFAULT_MAINTAIN_COMMENT_PROMPT_LIMIT,
@@ -424,22 +423,20 @@ const cloneRepository = (
     value: MaintainableSnapshot["repository"],
 ): MaintainableSnapshot["repository"] => {
     const source = (value ?? {}) as RecordLike;
+    // Canonical only: the reader translates REST variations once before
+    // capture, so this boundary reads canonical keys.
     return Object.freeze({
-        fullName: text(source.fullName ?? source.full_name),
-        defaultBranch: text(source.defaultBranch ?? source.default_branch),
-        htmlUrl: text(source.htmlUrl ?? source.html_url),
-        rawDefaultBranch: cloneDeepFrozen(
-            source.rawDefaultBranch !== undefined
-                ? source.rawDefaultBranch
-                : source.default_branch,
-        ),
+        fullName: text(source.fullName),
+        defaultBranch: text(source.defaultBranch),
+        htmlUrl: text(source.htmlUrl),
+        rawDefaultBranch: cloneDeepFrozen(source.rawDefaultBranch),
         raw: frozenRecord(source.raw),
     });
 };
 
-const cloneLabels = (value: unknown): ReadonlyArray<MaintainableLabel> => {
+const cloneLabels = (value: unknown): ReadonlyArray<MaintenanceLabel> => {
     if (!Array.isArray(value)) return Object.freeze([]);
-    const labels = value.map((entry) => normalizeMaintainableLabel(entry));
+    const labels = value.map((entry) => normalizeMaintenanceLabel(entry));
     labels.sort(
         (left, right) =>
             compareText(left.name, right.name) ||
@@ -449,55 +446,49 @@ const cloneLabels = (value: unknown): ReadonlyArray<MaintainableLabel> => {
     return Object.freeze(labels);
 };
 
-const cloneActor = (value: unknown): MaintainableActor | null =>
-    normalizeMaintainableActor(value);
+const cloneActor = (value: unknown): MaintenanceActor | null =>
+    normalizeMaintenanceActor(value);
 
-const cloneAssignees = (value: unknown): ReadonlyArray<MaintainableActor> => {
+const cloneAssignees = (value: unknown): ReadonlyArray<MaintenanceActor> => {
     if (!Array.isArray(value)) return Object.freeze([]);
     const assignees = value
         .map((entry) => cloneActor(entry))
-        .filter((entry): entry is MaintainableActor => entry !== null);
+        .filter((entry): entry is MaintenanceActor => entry !== null);
     assignees.sort(compareCanonical);
     return Object.freeze(assignees);
 };
 
-const cloneSummary = (value: unknown): MaintainableIssueSummary => {
+const cloneSummary = (value: unknown): MaintainIssueSummary => {
     const source = isRecord(value) ? value : {};
-    const state = normalizeMaintainableIssueState(source.state);
+    const state = normalizeMaintenanceIssueState(source.state);
     return Object.freeze({
         number: nonNegativeInteger(source.number),
-        nodeId: text(source.nodeId ?? source.node_id),
+        nodeId: text(source.nodeId),
         title: text(source.title),
-        url: text(source.url ?? source.htmlUrl ?? source.html_url),
-        htmlUrl: text(source.htmlUrl ?? source.html_url ?? source.url),
+        url: text(source.url),
+        htmlUrl: text(source.htmlUrl),
         labels: cloneLabels(source.labels),
-        author: cloneActor(source.author ?? source.user ?? null),
-        createdAt: text(source.createdAt ?? source.created_at),
-        updatedAt: text(source.updatedAt ?? source.updated_at),
-        commentCount: nonNegativeInteger(
-            source.commentCount ?? source.comments,
-        ),
+        author: cloneActor(source.author),
+        createdAt: text(source.createdAt),
+        updatedAt: text(source.updatedAt),
+        commentCount: nonNegativeInteger(source.commentCount),
         state,
         isOpen: state === "open",
         raw: frozenRecord(source.raw ?? source),
     });
 };
 
-const cloneAvailability = (value: unknown): MaintainableAvailability => {
-    return normalizeMaintainableAvailability(value);
+const cloneAvailability = (value: unknown): MaintenanceAvailability => {
+    return normalizeMaintenanceAvailability(value);
 };
 
 const cloneIssue = (
     value: unknown,
     threadOverride?: unknown,
-): MaintainableIssue => {
+): MaintenanceIssue => {
     const source = isRecord(value) ? value : {};
-    const selectedThread =
-        threadOverride ??
-        source.selectedThread ??
-        source.thread ??
-        source.commentThread;
-    return createMaintainableIssue({
+    const selectedThread = threadOverride ?? source.selectedThread;
+    return createMaintenanceIssue({
         ...source,
         labels: cloneLabels(source.labels),
         assignees: cloneAssignees(source.assignees),
@@ -508,12 +499,12 @@ const cloneIssue = (
         availability: cloneAvailability(source.availability),
         ...(source.skip === undefined
             ? {}
-            : { skip: normalizeMaintainableSkip(source.skip) }),
+            : { skip: normalizeMaintenanceSkip(source.skip) }),
     });
 };
 
 const cloneProjection = (
-    thread: MaintainableSelectedThread,
+    thread: MaintenanceCommentThread,
     budgets: MaintenanceSnapshotBudgets,
 ): ThreadPromptProjectionResult =>
     projectThreadPrompt({
@@ -532,10 +523,8 @@ const detailFor = (
     const sourceThread =
         source.thread ??
         source.selectedThread ??
-        source.commentThread ??
         sourceIssue.selectedThread ??
-        sourceIssue.thread ??
-        sourceIssue.commentThread;
+        sourceIssue.thread;
     const issue = cloneIssue(sourceIssue, sourceThread);
     const thread = issue.selectedThread;
     return Object.freeze({
@@ -567,7 +556,7 @@ const missingDetail = (
     issueNumber: number,
     budgets: MaintenanceSnapshotBudgets,
 ): MaintainSnapshotDetail => {
-    const skip = createMaintainableSkip({
+    const skip = normalizeMaintenanceSkip({
         reason: "unavailable",
         detail: "selected issue detail was not returned by the GitHub reader",
         issueNumber,
@@ -584,7 +573,7 @@ const missingDetail = (
 
 type MaintainSnapshotDetail = MaintainableSnapshot["selectedDetails"][number];
 
-const skipKey = (skip: MaintainableSkip): string =>
+const skipKey = (skip: MaintenanceSkip): string =>
     canonicalMaintenanceJson({
         reason: skip.reason,
         detail: skip.detail,
@@ -637,8 +626,8 @@ const detailsForNumbers = (
 
 const summariesFor = (
     source: RecordLike,
-): ReadonlyArray<MaintainableIssueSummary> => {
-    const summaryByNumber = new Map<number, MaintainableIssueSummary>();
+): ReadonlyArray<MaintainIssueSummary> => {
+    const summaryByNumber = new Map<number, MaintainIssueSummary>();
     if (!Array.isArray(source.openIssueSummaries)) {
         return Object.freeze([]);
     }
@@ -661,11 +650,11 @@ const summariesFor = (
 
 const skipsFor = (
     source: RecordLike,
-    issues: ReadonlyArray<MaintainableIssue>,
-): ReadonlyArray<MaintainableSkip> => {
-    const skipByKey = new Map<string, MaintainableSkip>();
+    issues: ReadonlyArray<MaintenanceIssue>,
+): ReadonlyArray<MaintenanceSkip> => {
+    const skipByKey = new Map<string, MaintenanceSkip>();
     const add = (value: unknown): void => {
-        const skip = normalizeMaintainableSkip(value);
+        const skip = normalizeMaintenanceSkip(value);
         if (skip === undefined) return;
         const key = skipKey(skip);
         if (!skipByKey.has(key)) skipByKey.set(key, skip);
@@ -682,12 +671,12 @@ const cloneGithubSnapshot = (
     budgets: MaintenanceSnapshotBudgets,
 ): {
     readonly repository: MaintainableSnapshot["repository"];
-    readonly labels: ReadonlyArray<MaintainableLabel>;
-    readonly openIssueSummaries: ReadonlyArray<MaintainableIssueSummary>;
+    readonly labels: ReadonlyArray<MaintenanceLabel>;
+    readonly openIssueSummaries: ReadonlyArray<MaintainIssueSummary>;
     readonly selectedIssueNumbers: ReadonlyArray<number>;
     readonly selectedDetails: ReadonlyArray<MaintainSnapshotDetail>;
-    readonly selectedIssues: ReadonlyArray<MaintainableIssue>;
-    readonly skips: ReadonlyArray<MaintainableSkip>;
+    readonly selectedIssues: ReadonlyArray<MaintenanceIssue>;
+    readonly skips: ReadonlyArray<MaintenanceSkip>;
 } => {
     const source = (value ?? {}) as unknown as RecordLike;
     const selectedIssueNumbers = uniqueSelectedNumbers(
@@ -797,7 +786,7 @@ const cloneGroundingOutcome = (
     return Object.freeze({ status: "skipped", skip });
 };
 
-const actorFingerprint = (actor: MaintainableActor | null): unknown =>
+const actorFingerprint = (actor: MaintenanceActor | null): unknown =>
     actor === null
         ? null
         : {
@@ -806,21 +795,21 @@ const actorFingerprint = (actor: MaintainableActor | null): unknown =>
               nodeId: actor.nodeId,
           };
 
-const labelFingerprint = (label: MaintainableLabel): RecordLike => ({
+const labelFingerprint = (label: MaintenanceLabel): RecordLike => ({
     name: label.name,
     description: label.description,
     color: label.color,
 });
 
 const availabilityFingerprint = (
-    availability: MaintainableAvailability,
+    availability: MaintenanceAvailability,
 ): RecordLike => ({
     kind: availability.kind,
     reason: availability.reason,
     detail: availability.detail,
 });
 
-const skipFingerprint = (skip: MaintainableSkip | undefined): unknown =>
+const skipFingerprint = (skip: MaintenanceSkip | undefined): unknown =>
     skip === undefined
         ? null
         : {
@@ -829,7 +818,7 @@ const skipFingerprint = (skip: MaintainableSkip | undefined): unknown =>
               issueNumber: skip.issueNumber,
           };
 
-const commentFingerprint = (comment: MaintainableComment): RecordLike => ({
+const commentFingerprint = (comment: MaintenanceComment): RecordLike => ({
     id: comment.id,
     databaseId: comment.databaseId,
     nodeId: comment.nodeId,
@@ -845,7 +834,7 @@ const commentFingerprint = (comment: MaintainableComment): RecordLike => ({
     marker: markerValue(comment.marker),
 });
 
-const threadFingerprint = (thread: MaintainableSelectedThread): RecordLike => ({
+const threadFingerprint = (thread: MaintenanceCommentThread): RecordLike => ({
     comments: thread.comments.map(commentFingerprint),
     fetchedCount: thread.fetchedCount,
     totalCount: thread.totalCount,
@@ -903,7 +892,7 @@ const projectionFingerprint = (
     aggregateLimit: projection.aggregateLimit,
 });
 
-const issueFingerprint = (issue: MaintainableIssue): RecordLike => ({
+const issueFingerprint = (issue: MaintenanceIssue): RecordLike => ({
     number: issue.number,
     nodeId: issue.nodeId,
     title: issue.title,
@@ -928,7 +917,7 @@ const issueFingerprint = (issue: MaintainableIssue): RecordLike => ({
     skip: skipFingerprint(issue.skip),
 });
 
-const summaryFingerprint = (summary: MaintainableIssueSummary): RecordLike => ({
+const summaryFingerprint = (summary: MaintainIssueSummary): RecordLike => ({
     number: summary.number,
     nodeId: summary.nodeId,
     title: summary.title,

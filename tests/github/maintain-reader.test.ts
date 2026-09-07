@@ -8,9 +8,9 @@ import {
     selectMaintainableIssueNumbers,
 } from "../../src/maintain/github-reader.ts";
 import {
-    createMaintainableIssue,
-    createMaintainableThread,
-} from "../../src/maintain-issues-snapshot.ts";
+    cloneMaintenanceIssue,
+    createMaintenanceCommentThread,
+} from "../../src/maintain/snapshot.ts";
 
 const response = (data: unknown, link?: string, status = 200): unknown => ({
     data,
@@ -137,8 +137,10 @@ describe("composed maintenance GitHub reader", () => {
         if (selectedIssue === undefined || selectedDetail === undefined) {
             throw new Error("expected one selected issue detail");
         }
-        const roundTrip = createMaintainableIssue(selectedIssue);
-        const threadRoundTrip = createMaintainableThread(selectedDetail.thread);
+        const roundTrip = cloneMaintenanceIssue(selectedIssue);
+        const threadRoundTrip = createMaintenanceCommentThread(
+            selectedDetail.thread,
+        );
         expect(roundTrip).toEqual(selectedIssue);
         expect(threadRoundTrip).toEqual(selectedDetail.thread);
         expect(Object.isFrozen(snapshot)).toBe(true);

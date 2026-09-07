@@ -43,9 +43,9 @@ import { open, readdir, realpath } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 
 import {
-    createUnknownValue,
-    type MaintainableUnknownValue,
-} from "./maintain-issues-snapshot.ts";
+    createMaintenanceUnknown,
+    type MaintenanceUnknown,
+} from "./maintain/snapshot.ts";
 import {
     CommandAbortedError,
     CommandRunnerLive,
@@ -127,7 +127,7 @@ export type GroundingSkipReason =
     | "dirty-checkout"
     | "missing-head"
     | "unreadable-repository"
-    | MaintainableUnknownValue;
+    | MaintenanceUnknown;
 
 /** Typed safe-skip outcome with a diagnostic reason. */
 export type GroundingSkip = {
@@ -161,7 +161,7 @@ export const normalizeGroundingSkipReason = (
     ) {
         return value;
     }
-    return createUnknownValue(value) as GroundingSkipReason;
+    return createMaintenanceUnknown(value) as GroundingSkipReason;
 };
 
 /** Availability of one guidance file in the bounded bundle. */

@@ -2,9 +2,18 @@
  * Canonical maintenance snapshot seam.
  *
  * A single typed snapshot vocabulary with one name per concept and one
- * construction function per value. The legacy compatibility surface in
- * `src/maintain-issues-snapshot.ts` remains supported and delegates to the
- * same values; this module is the preferred seam for new callers.
+ * construction function per value. This module is the preferred seam for new
+ * callers; the compatibility surface in `src/maintain-issues-snapshot.ts`
+ * remains supported and accepts the same canonical values.
+ *
+ * REST translation lives exactly once at the GitHub reader boundary
+ * (`src/maintain/github-reader/translate.ts`), which maps provider records
+ * into the canonical inputs below. These inputs use only canonical camelCase
+ * keys: they never read REST snake_case keys (`node_id`, `html_url`,
+ * `author_association`, `created_at`, ...) or REST aliases (`user` for
+ * `author`). Unknown provider values, unavailable comment threads, bounded
+ * evidence, and fail-closed completeness are preserved by the construction
+ * functions, which delegate to the shared value layer.
  *
  * Canonical concepts covered here:
  * - repository (`MaintenanceRepository`)
@@ -42,57 +51,166 @@ import {
     isRalphieManaged,
     isMaintainableIssueOpen,
     type MaintainableActor,
-    type MaintainableActorInput,
     type MaintainableAuthorAssociation,
     type MaintainableAvailability,
-    type MaintainableAvailabilityInput,
     type MaintainableComment,
-    type MaintainableCommentInput,
     type MaintainableIssue,
-    type MaintainableIssueInput,
     type MaintainableLabel,
-    type MaintainableLabelInput,
     type MaintainableMilestone,
-    type MaintainableMilestoneInput,
     type MaintainableSelectedThread,
-    type MaintainableSelectedThreadInput,
     type MaintainableSkip,
-    type MaintainableSkipInput,
     type MaintainableUnknownValue,
     type RalphieMarker,
 } from "../maintain-issues-snapshot.ts";
-import { mapMaintainRepositoryIdentity } from "./github-reader/lists.ts";
-import type { MaintainRepositoryIdentity } from "./github-reader/lists.ts";
 
 export type MaintenanceUnknown = MaintainableUnknownValue;
 export type MaintenanceIssueState = MaintainableIssue["state"];
 export type MaintenanceActor = MaintainableActor;
-export type MaintenanceActorInput = MaintainableActorInput;
 export type MaintenanceAuthorAssociation = MaintainableAuthorAssociation;
 export type MaintenanceLabel = MaintainableLabel;
-export type MaintenanceLabelInput = MaintainableLabelInput;
 export type MaintenanceMilestone = MaintainableMilestone;
-export type MaintenanceMilestoneInput = MaintainableMilestoneInput;
 export type MaintenanceMarker = RalphieMarker;
 export type MaintenanceAvailability = MaintainableAvailability;
-export type MaintenanceAvailabilityInput = MaintainableAvailabilityInput;
 export type MaintenanceSkip = MaintainableSkip;
-export type MaintenanceSkipInput = MaintainableSkipInput;
+export type MaintenanceSkipReason = MaintainableSkip["reason"];
 export type MaintenanceComment = MaintainableComment;
-export type MaintenanceCommentInput = MaintainableCommentInput;
 export type MaintenanceCommentThread = MaintainableSelectedThread;
-export type MaintenanceCommentThreadInput = MaintainableSelectedThreadInput;
 export type MaintenanceIssue = MaintainableIssue;
-export type MaintenanceIssueInput = MaintainableIssueInput;
-export type MaintenanceRepository = MaintainRepositoryIdentity;
+
+/** Canonical actor input: camelCase only. REST translation happens in the reader. */
+export type MaintenanceActorInput = {
+    readonly login?: unknown;
+    readonly type?: unknown;
+    readonly nodeId?: unknown;
+};
+
+/** Canonical label input. */
+export type MaintenanceLabelInput = {
+    readonly name?: unknown;
+    readonly description?: unknown;
+    readonly color?: unknown;
+};
+
+/** Canonical milestone input: camelCase only. */
+export type MaintenanceMilestoneInput = {
+    readonly number?: unknown;
+    readonly nodeId?: unknown;
+    readonly title?: unknown;
+    readonly description?: unknown;
+    readonly state?: unknown;
+    readonly url?: unknown;
+    readonly htmlUrl?: unknown;
+    readonly createdAt?: unknown;
+    readonly updatedAt?: unknown;
+    readonly dueOn?: unknown;
+};
+
+export type MaintenanceAvailabilityInput = {
+    readonly kind?: unknown;
+    readonly reason?: unknown;
+    readonly detail?: unknown;
+};
+
+export type MaintenanceSkipInput = {
+    readonly reason?: unknown;
+    readonly detail?: unknown;
+    readonly issueNumber?: unknown;
+};
+
+/** Canonical comment input: camelCase only. */
+export type MaintenanceCommentInput = {
+    readonly id?: unknown;
+    readonly databaseId?: unknown;
+    readonly nodeId?: unknown;
+    readonly url?: unknown;
+    readonly htmlUrl?: unknown;
+    readonly author?: unknown;
+    readonly authorAssociation?: unknown;
+    readonly body?: unknown;
+    readonly content?: unknown;
+    readonly createdAt?: unknown;
+    readonly updatedAt?: unknown;
+};
+
+/** Canonical thread input: camelCase only, one thread name. */
+export type MaintenanceCommentThreadInput = {
+    readonly comments?: unknown;
+    readonly fetchedCount?: unknown;
+    readonly totalCount?: unknown;
+    readonly complete?: unknown;
+    readonly availability?: unknown;
+};
+
+/** Canonical issue input: camelCase only, one thread name (`selectedThread`). */
+export type MaintenanceIssueInput = {
+    readonly number?: unknown;
+    readonly nodeId?: unknown;
+    readonly title?: unknown;
+    readonly body?: unknown;
+    readonly url?: unknown;
+    readonly htmlUrl?: unknown;
+    readonly state?: unknown;
+    readonly author?: unknown;
+    readonly authorAssociation?: unknown;
+    readonly labels?: unknown;
+    readonly assignees?: unknown;
+    readonly milestone?: unknown;
+    readonly locked?: unknown;
+    readonly createdAt?: unknown;
+    readonly updatedAt?: unknown;
+    readonly selectedThread?: unknown;
+    readonly availability?: unknown;
+    readonly skip?: unknown;
+};
+
+export type MaintenanceRepository = {
+    readonly fullName: string;
+    readonly defaultBranch: string;
+    readonly htmlUrl: string;
+    /** The unmodified REST `default_branch` value, including unknown shapes. */
+    readonly rawDefaultBranch: unknown;
+    /** A deep-frozen copy retaining every unknown REST response field. */
+    readonly raw: Readonly<Record<string, unknown>>;
+};
+
+/** Canonical repository input: camelCase only. */
 export type MaintenanceRepositoryInput = {
     readonly fullName?: unknown;
-    readonly full_name?: unknown;
     readonly defaultBranch?: unknown;
-    readonly default_branch?: unknown;
     readonly htmlUrl?: unknown;
-    readonly html_url?: unknown;
 };
+
+type RecordLike = Record<string, unknown>;
+
+const isRecord = (value: unknown): value is RecordLike =>
+    typeof value === "object" && value !== null && !Array.isArray(value);
+
+const text = (value: unknown): string =>
+    typeof value === "string" ? value : "";
+
+const cloneAndFreeze = <T>(
+    value: T,
+    seen = new WeakMap<object, unknown>(),
+): T => {
+    if (value === null || typeof value !== "object") return value;
+    if (seen.has(value)) return seen.get(value) as T;
+    if (Array.isArray(value)) {
+        const copy: unknown[] = [];
+        seen.set(value, copy);
+        for (const entry of value) copy.push(cloneAndFreeze(entry, seen));
+        return Object.freeze(copy) as T;
+    }
+    const copy: RecordLike = {};
+    seen.set(value, copy);
+    for (const key of Object.keys(value))
+        copy[key] = cloneAndFreeze((value as RecordLike)[key], seen);
+    return Object.freeze(copy) as T;
+};
+
+const frozenRaw = (value: unknown): Readonly<Record<string, unknown>> =>
+    isRecord(value)
+        ? cloneAndFreeze(value)
+        : Object.freeze({ value: cloneAndFreeze(value) });
 
 export const isMaintenanceUnknown = isMaintainableUnknownValue;
 
@@ -141,18 +259,21 @@ export const createMaintenanceIssue = createMaintainableIssue;
 export const cloneMaintenanceIssue = cloneMaintainableIssue;
 
 export const createMaintenanceRepository = (
-    value: unknown,
+    value: MaintenanceRepositoryInput | unknown,
     repository = "",
 ): MaintenanceRepository => {
-    if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-        return mapMaintainRepositoryIdentity(value, repository);
-    }
-    return mapMaintainRepositoryIdentity(
-        {
-            full_name: repository,
-            default_branch: "",
-            html_url: "",
-        },
-        repository,
-    );
+    const source = isRecord(value) ? value : {};
+    // Canonical keys only. The reader translates REST snake_case before
+    // calling this seam; direct REST records are not read here.
+    const rawDefaultBranch = (source as RecordLike).defaultBranch;
+    const defaultBranch = text(rawDefaultBranch);
+    const fullName = text((source as RecordLike).fullName) || text(repository);
+    const htmlUrl = text((source as RecordLike).htmlUrl);
+    return Object.freeze({
+        fullName,
+        defaultBranch,
+        htmlUrl,
+        rawDefaultBranch: cloneAndFreeze(rawDefaultBranch),
+        raw: frozenRaw(source),
+    });
 };
