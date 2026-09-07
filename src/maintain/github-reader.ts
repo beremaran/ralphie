@@ -17,7 +17,7 @@ import {
 } from "./github-reader/details.ts";
 import {
     collectMaintainReaderLists,
-    type MaintainableIssueSummary,
+    type MaintainIssueSummary,
     type MaintainReaderLists,
     type MaintainRepositoryIdentity,
 } from "./github-reader/lists.ts";
@@ -34,8 +34,6 @@ export type MaintainSelectionInput = {
     readonly issueSort?: IssueSort;
     readonly issueOrder?: IssueOrder;
 };
-
-export type MaintainReaderSelection = MaintainSelectionInput;
 
 const DEFAULT_SELECTION: Required<
     Pick<MaintainSelectionInput, "issueLabels" | "issueSort" | "issueOrder">
@@ -67,7 +65,7 @@ const normalizedSelection = (
 };
 
 const labelMatches = (
-    summary: MaintainableIssueSummary,
+    summary: MaintainIssueSummary,
     labels: ReadonlyArray<string>,
 ): boolean => {
     if (labels.length === 0) return true;
@@ -78,7 +76,7 @@ const labelMatches = (
 };
 
 const sortValue = (
-    summary: MaintainableIssueSummary,
+    summary: MaintainIssueSummary,
     sort: IssueSort,
 ): string | number => {
     if (sort === IssueSort.Comments) return summary.commentCount;
@@ -87,8 +85,8 @@ const sortValue = (
 };
 
 const compareSummaries = (
-    left: MaintainableIssueSummary,
-    right: MaintainableIssueSummary,
+    left: MaintainIssueSummary,
+    right: MaintainIssueSummary,
     selection: MaintainSelectionInput,
 ): number => {
     const sort = selection.issueSort ?? DEFAULT_SELECTION.issueSort;
@@ -104,8 +102,8 @@ const compareSummaries = (
     return left.number - right.number;
 };
 
-export const selectMaintainableIssueNumbers = (
-    summaries: ReadonlyArray<MaintainableIssueSummary>,
+export const selectMaintainIssueNumbers = (
+    summaries: ReadonlyArray<MaintainIssueSummary>,
     selection: MaintainSelectionInput = {},
 ): ReadonlyArray<number> => {
     const normalized = normalizedSelection(selection);
@@ -123,12 +121,10 @@ export const selectMaintainableIssueNumbers = (
     return Object.freeze(capped.map((summary) => summary.number));
 };
 
-export const selectMaintainableIssues = selectMaintainableIssueNumbers;
-
-export type MaintainableSnapshot = {
+export type MaintainSnapshot = {
     readonly repository: MaintainRepositoryIdentity;
     readonly labels: ReadonlyArray<MaintenanceLabel>;
-    readonly openIssueSummaries: ReadonlyArray<MaintainableIssueSummary>;
+    readonly openIssueSummaries: ReadonlyArray<MaintainIssueSummary>;
     readonly selectedIssueNumbers: ReadonlyArray<number>;
     readonly selectedDetails: ReadonlyArray<
         MaintainReaderDetails["details"][number]
@@ -138,15 +134,12 @@ export type MaintainableSnapshot = {
     readonly selection: MaintainSelectionInput;
 };
 
-export type MaintainableMaintenanceSnapshot = MaintainableSnapshot;
-export type MaintainSnapshot = MaintainableSnapshot;
-
 const assembleSnapshot = (
     lists: MaintainReaderLists,
     details: MaintainReaderDetails,
     selection: MaintainSelectionInput,
     selectedIssueNumbers: ReadonlyArray<number>,
-): MaintainableSnapshot =>
+): MaintainSnapshot =>
     Object.freeze({
         repository: lists.repository,
         labels: lists.labels,
@@ -159,17 +152,17 @@ const assembleSnapshot = (
     });
 
 /** Execute one complete list → selected detail/comment snapshot operation. */
-export const loadMaintainabilitySnapshot = async (
+export const loadMaintainSnapshot = async (
     client: Octokit,
     repository: string,
     selection: MaintainSelectionInput = {},
     signal?: AbortSignal,
     detailOptions: MaintainReaderDetailOptions = {},
-): Promise<MaintainableSnapshot> => {
+): Promise<MaintainSnapshot> => {
     const normalized = normalizedSelection(selection);
     const lists = await collectMaintainReaderLists(client, repository, signal);
     throwIfAborted(signal);
-    const selectedIssueNumbers = selectMaintainableIssueNumbers(
+    const selectedIssueNumbers = selectMaintainIssueNumbers(
         lists.openIssueSummaries,
         normalized,
     );
@@ -183,7 +176,3 @@ export const loadMaintainabilitySnapshot = async (
     throwIfAborted(signal);
     return assembleSnapshot(lists, details, normalized, selectedIssueNumbers);
 };
-
-export const collectMaintainabilitySnapshot = loadMaintainabilitySnapshot;
-export const loadMaintainableSnapshot = loadMaintainabilitySnapshot;
-export const readMaintainabilitySnapshot = loadMaintainabilitySnapshot;

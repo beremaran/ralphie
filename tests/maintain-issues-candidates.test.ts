@@ -7,11 +7,11 @@ import {
 } from "../src/maintain-issues-candidates.ts";
 import type { MaintenanceSnapshot } from "../src/maintain-issues-snapshot-service.ts";
 import {
-    createMaintainableIssue,
-    type MaintainableIssue,
-    type MaintainableLabel,
-} from "../src/maintain-issues-snapshot.ts";
-import type { MaintainableIssueSummary } from "../src/maintain/github-reader/lists.ts";
+    createMaintenanceIssue,
+    type MaintenanceIssue,
+    type MaintenanceLabel,
+} from "../src/maintain/snapshot.ts";
+import type { MaintainIssueSummary } from "../src/maintain/github-reader/lists.ts";
 
 type IssueSpec = {
     readonly number: number;
@@ -26,7 +26,7 @@ type IssueSpec = {
 
 const labelsFor = (
     labels: ReadonlyArray<string> = [],
-): ReadonlyArray<MaintainableLabel> =>
+): ReadonlyArray<MaintenanceLabel> =>
     labels.map((name) => ({ name, description: null, color: null }));
 
 const issueUrl = (number: number): string =>
@@ -41,8 +41,8 @@ const makeIssue = ({
     updatedAt = "2026-09-05T00:00:00.000Z",
     labels = [],
     accessible = true,
-}: IssueSpec): MaintainableIssue =>
-    createMaintainableIssue({
+}: IssueSpec): MaintenanceIssue =>
+    createMaintenanceIssue({
         number,
         nodeId: `I_${String(number)}`,
         title,
@@ -69,26 +69,24 @@ const makeSummary = ({
     createdAt = `2026-01-${String((number % 28) + 1).padStart(2, "0")}T00:00:00.000Z`,
     updatedAt = "2026-09-05T00:00:00.000Z",
     labels = [],
-}: IssueSpec): MaintainableIssueSummary =>
+}: IssueSpec): MaintainIssueSummary =>
     ({
         number,
         nodeId: `I_${String(number)}`,
         title,
         url: issueUrl(number),
-        htmlUrl: issueUrl(number),
         labels: labelsFor(labels),
         author: null,
         createdAt,
         updatedAt,
         commentCount: 0,
         state,
-        isOpen: state === "open",
         raw: Object.freeze({}),
-    }) as MaintainableIssueSummary;
+    }) as MaintainIssueSummary;
 
 const makeSnapshot = (
-    selectedIssues: ReadonlyArray<MaintainableIssue>,
-    openIssueSummaries: ReadonlyArray<MaintainableIssueSummary> = selectedIssues.map(
+    selectedIssues: ReadonlyArray<MaintenanceIssue>,
+    openIssueSummaries: ReadonlyArray<MaintainIssueSummary> = selectedIssues.map(
         (issue) =>
             makeSummary({
                 number: issue.number,

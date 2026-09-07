@@ -71,8 +71,6 @@ const frozenRaw = (value: unknown): Readonly<Record<string, unknown>> =>
 
 export type MaintainRepositoryIdentity = MaintenanceRepository;
 
-export type MaintainableRepositoryIdentity = MaintainRepositoryIdentity;
-
 export const mapMaintainRepositoryIdentity = (
     value: unknown,
     repository = "",
@@ -94,32 +92,20 @@ export const mapMaintainRepositoryIdentity = (
     });
 };
 
-export const normalizeMaintainRepositoryIdentity =
-    mapMaintainRepositoryIdentity;
-export const mapRepositoryIdentity = mapMaintainRepositoryIdentity;
-
-export type MaintainableIssueSummary = {
+export type MaintainIssueSummary = {
     readonly number: number;
     readonly nodeId: string;
     readonly title: string;
     readonly url: string;
-    readonly htmlUrl: string;
     readonly labels: ReadonlyArray<MaintenanceLabel>;
     readonly author: MaintenanceActor | null;
     readonly createdAt: string;
     readonly updatedAt: string;
     readonly commentCount: number;
     readonly state: MaintenanceIssueState;
-    readonly isOpen: boolean;
     /** Deep-frozen REST evidence, including fields not used by comparisons. */
     readonly raw: Readonly<Record<string, unknown>>;
 };
-
-export type MaintainIssueSummary = MaintainableIssueSummary;
-
-export type MaintainableLabelAlias = MaintenanceLabel;
-export type MaintainableActorAlias = MaintenanceActor;
-export type MaintainableIssueStateAlias = MaintenanceIssueState;
 
 const sortedLabels = (value: unknown): ReadonlyArray<MaintenanceLabel> => {
     if (!Array.isArray(value)) return Object.freeze([]);
@@ -130,9 +116,9 @@ const sortedLabels = (value: unknown): ReadonlyArray<MaintenanceLabel> => {
     return Object.freeze(labels);
 };
 
-export const mapMaintainableIssueSummary = (
+export const mapMaintainIssueSummary = (
     value: unknown,
-): MaintainableIssueSummary => {
+): MaintainIssueSummary => {
     const source = isRecord(value) ? value : {};
     // Single REST translation: provider variations become canonical fields
     // here; canonical normalization never reads REST keys.
@@ -143,29 +129,21 @@ export const mapMaintainableIssueSummary = (
         nodeId: text(canonical.nodeId),
         title: text(canonical.title),
         url: text(canonical.url),
-        htmlUrl: text(canonical.htmlUrl),
         labels: sortedLabels(canonical.labels),
         author: normalizeMaintenanceActor(canonical.author),
         createdAt: text(canonical.createdAt),
         updatedAt: text(canonical.updatedAt),
         commentCount: numberValue(canonical.commentCount),
         state,
-        isOpen: state === "open",
         raw: frozenRaw(source),
     });
 };
 
-export const normalizeMaintainableIssueSummary = mapMaintainableIssueSummary;
-export const mapIssueSummary = mapMaintainableIssueSummary;
-
 export type MaintainReaderLists = {
     readonly repository: MaintainRepositoryIdentity;
     readonly labels: ReadonlyArray<MaintenanceLabel>;
-    readonly openIssueSummaries: ReadonlyArray<MaintainableIssueSummary>;
+    readonly openIssueSummaries: ReadonlyArray<MaintainIssueSummary>;
 };
-
-export type MaintainableListCollection = MaintainReaderLists;
-export type MaintainRepositoryLists = MaintainReaderLists;
 
 const endpointFor = (
     client: Octokit,
@@ -260,9 +238,9 @@ const sortedCatalog = (
     );
 
 const deduplicateSummaries = (
-    values: ReadonlyArray<MaintainableIssueSummary>,
-): ReadonlyArray<MaintainableIssueSummary> => {
-    const byNumber = new Map<number, MaintainableIssueSummary>();
+    values: ReadonlyArray<MaintainIssueSummary>,
+): ReadonlyArray<MaintainIssueSummary> => {
+    const byNumber = new Map<number, MaintainIssueSummary>();
     for (const value of values) {
         if (!byNumber.has(value.number)) byNumber.set(value.number, value);
     }
@@ -318,7 +296,7 @@ export const collectMaintainReaderLists = async (
     });
     const summaries = issueValues
         .filter((value) => !(isRecord(value) && hasOwn(value, "pull_request")))
-        .map((value) => mapMaintainableIssueSummary(value));
+        .map((value) => mapMaintainIssueSummary(value));
     throwIfAborted(signal);
     return Object.freeze({
         repository: identity,
@@ -326,6 +304,3 @@ export const collectMaintainReaderLists = async (
         openIssueSummaries: deduplicateSummaries(summaries),
     });
 };
-
-export const loadMaintainReaderLists = collectMaintainReaderLists;
-export const collectMaintainableLists = collectMaintainReaderLists;

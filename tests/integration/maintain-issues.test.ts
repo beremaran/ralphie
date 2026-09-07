@@ -26,10 +26,10 @@ import {
     type MaintenancePlanService,
 } from "../../src/maintain-issues-plan.ts";
 import {
-    createMaintainableComment,
-    createMaintainableIssue,
-    type MaintainableIssue,
-} from "../../src/maintain-issues-snapshot.ts";
+    createMaintenanceComment,
+    createMaintenanceIssue,
+    type MaintenanceIssue,
+} from "../../src/maintain/snapshot.ts";
 import type { MaintenanceSnapshot } from "../../src/maintain-issues-snapshot-service.ts";
 import type {
     MaintenanceMutationRequest,
@@ -82,12 +82,12 @@ const issue = (input: {
     readonly body?: string | null;
     readonly labels?: ReadonlyArray<string>;
     readonly comments?: ReadonlyArray<
-        ReturnType<typeof createMaintainableComment>
+        ReturnType<typeof createMaintenanceComment>
     >;
     readonly createdAt?: string;
-}): MaintainableIssue => {
+}): MaintenanceIssue => {
     const comments = input.comments ?? [];
-    return createMaintainableIssue({
+    return createMaintenanceIssue({
         number: input.number,
         nodeId: `issue-node-${String(input.number)}`,
         title: input.title,
@@ -108,25 +108,23 @@ const issue = (input: {
     });
 };
 
-const summaryFor = (value: MaintainableIssue) => ({
+const summaryFor = (value: MaintenanceIssue) => ({
     number: value.number,
     nodeId: value.nodeId,
     title: value.title,
     url: value.url,
-    htmlUrl: value.url,
     labels: value.labels,
     author: null,
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,
     commentCount: value.selectedThread.comments.length,
     state: value.state,
-    isOpen: value.isOpen,
     raw: {},
 });
 
 const makeSnapshot = (
-    selectedIssues: ReadonlyArray<MaintainableIssue>,
-    summaries: ReadonlyArray<MaintainableIssue> = selectedIssues,
+    selectedIssues: ReadonlyArray<MaintenanceIssue>,
+    summaries: ReadonlyArray<MaintenanceIssue> = selectedIssues,
     fingerprint = "integration-snapshot",
 ): MaintenanceSnapshot => {
     const selection = {
@@ -172,7 +170,6 @@ const makeSnapshot = (
         capturedAt: TIMESTAMP,
         runId: null,
         metadata,
-        capture: metadata,
         repository: {
             fullName: REPOSITORY,
             defaultBranch: "main",
@@ -808,7 +805,7 @@ const duplicateAction = (
 };
 
 const commentFor = (issueNumber: number, id: number, body: string) =>
-    createMaintainableComment({
+    createMaintenanceComment({
         id,
         nodeId: `comment-node-${String(id)}`,
         url: commentUrl(issueNumber, id),

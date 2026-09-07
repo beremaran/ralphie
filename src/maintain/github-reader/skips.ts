@@ -18,7 +18,6 @@ import {
     type MaintenanceIssue,
     type MaintenanceIssueInput,
     type MaintenanceSkip,
-    type MaintenanceSkipInput,
     type MaintenanceSkipReason,
 } from "../snapshot.ts";
 
@@ -176,9 +175,6 @@ export const classifyRecordUnavailable = (
     );
 };
 
-export const classifyMaintainableRecordUnavailable = classifyRecordUnavailable;
-export const classifyMaintenanceRecordUnavailable = classifyRecordUnavailable;
-
 /**
  * Classify a detail payload before it reaches `createMaintenanceIssue`.
  * Presence of `pull_request` is significant even when its value is null or
@@ -194,10 +190,8 @@ export const classifyRecord = (
         ? undefined
         : classifyRecordUnavailable(value, issueNumber, repository));
 
-export const classifyMaintainableRecord = classifyRecord;
-
 /** Map an arbitrary issue-shaped record without throwing on null/unknown fields. */
-export const mapMaintainableIssueRecord = (
+export const mapMaintainIssueRecord = (
     value: unknown,
     issueNumber?: number,
 ): MaintenanceIssue => {
@@ -208,9 +202,3 @@ export const mapMaintainableIssueRecord = (
         ...(isRecord(value) && value.author === null ? { author: null } : {}),
     });
 };
-
-export const mapRecordToMaintainableIssue = mapMaintainableIssueRecord;
-export type MaintainableSkip = MaintenanceSkip;
-export type MaintainableIssue = MaintenanceIssue;
-export type MaintainableIssueInput = MaintenanceIssueInput;
-export type MaintainableSkipInput = MaintenanceSkipInput;

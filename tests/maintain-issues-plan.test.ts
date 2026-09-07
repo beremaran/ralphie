@@ -13,13 +13,13 @@ import {
 import type { AgentRepositoryInvariant } from "../src/agent/task-session.ts";
 import type { MaintenanceSnapshot } from "../src/maintain-issues-snapshot-service.ts";
 import {
-    createMaintainableComment,
-    createMaintainableIssue,
-    type MaintainableComment,
-    type MaintainableIssue,
-    type MaintainableLabel,
-} from "../src/maintain-issues-snapshot.ts";
-import type { MaintainableIssueSummary } from "../src/maintain/github-reader/lists.ts";
+    createMaintenanceComment,
+    createMaintenanceIssue,
+    type MaintenanceComment,
+    type MaintenanceIssue,
+    type MaintenanceLabel,
+} from "../src/maintain/snapshot.ts";
+import type { MaintainIssueSummary } from "../src/maintain/github-reader/lists.ts";
 
 const FINGERPRINT = "snapshot-plan-fingerprint";
 const HEAD = "a".repeat(40);
@@ -33,7 +33,7 @@ type IssueSpec = {
     readonly createdAt?: string;
     readonly updatedAt?: string;
     readonly labels?: ReadonlyArray<string>;
-    readonly comments?: ReadonlyArray<MaintainableComment>;
+    readonly comments?: ReadonlyArray<MaintenanceComment>;
     readonly accessible?: boolean;
 };
 
@@ -45,7 +45,7 @@ const commentUrl = (issueNumber: number, commentId: number): string =>
 
 const labelsFor = (
     labels: ReadonlyArray<string> = [],
-): ReadonlyArray<MaintainableLabel> =>
+): ReadonlyArray<MaintenanceLabel> =>
     labels.map((name) => ({ name, description: null, color: null }));
 
 const makeIssue = ({
@@ -58,8 +58,8 @@ const makeIssue = ({
     labels = [],
     comments = [],
     accessible = true,
-}: IssueSpec): MaintainableIssue =>
-    createMaintainableIssue({
+}: IssueSpec): MaintenanceIssue =>
+    createMaintenanceIssue({
         number,
         nodeId: `I_${String(number)}`,
         title,
@@ -86,27 +86,25 @@ const makeSummary = ({
     createdAt = `2026-01-${String((number % 28) + 1).padStart(2, "0")}T00:00:00.000Z`,
     updatedAt = "2026-09-05T00:00:00.000Z",
     labels = [],
-}: IssueSpec): MaintainableIssueSummary =>
+}: IssueSpec): MaintainIssueSummary =>
     ({
         number,
         nodeId: `I_${String(number)}`,
         title,
         url: issueUrl(number),
-        htmlUrl: issueUrl(number),
         labels: labelsFor(labels),
         author: null,
         createdAt,
         updatedAt,
         commentCount: 0,
         state,
-        isOpen: state === "open",
         raw: Object.freeze({}),
-    }) as MaintainableIssueSummary;
+    }) as MaintainIssueSummary;
 
 const makeSnapshot = (
-    selectedIssues: ReadonlyArray<MaintainableIssue>,
-    summaries: ReadonlyArray<MaintainableIssueSummary>,
-    labels: ReadonlyArray<MaintainableLabel> = labelsFor([
+    selectedIssues: ReadonlyArray<MaintenanceIssue>,
+    summaries: ReadonlyArray<MaintainIssueSummary>,
+    labels: ReadonlyArray<MaintenanceLabel> = labelsFor([
         "Ready",
         "bug",
         "maintenance",
@@ -171,7 +169,7 @@ const makeSnapshot = (
     } as unknown as MaintenanceSnapshot;
 };
 
-const baseIssue = (number = 1, body: string | null = null): MaintainableIssue =>
+const baseIssue = (number = 1, body: string | null = null): MaintenanceIssue =>
     makeIssue({
         number,
         title: "Payment timeout",
@@ -179,7 +177,7 @@ const baseIssue = (number = 1, body: string | null = null): MaintainableIssue =>
         labels: ["bug"],
     });
 
-const candidateSummaries = (): ReadonlyArray<MaintainableIssueSummary> => [
+const candidateSummaries = (): ReadonlyArray<MaintainIssueSummary> => [
     makeSummary({ number: 1, title: "Payment timeout", labels: ["bug"] }),
     makeSummary({ number: 2, title: "Payment timeout", labels: ["bug"] }),
     makeSummary({
@@ -312,7 +310,7 @@ describe("maintenance plan schema and validator", () => {
     });
 
     test("accepts valid provenance, canonicalizes catalog labels, and derives keys", () => {
-        const comment = createMaintainableComment({
+        const comment = createMaintenanceComment({
             id: 5,
             nodeId: "C_5",
             url: commentUrl(1, 5),
@@ -535,7 +533,7 @@ describe("maintenance plan schema and validator", () => {
     });
 
     test("requires exact answer comment identity and source evidence", () => {
-        const comment = createMaintainableComment({
+        const comment = createMaintenanceComment({
             id: 5,
             nodeId: "C_5",
             url: commentUrl(1, 5),

@@ -29,10 +29,10 @@ import {
     type MaintenanceSnapshot,
 } from "./maintain-issues-snapshot-service.ts";
 import type {
-    MaintainableComment,
-    MaintainableIssue,
-    MaintainableLabel,
-} from "./maintain-issues-snapshot.ts";
+    MaintenanceComment,
+    MaintenanceIssue,
+    MaintenanceLabel,
+} from "./maintain/snapshot.ts";
 import type { GitRepositoryInvariantService } from "./git/repository-invariant.ts";
 
 export const MAX_MAINTENANCE_PLAN_ACTIONS = 32;
@@ -315,13 +315,13 @@ type PlanIssue = {
     readonly url: string;
     readonly open: boolean;
     readonly accessible: boolean;
-    readonly labels: ReadonlyArray<MaintainableLabel>;
+    readonly labels: ReadonlyArray<MaintenanceLabel>;
 };
 
 type PlanIssueIndex = {
     readonly issues: ReadonlyMap<number, PlanIssue>;
     readonly comments: ReadonlyMap<number, ReadonlyArray<PlanComment>>;
-    readonly labels: ReadonlyMap<string, MaintainableLabel>;
+    readonly labels: ReadonlyMap<string, MaintenanceLabel>;
 };
 
 type AddLabelsAction = Extract<
@@ -366,7 +366,7 @@ const addSkip = (
     skips.push({ reason, detail, actionIndex, issueNumber });
 };
 
-const issueFromDetail = (issue: MaintainableIssue): PlanIssue => ({
+const issueFromDetail = (issue: MaintenanceIssue): PlanIssue => ({
     number: issue.number,
     title: issue.title,
     url: issue.url,
@@ -395,7 +395,7 @@ const addIssue = (issues: Map<number, PlanIssue>, issue: PlanIssue): void => {
 
 const commentFrom = (
     issueNumber: number,
-    comment: MaintainableComment,
+    comment: MaintenanceComment,
 ): PlanComment => ({
     id: comment.id,
     issueNumber,
@@ -410,7 +410,7 @@ const planIssueIndex = (snapshot: MaintenanceSnapshot): PlanIssueIndex => {
     const comments = new Map<number, PlanComment[]>();
     const addComments = (
         issueNumber: number,
-        values: ReadonlyArray<MaintainableComment>,
+        values: ReadonlyArray<MaintenanceComment>,
     ): void => {
         for (const comment of values) {
             const normalized = commentFrom(issueNumber, comment);
@@ -435,7 +435,7 @@ const planIssueIndex = (snapshot: MaintenanceSnapshot): PlanIssueIndex => {
         addIssue(issues, issueFromDetail(detail.issue));
         addComments(detail.issue.number, detail.thread.comments);
     }
-    const labels = new Map<string, MaintainableLabel>();
+    const labels = new Map<string, MaintenanceLabel>();
     for (const label of snapshot.labels) {
         const key = label.name.trim().toLocaleLowerCase("en-US");
         if (key.length > 0 && !labels.has(key)) labels.set(key, label);

@@ -2,7 +2,7 @@
  * Deterministic bounded comment-thread prompt projections.
  *
  * Pure read-model/planner surface over the full thread contract in
- * `maintain-issues-snapshot.ts` (`MaintenanceCommentThread`,
+ * `maintain/snapshot.ts` (`MaintenanceCommentThread`,
  * `MaintenanceComment`). `projectThreadPrompt` bounds three explicit prompt
  * budgets - per comment, per thread transcript, and per aggregate summary -
  * with explicit truncation metadata, and never mutates the fetched thread:
@@ -53,8 +53,6 @@ export const validateThreadPromptLimit = (
     }
     return value;
 };
-
-export const validatePromptLimit = validateThreadPromptLimit;
 
 export type CommentPromptProjectionState =
     | "unavailable"
@@ -200,9 +198,6 @@ export const projectCommentPrompt = (
         truncatedLength: projected.truncatedLength,
     });
 };
-
-export const projectMaintenanceCommentPrompt = projectCommentPrompt;
-export const projectMaintainableCommentPrompt = projectCommentPrompt;
 
 export type ThreadPromptProjection = {
     /** The stable per-thread prompt limit applied to `text`. */
@@ -445,9 +440,3 @@ export const projectThreadPrompt = (
         aggregateLimit,
     });
 };
-
-export const projectMaintenanceThreadPrompt = projectThreadPrompt;
-export const projectMaintainableThreadPrompt = projectThreadPrompt;
-export type MaintainableThreadPromptInput = MaintenanceThreadPromptInput;
-export type MaintainableComment = MaintenanceComment;
-export type MaintainableSelectedThread = MaintenanceCommentThread;

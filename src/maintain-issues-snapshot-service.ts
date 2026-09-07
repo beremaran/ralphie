@@ -16,9 +16,9 @@ import type { Octokit } from "octokit";
 import { type GitHubClientService } from "./github/client.ts";
 import { IssueOrder, IssueSort } from "./github/issues.ts";
 import {
-    loadMaintainabilitySnapshot,
+    loadMaintainSnapshot,
     type MaintainSelectionInput,
-    type MaintainableSnapshot,
+    type MaintainSnapshot,
 } from "./maintain/github-reader.ts";
 import type { MaintainIssueSummary } from "./maintain/github-reader/lists.ts";
 import {
@@ -196,9 +196,6 @@ export const DEFAULT_MAINTENANCE_SNAPSHOT_BUDGETS: MaintenanceSnapshotBudgets =
         guidanceAggregateByteLimit: DEFAULT_GUIDANCE_AGGREGATE_BYTE_LIMIT,
     });
 
-export const DEFAULT_MAINTENANCE_SNAPSHOT_LIMITS =
-    DEFAULT_MAINTENANCE_SNAPSHOT_BUDGETS;
-
 const normalizeSelection = (
     input: MaintainSelectionInput = {},
 ): MaintainSelectionInput => {
@@ -313,9 +310,6 @@ export type MaintenanceSnapshotRequest = {
     readonly guidanceAggregateByteLimit?: number;
 };
 
-export type MaintenanceSnapshotInput = MaintenanceSnapshotRequest;
-export type MaintenanceSnapshotCaptureInput = MaintenanceSnapshotRequest;
-
 export type MaintenanceSnapshotGitHubReaderInput = {
     readonly client: Octokit;
     readonly repository: string;
@@ -327,15 +321,12 @@ export type MaintenanceSnapshotGitHubReaderInput = {
 export type MaintenanceSnapshotGitHubReader = {
     readonly read: (
         input: MaintenanceSnapshotGitHubReaderInput,
-    ) => Promise<MaintainableSnapshot>;
+    ) => Promise<MaintainSnapshot>;
 };
 
 export type MaintenanceSnapshotGitHubReaderFunction = (
     input: MaintenanceSnapshotGitHubReaderInput,
-) => Promise<MaintainableSnapshot>;
-
-export type MaintenanceGitHubSnapshotReader = MaintenanceSnapshotGitHubReader;
-export type MaintenanceGitHubReaderService = MaintenanceSnapshotGitHubReader;
+) => Promise<MaintainSnapshot>;
 
 export type MaintenanceSnapshotCaptureMetadata = {
     readonly schemaVersion: number;
@@ -362,25 +353,19 @@ export type MaintenanceSnapshotCaptureMetadata = {
 };
 
 export const MAINTENANCE_SNAPSHOT_SCHEMA_VERSION = 1;
-export const MAINTENANCE_SNAPSHOT_VERSION = MAINTENANCE_SNAPSHOT_SCHEMA_VERSION;
 
-export type MaintenanceSnapshot = MaintainableSnapshot & {
+export type MaintenanceSnapshot = MaintainSnapshot & {
     readonly schemaVersion: number;
     readonly fingerprint: string;
     readonly capturedAt: string;
     readonly runId: string | null;
     readonly metadata: MaintenanceSnapshotCaptureMetadata;
-    /** Alias kept for callers that name the capture record directly. */
-    readonly capture: MaintenanceSnapshotCaptureMetadata;
     readonly grounding: RepositoryGrounding | undefined;
     readonly groundingOutcome: GroundingReadOutcome;
     readonly groundingSkip: GroundingSkip | undefined;
     readonly groundingStatus: GroundingReadOutcome["status"];
     readonly guidance: GuidanceBundle | undefined;
 };
-
-export type MaintainableMaintenanceSnapshot = MaintenanceSnapshot;
-export type ImmutableMaintenanceSnapshot = MaintenanceSnapshot;
 
 export type MaintenanceSnapshotServiceDependencies = {
     readonly githubClient?: Pick<GitHubClientService, "initialize">;
@@ -402,7 +387,7 @@ export type MaintenanceSnapshotService = {
 
 const liveGithubReader: MaintenanceSnapshotGitHubReader = {
     read: (input) =>
-        loadMaintainabilitySnapshot(
+        loadMaintainSnapshot(
             input.client,
             input.repository,
             input.selection,
@@ -416,12 +401,12 @@ const invokeGithubReader = (
         | MaintenanceSnapshotGitHubReader
         | MaintenanceSnapshotGitHubReaderFunction,
     input: MaintenanceSnapshotGitHubReaderInput,
-): Promise<MaintainableSnapshot> =>
+): Promise<MaintainSnapshot> =>
     typeof reader === "function" ? reader(input) : reader.read(input);
 
 const cloneRepository = (
-    value: MaintainableSnapshot["repository"],
-): MaintainableSnapshot["repository"] => {
+    value: MaintainSnapshot["repository"],
+): MaintainSnapshot["repository"] => {
     const source = (value ?? {}) as RecordLike;
     // Canonical only: the reader translates REST variations once before
     // capture, so this boundary reads canonical keys.
@@ -466,14 +451,12 @@ const cloneSummary = (value: unknown): MaintainIssueSummary => {
         nodeId: text(source.nodeId),
         title: text(source.title),
         url: text(source.url),
-        htmlUrl: text(source.htmlUrl),
         labels: cloneLabels(source.labels),
         author: cloneActor(source.author),
         createdAt: text(source.createdAt),
         updatedAt: text(source.updatedAt),
         commentCount: nonNegativeInteger(source.commentCount),
         state,
-        isOpen: state === "open",
         raw: frozenRecord(source.raw ?? source),
     });
 };
@@ -487,15 +470,9 @@ const cloneIssue = (
     threadOverride?: unknown,
 ): MaintenanceIssue => {
     const source = isRecord(value) ? value : {};
-    // Canonical comment-thread field is `selectedThread`. The `thread` and
-    // `commentThread` aliases remain accepted here only so callers not yet
-    // contracted keep working; planning and fingerprinting read the
-    // normalized `selectedThread` below.
-    const selectedThread =
-        threadOverride ??
-        source.selectedThread ??
-        (source as RecordLike).thread ??
-        (source as RecordLike).commentThread;
+    // Canonical comment-thread field only (`selectedThread`). Provider
+    // variations are translated at the GitHub read boundary.
+    const selectedThread = threadOverride ?? source.selectedThread;
     return createMaintenanceIssue({
         ...source,
         labels: cloneLabels(source.labels),
@@ -525,14 +502,10 @@ const cloneProjection = (
 const detailFor = (
     value: unknown,
     budgets: MaintenanceSnapshotBudgets,
-): MaintainableSnapshot["selectedDetails"][number] => {
+): MaintainSnapshot["selectedDetails"][number] => {
     const source = isRecord(value) ? value : {};
     const sourceIssue = isRecord(source.issue) ? source.issue : source;
-    const sourceThread =
-        source.thread ??
-        source.selectedThread ??
-        sourceIssue.selectedThread ??
-        sourceIssue.thread;
+    const sourceThread = source.selectedThread ?? sourceIssue.selectedThread;
     const issue = cloneIssue(sourceIssue, sourceThread);
     const thread = issue.selectedThread;
     return Object.freeze({
@@ -579,7 +552,7 @@ const missingDetail = (
     });
 };
 
-type MaintainSnapshotDetail = MaintainableSnapshot["selectedDetails"][number];
+type MaintainSnapshotDetail = MaintainSnapshot["selectedDetails"][number];
 
 const skipKey = (skip: MaintenanceSkip): string =>
     canonicalMaintenanceJson({
@@ -675,10 +648,10 @@ const skipsFor = (
 };
 
 const cloneGithubSnapshot = (
-    value: MaintainableSnapshot,
+    value: MaintainSnapshot,
     budgets: MaintenanceSnapshotBudgets,
 ): {
-    readonly repository: MaintainableSnapshot["repository"];
+    readonly repository: MaintainSnapshot["repository"];
     readonly labels: ReadonlyArray<MaintenanceLabel>;
     readonly openIssueSummaries: ReadonlyArray<MaintainIssueSummary>;
     readonly selectedIssueNumbers: ReadonlyArray<number>;
@@ -827,9 +800,7 @@ const skipFingerprint = (skip: MaintenanceSkip | undefined): unknown =>
           };
 
 const commentFingerprint = (comment: MaintenanceComment): RecordLike => ({
-    // Canonical comment identity, location, and body only. Mirrored
-    // `databaseId`, `nodeId`, `htmlUrl`, and `content` are deterministically
-    // derived and excluded so equivalent evidence shares one fingerprint.
+    // Canonical comment identity, location, and body only.
     id: comment.id,
     url: comment.url,
     author: actorFingerprint(comment.author),
@@ -837,7 +808,7 @@ const commentFingerprint = (comment: MaintenanceComment): RecordLike => ({
     body: bodyFingerprint(comment.body),
     createdAt: comment.createdAt,
     updatedAt: comment.updatedAt,
-    isRalphieManaged: comment.isRalphieManaged,
+    isMaintenanceManaged: comment.isMaintenanceManaged,
     marker: markerValue(comment.marker),
 });
 
@@ -900,9 +871,7 @@ const projectionFingerprint = (
 });
 
 const issueFingerprint = (issue: MaintenanceIssue): RecordLike => ({
-    // Canonical issue identity, body, location, state, and selected thread
-    // only. Mirrored `nodeId`, `htmlUrl`, `isOpen`/`open`, and thread aliases
-    // are deterministically derived and excluded.
+    // Canonical issue identity, body, location, state, and selected thread only.
     number: issue.number,
     title: issue.title,
     body: bodyFingerprint(issue.body),
@@ -918,14 +887,13 @@ const issueFingerprint = (issue: MaintenanceIssue): RecordLike => ({
     updatedAt: issue.updatedAt,
     selectedThread: threadFingerprint(issue.selectedThread),
     marker: markerValue(issue.marker),
-    isRalphieManaged: issue.isRalphieManaged,
+    isMaintenanceManaged: issue.isMaintenanceManaged,
     availability: availabilityFingerprint(issue.availability),
     skip: skipFingerprint(issue.skip),
 });
 
 const summaryFingerprint = (summary: MaintainIssueSummary): RecordLike => ({
-    // Canonical summary identity, location, and state only. Mirrored
-    // `nodeId`, `htmlUrl`, and `isOpen` are excluded.
+    // Canonical summary identity, location, and state only.
     number: summary.number,
     title: summary.title,
     url: summary.url,
@@ -980,7 +948,7 @@ const groundingFingerprint = (outcome: GroundingReadOutcome): RecordLike =>
           };
 
 const fingerprintPayload = (
-    snapshot: Omit<MaintenanceSnapshot, "fingerprint" | "metadata" | "capture">,
+    snapshot: Omit<MaintenanceSnapshot, "fingerprint" | "metadata">,
 ): RecordLike => ({
     schemaVersion: snapshot.schemaVersion,
     repository: {
@@ -1013,15 +981,11 @@ const fingerprintPayload = (
 });
 
 export const maintenanceSnapshotFingerprint = (
-    snapshot: Omit<MaintenanceSnapshot, "fingerprint" | "metadata" | "capture">,
+    snapshot: Omit<MaintenanceSnapshot, "fingerprint" | "metadata">,
 ): string => digestText(canonicalMaintenanceJson(fingerprintPayload(snapshot)));
 
-export const fingerprintMaintenanceSnapshot = maintenanceSnapshotFingerprint;
-export const computeMaintenanceSnapshotFingerprint =
-    maintenanceSnapshotFingerprint;
-
 const assembleSnapshot = (
-    github: MaintainableSnapshot,
+    github: MaintainSnapshot,
     groundingOutcome: GroundingReadOutcome,
     request: MaintenanceSnapshotRequest,
     selection: MaintainSelectionInput,
@@ -1083,7 +1047,6 @@ const assembleSnapshot = (
         capturedAt,
         runId,
         metadata,
-        capture: metadata,
         grounding,
         groundingOutcome: normalizedGrounding,
         groundingSkip,
@@ -1172,9 +1135,3 @@ export const makeMaintenanceSnapshotService = (
 
     return Object.freeze({ capture, read: capture });
 };
-
-export const makeMaintainIssuesSnapshotService = makeMaintenanceSnapshotService;
-export const makeMaintainabilitySnapshotService =
-    makeMaintenanceSnapshotService;
-export const MaintenanceSnapshotLive = makeMaintenanceSnapshotService();
-export const MaintainIssuesSnapshotLive = MaintenanceSnapshotLive;

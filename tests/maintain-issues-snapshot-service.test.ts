@@ -11,7 +11,7 @@ import {
     makeMaintenanceSnapshotService,
     type MaintenanceSnapshotGitHubReader,
 } from "../src/maintain-issues-snapshot-service.ts";
-import type { MaintainableSnapshot } from "../src/maintain/github-reader.ts";
+import type { MaintainSnapshot } from "../src/maintain/github-reader.ts";
 import type { MaintainIssueSummary } from "../src/maintain/github-reader/lists.ts";
 import {
     createMaintenanceIssue,
@@ -59,17 +59,14 @@ const grounded = (head = "a".repeat(40)): GroundingReadOutcome => ({
 
 const comment = (body: string) => ({
     id: 900,
-    databaseId: 900,
     nodeId: "C_900",
     url: "https://github.com/owner/repository/comments/900",
-    htmlUrl: "https://github.com/owner/repository/comments/900",
     author: null,
     authorAssociation: "NONE" as const,
     body,
-    content: body,
     createdAt: "2026-09-01T00:00:00.000Z",
     updatedAt: "2026-09-01T00:00:00.000Z",
-    isRalphieManaged: false,
+    isMaintenanceManaged: false,
     marker: undefined,
 });
 
@@ -103,14 +100,12 @@ const makeSummary = (description = "Ready"): MaintainIssueSummary =>
         nodeId: "I_7",
         title: "Maintenance subject",
         url: "https://github.com/owner/repository/issues/7",
-        htmlUrl: "https://github.com/owner/repository/issues/7",
         labels: [{ name: "ready", description, color: "00ff00" }],
         author: { login: "author", type: "User", nodeId: "U_1" },
         createdAt: "2026-09-01T00:00:00.000Z",
         updatedAt: "2026-09-02T00:00:00.000Z",
         commentCount: 1,
         state: "open",
-        isOpen: true,
         raw: {},
     }) as MaintainIssueSummary;
 
@@ -125,7 +120,7 @@ const makeSource = (
         }>;
         readonly skips?: ReadonlyArray<MaintenanceSkip>;
     } = {},
-): MaintainableSnapshot => {
+): MaintainSnapshot => {
     const issue = input.issue ?? makeIssue();
     return {
         repository: {
@@ -153,7 +148,7 @@ const makeSource = (
 };
 
 const makeReaders = (
-    source: MaintainableSnapshot,
+    source: MaintainSnapshot,
     outcome: GroundingReadOutcome,
 ) => {
     const calls = { initialize: 0, github: 0, grounding: 0 };
@@ -262,7 +257,7 @@ describe("maintenance snapshot assembler", () => {
     test("fingerprints equivalent values canonically and changes for plan context", async () => {
         const capture = async (
             input: {
-                readonly source?: MaintainableSnapshot;
+                readonly source?: MaintainSnapshot;
                 readonly outcome?: GroundingReadOutcome;
             } = {},
         ) => {

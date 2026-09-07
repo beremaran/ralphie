@@ -4,12 +4,12 @@ import type { Octokit } from "octokit";
 
 import { IssueOrder, IssueSort } from "../../src/github/issues.ts";
 import {
-    loadMaintainabilitySnapshot,
-    selectMaintainableIssueNumbers,
+    loadMaintainSnapshot,
+    selectMaintainIssueNumbers,
 } from "../../src/maintain/github-reader.ts";
 import {
-    cloneMaintenanceIssue,
     createMaintenanceCommentThread,
+    createMaintenanceIssue,
 } from "../../src/maintain/snapshot.ts";
 
 const response = (data: unknown, link?: string, status = 200): unknown => ({
@@ -108,7 +108,7 @@ describe("composed maintenance GitHub reader", () => {
             },
         } as unknown as Octokit;
 
-        const snapshot = await loadMaintainabilitySnapshot(client, "o/r", {
+        const snapshot = await loadMaintainSnapshot(client, "o/r", {
             issueLabels: ["ready"],
             issueSort: IssueSort.Created,
             issueOrder: IssueOrder.Descending,
@@ -137,7 +137,17 @@ describe("composed maintenance GitHub reader", () => {
         if (selectedIssue === undefined || selectedDetail === undefined) {
             throw new Error("expected one selected issue detail");
         }
-        const roundTrip = cloneMaintenanceIssue(selectedIssue);
+        const roundTrip = createMaintenanceIssue({
+            ...selectedIssue,
+            selectedThread: {
+                comments: selectedIssue.selectedThread.comments.map(
+                    (comment) => ({ ...comment }),
+                ),
+                totalCount: selectedIssue.selectedThread.totalCount,
+                complete: selectedIssue.selectedThread.complete,
+                availability: { ...selectedIssue.selectedThread.availability },
+            },
+        });
         const threadRoundTrip = createMaintenanceCommentThread(
             selectedDetail.thread,
         );
@@ -167,7 +177,7 @@ describe("composed maintenance GitHub reader", () => {
             },
         ] as never;
         expect(
-            selectMaintainableIssueNumbers(values, {
+            selectMaintainIssueNumbers(values, {
                 issueSort: IssueSort.Comments,
                 issueOrder: IssueOrder.Ascending,
             }),

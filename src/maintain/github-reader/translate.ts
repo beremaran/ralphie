@@ -93,7 +93,6 @@ export const maintenanceCommentInputFromRest = (
             source.authorAssociation,
         ),
         body: pick(source.body, source.content),
-        content: pick(source.content, source.body),
         createdAt: pick(source.created_at, source.createdAt),
         updatedAt: pick(source.updated_at, source.updatedAt),
     };
@@ -142,7 +141,6 @@ export const maintenanceIssueSummaryInputFromRest = (
     readonly nodeId: unknown;
     readonly title: unknown;
     readonly url: unknown;
-    readonly htmlUrl: unknown;
     readonly labels: unknown;
     readonly author: unknown;
     readonly createdAt: unknown;
@@ -155,8 +153,7 @@ export const maintenanceIssueSummaryInputFromRest = (
         number: source.number,
         nodeId: pick(source.node_id, source.nodeId),
         title: source.title,
-        url: pick(source.html_url, source.url),
-        htmlUrl: pick(source.html_url, source.htmlUrl, source.url),
+        url: pick(source.html_url, source.htmlUrl, source.url),
         labels: source.labels,
         author: maintenanceActorInputFromRest(
             pick(source.user, source.author, null),

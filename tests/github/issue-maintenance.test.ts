@@ -259,10 +259,8 @@ const snapshotWithSource = (
                     comments: [
                         {
                             id: 11,
-                            databaseId: 11,
                             nodeId: "C_11",
                             url: commentUrl(7, 11),
-                            htmlUrl: commentUrl(7, 11),
                             author: {
                                 login: "human",
                                 type: "User",
@@ -270,10 +268,9 @@ const snapshotWithSource = (
                             },
                             authorAssociation: "NONE",
                             body: sourceBody,
-                            content: sourceBody,
                             createdAt: "2026-09-05T00:00:00.000Z",
                             updatedAt: "2026-09-05T00:00:00.000Z",
-                            isRalphieManaged: false,
+                            isMaintenanceManaged: false,
                             marker: undefined,
                         },
                     ],

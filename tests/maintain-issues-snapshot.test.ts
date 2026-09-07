@@ -1,14 +1,15 @@
 import { describe, expect, test } from "bun:test";
 
 import {
-    createMaintainableComment,
-    createMaintainableIssue,
-    createMaintainableThread,
-    isRalphieManaged,
-    maintainMarker,
-    normalizeMaintainableAvailability,
-    parseRalphieMarker,
-} from "../src/maintain-issues-snapshot.ts";
+    createMaintenanceComment,
+    createMaintenanceCommentThread,
+    createMaintenanceIssue,
+    isMaintenanceIssueOpen,
+    isMaintenanceManaged,
+    normalizeMaintenanceAvailability,
+    parseMaintenanceMarker,
+    renderMaintenanceMarker,
+} from "../src/maintain/snapshot.ts";
 import { renderMaintenanceActionComment } from "../src/github/issue-maintenance.ts";
 import { renderMaintenanceRelationshipComment } from "../src/github/issue-maintenance-relationships.ts";
 
@@ -40,7 +41,6 @@ const issueInput = () => ({
                 updatedAt: "2026-01-03T00:00:00.000Z",
             },
         ],
-        fetchedCount: 1,
         totalCount: 1,
         complete: true,
         availability: { kind: "available", reason: null, detail: null },
@@ -51,7 +51,7 @@ const issueInput = () => ({
 describe("maintain-issues-snapshot value boundary", () => {
     test("deep-copies nested arrays and records without retaining references", () => {
         const input = issueInput();
-        const snapshot = createMaintainableIssue(input);
+        const snapshot = createMaintenanceIssue(input);
 
         expect(snapshot.labels).not.toBe(input.labels);
         expect(snapshot.labels[0]).not.toBe(input.labels[0]);
@@ -81,8 +81,8 @@ describe("maintain-issues-snapshot value boundary", () => {
 
     test("mutating a returned snapshot cannot affect a fresh copy of the input", () => {
         const input = issueInput();
-        const first = createMaintainableIssue(input);
-        const second = createMaintainableIssue(input);
+        const first = createMaintenanceIssue(input);
+        const second = createMaintenanceIssue(input);
 
         expect(first).toEqual(second);
         expect(first).not.toBe(second);
@@ -94,7 +94,7 @@ describe("maintain-issues-snapshot value boundary", () => {
 
     test("comment boundary copies without retaining actor references", () => {
         const author = { login: "octocat", type: "User", nodeId: null };
-        const comment = createMaintainableComment({
+        const comment = createMaintenanceComment({
             id: 1,
             nodeId: "C1",
             url: "https://example.test/c/1",
@@ -107,7 +107,8 @@ describe("maintain-issues-snapshot value boundary", () => {
         author.login = "mutated";
         expect(comment.author?.login).toBe("octocat");
         expect(comment.body).toBe("body");
-        expect(comment.content).toBe("body");
+        expect(comment.body).toBe("body");
+        expect(comment).not.toHaveProperty("content");
     });
 
     test("thread boundary copies comment entries", () => {
@@ -123,7 +124,7 @@ describe("maintain-issues-snapshot value boundary", () => {
                 updatedAt: "2026-01-01T00:00:00.000Z",
             },
         ];
-        const thread = createMaintainableThread({ comments });
+        const thread = createMaintenanceCommentThread({ comments });
         expect(thread.comments).not.toBe(comments);
         expect(thread.comments[0]).not.toBe(comments[0]);
         (comments as Array<unknown>).push({
@@ -140,7 +141,7 @@ describe("maintain-issues-snapshot value boundary", () => {
     });
 
     test("nullable fields survive without throwing", () => {
-        const snapshot = createMaintainableIssue({
+        const snapshot = createMaintenanceIssue({
             number: 7,
             nodeId: "I_7",
             title: "Nullable",
@@ -161,7 +162,7 @@ describe("maintain-issues-snapshot value boundary", () => {
         expect(snapshot.author).toBeNull();
         expect(snapshot.milestone).toBeUndefined();
 
-        const comment = createMaintainableComment({
+        const comment = createMaintenanceComment({
             id: 5,
             nodeId: "C5",
             url: "https://example.test/c/5",
@@ -173,22 +174,24 @@ describe("maintain-issues-snapshot value boundary", () => {
         });
         expect(comment.author).toBeNull();
         expect(comment.body).toBeNull();
-        expect(comment.content).toBeNull();
+        expect(comment.body).toBeNull();
+        expect(comment).not.toHaveProperty("content");
     });
 
     test("future and unknown enum and actor values use an explicit unknown shape", () => {
-        const snapshot = createMaintainableIssue({
+        const snapshot = createMaintenanceIssue({
             ...(issueInput() as Record<string, unknown>),
             state: "future-state",
             authorAssociation: "FUTURE_ROLE",
             author: { login: "mystery", type: "FutureBot", nodeId: null },
-        } as unknown as Parameters<typeof createMaintainableIssue>[0]);
+        } as unknown as Parameters<typeof createMaintenanceIssue>[0]);
         expect(snapshot.state).toEqual({
             kind: "unknown",
             value: "future-state",
         });
-        expect(snapshot.isOpen).toBe(false);
-        expect(snapshot.open).toBe(false);
+        expect(isMaintenanceIssueOpen(snapshot.state)).toBe(false);
+        expect(snapshot).not.toHaveProperty("isOpen");
+        expect(snapshot).not.toHaveProperty("open");
         expect(snapshot.authorAssociation).toEqual({
             kind: "unknown",
             value: "FUTURE_ROLE",
@@ -201,10 +204,10 @@ describe("maintain-issues-snapshot value boundary", () => {
     });
 
     test("only exact managed markers count", () => {
-        const exact = maintainMarker(12);
-        expect(parseRalphieMarker(exact)?.kind).toBe("maintain");
-        expect(parseRalphieMarker(exact)?.normalized).toBe(exact);
-        expect(isRalphieManaged(`before\n${exact}\nafter`)).toBe(true);
+        const exact = renderMaintenanceMarker(12);
+        expect(parseMaintenanceMarker(exact)?.kind).toBe("maintain");
+        expect(parseMaintenanceMarker(exact)?.normalized).toBe(exact);
+        expect(isMaintenanceManaged(`before\n${exact}\nafter`)).toBe(true);
 
         const maintenanceActionBody = renderMaintenanceActionComment({
             action: {
@@ -214,7 +217,7 @@ describe("maintain-issues-snapshot value boundary", () => {
                 rationale: "The issue does not identify one.",
             },
         });
-        expect(parseRalphieMarker(maintenanceActionBody)).toMatchObject({
+        expect(parseMaintenanceMarker(maintenanceActionBody)).toMatchObject({
             kind: "maintenance-action",
             issue: 12,
             action: "ask-question",
@@ -222,7 +225,7 @@ describe("maintain-issues-snapshot value boundary", () => {
             version: 1,
             bodySha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
         });
-        expect(isRalphieManaged(maintenanceActionBody)).toBe(true);
+        expect(isMaintenanceManaged(maintenanceActionBody)).toBe(true);
 
         const relationshipBody = renderMaintenanceRelationshipComment({
             issueNumber: 12,
@@ -233,7 +236,7 @@ describe("maintain-issues-snapshot value boundary", () => {
             snapshotFingerprint: "snapshot-fingerprint",
             rationale: "The issue is an exact duplicate.",
         });
-        expect(parseRalphieMarker(relationshipBody)).toMatchObject({
+        expect(parseMaintenanceMarker(relationshipBody)).toMatchObject({
             kind: "maintenance-relationship",
             issue: 12,
             relation: "duplicate",
@@ -242,7 +245,7 @@ describe("maintain-issues-snapshot value boundary", () => {
             version: 1,
             bodySha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
         });
-        expect(isRalphieManaged(relationshipBody)).toBe(true);
+        expect(isMaintenanceManaged(relationshipBody)).toBe(true);
 
         const nearMatches: ReadonlyArray<string | null> = [
             null,
@@ -260,11 +263,11 @@ describe("maintain-issues-snapshot value boundary", () => {
             "arbitrary text without a marker",
         ];
         for (const body of nearMatches) {
-            expect(parseRalphieMarker(body)).toBeUndefined();
-            expect(isRalphieManaged(body)).toBe(false);
+            expect(parseMaintenanceMarker(body)).toBeUndefined();
+            expect(isMaintenanceManaged(body)).toBe(false);
         }
 
-        const managedComment = createMaintainableComment({
+        const managedComment = createMaintenanceComment({
             id: 9,
             nodeId: "C9",
             url: "https://example.test/c/9",
@@ -274,9 +277,9 @@ describe("maintain-issues-snapshot value boundary", () => {
             createdAt: "2026-01-01T00:00:00.000Z",
             updatedAt: "2026-01-01T00:00:00.000Z",
         });
-        expect(managedComment.isRalphieManaged).toBe(true);
+        expect(managedComment.isMaintenanceManaged).toBe(true);
 
-        const plainComment = createMaintainableComment({
+        const plainComment = createMaintenanceComment({
             id: 10,
             nodeId: "C10",
             url: "https://example.test/c/10",
@@ -286,7 +289,7 @@ describe("maintain-issues-snapshot value boundary", () => {
             createdAt: "2026-01-01T00:00:00.000Z",
             updatedAt: "2026-01-01T00:00:00.000Z",
         });
-        expect(plainComment.isRalphieManaged).toBe(false);
+        expect(plainComment.isMaintenanceManaged).toBe(false);
     });
 });
 
@@ -320,14 +323,14 @@ describe("maintain-snapshot thread availability", () => {
     });
 
     test("omitted thread input never invents a complete zero-comment thread", () => {
-        const omitted = createMaintainableThread({});
+        const omitted = createMaintenanceCommentThread({});
         expect(omitted.comments).toHaveLength(0);
         expect(omitted.fetchedCount).toBe(0);
         expect(omitted.complete).toBe(false);
         expect(["unavailable", "partial"]).toContain(omitted.availability.kind);
         expect(omitted.availability.reason).not.toBeNull();
 
-        const omittedComments = createMaintainableThread({
+        const omittedComments = createMaintenanceCommentThread({
             totalCount: 0,
             complete: false,
         });
@@ -335,9 +338,9 @@ describe("maintain-snapshot thread availability", () => {
         expect(omittedComments.availability.kind).not.toBe("available");
         expect(omittedComments.availability.reason).not.toBeNull();
 
-        const omittedIssue = createMaintainableIssue({
+        const omittedIssue = createMaintenanceIssue({
             ...baseIssueInput(),
-        } as unknown as Parameters<typeof createMaintainableIssue>[0]);
+        } as unknown as Parameters<typeof createMaintenanceIssue>[0]);
         expect(omittedIssue.selectedThread.comments).toHaveLength(0);
         expect(omittedIssue.selectedThread.complete).toBe(false);
         expect(omittedIssue.selectedThread.availability.kind).not.toBe(
@@ -347,7 +350,7 @@ describe("maintain-snapshot thread availability", () => {
     });
 
     test("explicitly fetched zero comments are complete only with a known total of zero", () => {
-        const fetchedZero = createMaintainableThread({
+        const fetchedZero = createMaintenanceCommentThread({
             comments: [],
             totalCount: 0,
             complete: true,
@@ -360,7 +363,7 @@ describe("maintain-snapshot thread availability", () => {
         expect(fetchedZero.availability.kind).toBe("available");
         expect(fetchedZero.availability.reason).toBeNull();
 
-        const fetchedZeroUnknown = createMaintainableThread({
+        const fetchedZeroUnknown = createMaintenanceCommentThread({
             comments: [],
         });
         expect(fetchedZeroUnknown.complete).toBe(false);
@@ -369,9 +372,8 @@ describe("maintain-snapshot thread availability", () => {
     });
 
     test("known total greater than fetched forces an incomplete partial thread", () => {
-        const thread = createMaintainableThread({
+        const thread = createMaintenanceCommentThread({
             comments: [commentInput(1, "hello")],
-            fetchedCount: 99,
             totalCount: 5,
             complete: true,
             availability: { kind: "available", reason: null, detail: null },
@@ -391,7 +393,7 @@ describe("maintain-snapshot thread availability", () => {
             "deleted",
             "inaccessible",
         ] as const) {
-            const snapshot = createMaintainableIssue({
+            const snapshot = createMaintenanceIssue({
                 ...baseIssueInput(),
                 selectedThread: {
                     comments: [commentInput(1, "hello")],
@@ -409,7 +411,7 @@ describe("maintain-snapshot thread availability", () => {
                     detail: null,
                 },
                 skip: { reason, detail: `${reason} detail` },
-            } as unknown as Parameters<typeof createMaintainableIssue>[0]);
+            } as unknown as Parameters<typeof createMaintenanceIssue>[0]);
             expect(snapshot.skip?.reason).toBe(reason);
             expect(snapshot.availability.kind).toBe("unavailable");
             expect(snapshot.availability.reason).toBe(reason);
@@ -430,7 +432,7 @@ describe("maintain-snapshot thread availability", () => {
             "null-author",
             "unavailable",
         ] as const) {
-            const availability = normalizeMaintainableAvailability({
+            const availability = normalizeMaintenanceAvailability({
                 kind: "available",
                 reason,
                 detail: null,
@@ -439,7 +441,7 @@ describe("maintain-snapshot thread availability", () => {
             expect(availability.reason).toBe(reason);
         }
         for (const reason of ["partial", "locked"] as const) {
-            const availability = normalizeMaintainableAvailability({
+            const availability = normalizeMaintenanceAvailability({
                 kind: "available",
                 reason,
                 detail: null,
@@ -447,7 +449,7 @@ describe("maintain-snapshot thread availability", () => {
             expect(availability.kind).toBe("partial");
             expect(availability.reason).toBe(reason);
         }
-        const unknownKind = normalizeMaintainableAvailability({
+        const unknownKind = normalizeMaintenanceAvailability({
             kind: "future-kind",
             reason: null,
             detail: null,
@@ -455,20 +457,20 @@ describe("maintain-snapshot thread availability", () => {
         expect(unknownKind.kind).toBe("unavailable");
         expect(unknownKind.reason).not.toBeNull();
 
-        const partialWithoutReason = normalizeMaintainableAvailability({
+        const partialWithoutReason = normalizeMaintenanceAvailability({
             kind: "partial",
             reason: null,
             detail: null,
         });
         expect(partialWithoutReason.reason).not.toBeNull();
-        const unavailableWithoutReason = normalizeMaintainableAvailability({
+        const unavailableWithoutReason = normalizeMaintenanceAvailability({
             kind: "unavailable",
             reason: null,
             detail: null,
         });
         expect(unavailableWithoutReason.reason).not.toBeNull();
 
-        const contradictoryThread = createMaintainableThread({
+        const contradictoryThread = createMaintenanceCommentThread({
             comments: [commentInput(1, "hello")],
             totalCount: 1,
             complete: true,
@@ -483,24 +485,24 @@ describe("maintain-snapshot thread availability", () => {
     });
 
     test("missing or null comment bodies stay null while empty strings stay empty", () => {
-        const missing = createMaintainableComment({
+        const missing = createMaintenanceComment({
             ...commentInput(1),
             body: undefined,
-        } as unknown as Parameters<typeof createMaintainableComment>[0]);
+        } as unknown as Parameters<typeof createMaintenanceComment>[0]);
         expect(missing.body).toBeNull();
-        expect(missing.content).toBeNull();
+        expect(missing).not.toHaveProperty("content");
 
-        const nil = createMaintainableComment(commentInput(2, null));
+        const nil = createMaintenanceComment(commentInput(2, null));
         expect(nil.body).toBeNull();
-        expect(nil.content).toBeNull();
+        expect(nil).not.toHaveProperty("content");
 
-        const empty = createMaintainableComment(commentInput(3, ""));
+        const empty = createMaintenanceComment(commentInput(3, ""));
         expect(empty.body).toBe("");
-        expect(empty.content).toBe("");
+        expect(empty).not.toHaveProperty("content");
     });
 
     test("locked and partial records are preserved instead of dropped", () => {
-        const locked = createMaintainableIssue({
+        const locked = createMaintenanceIssue({
             ...baseIssueInput(),
             locked: true,
             author: null,
@@ -515,7 +517,7 @@ describe("maintain-snapshot thread availability", () => {
                 },
             },
             availability: { kind: "available", reason: null, detail: null },
-        } as unknown as Parameters<typeof createMaintainableIssue>[0]);
+        } as unknown as Parameters<typeof createMaintenanceIssue>[0]);
         expect(locked.locked).toBe(true);
         expect(locked.author).toBeNull();
         expect(locked.selectedThread.comments).toHaveLength(2);
@@ -525,7 +527,7 @@ describe("maintain-snapshot thread availability", () => {
         expect(locked.selectedThread.availability.kind).not.toBe("available");
         expect(locked.selectedThread.availability.reason).not.toBeNull();
 
-        const partial = createMaintainableIssue({
+        const partial = createMaintenanceIssue({
             ...baseIssueInput(),
             selectedThread: {
                 comments: [commentInput(7, "kept")],
@@ -542,14 +544,14 @@ describe("maintain-snapshot thread availability", () => {
                 reason: "partial",
                 detail: "truncated",
             },
-        } as unknown as Parameters<typeof createMaintainableIssue>[0]);
+        } as unknown as Parameters<typeof createMaintenanceIssue>[0]);
         expect(partial.selectedThread.comments).toHaveLength(1);
         expect(partial.selectedThread.comments[0]?.id).toBe(7);
         expect(partial.selectedThread.complete).toBe(false);
         expect(partial.selectedThread.availability.kind).toBe("partial");
         expect(partial.availability.kind).toBe("partial");
 
-        const nullAuthorComment = createMaintainableComment(
+        const nullAuthorComment = createMaintenanceComment(
             commentInput(9, "ghost"),
         );
         expect(nullAuthorComment.author).toBeNull();
@@ -557,7 +559,7 @@ describe("maintain-snapshot thread availability", () => {
     });
 
     test("complete fetched thread retains identity and order", () => {
-        const thread = createMaintainableThread({
+        const thread = createMaintenanceCommentThread({
             comments: [
                 commentInput(30, "third"),
                 commentInput(10, "first"),
@@ -581,7 +583,7 @@ describe("maintain-snapshot thread availability", () => {
     });
 
     test("unknown API values fail closed without throwing", () => {
-        const snapshot = createMaintainableIssue({
+        const snapshot = createMaintenanceIssue({
             ...baseIssueInput(),
             state: "future-state",
             authorAssociation: "FUTURE_ROLE",
@@ -591,7 +593,6 @@ describe("maintain-snapshot thread availability", () => {
             selectedThread: {
                 comments: [commentInput(1, "hello")],
                 totalCount: "many",
-                fetchedCount: "many",
                 complete: "yes",
                 availability: {
                     kind: "future-kind",
@@ -599,7 +600,7 @@ describe("maintain-snapshot thread availability", () => {
                     detail: null,
                 },
             },
-        } as unknown as Parameters<typeof createMaintainableIssue>[0]);
+        } as unknown as Parameters<typeof createMaintenanceIssue>[0]);
         expect(snapshot.state).toEqual({
             kind: "unknown",
             value: "future-state",

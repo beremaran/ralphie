@@ -18,7 +18,7 @@ import {
     type IssueMaintenanceAction,
 } from "../maintain-issues-plan.ts";
 import type { MaintenanceSnapshot } from "../maintain-issues-snapshot-service.ts";
-import type { MaintainableComment } from "../maintain-issues-snapshot.ts";
+import type { MaintenanceComment } from "../maintain/snapshot.ts";
 import { RalphieError } from "../shared/error.ts";
 import {
     canCommentOnLockedIssue,
@@ -726,7 +726,7 @@ const sameActor = (left: string | undefined, right: string): boolean =>
 const snapshotComment = (
     snapshot: MaintenanceSnapshot | undefined,
     commentId: number,
-): MaintainableComment | undefined => {
+): MaintenanceComment | undefined => {
     if (snapshot === undefined) return undefined;
     const selected = [
         ...snapshot.selectedIssues.flatMap((issue) =>

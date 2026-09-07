@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 
 import {
-    createMaintainableComment,
-    createMaintainableThread,
-} from "../src/maintain-issues-snapshot.ts";
+    createMaintenanceComment,
+    createMaintenanceCommentThread,
+} from "../src/maintain/snapshot.ts";
 import {
     THREAD_PROMPT_OMISSION_MARKER,
     THREAD_PROMPT_TRUNCATION_MARKER,
@@ -27,7 +27,7 @@ const commentInput = (id: number, body: string | null = "body") => ({
 });
 
 const threadInput = (comments: Array<unknown>) =>
-    createMaintainableThread({
+    createMaintenanceCommentThread({
         comments,
         totalCount: comments.length,
         complete: true,
@@ -103,7 +103,7 @@ describe("maintain-thread projection limit validation", () => {
 describe("maintain-thread per-comment projection", () => {
     test("retains a body that fits the per-comment budget", () => {
         const projected = projectCommentPrompt(
-            createMaintainableComment(commentInput(1, "hello")),
+            createMaintenanceComment(commentInput(1, "hello")),
             10,
         );
         expect(projected.state).toBe("retained");
@@ -116,7 +116,7 @@ describe("maintain-thread per-comment projection", () => {
 
     test("per-comment exhaustion truncates an over-budget body with the stable marker", () => {
         const projected = projectCommentPrompt(
-            createMaintainableComment(commentInput(2, LOWER_CASE)),
+            createMaintenanceComment(commentInput(2, LOWER_CASE)),
             15,
         );
         expect(projected.state).toBe("truncated");
@@ -134,7 +134,7 @@ describe("maintain-thread per-comment projection", () => {
     test("marker.length + 1 boundary keeps one head character and never the tail", () => {
         const limit = TRUNC.length + 1;
         const projected = projectCommentPrompt(
-            createMaintainableComment(commentInput(3, LOWER_CASE)),
+            createMaintenanceComment(commentInput(3, LOWER_CASE)),
             limit,
         );
         expect(projected.state).toBe("truncated");
@@ -148,7 +148,7 @@ describe("maintain-thread per-comment projection", () => {
 
     test("marker.length boundary emits the truncation marker alone", () => {
         const projected = projectCommentPrompt(
-            createMaintainableComment(commentInput(4, LOWER_CASE)),
+            createMaintenanceComment(commentInput(4, LOWER_CASE)),
             TRUNC.length,
         );
         expect(projected.state).toBe("truncated");
@@ -161,7 +161,7 @@ describe("maintain-thread per-comment projection", () => {
     test("limits smaller than the truncation marker omit content with a stable metadata marker", () => {
         // The omission marker still fits this budget.
         const withOmissionContent = projectCommentPrompt(
-            createMaintainableComment(commentInput(5, LOWER_CASE)),
+            createMaintenanceComment(commentInput(5, LOWER_CASE)),
             TRUNC.length - 1,
         );
         expect(withOmissionContent.state).toBe("omitted");
@@ -176,7 +176,7 @@ describe("maintain-thread per-comment projection", () => {
         // Even the omission marker cannot fit: content is empty but the
         // stable metadata marker is retained.
         const emptyContent = projectCommentPrompt(
-            createMaintainableComment(commentInput(6, LOWER_CASE)),
+            createMaintenanceComment(commentInput(6, LOWER_CASE)),
             OMIT.length - 1,
         );
         expect(emptyContent.state).toBe("omitted");
@@ -187,7 +187,7 @@ describe("maintain-thread per-comment projection", () => {
 
     test("observed empty bodies stay empty even with a zero budget", () => {
         const zero = projectCommentPrompt(
-            createMaintainableComment(commentInput(7, "")),
+            createMaintenanceComment(commentInput(7, "")),
             0,
         );
         expect(zero.state).toBe("empty");
@@ -200,7 +200,7 @@ describe("maintain-thread per-comment projection", () => {
 
     test("null bodies are unavailable, never empty or omitted", () => {
         const projected = projectCommentPrompt(
-            createMaintainableComment(commentInput(8, null)),
+            createMaintenanceComment(commentInput(8, null)),
             0,
         );
         expect(projected.state).toBe("unavailable");
@@ -358,7 +358,7 @@ describe("maintain-thread thread and aggregate projection", () => {
             commentInput(1, "a very long first comment body"),
             commentInput(2, "another long body"),
         ]);
-        const before = createMaintainableThread({
+        const before = createMaintenanceCommentThread({
             comments: input.comments.map((comment) => ({ ...comment })),
             totalCount: input.totalCount,
             complete: input.complete,
@@ -383,7 +383,7 @@ describe("maintain-thread thread and aggregate projection", () => {
     });
 
     test("projecting a partial or locked thread leaves availability intact", () => {
-        const partial = createMaintainableThread({
+        const partial = createMaintenanceCommentThread({
             comments: [commentInput(1, "only fetched comment")],
             totalCount: 3,
             complete: false,

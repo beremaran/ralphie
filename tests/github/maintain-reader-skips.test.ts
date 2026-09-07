@@ -1,15 +1,15 @@
 import { describe, expect, test } from "bun:test";
 
 import {
-    createMaintainableComment,
-    createMaintainableIssue,
-} from "../../src/maintain-issues-snapshot.ts";
+    createMaintenanceComment,
+    createMaintenanceIssue,
+} from "../../src/maintain/snapshot.ts";
 import {
     classifyPullRequestRecord,
     classifyRecordUnavailable,
     isPullRequestRecord,
     isMaintainReaderPaginationFailure,
-    mapMaintainableIssueRecord,
+    mapMaintainIssueRecord,
 } from "../../src/maintain/github-reader/skips.ts";
 import { MaintainGitHubReaderDiagnosticError } from "../../src/maintain/github-reader/diagnostics.ts";
 
@@ -72,7 +72,7 @@ describe("maintenance GitHub reader record skips", () => {
     });
 
     test("null authors and future enum values remain safe contract values", () => {
-        const issue = createMaintainableIssue({
+        const issue = createMaintenanceIssue({
             number: 22,
             title: "null author",
             author: null,
@@ -82,7 +82,7 @@ describe("maintenance GitHub reader record skips", () => {
             assignees: [],
             selectedThread: { comments: [] },
         });
-        const comment = createMaintainableComment({
+        const comment = createMaintenanceComment({
             id: 3,
             author: null,
             authorAssociation: "FUTURE_ASSOCIATION",
@@ -95,8 +95,6 @@ describe("maintenance GitHub reader record skips", () => {
             value: "FUTURE_ASSOCIATION",
         });
         expect(comment.author).toBeNull();
-        expect(
-            mapMaintainableIssueRecord({ author: null }, 23).author,
-        ).toBeNull();
+        expect(mapMaintainIssueRecord({ author: null }, 23).author).toBeNull();
     });
 });

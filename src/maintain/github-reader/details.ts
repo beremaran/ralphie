@@ -110,25 +110,17 @@ export const DEFAULT_MAINTAIN_COMMENT_PROMPT_LIMIT = 4_000;
 export const DEFAULT_MAINTAIN_THREAD_PROMPT_LIMIT = 32_000;
 export const DEFAULT_MAINTAIN_AGGREGATE_PROMPT_LIMIT = 2_000;
 
-export type MaintainableIssueDetail = {
+export type MaintainIssueDetail = {
     readonly issue: MaintenanceIssue;
     readonly thread: MaintenanceCommentThread;
     readonly threadProjection: ThreadPromptProjectionResult;
 };
 
-export type MaintainIssueDetail = MaintainableIssueDetail;
-
 export type MaintainReaderDetails = {
-    readonly details: ReadonlyArray<MaintainableIssueDetail>;
+    readonly details: ReadonlyArray<MaintainIssueDetail>;
     readonly issues: ReadonlyArray<MaintenanceIssue>;
     readonly skips: ReadonlyArray<MaintenanceSkip>;
 };
-
-export type MaintainableDetailCollection = MaintainReaderDetails;
-
-export type MaintainableSelectedThread = MaintenanceCommentThread;
-export type MaintainableIssue = MaintenanceIssue;
-export type MaintainableSkip = MaintenanceSkip;
 
 const uniqueIssueNumbers = (
     issueNumbers: ReadonlyArray<number>,
@@ -169,7 +161,7 @@ const project = (
 const skippedDetail = (
     issueNumber: number,
     skip: MaintenanceSkip,
-): MaintainableIssueDetail => {
+): MaintainIssueDetail => {
     const thread = skipThread(skip);
     const issue = createMaintenanceIssue({
         number: issueNumber,
@@ -278,7 +270,7 @@ const collectOneDetail = async (
     signal: AbortSignal | undefined,
     options: MaintainReaderDetailOptions,
 ): Promise<{
-    readonly detail: MaintainableIssueDetail;
+    readonly detail: MaintainIssueDetail;
     readonly skip?: MaintenanceSkip;
 }> => {
     throwIfAborted(signal);
@@ -343,7 +335,7 @@ export const collectMaintainReaderDetails = async (
     options: MaintainReaderDetailOptions = {},
 ): Promise<MaintainReaderDetails> => {
     const { owner, name } = parseRepositorySlug(repository);
-    const details: MaintainableIssueDetail[] = [];
+    const details: MaintainIssueDetail[] = [];
     const skips: MaintenanceSkip[] = [];
     for (const issueNumber of uniqueIssueNumbers(issueNumbers)) {
         const result = await collectOneDetail(
@@ -365,6 +357,3 @@ export const collectMaintainReaderDetails = async (
         skips: Object.freeze(skips),
     });
 };
-
-export const loadMaintainReaderDetails = collectMaintainReaderDetails;
-export const collectMaintainableDetails = collectMaintainReaderDetails;

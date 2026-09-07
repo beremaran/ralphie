@@ -86,9 +86,8 @@ describe("maintenance GitHub reader detail collection", () => {
             title: "Selected issue",
             body: "body\n<!-- ralphie:maintain issue=7 -->",
             url: "https://github.com/o/r/issues/7",
-            htmlUrl: "https://github.com/o/r/issues/7",
             locked: true,
-            isRalphieManaged: true,
+            isMaintenanceManaged: true,
         });
         expect(detail?.issue.author?.login).toBe("owner");
         expect(detail?.issue.availability).toMatchObject({
@@ -98,7 +97,7 @@ describe("maintenance GitHub reader detail collection", () => {
         expect(detail?.thread.comments).toHaveLength(2);
         expect(detail?.thread.complete).toBe(false);
         expect(detail?.thread.totalCount).toBe(2);
-        expect(detail?.thread.comments[0]?.isRalphieManaged).toBe(true);
+        expect(detail?.thread.comments[0]?.isMaintenanceManaged).toBe(true);
         expect(detail?.thread.comments[1]?.author).toBeNull();
         expect(detail?.thread.comments[0]?.authorAssociation).toEqual({
             kind: "unknown",

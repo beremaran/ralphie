@@ -185,7 +185,7 @@ binary, installer, Homebrew, and container distribution machinery was removed.
 | Complexity routing | `src/issues/executor.ts`, `src/issues/complexity.ts` |
 | Implementation/review/delivery | `src/issues/implementation-executor.ts`, `src/issues/pull-request-review.ts`, `src/issues/pull-request-review-coordinator.ts`, `src/github/pull-requests.ts` |
 | Decomposition and GitHub mutations | `src/issues/decomposition-executor.ts`, `src/github/issue-mutations.ts`, `src/github/issue-relationships.ts` |
-| Maintenance snapshot, planning, execution, and state | `src/maintain-issues.ts`, `src/maintain-issues-lifecycle.ts`, `src/maintain-issues-snapshot.ts`, `src/maintain-issues-snapshot-service.ts`, `src/maintain-issues-candidates.ts`, `src/maintain-issues-plan.ts`, `src/maintain-issues-state.ts` |
+| Maintenance snapshot, planning, execution, and state | `src/maintain-issues.ts`, `src/maintain-issues-lifecycle.ts`, `src/maintain/snapshot.ts`, `src/maintain-issues-snapshot-service.ts`, `src/maintain-issues-candidates.ts`, `src/maintain-issues-plan.ts`, `src/maintain-issues-state.ts` |
 | Maintenance GitHub reconciliation | `src/github/issue-maintenance.ts`, `src/github/issue-maintenance-relationships.ts`, `src/maintain-issues-grounding-reader.ts` |
 | OpenCode sessions and structured results | `src/agent/`, `src/opencode/` |
 | Git checkpoints, safety, and branches | `src/git/` |

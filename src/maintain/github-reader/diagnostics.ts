@@ -9,7 +9,6 @@
  * typed record skip.
  */
 import { RalphieError } from "../../shared/error.ts";
-import { rateLimitFromUnknown } from "../../github/rate-limit.ts";
 
 export const MAINTAIN_READER_DEFAULT_PAGE_SIZE = 100;
 export const MAINTAIN_READER_MAX_PAGES = 10_000;
@@ -75,8 +74,6 @@ export class MaintainGitHubReaderDiagnosticError extends RalphieError {
     }
 }
 
-export type MaintainReaderDiagnosticError = MaintainGitHubReaderDiagnosticError;
-
 const errorFor = (input: {
     readonly repository: string;
     readonly endpoint: string;
@@ -127,9 +124,6 @@ export const isMaintainReaderRateLimited = (value: unknown): boolean => {
     );
 };
 
-export const isRateLimited = isMaintainReaderRateLimited;
-export const maintainReaderRateLimitFromUnknown = rateLimitFromUnknown;
-
 const abortError = (message: string): Error => {
     const error = new Error(message);
     error.name = "AbortError";
@@ -144,8 +138,6 @@ export const throwIfAborted = (
     if (signal?.aborted !== true) return;
     throw signal.reason === undefined ? abortError(message) : signal.reason;
 };
-
-export const throwIfMaintainReaderAborted = throwIfAborted;
 
 export type MaintainReaderEndpoint = (
     parameters: Record<string, unknown>,
@@ -527,7 +519,3 @@ export const paginateMaintainReaderGet = async <T = unknown>(
         message: `pagination exceeded the safety limit of ${String(prepared.maxPages)} pages.`,
     });
 };
-
-export const paginateMaintainabilityGet = paginateMaintainReaderGet;
-export const paginateMaintenanceGet = paginateMaintainReaderGet;
-export const collectMaintainReaderPages = paginateMaintainReaderGet;

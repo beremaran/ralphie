@@ -8,9 +8,9 @@
  * directed cycles are reported before any mutation layer can see them.
  */
 import type {
-    MaintainableIssue,
-    MaintainableLabel,
-} from "./maintain-issues-snapshot.ts";
+    MaintenanceIssue,
+    MaintenanceLabel,
+} from "./maintain/snapshot.ts";
 import type { MaintenanceSnapshot } from "./maintain-issues-snapshot-service.ts";
 
 const MAX_TITLE_LENGTH = 512;
@@ -118,7 +118,7 @@ const titleSimilarity = (
 };
 
 const labelsFor = (
-    labels: ReadonlyArray<MaintainableLabel>,
+    labels: ReadonlyArray<MaintenanceLabel>,
 ): ReadonlyArray<string> =>
     [
         ...new Set(
@@ -129,8 +129,8 @@ const labelsFor = (
     ].sort(compareText);
 
 const sharedLabels = (
-    left: ReadonlyArray<MaintainableLabel>,
-    right: ReadonlyArray<MaintainableLabel>,
+    left: ReadonlyArray<MaintenanceLabel>,
+    right: ReadonlyArray<MaintenanceLabel>,
 ): ReadonlyArray<string> => intersection(labelsFor(left), labelsFor(right));
 
 const bodyTerms = (body: string | null): ReadonlyArray<string> =>
@@ -331,7 +331,7 @@ type ComparableIssue = {
     readonly url: string;
     readonly createdAt: string;
     readonly updatedAt: string;
-    readonly labels: ReadonlyArray<MaintainableLabel>;
+    readonly labels: ReadonlyArray<MaintenanceLabel>;
     readonly open: boolean;
     readonly accessible: boolean;
     readonly references: ReadonlyArray<ExplicitReference>;
@@ -344,7 +344,7 @@ type SnapshotIssueIndex = {
     readonly detailsByNumber: ReadonlyMap<number, ComparableIssue>;
 };
 
-const issueFromDetail = (issue: MaintainableIssue): ComparableIssue => ({
+const issueFromDetail = (issue: MaintenanceIssue): ComparableIssue => ({
     number: issue.number,
     title: issue.title,
     body: issue.body,
