@@ -113,7 +113,8 @@ export const selectMaintainableIssueNumbers = (
         .filter((summary) =>
             labelMatches(summary, normalized.issueLabels ?? []),
         )
-        .filter((summary) => summary.isOpen)
+        // Canonical open status: the single `state` field decides openness.
+        .filter((summary) => summary.state === "open")
         .sort((left, right) => compareSummaries(left, right, normalized));
     const capped =
         normalized.maxIssues === undefined

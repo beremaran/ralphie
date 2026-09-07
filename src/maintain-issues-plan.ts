@@ -370,7 +370,8 @@ const issueFromDetail = (issue: MaintainableIssue): PlanIssue => ({
     number: issue.number,
     title: issue.title,
     url: issue.url,
-    open: issue.state === "open" && issue.isOpen,
+    // Canonical open status: the single `state` field decides openness.
+    open: issue.state === "open",
     accessible:
         issue.availability.kind === "available" && issue.skip === undefined,
     labels: issue.labels,
@@ -382,7 +383,8 @@ const issueFromSummary = (
     number: summary.number,
     title: summary.title,
     url: summary.url,
-    open: summary.state === "open" && summary.isOpen,
+    // Canonical open status: the single `state` field decides openness.
+    open: summary.state === "open",
     accessible: true,
     labels: summary.labels,
 });
@@ -1521,7 +1523,6 @@ const promptSummaryView = (
             title: summary.title,
             url: summary.url,
             state: summary.state,
-            isOpen: summary.isOpen,
             labels: summary.labels.map((label) => label.name),
             createdAt: summary.createdAt,
             updatedAt: summary.updatedAt,

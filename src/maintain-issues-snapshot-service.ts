@@ -487,7 +487,15 @@ const cloneIssue = (
     threadOverride?: unknown,
 ): MaintenanceIssue => {
     const source = isRecord(value) ? value : {};
-    const selectedThread = threadOverride ?? source.selectedThread;
+    // Canonical comment-thread field is `selectedThread`. The `thread` and
+    // `commentThread` aliases remain accepted here only so callers not yet
+    // contracted keep working; planning and fingerprinting read the
+    // normalized `selectedThread` below.
+    const selectedThread =
+        threadOverride ??
+        source.selectedThread ??
+        (source as RecordLike).thread ??
+        (source as RecordLike).commentThread;
     return createMaintenanceIssue({
         ...source,
         labels: cloneLabels(source.labels),
@@ -819,15 +827,14 @@ const skipFingerprint = (skip: MaintenanceSkip | undefined): unknown =>
           };
 
 const commentFingerprint = (comment: MaintenanceComment): RecordLike => ({
+    // Canonical comment identity, location, and body only. Mirrored
+    // `databaseId`, `nodeId`, `htmlUrl`, and `content` are deterministically
+    // derived and excluded so equivalent evidence shares one fingerprint.
     id: comment.id,
-    databaseId: comment.databaseId,
-    nodeId: comment.nodeId,
     url: comment.url,
-    htmlUrl: comment.htmlUrl,
     author: actorFingerprint(comment.author),
     authorAssociation: comment.authorAssociation,
     body: bodyFingerprint(comment.body),
-    content: bodyFingerprint(comment.content),
     createdAt: comment.createdAt,
     updatedAt: comment.updatedAt,
     isRalphieManaged: comment.isRalphieManaged,
@@ -893,15 +900,14 @@ const projectionFingerprint = (
 });
 
 const issueFingerprint = (issue: MaintenanceIssue): RecordLike => ({
+    // Canonical issue identity, body, location, state, and selected thread
+    // only. Mirrored `nodeId`, `htmlUrl`, `isOpen`/`open`, and thread aliases
+    // are deterministically derived and excluded.
     number: issue.number,
-    nodeId: issue.nodeId,
     title: issue.title,
     body: bodyFingerprint(issue.body),
     url: issue.url,
-    htmlUrl: issue.htmlUrl,
     state: issue.state,
-    isOpen: issue.isOpen,
-    open: issue.open,
     author: actorFingerprint(issue.author),
     authorAssociation: issue.authorAssociation,
     labels: issue.labels.map(labelFingerprint),
@@ -918,18 +924,17 @@ const issueFingerprint = (issue: MaintenanceIssue): RecordLike => ({
 });
 
 const summaryFingerprint = (summary: MaintainIssueSummary): RecordLike => ({
+    // Canonical summary identity, location, and state only. Mirrored
+    // `nodeId`, `htmlUrl`, and `isOpen` are excluded.
     number: summary.number,
-    nodeId: summary.nodeId,
     title: summary.title,
     url: summary.url,
-    htmlUrl: summary.htmlUrl,
     labels: summary.labels.map(labelFingerprint),
     author: actorFingerprint(summary.author),
     createdAt: summary.createdAt,
     updatedAt: summary.updatedAt,
     commentCount: summary.commentCount,
     state: summary.state,
-    isOpen: summary.isOpen,
 });
 
 const guidanceFingerprint = (guidance: GuidanceBundle | undefined): unknown =>

@@ -352,7 +352,8 @@ const issueFromDetail = (issue: MaintainableIssue): ComparableIssue => ({
     createdAt: issue.createdAt,
     updatedAt: issue.updatedAt,
     labels: issue.labels,
-    open: issue.state === "open" && issue.isOpen,
+    // Canonical open status: the single `state` field decides openness.
+    open: issue.state === "open",
     accessible:
         issue.availability.kind === "available" && issue.skip === undefined,
     references: explicitReferences(issue.body),
@@ -368,7 +369,8 @@ const issueFromSummary = (
     createdAt: summary.createdAt,
     updatedAt: summary.updatedAt,
     labels: summary.labels,
-    open: summary.state === "open" && summary.isOpen,
+    // Canonical open status: the single `state` field decides openness.
+    open: summary.state === "open",
     accessible: true,
     references: Object.freeze([]),
 });

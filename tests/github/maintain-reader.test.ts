@@ -151,7 +151,7 @@ describe("composed maintenance GitHub reader", () => {
         const values = [
             {
                 number: 3,
-                isOpen: true,
+                state: "open",
                 labels: [{ name: "x" }],
                 createdAt: "",
                 updatedAt: "",
@@ -159,7 +159,7 @@ describe("composed maintenance GitHub reader", () => {
             },
             {
                 number: 1,
-                isOpen: true,
+                state: "open",
                 labels: [{ name: "x" }],
                 createdAt: "",
                 updatedAt: "",
