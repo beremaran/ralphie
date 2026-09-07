@@ -1,11 +1,11 @@
 import type { CommitMessageDecision } from "../issues/decisions.ts";
 import {
     CommandRunnerLive,
+    requireSuccess,
     type CommandResult,
     type CommandRunnerService,
 } from "../process/command-runner.ts";
 import { RalphieError } from "../shared/error.ts";
-import { runGit } from "./run-git.ts";
 
 export type GitPushFailureKind = "non-fast-forward" | "other";
 
@@ -134,20 +134,20 @@ export const makeGitIssueOperationsService = (
     };
 
     const currentBranch = (repositoryPath: string) =>
-        runGit(
+        requireSuccess(
             runner,
-            repositoryPath,
-            ["rev-parse", "--abbrev-ref", "HEAD"],
+            "git",
+            ["-C", repositoryPath, "rev-parse", "--abbrev-ref", "HEAD"],
             "Failed to read the current Git branch",
-        );
+        ).then((result) => result.stdout);
 
     const status = (repositoryPath: string) =>
-        runGit(
+        requireSuccess(
             runner,
-            repositoryPath,
-            ["status", "--porcelain=v1"],
+            "git",
+            ["-C", repositoryPath, "status", "--porcelain=v1"],
             "Failed to inspect the Git checkout status",
-        );
+        ).then((result) => result.stdout);
 
     const branchExists = async (
         repositoryPath: string,
@@ -170,12 +170,12 @@ export const makeGitIssueOperationsService = (
     };
 
     const resolveCommit = (repositoryPath: string, sha: string) =>
-        runGit(
+        requireSuccess(
             runner,
-            repositoryPath,
-            ["rev-parse", "--verify", `${sha}^{commit}`],
+            "git",
+            ["-C", repositoryPath, "rev-parse", "--verify", `${sha}^{commit}`],
             "Failed to resolve the requested Git base commit",
-        );
+        ).then((result) => result.stdout);
 
     const assertPushSucceeded = (
         branch: string,
@@ -207,12 +207,20 @@ export const makeGitIssueOperationsService = (
         branch: string,
         expectedCommitSha: string,
     ): Promise<void> => {
-        const remote = await runGit(
-            runner,
-            repositoryPath,
-            ["ls-remote", "origin", `refs/heads/${branch}`],
-            "Failed to verify the pushed issue commit",
-        );
+        const remote = (
+            await requireSuccess(
+                runner,
+                "git",
+                [
+                    "-C",
+                    repositoryPath,
+                    "ls-remote",
+                    "origin",
+                    `refs/heads/${branch}`,
+                ],
+                "Failed to verify the pushed issue commit",
+            )
+        ).stdout;
         const remoteSha = remote.split(/\s+/)[0] ?? "";
         if (remoteSha.toLowerCase() !== expectedCommitSha.toLowerCase()) {
             throw new RalphieError({
@@ -220,12 +228,14 @@ export const makeGitIssueOperationsService = (
             });
         }
 
-        const checkoutStatus = await runGit(
-            runner,
-            repositoryPath,
-            ["status", "--porcelain=v1"],
-            "Failed to verify the issue checkout after push",
-        );
+        const checkoutStatus = (
+            await requireSuccess(
+                runner,
+                "git",
+                ["-C", repositoryPath, "status", "--porcelain=v1"],
+                "Failed to verify the issue checkout after push",
+            )
+        ).stdout;
         if (checkoutStatus !== "") {
             throw new RalphieError({
                 message: "Issue checkout is dirty after push.",
@@ -321,12 +331,19 @@ export const makeGitIssueOperationsService = (
         resolvedBaseSha: string,
         actualBranch: string,
     ): Promise<GitFeatureBranchResult> => {
-        const branchSha = await runGit(
-            runner,
-            repositoryPath,
-            ["rev-parse", `refs/heads/${branch}^{commit}`],
-            `Failed to read feature branch ${branch}`,
-        );
+        const branchSha = (
+            await requireSuccess(
+                runner,
+                "git",
+                [
+                    "-C",
+                    repositoryPath,
+                    "rev-parse",
+                    `refs/heads/${branch}^{commit}`,
+                ],
+                `Failed to read feature branch ${branch}`,
+            )
+        ).stdout;
         await verifyFeatureBranchAncestry(repositoryPath, branch, baseSha);
         if (actualBranch !== branch) {
             if ((await status(repositoryPath)) !== "") {
@@ -334,12 +351,14 @@ export const makeGitIssueOperationsService = (
                     message: `Cannot checkout feature branch ${branch}; the current checkout is dirty.`,
                 });
             }
-            await runGit(
-                runner,
-                repositoryPath,
-                ["checkout", branch],
-                `Failed to checkout existing feature branch ${branch}`,
-            );
+            (
+                await requireSuccess(
+                    runner,
+                    "git",
+                    ["-C", repositoryPath, "checkout", branch],
+                    `Failed to checkout existing feature branch ${branch}`,
+                )
+            ).stdout;
         }
         return {
             branch,
@@ -362,18 +381,22 @@ export const makeGitIssueOperationsService = (
                 message: `Cannot create feature branch ${branch}; the current checkout is dirty.`,
             });
         }
-        await runGit(
-            runner,
-            repositoryPath,
-            ["checkout", "-b", branch, baseSha],
-            `Failed to create feature branch ${branch}`,
-        );
-        const headSha = await runGit(
-            runner,
-            repositoryPath,
-            ["rev-parse", "HEAD"],
-            "Failed to verify the created feature branch",
-        );
+        (
+            await requireSuccess(
+                runner,
+                "git",
+                ["-C", repositoryPath, "checkout", "-b", branch, baseSha],
+                `Failed to create feature branch ${branch}`,
+            )
+        ).stdout;
+        const headSha = (
+            await requireSuccess(
+                runner,
+                "git",
+                ["-C", repositoryPath, "rev-parse", "HEAD"],
+                "Failed to verify the created feature branch",
+            )
+        ).stdout;
         if (headSha.toLowerCase() !== baseSha.toLowerCase()) {
             throw new RalphieError({
                 message: `Created feature branch ${branch} at ${headSha}, expected base commit ${baseSha}.`,
@@ -390,22 +413,24 @@ export const makeGitIssueOperationsService = (
 
     return {
         stageAll: async (repositoryPath) => {
-            await runGit(
-                runner,
-                repositoryPath,
-                ["add", "--all"],
-                "Failed to stage all issue changes",
-            );
+            (
+                await requireSuccess(
+                    runner,
+                    "git",
+                    ["-C", repositoryPath, "add", "--all"],
+                    "Failed to stage all issue changes",
+                )
+            ).stdout;
         },
 
         readStagedBinaryDiff: (repositoryPath) =>
-            runGit(
+            requireSuccess(
                 runner,
-                repositoryPath,
-                ["diff", "--cached", "--binary"],
+                "git",
+                ["-C", repositoryPath, "diff", "--cached", "--binary"],
                 "Failed to read the staged issue diff",
-                false,
-            ),
+                { trimStdout: false },
+            ).then((result) => result.stdout),
 
         readCommittedBinaryDiff: async (
             repositoryPath,
@@ -419,14 +444,22 @@ export const makeGitIssueOperationsService = (
                         "Committed diff requires explicit full base and head object IDs.",
                 });
             }
-            const patch = await runGit(
-                runner,
-                repositoryPath,
-                ["diff", "--binary", "--no-ext-diff", `${baseSha}..${headSha}`],
-                "Failed to read the committed pull request diff",
-                false,
-                signal,
-            );
+            const patch = (
+                await requireSuccess(
+                    runner,
+                    "git",
+                    [
+                        "-C",
+                        repositoryPath,
+                        "diff",
+                        "--binary",
+                        "--no-ext-diff",
+                        `${baseSha}..${headSha}`,
+                    ],
+                    "Failed to read the committed pull request diff",
+                    { trimStdout: false, signal },
+                )
+            ).stdout;
             const bytes = Buffer.byteLength(patch, "utf8");
             if (bytes > MAX_COMMITTED_DIFF_BYTES) {
                 throw new RalphieError({
@@ -460,43 +493,53 @@ export const makeGitIssueOperationsService = (
                 });
             }
 
-            const expectedTree = await runGit(
-                runner,
-                repositoryPath,
-                ["write-tree"],
-                "Failed to capture the staged issue tree",
-            );
+            const expectedTree = (
+                await requireSuccess(
+                    runner,
+                    "git",
+                    ["-C", repositoryPath, "write-tree"],
+                    "Failed to capture the staged issue tree",
+                )
+            ).stdout;
             const commitArgs = ["commit", "-m", message.subject];
             if (message.body !== undefined) commitArgs.push("-m", message.body);
-            await runGit(
-                runner,
-                repositoryPath,
-                commitArgs,
-                "Failed to commit the staged issue changes",
-            );
-            const sha = await runGit(
-                runner,
-                repositoryPath,
-                ["rev-parse", "HEAD"],
-                "Failed to read the created issue commit",
-            );
-            const actualTree = await runGit(
-                runner,
-                repositoryPath,
-                ["rev-parse", "HEAD^{tree}"],
-                "Failed to verify the created issue tree",
-            );
+            (
+                await requireSuccess(
+                    runner,
+                    "git",
+                    ["-C", repositoryPath, ...commitArgs],
+                    "Failed to commit the staged issue changes",
+                )
+            ).stdout;
+            const sha = (
+                await requireSuccess(
+                    runner,
+                    "git",
+                    ["-C", repositoryPath, "rev-parse", "HEAD"],
+                    "Failed to read the created issue commit",
+                )
+            ).stdout;
+            const actualTree = (
+                await requireSuccess(
+                    runner,
+                    "git",
+                    ["-C", repositoryPath, "rev-parse", "HEAD^{tree}"],
+                    "Failed to verify the created issue tree",
+                )
+            ).stdout;
             if (actualTree !== expectedTree) {
                 throw new RalphieError({
                     message: `Created issue commit ${sha} does not contain the expected staged tree.`,
                 });
             }
-            const checkoutStatus = await runGit(
-                runner,
-                repositoryPath,
-                ["status", "--porcelain=v1"],
-                "Failed to verify the issue checkout after commit",
-            );
+            const checkoutStatus = (
+                await requireSuccess(
+                    runner,
+                    "git",
+                    ["-C", repositoryPath, "status", "--porcelain=v1"],
+                    "Failed to verify the issue checkout after commit",
+                )
+            ).stdout;
             if (checkoutStatus !== "") {
                 throw new RalphieError({
                     message: "Issue checkout is dirty after commit.",
@@ -552,52 +595,74 @@ export const makeGitIssueOperationsService = (
                         "Cannot restore the base checkout while it is dirty.",
                 });
             }
-            await runGit(
-                runner,
-                repositoryPath,
-                ["fetch", "--prune", "origin"],
-                "Failed to fetch the merged base branch from origin",
-            );
-            const originSha = await runGit(
-                runner,
-                repositoryPath,
-                [
-                    "rev-parse",
-                    "--verify",
-                    `refs/remotes/origin/${baseBranch}^{commit}`,
-                ],
-                `Failed to resolve origin/${baseBranch}`,
-            );
-            await runGit(
-                runner,
-                repositoryPath,
-                [
-                    "checkout",
-                    "-B",
-                    baseBranch,
-                    `refs/remotes/origin/${baseBranch}`,
-                ],
-                `Failed to checkout base branch ${baseBranch}`,
-            );
-            await runGit(
-                runner,
-                repositoryPath,
-                ["reset", "--hard", `refs/remotes/origin/${baseBranch}`],
-                "Failed to reset the base checkout to origin",
-            );
-            await runGit(
-                runner,
-                repositoryPath,
-                ["clean", "-fd"],
-                "Failed to remove files left by the merged feature branch",
-            );
+            (
+                await requireSuccess(
+                    runner,
+                    "git",
+                    ["-C", repositoryPath, "fetch", "--prune", "origin"],
+                    "Failed to fetch the merged base branch from origin",
+                )
+            ).stdout;
+            const originSha = (
+                await requireSuccess(
+                    runner,
+                    "git",
+                    [
+                        "-C",
+                        repositoryPath,
+                        "rev-parse",
+                        "--verify",
+                        `refs/remotes/origin/${baseBranch}^{commit}`,
+                    ],
+                    `Failed to resolve origin/${baseBranch}`,
+                )
+            ).stdout;
+            (
+                await requireSuccess(
+                    runner,
+                    "git",
+                    [
+                        "-C",
+                        repositoryPath,
+                        "checkout",
+                        "-B",
+                        baseBranch,
+                        `refs/remotes/origin/${baseBranch}`,
+                    ],
+                    `Failed to checkout base branch ${baseBranch}`,
+                )
+            ).stdout;
+            (
+                await requireSuccess(
+                    runner,
+                    "git",
+                    [
+                        "-C",
+                        repositoryPath,
+                        "reset",
+                        "--hard",
+                        `refs/remotes/origin/${baseBranch}`,
+                    ],
+                    "Failed to reset the base checkout to origin",
+                )
+            ).stdout;
+            (
+                await requireSuccess(
+                    runner,
+                    "git",
+                    ["-C", repositoryPath, "clean", "-fd"],
+                    "Failed to remove files left by the merged feature branch",
+                )
+            ).stdout;
             const restoredBranch = await currentBranch(repositoryPath);
-            const restoredSha = await runGit(
-                runner,
-                repositoryPath,
-                ["rev-parse", "HEAD"],
-                "Failed to verify the restored base checkout",
-            );
+            const restoredSha = (
+                await requireSuccess(
+                    runner,
+                    "git",
+                    ["-C", repositoryPath, "rev-parse", "HEAD"],
+                    "Failed to verify the restored base checkout",
+                )
+            ).stdout;
             if (
                 restoredBranch !== baseBranch ||
                 restoredSha.toLowerCase() !== originSha.toLowerCase() ||

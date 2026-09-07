@@ -1,11 +1,11 @@
 import type { CommitMessageDecision } from "../issues/decisions.ts";
 import {
     CommandRunnerLive,
+    requireSuccess,
     type CommandResult,
     type CommandRunnerService,
 } from "../process/command-runner.ts";
 import { RalphieError } from "../shared/error.ts";
-import { runGit } from "./run-git.ts";
 
 /** Git object IDs are kept full at every delivery boundary. */
 const FULL_GIT_OBJECT_ID = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/i;
@@ -178,7 +178,7 @@ const checkRef = async (
     const result = await runner.run(
         "git",
         ["-C", repositoryPath, "check-ref-format", "--branch", branch],
-        signal === undefined ? undefined : { signal },
+        { signal },
     );
     if (result.exitCode !== 0) {
         throw new PipelineDeliveryGitError({
@@ -194,42 +194,39 @@ const readBranch = async (
     repositoryPath: string,
     signal?: AbortSignal,
 ): Promise<string> =>
-    runGit(
+    requireSuccess(
         runner,
-        repositoryPath,
-        ["rev-parse", "--abbrev-ref", "HEAD"],
+        "git",
+        ["-C", repositoryPath, "rev-parse", "--abbrev-ref", "HEAD"],
         "Failed to read the pipeline delivery branch",
-        true,
-        signal,
-    );
+        { signal },
+    ).then((result) => result.stdout);
 
 const readHead = async (
     runner: CommandRunnerService,
     repositoryPath: string,
     signal?: AbortSignal,
 ): Promise<string> =>
-    runGit(
+    requireSuccess(
         runner,
-        repositoryPath,
-        ["rev-parse", "HEAD"],
+        "git",
+        ["-C", repositoryPath, "rev-parse", "HEAD"],
         "Failed to read the pipeline delivery HEAD",
-        true,
-        signal,
-    );
+        { signal },
+    ).then((result) => result.stdout);
 
 const readStatus = async (
     runner: CommandRunnerService,
     repositoryPath: string,
     signal?: AbortSignal,
 ): Promise<string> =>
-    runGit(
+    requireSuccess(
         runner,
-        repositoryPath,
-        ["status", "--porcelain=v1"],
+        "git",
+        ["-C", repositoryPath, "status", "--porcelain=v1"],
         "Failed to inspect the pipeline delivery checkout",
-        true,
-        signal,
-    );
+        { signal },
+    ).then((result) => result.stdout);
 
 const readCheckout = async (
     runner: CommandRunnerService,
@@ -260,7 +257,7 @@ const remoteHead = async (
     const result = await runner.run(
         "git",
         ["-C", repositoryPath, "ls-remote", "origin", `refs/heads/${branch}`],
-        signal === undefined ? undefined : { signal },
+        { signal },
     );
     if (result.exitCode !== 0) {
         throw new PipelineDeliveryGitError({
@@ -348,24 +345,26 @@ export const makePipelineDeliveryGitService = (
         requireClean(before, "Preparing the pipeline delivery checkout");
 
         if (before.branch !== branch) {
-            await runGit(
-                runner,
-                repositoryPath,
-                ["checkout", branch],
-                `Failed to checkout pipeline branch ${branch}`,
-                true,
-                signal,
-            );
+            (
+                await requireSuccess(
+                    runner,
+                    "git",
+                    ["-C", repositoryPath, "checkout", branch],
+                    `Failed to checkout pipeline branch ${branch}`,
+                    { signal },
+                )
+            ).stdout;
         }
 
-        await runGit(
-            runner,
-            repositoryPath,
-            ["fetch", "--prune", "origin", branch],
-            `Failed to fetch origin/${branch} before pipeline repair`,
-            true,
-            signal,
-        );
+        (
+            await requireSuccess(
+                runner,
+                "git",
+                ["-C", repositoryPath, "fetch", "--prune", "origin", branch],
+                `Failed to fetch origin/${branch} before pipeline repair`,
+                { signal },
+            )
+        ).stdout;
         const fetchedRemote = await remoteHead(
             runner,
             repositoryPath,
@@ -374,22 +373,24 @@ export const makePipelineDeliveryGitService = (
         );
         assertRemote(fetchedRemote, expectedRemoteSha, branch);
 
-        await runGit(
-            runner,
-            repositoryPath,
-            ["reset", "--hard", expectedRemoteSha],
-            "Failed to prepare the exact pipeline repair checkpoint",
-            true,
-            signal,
-        );
-        await runGit(
-            runner,
-            repositoryPath,
-            ["clean", "-fd"],
-            "Failed to remove stale pipeline repair files",
-            true,
-            signal,
-        );
+        (
+            await requireSuccess(
+                runner,
+                "git",
+                ["-C", repositoryPath, "reset", "--hard", expectedRemoteSha],
+                "Failed to prepare the exact pipeline repair checkpoint",
+                { signal },
+            )
+        ).stdout;
+        (
+            await requireSuccess(
+                runner,
+                "git",
+                ["-C", repositoryPath, "clean", "-fd"],
+                "Failed to remove stale pipeline repair files",
+                { signal },
+            )
+        ).stdout;
 
         const after = await readCheckout(runner, repositoryPath, signal);
         if (
@@ -426,22 +427,24 @@ export const makePipelineDeliveryGitService = (
                 message: `Refusing to discard pipeline edits: expected local ${branch}@${expectedLocalSha}, found ${before.branch}@${before.head}.`,
             });
         }
-        await runGit(
-            runner,
-            repositoryPath,
-            ["reset", "--hard", expectedLocalSha],
-            "Failed to discard stale pipeline repair edits",
-            true,
-            signal,
-        );
-        await runGit(
-            runner,
-            repositoryPath,
-            ["clean", "-fd"],
-            "Failed to remove stale pipeline repair files",
-            true,
-            signal,
-        );
+        (
+            await requireSuccess(
+                runner,
+                "git",
+                ["-C", repositoryPath, "reset", "--hard", expectedLocalSha],
+                "Failed to discard stale pipeline repair edits",
+                { signal },
+            )
+        ).stdout;
+        (
+            await requireSuccess(
+                runner,
+                "git",
+                ["-C", repositoryPath, "clean", "-fd"],
+                "Failed to remove stale pipeline repair files",
+                { signal },
+            )
+        ).stdout;
         const after = await readCheckout(runner, repositoryPath, signal);
         if (
             !sameBranchAndHead(after, branch, expectedLocalSha) ||
@@ -458,14 +461,15 @@ export const makePipelineDeliveryGitService = (
         readCheckout(runner, repositoryPath, signal),
 
     readStagedTreeSha: async (repositoryPath, signal) => {
-        const tree = await runGit(
-            runner,
-            repositoryPath,
-            ["write-tree"],
-            "Failed to read the staged pipeline repair tree",
-            true,
-            signal,
-        );
+        const tree = (
+            await requireSuccess(
+                runner,
+                "git",
+                ["-C", repositoryPath, "write-tree"],
+                "Failed to read the staged pipeline repair tree",
+                { signal },
+            )
+        ).stdout;
         assertSha(tree, "Staged pipeline repair tree");
         return tree;
     },
@@ -489,14 +493,15 @@ export const makePipelineDeliveryGitService = (
                 message: `Refusing to commit pipeline repair: expected clean ${branch}@${expectedParentSha}, found ${before.branch}@${before.head}.`,
             });
         }
-        const stagedTree = await runGit(
-            runner,
-            repositoryPath,
-            ["write-tree"],
-            "Failed to capture the staged pipeline repair tree",
-            true,
-            signal,
-        );
+        const stagedTree = (
+            await requireSuccess(
+                runner,
+                "git",
+                ["-C", repositoryPath, "write-tree"],
+                "Failed to capture the staged pipeline repair tree",
+                { signal },
+            )
+        ).stdout;
         if (!sameSha(stagedTree, expectedTreeSha)) {
             throw new PipelineDeliveryGitError({
                 kind: "verification-failed",
@@ -506,32 +511,31 @@ export const makePipelineDeliveryGitService = (
 
         const args = ["commit", "-m", message.subject];
         if (message.body !== undefined) args.push("-m", message.body);
-        await runGit(
-            runner,
-            repositoryPath,
-            args,
-            "Failed to commit the approved pipeline repair",
-            true,
-            signal,
-        );
+        (
+            await requireSuccess(
+                runner,
+                "git",
+                ["-C", repositoryPath, ...args],
+                "Failed to commit the approved pipeline repair",
+                { signal },
+            )
+        ).stdout;
         const [sha, parentSha, treeSha, after] = await Promise.all([
             readHead(runner, repositoryPath, signal),
-            runGit(
+            requireSuccess(
                 runner,
-                repositoryPath,
-                ["rev-parse", "HEAD^"],
+                "git",
+                ["-C", repositoryPath, "rev-parse", "HEAD^"],
                 "Failed to read the pipeline repair commit parent",
-                true,
-                signal,
-            ),
-            runGit(
+                { signal },
+            ).then((result) => result.stdout),
+            requireSuccess(
                 runner,
-                repositoryPath,
-                ["rev-parse", "HEAD^{tree}"],
+                "git",
+                ["-C", repositoryPath, "rev-parse", "HEAD^{tree}"],
                 "Failed to verify the pipeline repair commit tree",
-                true,
-                signal,
-            ),
+                { signal },
+            ).then((result) => result.stdout),
             readCheckout(runner, repositoryPath, signal),
         ]);
         if (
@@ -567,7 +571,7 @@ export const makePipelineDeliveryGitService = (
                 "origin",
                 `HEAD:refs/heads/${branch}`,
             ],
-            signal === undefined ? undefined : { signal },
+            { signal },
         );
         const output = commitOutput(result);
         if (result.exitCode === 0) {

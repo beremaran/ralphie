@@ -12,13 +12,16 @@ import {
     type NeedsAttentionRequest,
 } from "../agent/task-session.ts";
 import type { GitIssueOperationsService } from "../git/issue-operations.ts";
-import { runGit } from "../git/run-git.ts";
+
 import type {
     GitRevisionDeliveryOutcome,
     GitRevisionDeliveryService,
     GitRevisionReconciliationInput,
 } from "../git/revision-delivery.ts";
-import type { CommandRunnerService } from "../process/command-runner.ts";
+import {
+    requireSuccess,
+    type CommandRunnerService,
+} from "../process/command-runner.ts";
 import { AgentSessionProfile, type AgentClient } from "../opencode/client.ts";
 import type { GitHubIssue } from "../github/issues.ts";
 import type {
@@ -208,12 +211,14 @@ const clearIndex = async (
     runner: Pick<CommandRunnerService, "run">,
     repositoryPath: string,
 ): Promise<void> => {
-    await runGit(
-        runner,
-        repositoryPath,
-        ["reset"],
-        "Failed to clear the temporary revision index",
-    );
+    (
+        await requireSuccess(
+            runner,
+            "git",
+            ["-C", repositoryPath, "reset"],
+            "Failed to clear the temporary revision index",
+        )
+    ).stdout;
 };
 
 const isRecoverableDelivery = (

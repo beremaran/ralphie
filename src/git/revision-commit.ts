@@ -1,11 +1,11 @@
 import type { CommitMessageDecision } from "../issues/decisions.ts";
 import {
     CommandRunnerLive,
+    requireSuccess,
     type CommandRunnerService,
     type CommandResult,
 } from "../process/command-runner.ts";
 import { RalphieError } from "../shared/error.ts";
-import { runGit } from "./run-git.ts";
 
 export type GitRevisionCommitFailureKind =
     | "invalid-input"
@@ -181,36 +181,58 @@ const revalidateCreatedCommit = async (
     input: GitRevisionCommitInput,
     capturedTree: string,
 ): Promise<GitRevisionCommitResult> => {
-    const headSha = await runGit(
-        runner,
-        input.repositoryPath,
-        ["rev-parse", "--verify", "HEAD^{commit}"],
-        "Failed to verify the revision commit.",
-    );
-    const parentSha = await runGit(
-        runner,
-        input.repositoryPath,
-        ["rev-parse", "HEAD^"],
-        "Failed to read the revision parent.",
-    );
-    const treeSha = await runGit(
-        runner,
-        input.repositoryPath,
-        ["rev-parse", "HEAD^{tree}"],
-        "Failed to read the revision tree.",
-    );
-    const commitCount = await runGit(
-        runner,
-        input.repositoryPath,
-        ["rev-list", "--count", `${input.expectedPriorHeadSha}..HEAD`],
-        "Failed to count the revision commits.",
-    );
-    const finalStatus = await runGit(
-        runner,
-        input.repositoryPath,
-        ["status", "--porcelain=v1"],
-        "Failed to check the revision status after commit.",
-    );
+    const headSha = (
+        await requireSuccess(
+            runner,
+            "git",
+            [
+                "-C",
+                input.repositoryPath,
+                "rev-parse",
+                "--verify",
+                "HEAD^{commit}",
+            ],
+            "Failed to verify the revision commit.",
+        )
+    ).stdout;
+    const parentSha = (
+        await requireSuccess(
+            runner,
+            "git",
+            ["-C", input.repositoryPath, "rev-parse", "HEAD^"],
+            "Failed to read the revision parent.",
+        )
+    ).stdout;
+    const treeSha = (
+        await requireSuccess(
+            runner,
+            "git",
+            ["-C", input.repositoryPath, "rev-parse", "HEAD^{tree}"],
+            "Failed to read the revision tree.",
+        )
+    ).stdout;
+    const commitCount = (
+        await requireSuccess(
+            runner,
+            "git",
+            [
+                "-C",
+                input.repositoryPath,
+                "rev-list",
+                "--count",
+                `${input.expectedPriorHeadSha}..HEAD`,
+            ],
+            "Failed to count the revision commits.",
+        )
+    ).stdout;
+    const finalStatus = (
+        await requireSuccess(
+            runner,
+            "git",
+            ["-C", input.repositoryPath, "status", "--porcelain=v1"],
+            "Failed to check the revision status after commit.",
+        )
+    ).stdout;
 
     const mismatches: string[] = [];
     if (!validGitSha.test(headSha)) {
@@ -241,45 +263,47 @@ export const makeGitRevisionCommitService = (
     runner: CommandRunnerService = CommandRunnerLive,
 ): GitRevisionCommitService => {
     const currentBranch = (repositoryPath: string) =>
-        runGit(
+        requireSuccess(
             runner,
-            repositoryPath,
-            ["rev-parse", "--abbrev-ref", "HEAD"],
+            "git",
+            ["-C", repositoryPath, "rev-parse", "--abbrev-ref", "HEAD"],
             "Failed to read the managed revision branch.",
-        );
+        ).then((result) => result.stdout);
 
     const headCommit = (repositoryPath: string) =>
-        runGit(
+        requireSuccess(
             runner,
-            repositoryPath,
-            ["rev-parse", "HEAD"],
+            "git",
+            ["-C", repositoryPath, "rev-parse", "HEAD"],
             "Failed to read the managed revision HEAD.",
-        );
+        ).then((result) => result.stdout);
 
     const status = (repositoryPath: string) =>
-        runGit(
+        requireSuccess(
             runner,
-            repositoryPath,
-            ["status", "--porcelain=v1"],
+            "git",
+            ["-C", repositoryPath, "status", "--porcelain=v1"],
             "Failed to inspect the managed revision status.",
-        );
+        ).then((result) => result.stdout);
 
     const treeOf = (repositoryPath: string, sha: string) =>
-        runGit(
+        requireSuccess(
             runner,
-            repositoryPath,
-            ["rev-parse", `${sha}^{tree}`],
+            "git",
+            ["-C", repositoryPath, "rev-parse", `${sha}^{tree}`],
             "Failed to resolve a revision tree.",
-        );
+        ).then((result) => result.stdout);
 
     /** Restore only temporary index state; never moves the branch ref and never discards working-tree changes. */
     const unstage = async (repositoryPath: string): Promise<void> => {
-        await runGit(
-            runner,
-            repositoryPath,
-            ["reset"],
-            "Failed to unstage the rejected revision.",
-        );
+        (
+            await requireSuccess(
+                runner,
+                "git",
+                ["-C", repositoryPath, "reset"],
+                "Failed to unstage the rejected revision.",
+            )
+        ).stdout;
     };
 
     const verifyManagedSequentialHead = async (
@@ -329,18 +353,22 @@ export const makeGitRevisionCommitService = (
         let createdCommit = false;
         let capturedTree = "";
         try {
-            await runGit(
-                runner,
-                input.repositoryPath,
-                ["add", "--all"],
-                "Failed to stage the approved revision.",
-            );
-            capturedTree = await runGit(
-                runner,
-                input.repositoryPath,
-                ["write-tree"],
-                "Failed to capture the staged revision tree.",
-            );
+            (
+                await requireSuccess(
+                    runner,
+                    "git",
+                    ["-C", input.repositoryPath, "add", "--all"],
+                    "Failed to stage the approved revision.",
+                )
+            ).stdout;
+            capturedTree = (
+                await requireSuccess(
+                    runner,
+                    "git",
+                    ["-C", input.repositoryPath, "write-tree"],
+                    "Failed to capture the staged revision tree.",
+                )
+            ).stdout;
             const priorTree = await treeOf(
                 input.repositoryPath,
                 input.expectedPriorHeadSha,
@@ -366,12 +394,14 @@ export const makeGitRevisionCommitService = (
             if (input.message.body !== undefined) {
                 commitArgs.push("-m", input.message.body);
             }
-            await runGit(
-                runner,
-                input.repositoryPath,
-                commitArgs,
-                "Failed to commit the approved revision.",
-            );
+            (
+                await requireSuccess(
+                    runner,
+                    "git",
+                    ["-C", input.repositoryPath, ...commitArgs],
+                    "Failed to commit the approved revision.",
+                )
+            ).stdout;
             createdCommit = true;
         } catch (error) {
             // Pre-commit failures clean up only the temporary index state;

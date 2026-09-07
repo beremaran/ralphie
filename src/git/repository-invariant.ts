@@ -1,9 +1,9 @@
 import {
     CommandRunnerLive,
+    requireSuccess,
     type CommandRunnerService,
 } from "../process/command-runner.ts";
 import { RalphieError } from "../shared/error.ts";
-import { runGit } from "./run-git.ts";
 
 export type GitRepositoryInvariant = {
     readonly branch: string;
@@ -27,22 +27,24 @@ const readInvariant = async (
     repositoryPath: string,
     signal?: AbortSignal,
 ): Promise<GitRepositoryInvariant> => {
-    const branch = await runGit(
-        runner,
-        repositoryPath,
-        ["rev-parse", "--abbrev-ref", "HEAD"],
-        "Failed to read the repository branch",
-        true,
-        signal,
-    );
-    const head = await runGit(
-        runner,
-        repositoryPath,
-        ["rev-parse", "HEAD"],
-        "Failed to read the repository HEAD",
-        true,
-        signal,
-    );
+    const branch = (
+        await requireSuccess(
+            runner,
+            "git",
+            ["-C", repositoryPath, "rev-parse", "--abbrev-ref", "HEAD"],
+            "Failed to read the repository branch",
+            { signal },
+        )
+    ).stdout;
+    const head = (
+        await requireSuccess(
+            runner,
+            "git",
+            ["-C", repositoryPath, "rev-parse", "HEAD"],
+            "Failed to read the repository HEAD",
+            { signal },
+        )
+    ).stdout;
 
     if (!branch || !head) {
         throw new RalphieError({

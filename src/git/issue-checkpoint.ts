@@ -1,9 +1,9 @@
 import {
     CommandRunnerLive,
+    requireSuccess,
     type CommandRunnerService,
 } from "../process/command-runner.ts";
 import { RalphieError } from "../shared/error.ts";
-import { runGit } from "./run-git.ts";
 
 export type IssueCheckpoint = {
     readonly branch: string;
@@ -29,29 +29,36 @@ export const makeGitIssueCheckpointService = (
     runner: CommandRunnerService = CommandRunnerLive,
 ): GitIssueCheckpointService => {
     const currentBranch = (repositoryPath: string) =>
-        runGit(
+        requireSuccess(
             runner,
-            repositoryPath,
-            ["rev-parse", "--abbrev-ref", "HEAD"],
+            "git",
+            ["-C", repositoryPath, "rev-parse", "--abbrev-ref", "HEAD"],
             "Failed to read the current branch",
-        );
+        ).then((result) => result.stdout);
 
     const status = (repositoryPath: string) =>
-        runGit(
+        requireSuccess(
             runner,
-            repositoryPath,
-            ["status", "--porcelain=v1"],
+            "git",
+            ["-C", repositoryPath, "status", "--porcelain=v1"],
             "Failed to inspect the repository status",
-        );
+        ).then((result) => result.stdout);
 
     const untrackedFiles = (repositoryPath: string) =>
-        runGit(
+        requireSuccess(
             runner,
-            repositoryPath,
-            ["ls-files", "--others", "--exclude-standard", "-z"],
+            "git",
+            [
+                "-C",
+                repositoryPath,
+                "ls-files",
+                "--others",
+                "--exclude-standard",
+                "-z",
+            ],
             "Failed to list untracked issue changes",
-            false,
-        );
+            { trimStdout: false },
+        ).then((result) => result.stdout);
 
     const untrackedPatch = async (
         repositoryPath: string,
@@ -82,20 +89,31 @@ export const makeGitIssueCheckpointService = (
     };
 
     const createPatch = async (repositoryPath: string): Promise<string> => {
-        const staged = await runGit(
-            runner,
-            repositoryPath,
-            ["diff", "--cached", "--binary", "--no-ext-diff"],
-            "Failed to preserve the staged issue changes",
-            false,
-        );
-        const unstaged = await runGit(
-            runner,
-            repositoryPath,
-            ["diff", "--binary", "--no-ext-diff"],
-            "Failed to preserve the unstaged issue changes",
-            false,
-        );
+        const staged = (
+            await requireSuccess(
+                runner,
+                "git",
+                [
+                    "-C",
+                    repositoryPath,
+                    "diff",
+                    "--cached",
+                    "--binary",
+                    "--no-ext-diff",
+                ],
+                "Failed to preserve the staged issue changes",
+                { trimStdout: false },
+            )
+        ).stdout;
+        const unstaged = (
+            await requireSuccess(
+                runner,
+                "git",
+                ["-C", repositoryPath, "diff", "--binary", "--no-ext-diff"],
+                "Failed to preserve the unstaged issue changes",
+                { trimStdout: false },
+            )
+        ).stdout;
         const paths = (await untrackedFiles(repositoryPath))
             .split("\0")
             .filter((path) => path.length > 0);
@@ -119,12 +137,14 @@ export const makeGitIssueCheckpointService = (
                 });
             }
 
-            const sha = await runGit(
-                runner,
-                repositoryPath,
-                ["rev-parse", "HEAD"],
-                "Failed to capture the issue base commit",
-            );
+            const sha = (
+                await requireSuccess(
+                    runner,
+                    "git",
+                    ["-C", repositoryPath, "rev-parse", "HEAD"],
+                    "Failed to capture the issue base commit",
+                )
+            ).stdout;
             if (!validGitSha.test(sha)) {
                 throw new RalphieError({
                     message: `Git returned an invalid issue base commit: ${sha}.`,
@@ -149,25 +169,31 @@ export const makeGitIssueCheckpointService = (
                 });
             }
 
-            await runGit(
-                runner,
-                repositoryPath,
-                ["reset", "--hard", checkpoint.sha],
-                "Failed to restore the issue base commit",
-            );
-            await runGit(
-                runner,
-                repositoryPath,
-                ["clean", "-fd"],
-                "Failed to remove files created by the unsuccessful implementation",
-            );
+            (
+                await requireSuccess(
+                    runner,
+                    "git",
+                    ["-C", repositoryPath, "reset", "--hard", checkpoint.sha],
+                    "Failed to restore the issue base commit",
+                )
+            ).stdout;
+            (
+                await requireSuccess(
+                    runner,
+                    "git",
+                    ["-C", repositoryPath, "clean", "-fd"],
+                    "Failed to remove files created by the unsuccessful implementation",
+                )
+            ).stdout;
 
-            const restoredSha = await runGit(
-                runner,
-                repositoryPath,
-                ["rev-parse", "HEAD"],
-                "Failed to verify the restored commit",
-            );
+            const restoredSha = (
+                await requireSuccess(
+                    runner,
+                    "git",
+                    ["-C", repositoryPath, "rev-parse", "HEAD"],
+                    "Failed to verify the restored commit",
+                )
+            ).stdout;
             const restoredStatus = await status(repositoryPath);
             if (
                 restoredSha.toLowerCase() !== checkpoint.sha.toLowerCase() ||

@@ -1,6 +1,7 @@
 import type { CommitMessageDecision } from "../issues/decisions.ts";
 import {
     CommandRunnerLive,
+    requireSuccess,
     type CommandResult,
     type CommandRunnerService,
 } from "../process/command-runner.ts";
@@ -14,7 +15,6 @@ import {
     type GitRevisionCommitContext,
     type GitRevisionCommitService,
 } from "./revision-commit.ts";
-import { runGit } from "./run-git.ts";
 
 export type GitRevisionDeliveryFailureKind = "invalid-input" | "cancelled";
 
@@ -229,12 +229,20 @@ const readRemoteHead = async (
 ): Promise<RemoteHeadRead> => {
     let output: string;
     try {
-        output = await runGit(
-            runner,
-            repositoryPath,
-            ["ls-remote", "origin", `refs/heads/${branch}`],
-            "Failed to read the authoritative remote branch.",
-        );
+        output = (
+            await requireSuccess(
+                runner,
+                "git",
+                [
+                    "-C",
+                    repositoryPath,
+                    "ls-remote",
+                    "origin",
+                    `refs/heads/${branch}`,
+                ],
+                "Failed to read the authoritative remote branch.",
+            )
+        ).stdout;
     } catch {
         return { available: false };
     }
@@ -247,12 +255,14 @@ const checkoutStatus = async (
     repositoryPath: string,
 ): Promise<string | undefined> => {
     try {
-        return await runGit(
-            runner,
-            repositoryPath,
-            ["status", "--porcelain=v1"],
-            "Failed to inspect the revision checkout.",
-        );
+        return (
+            await requireSuccess(
+                runner,
+                "git",
+                ["-C", repositoryPath, "status", "--porcelain=v1"],
+                "Failed to inspect the revision checkout.",
+            )
+        ).stdout;
     } catch {
         return undefined;
     }
@@ -430,12 +440,14 @@ const reconcileRevision = async (
     verifyReconciliationInput(input);
     cancellationCheck(input.context?.isCancelled);
 
-    const actualBranch = await runGit(
-        runner,
-        input.repositoryPath,
-        ["rev-parse", "--abbrev-ref", "HEAD"],
-        "Failed to read the managed revision branch during reconciliation.",
-    );
+    const actualBranch = (
+        await requireSuccess(
+            runner,
+            "git",
+            ["-C", input.repositoryPath, "rev-parse", "--abbrev-ref", "HEAD"],
+            "Failed to read the managed revision branch during reconciliation.",
+        )
+    ).stdout;
     if (actualBranch !== input.branch) {
         fail(
             "invalid-input",
@@ -443,12 +455,20 @@ const reconcileRevision = async (
         );
     }
 
-    const headSha = await runGit(
-        runner,
-        input.repositoryPath,
-        ["rev-parse", "--verify", "HEAD^{commit}"],
-        "Failed to read the local revision candidate.",
-    );
+    const headSha = (
+        await requireSuccess(
+            runner,
+            "git",
+            [
+                "-C",
+                input.repositoryPath,
+                "rev-parse",
+                "--verify",
+                "HEAD^{commit}",
+            ],
+            "Failed to read the local revision candidate.",
+        )
+    ).stdout;
     if (sameSha(headSha, input.expectedPriorHeadSha)) return undefined;
     if (
         input.expectedHeadSha !== undefined &&
@@ -460,24 +480,28 @@ const reconcileRevision = async (
         );
     }
 
-    const parentSha = await runGit(
-        runner,
-        input.repositoryPath,
-        ["rev-parse", "HEAD^"],
-        "Failed to read the local revision parent.",
-    );
+    const parentSha = (
+        await requireSuccess(
+            runner,
+            "git",
+            ["-C", input.repositoryPath, "rev-parse", "HEAD^"],
+            "Failed to read the local revision parent.",
+        )
+    ).stdout;
     if (!sameSha(parentSha, input.expectedPriorHeadSha)) {
         fail(
             "invalid-input",
             `Local revision candidate ${headSha} is not exactly one commit over ${input.expectedPriorHeadSha}.`,
         );
     }
-    const treeSha = await runGit(
-        runner,
-        input.repositoryPath,
-        ["rev-parse", "HEAD^{tree}"],
-        "Failed to read the local revision tree.",
-    );
+    const treeSha = (
+        await requireSuccess(
+            runner,
+            "git",
+            ["-C", input.repositoryPath, "rev-parse", "HEAD^{tree}"],
+            "Failed to read the local revision tree.",
+        )
+    ).stdout;
     if (
         input.expectedStagedTreeSha !== undefined &&
         !sameSha(treeSha, input.expectedStagedTreeSha)

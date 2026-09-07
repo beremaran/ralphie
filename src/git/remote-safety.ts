@@ -1,10 +1,10 @@
 import {
     CommandRunnerLive,
+    requireSuccess,
     type CommandRunnerService,
 } from "../process/command-runner.ts";
 import { RalphieError } from "../shared/error.ts";
 import { parseRepositorySlug } from "../github/repository.ts";
-import { runGit } from "./run-git.ts";
 
 export type GitRemoteSafetyFailureKind =
     | "origin-mismatch"
@@ -220,12 +220,14 @@ const readAndVerifyOrigin = async (
     input: GitRemoteSafetyInput,
     slug: string,
 ): Promise<string> => {
-    const origin = await runGit(
-        runner,
-        input.repositoryPath,
-        ["remote", "get-url", "origin"],
-        "Failed to read the repository origin.",
-    );
+    const origin = (
+        await requireSuccess(
+            runner,
+            "git",
+            ["-C", input.repositoryPath, "remote", "get-url", "origin"],
+            "Failed to read the repository origin.",
+        )
+    ).stdout;
     let originSlug: string;
     try {
         originSlug = parseRepositorySlug(origin).slug;
@@ -329,12 +331,14 @@ const readAndVerifyManagedOrigin = async (
     input: GitManagedRevisionInput,
     slug: string,
 ): Promise<string> => {
-    const origin = await runGit(
-        runner,
-        input.repositoryPath,
-        ["remote", "get-url", "origin"],
-        "Failed to read the repository origin.",
-    );
+    const origin = (
+        await requireSuccess(
+            runner,
+            "git",
+            ["-C", input.repositoryPath, "remote", "get-url", "origin"],
+            "Failed to read the repository origin.",
+        )
+    ).stdout;
     let originSlug: string;
     try {
         originSlug = parseRepositorySlug(origin).slug;
@@ -408,17 +412,21 @@ const verifyManagedBaseAncestry = async (
     runner: CommandRunnerService,
     input: GitManagedRevisionInput,
 ): Promise<readonly [number, number]> => {
-    const countsOutput = await runGit(
-        runner,
-        input.repositoryPath,
-        [
-            "rev-list",
-            "--left-right",
-            "--count",
-            `${input.baseSha}...${input.expectedPriorHeadSha}`,
-        ],
-        "Failed to compare the feature head with its original base.",
-    );
+    const countsOutput = (
+        await requireSuccess(
+            runner,
+            "git",
+            [
+                "-C",
+                input.repositoryPath,
+                "rev-list",
+                "--left-right",
+                "--count",
+                `${input.baseSha}...${input.expectedPriorHeadSha}`,
+            ],
+            "Failed to compare the feature head with its original base.",
+        )
+    ).stdout;
     const counts = parseCounts(countsOutput);
     if (counts === undefined) {
         failManaged(
@@ -470,12 +478,14 @@ const verifyManagedRevisionParent = async (
     runner: CommandRunnerService,
     input: GitManagedRevisionPrePushInput,
 ): Promise<void> => {
-    const parent = await runGit(
-        runner,
-        input.repositoryPath,
-        ["rev-parse", "HEAD^"],
-        "Failed to read the created revision parent.",
-    );
+    const parent = (
+        await requireSuccess(
+            runner,
+            "git",
+            ["-C", input.repositoryPath, "rev-parse", "HEAD^"],
+            "Failed to read the created revision parent.",
+        )
+    ).stdout;
     if (parent.toLowerCase() !== input.expectedPriorHeadSha.toLowerCase()) {
         failManaged(
             "stale-prior-head",
@@ -530,41 +540,57 @@ export const makeGitRemoteSafetyService = (
         const slug = validateDirectPushInput(input);
         const origin = await readAndVerifyOrigin(runner, input, slug);
 
-        const localBranch = await runGit(
-            runner,
-            input.repositoryPath,
-            ["symbolic-ref", "--short", "HEAD"],
-            "Failed to read the checked-out branch.",
-        );
+        const localBranch = (
+            await requireSuccess(
+                runner,
+                "git",
+                ["-C", input.repositoryPath, "symbolic-ref", "--short", "HEAD"],
+                "Failed to read the checked-out branch.",
+            )
+        ).stdout;
         verifyBranch(input, localBranch);
 
-        const head = await runGit(
-            runner,
-            input.repositoryPath,
-            ["rev-parse", "HEAD"],
-            "Failed to read the local HEAD.",
-        );
+        const head = (
+            await requireSuccess(
+                runner,
+                "git",
+                ["-C", input.repositoryPath, "rev-parse", "HEAD"],
+                "Failed to read the local HEAD.",
+            )
+        ).stdout;
         verifyHead(input, head);
 
-        const remote = await runGit(
-            runner,
-            input.repositoryPath,
-            ["ls-remote", "origin", `refs/heads/${input.branch}`],
-            `Failed to read origin/${input.branch}.`,
-        );
+        const remote = (
+            await requireSuccess(
+                runner,
+                "git",
+                [
+                    "-C",
+                    input.repositoryPath,
+                    "ls-remote",
+                    "origin",
+                    `refs/heads/${input.branch}`,
+                ],
+                `Failed to read origin/${input.branch}.`,
+            )
+        ).stdout;
         verifyRemoteBase(input, remote);
 
-        const countsOutput = await runGit(
-            runner,
-            input.repositoryPath,
-            [
-                "rev-list",
-                "--left-right",
-                "--count",
-                `${input.intendedBaseSha}...HEAD`,
-            ],
-            "Failed to compare the checkout with its intended base.",
-        );
+        const countsOutput = (
+            await requireSuccess(
+                runner,
+                "git",
+                [
+                    "-C",
+                    input.repositoryPath,
+                    "rev-list",
+                    "--left-right",
+                    "--count",
+                    `${input.intendedBaseSha}...HEAD`,
+                ],
+                "Failed to compare the checkout with its intended base.",
+            )
+        ).stdout;
         const [behind, ahead] = verifyAheadBehindCounts(input, countsOutput);
 
         return {
@@ -581,28 +607,40 @@ export const makeGitRemoteSafetyService = (
         const slug = verifyManagedRevisionPushInput(input);
         const origin = await readAndVerifyManagedOrigin(runner, input, slug);
 
-        const localBranch = await runGit(
-            runner,
-            input.repositoryPath,
-            ["symbolic-ref", "--short", "HEAD"],
-            "Failed to read the checked-out branch.",
-        );
+        const localBranch = (
+            await requireSuccess(
+                runner,
+                "git",
+                ["-C", input.repositoryPath, "symbolic-ref", "--short", "HEAD"],
+                "Failed to read the checked-out branch.",
+            )
+        ).stdout;
         verifyManagedBranch(input, localBranch);
 
-        const head = await runGit(
-            runner,
-            input.repositoryPath,
-            ["rev-parse", "HEAD"],
-            "Failed to read the local HEAD.",
-        );
+        const head = (
+            await requireSuccess(
+                runner,
+                "git",
+                ["-C", input.repositoryPath, "rev-parse", "HEAD"],
+                "Failed to read the local HEAD.",
+            )
+        ).stdout;
         verifyManagedLocalHead(input, head);
 
-        const remote = await runGit(
-            runner,
-            input.repositoryPath,
-            ["ls-remote", "origin", `refs/heads/${input.branch}`],
-            `Failed to read origin/${input.branch}.`,
-        );
+        const remote = (
+            await requireSuccess(
+                runner,
+                "git",
+                [
+                    "-C",
+                    input.repositoryPath,
+                    "ls-remote",
+                    "origin",
+                    `refs/heads/${input.branch}`,
+                ],
+                `Failed to read origin/${input.branch}.`,
+            )
+        ).stdout;
         verifyManagedRemoteHead(input, remote);
 
         const [behind, ahead] = await verifyManagedBaseAncestry(runner, input);
@@ -623,29 +661,41 @@ export const makeGitRemoteSafetyService = (
         const slug = verifyManagedRevisionPrePushInput(input);
         const origin = await readAndVerifyManagedOrigin(runner, input, slug);
 
-        const localBranch = await runGit(
-            runner,
-            input.repositoryPath,
-            ["symbolic-ref", "--short", "HEAD"],
-            "Failed to read the checked-out branch.",
-        );
+        const localBranch = (
+            await requireSuccess(
+                runner,
+                "git",
+                ["-C", input.repositoryPath, "symbolic-ref", "--short", "HEAD"],
+                "Failed to read the checked-out branch.",
+            )
+        ).stdout;
         verifyManagedBranch(input, localBranch);
 
-        const head = await runGit(
-            runner,
-            input.repositoryPath,
-            ["rev-parse", "HEAD"],
-            "Failed to read the local HEAD.",
-        );
+        const head = (
+            await requireSuccess(
+                runner,
+                "git",
+                ["-C", input.repositoryPath, "rev-parse", "HEAD"],
+                "Failed to read the local HEAD.",
+            )
+        ).stdout;
         verifyManagedLocalCreatedHead(input, head);
         await verifyManagedRevisionParent(runner, input);
 
-        const remote = await runGit(
-            runner,
-            input.repositoryPath,
-            ["ls-remote", "origin", `refs/heads/${input.branch}`],
-            `Failed to read origin/${input.branch}.`,
-        );
+        const remote = (
+            await requireSuccess(
+                runner,
+                "git",
+                [
+                    "-C",
+                    input.repositoryPath,
+                    "ls-remote",
+                    "origin",
+                    `refs/heads/${input.branch}`,
+                ],
+                `Failed to read origin/${input.branch}.`,
+            )
+        ).stdout;
         verifyManagedRemoteHead(input, remote);
 
         const [behind, ahead] = await verifyManagedBaseAncestry(runner, input);

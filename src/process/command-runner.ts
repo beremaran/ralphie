@@ -232,10 +232,7 @@ export const requireSuccess = async (
     failureMessage: string,
     options?: CommandRunOptions,
 ): Promise<CommandResult> => {
-    const result =
-        options === undefined
-            ? await runner.run(command, args)
-            : await runner.run(command, args, options);
+    const result = await runner.run(command, args, options);
     if (result.exitCode !== 0) {
         const detail = result.stderr ? `\n${result.stderr}` : "";
         throw new RalphieError({

@@ -42,7 +42,6 @@
 import { open, readdir, realpath } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 
-import { runGit } from "./git/run-git.ts";
 import {
     createUnknownValue,
     type MaintainableUnknownValue,
@@ -50,6 +49,7 @@ import {
 import {
     CommandAbortedError,
     CommandRunnerLive,
+    requireSuccess,
     type CommandRunnerService,
 } from "./process/command-runner.ts";
 import { RalphieError } from "./shared/error.ts";
@@ -325,14 +325,15 @@ const readGitOnly = async (
     | { readonly ok: false; readonly detail: string }
 > => {
     try {
-        const value = await runGit(
-            runner,
-            repositoryPath,
-            args,
-            `Failed to run read-only git ${args[0] ?? "command"}`,
-            trimStdout,
-            signal,
-        );
+        const value = (
+            await requireSuccess(
+                runner,
+                "git",
+                ["-C", repositoryPath, ...args],
+                `Failed to run read-only git ${args[0] ?? "command"}`,
+                { trimStdout, signal },
+            )
+        ).stdout;
         return { ok: true, value };
     } catch (error) {
         if (error instanceof CommandAbortedError) throw error;
