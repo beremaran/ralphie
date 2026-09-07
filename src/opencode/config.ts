@@ -17,13 +17,3 @@ export type OpenCodeEndpoint = {
     readonly baseUrl: string;
     readonly headers?: Record<string, string>;
 };
-
-export const resolveOpenCodeEndpointConfig = (
-    config: OpenCodeProviderConfig,
-): {
-    readonly baseUrl?: string;
-    readonly token?: string;
-} => ({
-    ...(config.baseUrl === undefined ? {} : { baseUrl: config.baseUrl }),
-    ...(config.token === undefined ? {} : { token: config.token }),
-});

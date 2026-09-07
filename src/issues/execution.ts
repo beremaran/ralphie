@@ -2,7 +2,11 @@ import type { Octokit } from "octokit";
 import type { AgentClient } from "../opencode/client.ts";
 
 import type { GitHubIssue } from "../github/issues.ts";
-import type { NeedsAttentionReason } from "./decisions.ts";
+import type { IssueArtifactStore } from "./artifacts.ts";
+import type {
+    IssueResolutionDecision,
+    NeedsAttentionReason,
+} from "./decisions.ts";
 import type { AgentModel, AgentSelection } from "../agent/model.ts";
 import type { AgentSessionDiagnostics } from "../agent/task-session.ts";
 import type { GitRepositoryInvariantService } from "../git/repository-invariant.ts";
@@ -142,3 +146,20 @@ export type IssueExecutionContext = {
     /** Maximum generated-child lineage depth allowed for decomposition. */
     readonly maxDecompositionDepth?: number;
 };
+
+/**
+ * Inputs shared by the concrete per-issue workflow executors.
+ *
+ * The artifact store is passed explicitly so an executor can persist each
+ * decision and deterministic checkpoint as it progresses. Keeping it next to
+ * the execution context also makes the boundary easy to exercise with a
+ * per-issue store in tests and in a future live implementation.
+ */
+export type WorkflowExecutorInput = {
+    readonly context: IssueExecutionContext;
+    readonly artifacts: IssueArtifactStore;
+    /** Fresh evidence that corrected an already-resolved grounding route. */
+    readonly unresolvedResolution?: IssueResolutionDecision;
+};
+
+export type WorkflowExecutorResult = IssueExecutionOutcome;

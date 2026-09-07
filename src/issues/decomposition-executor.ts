@@ -26,12 +26,12 @@ import {
     issueBreakdownDecisionSchema,
     type IssueBreakdownDecision,
 } from "./decisions.ts";
-import { IssueExecutionOutcomeKind } from "./execution.ts";
+import {
+    IssueExecutionOutcomeKind,
+    type WorkflowExecutorInput,
+    type WorkflowExecutorResult,
+} from "./execution.ts";
 import type { ReviewAttempt } from "./recovery.ts";
-import type {
-    WorkflowExecutorInput,
-    WorkflowExecutorResult,
-} from "./workflow-executor-input.ts";
 import type { NeedsAttentionRouterService } from "./needs-attention.ts";
 import { DEFAULT_MAX_DECOMPOSITION_DEPTH } from "../options.ts";
 

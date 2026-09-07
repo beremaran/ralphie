@@ -25,10 +25,11 @@ import {
     type ProgressReporterService,
 } from "../progress/progress.ts";
 import { RalphieError } from "../shared/error.ts";
-import type {
-    WorkflowExecutorInput,
-    WorkflowExecutorResult,
-} from "./workflow-executor-input.ts";
+import {
+    IssueExecutionOutcomeKind,
+    type WorkflowExecutorInput,
+    type WorkflowExecutorResult,
+} from "./execution.ts";
 import { IssueArtifactKind, issueFreshnessFingerprint } from "./artifacts.ts";
 import {
     commitMessageDecisionSchema,
@@ -37,7 +38,6 @@ import {
     reviewDecisionSchema,
     ReviewVerdict,
 } from "./decisions.ts";
-import { IssueExecutionOutcomeKind } from "./execution.ts";
 import { type IssueRecoveryService, type ReviewAttempt } from "./recovery.ts";
 import { REVIEW_ITERATION_LIMIT } from "./stage.ts";
 import { assertProtectedDecisionsAuthorized } from "./scope-policy.ts";
