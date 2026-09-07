@@ -6,8 +6,8 @@ import {
     BUILD_INFO,
     getBuildInfo,
     LOCAL_BUILD_COMMIT_SHA,
+    RALPHIE_VERSION,
 } from "../src/build-info.ts";
-import { RALPHIE_VERSION } from "../src/version.ts";
 
 const repositoryRoot = join(import.meta.dir, "..");
 
