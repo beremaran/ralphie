@@ -455,12 +455,9 @@ export {
     createDisplayState,
     initialDisplayState,
     progressStageLabel,
-    reduceDisplayState,
     reduceAgentSessionEvent,
     reduceProgressUpdate,
     updateDisplayState,
-    updateDisplayStateFromAgent,
-    updateDisplayStateFromProgress,
 } from "./display-state.ts";
 export type {
     DisplayActivity,

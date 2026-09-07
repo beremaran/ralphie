@@ -561,6 +561,4 @@ export const makeLiveRuntime = ({
     };
 };
 
-export const LiveRuntime = makeLiveRuntime;
-
 export { makeOpenCodeService };

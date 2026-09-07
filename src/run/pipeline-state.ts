@@ -23,7 +23,6 @@ import { RalphieError } from "../shared/error.ts";
 import { resolveWorkspacePath } from "../workspace/workspace.ts";
 
 export const PIPELINE_RUN_STATE_VERSION = 1 as const;
-export const PIPELINE_STATE_VERSION = PIPELINE_RUN_STATE_VERSION;
 export const PIPELINE_RUN_MODE = "get-pipelines-green" as const;
 
 export const PIPELINE_RUN_STATUSES = ["active", "stopped", "complete"] as const;
@@ -357,8 +356,6 @@ export const pipelineRunStatePath = (
         "pipeline",
         "state.json",
     );
-
-export const getPipelineRunStatePath = pipelineRunStatePath;
 
 const persistAtomically = async (
     path: string,
@@ -965,8 +962,6 @@ export const PipelineRunStateStoreLive: PipelineRunStateStoreService = {
     },
 };
 
-export const PipelineStateStoreLive = PipelineRunStateStoreLive;
-
 export type PipelineResumeExpectations = {
     readonly repository: string;
     readonly branch?: string;
@@ -1029,8 +1024,6 @@ export const loadPipelineRunState = async (
     store: PipelineRunStateStoreService = PipelineRunStateStoreLive,
 ): Promise<PipelineRunState> =>
     validatePipelineResumeState(await store.load(path), expected);
-
-export const loadPipelineState = loadPipelineRunState;
 
 export type PipelineResumeReconciliation = {
     readonly action: PipelineResumeAction;

@@ -554,7 +554,3 @@ export function updateDisplayState(
     }
     return reduceProgressUpdate(state, input, contextOrNow as DisplayClock);
 }
-
-export const reduceDisplayState = updateDisplayState;
-export const updateDisplayStateFromProgress = reduceProgressUpdate;
-export const updateDisplayStateFromAgent = reduceAgentSessionEvent;

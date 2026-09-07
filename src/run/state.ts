@@ -191,8 +191,6 @@ const outcomeSchema = z.preprocess((value) => {
     return value;
 }, currentOutcomeSchema);
 
-export const runStateOutcomeSchema = outcomeSchema;
-
 const pipelineSnapshotSchema = z
     .object({
         repository: z.string().min(1),

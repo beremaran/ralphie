@@ -108,6 +108,3 @@ export const makeResolutionVerificationService = (
         }
     },
 });
-
-export const makeIssueResolutionVerificationService =
-    makeResolutionVerificationService;

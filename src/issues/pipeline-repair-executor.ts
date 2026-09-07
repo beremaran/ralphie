@@ -12,10 +12,7 @@ import {
     runAgentTask,
     type AgentSessionDiagnostics,
 } from "../agent/task-session.ts";
-import type {
-    PipelineDiagnosticsBoundary,
-    RepairDiagnostics,
-} from "../github/pipeline-diagnostics-boundary.ts";
+import type { PipelineDiagnosticsBoundary } from "../github/pipeline-diagnostics-boundary.ts";
 import type { PipelineSnapshot } from "../github/pipeline-snapshot.ts";
 import type {
     GitIssueCheckpointService,
@@ -925,8 +922,3 @@ export const makePipelineRepairExecutorService = (
 
     return { execute };
 };
-
-export const makePipelineRepairExecutor = makePipelineRepairExecutorService;
-
-/** Type-only helper for callers that need the bounded projection explicitly. */
-export type PipelineRepairDiagnostics = RepairDiagnostics;

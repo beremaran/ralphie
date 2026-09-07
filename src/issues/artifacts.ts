@@ -78,8 +78,6 @@ export type IssueFreshnessFingerprint =
           readonly commentVersion: number | string;
       };
 
-export type IssueFreshness = IssueFreshnessFingerprint;
-
 export type NeedsAttentionDecisionArtifact = {
     readonly decision: NeedsAttentionDecision;
     readonly fingerprint: IssueFreshnessFingerprint;
@@ -94,8 +92,6 @@ export type IssueResolutionDecisionArtifact = {
     readonly decision: IssueResolutionDecision;
     readonly fingerprint: IssueFreshnessFingerprint;
 };
-
-export type NeedsAttentionArtifact = NeedsAttentionDecisionArtifact;
 
 export type NeedsAttentionHandoffArtifact = {
     readonly request: NeedsAttentionRequest;
@@ -684,9 +680,6 @@ export const issueArtifactPath = (
         String(issueNumber),
         "artifacts.json",
     );
-
-export const getIssueArtifactPath = issueArtifactPath;
-export const artifactPath = issueArtifactPath;
 
 const toPersistedState = (
     issueNumber: number,

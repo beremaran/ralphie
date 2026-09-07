@@ -46,8 +46,6 @@ export enum GroundingDisposition {
     NeedsAttention = "needs_attention",
 }
 
-export { GroundingDisposition as GroundingDecisionDisposition };
-
 export const complexityDecisionSchema = z.object({
     complexity: z
         .enum(ComplexityLevel)

@@ -143,8 +143,6 @@ export type PipelineSnapshotNormalizationInput =
 /** A suite ID is an identifier, not a stable check/context name. */
 const CHECK_SUITE_FALLBACK_NAME = "(unnamed check suite)";
 
-export const PIPELINE_CHECK_SUITE_FALLBACK_NAME = CHECK_SUITE_FALLBACK_NAME;
-
 const defaultProvider: Record<PipelineObservationKind, string> = {
     "check-run": "github.check-run",
     "check-suite": "github.check-suite",

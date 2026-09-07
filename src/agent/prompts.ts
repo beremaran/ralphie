@@ -750,10 +750,6 @@ Structured review decision:
 Previous review decisions:
 <previous-reviews>${jsonForUntrustedPrompt(previousReviews ?? [])}</previous-reviews>`;
 
-/** Short aliases for pipeline-mode callers that use the domain noun first. */
-export const buildPipelineReviewPrompt = buildPipelineRepairReviewPrompt;
-export const buildPipelineReviewFixPrompt = buildPipelineRepairReviewFixPrompt;
-
 export const buildVerificationFixPrompt = ({
     issue,
     repositoryPath,

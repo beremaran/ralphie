@@ -137,12 +137,6 @@ export type AgentSessionDiagnosticInput = Omit<
     "runId" | "recordedAt"
 >;
 
-/** Successful sessions remain available for post-run inspection. */
-export const AgentSessionRetentionPolicy = "retain" as const;
-export type AgentSessionRetentionPolicy = typeof AgentSessionRetentionPolicy;
-
-export const AGENT_SESSION_RETENTION_POLICY = AgentSessionRetentionPolicy;
-
 export type AgentSessionDiagnostics = {
     readonly record: (
         runId: string,
@@ -470,15 +464,3 @@ export const makeAgentTaskSessionService = (
         run: (request) => runAgentTask(client, withDiagnostics(request)),
     };
 };
-
-/** Server owns permissions now; kept as empty placeholders. */
-export const AGENT_TASK_PERMISSION_POLICY: ReadonlyArray<{
-    readonly permission: string;
-    readonly pattern: string;
-    readonly action: "allow" | "deny";
-}> = [];
-export const AGENT_DECISION_PERMISSION_POLICY: ReadonlyArray<{
-    readonly permission: string;
-    readonly pattern: string;
-    readonly action: "allow" | "deny";
-}> = [];

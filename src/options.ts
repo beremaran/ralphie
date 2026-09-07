@@ -44,10 +44,6 @@ export enum DuplicateAction {
     Close = "close",
 }
 
-/** Alias for callers that refer to the duplicate action as a policy. */
-export const DuplicatePolicy = DuplicateAction;
-export type DuplicatePolicy = DuplicateAction;
-
 export const DEFAULT_EXECUTION_MODE = ExecutionMode.Issues;
 export const DEFAULT_DUPLICATE_ACTION = DuplicateAction.Link;
 export const DEFAULT_MAX_ATTEMPTS = 3;

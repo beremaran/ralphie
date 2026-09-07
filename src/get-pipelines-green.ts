@@ -283,5 +283,3 @@ export const getPipelinesGreen: GetPipelinesGreenEntryPoint = async (
         await server?.close();
     }
 };
-
-export const runGetPipelinesGreen = getPipelinesGreen;

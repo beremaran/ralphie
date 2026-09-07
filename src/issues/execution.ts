@@ -36,8 +36,6 @@ export enum IssueExecutionOutcomeKind {
     Failed = "failed",
 }
 
-export type IssueCompletionKind = "pushed-commit" | "already-resolved";
-
 export type IssueExecutionOutcome =
     | {
           readonly kind: IssueExecutionOutcomeKind.Completed;

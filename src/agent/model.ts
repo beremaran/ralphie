@@ -27,5 +27,3 @@ export const agentModelSchema = z
 
 export const agentModelVariantSchema = z.string().trim().min(1);
 export const agentSchema = z.string().trim().min(1).default(DEFAULT_AGENT);
-
-export const piAgentSchema = agentSchema;
