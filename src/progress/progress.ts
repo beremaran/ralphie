@@ -492,9 +492,6 @@ export {
     INTERACTIVE_FOOTER_USES_SCROLL_REGION,
     INTERACTIVE_REGION_MAX_ROWS,
     makeDefaultTerminalOutputStrategy,
-    makeDurableBreadcrumbStrategy,
-    makeDurableBreadcrumbTerminalOutputStrategy,
-    makeInteractiveTerminalOutputStrategy,
     makeTerminalOutputController,
 } from "./terminal-controller.ts";
 export type {
@@ -503,7 +500,6 @@ export type {
     TerminalOutputController,
     TerminalOutputControllerOptions,
     TerminalOutputStrategy,
-    TerminalResizeListener,
     TerminalResizeSubscription,
 } from "./terminal-controller.ts";
 export {
@@ -513,7 +509,6 @@ export {
     breadcrumbLabelFor,
     canonicalBreadcrumbKey,
     createBreadcrumbPolicyState,
-    initialBreadcrumbPolicyState,
     makeBreadcrumbPolicy,
     normalizeBreadcrumbLabel,
     prepareBreadcrumbCandidate,
@@ -522,15 +517,10 @@ export {
     renderBreadcrumbLine,
 } from "./breadcrumb-label.ts";
 export type {
-    ApprovedBreadcrumbCandidate,
     BreadcrumbCandidate,
-    BreadcrumbCandidateInput,
-    BreadcrumbLabel,
     BreadcrumbLabelCandidate,
     BreadcrumbPolicy,
     BreadcrumbRenderOptions,
-    BreadcrumbRenderResult,
-    BreadcrumbPolicyConfiguration,
     BreadcrumbPolicyDecision,
     BreadcrumbPolicyOptions,
     BreadcrumbPolicyResult,
@@ -540,10 +530,7 @@ export type {
     BreadcrumbArbitrationResult,
     BreadcrumbCandidateKind,
 } from "./breadcrumb-label.ts";
-export {
-    makeDisplayCoordinator,
-    makeProgressCoordinator,
-} from "./coordinator.ts";
+export { makeProgressCoordinator } from "./coordinator.ts";
 export {
     ACTIVITY_REGISTRY_LIMIT,
     ACTIVITY_SNAPSHOT_ROWS,

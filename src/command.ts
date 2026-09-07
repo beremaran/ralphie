@@ -559,9 +559,11 @@ const makeCommandCoordinator = (
         mode: resolveProgressMode(config, terminal),
         verbose: config.verbose,
         width: () => process.stderr.columns ?? terminal.width,
-        resize: (listener) => {
-            process.stderr.on("resize", listener);
-            return () => process.stderr.removeListener("resize", listener);
+        resize: {
+            subscribe: (listener) => {
+                process.stderr.on("resize", listener);
+                return () => process.stderr.removeListener("resize", listener);
+            },
         },
         write: config.json ? output.stdout : output.stderr,
         colors: terminal.isInteractive && !terminal.isCI,

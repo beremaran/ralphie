@@ -25,8 +25,6 @@ export type TerminalResizeSubscription = {
     readonly subscribe: (listener: () => void) => () => void;
 };
 
-export type TerminalResizeListener = (listener: () => void) => () => void;
-
 /** State-driven footer content plus the refresh cadence. */
 export type TerminalFooterOptions = {
     /**
@@ -57,11 +55,7 @@ export type TerminalOutputControllerOptions = {
     /** Current terminal width, sampled for every region paint and resize. */
     readonly width?: () => number;
     /** Injectable resize source; defaults to the interactive stderr stream. */
-    readonly resize?: TerminalResizeSubscription | TerminalResizeListener;
-    /** Compatibility alias for resize, useful when wiring an event source. */
-    readonly onResize?: TerminalResizeListener;
-    /** Compatibility alias for resize subscription wiring. */
-    readonly subscribeResize?: TerminalResizeListener;
+    readonly resize?: TerminalResizeSubscription;
 };
 
 /**
@@ -125,20 +119,6 @@ export const makeDefaultTerminalOutputStrategy = (
     restore: () => {},
 });
 
-/** Explicit name for the conservative, durable default strategy. */
-export const makeDurableBreadcrumbStrategy = makeDefaultTerminalOutputStrategy;
-export const makeDurableBreadcrumbTerminalOutputStrategy =
-    makeDefaultTerminalOutputStrategy;
-
-/**
- * Locked interactive default: the durable-transcript-breadcrumbs strategy.
- * Kept as a distinct export so a future reserved-row or scroll-region
- * strategy cannot silently become the default without updating the layout
- * lock and its regression coverage.
- */
-export const makeInteractiveTerminalOutputStrategy =
-    makeDurableBreadcrumbTerminalOutputStrategy;
-
 const nativeResizeSubscription: TerminalResizeSubscription = {
     subscribe: (listener) => {
         process.stderr.on("resize", listener);
@@ -146,29 +126,20 @@ const nativeResizeSubscription: TerminalResizeSubscription = {
     },
 };
 
-const resizeSubscriptionFor = (
-    resize: TerminalResizeSubscription | TerminalResizeListener | undefined,
-    onResize: TerminalResizeListener | undefined,
-): TerminalResizeListener => {
-    if (resize !== undefined) {
-        return typeof resize === "function"
-            ? resize
-            : (listener) => resize.subscribe(listener);
-    }
-    return (
-        onResize ?? ((listener) => nativeResizeSubscription.subscribe(listener))
-    );
-};
+const resizeSubscribeFor = (
+    resize: TerminalResizeSubscription | undefined,
+): ((listener: () => void) => () => void) =>
+    resize === undefined
+        ? (listener) => nativeResizeSubscription.subscribe(listener)
+        : (listener) => resize.subscribe(listener);
 
 export const makeTerminalOutputController = ({
     mode,
     write = (text) => process.stderr.write(text),
-    strategy = makeInteractiveTerminalOutputStrategy(write),
+    strategy = makeDefaultTerminalOutputStrategy(write),
     footer,
     width = footer?.width ?? (() => process.stderr.columns ?? 80),
     resize,
-    onResize,
-    subscribeResize,
 }: TerminalOutputControllerOptions): TerminalOutputController => {
     const boundary = makeTerminalStreamBoundaryTracker();
     const interactive = mode === "interactive";
@@ -362,10 +333,7 @@ export const makeTerminalOutputController = ({
         if (interactive) afterContentWrite();
     };
 
-    const resizeListener = resizeSubscriptionFor(
-        resize,
-        onResize ?? subscribeResize,
-    );
+    const resizeListener = resizeSubscribeFor(resize);
     const unregisterResize = interactive
         ? resizeListener(handleResize)
         : () => {};

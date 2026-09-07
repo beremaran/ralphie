@@ -11,9 +11,6 @@ import {
     INTERACTIVE_FOOTER_USES_SCROLL_REGION,
     INTERACTIVE_REGION_MAX_ROWS,
     makeDefaultTerminalOutputStrategy,
-    makeDurableBreadcrumbStrategy,
-    makeDurableBreadcrumbTerminalOutputStrategy,
-    makeInteractiveTerminalOutputStrategy,
     makeTerminalOutputController,
 } from "../../src/progress/terminal-controller.ts";
 import { stripTerminalControls } from "../../src/shared/terminal.ts";
@@ -227,18 +224,10 @@ describe("interactive footer layout strategy lock (issue #313)", () => {
         expect(INTERACTIVE_FOOTER_USES_SCROLL_REGION).toBe(false);
         expect(INTERACTIVE_FOOTER_USES_RESERVED_ROW).toBe(false);
         expect(INTERACTIVE_REGION_MAX_ROWS).toBe(3);
-        // All three factory names resolve to the same locked implementation so
-        // a future reserved-row/scroll-region strategy cannot silently become
-        // the default without updating this lock.
-        expect(makeDurableBreadcrumbStrategy).toBe(
-            makeDefaultTerminalOutputStrategy,
-        );
-        expect(makeDurableBreadcrumbTerminalOutputStrategy).toBe(
-            makeDefaultTerminalOutputStrategy,
-        );
-        expect(makeInteractiveTerminalOutputStrategy).toBe(
-            makeDurableBreadcrumbTerminalOutputStrategy,
-        );
+        // One terminal strategy factory remains so a future
+        // reserved-row/scroll-region strategy cannot silently become the
+        // default without updating this lock.
+        expect(typeof makeDefaultTerminalOutputStrategy).toBe("function");
     });
 
     test("the controller default strategy is the locked durable strategy", async () => {

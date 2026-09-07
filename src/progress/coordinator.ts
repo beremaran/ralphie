@@ -48,7 +48,6 @@ import {
     type TerminalFooterOptions,
     type TerminalOutputController,
     type TerminalOutputStrategy,
-    type TerminalResizeListener,
     type TerminalResizeSubscription,
 } from "./terminal-controller.ts";
 
@@ -68,10 +67,7 @@ export type ProgressCoordinatorOptions = Omit<
     /** Injectable terminal surface, useful for deterministic coordinator tests. */
     readonly strategy?: TerminalOutputStrategy;
     /** Injectable resize source; the default listens to stderr in interactive mode. */
-    readonly resize?: TerminalResizeSubscription | TerminalResizeListener;
-    /** Compatibility aliases for resize-source injection. */
-    readonly onResize?: TerminalResizeListener;
-    readonly subscribeResize?: TerminalResizeListener;
+    readonly resize?: TerminalResizeSubscription;
 };
 
 /**
@@ -85,10 +81,6 @@ export type ProgressCoordinator = {
     readonly progress: ProgressReporterService;
     /** Listener to pass to the agent service. */
     readonly piListener: AgentEventListener;
-    /** Compatibility alias for callers that use the generic listener name. */
-    readonly listener: AgentEventListener;
-    /** Explicit event-listener alias for dependency wiring. */
-    readonly piEventListener: AgentEventListener;
     /** Insert an approved breadcrumb through the transcript boundary. */
     readonly insertBreadcrumb?: (
         candidate: BreadcrumbLabelCandidate,
@@ -274,8 +266,6 @@ export const makeProgressCoordinator = (
                   strategy: options.strategy,
                   width: footerWidth,
                   resize: options.resize,
-                  onResize: options.onResize,
-                  subscribeResize: options.subscribeResize,
                   footer: {
                       ...options.footer,
                       footerLine: () =>
@@ -401,8 +391,6 @@ export const makeProgressCoordinator = (
     return {
         progress,
         piListener,
-        listener: piListener,
-        piEventListener: piListener,
         insertBreadcrumb,
         getDisplayState: () => state,
         dispose: async () => {
@@ -413,9 +401,6 @@ export const makeProgressCoordinator = (
         },
     };
 };
-
-/** Explicit alias for callers that name the service by its display role. */
-export const makeDisplayCoordinator = makeProgressCoordinator;
 
 export type { AgentEventContext, AgentSessionEvent };
 export type { ProgressRenderMode };

@@ -81,10 +81,6 @@ export type BreadcrumbLabelCandidate = NormalizedBreadcrumb & {
     readonly [displayContextCandidateBrand]: true;
 };
 
-export type BreadcrumbLabel = NormalizedBreadcrumb;
-export type BreadcrumbRenderResult = NormalizedBreadcrumb;
-export type ApprovedBreadcrumbCandidate = BreadcrumbLabelCandidate;
-
 const isApprovedBreadcrumbCandidate = (
     value: unknown,
 ): value is BreadcrumbLabelCandidate => {
@@ -182,8 +178,6 @@ export type BreadcrumbCandidate = {
     readonly key: string;
 };
 
-export type BreadcrumbCandidateInput = BreadcrumbCandidate;
-
 export type BreadcrumbPolicyOptions = {
     /** Number of visible rendered rows required for one cadence crossing. */
     readonly breadcrumbThreshold?: number;
@@ -249,31 +243,19 @@ const stateFor = (
     };
 };
 
-const positionFor = (candidate: BreadcrumbCandidateInput): number =>
+const positionFor = (candidate: BreadcrumbCandidate): number =>
     nonNegativeSafeInteger(
         candidate.visibleLinePosition ?? 0,
         "visibleLinePosition",
     );
 
-const keyFor = (candidate: BreadcrumbCandidateInput): string =>
+const keyFor = (candidate: BreadcrumbCandidate): string =>
     canonicalBreadcrumbKey(candidate.key ?? "");
 
-const candidateFor = (
-    candidate: BreadcrumbCandidateInput | number,
-    key?: string,
-): BreadcrumbCandidate =>
-    typeof candidate === "number"
-        ? {
-              visibleLinePosition: nonNegativeSafeInteger(
-                  candidate,
-                  "visibleLinePosition",
-              ),
-              key: key ?? "",
-          }
-        : {
-              visibleLinePosition: positionFor(candidate),
-              key: keyFor(candidate),
-          };
+const candidateFor = (candidate: BreadcrumbCandidate): BreadcrumbCandidate => ({
+    visibleLinePosition: positionFor(candidate),
+    key: keyFor(candidate),
+});
 
 const crossingNumbersFor = (
     state: BreadcrumbPolicyState,
@@ -301,7 +283,7 @@ const crossingNumbersFor = (
  */
 export const reduceBreadcrumbPolicy = (
     currentState: BreadcrumbPolicyState | undefined,
-    candidateInput: BreadcrumbCandidateInput,
+    candidateInput: BreadcrumbCandidate,
     options: BreadcrumbPolicyOptions = {},
 ): BreadcrumbPolicyResult => {
     const state = stateFor(currentState);
@@ -348,24 +330,12 @@ export const reduceBreadcrumbPolicy = (
     return { state: nextState, decision };
 };
 
-export type BreadcrumbPolicyConfiguration = BreadcrumbPolicyOptions | number;
-
-const optionsFor = (
-    options: BreadcrumbPolicyConfiguration,
-): BreadcrumbPolicyOptions =>
-    typeof options === "number" ? { breadcrumbThreshold: options } : options;
-
 export type BreadcrumbPolicy = {
     readonly breadcrumbThreshold: number;
     readonly getState: () => BreadcrumbPolicyState;
     readonly consider: (
-        candidate: BreadcrumbCandidateInput | number,
-        key?: string,
+        candidate: BreadcrumbCandidate,
     ) => BreadcrumbPolicyDecision;
-    readonly shouldEmit: (
-        candidate: BreadcrumbCandidateInput | number,
-        key?: string,
-    ) => boolean;
     /** Reset line accounting at a new visible-line accounting boundary. */
     readonly reset: (renderedOutputBaseline?: number) => void;
     /** Rebase after inserting a breadcrumb without clearing its adjacent key. */
@@ -376,7 +346,7 @@ export type BreadcrumbCandidateKind = "lifecycle" | "periodic";
 
 export type BreadcrumbArbitrationCandidate = {
     readonly kind: BreadcrumbCandidateKind;
-    readonly candidate: BreadcrumbCandidateInput;
+    readonly candidate: BreadcrumbCandidate;
 };
 
 export type BreadcrumbArbitrationResult = {
@@ -431,17 +401,15 @@ export const arbitrateBreadcrumbCandidates = (
 
 /** Create a stateful policy adapter for the transcript/coordinator seam. */
 export const makeBreadcrumbPolicy = (
-    configuration: BreadcrumbPolicyConfiguration = {},
+    options: BreadcrumbPolicyOptions = {},
 ): BreadcrumbPolicy => {
-    const options = optionsFor(configuration);
     const breadcrumbThreshold = thresholdFor(options);
     let state = stateFor(options.initialState);
 
     const consider = (
-        candidateInput: BreadcrumbCandidateInput | number,
-        key?: string,
+        candidateInput: BreadcrumbCandidate,
     ): BreadcrumbPolicyDecision => {
-        const candidate = candidateFor(candidateInput, key);
+        const candidate = candidateFor(candidateInput);
         const result = reduceBreadcrumbPolicy(state, candidate, {
             breadcrumbThreshold,
         });
@@ -472,7 +440,6 @@ export const makeBreadcrumbPolicy = (
         breadcrumbThreshold,
         getState: () => state,
         consider,
-        shouldEmit: (candidateInput, key) => consider(candidateInput, key).emit,
         reset,
         rebase,
     };
@@ -482,6 +449,3 @@ export const createBreadcrumbPolicyState = (): BreadcrumbPolicyState => ({
     renderedOutputBaseline: 0,
     processedPeriodicCrossings: 0,
 });
-
-export const initialBreadcrumbPolicyState: BreadcrumbPolicyState =
-    createBreadcrumbPolicyState();

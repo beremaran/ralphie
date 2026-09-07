@@ -49,7 +49,7 @@ const breadcrumbLines = (output: string): ReadonlyArray<string> =>
     visibleLines(output).filter((line) => line.includes("› "));
 
 const startSession = (harness: BreadcrumbHarness): void => {
-    harness.coordinator.listener(event({ type: "agent_start" }), context);
+    harness.coordinator.piListener(event({ type: "agent_start" }), context);
 };
 
 const writeAssistant = (
@@ -57,7 +57,7 @@ const writeAssistant = (
     delta: string,
     contentIndex?: number,
 ): void => {
-    harness.coordinator.listener(
+    harness.coordinator.piListener(
         event({
             type: "message_update",
             assistantMessageEvent: {
@@ -74,7 +74,7 @@ const settleSession = (
     harness: BreadcrumbHarness,
     settledEvent: AgentSessionEvent = event({ type: "agent_settled" }),
 ): void => {
-    harness.coordinator.listener(settledEvent, context);
+    harness.coordinator.piListener(settledEvent, context);
 };
 
 describe("assembled breadcrumb policy regressions", () => {
@@ -136,7 +136,7 @@ describe("assembled breadcrumb policy regressions", () => {
         const harness = makeBreadcrumbHarness();
         startSession(harness);
         writeAssistant(harness, "one");
-        harness.coordinator.listener(
+        harness.coordinator.piListener(
             event({ type: "compaction_start", reason: "threshold" }),
             context,
         );
@@ -188,7 +188,7 @@ describe("assembled breadcrumb policy regressions", () => {
         writeAssistant(harness, rows.join("\n"));
         const afterLargeEvent = harness.output;
 
-        harness.coordinator.listener(event({ type: "turn_end" }), context);
+        harness.coordinator.piListener(event({ type: "turn_end" }), context);
         expect(harness.output).toBe(afterLargeEvent);
 
         writeAssistant(harness, "after", 1);
@@ -219,7 +219,7 @@ describe("assembled breadcrumb policy regressions", () => {
         // Compaction crosses the cadence boundary. Responding and Compacting
         // context are both candidates at this transcript boundary, but the
         // lifecycle candidate must win.
-        harness.coordinator.listener(
+        harness.coordinator.piListener(
             event({ type: "compaction_start", reason: "threshold" }),
             context,
         );
@@ -248,7 +248,7 @@ describe("assembled breadcrumb policy regressions", () => {
         ).join("\n");
 
         startSession(harness);
-        harness.coordinator.listener(
+        harness.coordinator.piListener(
             event({
                 type: "tool_execution_start",
                 toolCallId: "tool-long",
@@ -257,7 +257,7 @@ describe("assembled breadcrumb policy regressions", () => {
             }),
             context,
         );
-        harness.coordinator.listener(
+        harness.coordinator.piListener(
             event({
                 type: "tool_execution_update",
                 toolCallId: "tool-long",
@@ -266,7 +266,7 @@ describe("assembled breadcrumb policy regressions", () => {
             }),
             context,
         );
-        harness.coordinator.listener(
+        harness.coordinator.piListener(
             event({
                 type: "tool_execution_end",
                 toolCallId: "tool-long",
@@ -382,7 +382,7 @@ describe("assembled breadcrumb policy regressions", () => {
             const harness = makeBreadcrumbHarness();
             startSession(harness);
             writeAssistant(harness, "one\ntwo");
-            harness.coordinator.listener(lifecycleCase.event, context);
+            harness.coordinator.piListener(lifecycleCase.event, context);
             settleSession(harness);
 
             expect(visibleLines(harness.output)).toEqual([
@@ -409,9 +409,9 @@ describe("assembled breadcrumb policy regressions", () => {
             type: "compaction_start",
             reason: "threshold",
         });
-        harness.coordinator.listener(compactionStart, context);
-        harness.coordinator.listener(compactionStart, context);
-        harness.coordinator.listener(
+        harness.coordinator.piListener(compactionStart, context);
+        harness.coordinator.piListener(compactionStart, context);
+        harness.coordinator.piListener(
             event({
                 type: "compaction_end",
                 reason: "threshold",
@@ -457,7 +457,7 @@ describe("assembled breadcrumb policy regressions", () => {
         harness.clearOutput();
         startSession(harness);
         writeAssistant(harness, "one\ntwo");
-        harness.coordinator.listener(
+        harness.coordinator.piListener(
             event({ type: "compaction_start", reason: "threshold" }),
             context,
         );
@@ -496,7 +496,7 @@ describe("assembled breadcrumb policy regressions", () => {
         });
         startSession(harness);
         writeAssistant(harness, "one\n");
-        harness.coordinator.listener(
+        harness.coordinator.piListener(
             event({ type: "compaction_start", reason: "threshold" }),
             context,
         );
@@ -513,7 +513,7 @@ describe("assembled breadcrumb policy regressions", () => {
             total: 1,
         });
         writeAssistant(harness, "two\n");
-        harness.coordinator.listener(
+        harness.coordinator.piListener(
             event({ type: "compaction_start", reason: "threshold" }),
             context,
         );
@@ -548,7 +548,7 @@ describe("assembled breadcrumb policy regressions", () => {
         const harness = makeBreadcrumbHarness();
         startSession(harness);
         writeAssistant(harness, "one\ntwo");
-        harness.coordinator.listener(
+        harness.coordinator.piListener(
             event({ type: "compaction_start", reason: "threshold" }),
             context,
         );

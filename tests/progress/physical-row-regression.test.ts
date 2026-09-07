@@ -125,22 +125,25 @@ const expectRegionRowsFit = (
 describe("interactive activity region physical-row regression", () => {
     test("repeated tool calls never exceed three physical rows at any instant", async () => {
         const harness = makeHarness();
-        harness.coordinator.listener(asEvent({ type: "agent_start" }), context);
+        harness.coordinator.piListener(
+            asEvent({ type: "agent_start" }),
+            context,
+        );
         await harness.settle();
         for (let cycle = 0; cycle < 15; cycle += 1) {
-            harness.coordinator.listener(
+            harness.coordinator.piListener(
                 toolStart(`tool-${cycle}`, "bash", {
                     command: `echo cycle ${cycle}`,
                 }),
                 context,
             );
             for (let delta = 0; delta < 5; delta += 1) {
-                harness.coordinator.listener(
+                harness.coordinator.piListener(
                     toolUpdate(`tool-${cycle}`, "bash"),
                     context,
                 );
             }
-            harness.coordinator.listener(
+            harness.coordinator.piListener(
                 toolEnd(
                     `tool-${cycle}`,
                     "bash",
@@ -186,15 +189,15 @@ describe("interactive activity region physical-row regression", () => {
         const harness = makeHarness({ width: () => 24 });
         const longCommand = `./scripts/verify --config ${"x".repeat(120)}`;
         const deepPath = `/workspace/repository/src/${"d".repeat(80)}/file.ts`;
-        harness.coordinator.listener(
+        harness.coordinator.piListener(
             toolStart("bash-1", "bash", { command: longCommand }),
             context,
         );
-        harness.coordinator.listener(
+        harness.coordinator.piListener(
             toolStart("read-1", "read", { path: deepPath, offset: 40 }),
             context,
         );
-        harness.coordinator.listener(
+        harness.coordinator.piListener(
             toolStart("write-1", "write", {
                 path: deepPath,
                 content: "a\nb\nc\nd",
@@ -214,7 +217,7 @@ describe("interactive activity region physical-row regression", () => {
         expect(meter.rows()).toBe(region.length);
         expect(meter.row()).toBe(region.length - 1);
 
-        await harness.coordinator.listener(
+        await harness.coordinator.piListener(
             toolEnd("bash-1", "bash", { content: "done" }, false),
             context,
         );
@@ -227,20 +230,23 @@ describe("interactive activity region physical-row regression", () => {
 
     test("narrow terminals and mid-run resize repaint within three rows", async () => {
         const harness = makeHarness();
-        harness.coordinator.listener(asEvent({ type: "agent_start" }), context);
+        harness.coordinator.piListener(
+            asEvent({ type: "agent_start" }),
+            context,
+        );
         const widths = [12, 26, 6, 40];
         for (const width of widths) {
             harness.width(width);
             harness.resize.emit();
             await harness.settle();
             for (let index = 0; index < 3; index += 1) {
-                harness.coordinator.listener(
+                harness.coordinator.piListener(
                     toolStart(`resize-${width}-${index}`, "bash", {
                         command: `echo ${"y".repeat(width * 3)}`,
                     }),
                     context,
                 );
-                harness.coordinator.listener(
+                harness.coordinator.piListener(
                     toolEnd(
                         `resize-${width}-${index}`,
                         "bash",
@@ -271,8 +277,11 @@ describe("interactive activity region physical-row regression", () => {
             "services ",
             "explicitly.",
         ];
-        harness.coordinator.listener(asEvent({ type: "agent_start" }), context);
-        harness.coordinator.listener(
+        harness.coordinator.piListener(
+            asEvent({ type: "agent_start" }),
+            context,
+        );
+        harness.coordinator.piListener(
             asEvent({
                 type: "message_update",
                 assistantMessageEvent: {
@@ -283,7 +292,7 @@ describe("interactive activity region physical-row regression", () => {
             context,
         );
         for (const delta of deltas) {
-            harness.coordinator.listener(textDelta(delta), context);
+            harness.coordinator.piListener(textDelta(delta), context);
         }
         await harness.settle();
 
@@ -301,12 +310,12 @@ describe("interactive activity region physical-row regression", () => {
         expect(span).not.toContain("\n");
 
         // Tool activity arriving mid-stream never disturbs the block bytes.
-        harness.coordinator.listener(
+        harness.coordinator.piListener(
             toolStart("mid-1", "grep", { pattern: "needle" }),
             context,
         );
-        harness.coordinator.listener(textDelta(" tail."), context);
-        harness.coordinator.listener(
+        harness.coordinator.piListener(textDelta(" tail."), context);
+        harness.coordinator.piListener(
             toolEnd("mid-1", "grep", { content: "match" }, false),
             context,
         );
@@ -324,20 +333,23 @@ describe("interactive activity region physical-row regression", () => {
 
     test("completion, failure, and cleanup keep the region bounded and durable", async () => {
         const harness = makeHarness();
-        harness.coordinator.listener(asEvent({ type: "agent_start" }), context);
-        harness.coordinator.listener(
+        harness.coordinator.piListener(
+            asEvent({ type: "agent_start" }),
+            context,
+        );
+        harness.coordinator.piListener(
             toolStart("ok-1", "bash", { command: "echo ok" }),
             context,
         );
-        harness.coordinator.listener(
+        harness.coordinator.piListener(
             toolEnd("ok-1", "bash", { content: "ok" }, false),
             context,
         );
-        harness.coordinator.listener(
+        harness.coordinator.piListener(
             toolStart("fail-1", "grep", { pattern: "needle" }),
             context,
         );
-        harness.coordinator.listener(
+        harness.coordinator.piListener(
             toolEnd(
                 "fail-1",
                 "grep",

@@ -145,13 +145,13 @@ const textDelta = (delta: string) =>
 describe("coordinator activity wiring", () => {
     test("repeated tool updates replace one activity row and emit one transcript outcome", async () => {
         const { coordinator, strategy, settle } = makeInteractiveHarness();
-        coordinator.listener(asEvent({ type: "agent_start" }), context);
-        coordinator.listener(
+        coordinator.piListener(asEvent({ type: "agent_start" }), context);
+        coordinator.piListener(
             toolStart("tool-1", "bash", { command: "echo work" }),
             context,
         );
         for (let index = 0; index < 5; index += 1) {
-            coordinator.listener(
+            coordinator.piListener(
                 asEvent({
                     type: "tool_execution_update",
                     toolCallId: "tool-1",
@@ -161,7 +161,7 @@ describe("coordinator activity wiring", () => {
                 context,
             );
         }
-        coordinator.listener(
+        coordinator.piListener(
             toolEnd("tool-1", "bash", { content: "final output" }, false),
             context,
         );
@@ -184,12 +184,12 @@ describe("coordinator activity wiring", () => {
 
     test("missing or empty ids never crash or grow the activity registry", async () => {
         const { coordinator, strategy, settle } = makeInteractiveHarness();
-        coordinator.listener(asEvent({ type: "agent_start" }), context);
-        coordinator.listener(
+        coordinator.piListener(asEvent({ type: "agent_start" }), context);
+        coordinator.piListener(
             toolStart("", "bash", { command: "echo missing" }),
             context,
         );
-        coordinator.listener(
+        coordinator.piListener(
             asEvent({
                 type: "tool_execution_update",
                 toolCallId: "",
@@ -198,12 +198,12 @@ describe("coordinator activity wiring", () => {
             }),
             context,
         );
-        coordinator.listener(
+        coordinator.piListener(
             toolEnd("", "bash", { content: "x".repeat(200) }, false),
             context,
         );
         for (let index = 0; index < 5; index += 1) {
-            coordinator.listener(
+            coordinator.piListener(
                 asEvent({
                     type: "bash_execution_update",
                     delta: `chunk ${index}`,
@@ -211,7 +211,7 @@ describe("coordinator activity wiring", () => {
                 context,
             );
         }
-        coordinator.listener(asEvent({ type: "agent_settled" }), context);
+        coordinator.piListener(asEvent({ type: "agent_settled" }), context);
         await settle();
         await coordinator.dispose();
 
@@ -226,8 +226,8 @@ describe("coordinator activity wiring", () => {
 
     test("interleaved assistant text is never cleared or corrupted by the region", async () => {
         const { coordinator, strategy, settle } = makeInteractiveHarness();
-        coordinator.listener(asEvent({ type: "agent_start" }), context);
-        coordinator.listener(
+        coordinator.piListener(asEvent({ type: "agent_start" }), context);
+        coordinator.piListener(
             asEvent({
                 type: "message_update",
                 assistantMessageEvent: {
@@ -244,19 +244,19 @@ describe("coordinator activity wiring", () => {
             "fourth ",
             "fifth",
         ]) {
-            coordinator.listener(textDelta(delta), context);
+            coordinator.piListener(textDelta(delta), context);
         }
         // Intermediate activity updates arrive while the response streams.
-        coordinator.listener(
+        coordinator.piListener(
             toolStart("tool-2", "grep", { pattern: "needle" }),
             context,
         );
-        coordinator.listener(textDelta(" tail"), context);
-        coordinator.listener(
+        coordinator.piListener(textDelta(" tail"), context);
+        coordinator.piListener(
             toolEnd("tool-2", "grep", { content: "match" }, false),
             context,
         );
-        coordinator.listener(
+        coordinator.piListener(
             asEvent({
                 type: "message_update",
                 assistantMessageEvent: {
@@ -283,11 +283,11 @@ describe("coordinator activity wiring", () => {
 
     test("tool success maps to a bounded activity row and one summary", async () => {
         const { coordinator, strategy, settle } = makeInteractiveHarness();
-        coordinator.listener(
+        coordinator.piListener(
             toolStart("t1", "bash", { command: "echo ok" }),
             context,
         );
-        coordinator.listener(
+        coordinator.piListener(
             toolEnd("t1", "bash", { content: "ok" }, false),
             context,
         );
@@ -308,11 +308,11 @@ describe("coordinator activity wiring", () => {
 
     test("tool failure maps to a bounded sanitized activity row and summary", async () => {
         const { coordinator, strategy, settle } = makeInteractiveHarness();
-        coordinator.listener(
+        coordinator.piListener(
             toolStart("t1", "grep", { pattern: "needle" }),
             context,
         );
-        coordinator.listener(
+        coordinator.piListener(
             toolEnd(
                 "t1",
                 "grep",
@@ -386,13 +386,13 @@ describe("coordinator activity wiring", () => {
         const { coordinator, strategy, settle } = makeInteractiveHarness({
             verbose: true,
         });
-        coordinator.listener(asEvent({ type: "agent_start" }), context);
+        coordinator.piListener(asEvent({ type: "agent_start" }), context);
         for (let index = 0; index < 3; index += 1) {
-            coordinator.listener(
+            coordinator.piListener(
                 toolStart(`t${index}`, "bash", { command: `echo ${index}` }),
                 context,
             );
-            coordinator.listener(
+            coordinator.piListener(
                 toolEnd(`t${index}`, "bash", { content: `${index}` }, false),
                 context,
             );
@@ -428,12 +428,12 @@ describe("coordinator activity wiring", () => {
     test("interactive mode routes through the replaceable region and never the fallback sink", async () => {
         const { coordinator, strategy, settle, fallback } =
             makeInteractiveHarness();
-        coordinator.listener(asEvent({ type: "agent_start" }), context);
-        coordinator.listener(
+        coordinator.piListener(asEvent({ type: "agent_start" }), context);
+        coordinator.piListener(
             toolStart("t1", "bash", { command: "echo hi" }),
             context,
         );
-        coordinator.listener(
+        coordinator.piListener(
             toolEnd("t1", "bash", { content: "hi" }, false),
             context,
         );
@@ -452,12 +452,12 @@ describe("coordinator dispose safety", () => {
     test("double dispose is harmless and emit/listener become no-ops", async () => {
         const { coordinator, strategy, settle, fallback } =
             makeInteractiveHarness();
-        coordinator.listener(asEvent({ type: "agent_start" }), context);
-        coordinator.listener(
+        coordinator.piListener(asEvent({ type: "agent_start" }), context);
+        coordinator.piListener(
             toolStart("t1", "bash", { command: "echo hi" }),
             context,
         );
-        coordinator.listener(
+        coordinator.piListener(
             toolEnd("t1", "bash", { content: "hi" }, false),
             context,
         );
@@ -481,7 +481,7 @@ describe("coordinator dispose safety", () => {
             message: "stale progress",
         });
         coordinator.piListener(textDelta("stale text"), context);
-        coordinator.listener(
+        coordinator.piListener(
             toolStart("t2", "bash", { command: "echo stale" }),
             context,
         );
@@ -500,13 +500,13 @@ describe("coordinator dispose safety", () => {
 describe("coordinator mode-specific contracts", () => {
     test("plain mode stays append-only with no cursor controls", async () => {
         const { coordinator, output } = makeBoundedCapture("plain");
-        coordinator.listener(asEvent({ type: "agent_start" }), context);
-        coordinator.listener(textDelta("hello world"), context);
-        coordinator.listener(
+        coordinator.piListener(asEvent({ type: "agent_start" }), context);
+        coordinator.piListener(textDelta("hello world"), context);
+        coordinator.piListener(
             toolStart("p1", "bash", { command: "echo hi" }),
             context,
         );
-        coordinator.listener(
+        coordinator.piListener(
             toolEnd("p1", "bash", { content: "hi" }, false),
             context,
         );
@@ -515,7 +515,7 @@ describe("coordinator mode-specific contracts", () => {
             status: "succeeded",
             message: "done now",
         });
-        coordinator.listener(asEvent({ type: "agent_settled" }), context);
+        coordinator.piListener(asEvent({ type: "agent_settled" }), context);
         await coordinator.dispose();
 
         const text = output();
@@ -530,8 +530,8 @@ describe("coordinator mode-specific contracts", () => {
 
     test("json mode emits only lossless structured records", async () => {
         const { coordinator, output } = makeBoundedCapture("json");
-        coordinator.listener(asEvent({ type: "agent_start" }), context);
-        coordinator.listener(
+        coordinator.piListener(asEvent({ type: "agent_start" }), context);
+        coordinator.piListener(
             toolStart("j1", "bash", { command: "echo hi", secret: "value" }),
             context,
         );
@@ -540,7 +540,7 @@ describe("coordinator mode-specific contracts", () => {
             status: "succeeded",
             message: "done",
         });
-        coordinator.listener(asEvent({ type: "agent_settled" }), context);
+        coordinator.piListener(asEvent({ type: "agent_settled" }), context);
         await coordinator.dispose();
 
         const records = output()
@@ -564,8 +564,8 @@ describe("coordinator mode-specific contracts", () => {
 
     test("quiet mode suppresses routine transcript and progress", async () => {
         const { coordinator, output } = makeBoundedCapture("quiet");
-        coordinator.listener(asEvent({ type: "agent_start" }), context);
-        coordinator.listener(textDelta("hidden"), context);
+        coordinator.piListener(asEvent({ type: "agent_start" }), context);
+        coordinator.piListener(textDelta("hidden"), context);
         await coordinator.progress.emit({
             stage: "implementation",
             status: "succeeded",

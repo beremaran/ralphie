@@ -236,8 +236,6 @@ describe("native CLI parser", () => {
                     makeCoordinator: () => ({
                         progress: makeProgressRecorder([]),
                         piListener: () => {},
-                        listener: () => {},
-                        piEventListener: () => {},
                         getDisplayState: () => ({}) as never,
                         dispose: async () => {},
                     }),
@@ -275,8 +273,6 @@ describe("native CLI parser", () => {
                     makeCoordinator: () => ({
                         progress: makeProgressRecorder([]),
                         piListener: () => {},
-                        listener: () => {},
-                        piEventListener: () => {},
                         getDisplayState: () => ({}) as never,
                         dispose: async () => {},
                     }),
@@ -445,8 +441,6 @@ describe("native CLI parser", () => {
                         makeCoordinator: () => ({
                             progress: makeProgressRecorder([]),
                             piListener: () => {},
-                            listener: () => {},
-                            piEventListener: () => {},
                             getDisplayState: () => ({}) as never,
                             dispose: async () => {},
                         }),

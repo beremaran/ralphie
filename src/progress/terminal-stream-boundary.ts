@@ -31,7 +31,6 @@ export type TerminalStreamBoundaryState = {
 export type TerminalStreamBoundaryTracker = {
     /** Consume one arbitrary stream chunk and return the resulting state. */
     readonly write: (chunk: string) => TerminalStreamBoundaryState;
-    readonly getState: () => TerminalStreamBoundaryState;
     /** True only when the line boundary is also safe for a redraw. */
     readonly isRedrawSafe: () => boolean;
     readonly hasOpenControlSequence: () => boolean;
@@ -258,7 +257,6 @@ export const makeTerminalStreamBoundaryTracker =
 
         return {
             write,
-            getState,
             isRedrawSafe,
             hasOpenControlSequence,
             reset,
