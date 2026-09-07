@@ -79,6 +79,8 @@ export type TerminalOutputController = ProgressOutput & {
     readonly isFooterVisible: () => boolean;
     /** Coalesce a region repaint for display-state changes. */
     readonly invalidate: () => void;
+    /** Flush a pending region repaint immediately. */
+    readonly flush: () => void;
 };
 
 const CLEAR_LINE = "\r\x1b[2K";
@@ -369,6 +371,7 @@ export const makeTerminalOutputController = ({
         },
         isFooterVisible: () => regionShown,
         invalidate,
+        flush: () => scheduler?.flush(),
         dispose: () => {
             if (disposed) return;
             disposed = true;

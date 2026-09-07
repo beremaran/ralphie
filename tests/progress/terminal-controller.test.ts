@@ -8,6 +8,11 @@ import type {
     TerminalOutputStrategy,
     TerminalResizeSubscription,
 } from "../../src/progress/terminal-controller.ts";
+import {
+    PhysicalRowMeter,
+    makeRecordingStrategy,
+    regionBytes,
+} from "../shared/physical-row-meter.ts";
 
 const CLEAR = "\r\x1b[2K";
 const UP = "\x1b[1A";
@@ -25,13 +30,16 @@ const makeResizeSource = () => {
         emit: () => {
             for (const listener of [...listeners]) listener();
         },
+        listenerCount: () => listeners.length,
     };
 };
 
 const makeFakeStrategy = (): TerminalOutputStrategy & {
     readonly output: () => string;
+    readonly restoreCount: () => number;
 } => {
     let bytes = "";
+    let restoreCount = 0;
     return {
         write: (text) => {
             bytes += text;
@@ -43,9 +51,11 @@ const makeFakeStrategy = (): TerminalOutputStrategy & {
             bytes += CLEAR;
         },
         restore: () => {
+            restoreCount += 1;
             bytes += "[restore]";
         },
         output: () => bytes,
+        restoreCount: () => restoreCount,
     };
 };
 
@@ -81,7 +91,7 @@ const makeHarness = (
         strategy,
         resize,
         output: () => strategy.output(),
-        settle: () => Bun.sleep(150),
+        settle: () => controller.flush(),
         setFooter: (line: string) => {
             footerTarget = line;
             controller.setFooter(line);
@@ -200,6 +210,70 @@ describe("terminal output controller region", () => {
         expect(output()).not.toContain("\n");
     });
 
+    test("bounds a 100-character footer and activity by physical rows", async () => {
+        for (const width of [12, 20, 80]) {
+            const strategy = makeRecordingStrategy();
+            const controller = makeTerminalOutputController({
+                mode: "interactive",
+                strategy,
+                width: () => width,
+                footer: {
+                    activityLines: () => [
+                        "activity row ".repeat(10),
+                        "second activity row ".repeat(10),
+                    ],
+                },
+                resize: makeResizeSource(),
+            });
+
+            controller.setFooter("f".repeat(100));
+            controller.flush();
+
+            const rows = strategy.currentRegion();
+            expect(rows.length).toBeLessThanOrEqual(
+                INTERACTIVE_REGION_MAX_ROWS,
+            );
+            expect(rows).toHaveLength(3);
+            for (const row of rows) {
+                expect(Bun.stringWidth(row)).toBeLessThanOrEqual(width);
+            }
+            const meter = new PhysicalRowMeter(width);
+            meter.feed(regionBytes(rows));
+            expect(meter.peakRows()).toBe(rows.length);
+
+            controller.dispose();
+        }
+    });
+
+    test("clips long footer and activity rows with ellipses without wrapping", async () => {
+        const width = 20;
+        const strategy = makeRecordingStrategy();
+        const controller = makeTerminalOutputController({
+            mode: "interactive",
+            strategy,
+            width: () => width,
+            footer: {
+                activityLines: () => ["a".repeat(100), "b".repeat(100)],
+            },
+            resize: makeResizeSource(),
+        });
+
+        controller.setFooter("footer ".repeat(20));
+        controller.flush();
+
+        const rows = strategy.currentRegion();
+        expect(rows).toHaveLength(3);
+        for (const row of rows) {
+            expect(row).toEndWith("…");
+            expect(Bun.stringWidth(row)).toBeLessThanOrEqual(width);
+        }
+        const meter = new PhysicalRowMeter(width);
+        meter.feed(regionBytes(rows));
+        expect(meter.peakRows()).toBe(3);
+
+        controller.dispose();
+    });
+
     test("defers region repaints while a transcript line is open", async () => {
         const { controller, output, settle, setFooter } = makeHarness();
         controller.writeTranscript("half");
@@ -219,6 +293,25 @@ describe("terminal output controller region", () => {
         expect(output()).toBe("\x1b[31");
         controller.writeTranscript("mred\x1b[0m\n");
         expect(output()).toBe("\x1b[31mred\x1b[0m\nF");
+    });
+
+    test("defers both split CSI and OSC sequences while preserving bytes", async () => {
+        const cases = [
+            ["\x1b[31", "mred\x1b[0m\n"],
+            ["\x1b]8;;https://example.test", "\x1b\\linked\x1b]8;;\x1b\\\n"],
+        ] as const;
+
+        for (const [open, close] of cases) {
+            const { controller, output, settle, setFooter } = makeHarness();
+            controller.writeTranscript(open);
+            setFooter("F");
+            await settle();
+            expect(output()).toBe(open);
+
+            controller.writeTranscript(close);
+            expect(output()).toBe(`${open}${close}F`);
+            controller.dispose();
+        }
     });
 
     test("streamed assistant text is never overwritten by the region", async () => {
@@ -284,6 +377,42 @@ describe("terminal output controller region", () => {
         expect(Bun.stringWidth(lastPaint)).toBeLessThanOrEqual(6);
     });
 
+    test("clears the old region before repainting after a mid-run resize", async () => {
+        let currentWidth = 20;
+        const strategy = makeRecordingStrategy();
+        const resize = makeResizeSource();
+        const controller = makeTerminalOutputController({
+            mode: "interactive",
+            strategy,
+            width: () => currentWidth,
+            footer: {
+                activityLines: () => ["activity"],
+            },
+            resize,
+        });
+
+        controller.setFooter("footer content");
+        controller.flush();
+        expect(strategy.currentRegion()).toEqual([
+            "activity",
+            "footer content",
+        ]);
+
+        currentWidth = 6;
+        resize.emit();
+
+        expect(strategy.clearCount()).toBe(5);
+        expect(strategy.currentRegion()).toEqual(["activ…", "foote…"]);
+        for (const row of strategy.currentRegion()) {
+            expect(Bun.stringWidth(row)).toBeLessThanOrEqual(currentWidth);
+        }
+        const meter = new PhysicalRowMeter(currentWidth);
+        meter.feed(regionBytes(strategy.currentRegion()));
+        expect(meter.peakRows()).toBe(2);
+
+        controller.dispose();
+    });
+
     test("resize during an open line defers until the line closes", async () => {
         let currentWidth = 40;
         const { controller, output, resize, settle, setFooter } = makeHarness({
@@ -307,9 +436,10 @@ describe("terminal output controller region", () => {
 
     test("disposal erases the region in place, settles the cursor, and restores the strategy", async () => {
         const activity = ["run bash", "run read"];
-        const { output, settle, setFooter, controller } = makeHarness({
-            activityLines: () => activity,
-        });
+        const { output, settle, setFooter, controller, strategy, resize } =
+            makeHarness({
+                activityLines: () => activity,
+            });
         setFooter("stage");
         await settle();
         expect(output()).toBe("run bash\nrun read\nstage");
@@ -319,6 +449,9 @@ describe("terminal output controller region", () => {
                 "assistant text\nrun bash\nrun read\nstage",
         );
 
+        setFooter("pending repaint");
+        const beforeDispose = output();
+        expect(output()).toBe(beforeDispose);
         controller.dispose();
         // The region is erased in place and the stream settles on a fresh
         // line, so no footer/status or activity fragment survives on the
@@ -328,14 +461,21 @@ describe("terminal output controller region", () => {
                 "assistant text\nrun bash\nrun read\nstage" +
                 `${CLEAR}${UP}${CLEAR}${UP}${CLEAR}\n[restore]`,
         );
-        // Double disposal is harmless: a second dispose writes no bytes.
         const afterFirstDispose = output();
+        expect(afterFirstDispose).not.toContain("pending repaint");
+        controller.flush();
+        expect(output()).toBe(afterFirstDispose);
+        expect(strategy.restoreCount()).toBe(1);
+        expect(resize.listenerCount()).toBe(0);
+        // Double disposal is harmless: a second dispose writes no bytes.
         controller.dispose();
         expect(output()).toBe(afterFirstDispose);
+        expect(strategy.restoreCount()).toBe(1);
         // A disposed controller ignores further region updates entirely.
         setFooter("stale");
+        resize.emit();
         controller.invalidate();
-        await settle();
+        controller.flush();
         expect(output()).toBe(afterFirstDispose);
     });
 
@@ -375,7 +515,7 @@ describe("dispose safety", () => {
         controller.writeTranscript("stream after dispose");
         controller.beginLive("live after dispose");
         controller.appendLine("append after dispose", "live after dispose");
-        await Bun.sleep(150);
+        controller.flush();
         expect(controller.isFooterVisible()).toBe(false);
         expect(output()).toBe(afterFirstDispose);
     });
@@ -391,8 +531,8 @@ describe("dispose safety", () => {
         controller.dispose();
         const afterDispose = output();
 
-        // The pending timer never fires after dispose.
-        await Bun.sleep(150);
+        // The pending repaint never runs after dispose.
+        controller.flush();
         expect(output()).toBe(afterDispose);
         expect(controller.isFooterVisible()).toBe(false);
     });
@@ -423,7 +563,7 @@ describe("dispose safety", () => {
         });
         // Paint a visible region so a stale resize would be observable.
         controller.setFooter("live");
-        await Bun.sleep(150);
+        controller.flush();
         expect(strategy.output()).toBe("live");
         resize.emit();
         expect(strategy.output()).toBe(`live${CLEAR}live`);
@@ -506,7 +646,7 @@ describe("region visibility", () => {
         });
         controller.setFooter("direct");
         expect(strategy.output()).toBe("");
-        await Bun.sleep(150);
+        controller.flush();
         expect(strategy.output()).toBe("direct");
         // Dispose detaches the default process.stderr resize listener.
         controller.dispose();
