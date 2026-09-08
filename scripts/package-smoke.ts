@@ -2,20 +2,22 @@
 
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 
 import packageJson from "../package.json";
 
 const repositoryRoot = resolve(import.meta.dir, "..");
 const packageName = "@beremaran/ralphie";
+const packageManager = (): "npm" | "bun" =>
+    Bun.which("npm") === null ? "bun" : "npm";
 const usage = `Usage:
   bun run package:check
   bun run package:check -- --dry-run
   bun run package:check -- --registry --package-spec @beremaran/ralphie@<version>
 
 The default checks the package built from this checkout. --dry-run only
-inspects npm pack's file list. --registry is required for a package spec so
+inspects the package manager's pack file list. --registry is required for a package spec so
 registry checks cannot happen during ordinary local checks.`;
 
 type CheckOptions = {
@@ -74,6 +76,7 @@ const isolatedEnv = (home: string): Record<string, string> => {
     env.HOME = home;
     env.XDG_CONFIG_HOME = join(home, ".config");
     env.NPM_CONFIG_USERCONFIG = join(home, ".npmrc");
+    env.BUN_INSTALL_CACHE_DIR = join(home, ".bun", "install", "cache");
     delete env.NODE_PATH;
     return env;
 };
@@ -181,6 +184,33 @@ const packFileList = (
     layout: CheckLayout,
     cwd: string,
 ): ReadonlyArray<string> => {
+    if (packageManager() === "bun") {
+        const args = ["pm", "pack"];
+        if (options.packageSpec !== undefined) args.push(options.packageSpec);
+        args.push(
+            "--dry-run",
+            "--ignore-scripts",
+            "--destination",
+            layout.pack,
+        );
+        const output = run(
+            process.execPath,
+            args,
+            cwd,
+            isolatedEnv(layout.home),
+        );
+        const files = output.split(/\r?\n/).flatMap((line) => {
+            const match = /^packed\s+\S+\s+(.+)$/.exec(line);
+            const path = match?.[1];
+            return path === undefined ? [] : [path];
+        });
+        if (files.length === 0) {
+            return fail(
+                `bun pm pack did not produce a file list. Output was:\n${output}`,
+            );
+        }
+        return files;
+    }
     const args = ["pack"];
     if (options.packageSpec !== undefined) args.push(options.packageSpec);
     args.push(
@@ -221,6 +251,24 @@ const packTarball = (
     layout: CheckLayout,
     cwd: string,
 ): string => {
+    if (packageManager() === "bun") {
+        const args = ["pm", "pack"];
+        if (options.packageSpec !== undefined) args.push(options.packageSpec);
+        args.push("--ignore-scripts", "--destination", layout.pack, "--quiet");
+        const output = run(
+            process.execPath,
+            args,
+            cwd,
+            isolatedEnv(layout.home),
+        );
+        const filename = basename(output.trim().split(/\r?\n/).at(-1) ?? "");
+        if (filename.length === 0) {
+            return fail(
+                `bun pm pack returned no tarball filename. Output was:\n${output}`,
+            );
+        }
+        return join(layout.pack, filename);
+    }
     const args = ["pack"];
     if (options.packageSpec !== undefined) args.push(options.packageSpec);
     args.push(
@@ -303,22 +351,37 @@ const installAndVerify = async (
         `${JSON.stringify({ name: "ralphie-package-fixture", private: true, version: "1.0.0" }, null, 2)}\n`,
     );
     const env = isolatedEnv(layout.home);
-    run(
-        "npm",
-        [
-            "install",
-            "--omit=dev",
-            "--ignore-scripts",
-            "--package-lock=false",
-            "--cache",
-            layout.cache,
-            "--no-audit",
-            "--no-fund",
-            tarball,
-        ],
-        layout.install,
-        env,
-    );
+    if (packageManager() === "bun") {
+        run(
+            process.execPath,
+            [
+                "install",
+                "--no-save",
+                "--ignore-scripts",
+                "--no-progress",
+                tarball,
+            ],
+            layout.install,
+            env,
+        );
+    } else {
+        run(
+            "npm",
+            [
+                "install",
+                "--omit=dev",
+                "--ignore-scripts",
+                "--package-lock=false",
+                "--cache",
+                layout.cache,
+                "--no-audit",
+                "--no-fund",
+                tarball,
+            ],
+            layout.install,
+            env,
+        );
+    }
     const installedRoot = join(layout.install, "node_modules", packageName);
     const manifest = JSON.parse(
         await Bun.file(join(installedRoot, "package.json")).text(),

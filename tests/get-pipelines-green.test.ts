@@ -27,10 +27,8 @@ import {
     resolveRalphieConfig,
     type GetPipelinesGreenRalphieConfig,
 } from "../src/options.ts";
-import {
-    makeProgressRecorder,
-    type ProgressUpdate,
-} from "../src/progress/progress.ts";
+import type { ProgressUpdate } from "../src/progress/progress.ts";
+import { makeTestProgressRecorder } from "./shared/progress-recorder.ts";
 import {
     makePipelineDeliveryStateAdapter,
     PipelineRunStateStoreLive,
@@ -128,7 +126,7 @@ const makeRuntime = (input: {
     readonly progressEvents: ProgressUpdate[];
 }): PipelineDeliveryRuntime => {
     const { workspace, calls } = input;
-    const progress = makeProgressRecorder(input.progressEvents);
+    const progress = makeTestProgressRecorder(input.progressEvents);
     const pipelineDeliveryGit = fakeGit(calls);
     const gitRepository = {
         verifyInstalled: async () => {

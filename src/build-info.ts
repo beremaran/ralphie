@@ -22,8 +22,3 @@ export const BUILD_INFO: BuildInfo = Object.freeze(
         commitSha: LOCAL_BUILD_COMMIT_SHA,
     },
 );
-
-export const getBuildInfo = (): BuildInfo => BUILD_INFO;
-
-/** Backwards-compatible access to the package release version. */
-export const RALPHIE_VERSION = BUILD_INFO.version;

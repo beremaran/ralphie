@@ -18,10 +18,8 @@ import {
 import type { GitHubIssueMaintenanceService } from "../src/github/issue-maintenance.ts";
 import type { GitHubIssueMaintenanceRelationshipService } from "../src/github/issue-maintenance-relationships.ts";
 import { IssueOrder, IssueSort } from "../src/github/issues.ts";
-import {
-    makeProgressRecorder,
-    type ProgressUpdate,
-} from "../src/progress/progress.ts";
+import type { ProgressUpdate } from "../src/progress/progress.ts";
+import { makeTestProgressRecorder } from "./shared/progress-recorder.ts";
 import { ExecutionMode, resolveRalphieConfig } from "../src/options.ts";
 import type { MaintenanceRuntime } from "../src/runtime.ts";
 
@@ -190,7 +188,7 @@ const baseRuntime = (input: {
 }): MaintenanceRuntime => {
     const calls = input.calls ?? [];
     return {
-        progress: makeProgressRecorder(input.progressEvents),
+        progress: makeTestProgressRecorder(input.progressEvents),
         githubClient: {
             initialize: async () => {
                 calls.push("github-auth");

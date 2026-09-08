@@ -16,7 +16,7 @@ import {
 } from "../src/options.ts";
 import { IssueOrder, IssueSort } from "../src/github/issues.ts";
 import { RUN_STATE_VERSION, RunStateStatus } from "../src/run/state.ts";
-import { makeProgressRecorder } from "../src/progress/progress.ts";
+import { makeTestProgressRecorder } from "./shared/progress-recorder.ts";
 
 describe("native CLI parser", () => {
     test("documents maintenance mode and duplicate policy in help", () => {
@@ -234,7 +234,7 @@ describe("native CLI parser", () => {
             await runCommand(["owner/repository", "--resume", path], {
                 factories: {
                     makeCoordinator: () => ({
-                        progress: makeProgressRecorder([]),
+                        progress: makeTestProgressRecorder([]),
                         piListener: () => {},
                         getDisplayState: () => ({}) as never,
                         dispose: async () => {},
@@ -271,7 +271,7 @@ describe("native CLI parser", () => {
             const error = await runCommand(["owner/repository"], {
                 factories: {
                     makeCoordinator: () => ({
-                        progress: makeProgressRecorder([]),
+                        progress: makeTestProgressRecorder([]),
                         piListener: () => {},
                         getDisplayState: () => ({}) as never,
                         dispose: async () => {},
@@ -439,7 +439,7 @@ describe("native CLI parser", () => {
                 {
                     factories: {
                         makeCoordinator: () => ({
-                            progress: makeProgressRecorder([]),
+                            progress: makeTestProgressRecorder([]),
                             piListener: () => {},
                             getDisplayState: () => ({}) as never,
                             dispose: async () => {},

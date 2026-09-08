@@ -15,7 +15,8 @@ bun run check
 ```
 
 `bun run check` runs the same gate as CI, in this order:
-`format:check`, `lint`, `typecheck`, `test`, and `build`.
+`format:check`, `lint`, `typecheck`, the source-reachability audit, `test`, and
+`build`.
 
 Useful individual commands:
 
@@ -30,7 +31,8 @@ Useful individual commands:
 | `bun run build -- --commit-sha <sha> [--version <version>]` | Build with explicit release metadata. |
 | `bun run build:package` | Same as `bun run build`; the package bundle at `dist/ralphie.js`. |
 | `bun run package:check` | Pack, inspect, install, and run the local package in isolated temporary directories. |
-| `bun run package:inspect` | Inspect the local `npm pack --dry-run` file list without installing it. |
+| `bun run package:inspect` | Inspect the local package-manager pack file list without installing it. |
+| `bun run source:audit` | Run the deterministic, offline source/module/export reachability audit as sorted JSON. |
 | `bun run probe:structured-output` | Exercise a real schema-validated OpenCode decision; `--union` probes the grounding decision union, and `--model provider/id`, `--agent`, `--variant` target a specific model. |
 
 The package check builds an actual tarball, verifies its allowlist, installs it
@@ -51,6 +53,36 @@ The project is a Bun + TypeScript CLI in strict mode. The entry point is
 with four-space indentation, double quotes, and semicolons. Keep functions
 small: the configured cognitive-complexity limit is the meaningful lint
 constraint.
+
+## Source reachability boundary
+
+The supported runtime boundary is the bundled `dist/ralphie.js` CLI reached
+from `index.ts` through `src/cli.ts`, `src/command.ts`, and the runtime
+assembly. Tests and helper probes are verification-only consumers: they do not
+establish a supported production path, and a type-only import does not
+establish runtime bundle reachability.
+
+`bun run source:audit` follows value imports, type-only imports, relative
+re-exports, and missing paths from the production root `index.ts`. It also
+follows the explicit build root `scripts/build.ts`, reports every `src/**/*.ts`
+module and export in stable JSON, and fails on unresolved relative paths. Run
+`bun run scripts/source-reachability.ts` when a human-readable classification
+listing is more useful. The audit is part of `bun run check` and is fully
+offline.
+
+The completed audit has one intentional build-time exception set:
+
+| Source path | Root | Import kind | Purpose |
+| --- | --- | --- | --- |
+| `scripts/build.ts` → `src/build-info.ts` | `scripts/build.ts` | value: `LOCAL_BUILD_COMMIT_SHA` | Supplies the `local` commit sentinel when a release build does not provide an explicit commit SHA. |
+| `scripts/build.ts` → `src/build-info.ts` | `scripts/build.ts` | type: `BuildInfo` | Checks the shape of the version/commit metadata injected into the bundle. |
+| `src/command.ts` → `src/build-info.ts` | `index.ts` production path | value: `BUILD_INFO` | Supplies the version and commit SHA reported by the CLI's plain and JSON `--version` output. |
+| `src/build-info.ts` → `package.json` | `index.ts` production path and build output | value: package metadata | Provides the package version fallback used before release metadata is injected. |
+
+Keep these roots and exceptions synchronized with the audit when changing the
+source map or build metadata relationship. A source-only helper should not be
+made part of the package boundary merely to satisfy a test import; add focused
+verification at the canonical production seam instead.
 
 ## Publishing
 

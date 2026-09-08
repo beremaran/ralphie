@@ -26,7 +26,7 @@ import {
     UNTRUSTED_PIPELINE_DIAGNOSTICS_OPEN,
 } from "../../src/github/pipeline-diagnostics-boundary.ts";
 import { pipelineDiagnosticsPath } from "../../src/github/pipeline-diagnostics-artifact.ts";
-import { makeProgressRecorder } from "../../src/progress/progress.ts";
+import { makeTestProgressRecorder } from "../shared/progress-recorder.ts";
 import { makeLiveRuntime } from "../../src/runtime.ts";
 
 const request: PipelineSnapshotRequest = {
@@ -136,7 +136,7 @@ describe("pipeline diagnostics runtime assembly", () => {
                         throw new Error("the agent must not start");
                     },
                 },
-                progress: makeProgressRecorder([]),
+                progress: makeTestProgressRecorder([]),
                 pipelineDiagnosticsDependencies: {
                     collector: fakeCollector(collectionFor(records), requests),
                     logs: makePipelineDiagnosticsLogsService({
@@ -253,7 +253,7 @@ describe("pipeline diagnostics runtime assembly", () => {
             };
             const runtime = makeLiveRuntime({
                 opencode: { start: async () => ({}) as never },
-                progress: makeProgressRecorder([]),
+                progress: makeTestProgressRecorder([]),
                 pipelineDiagnosticsDependencies: {
                     collector: fakeCollector(collectionFor(records), []),
                     logs,

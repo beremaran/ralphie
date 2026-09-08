@@ -25,10 +25,8 @@ import {
 import { makeIssueArtifactStore } from "../../src/issues/artifacts.ts";
 import type { GitIssueOperationsService } from "../../src/git/issue-operations.ts";
 import type { GitHubIssue } from "../../src/github/issues.ts";
-import {
-    makeProgressRecorder,
-    type ProgressUpdate,
-} from "../../src/progress/progress.ts";
+import type { ProgressUpdate } from "../../src/progress/progress.ts";
+import { makeTestProgressRecorder } from "../shared/progress-recorder.ts";
 import { DEFAULT_AGENT } from "../../src/agent/model.ts";
 import { ReviewVerdict } from "../../src/issues/decisions.ts";
 import type { RunState } from "../../src/run/state.ts";
@@ -276,7 +274,7 @@ const closureInput = (
     agentSelection: { agent: DEFAULT_AGENT },
     runId: "test-run",
     workspace: "/tmp/ralphie",
-    progress: makeProgressRecorder(fakes.events),
+    progress: makeTestProgressRecorder(fakes.events),
     current: 1,
     total: 1,
     onClosure: async (next) => {

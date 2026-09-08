@@ -65,7 +65,7 @@
     "dev": "bun --watch ./index.ts",
     "build": "bun run scripts/build.ts",
     "build:package": "bun run scripts/build.ts",
-    "check": "bun run format:check && bun run lint && bun run typecheck && bun run test && bun run build",
+    "check": "bun run format:check && bun run lint && bun run typecheck && bun run source:audit && bun run test && bun run build",
     "format": "biome format --write .",
     "format:check": "biome format .",
     "lint": "biome lint .",
@@ -73,6 +73,7 @@
     "package:inspect": "bun run scripts/package-smoke.ts --dry-run",
     "prepack": "bun run build:package",
     "probe:structured-output": "bun run scripts/probe-structured-output.ts",
+    "source:audit": "bun run scripts/source-reachability.ts --json",
     "test": "bun test tests",
     "typecheck": "bunx tsc --noEmit"
   }

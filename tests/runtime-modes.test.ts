@@ -6,7 +6,7 @@ import {
     type MaintenanceRuntime,
     type PipelineDeliveryRuntime,
 } from "../src/runtime.ts";
-import { makeProgressRecorder } from "../src/progress/progress.ts";
+import { makeTestProgressRecorder } from "./shared/progress-recorder.ts";
 
 const ISSUE_KEYS = [
     "progress",
@@ -117,7 +117,7 @@ describe("mode-local runtime seams", () => {
                     );
                 },
             },
-            progress: makeProgressRecorder([]),
+            progress: makeTestProgressRecorder([]),
         });
         const issue: IssueWorkflowRuntime = runtime;
         const maintenance: MaintenanceRuntime = runtime;

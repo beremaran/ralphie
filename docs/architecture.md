@@ -170,6 +170,14 @@ Ralphie's only distribution channel is the published npm package (see
 [Getting started](getting-started.md#published-package)); the former native
 binary, installer, Homebrew, and container distribution machinery was removed.
 
+The package boundary is the bundled `dist/ralphie.js` CLI reached from
+`index.ts` through `src/cli.ts`, `src/command.ts`, and runtime assembly. Tests
+and helper probes are verification-only consumers. In particular, a type-only
+import can document or check a contract but does not make a module runtime
+reachable. The deterministic source audit is described in
+[Development](development.md#source-reachability-boundary) and runs as part of
+the normal check gate.
+
 ## Source map
 
 | Concern | Primary source |

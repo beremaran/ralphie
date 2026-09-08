@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { normalizePipelineSnapshot } from "../src/github/pipeline-snapshot.ts";
 import type { PipelineSnapshotRequest } from "../src/github/pipeline-observation.ts";
-import { makeProgressRecorder } from "../src/progress/progress.ts";
+import { makeTestProgressRecorder } from "./shared/progress-recorder.ts";
 import { makeLiveRuntime } from "../src/runtime.ts";
 
 const request: PipelineSnapshotRequest = {
@@ -21,7 +21,7 @@ describe("runtime factory", () => {
                     );
                 },
             },
-            progress: makeProgressRecorder([]),
+            progress: makeTestProgressRecorder([]),
         });
 
         expect(runtime.pipelineSnapshot).toBeDefined();
@@ -60,7 +60,7 @@ describe("runtime factory", () => {
                     throw new Error("The agent must not start while observing");
                 },
             },
-            progress: makeProgressRecorder([]),
+            progress: makeTestProgressRecorder([]),
         });
         const controller = new AbortController();
         const snapshot = normalizePipelineSnapshot({

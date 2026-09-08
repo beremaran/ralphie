@@ -73,11 +73,11 @@ import {
     REVIEW_ITERATION_LIMIT,
 } from "../../src/issues/stage.ts";
 import type { IssueVerificationService } from "../../src/issues/verification.ts";
-import {
-    makeProgressRecorder,
-    type ProgressReporterService,
-    type ProgressUpdate,
+import type {
+    ProgressReporterService,
+    ProgressUpdate,
 } from "../../src/progress/progress.ts";
+import { makeTestProgressRecorder } from "../shared/progress-recorder.ts";
 import { RalphieError } from "../../src/shared/error.ts";
 
 const issue: GitHubIssue = {
@@ -432,7 +432,7 @@ type ExecutorHarnessOptions = {
 const makeExecutorHarness = async (options: ExecutorHarnessOptions = {}) => {
     const trace = options.trace ?? [];
     const events: ProgressUpdate[] = [];
-    const progress = makeProgressRecorder(events);
+    const progress = makeTestProgressRecorder(events);
     const { client, creates, prompts } = fakePi([
         {
             titlePrefix: VERIFIER_TITLE,
@@ -536,7 +536,7 @@ const makeImplementationHarness = async (
     options: ImplementationHarnessOptions = {},
 ) => {
     const events: ProgressUpdate[] = [];
-    const progress = makeProgressRecorder(events);
+    const progress = makeTestProgressRecorder(events);
     const { client, creates, prompts } = fakePi(options.scripts ?? []);
     const store = await makeTrackedStore();
     const recoveryTrace: string[] = [];
@@ -667,7 +667,7 @@ const makeDecompositionHarness = async (
     options: DecompositionHarnessOptions = {},
 ) => {
     const events: ProgressUpdate[] = [];
-    const progress = makeProgressRecorder(events);
+    const progress = makeTestProgressRecorder(events);
     const { client, creates, prompts } = fakePi(options.scripts ?? []);
     const store = await makeTrackedStore();
     const { service: recovery, recoveryInputs } = makeFakeRecovery();
@@ -839,7 +839,7 @@ describe("structured-output needs-attention side channel", () => {
 describe("needs-attention router", () => {
     test("returns undefined without a handoff or request and starts no verifier session", async () => {
         const events: ProgressUpdate[] = [];
-        const progress = makeProgressRecorder(events);
+        const progress = makeTestProgressRecorder(events);
         const { client, prompts } = fakePi([]);
         const store = await makeTrackedStore();
         const { router } = makeRealRouter(progress);
@@ -861,7 +861,7 @@ describe("needs-attention router", () => {
         "clears the handoff and resumes when the verifier returns $disposition",
         async ({ disposition }) => {
             const events: ProgressUpdate[] = [];
-            const progress = makeProgressRecorder(events);
+            const progress = makeTestProgressRecorder(events);
             const { client, prompts } = fakePi([
                 {
                     titlePrefix: VERIFIER_TITLE,
@@ -942,7 +942,7 @@ describe("needs-attention router", () => {
 
     test("resumes a pending handoff with a fresh verifier session", async () => {
         const events: ProgressUpdate[] = [];
-        const progress = makeProgressRecorder(events);
+        const progress = makeTestProgressRecorder(events);
         const { client, prompts } = fakePi([
             {
                 titlePrefix: VERIFIER_TITLE,
@@ -972,7 +972,7 @@ describe("needs-attention router", () => {
 
     test("reuses a persisted decision without a fresh verifier session when recovery retries", async () => {
         const events: ProgressUpdate[] = [];
-        const progress = makeProgressRecorder(events);
+        const progress = makeTestProgressRecorder(events);
         const { client, prompts } = fakePi([]);
         const store = await makeTrackedStore();
         await store.beginNeedsAttentionHandoff({
@@ -1001,7 +1001,7 @@ describe("needs-attention router", () => {
 
     test("invalidates a stale persisted decision before verification", async () => {
         const events: ProgressUpdate[] = [];
-        const progress = makeProgressRecorder(events);
+        const progress = makeTestProgressRecorder(events);
         const { client, prompts } = fakePi([
             {
                 titlePrefix: VERIFIER_TITLE,
@@ -1035,7 +1035,7 @@ describe("needs-attention router", () => {
 
     test("propagates verifier failures and keeps the handoff pending", async () => {
         const events: ProgressUpdate[] = [];
-        const progress = makeProgressRecorder(events);
+        const progress = makeTestProgressRecorder(events);
         const { client, prompts } = fakePi([
             { titlePrefix: VERIFIER_TITLE, result: { error: true } },
         ]);
@@ -1115,7 +1115,7 @@ describe("issue executor needs-attention routing", () => {
 
     test("does not treat a grounding needs_attention result as confirmation when its side-channel request is rejected", async () => {
         const events: ProgressUpdate[] = [];
-        const progress = makeProgressRecorder(events);
+        const progress = makeTestProgressRecorder(events);
         const { client, prompts } = fakePi([
             {
                 titlePrefix: VERIFIER_TITLE,
@@ -1228,7 +1228,7 @@ describe("issue executor needs-attention routing", () => {
     test("resumes a pending handoff after a verifier failure without trusting the signal", async () => {
         let failVerifier = true;
         const events: ProgressUpdate[] = [];
-        const progress = makeProgressRecorder(events);
+        const progress = makeTestProgressRecorder(events);
         const { client, prompts } = fakePi([
             {
                 titlePrefix: VERIFIER_TITLE,
@@ -1300,7 +1300,7 @@ describe("issue executor needs-attention routing", () => {
     test("halts on decision persistence failure and resumes with a fresh verifier", async () => {
         let failPersistence = true;
         const events: ProgressUpdate[] = [];
-        const progress = makeProgressRecorder(events);
+        const progress = makeTestProgressRecorder(events);
         const { client, prompts } = fakePi([
             {
                 titlePrefix: VERIFIER_TITLE,
@@ -1367,7 +1367,7 @@ describe("issue executor needs-attention routing", () => {
     test("recovery failure after decision persistence reuses the confirmed decision on restart", async () => {
         let failRecovery = true;
         const events: ProgressUpdate[] = [];
-        const progress = makeProgressRecorder(events);
+        const progress = makeTestProgressRecorder(events);
         const { client, prompts } = fakePi([
             {
                 titlePrefix: VERIFIER_TITLE,
@@ -1940,7 +1940,7 @@ describe("needs-attention recovery diagnostics", () => {
         try {
             const trace: string[] = [];
             const events: ProgressUpdate[] = [];
-            const progress = makeProgressRecorder(events);
+            const progress = makeTestProgressRecorder(events);
             const git: GitIssueCheckpointService = {
                 capture: async () => CHECKPOINT,
                 createPatch: async () => {
@@ -1986,7 +1986,7 @@ describe("needs-attention recovery diagnostics", () => {
         try {
             const trace: string[] = [];
             const events: ProgressUpdate[] = [];
-            const progress = makeProgressRecorder(events);
+            const progress = makeTestProgressRecorder(events);
             const git: GitIssueCheckpointService = {
                 capture: async () => CHECKPOINT,
                 createPatch: async () => {
@@ -2034,7 +2034,7 @@ describe("needs-attention recovery diagnostics", () => {
         try {
             const trace: string[] = [];
             const events: ProgressUpdate[] = [];
-            const progress = makeProgressRecorder(events);
+            const progress = makeTestProgressRecorder(events);
             const git: GitIssueCheckpointService = {
                 capture: async () => CHECKPOINT,
                 createPatch: async () => {
@@ -2080,7 +2080,7 @@ describe("needs-attention recovery diagnostics", () => {
         try {
             const trace: string[] = [];
             const events: ProgressUpdate[] = [];
-            const progress = makeProgressRecorder(events);
+            const progress = makeTestProgressRecorder(events);
             const git: GitIssueCheckpointService = {
                 capture: async () => CHECKPOINT,
                 createPatch: async () => "--- a/x\n+++ b/x\n",
@@ -2131,7 +2131,7 @@ describe("needs-attention recovery diagnostics", () => {
         const workspace = mkdtempSync(join(tmpdir(), "ralphie-recovery-"));
         try {
             const events: ProgressUpdate[] = [];
-            const progress = makeProgressRecorder(events);
+            const progress = makeTestProgressRecorder(events);
             const git: GitIssueCheckpointService = {
                 capture: async () => CHECKPOINT,
                 createPatch: async () => "--- a/x\n+++ b/x\n",

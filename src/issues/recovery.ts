@@ -61,10 +61,8 @@ export type NeedsAttentionRecoveryInput = {
     readonly fingerprint: IssueFreshnessFingerprint;
     /** The grounding decision that confirmed the agent's request. */
     readonly decision: NeedsAttentionDecision;
-    /** The original bounded request from the mutating agent, when available. */
-    readonly request?: NeedsAttentionRequest;
-    /** Compatibility name for callers that retain the agent terminology. */
-    readonly agentRequest?: NeedsAttentionRequest;
+    /** The original bounded request from the mutating agent. */
+    readonly request: NeedsAttentionRequest;
     /** May be supplied by callers when the service was assembled without one. */
     readonly repositoryInvariant?: GitRepositoryInvariantService;
     /** Caller cancellation observed by the invariant verification. */
@@ -168,7 +166,7 @@ const needsAttentionMetadata = (
     input: NeedsAttentionRecoveryInput,
     diagnosticsPath: string,
 ): string => {
-    const request = input.request ?? input.agentRequest;
+    const request = input.request;
     try {
         return `${JSON.stringify(
             {

@@ -19,5 +19,3 @@ export const runCli = async (
         process.removeListener("SIGINT", onInterrupt);
     }
 };
-
-export default runCli;

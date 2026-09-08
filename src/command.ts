@@ -800,5 +800,3 @@ export const runCommand = async (
         await disposeCommandResources(runtime, coordinator, commandError);
     }
 };
-
-export default runCommand;

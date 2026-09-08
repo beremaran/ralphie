@@ -48,10 +48,8 @@ import {
     resolveRalphieConfig,
 } from "../../src/options.ts";
 import { RalphieExitCode } from "../../src/process/exit-code.ts";
-import {
-    makeProgressRecorder,
-    type ProgressReporterService,
-} from "../../src/progress/progress.ts";
+import type { ProgressReporterService } from "../../src/progress/progress.ts";
+import { makeTestProgressRecorder } from "../shared/progress-recorder.ts";
 import type { MaintenanceRunStateStoreService } from "../../src/maintain-issues-state.ts";
 import type { AgentClient } from "../../src/opencode/client.ts";
 import type {
@@ -654,7 +652,7 @@ const makeRuntime = (input: {
     readonly progress?: ProgressReporterService;
     readonly opencode?: OpenCodeService;
 }): MaintenanceRuntime => {
-    const progress = input.progress ?? makeProgressRecorder([]);
+    const progress = input.progress ?? makeTestProgressRecorder([]);
     const opencode = input.opencode ?? makeStubPi(input.calls);
     return {
         progress,

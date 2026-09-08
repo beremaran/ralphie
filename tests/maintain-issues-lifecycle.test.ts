@@ -15,10 +15,8 @@ import type {
 } from "../src/maintain-issues-state.ts";
 import type { GitHubIssueMaintenanceService } from "../src/github/issue-maintenance.ts";
 import { IssueOrder, IssueSort } from "../src/github/issues.ts";
-import {
-    makeProgressRecorder,
-    type ProgressUpdate,
-} from "../src/progress/progress.ts";
+import type { ProgressUpdate } from "../src/progress/progress.ts";
+import { makeTestProgressRecorder } from "./shared/progress-recorder.ts";
 import {
     DuplicateAction,
     ExecutionMode,
@@ -261,7 +259,7 @@ const runLifecycle = (input: {
         initialState: input.initial ?? initialState(),
         reports: input.reports,
         emit: async (update) => {
-            await makeProgressRecorder(input.events).emit(update);
+            await makeTestProgressRecorder(input.events).emit(update);
         },
         persist: async (next) => {
             input.saved.push(structuredClone(next));

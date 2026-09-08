@@ -52,11 +52,11 @@ import {
 } from "../src/issues/artifacts.ts";
 import { DEFAULT_AGENT } from "../src/agent/model.ts";
 import type { OpenCodeService } from "../src/opencode/server.ts";
-import {
-    makeProgressRecorder,
-    type ProgressReporterService,
-    type ProgressUpdate,
+import type {
+    ProgressReporterService,
+    ProgressUpdate,
 } from "../src/progress/progress.ts";
+import { makeTestProgressRecorder } from "./shared/progress-recorder.ts";
 import {
     type RunState,
     RunStateStatus,
@@ -481,7 +481,7 @@ const testRuntime = (
             if (options.removeFailure) throw options.removeFailure;
         },
     };
-    const progressRecorder = makeProgressRecorder(progressEvents);
+    const progressRecorder = makeTestProgressRecorder(progressEvents);
     const progress: ProgressReporterService = options.failPiReadyProgress
         ? {
               ...progressRecorder,
@@ -2251,7 +2251,7 @@ describe("workflow", () => {
                             };
                         },
                     },
-                    makeProgressRecorder(events),
+                    makeTestProgressRecorder(events),
                     {
                         assess: async () => {
                             groundingCalls += 1;
@@ -2414,7 +2414,7 @@ describe("workflow", () => {
                         },
                     }),
                 },
-                makeProgressRecorder(events),
+                makeTestProgressRecorder(events),
                 {
                     assess: async () => ({
                         sessionID: "resumed-grounding",
