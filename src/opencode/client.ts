@@ -1,134 +1,42 @@
 import { extractNeedsAttentionJson, extractStructuredJson } from "./json.ts";
 import { isDeniedShellResource } from "./permissions.ts";
 import { RalphieError } from "../shared/error.ts";
+import { AgentSessionProfile } from "../harness/contracts.ts";
+import type {
+    AgentAssistantError,
+    AgentAssistantMessage,
+    AgentClient,
+    AgentEventContext,
+    AgentEventListener,
+    AgentModel,
+    AgentPart,
+    AgentPromptFormat as PromptFormat,
+    AgentPromptInput as PromptInput,
+} from "../harness/contracts.ts";
 
-export type AgentModel = {
-    readonly providerID: string;
-    readonly modelID: string;
-};
+export {
+    AGENT_REVIEW_SESSION_PROFILE,
+    AgentSessionProfile,
+} from "../harness/contracts.ts";
+export type {
+    AgentApiResult,
+    AgentAssistantError,
+    AgentAssistantMessage,
+    AgentClient,
+    AgentEventContext,
+    AgentEventListener,
+    AgentModel,
+    AgentPart,
+    AgentPromptFormat,
+    AgentPromptInput,
+    AgentSelection,
+    AgentSessionCreateInput,
+    AgentSessionEvent,
+} from "../harness/contracts.ts";
 
-export type AgentSelection = {
-    readonly agent: string;
-    readonly model?: AgentModel;
-    readonly variant?: string;
-};
-
-export const AgentSessionProfile = {
-    Default: "default",
-    Review: "review",
-} as const;
-
-export type AgentSessionProfile =
-    (typeof AgentSessionProfile)[keyof typeof AgentSessionProfile];
-
-export const AGENT_REVIEW_SESSION_PROFILE = AgentSessionProfile.Review;
-
-export type AgentAssistantError = {
-    readonly name: string;
-    readonly data?: {
-        readonly message?: string;
-        readonly retries?: number;
-    };
-};
-
-export type AgentAssistantMessage = {
-    readonly id: string;
-    readonly role: "assistant";
-    readonly error?: AgentAssistantError;
-    readonly structured?: unknown;
-    readonly text?: string;
-    readonly [key: string]: unknown;
-};
-
-export type AgentPart = {
-    readonly type: string;
-    readonly text?: string;
-    readonly [key: string]: unknown;
-};
-
-export type AgentSessionEvent = any;
-
-export type AgentEventContext = {
-    readonly sessionID: string;
-    readonly directory: string;
-    readonly title?: string;
-};
-
-export type AgentEventListener = (
-    event: any,
-    context: AgentEventContext,
-) => void;
-
-type CreateSessionInput = {
-    readonly directory: string;
-    readonly title?: string;
-    readonly agent?: string;
-    readonly model?:
-        | AgentModel
-        | {
-              readonly providerID: string;
-              readonly id: string;
-          };
-    readonly variant?: string;
-    readonly profile?: AgentSessionProfile;
-};
-
-type PromptFormat = {
-    readonly type: "json_schema";
-    readonly schema: unknown;
-    readonly retryCount?: number;
-    readonly validate?: (value: unknown) => {
-        readonly success: boolean;
-        readonly error?: string;
-    };
-};
-
-type PromptInput = {
-    readonly sessionID: string;
-    readonly directory: string;
-    readonly agent?: string;
-    readonly model?: AgentModel;
-    readonly variant?: string;
-    readonly profile?: AgentSessionProfile;
-    readonly parts: ReadonlyArray<{
-        readonly type: "text";
-        readonly text: string;
-    }>;
-    readonly format?: PromptFormat;
-};
-
-type ApiResult<T> = {
-    readonly data?: T;
-    readonly error?: unknown;
-};
-
-export type AgentClient = {
-    readonly session: {
-        readonly create: (
-            input: CreateSessionInput,
-            options?: {
-                readonly signal?: AbortSignal;
-            },
-        ) => Promise<
-            ApiResult<{
-                readonly id: string;
-            }>
-        >;
-        readonly prompt: (
-            input: PromptInput,
-            options?: {
-                readonly signal?: AbortSignal;
-            },
-        ) => Promise<
-            ApiResult<{
-                readonly info: AgentAssistantMessage;
-                readonly parts: ReadonlyArray<AgentPart>;
-                readonly needsAttention?: unknown;
-            }>
-        >;
-    };
-    readonly close?: () => void;
-};
+type CreateSessionInput =
+    import("../harness/contracts.ts").AgentSessionCreateInput;
+type ApiResult<T> = import("../harness/contracts.ts").AgentApiResult<T>;
 
 /** Minimal OpenCode transport; production binds this to @opencode-ai/client. */
 export type OpenCodeModelInfo = {

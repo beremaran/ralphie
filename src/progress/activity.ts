@@ -1,4 +1,4 @@
-import type { AgentSessionEvent } from "../opencode/client.ts";
+import type { AgentSessionEvent } from "../harness/index.ts";
 import { stripTerminalControls } from "../shared/terminal.ts";
 import { green, red, yellow } from "./colors.ts";
 import { PROGRESS_STAGE_LABELS } from "./display-state.ts";

@@ -2,10 +2,9 @@ import { OpenCode } from "@opencode-ai/client";
 import { Service } from "@opencode-ai/client/service";
 
 import { RalphieError } from "../shared/error.ts";
+import type { AgentClient, AgentEventListener } from "../harness/index.ts";
 import {
     makeOpenCodeClient,
-    type AgentClient,
-    type AgentEventListener,
     type OpenCodeMessage,
     type OpenCodeModelInfo,
     type OpenCodeTransport,

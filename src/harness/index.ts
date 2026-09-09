@@ -1,4 +1,17 @@
 export type {
+    AgentApiResult,
+    AgentAssistantError,
+    AgentAssistantMessage,
+    AgentClient,
+    AgentEventContext,
+    AgentEventListener,
+    AgentModel,
+    AgentPart,
+    AgentPromptFormat,
+    AgentPromptInput,
+    AgentSelection,
+    AgentSessionCreateInput,
+    AgentSessionEvent,
     HarnessCapabilities,
     HarnessCapability,
     HarnessDriver,
@@ -19,4 +32,8 @@ export type {
     HarnessTurnInput,
     HarnessTurnResult,
 } from "./contracts.ts";
-export { HARNESS_KINDS } from "./contracts.ts";
+export {
+    AGENT_REVIEW_SESSION_PROFILE,
+    AgentSessionProfile,
+    HARNESS_KINDS,
+} from "./contracts.ts";

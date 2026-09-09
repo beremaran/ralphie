@@ -1,7 +1,4 @@
-import type {
-    AgentEventContext,
-    AgentSessionEvent,
-} from "../opencode/client.ts";
+import type { AgentEventContext, AgentSessionEvent } from "../harness/index.ts";
 import { stripTerminalControls } from "../shared/terminal.ts";
 import type {
     ProgressEvent,

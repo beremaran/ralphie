@@ -1,5 +1,5 @@
 import { RalphieError } from "../shared/error.ts";
-import type { AgentModel } from "./client.ts";
+import type { AgentModel } from "../agent/model.ts";
 import type { OpenCodeModelInfo } from "./client.ts";
 
 export type StageVariantCheck = {

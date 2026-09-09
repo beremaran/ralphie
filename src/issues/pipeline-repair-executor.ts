@@ -21,7 +21,7 @@ import type {
 import type { GitIssueOperationsService } from "../git/issue-operations.ts";
 import type { GitRepositoryInvariantService } from "../git/repository-invariant.ts";
 import type { IssueVerificationService } from "./verification.ts";
-import { AgentSessionProfile, type AgentClient } from "../opencode/client.ts";
+import { AgentSessionProfile, type AgentClient } from "../harness/index.ts";
 import {
     ReviewVerdict,
     reviewDecisionSchema,

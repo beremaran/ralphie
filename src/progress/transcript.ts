@@ -2,7 +2,7 @@ import type {
     AgentEventContext,
     AgentEventListener,
     AgentSessionEvent,
-} from "../opencode/client.ts";
+} from "../harness/index.ts";
 import { stripTerminalControls } from "../shared/terminal.ts";
 import { cyan, dim, green, red, yellow } from "./colors.ts";
 import {

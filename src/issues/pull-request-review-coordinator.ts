@@ -22,7 +22,7 @@ import {
     requireSuccess,
     type CommandRunnerService,
 } from "../process/command-runner.ts";
-import { AgentSessionProfile, type AgentClient } from "../opencode/client.ts";
+import { AgentSessionProfile, type AgentClient } from "../harness/index.ts";
 import type { GitHubIssue } from "../github/issues.ts";
 import type {
     GitHubPullRequestService,

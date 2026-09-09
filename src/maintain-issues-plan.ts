@@ -11,7 +11,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 
-import { AgentSessionProfile, type AgentClient } from "./opencode/client.ts";
+import { AgentSessionProfile, type AgentClient } from "./harness/index.ts";
 import {
     requestStructuredOutput,
     type StructuredOutputResult,

@@ -4,7 +4,7 @@ import type { Octokit } from "octokit";
 
 import { buildPullRequestReviewPrompt } from "../agent/prompts.ts";
 import type { AgentSelection } from "../agent/model.ts";
-import { AgentSessionProfile, type AgentClient } from "../opencode/client.ts";
+import { AgentSessionProfile, type AgentClient } from "../harness/index.ts";
 import type {
     AgentSessionDiagnostics,
     NeedsAttentionRequest,

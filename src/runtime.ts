@@ -172,8 +172,7 @@ import {
     makeMaintenancePlanService,
     type MaintenancePlanService,
 } from "./maintain-issues-plan.ts";
-import type { AgentClient } from "./opencode/client.ts";
-import type { HarnessFactory } from "./harness/index.ts";
+import type { AgentClient, HarnessFactory } from "./harness/index.ts";
 import { type ProgressReporterService } from "./progress/progress.ts";
 import { RunStateStoreLive, type RunStateStoreService } from "./run/state.ts";
 import { WorkspaceLive, type WorkspaceService } from "./workspace/workspace.ts";

@@ -1,5 +1,5 @@
 import type { Octokit } from "octokit";
-import type { AgentClient } from "../opencode/client.ts";
+import type { AgentClient } from "../harness/index.ts";
 
 import type { GitHubIssue } from "../github/issues.ts";
 import type { IssueArtifactStore } from "./artifacts.ts";

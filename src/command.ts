@@ -36,7 +36,7 @@ import {
     type PipelineDeliveryRuntime,
 } from "./runtime.ts";
 import type { OpenCodeService } from "./opencode/server.ts";
-import type { AgentEventListener } from "./opencode/client.ts";
+import type { AgentEventListener } from "./harness/index.ts";
 import {
     exitCodeForError,
     isNeedsAttentionStop,

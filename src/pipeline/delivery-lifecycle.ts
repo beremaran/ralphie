@@ -20,7 +20,7 @@ import type {
     PipelineRepairOutcome,
 } from "../issues/pipeline-repair-executor.ts";
 import type { CommitMessageDecision } from "../issues/decisions.ts";
-import type { AgentClient } from "../opencode/client.ts";
+import type { AgentClient } from "../harness/index.ts";
 import type {
     PipelineCheckoutState,
     PipelineCommitResult,

@@ -1,4 +1,4 @@
-import type { AgentAssistantMessage, AgentClient } from "../opencode/client.ts";
+import type { AgentAssistantMessage, AgentClient } from "../harness/index.ts";
 import { z } from "zod";
 
 import {

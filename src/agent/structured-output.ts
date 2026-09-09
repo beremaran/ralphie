@@ -1,4 +1,4 @@
-import { AgentSessionProfile, type AgentClient } from "../opencode/client.ts";
+import { AgentSessionProfile, type AgentClient } from "../harness/index.ts";
 import { z } from "zod";
 
 import { RalphieError } from "../shared/error.ts";

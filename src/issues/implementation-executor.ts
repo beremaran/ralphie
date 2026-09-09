@@ -14,7 +14,7 @@ import {
     buildVerificationFixPrompt,
 } from "../agent/prompts.ts";
 import { requestStructuredOutput } from "../agent/structured-output.ts";
-import { AgentSessionProfile } from "../opencode/client.ts";
+import { AgentSessionProfile } from "../harness/index.ts";
 import {
     runAgentTask,
     type NeedsAttentionRequest,

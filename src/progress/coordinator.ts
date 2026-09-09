@@ -2,7 +2,7 @@ import type {
     AgentEventContext,
     AgentEventListener,
     AgentSessionEvent,
-} from "../opencode/client.ts";
+} from "../harness/index.ts";
 import {
     arbitrateBreadcrumbCandidates,
     breadcrumbCandidateFor,
