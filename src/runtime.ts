@@ -173,6 +173,10 @@ import {
     type MaintenancePlanService,
 } from "./maintain-issues-plan.ts";
 import type { AgentClient, HarnessFactory } from "./harness/index.ts";
+import {
+    makeAntigravityRuntimeDiscovery,
+    type AntigravityRuntimeDiscovery,
+} from "./harness/index.ts";
 import { type ProgressReporterService } from "./progress/progress.ts";
 import { RunStateStoreLive, type RunStateStoreService } from "./run/state.ts";
 import { WorkspaceLive, type WorkspaceService } from "./workspace/workspace.ts";
@@ -181,6 +185,8 @@ import { WorkspaceLive, type WorkspaceService } from "./workspace/workspace.ts";
 export type RalphieRuntime = {
     /** Optional provider-neutral harness factory for future workflow migration. */
     readonly harnessFactory?: HarnessFactory;
+    /** Read-only Antigravity runtime discovery; auth and session setup stay separate. */
+    readonly antigravityRuntimeDiscovery?: AntigravityRuntimeDiscovery;
     readonly commandRunner: CommandRunnerService;
     readonly githubClient: GitHubClientService;
     readonly pipelineSnapshot: PipelineSnapshotCollectorService;
@@ -250,6 +256,8 @@ export type RalphieRuntime = {
 
 /** Focused dependencies consumed directly by the issue workflow entrypoint. */
 export type IssueWorkflowRuntime = {
+    /** Optional Antigravity preflight; when supplied it runs before agent startup. */
+    readonly antigravityRuntimeDiscovery?: AntigravityRuntimeDiscovery;
     readonly progress: ProgressReporterService;
     readonly runStateStore: RunStateStoreService;
     readonly workspace: WorkspaceService;
@@ -271,6 +279,8 @@ export type IssueWorkflowRuntime = {
 
 /** Focused dependencies consumed directly by maintenance execution. */
 export type MaintenanceRuntime = {
+    /** Optional Antigravity preflight; when supplied it runs before agent startup. */
+    readonly antigravityRuntimeDiscovery?: AntigravityRuntimeDiscovery;
     readonly progress: ProgressReporterService;
     readonly workspace: WorkspaceService;
     readonly githubClient: GitHubClientService;
@@ -295,6 +305,8 @@ export type MaintenanceRuntime = {
 
 /** Focused dependencies consumed directly by Pipeline delivery. */
 export type PipelineDeliveryRuntime = {
+    /** Optional Antigravity preflight; when supplied it runs before agent startup. */
+    readonly antigravityRuntimeDiscovery?: AntigravityRuntimeDiscovery;
     readonly progress: ProgressReporterService;
     readonly workspace: WorkspaceService;
     readonly githubClient: GitHubClientService;
@@ -307,6 +319,8 @@ export type RuntimeOverrides = {
     readonly opencode: OpenCodeService;
     /** Optional provider-neutral harness factory seam. */
     readonly harnessFactory?: HarnessFactory;
+    /** Optional deterministic Antigravity discovery seam. */
+    readonly antigravityRuntimeDiscovery?: AntigravityRuntimeDiscovery;
     readonly progress: ProgressReporterService;
     /** Optional deterministic seams for the read-only pipeline observer. */
     readonly pipelineObservationDependencies?: PipelineObservationServiceDependencies;
@@ -341,6 +355,7 @@ export type RuntimeOverrides = {
 export const makeLiveRuntime = ({
     opencode,
     harnessFactory,
+    antigravityRuntimeDiscovery: antigravityRuntimeDiscoveryOverride,
     progress,
     commandRunner = CommandRunnerLive,
     runStateStore = RunStateStoreLive,
@@ -360,6 +375,9 @@ export const makeLiveRuntime = ({
     maintenanceRunStateStore: maintenanceRunStateStoreOverride,
 }: RuntimeOverrides): RalphieRuntime => {
     const githubClient = makeGitHubClientService(commandRunner);
+    const antigravityRuntimeDiscovery =
+        antigravityRuntimeDiscoveryOverride ??
+        makeAntigravityRuntimeDiscovery();
     const pipelineSnapshot = makePipelineSnapshotCollectorService();
     const pipelineObservation = makePipelineObservationService(
         pipelineObservationDependencies,
@@ -516,6 +534,7 @@ export const makeLiveRuntime = ({
     );
     return {
         ...(harnessFactory === undefined ? {} : { harnessFactory }),
+        antigravityRuntimeDiscovery,
         commandRunner,
         githubClient,
         pipelineSnapshot,

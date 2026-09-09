@@ -25,6 +25,7 @@ import {
 } from "./issues/queue.ts";
 import type { OpenCodeRuntime } from "./opencode/server.ts";
 import { validateModelVariants } from "./opencode/variants.ts";
+import { requireAntigravityRuntime } from "./harness/index.ts";
 import {
     type ProgressReporterService,
     type ProgressStage,
@@ -961,6 +962,7 @@ export const workflow = async (
         issueExecutor: normalIssueExecutor,
         dryRunIssueExecutor,
         opencode,
+        antigravityRuntimeDiscovery,
     } = runtime;
 
     await emitRunStarted(progress, config);
@@ -2028,6 +2030,10 @@ export const workflow = async (
                 "opencode-runtime",
                 "Starting OpenCode runtime...",
                 async () => {
+                    await requireAntigravityRuntime(
+                        antigravityRuntimeDiscovery,
+                        signal,
+                    );
                     const started = await opencode.start();
                     server = started;
                     await validateRuntimeModelVariants(

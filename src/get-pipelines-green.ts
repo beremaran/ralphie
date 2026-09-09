@@ -19,6 +19,7 @@ import type {
 } from "./progress/progress.ts";
 import type { OpenCodeRuntime } from "./opencode/server.ts";
 import type { PipelineDeliveryRuntime } from "./runtime.ts";
+import { requireAntigravityRuntime } from "./harness/index.ts";
 import type {
     PipelineDeliveryContext,
     PipelineDeliveryOutcome,
@@ -245,6 +246,10 @@ export const getPipelinesGreen: GetPipelinesGreenEntryPoint = async (
 
         const startServer = async (): Promise<OpenCodeRuntime> => {
             if (server !== undefined) return server;
+            await requireAntigravityRuntime(
+                runtime.antigravityRuntimeDiscovery,
+                options.signal,
+            );
             server = await track({
                 progress: runtime.progress,
                 stage: "opencode-runtime",

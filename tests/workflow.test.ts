@@ -71,6 +71,7 @@ import {
 } from "../src/options.ts";
 import { IssueOrder, IssueSort } from "../src/github/issues.ts";
 import type { IssueWorkflowRuntime } from "../src/runtime.ts";
+import type { AntigravityRuntimeDiscovery } from "../src/harness/index.ts";
 import { RalphieError } from "../src/shared/error.ts";
 import {
     ComplexityLevel,
@@ -171,6 +172,7 @@ type TestRuntimeOptions = {
     readonly opencodeModels?: ReadonlyArray<OpenCodeModelInfo>;
     /** Default model exposed by the mock OpenCode runtime. */
     readonly opencodeDefaultModel?: OpenCodeModelInfo;
+    readonly antigravityRuntimeDiscovery?: AntigravityRuntimeDiscovery;
 };
 
 const testRuntime = (
@@ -553,6 +555,12 @@ const testRuntime = (
         issueOperations: operations,
     });
     return {
+        ...(options.antigravityRuntimeDiscovery === undefined
+            ? {}
+            : {
+                  antigravityRuntimeDiscovery:
+                      options.antigravityRuntimeDiscovery,
+              }),
         githubClient,
         githubIssues,
         githubIssueMutations: mutations,
@@ -819,6 +827,47 @@ const postPrReviewFor = (
 });
 
 describe("workflow", () => {
+    test("runs Antigravity discovery before starting the agent runtime", async () => {
+        const calls: string[] = [];
+        const discovery: AntigravityRuntimeDiscovery = {
+            discover: async () => {
+                calls.push("discoverAntigravity");
+                return {
+                    status: "available",
+                    candidates: ["/bin/antigravity"],
+                    message: "Antigravity runtime is available and compatible.",
+                    setupHint: "",
+                    runtime: {
+                        executable: "/bin/antigravity",
+                        version: "1.4.2",
+                        protocolVersion: "1",
+                        features: [],
+                        capabilities: {
+                            resume: false,
+                            "structured-output": false,
+                            "model-catalog": false,
+                            variants: false,
+                            events: false,
+                            permissions: false,
+                        },
+                    },
+                };
+            },
+            probe: async () => ({
+                kind: "google-antigravity",
+                available: true,
+                authenticated: false,
+            }),
+        };
+
+        await workflow(
+            baseOptions,
+            testRuntime(calls, [], { antigravityRuntimeDiscovery: discovery }),
+        );
+
+        expectCallOrder(calls, ["discoverAntigravity", "startServer"]);
+    });
+
     test("executes an issue, persists completion, releases the agent, and cleans up", async () => {
         const calls: string[] = [];
         const states: RunState[] = [];

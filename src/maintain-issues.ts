@@ -26,6 +26,7 @@ import {
     validateMaintenanceResumeState,
 } from "./maintain-issues-state.ts";
 import { type MaintenanceRuntime } from "./runtime.ts";
+import { requireAntigravityRuntime } from "./harness/index.ts";
 import {
     DuplicateAction,
     type MaintainIssuesRalphieConfig,
@@ -659,6 +660,7 @@ const startMaintenancePlanner = async (input: {
     readonly config: MaintainIssuesRalphieConfig;
     readonly runtime: MaintenanceRuntime;
     readonly emit: MaintenanceEmit;
+    readonly signal?: AbortSignal;
     readonly onStarted: (service: StartedMaintenanceOpenCode) => void;
 }): Promise<MaintenancePlanService> => {
     if (input.runtime.maintenancePlanner !== undefined) {
@@ -671,6 +673,10 @@ const startMaintenancePlanner = async (input: {
             "Starting OpenCode runtime for read-only maintenance planning...",
         repository: input.config.repo,
     });
+    await requireAntigravityRuntime(
+        input.runtime.antigravityRuntimeDiscovery,
+        input.signal,
+    );
     const started = await input.runtime.opencode.start();
     input.onStarted(started);
     const planner =
@@ -783,6 +789,7 @@ const executeMaintenanceIssues = async (input: {
         config: input.config,
         runtime: input.runtime,
         emit: input.emit,
+        signal: input.signal,
         onStarted: input.onOpenCodeStarted,
     });
     const lifecycle = await executeMaintenanceLifecycle({

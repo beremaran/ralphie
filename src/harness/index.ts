@@ -37,3 +37,28 @@ export {
     AgentSessionProfile,
     HARNESS_KINDS,
 } from "./contracts.ts";
+export {
+    ANTIGRAVITY_CAPABILITIES_ARGUMENTS,
+    ANTIGRAVITY_DEFAULT_EXECUTABLE,
+    ANTIGRAVITY_DEFAULT_PROTOCOL_VERSION,
+    ANTIGRAVITY_DISCOVERY_TIMEOUT_MS,
+    ANTIGRAVITY_HARNESS_KIND,
+    ANTIGRAVITY_MAXIMUM_VERSION,
+    ANTIGRAVITY_MINIMUM_VERSION,
+    ANTIGRAVITY_PROTOCOL_ARGUMENTS,
+    ANTIGRAVITY_VERSION_ARGUMENTS,
+    discoverAntigravityRuntime,
+    makeAntigravityRuntimeDiscovery,
+    parseAntigravityVersion,
+    probeAntigravityRuntime,
+    requireAntigravityRuntime,
+} from "./antigravity-runtime.ts";
+export type {
+    AntigravityDiscoveryInput,
+    AntigravityDiscoveryResult,
+    AntigravityDiscoveryStatus,
+    AntigravityFileSystem,
+    AntigravityRuntime,
+    AntigravityRuntimeConfig,
+    AntigravityRuntimeDiscovery,
+} from "./antigravity-runtime.ts";
