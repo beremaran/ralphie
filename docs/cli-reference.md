@@ -56,7 +56,7 @@ command schema.
 | `--workspace <path>` | `~/.ralphie` | Root directory for repository checkouts and run artifacts. |
 | `--dry-run` | off | Preview the selected mode. Issue mode assesses/routes, maintenance mode plans, and pipeline mode observes/diagnoses without agent or delivery mutations. |
 | `--resume <state.json>` | none | Continue a compatible saved run. |
-| `--clean <when>` | off | Remove the workspace at `start`, `end`, or `both` (before any step and/or after success). |
+| `--clean <when>` | off | Remove the workspace at `start`, `end`, or `both`; mode-specific dry-run and resume rules are documented under [cleanup](operations-and-recovery.md#cleanup). |
 | `--output <mode>` | `default` | Output mode: live transcript and progress, `verbose`, `quiet`, or `json`. |
 
 The short aliases are `-b` for `--branch`, `-h` for `--help`, and `-v` for
@@ -143,14 +143,14 @@ cancelled runs remain available for `--resume`.
 
 ## Environment variables
 
-Model credentials are read from environment variables:
+Ralphie also reads these environment variables:
 
 | Variable | Purpose |
 | --- | --- |
 | `GH_TOKEN` | GitHub.com token for noninteractive `gh` authentication (preferred). |
 | `GITHUB_TOKEN` | Fallback GitHub.com token alias for `gh`. |
 | `OPENCODE_URL` | OpenCode server URL (used when `--opencode-url` is absent). |
-| `OPENCODE_TOKEN` | OpenCode server token; supply it only through the environment. |
+| `OPENCODE_TOKEN` | OpenCode server token, used when `--opencode-token` is absent. |
 
 For interactive `github.com` use, authenticate with `gh auth login` and verify
 with `gh auth status`. For unattended use, provide `GH_TOKEN` (preferred) or

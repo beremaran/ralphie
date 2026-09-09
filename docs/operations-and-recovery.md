@@ -7,16 +7,17 @@ at the [documentation index](README.md) for other audience paths.
 
 ## Progress output
 
-Ralphie streams the complete OpenCode transcript while each task runs, including
-thinking deltas, assistant text, tool calls, and tool results. Tasks and issues
-are intentionally processed sequentially so this output remains ordered.
+Ralphie receives the complete OpenCode event stream while each task runs,
+including thinking deltas, assistant text, tool calls, and tool results. Tasks
+and issues are intentionally processed sequentially so this event stream remains
+ordered. JSON output exposes it losslessly for integrations.
 
 Human-readable transcript output groups each OpenCode session into a compact block:
-thinking and assistant text stream immediately within a 140-character bound,
-tool calls are shown as readable commands, and tool output is indented,
-de-duplicated, and bounded to 3 lines/140 characters. Truncated streams still
-report background totals with a `truncated` marker. JSON output remains the
-lossless event stream for integrations.
+assistant text streams immediately within a 140-character bound; thinking deltas
+and intermediate tool output stay in the compact activity surface; tool calls are
+shown as readable commands; and each tool completion or failure gets one concise
+summary line. Truncated assistant streams report their total with a `truncated`
+marker.
 
 Ralphie adapts its progress renderer to its environment. `--output default`
 resolves to `interactive` only when stdin and stderr are both TTYs and `CI`
@@ -353,15 +354,17 @@ Pipeline resume boundaries are reconciled independently from issue state:
   still match the clean checkpoint. A committed local repair is retained for
   explicit reconciliation.
 
-Native sub-issue and dependency endpoints require a compatible GitHub host. On
-unsupported servers (for example older GitHub Enterprise Server versions) or
-with a token lacking issue write permission, decomposition fails with an
-actionable error naming the missing capability; there is no body-link fallback.
+Native sub-issue and dependency endpoints require `github.com`; GitHub
+Enterprise Server is not supported by the current client. With an unavailable
+endpoint or a token lacking issue write permission, live decomposition fails with
+an actionable error naming the missing capability; there is no body-link fallback.
 See [Workflows](workflows.md#platform-support-for-native-sub-issues-and-dependencies).
 
-One issue failure currently halts the run. This preserves the checkout and
-diagnostics at the first uncertain boundary instead of allowing later issues to
-continue on questionable state.
+An ordinary issue failure halts the run by default, preserving the checkout and
+diagnostics at the first uncertain boundary. With
+`--on-issue-failure continue`, Ralphie restores the failed issue checkout,
+records its outcome, and continues independent work; the drained run exits `1`
+if any issue failed.
 
 A deterministic verification command returning non-zero is handled before it
 becomes an issue failure. Ralphie gives the bounded command output and staged
@@ -390,6 +393,8 @@ the exact-tree commit is created, it is retained for the same reconciliation.
 `--clean end` removes the entire workspace after success, including completed
 state, events, diagnostics, and the repository checkout. Cleanup is skipped on
 failure so recovery remains possible. `--clean start` removes the workspace
-before any step, after protected-path checks. `--clean both` does both. Use
-these options only with a path dedicated to Ralphie; see [Safety](safety.md)
-for the destructive workspace contract.
+before preparation, after protected-path checks. Maintenance dry runs never
+remove the workspace, and resumed maintenance or pipeline runs skip start
+cleanup. Issue-mode start cleanup still follows the issue workflow setting.
+`--clean both` does both. Use these options only with a path dedicated to
+Ralphie; see [Safety](safety.md) for the destructive workspace contract.

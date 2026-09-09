@@ -43,10 +43,14 @@ credential is supplied as an input and does not need to be printed or exposed;
 a mounted GitHub CLI profile is not required when an environment token is
 provided. This contract covers `github.com` only.
 
-Your GitHub account must be able to read the target repository and its issues.
-Non-dry runs also require permission to push to the selected branch and create,
-update, and close issues. `--workflow pr` additionally requires permission to
-create, comment on, and merge pull requests.
+Permission needs depend on the selected mode. The default issue workflow needs
+read access to the target repository and its issues. A non-dry issue run also
+needs permission to push to the selected branch and create, update, and close
+issues. `--workflow pr` additionally needs permission to create, comment on, and
+merge pull requests. Live `maintain-issues` needs Issues write permission but
+not Contents write or branch push. Live `get-pipelines-green` needs permission
+to push the selected branch but not issue write permission. Dry runs do not need
+these write permissions.
 
 ## Installation
 

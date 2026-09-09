@@ -71,9 +71,9 @@ All notable changes to Ralphie are documented here. The project follows
   durable event log. Credentials and other sensitive values pass through into
   transcripts, breadcrumbs, JSON Lines, and `events.jsonl` exactly as
   supplied; only terminal control sequences are stripped from human-readable
-  rows. Documentation (`README.md`, `docs/architecture.md`,
-  `docs/end-to-end-execution.md`, `docs/operations-and-recovery.md`) now
-  describes this intentional unredacted output contract.
+  rows. Documentation (`README.md`, `docs/architecture.md`, and
+  `docs/operations-and-recovery.md`) now describes this intentional unredacted
+  output contract.
 
 - Validate OpenCode model/variant compatibility before execution and fail fast
   on silent turns. After the OpenCode runtime starts, the workflow lists the
@@ -151,8 +151,8 @@ All notable changes to Ralphie are documented here. The project follows
   Plain/CI output is deterministic append-only with no `ESC`/carriage-return or
   footer residue, verbose never expands the three-row cap, quiet keeps failures
   and handled needs-attention stops only, and JSON stays JSON Lines on stdout
-  with stderr empty. `README.md`, `docs/end-to-end-execution.md`, and
-  `docs/operations-and-recovery.md` now publish exactly this tested contract,
+  with stderr empty. `README.md` and `docs/operations-and-recovery.md` now
+  publish exactly this tested contract,
   locked by `tests/progress/interactive-footer-layout-strategy.test.ts`, the PTY
   streaming-stress fixture, the real-PTY lifecycle fixture, and the
   noninteractive cleanup matrix.

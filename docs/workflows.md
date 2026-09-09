@@ -220,7 +220,11 @@ reconciles decomposed parents it discovers or refreshes, so a parent whose
 final child closed in a previous run is completed on a later run. The open-issue
 queue is refreshed after decomposition; newly eligible children can run during
 the same invocation. If dependencies remain open after the queue is exhausted,
-the run persists active state and fails instead of processing blocked work.
+Ralphie records each blocked issue as a needs-attention outcome and leaves it
+pending instead of handing it to an agent. The default halt policy persists
+active state and stops with exit status `2`; `--on-needs-attention continue`
+drains later work and can complete with exit status `0`. Blocked issues remain
+open.
 
 A direct complexity 4–5 route returns `decomposed`. Review exhaustion returns an
 `escalated` outcome containing the recovery diagnostic path and, after
@@ -229,25 +233,24 @@ the queue.
 
 ### Platform support for native sub-issues and dependencies
 
-Native sub-issues and `blocked_by` dependencies are GitHub REST features that
-require a compatible host: `github.com`, or GitHub Enterprise Server versions
-that ship the sub-issues and issue-dependencies endpoints. Ralphie treats them
-as required for decomposition:
+Native sub-issues and `blocked_by` dependencies are GitHub REST features required
+for decomposition. Ralphie's current GitHub client targets `github.com` only;
+GitHub Enterprise Server is not supported. There is **no body-link fallback**:
+Ralphie never silently degrades to body-only hierarchy semantics.
 
 - Creating, recovering, or linking children fails with an actionable error
   naming the missing platform capability when an endpoint is unavailable or the
-  token lacks issue write permission. There is **no body-link fallback**: Ralphie
-  never silently degrades to body-only hierarchy semantics.
-- The compatibility check is implicit and per-operation: the first relationship
-  read or write against an unsupported server surfaces the error, so a dry run
-  or a run on an unsupported host fails at decomposition instead of producing a
-  different, undocumented hierarchy.
+  token lacks issue write permission.
+- The compatibility check is per live operation: the first relationship read or
+  write against an unsupported endpoint surfaces the error. A dry run reports
+  the planned native hierarchy but does not create or validate relationships.
 - Recovery metadata (stable markers and the persisted key/dependency mappings)
-  remains the idempotency record regardless of platform support, so a run
-  resumed on a compatible host reconciles correctly.
-- To verify host support before a run: `gh api repos/{owner}/{repo}/issues/1/sub_issues`
-  and `gh api repos/{owner}/{repo}/issues/1/dependencies/blocked_by` should
-  return `200` (an empty list) rather than `404`.
+  remains the idempotency record, so a run can resume after a recoverable
+  relationship failure without blindly duplicating children.
+- To verify the required `github.com` endpoints before a live run:
+  `gh api repos/{owner}/{repo}/issues/1/sub_issues` and
+  `gh api repos/{owner}/{repo}/issues/1/dependencies/blocked_by` should return
+  `200` (an empty list) rather than `404`.
 
 ## Delivery modes
 
@@ -255,7 +258,7 @@ as required for decomposition:
 | --- | --- | --- | --- |
 | `lgtm` | Selected base branch | Commit and non-force push directly to that branch; verify remote SHA and clean checkout | Close directly as `completed` after verified delivery. |
 | `pr` | `ralphie/issue-<number>` in the main checkout | Push feature branch, create/find matching PR, persist its number and base/head snapshot, run the resumable post-PR review/revision coordinator for at most five shared attempts, publish approved head-scoped review attempts, wait for checks on that exact head SHA to pass, re-read the PR, and invoke a proof-bearing merge only when the review, checks, base, and head still match | PR body contains `Closes #<issue>`; GitHub closes the issue on merge. A failed, cancelled, timed-out, absent, unknown, changed-head, closed, or unmergeable review, revision, or check gate retains the feature branch and PR, leaves the issue open, and persists recoverable run state. The serial run restores the base checkout afterward. |
-| `--dry-run` | Prepared normal checkout | Ground the issue, then assess complexity and report implementation or decomposition when actionable; report already-resolved and needs-attention routes otherwise. A decomposition dry run also performs the read-only breakdown session and reports the intended native sub-issue hierarchy, children to create or reuse, and dependency edges. No implementation, decomposition, delivery, commit, push, checkout, issue, or PR mutation | No issue is closed. The result is `skipped` except needs-attention, which remains a needs-attention outcome. |
+| `--dry-run` | Prepared normal checkout; preparation may reset, clean, or switch the branch | Ground the issue, then assess complexity and report implementation or decomposition when actionable; report already-resolved and needs-attention routes otherwise. A decomposition dry run also performs the read-only breakdown session and reports the intended native sub-issue hierarchy, children to create or reuse, and dependency edges. No implementation or decomposition mutation, delivery, commit, push, issue, or PR mutation; preparation may still change the local checkout | No issue is closed. The result is `skipped` except needs-attention, which remains a needs-attention outcome. |
 
 The direct-push path never uses force. A push rejection is authoritative: the
 created commit and artifacts are retained, the run halts, and resume can

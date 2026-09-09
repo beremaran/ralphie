@@ -135,7 +135,9 @@ server endpoint is operator-owned and is never removed; keep any server-side
 configuration outside the workspace.
 
 `--clean start` and `--clean end` recursively delete the workspace after
-protected-path checks. Use a path dedicated to Ralphie:
+protected-path checks. Their mode-specific dry-run and resume rules are
+[documented with cleanup and recovery](operations-and-recovery.md#cleanup). Use a
+path dedicated to Ralphie:
 
 ```bash
 bunx @beremaran/ralphie owner/repository \
@@ -158,9 +160,10 @@ reports already-resolved and needs-attention routes with the selected policy
 and blocker details. It may change the local workspace during preparation and
 persists only run-level state and progress. It reuses matching persisted
 routing decisions when available but never writes per-issue complexity or
-needs-attention artifacts, and it cannot invoke implementation, decomposition,
-delivery, commits, pushes, checkout mutation, or GitHub mutations. A resumed
-dry run remains a dry run.
+needs-attention artifacts. Preparation may reset, clean, or switch the local
+checkout, but dry-run logic cannot invoke implementation, decomposition
+mutation, delivery, commits, pushes, or GitHub mutations. A resumed dry run
+remains a dry run.
 
 Pipeline dry-run uses a different, mode-specific boundary:
 
