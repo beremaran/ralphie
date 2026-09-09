@@ -173,12 +173,15 @@ import {
     type MaintenancePlanService,
 } from "./maintain-issues-plan.ts";
 import type { AgentClient } from "./opencode/client.ts";
+import type { HarnessFactory } from "./harness/index.ts";
 import { type ProgressReporterService } from "./progress/progress.ts";
 import { RunStateStoreLive, type RunStateStoreService } from "./run/state.ts";
 import { WorkspaceLive, type WorkspaceService } from "./workspace/workspace.ts";
 
 /** Concrete adapter assembly for one run. Only the command wiring consumes this broad shape; execution modes depend on their focused seams. */
 export type RalphieRuntime = {
+    /** Optional provider-neutral harness factory for future workflow migration. */
+    readonly harnessFactory?: HarnessFactory;
     readonly commandRunner: CommandRunnerService;
     readonly githubClient: GitHubClientService;
     readonly pipelineSnapshot: PipelineSnapshotCollectorService;
@@ -303,6 +306,8 @@ export type PipelineDeliveryRuntime = {
 
 export type RuntimeOverrides = {
     readonly opencode: OpenCodeService;
+    /** Optional provider-neutral harness factory seam. */
+    readonly harnessFactory?: HarnessFactory;
     readonly progress: ProgressReporterService;
     /** Optional deterministic seams for the read-only pipeline observer. */
     readonly pipelineObservationDependencies?: PipelineObservationServiceDependencies;
@@ -336,6 +341,7 @@ export type RuntimeOverrides = {
 /** Assemble the small object graph for one run. */
 export const makeLiveRuntime = ({
     opencode,
+    harnessFactory,
     progress,
     commandRunner = CommandRunnerLive,
     runStateStore = RunStateStoreLive,
@@ -510,6 +516,7 @@ export const makeLiveRuntime = ({
         needsAttentionRouter,
     );
     return {
+        ...(harnessFactory === undefined ? {} : { harnessFactory }),
         commandRunner,
         githubClient,
         pipelineSnapshot,
