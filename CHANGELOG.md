@@ -7,6 +7,13 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Removed
 
+- Remove every top-level execution mode other than the issue workflow. The
+  `--mode` flag, `maintain-issues`, `get-pipelines-green`, and
+  `--duplicate-action`/`--max-attempts`/`--pipeline-timeout` are gone, along
+  with the maintenance snapshot/planning/state subsystem, the pipeline
+  delivery/diagnostics/repair subsystem, and their tests and docs.
+  `--workflow lgtm|pr` remains the only delivery selector.
+
 - Replace the external OpenCode server integration and the multi-harness/ACP
   discovery layer with the in-process pi agent runtime
   (`@earendil-works/pi-agent-core` plus `@earendil-works/pi-ai`). Deleted

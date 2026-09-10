@@ -8,8 +8,6 @@ import { HELP_TEXT, parseCliArgs, runCommand } from "../src/command.ts";
 import { RalphieExitCode } from "../src/process/exit-code.ts";
 import { RalphieError } from "../src/shared/error.ts";
 import {
-    DuplicateAction,
-    ExecutionMode,
     IssueFailurePolicy,
     NeedsAttentionPolicy,
     WorkflowMode,
@@ -19,9 +17,7 @@ import { RUN_STATE_VERSION, RunStateStatus } from "../src/run/state.ts";
 import { makeTestProgressRecorder } from "./shared/progress-recorder.ts";
 
 describe("native CLI parser", () => {
-    test("documents maintenance mode and duplicate policy in help", () => {
-        expect(HELP_TEXT).toContain("maintain-issues");
-        expect(HELP_TEXT).toContain("--duplicate-action");
+    test("documents the issue workflow in help", () => {
         expect(HELP_TEXT).toContain("--on-needs-attention <halt|continue>");
         expect(HELP_TEXT).toContain("--on-issue-failure <halt|continue>");
         expect(HELP_TEXT).toContain("--implementation-thinking <level>");
@@ -31,7 +27,8 @@ describe("native CLI parser", () => {
         expect(HELP_TEXT).toContain("--notify-needs-attention");
         expect(HELP_TEXT).toContain("--needs-attention-label <name>");
         expect(HELP_TEXT).toContain("default halt");
-        expect(HELP_TEXT).toContain("default link");
+        expect(HELP_TEXT).not.toContain("maintain-issues");
+        expect(HELP_TEXT).not.toContain("get-pipelines-green");
     });
 
     test("parses positional repository, repeatable labels, flags, and values", () => {
@@ -51,7 +48,6 @@ describe("native CLI parser", () => {
         expect(parsed.version).toBe(false);
         expect(parsed.options).toMatchObject({
             repo: "owner/repository",
-            mode: ExecutionMode.Issues,
             workflow: WorkflowMode.Pr,
             issueLabels: ["bug", "ready"],
             maxIssues: 3,
@@ -347,176 +343,15 @@ describe("native CLI parser", () => {
         }
     });
 
-    test("parses maintenance mode and duplicate policy", () => {
-        expect(
-            parseCliArgs(["owner/repository", "--mode", "maintain-issues"])
-                .options,
-        ).toMatchObject({
-            mode: ExecutionMode.MaintainIssues,
-            duplicateAction: DuplicateAction.Link,
-        });
-        expect(
-            parseCliArgs([
-                "owner/repository",
-                "--mode",
-                "maintain-issues",
-                "--duplicate-action",
-                "close",
-            ]).options,
-        ).toMatchObject({
-            mode: ExecutionMode.MaintainIssues,
-            duplicateAction: DuplicateAction.Close,
-        });
-    });
-
-    test("preserves whether duplicate policy was explicitly supplied", () => {
-        expect(
-            parseCliArgs(["owner/repository", "--mode", "maintain-issues"])
-                .explicitDuplicateAction,
-        ).toBeUndefined();
-        expect(
-            parseCliArgs([
-                "owner/repository",
-                "--mode",
-                "maintain-issues",
-                "--duplicate-action",
-                "link",
-            ]).explicitDuplicateAction,
-        ).toBe(DuplicateAction.Link);
-    });
-
-    test("rejects duplicate policy in issue mode and workflow in maintenance mode", () => {
-        expect(() =>
-            parseCliArgs(["owner/repository", "--duplicate-action", "close"]),
-        ).toThrow(
-            "Option --duplicate-action is only available in maintain-issues mode and cannot be used with --mode issues.",
-        );
-        expect(() =>
-            parseCliArgs([
-                "owner/repository",
-                "--mode",
-                "maintain-issues",
-                "--workflow",
-                "pr",
-            ]),
-        ).toThrow(
-            "Option --workflow is only available in issues mode and cannot be used with --mode maintain-issues.",
-        );
-    });
-
-    test("parses pipeline mode and its options", () => {
-        expect(
-            parseCliArgs([
-                "owner/repository",
-                "--mode",
-                "get-pipelines-green",
-                "--max-attempts",
-                "5",
-                "--pipeline-timeout",
-                "10m",
-            ]).options,
-        ).toMatchObject({
-            mode: ExecutionMode.GetPipelinesGreen,
-            maxAttempts: 5,
-            pipelineTimeout: { value: 10, unit: "minutes" },
-        });
-    });
-
-    test("dispatches pipeline mode through its dedicated runner", async () => {
-        let received: Record<string, unknown> | undefined;
-        process.exitCode = 0;
-        try {
-            await runCommand(
-                [
-                    "owner/repository",
-                    "--mode",
-                    "get-pipelines-green",
-                    "--branch",
-                    "main",
-                    "--max-attempts",
-                    "2",
-                ],
-                {
-                    factories: {
-                        makeCoordinator: () => ({
-                            progress: makeTestProgressRecorder([]),
-                            piListener: () => {},
-                            getDisplayState: () => ({}) as never,
-                            dispose: async () => {},
-                        }),
-                        makeAgentRuntime: () => ({
-                            start: async () => undefined as never,
-                        }),
-                        makeRuntime: () => ({}) as never,
-                        runPipelinesGreen: async (options) => {
-                            received = options as unknown as Record<
-                                string,
-                                unknown
-                            >;
-                            return undefined as never;
-                        },
-                    },
-                },
-            );
-            expect(received).toMatchObject({
-                runId: expect.any(String),
-                config: {
-                    mode: ExecutionMode.GetPipelinesGreen,
-                    branch: "main",
-                    maxAttempts: 2,
-                },
-            });
-            expect(process.exitCode).toBe(RalphieExitCode.Success);
-        } finally {
-            process.exitCode = 0;
+    test("rejects the removed mode and pipeline flags", () => {
+        for (const args of [
+            ["owner/repository", "--mode", "issues"],
+            ["owner/repository", "--max-attempts", "2"],
+            ["owner/repository", "--pipeline-timeout", "10m"],
+            ["owner/repository", "--duplicate-action", "close"],
+        ]) {
+            expect(() => parseCliArgs(args)).toThrow();
         }
-    });
-
-    test("rejects unknown and extra arguments", () => {
-        expect(() => parseCliArgs(["owner/repository", "extra"])).toThrow(
-            "Unexpected argument",
-        );
-        expect(() => parseCliArgs(["owner/repository", "--unknown"])).toThrow();
-    });
-
-    test("rejects non-positive pipeline attempt counts", () => {
-        expect(() =>
-            parseCliArgs([
-                "owner/repository",
-                "--mode",
-                "get-pipelines-green",
-                "--max-attempts",
-                "0",
-            ]),
-        ).toThrow();
-    });
-
-    test("rejects issue flags in pipeline mode and pipeline flags in issue mode", () => {
-        expect(() =>
-            parseCliArgs([
-                "owner/repository",
-                "--mode",
-                "get-pipelines-green",
-                "--issue-sort",
-                "invalid",
-            ]),
-        ).toThrow(
-            "Option --issue-sort is only available in issues mode and cannot be used with --mode get-pipelines-green.",
-        );
-        expect(() =>
-            parseCliArgs([
-                "owner/repository",
-                "--mode",
-                "get-pipelines-green",
-                "--issue-label",
-                "",
-            ]),
-        ).toThrow(
-            "Option --issue-label is only available in issues mode and cannot be used with --mode get-pipelines-green.",
-        );
-        expect(() =>
-            parseCliArgs(["owner/repository", "--max-attempts", "2"]),
-        ).toThrow("--max-attempts");
     });
 
     test("parses compound issue sort and validates enums", () => {

@@ -17,11 +17,6 @@ GitHub, run state, recovery, and safety checks deterministic.
 > branch and pull request instead. Ralphie is pre-1.0. Start with a one-issue
 > `--dry-run` against a repository you control before enabling mutations.
 
-The top-level `--mode` defaults to `issues` (code delivery). `--mode
-maintain-issues` reconciles issue metadata without implementing code, and
-`--mode get-pipelines-green` repairs a failing base-branch pipeline. See
-[Workflows](./docs/workflows.md) for what each mode does.
-
 ## Quick start
 
 Run the latest release without installing globally:

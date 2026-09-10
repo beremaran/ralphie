@@ -31,10 +31,6 @@ import {
     type GitRepositoryInvariantService,
 } from "./git/repository-invariant.ts";
 import {
-    makePipelineDeliveryGitService,
-    type PipelineDeliveryGitService,
-} from "./git/pipeline-delivery.ts";
-import {
     makeGitRepositoryService,
     type GitRepositoryService,
 } from "./git/repository.ts";
@@ -75,32 +71,10 @@ import {
     type PullRequestClosureService,
 } from "./issues/pull-request-closure.ts";
 import {
-    makePipelineSnapshotCollectorService,
-    type PipelineSnapshotCollectorService,
-} from "./github/pipeline-snapshot-collector.ts";
-import {
     makePipelineObservationService,
     type PipelineObservationService,
     type PipelineObservationServiceDependencies,
 } from "./github/pipeline-observation.ts";
-import {
-    makePipelineDiagnosticsService,
-    type PipelineDiagnosticsService,
-    type PipelineDiagnosticsServiceDependencies,
-} from "./github/pipeline-diagnostics-service.ts";
-import {
-    makePipelineRepairExecutorService,
-    type PipelineRepairExecutorService,
-} from "./issues/pipeline-repair-executor.ts";
-import {
-    makePipelineDeliveryLifecycle,
-    type PipelineDeliveryLifecycle,
-} from "./pipeline/delivery-lifecycle.ts";
-import {
-    makePipelineDeliveryStateAdapter,
-    PipelineRunStateStoreLive,
-    type PipelineRunStateStoreService,
-} from "./run/pipeline-state.ts";
 import {
     makeGitHubNeedsAttentionNotificationService,
     type GitHubNeedsAttentionNotificationService,
@@ -148,47 +122,16 @@ import {
     type NeedsAttentionRouterService,
 } from "./issues/needs-attention.ts";
 import { type PiAgentService } from "./pi/runtime.ts";
-import { makeMaintainIssuesGroundingReader } from "./maintain-issues-grounding-reader.ts";
-import {
-    makeMaintenanceSnapshotService,
-    type MaintenanceSnapshotService,
-} from "./maintain-issues-snapshot-service.ts";
-import {
-    makeGitHubIssueMaintenanceService,
-    type GitHubIssueMaintenanceService,
-} from "./github/issue-maintenance.ts";
-import {
-    makeGitHubIssueMaintenanceRelationshipService,
-    type GitHubIssueMaintenanceRelationshipService,
-} from "./github/issue-maintenance-relationships.ts";
-import {
-    MaintenanceRunStateStoreLive,
-    type MaintenanceRunStateStoreService,
-} from "./maintain-issues-state.ts";
-import {
-    makeMaintenancePlanService,
-    type MaintenancePlanService,
-} from "./maintain-issues-plan.ts";
-import type { AgentClient } from "./agent/contracts.ts";
 import { type ProgressReporterService } from "./progress/progress.ts";
 import { RunStateStoreLive, type RunStateStoreService } from "./run/state.ts";
 import { WorkspaceLive, type WorkspaceService } from "./workspace/workspace.ts";
 
-/** Concrete adapter assembly for one run. Only the command wiring consumes this broad shape; execution modes depend on their focused seams. */
+/** Concrete adapter assembly for one run. Only the command wiring consumes this broad shape; the workflow depends on its focused seam. */
 export type RalphieRuntime = {
     readonly commandRunner: CommandRunnerService;
     readonly githubClient: GitHubClientService;
-    readonly pipelineSnapshot: PipelineSnapshotCollectorService;
-    /** Bounded, read-only pipeline observer for one exact commit SHA. */
+    /** Bounded, read-only check observer for one exact commit SHA. */
     readonly pipelineObservation: PipelineObservationService;
-    /** Collects, persists, and prompt-bounds diagnostics for a failed run. */
-    readonly pipelineDiagnostics: PipelineDiagnosticsService;
-    /** Pipeline-only diagnose/edit/review boundary; never commits or pushes. */
-    readonly pipelineRepairExecutor: PipelineRepairExecutorService;
-    /** Complete Pipeline delivery lifecycle, including state and resume. */
-    readonly pipelineDeliveryLifecycle: PipelineDeliveryLifecycle;
-    /** Lower-level Git adapter used by the lifecycle and deterministic tests. */
-    readonly pipelineDeliveryGit: PipelineDeliveryGitService;
     readonly githubIssues: GitHubIssuesService;
     readonly githubIssueMutations: GitHubIssueMutationService;
     readonly githubIssueRelationships: GitHubIssueRelationshipService;
@@ -202,20 +145,6 @@ export type RalphieRuntime = {
     readonly pullRequestClosure: PullRequestClosureService;
     /** Publishes structured needs-attention outcomes outside issue execution. */
     readonly githubNeedsAttentionNotification: GitHubNeedsAttentionNotificationService;
-    /** Fresh, immutable, read-only maintenance context for one run. */
-    readonly maintenanceSnapshot: MaintenanceSnapshotService;
-    /** Optional injected maintenance planner; production creates one per agent session. */
-    readonly maintenancePlanner?: MaintenancePlanService;
-    /** Build a planner around the agent client created for one run. */
-    readonly maintenancePlannerForAgent?: (
-        agent: AgentClient,
-    ) => MaintenancePlanService;
-    /** Deterministic additive/comment maintenance mutation boundary. */
-    readonly maintenanceMutation?: GitHubIssueMaintenanceService;
-    /** Deterministic duplicate/related relationship mutation boundary. */
-    readonly maintenanceRelationships?: GitHubIssueMaintenanceRelationshipService;
-    /** Mode-specific state store; it is never shared with issue queue state. */
-    readonly maintenanceRunStateStore?: MaintenanceRunStateStoreService;
     readonly gitRepository: GitRepositoryService;
     readonly gitRepositoryInvariant: GitRepositoryInvariantService;
     readonly gitIssueCheckpoint: GitIssueCheckpointService;
@@ -238,8 +167,6 @@ export type RalphieRuntime = {
     readonly agentRuntime: PiAgentService;
     readonly progress: ProgressReporterService;
     readonly runStateStore: RunStateStoreService;
-    /** Pipeline-only state; never shared with issue-mode state. */
-    readonly pipelineRunStateStore: PipelineRunStateStoreService;
     readonly workspace: WorkspaceService;
 };
 
@@ -264,67 +191,12 @@ export type IssueWorkflowRuntime = {
     readonly agentRuntime: PiAgentService;
 };
 
-/** Focused dependencies consumed directly by maintenance execution. */
-export type MaintenanceRuntime = {
-    readonly progress: ProgressReporterService;
-    readonly workspace: WorkspaceService;
-    readonly githubClient: GitHubClientService;
-    readonly gitRepository: GitRepositoryService;
-    readonly gitRepositoryInvariant: GitRepositoryInvariantService;
-    readonly commandRunner: CommandRunnerService;
-    readonly maintenanceSnapshot: MaintenanceSnapshotService;
-    /** Optional injected maintenance planner; production creates one per agent session. */
-    readonly maintenancePlanner?: MaintenancePlanService;
-    /** Build a planner around the agent client created for one run. */
-    readonly maintenancePlannerForAgent?: (
-        agent: AgentClient,
-    ) => MaintenancePlanService;
-    /** Deterministic additive/comment maintenance mutation boundary. */
-    readonly maintenanceMutation?: GitHubIssueMaintenanceService;
-    /** Deterministic duplicate/related relationship mutation boundary. */
-    readonly maintenanceRelationships?: GitHubIssueMaintenanceRelationshipService;
-    /** Mode-specific state store; it is never shared with issue queue state. */
-    readonly maintenanceRunStateStore?: MaintenanceRunStateStoreService;
-    readonly agentRuntime: PiAgentService;
-};
-
-/** Focused dependencies consumed directly by Pipeline delivery. */
-export type PipelineDeliveryRuntime = {
-    readonly progress: ProgressReporterService;
-    readonly workspace: WorkspaceService;
-    readonly githubClient: GitHubClientService;
-    readonly gitRepository: GitRepositoryService;
-    readonly agentRuntime: PiAgentService;
-    readonly pipelineDeliveryLifecycle: PipelineDeliveryLifecycle;
-};
-
 export type RuntimeOverrides = {
     readonly agentRuntime: PiAgentService;
     readonly progress: ProgressReporterService;
-    /** Optional deterministic seams for the read-only pipeline observer. */
+    /** Optional deterministic seams for the read-only check observer. */
     readonly pipelineObservationDependencies?: PipelineObservationServiceDependencies;
-    /** Optional deterministic seams for the pipeline diagnostics runtime path. */
-    readonly pipelineDiagnosticsDependencies?: PipelineDiagnosticsServiceDependencies;
-    /** Optional deterministic pipeline repair executor for orchestration tests. */
-    readonly pipelineRepairExecutor?: PipelineRepairExecutorService;
-    /** Optional deterministic Pipeline delivery lifecycle for orchestration tests. */
-    readonly pipelineDeliveryLifecycle?: PipelineDeliveryLifecycle;
-    /** Optional deterministic Git boundary for pipeline orchestration tests. */
-    readonly pipelineDeliveryGit?: PipelineDeliveryGitService;
-    /** Optional deterministic state store for pipeline orchestration tests. */
-    readonly pipelineRunStateStore?: PipelineRunStateStoreService;
-    /** Optional deterministic seam for maintenance snapshot tests. */
-    readonly maintenanceSnapshot?: MaintenanceSnapshotService;
-    /** Optional deterministic maintenance planner used by runner tests. */
-    readonly maintenancePlanner?: MaintenancePlanService;
-    /** Optional factory for a planner bound to the live agent client. */
-    readonly maintenancePlannerForAgent?: (
-        agent: AgentClient,
-    ) => MaintenancePlanService;
-    /** Optional deterministic maintenance mutation seams. */
-    readonly maintenanceMutation?: GitHubIssueMaintenanceService;
-    readonly maintenanceRelationships?: GitHubIssueMaintenanceRelationshipService;
-    readonly maintenanceRunStateStore?: MaintenanceRunStateStoreService;
+    /** Optional deterministic seam for the issue artifact store. */
     readonly commandRunner?: CommandRunnerService;
     readonly runStateStore?: RunStateStoreService;
     readonly workspace?: WorkspaceService;
@@ -336,28 +208,12 @@ export const makeLiveRuntime = ({
     progress,
     commandRunner = CommandRunnerLive,
     runStateStore = RunStateStoreLive,
-    pipelineRunStateStore = PipelineRunStateStoreLive,
     workspace = WorkspaceLive,
     pipelineObservationDependencies,
-    pipelineDiagnosticsDependencies,
-    pipelineRepairExecutor: pipelineRepairExecutorOverride,
-    pipelineDeliveryLifecycle: pipelineDeliveryLifecycleOverride,
-    pipelineDeliveryGit: pipelineDeliveryGitOverride,
-    pipelineRunStateStore: pipelineRunStateStoreOverride,
-    maintenanceSnapshot: maintenanceSnapshotOverride,
-    maintenancePlanner: maintenancePlannerOverride,
-    maintenancePlannerForAgent: maintenancePlannerForAgentOverride,
-    maintenanceMutation: maintenanceMutationOverride,
-    maintenanceRelationships: maintenanceRelationshipsOverride,
-    maintenanceRunStateStore: maintenanceRunStateStoreOverride,
 }: RuntimeOverrides): RalphieRuntime => {
     const githubClient = makeGitHubClientService(commandRunner);
-    const pipelineSnapshot = makePipelineSnapshotCollectorService();
     const pipelineObservation = makePipelineObservationService(
         pipelineObservationDependencies,
-    );
-    const pipelineDiagnostics = makePipelineDiagnosticsService(
-        pipelineDiagnosticsDependencies,
     );
     const githubIssues = makeGitHubIssuesService();
     const githubIssueMutations = makeGitHubIssueMutationsService();
@@ -370,29 +226,9 @@ export const makeLiveRuntime = ({
     const githubPullRequests = makeGitHubPullRequestService();
     const githubNeedsAttentionNotification =
         makeGitHubNeedsAttentionNotificationService();
-    const maintenanceSnapshot =
-        maintenanceSnapshotOverride ??
-        makeMaintenanceSnapshotService({
-            githubClient,
-            groundingReader: makeMaintainIssuesGroundingReader(commandRunner),
-        });
-    const maintenanceMutation =
-        maintenanceMutationOverride ?? makeGitHubIssueMaintenanceService();
-    const maintenanceRelationships =
-        maintenanceRelationshipsOverride ??
-        makeGitHubIssueMaintenanceRelationshipService();
-    const maintenanceRunStateStore =
-        maintenanceRunStateStoreOverride ?? MaintenanceRunStateStoreLive;
     const gitRepository = makeGitRepositoryService(commandRunner);
     const gitRepositoryInvariant =
         makeGitRepositoryInvariantService(commandRunner);
-    const maintenancePlannerForAgent =
-        maintenancePlannerForAgentOverride ??
-        ((agent: AgentClient) =>
-            makeMaintenancePlanService({
-                agent,
-                repositoryInvariant: gitRepositoryInvariant,
-            }));
     const gitIssueCheckpoint = makeGitIssueCheckpointService(commandRunner);
     const gitIssueOperations = makeGitIssueOperationsService(commandRunner);
     const pullRequestReviewAttempt = makePullRequestReviewAttemptService({
@@ -418,37 +254,6 @@ export const makeLiveRuntime = ({
     );
     const needsAttentionRouter = makeNeedsAttentionRouterService(issueRecovery);
     const issueVerification = makeIssueVerificationService(commandRunner);
-    const pipelineRepairExecutor =
-        pipelineRepairExecutorOverride ??
-        makePipelineRepairExecutorService({
-            issueOperations: gitIssueOperations,
-            checkpoint: gitIssueCheckpoint,
-            captureCheckpoint: gitIssueCheckpoint.capture,
-            stagedTreeSha: issueVerification.stagedTreeSha,
-        });
-    const pipelineDeliveryGit: PipelineDeliveryGitService =
-        pipelineDeliveryGitOverride ??
-        makePipelineDeliveryGitService(commandRunner);
-    const actualPipelineRunStateStore =
-        pipelineRunStateStoreOverride ?? pipelineRunStateStore;
-    const pipelineDeliveryLifecycle =
-        pipelineDeliveryLifecycleOverride ??
-        makePipelineDeliveryLifecycle({
-            repository: gitRepository,
-            git: pipelineDeliveryGit,
-            observation: pipelineObservation,
-            diagnostics: async (input) => {
-                const result = await pipelineDiagnostics.collectAndStore(input);
-                return { boundary: result.boundary, path: result.path };
-            },
-            repair: pipelineRepairExecutor,
-            repositoryInvariant: gitRepositoryInvariant,
-            remoteSafety: gitRemoteSafety,
-            state: makePipelineDeliveryStateAdapter({
-                store: actualPipelineRunStateStore,
-            }),
-            progress,
-        });
     const pullRequestReviewCoordinator =
         makePullRequestReviewCoordinatorService({
             pullRequests: githubPullRequests,
@@ -509,12 +314,7 @@ export const makeLiveRuntime = ({
     return {
         commandRunner,
         githubClient,
-        pipelineSnapshot,
         pipelineObservation,
-        pipelineDiagnostics,
-        pipelineRepairExecutor,
-        pipelineDeliveryLifecycle,
-        pipelineDeliveryGit,
         githubIssues,
         githubIssueMutations,
         githubIssueRelationships,
@@ -524,14 +324,6 @@ export const makeLiveRuntime = ({
         pullRequestReviewCoordinator,
         pullRequestClosure,
         githubNeedsAttentionNotification,
-        maintenanceSnapshot,
-        ...(maintenancePlannerOverride === undefined
-            ? {}
-            : { maintenancePlanner: maintenancePlannerOverride }),
-        maintenancePlannerForAgent,
-        maintenanceMutation,
-        maintenanceRelationships,
-        maintenanceRunStateStore,
         gitRepository,
         gitRepositoryInvariant,
         gitIssueCheckpoint,
@@ -553,7 +345,6 @@ export const makeLiveRuntime = ({
         agentRuntime,
         progress,
         runStateStore,
-        pipelineRunStateStore: actualPipelineRunStateStore,
         workspace,
     };
 };

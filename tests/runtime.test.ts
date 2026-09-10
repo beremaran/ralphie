@@ -24,29 +24,16 @@ describe("runtime factory", () => {
             progress: makeTestProgressRecorder([]),
         });
 
-        expect(runtime.pipelineSnapshot).toBeDefined();
-        expect(runtime.pipelineSnapshot.collect).toBeFunction();
         expect(runtime.pipelineObservation).toBeDefined();
         expect(runtime.pipelineObservation.observe).toBeFunction();
-        expect(runtime.pipelineDiagnostics).toBeDefined();
-        expect(runtime.pipelineDiagnostics.collectAndStore).toBeFunction();
-        expect(runtime.pipelineRepairExecutor).toBeDefined();
-        expect(runtime.pipelineRepairExecutor.execute).toBeFunction();
-        expect(runtime.pipelineDeliveryLifecycle).toBeDefined();
-        expect(runtime.pipelineDeliveryLifecycle.execute).toBeFunction();
-        expect(runtime.pipelineDeliveryGit).toBeDefined();
-        expect(runtime.pipelineDeliveryGit.readRemoteHead).toBeFunction();
-        expect(runtime.pipelineRunStateStore).toBeDefined();
-        expect(runtime.pipelineRunStateStore.save).toBeFunction();
-        expect(runtime.maintenanceSnapshot).toBeDefined();
-        expect(runtime.maintenanceSnapshot.capture).toBeFunction();
-        expect(runtime.maintenanceSnapshot.read).toBe(
-            runtime.maintenanceSnapshot.capture,
-        );
         expect(runtime.pullRequestReviewAttempt).toBeDefined();
         expect(runtime.pullRequestReviewAttempt.review).toBeFunction();
         expect(runtime.pullRequestReviewCoordinator).toBeDefined();
         expect(runtime.pullRequestReviewCoordinator.review).toBeFunction();
+        expect(runtime.pullRequestClosure).toBeDefined();
+        expect(runtime.pullRequestClosure.close).toBeFunction();
+        expect(runtime.issueExecutor).toBeDefined();
+        expect(runtime.issueExecutor.execute).toBeFunction();
         expect(runtime.gitRevisionCommit).toBeDefined();
         expect(runtime.gitRevisionCommit.commitRevision).toBeFunction();
         expect(runtime.gitRevisionDelivery).toBeDefined();

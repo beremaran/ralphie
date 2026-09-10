@@ -3,17 +3,12 @@ import { describe, expect, test } from "bun:test";
 import { IssueOrder, IssueSort } from "../src/github/issues.ts";
 import {
     DEFAULT_WORKSPACE,
-    DEFAULT_DUPLICATE_ACTION,
-    DEFAULT_EXECUTION_MODE,
     DEFAULT_WORKFLOW_MODE,
     DEFAULT_NEEDS_ATTENTION_POLICY,
     DEFAULT_ISSUE_FAILURE_POLICY,
     DEFAULT_MAX_DECOMPOSITION_DEPTH,
     DEFAULT_IMPLEMENTATION_ATTEMPTS,
     NeedsAttentionPolicy,
-    DuplicateAction,
-    ExecutionMode,
-    parsePipelineTimeout,
     resolveRalphieConfig,
     WorkflowMode,
 } from "../src/options.ts";
@@ -32,7 +27,6 @@ describe("CLI configuration", () => {
             }),
         ).toEqual({
             repo: "owner/repo",
-            mode: DEFAULT_EXECUTION_MODE,
             workflow: DEFAULT_WORKFLOW_MODE,
             onNeedsAttention: DEFAULT_NEEDS_ATTENTION_POLICY,
             onIssueFailure: DEFAULT_ISSUE_FAILURE_POLICY,
@@ -140,119 +134,23 @@ describe("CLI configuration", () => {
         });
     });
 
-    test("resolves maintenance mode with shared selection and duplicate defaults", () => {
-        expect(
-            resolveRalphieConfig({
-                repo: "owner/repo",
-                mode: ExecutionMode.MaintainIssues,
-            }),
-        ).toEqual({
-            repo: "owner/repo",
-            mode: ExecutionMode.MaintainIssues,
-            duplicateAction: DEFAULT_DUPLICATE_ACTION,
-            issueLabels: [],
-            issueSort: IssueSort.Created,
-            issueOrder: IssueOrder.Ascending,
-            agent: "build",
-            workspace: DEFAULT_WORKSPACE,
-            cleanStart: false,
-            cleanEnd: false,
-            dryRun: false,
-            verbose: false,
-            json: false,
-            quiet: false,
-        });
-
-        expect(
-            resolveRalphieConfig({
-                repo: "owner/repo",
-                mode: ExecutionMode.MaintainIssues,
-                duplicateAction: DuplicateAction.Close,
-                maxIssues: 2,
-                issueLabels: ["duplicate"],
-            }),
-        ).toMatchObject({
-            duplicateAction: DuplicateAction.Close,
-            maxIssues: 2,
-            issueLabels: ["duplicate"],
-        });
-    });
-
-    test("rejects implementation and pipeline options in maintenance mode", () => {
+    test("rejects non-positive integer options", () => {
         expect(() =>
             resolveRalphieConfig({
                 repo: "owner/repo",
-                mode: ExecutionMode.MaintainIssues,
-                workflow: WorkflowMode.Pr,
+                implementationAttempts: 0,
             }),
         ).toThrow(
-            "Option --workflow is only available in issues mode and cannot be used with --mode maintain-issues.",
+            "Option --implementation-attempts requires a positive integer.",
         );
         expect(() =>
             resolveRalphieConfig({
                 repo: "owner/repo",
-                mode: ExecutionMode.MaintainIssues,
-                verificationCommands: ["bun run check"],
+                maxDecompositionDepth: -1,
             }),
-        ).toThrow("Option --verify-command");
-        expect(() =>
-            resolveRalphieConfig({
-                repo: "owner/repo",
-                mode: ExecutionMode.MaintainIssues,
-                maxAttempts: 1,
-            }),
-        ).toThrow("Option --max-attempts");
-    });
-
-    test("resolves pipeline mode with its own defaults and options", () => {
-        expect(
-            resolveRalphieConfig({
-                repo: "owner/repo",
-                mode: ExecutionMode.GetPipelinesGreen,
-            }),
-        ).toMatchObject({
-            mode: ExecutionMode.GetPipelinesGreen,
-            maxAttempts: 3,
-        });
-
-        expect(
-            resolveRalphieConfig({
-                repo: "owner/repo",
-                mode: ExecutionMode.GetPipelinesGreen,
-                maxAttempts: 5,
-                pipelineTimeout: parsePipelineTimeout("10m"),
-            }),
-        ).toEqual({
-            repo: "owner/repo",
-            mode: ExecutionMode.GetPipelinesGreen,
-            maxAttempts: 5,
-            pipelineTimeout: { value: 10, unit: "minutes" },
-            agent: "build",
-            workspace: DEFAULT_WORKSPACE,
-            cleanStart: false,
-            cleanEnd: false,
-            dryRun: false,
-            verbose: false,
-            json: false,
-            quiet: false,
-        });
-    });
-
-    test("rejects options from the other execution mode", () => {
-        expect(() =>
-            resolveRalphieConfig({
-                repo: "owner/repo",
-                mode: ExecutionMode.GetPipelinesGreen,
-                maxIssues: 1,
-            }),
-        ).toThrow("--max-issues");
-        expect(() =>
-            resolveRalphieConfig({
-                repo: "owner/repo",
-                mode: ExecutionMode.Issues,
-                maxAttempts: 1,
-            }),
-        ).toThrow("--max-attempts");
+        ).toThrow(
+            "Option --max-decomposition-depth requires a positive integer.",
+        );
     });
 
     test("rejects incompatible output modes", () => {
@@ -263,21 +161,5 @@ describe("CLI configuration", () => {
                 quiet: true,
             }),
         ).toThrow("JSON and quiet output modes cannot be enabled together.");
-    });
-
-    test("parses only positive integer pipeline durations", () => {
-        expect(parsePipelineTimeout("30s")).toEqual({
-            value: 30,
-            unit: "seconds",
-        });
-        expect(parsePipelineTimeout("2h")).toEqual({
-            value: 2,
-            unit: "hours",
-        });
-        for (const value of ["0s", "30", "1.5h", "2ms", " 30s", "30s "]) {
-            expect(() => parsePipelineTimeout(value)).toThrow(
-                "--pipeline-timeout",
-            );
-        }
     });
 });

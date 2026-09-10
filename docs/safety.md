@@ -68,56 +68,6 @@ delivery services remain authoritative.
 In `pr` mode, the feature branch, pull request, review comments, and merge are
 reconciled through GitHub before the linked issue is considered complete.
 
-## Pipeline mode guardrails
-
-`--mode get-pipelines-green` is a direct base-branch operation with a separate
-state machine. It captures one exact remote commit SHA and reads the supported
-GitHub sources for that SHA: Check Runs, Check Suites, legacy commit statuses,
-and Actions workflow runs. The normalized all-visible-checks policy requires a
-non-empty complete set in which every item is `passing`, with no source or
-completeness errors, followed by a final authoritative remote-HEAD read that
-still equals the observed SHA. `acceptable` neutral/skipped results,
-`pending`, `failing`, `cancelled`, and `unknown` states never prove green.
-Missing permissions, unsupported endpoints, pagination errors, contradictory
-scope, and unknown provider values fail closed. An empty set after the bounded
-registration grace is `no-pipelines-discovered`, not success; pending work is
-bounded by the absolute pipeline deadline, and the observer can apply a
-quiescence window and repeated terminal confirmations.
-
-The mode does not scrape web pages, infer hidden checks, rerun workflows, or
-create pull requests. Diagnostics can retrieve only allowlisted job-log
-evidence within fixed bounds. CI/provider values are untrusted data: terminal
-controls are removed at the artifact boundary, values are not redacted, and
-repair prompts enclose the evidence in `<untrusted-pipeline-diagnostics>`
-markers so it cannot become an instruction channel.
-
-When a repair is needed, the deterministic boundary captures and persists a
-clean checkpoint, verifies the repository and branch before agent work and
-again immediately before commit/push, stages and reviews the exact tree, and
-uses one non-force push to `HEAD:refs/heads/<branch>`. A push response is not
-proof; `git ls-remote`-equivalent authoritative remote evidence must confirm
-the created SHA. A concurrent branch advance invalidates the candidate and is
-observed rather than overwritten. Only confirmed remote repairs consume
-`--max-attempts`; the normalized failure fingerprint prevents the same failure
-from cycling through new commits.
-
-Pipeline state is retained on failed, timed-out, ambiguous, or cancelled runs
-at `<workspace>/.ralphie/runs/<run-id>/pipeline/state.json`, with diagnostics at
-`pipeline/diagnostics.json`. `--resume` validates the repository and branch,
-re-reads the remote, invalidates stale evidence, reconciles a possibly lost
-push response, and never restarts the saved deadline. If cancellation or
-timeout finds the local branch still at the clean checkpoint, an uncommitted
-repair is discarded safely; a committed repair is retained for reconciliation.
-`--clean end` is available only after a green outcome.
-
-Ralphie does not try to predict whether GitHub will accept the update by
-querying branch protection, repository rulesets, or API-reported push
-permission. The actual non-force `git push` is authoritative and enforces the
-repository's current policy without plan-, permission-, or timing-dependent API
-guesses. If GitHub rejects the push, Ralphie surfaces the complete Git
-response, retains the created commit and run artifacts, and halts for
-inspection or resume.
-
 ## Workspace risk
 
 There is one intentionally destructive local behavior: when reusing an existing
@@ -162,31 +112,6 @@ needs-attention artifacts. Preparation may reset, clean, or switch the local
 checkout, but dry-run logic cannot invoke implementation, decomposition
 mutation, delivery, commits, pushes, or GitHub mutations. A resumed dry run
 remains a dry run.
-
-Pipeline dry-run uses a different, mode-specific boundary:
-
-```bash
-bunx @beremaran/ralphie owner/repository \
-  --mode get-pipelines-green --branch main --dry-run \
-  --pipeline-timeout 10m --output json
-```
-
-It authenticates, prepares and inspects the checkout, reads and observes the
-current remote HEAD, waits/classifies visible checks, and collects bounded
-diagnostics for a failing snapshot. It never starts the agent runtime, edits or stages
-files, commits, pushes, reruns Actions, mutates GitHub, or creates a pull
-request. A failing preview reports what repair would be attempted and exits
-`1`; a green preview still performs no delivery. Failed previews retain the
-pipeline state and diagnostics for inspection or `--resume`.
-
-The `maintain-issues` dry-run boundary is narrower: it reads the GitHub issue,
-comment, label, and repository data needed for one complete maintenance
-snapshot, and reads the existing checkout for source grounding, but it does
-not prepare, clone, reset, or otherwise mutate the workspace. It does not call
-label, comment, relationship, or duplicate-closure services, and it writes no
-maintenance state, artifacts, or event log. The output still contains the
-validated plan, action outcomes, evidence, and skip reasons, so operators can
-check the proposed pass before granting Issues write permission.
 
 ## Agent and mutation boundaries
 

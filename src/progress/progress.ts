@@ -37,27 +37,8 @@ export type ProgressStage =
     | "issue-creation"
     | "issue-relationships"
     | "issue-closure"
-    | "maintenance-observation"
-    | "maintenance-planning"
-    | "maintenance-validation"
-    | "maintenance-action"
-    | "maintenance-mutation"
-    | "maintenance-replan"
-    | "maintenance-outcome"
-    | "maintenance-recovery"
     | "pr-gate"
-    | "notification-recovery"
-    | "pipeline-remote-read"
-    | "pipeline-observation"
-    | "pipeline-diagnostics"
-    | "pipeline-repair"
-    | "pipeline-commit-message"
-    | "pipeline-commit"
-    | "pipeline-push"
-    | "pipeline-reconcile"
-    | "pipeline-final-verification"
-    | "pipeline-resume"
-    | "pipeline-outcome";
+    | "notification-recovery";
 
 export type ProgressStatus =
     | "started"

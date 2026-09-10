@@ -3,18 +3,11 @@ import { dirname, join } from "node:path";
 import { z } from "zod";
 
 import {
-    DEFAULT_EXECUTION_MODE,
-    DuplicateAction,
-    ExecutionMode,
     IssueFailurePolicy,
     NeedsAttentionPolicy,
-    parsePipelineTimeout,
     type ResolvedRalphieConfig,
     resolveRalphieConfig,
     type IssueRalphieConfig,
-    type MaintainIssuesRalphieConfig,
-    type GetPipelinesGreenRalphieConfig,
-    validateExplicitRalphieCliOptions,
     validateRalphieCliOptions,
     WorkflowMode,
     DEFAULT_MAX_DECOMPOSITION_DEPTH,
@@ -29,12 +22,7 @@ import {
 import { type ProgressRenderMode } from "./progress/progress.ts";
 import { makePiAgentService, type PiAgentService } from "./pi/runtime.ts";
 import type { PiAgentConfig } from "./pi/config.ts";
-import {
-    makeLiveRuntime,
-    type IssueWorkflowRuntime,
-    type MaintenanceRuntime,
-    type PipelineDeliveryRuntime,
-} from "./runtime.ts";
+import { makeLiveRuntime, type IssueWorkflowRuntime } from "./runtime.ts";
 import type { AgentEventListener } from "./agent/contracts.ts";
 import {
     exitCodeForError,
@@ -42,40 +30,24 @@ import {
     RalphieExitCode,
 } from "./process/exit-code.ts";
 import { workflow } from "./workflow.ts";
-import {
-    maintainIssues,
-    type MaintainIssuesOptions,
-} from "./maintain-issues.ts";
 import { BUILD_INFO } from "./build-info.ts";
 import { type RunState, RunStateStoreLive } from "./run/state.ts";
-import {
-    loadMaintenanceRunState,
-    type MaintenanceRunState,
-} from "./maintain-issues-state.ts";
 import { reconcileRunState } from "./run/reconciliation.ts";
 import { resolveWorkspacePath } from "./workspace/workspace.ts";
 import { RalphieError } from "./shared/error.ts";
-import {
-    getPipelinesGreen,
-    type GetPipelinesGreenOptions,
-} from "./get-pipelines-green.ts";
 
 const cliOptions = {
-    mode: { type: "string" },
     branch: { type: "string", short: "b" },
     workflow: { type: "string" },
     "on-needs-attention": { type: "string" },
     "on-issue-failure": { type: "string" },
     "notify-needs-attention": { type: "boolean" },
     "needs-attention-label": { type: "string" },
-    "duplicate-action": { type: "string" },
     "max-issues": { type: "string" },
     "max-decomposition-depth": { type: "string" },
     "issue-label": { type: "string", multiple: true },
     "issue-sort": { type: "string" },
     "verify-command": { type: "string", multiple: true },
-    "max-attempts": { type: "string" },
-    "pipeline-timeout": { type: "string" },
     model: { type: "string" },
     thinking: { type: "string" },
     "grounding-thinking": { type: "string" },
@@ -98,8 +70,6 @@ type ParsedCli = {
     readonly help: boolean;
     readonly version: boolean;
     readonly options: Parameters<typeof resolveRalphieConfig>[0];
-    /** Undefined when --duplicate-action was not present on the command line. */
-    readonly explicitDuplicateAction?: DuplicateAction;
 };
 
 const asString = (
@@ -233,25 +203,10 @@ const parseCliOptions = (
     values: Record<string, unknown>,
     repo: string | undefined,
 ): Parameters<typeof resolveRalphieConfig>[0] => {
-    const modeValue = asNonEmptyString(values, "mode");
-    const mode =
-        modeValue === undefined
-            ? DEFAULT_EXECUTION_MODE
-            : z.enum(ExecutionMode).parse(modeValue);
-    validateExplicitRalphieCliOptions(values, mode);
-
     const onNeedsAttention = parseNeedsAttentionPolicy(values);
     const notificationOptions = parseNotificationOptions(values);
-    const duplicateActionValue = asNonEmptyString(values, "duplicate-action");
-    const duplicateAction =
-        duplicateActionValue === undefined
-            ? mode === ExecutionMode.MaintainIssues
-                ? DuplicateAction.Link
-                : undefined
-            : z.enum(DuplicateAction).parse(duplicateActionValue);
     const issueSortValue = asNonEmptyString(values, "issue-sort");
     const thinkingValue = asNonEmptyString(values, "thinking");
-    const pipelineTimeoutValue = asString(values, "pipeline-timeout");
     const cleanValue = asNonEmptyString(values, "clean");
     const rawOutput = asNonEmptyString(values, "output");
     const outputValue =
@@ -259,7 +214,6 @@ const parseCliOptions = (
 
     return {
         repo,
-        mode,
         branch: asString(values, "branch"),
         workflow:
             asString(values, "workflow") === undefined
@@ -268,17 +222,11 @@ const parseCliOptions = (
         onNeedsAttention,
         onIssueFailure: parseIssueFailurePolicy(values),
         ...notificationOptions,
-        ...(duplicateAction === undefined ? {} : { duplicateAction }),
         maxIssues: asNumber(values, "max-issues"),
         maxDecompositionDepth: asNumber(values, "max-decomposition-depth"),
         issueLabels: parseIssueLabels(values),
         verificationCommands: parseRepeatedStrings(values, "verify-command"),
         ...(issueSortValue === undefined ? {} : parseIssueSort(issueSortValue)),
-        maxAttempts: asNumber(values, "max-attempts"),
-        pipelineTimeout:
-            pipelineTimeoutValue === undefined
-                ? undefined
-                : parsePipelineTimeout(pipelineTimeoutValue),
         model: parseModel(values, "model"),
         thinking:
             thinkingValue === undefined
@@ -329,10 +277,6 @@ export const parseCliArgs = (args: ReadonlyArray<string>): ParsedCli => {
         help: asBoolean(values, "help"),
         version: asBoolean(values, "version"),
         options,
-        ...(values["duplicate-action"] === undefined ||
-        options.duplicateAction === undefined
-            ? {}
-            : { explicitDuplicateAction: options.duplicateAction }),
     };
 };
 
@@ -369,30 +313,25 @@ const resolveProgressMode = (
 
 export const HELP_TEXT = `Usage: ralphie <owner/repository> [options]
 
-Run an issue queue, maintain issues, or get-pipelines-green through pi.
+Turn open GitHub issues into reviewed commits through pi.
 
 Options:
-  -b, --branch <name>          Branch to operate on
-      --mode <mode>            issues (default), maintain-issues, or get-pipelines-green
-      --workflow <mode>        Issue workflow: lgtm or pr (issues mode only)
+  -b, --branch <name>          Base branch to operate on
+      --workflow <mode>        Issue workflow: lgtm or pr (default lgtm)
       --on-needs-attention <halt|continue>
-                               Needs-attention policy (default halt; issues mode only)
+                               Needs-attention policy (default halt)
       --on-issue-failure <halt|continue>
-                               Ordinary issue failure policy (default halt; issues mode only)
+                               Ordinary issue failure policy (default halt)
       --notify-needs-attention Enable needs-attention GitHub notifications (default disabled)
       --needs-attention-label <name>
                                Add this label to notifications (requires the opt-in flag)
-      --duplicate-action <link|close>
-                               Duplicate handling in maintain-issues mode (default link)
       --max-issues <n>         Maximum issues to process
       --max-decomposition-depth <n>
                                Maximum recursive decomposition depth (default 3)
       --issue-label <label>    Include only issues with this label (repeatable)
       --issue-sort <sort>      created, updated, or comments, optionally :asc or :desc
       --verify-command <cmd>   Deterministic pre-commit gate (repeatable)
-      --max-attempts <n>       Pipeline attempts (positive; default 3)
-      --pipeline-timeout <t>  Pipeline timeout: e.g. 30s, 10m, or 2h
-      --model <provider/model> Pi model selection
+      --model <provider/model> Pi model selection (defaults to pi settings)
       --thinking <level>       Thinking level: off, minimal, low, medium, high, xhigh, or max (default medium)
       --grounding-thinking <level> Readiness reasoning (default low)
       --implementation-thinking <level> Implementation reasoning (default high)
@@ -419,11 +358,9 @@ Environment:
                                Provider credentials; a stored pi auth.json credential wins
 `;
 
-export type CommandRuntime = IssueWorkflowRuntime &
-    MaintenanceRuntime &
-    PipelineDeliveryRuntime & {
-        readonly dispose?: () => Promise<void>;
-    };
+export type CommandRuntime = IssueWorkflowRuntime & {
+    readonly dispose?: () => Promise<void>;
+};
 
 export type CommandFactories = {
     readonly makeCoordinator?: (
@@ -438,16 +375,7 @@ export type CommandFactories = {
         readonly progress: ProgressCoordinator["progress"];
     }) => CommandRuntime;
     readonly runWorkflow?: typeof workflow;
-    readonly runMaintenance?: typeof maintainIssues;
-    readonly runPipelinesGreen?: typeof getPipelinesGreen;
 };
-
-type CommandResumeState = RunState | MaintenanceRunState;
-
-const isMaintenanceResumeState = (
-    state: CommandResumeState | undefined,
-): state is MaintenanceRunState =>
-    state !== undefined && "mode" in state && state.mode === "maintain-issues";
 
 export type CommandOutput = {
     readonly stdout: (text: string) => void;
@@ -475,8 +403,6 @@ const resolveCommandFactories = (
     makeAgentRuntime: factories.makeAgentRuntime ?? makePiAgentService,
     makeRuntime: factories.makeRuntime ?? makeLiveRuntime,
     runWorkflow: factories.runWorkflow ?? workflow,
-    runMaintenance: factories.runMaintenance ?? maintainIssues,
-    runPipelinesGreen: factories.runPipelinesGreen ?? getPipelinesGreen,
 });
 
 const loadResumeState = async (
@@ -527,17 +453,15 @@ const eventLogPathFor = (
     config: ResolvedRalphieConfig,
     runId: string,
 ): string | undefined =>
-    config.mode === ExecutionMode.MaintainIssues && config.dryRun
-        ? undefined
-        : config.resume === undefined
-          ? join(
-                resolveWorkspacePath(config.workspace),
-                ".ralphie",
-                "runs",
-                runId,
-                "events.jsonl",
-            )
-          : join(dirname(config.resume), "events.jsonl");
+    config.resume === undefined
+        ? join(
+              resolveWorkspacePath(config.workspace),
+              ".ralphie",
+              "runs",
+              runId,
+              "events.jsonl",
+          )
+        : join(dirname(config.resume), "events.jsonl");
 
 const makeCommandCoordinator = (
     config: ResolvedRalphieConfig,
@@ -561,34 +485,6 @@ const makeCommandCoordinator = (
         runId,
         eventLogPath: eventLogPathFor(config, runId),
     });
-
-const resumeStateForConfig = async (
-    config: ResolvedRalphieConfig,
-    explicitPolicy?: NeedsAttentionPolicy,
-    explicitMaxDecompositionDepth?: number,
-    explicitDuplicateAction?: DuplicateAction,
-): Promise<CommandResumeState | undefined> => {
-    if (config.mode === ExecutionMode.Issues) {
-        return await loadResumeState(
-            config,
-            explicitPolicy,
-            explicitMaxDecompositionDepth,
-        );
-    }
-    if (config.mode === ExecutionMode.GetPipelinesGreen) {
-        // Pipeline state is deliberately loaded by the delivery lifecycle so
-        // branch preparation, remote reconciliation, and state projection are
-        // one module-owned sequence.
-        return undefined;
-    }
-    if (config.resume === undefined) return undefined;
-    return await loadMaintenanceRunState(config.resume, {
-        repository: config.repo,
-        branch: config.branch,
-        duplicateAction: explicitDuplicateAction,
-        dryRun: config.dryRun,
-    });
-};
 
 const workflowOptionsFor = (
     config: IssueRalphieConfig,
@@ -635,53 +531,6 @@ const workflowOptionsFor = (
     needsAttentionLabel:
         resumeState?.needsAttentionLabel ?? config.needsAttentionLabel,
 });
-
-/** Execute one Ralphie command. */
-const dispatchCommand = async (
-    config:
-        | IssueRalphieConfig
-        | MaintainIssuesRalphieConfig
-        | GetPipelinesGreenRalphieConfig,
-    input: RunCommandInput,
-    runId: string,
-    resumeState: CommandResumeState | undefined,
-    explicitDuplicateAction: DuplicateAction | undefined,
-    runtime: CommandRuntime,
-    factories: Required<CommandFactories>,
-): Promise<void> => {
-    if (config.mode === ExecutionMode.GetPipelinesGreen) {
-        const pipelineOptions: GetPipelinesGreenOptions = {
-            config,
-            runId,
-            signal: input.signal,
-        };
-        await factories.runPipelinesGreen(pipelineOptions, runtime);
-        return;
-    }
-    if (config.mode === ExecutionMode.Issues) {
-        const issueResumeState =
-            resumeState === undefined || !("mode" in resumeState)
-                ? resumeState
-                : undefined;
-        await factories.runWorkflow(
-            workflowOptionsFor(config, input, runId, issueResumeState),
-            runtime,
-        );
-        return;
-    }
-    await factories.runMaintenance(
-        {
-            config,
-            runId,
-            signal: input.signal,
-            ...(explicitDuplicateAction === undefined
-                ? {}
-                : { explicitDuplicateAction }),
-            ...(isMaintenanceResumeState(resumeState) ? { resumeState } : {}),
-        } satisfies MaintainIssuesOptions,
-        runtime,
-    );
-};
 
 const commandErrorFor = (
     error: unknown,
@@ -739,11 +588,10 @@ export const runCommand = async (
     }
 
     const config = resolveRalphieConfig(parsed.options);
-    const resumeState = await resumeStateForConfig(
+    const resumeState = await loadResumeState(
         config,
         parsed.options.onNeedsAttention,
         parsed.options.maxDecompositionDepth,
-        parsed.explicitDuplicateAction,
     );
 
     const terminal = input.terminal ?? terminalInfo();
@@ -769,14 +617,9 @@ export const runCommand = async (
             agentRuntime,
             progress: coordinator.progress,
         });
-        await dispatchCommand(
-            config,
-            input,
-            runId,
-            resumeState,
-            parsed.explicitDuplicateAction,
+        await factories.runWorkflow(
+            workflowOptionsFor(config, input, runId, resumeState),
             runtime,
-            factories,
         );
         process.exitCode = RalphieExitCode.Success;
     } catch (error) {

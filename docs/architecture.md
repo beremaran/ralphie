@@ -37,7 +37,7 @@ effects and validate their invariants at the boundary.
 
 | Area | Responsibility |
 | --- | --- |
-| `src/github/` | GitHub CLI authentication, Octokit, issue discovery, mutations, native sub-issues/dependencies, decomposition links, pipeline snapshot collection, bounded pipeline observation, and persisted pipeline diagnostics. |
+| `src/github/` | GitHub CLI authentication, Octokit, issue discovery, mutations, native sub-issues/dependencies, decomposition links, check snapshot normalization, and bounded, deadline-aware check observation. |
 | `src/git/` | Checkout preparation, checkpoints, deterministic issue operations, invariants, and remote safety. |
 | `src/issues/` | Queueing, complexity routing, implementation, review, recovery, and decomposition. |
 | `src/agent/` | Ralphie's session, prompt, schema, diagnostics, and structured-output boundary. |
@@ -50,10 +50,10 @@ effects and validate their invariants at the boundary.
 `src/workflow.ts` orchestrates the issue modules. `src/runtime.ts` assembles
 their live implementations into one explicit runtime object.
 
-## Read-only pipeline observation contract
+## Read-only check observation contract
 
-The live runtime exposes `runtime.pipelineObservation.observe(...)` for a later
-workflow gate. It observes one immutable 40- or 64-character commit SHA and is
+The live runtime exposes `runtime.pipelineObservation.observe(...)` for the PR
+delivery check gate. It observes one immutable 40- or 64-character commit SHA and is
 read-only: with an Octokit client it uses paginated Check Run and legacy commit
 status reads plus `repos.getBranch` for the final HEAD race check. Tests and
 other read-only callers may provide `fetchSnapshot`, `readHead`, and injected
@@ -84,65 +84,6 @@ sleep receives an abortable derived signal; caller cancellation returns an
 `aborted` outcome with its original reason, distinct from timeout or read
 failure. Normalized items retain source/producer identity and raw diagnostic
 fields for audit consumers.
-
-## Pipeline diagnostics collection
-
-The live runtime exposes `runtime.pipelineDiagnostics.collectAndStore(...)` for
-failure repair and recovery paths. The operation keeps the observed request
-and exact commit SHA fixed while it collects bounded workflow-run and
-check-run evidence, retrieves only allowlisted job-log redirects, writes a
-versioned artifact, and returns the prompt-safe repair projection. GitHub
-collection is read-only; the only local mutation is the atomic artifact write.
-
-The artifact is stored at
-`.ralphie/runs/<run-id>/pipeline/diagnostics.json`. It retains provider
-identity, run/attempt/job/check IDs, raw status and conclusion values,
-dispositions, unknown JSON fields, and byte accounting within the shared job,
-step, excerpt, and total-evidence bounds. Terminal controls are stripped at
-the persistence boundary without redacting supplied text. The repair-facing
-text is generated from the same typed projection as the structured result and
-is enclosed in `<untrusted-pipeline-diagnostics>` markers; provider content
-cannot escape those markers or inject a second closing marker.
-
-## Pipeline delivery orchestration and state
-
-`--mode get-pipelines-green` is deliberately not a branch in the issue queue.
-`src/get-pipelines-green.ts` is a thin command adapter for authentication,
-workspace cleanup, agent-runtime lifetime, and terminal exit semantics. The public
-Pipeline module is `src/pipeline/delivery-lifecycle.ts`; its single
-discriminated `execute` entry point accepts live, dry-run, or resume requests
-and owns repository preparation, remote-head capture, deadline creation, state
-reconciliation, observation, repair, commit delivery, and terminal outcomes.
-`src/pipeline/delivery-types.ts` holds the lifecycle domain types and
-evidence-bearing events, while `src/pipeline/delivery-lifecycle.ts` holds the
-commit-independent identity used to detect a repeated normalized failure.
-
-`RalphieRuntime` exposes `pipelineDeliveryLifecycle` as the lifecycle seam and
-retains the lower-level Git, observation, diagnostics, repair, and remote-safety
-modules for injection and reuse. The lifecycle fans each semantic
-`PipelineDeliveryEvent` to the state session and progress reporter; neither
-consumer reconstructs state from display updates. `src/run/pipeline-state.ts`
-provides the state adapter that creates/loads a version-one pipeline state,
-reconciles the remote before mutation, and atomically projects lifecycle events
-to `.ralphie/runs/<run-id>/pipeline/state.json`.
-
-The pipeline state store in `src/run/pipeline-state.ts` is a versioned adapter,
-not a second issue queue. It persists a bounded projection of the current
-remote SHA, normalized statuses, failure identity, checkpoint, attempt history,
-diagnostic reference, and created/pushed commit evidence. Writes use a unique
-temporary file followed by an atomic rename. Resume re-reads the remote before
-any mutation, invalidates evidence for a changed SHA, reconciles a created
-commit that already arrived, and retains the original absolute deadline. This
-keeps the state seam small and makes failure, ambiguous-push, cancellation, and
-stale-head cases directly testable without a live model request or GitHub write.
-
-The lifecycle exposes the same typed progress contract as the other modes.
-Pipeline phase events carry the phase boundary, exact remote SHA when known,
-pushed attempt count, external-movement count, failure identity, diagnostic
-path, and terminal outcome details. The output renderer determines whether
-those events are interactive, append-only, quiet, or JSON Lines; it does not
-alter the underlying safety state machine. A green outcome is the only
-successful terminal state.
 
 ## Dependency and side-effect rules
 
@@ -186,16 +127,11 @@ the normal check gate.
 | Public trigger and flags | `index.ts`, `src/cli.ts`, `src/command.ts`, `src/options.ts` |
 | Runtime dependency assembly | `src/runtime.ts` |
 | Run orchestration, queue, state transitions | `src/workflow.ts`, `src/issues/queue.ts` |
-| Pipeline snapshot normalization and collection | `src/github/pipeline-snapshot.ts`, `src/github/pipeline-snapshot-collector.ts` |
-| Bounded, deadline-aware pipeline observation, paginated exact-SHA reads, retries, and final HEAD check | `src/github/pipeline-observation.ts`, `src/github/pipeline-snapshot-collector.ts` |
-| Pipeline diagnostics collection, persistence, and repair boundary | `src/github/pipeline-diagnostics-collector.ts`, `src/github/pipeline-diagnostics-service.ts`, `src/github/pipeline-diagnostics-artifact.ts`, `src/github/pipeline-diagnostics-boundary.ts` |
-| Pipeline delivery lifecycle and direct delivery | `src/pipeline/delivery-lifecycle.ts`, `src/pipeline/delivery-types.ts`, `src/git/pipeline-delivery.ts` |
-| Pipeline state, bounded persistence, and resume reconciliation | `src/run/pipeline-state.ts` |
+| Check snapshot normalization and collection | `src/github/pipeline-snapshot.ts`, `src/github/pipeline-snapshot-collector.ts` |
+| Bounded, deadline-aware check observation, paginated exact-SHA reads, retries, and final HEAD check | `src/github/pipeline-observation.ts`, `src/github/pipeline-snapshot-collector.ts` |
 | Complexity routing | `src/issues/executor.ts`, `src/issues/complexity.ts` |
 | Implementation/review/delivery | `src/issues/implementation-executor.ts`, `src/issues/pull-request-review.ts`, `src/issues/pull-request-review-coordinator.ts`, `src/github/pull-requests.ts` |
 | Decomposition and GitHub mutations | `src/issues/decomposition-executor.ts`, `src/github/issue-mutations.ts`, `src/github/issue-relationships.ts` |
-| Maintenance snapshot, planning, execution, and state | `src/maintain-issues.ts`, `src/maintain-issues-lifecycle.ts`, `src/maintain/snapshot.ts`, `src/maintain-issues-snapshot-service.ts`, `src/maintain-issues-candidates.ts`, `src/maintain-issues-plan.ts`, `src/maintain-issues-state.ts` |
-| Maintenance GitHub reconciliation | `src/github/issue-maintenance.ts`, `src/github/issue-maintenance-relationships.ts`, `src/maintain-issues-grounding-reader.ts` |
 | Pi model catalog, credentials, tools, sessions, and structured results | `src/pi/`, `src/agent/` |
 | Git checkpoints, safety, and branches | `src/git/` |
 | Durable state and reconciliation | `src/run/`, `src/issues/artifacts.ts` |

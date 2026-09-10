@@ -58,15 +58,15 @@ describe("source reachability audit", () => {
 
         const command = moduleFor(report, "src/command.ts");
         expect(command.imports).toContainEqual({
-            to: "src/get-pipelines-green.ts",
+            to: "src/pi/config.ts",
             kind: "type",
-            names: ["GetPipelinesGreenOptions"],
+            names: ["PiAgentConfig"],
             reexport: false,
         });
         expect(command.imports).toContainEqual({
-            to: "src/get-pipelines-green.ts",
+            to: "src/agent/model.ts",
             kind: "value",
-            names: ["getPipelinesGreen"],
+            names: ["agentModelSchema", "agentModelVariantSchema"],
             reexport: false,
         });
         expect(
