@@ -183,7 +183,7 @@ const routeForComplexity = (complexity: ComplexityLevel) =>
         : ("decomposition" as const);
 
 const routeDetails = (
-    context: IssueExecutionContext,
+    _context: IssueExecutionContext,
     route:
         | "implementation"
         | "decomposition"
@@ -196,9 +196,6 @@ const routeDetails = (
     route,
     ...(grounding === undefined ? {} : { grounding: grounding.disposition }),
     ...(complexity === undefined ? {} : { complexity }),
-    ...(context.needsAttentionPolicy === undefined
-        ? {}
-        : { policy: context.needsAttentionPolicy }),
 });
 
 const reportRoute = async (
@@ -259,9 +256,6 @@ const needsAttentionOutcome = (
         summary: decision.summary,
         evidence: [...decision.evidence],
         questions: [...decision.questions],
-        ...(context.needsAttentionPolicy === undefined
-            ? {}
-            : { policy: context.needsAttentionPolicy }),
     };
     return persisted
         ? {
@@ -291,7 +285,7 @@ const needsAttentionReasonFor = (reason: string): NeedsAttentionReason =>
  * route a real run would take after read-only verification.
  */
 const decompositionSignalOutcome = (
-    context: IssueExecutionContext,
+    _context: IssueExecutionContext,
     request: NeedsAttentionRequest,
 ): IssueExecutionOutcome => {
     const summary =
@@ -305,9 +299,6 @@ const decompositionSignalOutcome = (
         questions: [
             "A real run would verify this signal with the read-only needs-attention verifier before routing.",
         ],
-        ...(context.needsAttentionPolicy === undefined
-            ? {}
-            : { policy: context.needsAttentionPolicy }),
     };
 };
 
@@ -331,15 +322,12 @@ const reportDecompositionSignal = async (
             ...(request.message === undefined
                 ? {}
                 : { summary: request.message }),
-            ...(context.needsAttentionPolicy === undefined
-                ? {}
-                : { policy: context.needsAttentionPolicy }),
         },
     });
 };
 
 const plannedDecompositionDetails = (
-    context: IssueExecutionContext,
+    _context: IssueExecutionContext,
     grounding: GroundingDecision | undefined,
     complexity: ComplexityLevel,
     plan: DecompositionOperationPlan,
@@ -348,9 +336,6 @@ const plannedDecompositionDetails = (
     route: "decomposition",
     ...(grounding === undefined ? {} : { grounding: grounding.disposition }),
     complexity,
-    ...(context.needsAttentionPolicy === undefined
-        ? {}
-        : { policy: context.needsAttentionPolicy }),
     operations: {
         createChildren: plan.counts.create,
         reuseChildren: plan.counts.reuse,

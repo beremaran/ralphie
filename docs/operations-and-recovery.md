@@ -67,17 +67,16 @@ No reserved-row or scroll-region strategy is tested or published.
   stdout with stderr empty: every non-empty line parses as one complete JSON
   record, human headers/footers/glyphs/breadcrumbs never appear, and values
   are preserved as supplied; and
-- `--output quiet` suppresses routine progress and transcript rows but retains failures,
-  needs-attention decisions, and handled stops.
+- `--output quiet` suppresses routine progress and transcript rows but retains failures
+  and needs-attention decisions.
 
 JSON events use a stable operational vocabulary and include `runId`,
 `timestamp`, `stage`, `status`, and `message`. Grounding events identify
 whether agent work was skipped. Human-readable needs-attention decisions name
 the issue number and title and show the current/total queue position. A
 `needs-attention` event includes its reason, summary, evidence, questions,
-diagnostic or artifact path, selected policy, and issue budget; verbose and
-JSON output retain those complete details. A handled halt emits a final
-needs-attention event with `handled: true` and every outcome count before exit.
+diagnostic or artifact path, and issue budget; verbose and
+JSON output retain those complete details.
 Depending on the event, it may also include the repository, review attempt,
 session ID, commit SHA, created issue numbers, or diagnostic paths. Supplied
 progress-event values are preserved as-is; pi transcripts and breadcrumbs
@@ -132,13 +131,13 @@ configuration is not stored in this tree):
 ```
 
 `state.json` is versioned, schema-validated, and atomically replaced. It
-contains the repository/branch, selected `onNeedsAttention` policy,
+contains the repository/branch,
 notification settings and any pending notification intent, pi model selection,
 budget, pending and completed queue numbers, processed count, outcomes, active
 issue/stage, checkout invariant, and update time. State is saved before the
 queue starts, when an issue becomes active, before and after review/revision/
 publication boundaries, after outcomes and queue refreshes, and at final
-completion. Version 10 accepts and migrates previous versions while preserving
+completion. Version 11 accepts and migrates previous versions while preserving
 resumable evidence.
 
 ## Failure, cancellation, and exit status
@@ -157,8 +156,8 @@ stateDiagram-v2
     Retained --> [*]
 ```
 
-- One issue failure uses the current halt policy: Ralphie persists the active
-  issue, releases the agent runtime, retains artifacts, and stops before later issues.
+- One issue failure restores its checkout, persists the failed outcome, retains
+  artifacts, and continues to later issues.
 - The agent runtime is closed on success, failure, cancellation, and scoped defects. Ordinary
   failures set process exit code `1`.
 - Cancellation is checked before long-running boundaries and passed into the agent runtime.
@@ -168,27 +167,25 @@ stateDiagram-v2
   removes the entire workspace. Cleanup is skipped on failure so state and
   diagnostics remain available.
 
-Ordinary issue failures halt by default. With `--on-issue-failure continue`,
-Ralphie restores the failed issue checkout, records its outcome, and continues
-independent issues. Failed prerequisites are not marked complete, so dependent
-issues remain blocked. After draining all reachable work, the run exits with
-status `1` and an aggregate partial-failure summary. This policy is independent
-from needs-attention handling.
+An ordinary issue failure never stops the queue. Ralphie restores the failed
+issue checkout, records its outcome, and continues independent issues. Failed
+prerequisites are not marked complete, so dependent issues remain blocked.
+After draining all reachable work, the run exits with status `1` and an
+aggregate partial-failure summary.
 
-A needs-attention stop is handled separately and exits with status `2` by
-default. `--on-needs-attention continue` drains later work and completes with
-status `0` when the queue is drained. The issue remains open in either policy.
-The deterministic `decomposition_limit_reached` boundary is always handled as
-`continue`: raise the persisted `--max-decomposition-depth`, narrow the issue,
-or resolve its review findings manually before a later run. It never closes or
-marks the capped issue complete, so dependent work remains blocked.
+Needs-attention outcomes also continue the queue. A drained run completes with
+status `0`, and the deferred issue remains open. The deterministic
+`decomposition_limit_reached` boundary behaves the same way: raise the
+persisted `--max-decomposition-depth`, narrow the issue, or resolve its review
+findings manually before a later run. It never closes or marks the capped
+issue complete, so dependent work remains blocked.
 
 ## Needs-attention handling
 
 A validated needs-attention decision is not an ordinary failure. Ralphie
-persists its explicit policy plus the summary, evidence, questions, and issue
-freshness metadata in the run artifacts. With the default `halt` policy, the
-handled stop leaves the issue open and the run resumable with exit status 2.
+persists the summary, evidence, questions, and issue
+freshness metadata in the run artifacts, keeps the issue open, and continues
+with later work.
 Notifications are disabled unless `--notify-needs-attention` is supplied; a
 label by itself is rejected. When opted in, Ralphie first persists the
 structured outcome and notification label intent, then publishes through the
@@ -200,9 +197,7 @@ A failed or uncertain notification remains at an explicit
 notification-recovery boundary; resume preserves the saved
 notification intent and label, reconciles the stable marker, and retries
 without rerunning agent work or closing the issue. Dry runs report
-needs-attention outcomes but never publish notifications. With
-`--on-needs-attention continue`, the issue remains open while later work is
-drained; a drained run completes with exit status 0.
+needs-attention outcomes but never publish notifications.
 
 When any executor session requests needs attention, Ralphie first persists the
 bounded request, clean checkpoint, and issue freshness fingerprint. Exactly one
@@ -291,33 +286,16 @@ endpoint or a token lacking issue write permission, live decomposition fails wit
 an actionable error naming the missing capability; there is no body-link fallback.
 See [Workflows](workflows.md#platform-support-for-native-sub-issues-and-dependencies).
 
-An ordinary issue failure halts the run by default, preserving the checkout and
-diagnostics at the first uncertain boundary. With
-`--on-issue-failure continue`, Ralphie restores the failed issue checkout,
-records its outcome, and continues independent work; the drained run exits `1`
-if any issue failed.
+An ordinary issue failure never stops the queue. Ralphie restores the failed
+issue checkout, records its outcome, and continues independent work; the
+drained run exits `1` if any issue failed.
 
 A deterministic verification command returning non-zero is handled before it
 becomes an issue failure. Ralphie gives the bounded command output and staged
 diff to a fresh verification-fix session, restages its changes, and retries up
 to five times. Only repair exhaustion or a non-repairable verification fault
 (for example missing configuration or a command changing the staged tree)
-reaches the ordinary halt boundary.
-
-A managed feature-branch revision delivery ends in one of three ways, each
-persisted for resume. A `confirmed` outcome means the authoritative remote
-read proved the remote equals the new commit with a clean checkout, including
-a lost push response reconciled to success; the revision is delivered. An
-`external-movement` outcome means the remote no longer equals the expected
-prior head; the created clean commit is retained locally and resume must not
-retry, force-push, or reset over the moved remote. An `ambiguous` outcome
-means the remote read could not prove whether the new commit arrived; the
-created clean commit is retained, and resume re-reads the authoritative remote
-branch to reconcile: a remote still at the expected prior head can be safely
-re-pushed non-force, a remote already at the retained commit is treated as
-confirmed, and a remote that moved elsewhere halts again. A cancellation or
-failure before the first mutation leaves the untouched clean checkout; after
-the exact-tree commit is created, it is retained for the same reconciliation.
+reaches the ordinary failure boundary.
 
 ## Cleanup
 

@@ -1,5 +1,4 @@
 import type { DecompositionDepthLimitError } from "../github/decomposition-markdown.ts";
-import { NeedsAttentionPolicy } from "../options.ts";
 import { NeedsAttentionReason } from "./decisions.ts";
 import {
     IssueExecutionOutcomeKind,
@@ -23,5 +22,4 @@ export const decompositionLimitOutcome = (
         `Increase --max-decomposition-depth above ${error.maximumDepth}, narrow the issue manually, or resolve the remaining review findings.`,
     ],
     route: "needs-attention",
-    policy: NeedsAttentionPolicy.Continue,
 });

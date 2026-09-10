@@ -78,8 +78,8 @@ bunx @beremaran/ralphie owner/repository --dry-run --max-issues 1
 Dry-run mode performs real preflight, cloning, issue discovery, and read-only
 issue grounding. For actionable issues it performs a read-only complexity
 assessment and reports the implementation or decomposition route; it also
-reports already-resolved and needs-attention routes with the selected policy
-and blocker details. It may change the local workspace during preparation and
+reports already-resolved and needs-attention routes with
+blocker details. It may change the local workspace during preparation and
 persists only run-level state and progress. It reuses matching persisted
 routing decisions when available but never writes per-issue complexity or
 needs-attention artifacts. Preparation may reset, clean, or switch the local

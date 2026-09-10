@@ -1,5 +1,5 @@
 import { runCommand } from "./command.ts";
-import { exitCodeForError, isNeedsAttentionStop } from "./process/exit-code.ts";
+import { exitCodeForError } from "./process/exit-code.ts";
 
 /** Start the CLI with a native AbortSignal rather than a framework context. */
 export const runCli = async (
@@ -12,7 +12,6 @@ export const runCli = async (
         await runCommand(args, { signal: controller.signal });
     } catch (error) {
         process.exitCode = exitCodeForError(error, controller.signal);
-        if (isNeedsAttentionStop(error)) return;
         const message = error instanceof Error ? error.message : String(error);
         process.stderr.write(`${message}\n`);
     } finally {

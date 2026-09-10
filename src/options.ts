@@ -7,29 +7,12 @@ import { RalphieError } from "./shared/error.ts";
 
 export const DEFAULT_WORKSPACE = "~/.ralphie";
 
-/** Policy used when an issue executor reports that an issue needs attention. */
-export enum NeedsAttentionPolicy {
-    Halt = "halt",
-    Continue = "continue",
-}
-
-export const DEFAULT_NEEDS_ATTENTION_POLICY = NeedsAttentionPolicy.Halt;
-
-/** Policy used when an issue ends in an ordinary failure. */
-export enum IssueFailurePolicy {
-    Halt = "halt",
-    Continue = "continue",
-}
-
-export const DEFAULT_ISSUE_FAILURE_POLICY = IssueFailurePolicy.Halt;
 export const DEFAULT_IMPLEMENTATION_ATTEMPTS = 3;
 
 export type CleanWhen = "start" | "end" | "both";
 
 export type RalphieCliOptions = {
     readonly repo?: string;
-    readonly onNeedsAttention?: NeedsAttentionPolicy;
-    readonly onIssueFailure?: IssueFailurePolicy;
     readonly notifyNeedsAttention?: boolean;
     readonly needsAttentionLabel?: string;
     readonly branch?: string;
@@ -77,8 +60,6 @@ type SharedIssueSelection = {
 
 export type IssueRalphieConfig = SharedRalphieConfig &
     SharedIssueSelection & {
-        readonly onNeedsAttention: NeedsAttentionPolicy;
-        readonly onIssueFailure: IssueFailurePolicy;
         readonly notificationsEnabled: boolean;
         readonly needsAttentionLabel?: string;
         readonly implementationAttempts: number;
@@ -97,9 +78,6 @@ const optionalProperty = <Key extends string, Value>(
     value === undefined
         ? {}
         : ({ [key]: value } as { [Property in Key]: Value });
-
-const withDefault = <Value>(value: Value | undefined, fallback: Value): Value =>
-    value ?? fallback;
 
 const validatePositiveIntegers = (options: RalphieCliOptions): void => {
     if (
@@ -200,14 +178,6 @@ export const resolveRalphieConfig = (
     return {
         ...commonResolvedConfig(options, json, quiet),
         ...issueSelectionConfig(options),
-        onNeedsAttention: withDefault(
-            options.onNeedsAttention,
-            DEFAULT_NEEDS_ATTENTION_POLICY,
-        ),
-        onIssueFailure: withDefault(
-            options.onIssueFailure,
-            DEFAULT_ISSUE_FAILURE_POLICY,
-        ),
         notificationsEnabled: options.notifyNeedsAttention ?? false,
         ...optionalProperty(
             "needsAttentionLabel",

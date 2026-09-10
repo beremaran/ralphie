@@ -47,7 +47,6 @@ import {
 } from "../src/run/state.ts";
 import type { WorkspaceService } from "../src/workspace/workspace.ts";
 import { workflow } from "../src/workflow.ts";
-import { IssueFailurePolicy, NeedsAttentionPolicy } from "../src/options.ts";
 import { IssueOrder, IssueSort } from "../src/github/issues.ts";
 import type { IssueWorkflowRuntime } from "../src/runtime.ts";
 import { RalphieError } from "../src/shared/error.ts";
@@ -532,7 +531,6 @@ const baseOptions = {
     cleanup: false,
     startClean: false,
     runId: "test-run",
-    onNeedsAttention: NeedsAttentionPolicy.Continue,
 } as const;
 
 describe("workflow", () => {
@@ -554,9 +552,6 @@ describe("workflow", () => {
         );
         expect(summary.counts.completed).toBe(1);
         expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
-        expect(states.at(-1)?.onNeedsAttention).toBe(
-            NeedsAttentionPolicy.Continue,
-        );
         expect(states.at(-1)?.maxDecompositionDepth).toBe(6);
         expect(states.at(-1)?.queue.completedIssueNumbers).toEqual([42]);
         expect(calls).toEqual([
@@ -695,7 +690,6 @@ describe("workflow", () => {
                     runId: "resumed-dry-run",
                     repository: baseOptions.repo,
                     branch: "develop",
-                    onNeedsAttention: NeedsAttentionPolicy.Continue,
                     dryRun: true,
                     selection: { agent: DEFAULT_AGENT },
                     maxIssues: 1,
@@ -791,7 +785,6 @@ describe("workflow", () => {
                 {
                     ...baseOptions,
                     dryRun: true,
-                    onNeedsAttention: NeedsAttentionPolicy.Continue,
                 },
                 testRuntime(
                     calls,
@@ -930,7 +923,6 @@ describe("workflow", () => {
                     runId: `resumed-${route}`,
                     repository: baseOptions.repo,
                     branch: baseOptions.branch,
-                    onNeedsAttention: NeedsAttentionPolicy.Continue,
                     dryRun: true,
                     selection: { agent: DEFAULT_AGENT },
                     maxIssues: 1,
@@ -1055,8 +1047,6 @@ describe("workflow", () => {
             stage: "run",
             status: "info",
             details: {
-                policy: NeedsAttentionPolicy.Continue,
-                onNeedsAttention: NeedsAttentionPolicy.Continue,
                 budget: 2,
             },
         });
@@ -1073,7 +1063,6 @@ describe("workflow", () => {
                 evidence: ["Issue body links the prerequisite."],
                 questions: ["Complete the prerequisite, then retry."],
                 artifactPath: "/tmp/needs-attention.json",
-                policy: NeedsAttentionPolicy.Continue,
                 queuePosition: 1,
                 budget: 2,
             },
@@ -1141,7 +1130,6 @@ describe("workflow", () => {
                 evidence: ["Issue body links the open prerequisite."],
                 questions: ["Complete the prerequisite, then retry."],
                 diagnosticsPath,
-                policy: NeedsAttentionPolicy.Continue,
             },
         });
         expect(states.at(-1)?.outcomes).toContainEqual(
@@ -1160,14 +1148,13 @@ describe("workflow", () => {
         expect(calls).toContain("closeIssue:43");
     });
 
-    test("continues after the decomposition ceiling even when needs-attention defaults to halt", async () => {
+    test("continues after the decomposition ceiling", async () => {
         const calls: string[] = [];
         const states: RunState[] = [];
         const summary = await workflow(
             {
                 ...baseOptions,
                 maxIssues: 2,
-                onNeedsAttention: NeedsAttentionPolicy.Halt,
             },
             testRuntime(calls, states, {
                 issueLists: [[firstIssue, secondIssue]],
@@ -1183,7 +1170,6 @@ describe("workflow", () => {
                             "Increase the maximum or narrow the issue.",
                         ],
                         route: "needs-attention",
-                        policy: NeedsAttentionPolicy.Continue,
                     },
                     {
                         kind: IssueExecutionOutcomeKind.Completed,
@@ -1204,38 +1190,36 @@ describe("workflow", () => {
         expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
     });
 
-    test("halts with a handled stop without reporting an ordinary failure", async () => {
+    test("records a needs-attention outcome and continues without reporting an ordinary failure", async () => {
         const calls: string[] = [];
         const states: RunState[] = [];
         const events: ProgressUpdate[] = [];
-        await expect(
-            workflow(
+        const summary = await workflow(
+            {
+                ...baseOptions,
+            },
+            testRuntime(
+                calls,
+                states,
                 {
-                    ...baseOptions,
-                    onNeedsAttention: NeedsAttentionPolicy.Halt,
+                    outcomes: [
+                        {
+                            kind: IssueExecutionOutcomeKind.NeedsAttention,
+                            reason: NeedsAttentionReason.ExternalDependency,
+                            summary: "A prerequisite is still open.",
+                            evidence: ["The prerequisite is unresolved."],
+                            questions: ["When will it be available?"],
+                            artifactPath: "/tmp/needs-attention.json",
+                        },
+                    ],
                 },
-                testRuntime(
-                    calls,
-                    states,
-                    {
-                        outcomes: [
-                            {
-                                kind: IssueExecutionOutcomeKind.NeedsAttention,
-                                reason: NeedsAttentionReason.ExternalDependency,
-                                summary: "A prerequisite is still open.",
-                                evidence: ["The prerequisite is unresolved."],
-                                questions: ["When will it be available?"],
-                                artifactPath: "/tmp/needs-attention.json",
-                            },
-                        ],
-                    },
-                    events,
-                ),
+                events,
             ),
-        ).rejects.toMatchObject({ name: "NeedsAttentionStop" });
-        expect(states.at(-1)?.status).toBe(RunStateStatus.Active);
-        expect(states.at(-1)?.onNeedsAttention).toBe(NeedsAttentionPolicy.Halt);
-        expect(states.at(-1)?.activeIssue?.issueNumber).toBe(42);
+        );
+        expect(summary.counts[IssueExecutionOutcomeKind.NeedsAttention]).toBe(
+            1,
+        );
+        expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
         expect(events.some(({ status }) => status === "failed")).toBe(false);
         expect(events).toContainEqual(
             expect.objectContaining({
@@ -1247,45 +1231,16 @@ describe("workflow", () => {
                     evidence: ["The prerequisite is unresolved."],
                     questions: ["When will it be available?"],
                     artifactPath: "/tmp/needs-attention.json",
-                    policy: NeedsAttentionPolicy.Halt,
                 }),
             }),
         );
-        expect(events).toContainEqual(
-            expect.objectContaining({
-                stage: "run",
-                status: "needs-attention",
-                issue: { number: 42, title: firstIssue.title },
-                current: 1,
-                total: 1,
-                message: expect.stringContaining("needs-attention"),
-                details: expect.objectContaining({
-                    handled: true,
-                    reason: NeedsAttentionReason.ExternalDependency,
-                    summary: "A prerequisite is still open.",
-                    evidence: ["The prerequisite is unresolved."],
-                    questions: ["When will it be available?"],
-                    artifactPath: "/tmp/needs-attention.json",
-                    issueNumber: 42,
-                    issueTitle: firstIssue.title,
-                    queuePosition: 1,
-                    queueTotal: 1,
-                    policy: NeedsAttentionPolicy.Halt,
-                    counts: {
-                        completed: 0,
-                        decomposed: 0,
-                        escalated: 0,
-                        "needs-attention": 1,
-                        skipped: 0,
-                        failed: 0,
-                    },
-                }),
-            }),
+        expect(events.some(({ status }) => status === "needs-attention")).toBe(
+            true,
         );
         expect(calls).not.toContain("closeIssue:42");
     });
 
-    test("surfaces dependency-blocked issues as needs-attention outcomes and halts", async () => {
+    test("surfaces dependency-blocked issues as needs-attention outcomes and continues", async () => {
         const calls: string[] = [];
         const states: RunState[] = [];
         const events: ProgressUpdate[] = [];
@@ -1294,38 +1249,37 @@ describe("workflow", () => {
             number: 44,
             body: '<!-- ralphie:decomposition root=7 parent=35 key="blocked" depth=2 -->\n\nBlocked work.\n\n## Dependencies\n\n- #42 (prerequisite)',
         };
-        await expect(
-            workflow(
+        const summary = await workflow(
+            {
+                ...baseOptions,
+                maxIssues: 2,
+            },
+            testRuntime(
+                calls,
+                states,
                 {
-                    ...baseOptions,
-                    maxIssues: 2,
-                    onNeedsAttention: NeedsAttentionPolicy.Halt,
+                    issueLists: [[firstIssue, blockedIssue]],
+                    outcomes: [
+                        {
+                            kind: IssueExecutionOutcomeKind.NeedsAttention,
+                            reason: NeedsAttentionReason.MissingInformation,
+                            summary: "The prerequisite needs an answer.",
+                            evidence: ["The prerequisite is unanswered."],
+                            questions: ["What is the answer?"],
+                            route: "needs-attention",
+                        },
+                    ],
                 },
-                testRuntime(
-                    calls,
-                    states,
-                    {
-                        issueLists: [[firstIssue, blockedIssue]],
-                        outcomes: [
-                            {
-                                kind: IssueExecutionOutcomeKind.NeedsAttention,
-                                reason: NeedsAttentionReason.MissingInformation,
-                                summary: "The prerequisite needs an answer.",
-                                evidence: ["The prerequisite is unanswered."],
-                                questions: ["What is the answer?"],
-                                route: "needs-attention",
-                                policy: NeedsAttentionPolicy.Continue,
-                            },
-                        ],
-                    },
-                    events,
-                ),
+                events,
             ),
-        ).rejects.toMatchObject({ name: "NeedsAttentionStop" });
+        );
 
         // The dependency never completed, so the blocked issue was never
         // handed to the executor, never closed, and never notified unless the
-        // blocked path itself reports it. The halt stop names the blocked issue.
+        // blocked path itself reports it.
+        expect(summary.counts[IssueExecutionOutcomeKind.NeedsAttention]).toBe(
+            2,
+        );
         expect(calls).not.toContain("executeIssue:44");
         expect(calls).not.toContain("closeIssue:42");
         expect(calls).not.toContain("closeIssue:44");
@@ -1338,7 +1292,6 @@ describe("workflow", () => {
                 details: expect.objectContaining({
                     reason: NeedsAttentionReason.ExternalDependency,
                     summary: expect.stringContaining("#42"),
-                    policy: NeedsAttentionPolicy.Halt,
                 }),
             }),
         );
@@ -1354,11 +1307,13 @@ describe("workflow", () => {
         expect(
             blockedOutcome.evidence.some((item) => item.includes("#42")),
         ).toBe(true);
-        expect(states.at(-1)?.status).toBe(RunStateStatus.Active);
-        expect(states.at(-1)?.activeIssue?.issueNumber).toBe(44);
+        expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
+        expect(
+            states.at(-1)?.queue.pending.map(({ number }) => number),
+        ).toContain(44);
     });
 
-    test("completes with dependency-blocked issues recorded and still pending when the policy continues", async () => {
+    test("completes with dependency-blocked issues recorded and still pending", async () => {
         const calls: string[] = [];
         const states: RunState[] = [];
         const blockedIssue: GitHubIssue = {
@@ -1370,7 +1325,6 @@ describe("workflow", () => {
             {
                 ...baseOptions,
                 maxIssues: 2,
-                onNeedsAttention: NeedsAttentionPolicy.Continue,
             },
             testRuntime(calls, states, {
                 issueLists: [[firstIssue, blockedIssue]],
@@ -1382,7 +1336,6 @@ describe("workflow", () => {
                         evidence: ["The prerequisite is unanswered."],
                         questions: ["What is the answer?"],
                         route: "needs-attention",
-                        policy: NeedsAttentionPolicy.Continue,
                     },
                 ],
             }),
@@ -1428,7 +1381,6 @@ describe("workflow", () => {
                         evidence: ["The prerequisite is unanswered."],
                         questions: ["What is the answer?"],
                         route: "needs-attention",
-                        policy: NeedsAttentionPolicy.Continue,
                     },
                 ],
                 needsAttentionNotification: {
@@ -1466,7 +1418,7 @@ describe("workflow", () => {
         expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
     });
 
-    test("persists halt recovery after its artifact and reuses grounding on resume", async () => {
+    test("persists the needs-attention outcome before continuing to the next issue", async () => {
         const calls: string[] = [];
         const states: RunState[] = [];
         const events: ProgressUpdate[] = [];
@@ -1476,50 +1428,52 @@ describe("workflow", () => {
         });
         let savedOutcome = false;
 
-        await expect(
-            workflow(
+        const summary = await workflow(
+            {
+                ...baseOptions,
+                maxIssues: 2,
+            },
+            testRuntime(
+                calls,
+                states,
                 {
-                    ...baseOptions,
-                    maxIssues: 2,
-                    onNeedsAttention: undefined,
-                },
-                testRuntime(
-                    calls,
-                    states,
-                    {
-                        issueLists: [[firstIssue, secondIssue]],
-                        issueExecutor: executor,
-                        onStateSave: (state) => {
-                            if (
-                                !savedOutcome &&
-                                state.activeIssue?.issueNumber === 42 &&
-                                state.checkout?.head === "head-1" &&
-                                state.queue.pending
-                                    .map(({ number }) => number)
-                                    .join(",") === "42,43" &&
-                                state.outcomes.some(
-                                    ({ issueNumber, outcome }) =>
-                                        issueNumber === 42 &&
-                                        outcome.kind ===
-                                            IssueExecutionOutcomeKind.NeedsAttention,
-                                )
-                            ) {
-                                savedOutcome = true;
-                                calls.push("save:needs-attention");
-                            }
-                        },
+                    issueLists: [[firstIssue, secondIssue]],
+                    issueExecutor: executor,
+                    onStateSave: (state) => {
+                        if (
+                            !savedOutcome &&
+                            state.activeIssue?.issueNumber === 42 &&
+                            state.checkout?.head === "head-1" &&
+                            state.queue.pending
+                                .map(({ number }) => number)
+                                .join(",") === "42,43" &&
+                            state.outcomes.some(
+                                ({ issueNumber, outcome }) =>
+                                    issueNumber === 42 &&
+                                    outcome.kind ===
+                                        IssueExecutionOutcomeKind.NeedsAttention,
+                            )
+                        ) {
+                            savedOutcome = true;
+                            calls.push("save:needs-attention");
+                        }
                     },
-                    events,
-                ),
+                },
+                events,
             ),
-        ).rejects.toMatchObject({ name: "NeedsAttentionStop" });
+        );
 
-        const haltState = states.at(-1);
-        if (haltState === undefined) throw new Error("Missing halted state");
-        expect(haltState).toMatchObject({
+        const pendingState = states.find(
+            (state) =>
+                state.activeIssue?.issueNumber === 42 &&
+                state.outcomes.some(({ issueNumber }) => issueNumber === 42),
+        );
+        if (pendingState === undefined) {
+            throw new Error("Missing persisted needs-attention state");
+        }
+        expect(pendingState).toMatchObject({
             status: RunStateStatus.Active,
             runId: "test-run",
-            onNeedsAttention: NeedsAttentionPolicy.Halt,
             activeIssue: { issueNumber: 42, stage: "grounding" },
             checkout: { branch: "develop", head: "head-1" },
             queue: {
@@ -1531,94 +1485,29 @@ describe("workflow", () => {
                 processedCount: 0,
             },
         });
-        expect(haltState.outcomes).toHaveLength(1);
-        expect(haltState.outcomes[0]).toMatchObject({
-            issueNumber: 42,
-            outcome: {
-                kind: IssueExecutionOutcomeKind.NeedsAttention,
-            },
-        });
+        const outcome42 = pendingState.outcomes.find(
+            ({ issueNumber }) => issueNumber === 42,
+        )?.outcome;
+        if (outcome42?.kind !== IssueExecutionOutcomeKind.NeedsAttention) {
+            throw new Error("Expected a needs-attention outcome for #42.");
+        }
         expect(
-            haltState.outcomes[0]?.outcome.kind ===
-                IssueExecutionOutcomeKind.NeedsAttention &&
-                "artifactPath" in haltState.outcomes[0].outcome &&
-                haltState.outcomes[0].outcome.artifactPath,
+            "artifactPath" in outcome42 && outcome42.artifactPath,
         ).toBeString();
         expectCallOrder(calls, [
             `artifact:42:${IssueArtifactKind.NeedsAttentionDecision}`,
             "save:needs-attention",
             "closeRuntime",
         ]);
-        expect(calls).not.toContain("grounding:43");
-        expect(events.some(({ status }) => status === "failed")).toBeFalse();
-        expect(events).toContainEqual(
-            expect.objectContaining({
-                stage: "run",
-                status: "needs-attention",
-                details: expect.objectContaining({
-                    handled: true,
-                    counts: {
-                        completed: 0,
-                        decomposed: 0,
-                        escalated: 0,
-                        "needs-attention": 1,
-                        skipped: 0,
-                        failed: 0,
-                    },
-                }),
-            }),
+        expect(summary.counts[IssueExecutionOutcomeKind.NeedsAttention]).toBe(
+            1,
         );
-
-        const resumedStates: RunState[] = [];
-        const resumedEvents: ProgressUpdate[] = [];
-        await expect(
-            workflow(
-                {
-                    ...baseOptions,
-                    maxIssues: 2,
-                    resumeState: haltState,
-                },
-                testRuntime(
-                    calls,
-                    resumedStates,
-                    {
-                        issueLists: [[firstIssue, secondIssue]],
-                        issueExecutor: executor,
-                        captureStart: 1,
-                    },
-                    resumedEvents,
-                ),
-            ),
-        ).rejects.toMatchObject({ name: "NeedsAttentionStop" });
-
-        expect(calls.filter((call) => call === "grounding:42")).toHaveLength(1);
-        expect(calls).not.toContain("grounding:43");
-        expect(calls.filter((call) => call === "closeRuntime")).toHaveLength(2);
-        expect(calls).not.toContain("directPush:42:develop");
+        expect(summary.counts.completed).toBe(1);
+        expect(calls).toContain("grounding:43");
+        expect(calls).toContain("closeIssue:43");
         expect(calls).not.toContain("closeIssue:42");
-        expect(resumedStates.at(-1)).toMatchObject({
-            status: RunStateStatus.Active,
-            runId: haltState.runId,
-            activeIssue: { issueNumber: 42, stage: "grounding" },
-            queue: {
-                pending: [{ number: 42 }, { number: 43 }],
-                completedIssueNumbers: [],
-                processedCount: 0,
-            },
-        });
-        expect(resumedStates.at(-1)?.outcomes).toHaveLength(1);
-        expect(resumedEvents).toContainEqual(
-            expect.objectContaining({
-                stage: "run",
-                status: "needs-attention",
-                details: expect.objectContaining({
-                    counts: expect.objectContaining({
-                        "needs-attention": 1,
-                        failed: 0,
-                    }),
-                }),
-            }),
-        );
+        expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
+        expect(events.some(({ status }) => status === "failed")).toBeFalse();
     });
 
     test("persists the needs-attention outcome before notification and clears the intent after success", async () => {
@@ -1697,7 +1586,7 @@ describe("workflow", () => {
         );
     });
 
-    test("retains a halted open issue after a successful notification", async () => {
+    test("retains the needs-attention outcome and intent until the notification succeeds", async () => {
         const states: RunState[] = [];
         const notification: GitHubNeedsAttentionNotificationService = {
             notify: async () => ({
@@ -1706,38 +1595,43 @@ describe("workflow", () => {
             }),
         };
 
-        await expect(
-            workflow(
-                {
-                    ...baseOptions,
-                    onNeedsAttention: NeedsAttentionPolicy.Halt,
-                    notificationsEnabled: true,
-                },
-                testRuntime([], states, {
-                    needsAttentionNotification: notification,
-                    outcomes: [
-                        {
-                            kind: IssueExecutionOutcomeKind.NeedsAttention,
-                            reason: NeedsAttentionReason.ExternalDependency,
-                            summary: "A prerequisite is still open.",
-                            evidence: ["The prerequisite is unresolved."],
-                            questions: ["When will it be available?"],
-                            artifactPath: "/tmp/needs-attention.json",
-                        },
-                    ],
-                }),
-            ),
-        ).rejects.toMatchObject({ name: "NeedsAttentionStop" });
+        const summary = await workflow(
+            {
+                ...baseOptions,
+                notificationsEnabled: true,
+            },
+            testRuntime([], states, {
+                needsAttentionNotification: notification,
+                outcomes: [
+                    {
+                        kind: IssueExecutionOutcomeKind.NeedsAttention,
+                        reason: NeedsAttentionReason.ExternalDependency,
+                        summary: "A prerequisite is still open.",
+                        evidence: ["The prerequisite is unresolved."],
+                        questions: ["When will it be available?"],
+                        artifactPath: "/tmp/needs-attention.json",
+                    },
+                ],
+            }),
+        );
 
+        expect(summary.counts[IssueExecutionOutcomeKind.NeedsAttention]).toBe(
+            1,
+        );
+        expect(
+            states.some(
+                (state) =>
+                    state.activeIssue?.issueNumber === 42 &&
+                    state.pendingNotification !== undefined,
+            ),
+        ).toBeTrue();
         const state = states.at(-1);
-        if (state === undefined) throw new Error("Missing halted state");
+        if (state === undefined) throw new Error("Missing final state");
+        expect(state.status).toBe(RunStateStatus.Complete);
         expect(state.pendingNotification).toBeUndefined();
-        expect(state.queue.pending.map(({ number }) => number)).toContain(42);
-        expect(state.queue.completedIssueNumbers).not.toContain(42);
-        expect(state.activeIssue).toEqual({
-            issueNumber: 42,
-            stage: "grounding",
-        });
+        expect(state.outcomes[0]?.outcome.kind).toBe(
+            IssueExecutionOutcomeKind.NeedsAttention,
+        );
     });
 
     test("keeps notification recovery distinct and retries the saved outcome without agent work", async () => {
@@ -1822,7 +1716,6 @@ describe("workflow", () => {
             runId: "disabled-notification-resume",
             repository: baseOptions.repo,
             branch: "develop",
-            onNeedsAttention: NeedsAttentionPolicy.Continue,
             dryRun: false,
             notificationsEnabled: false,
             selection: { agent: DEFAULT_AGENT },
@@ -1917,62 +1810,6 @@ describe("workflow", () => {
         expect(notified).toBeFalse();
     });
 
-    test("refreshes issue freshness metadata before active resume", async () => {
-        const initialIssue = {
-            ...firstIssue,
-            updatedAt: "2026-08-28T00:00:00.000Z",
-            commentCount: 1,
-            commentVersion: "2026-08-28T00:00:00.000Z",
-        };
-        const needsAttention: IssueExecutionOutcome = {
-            kind: IssueExecutionOutcomeKind.NeedsAttention,
-            reason: NeedsAttentionReason.ExternalDependency,
-            summary: "A prerequisite is still open.",
-            evidence: ["The prerequisite is unresolved."],
-            questions: ["When will it be available?"],
-            artifactPath: "/tmp/needs-attention.json",
-        };
-        const firstCalls: string[] = [];
-        const firstStates: RunState[] = [];
-        await expect(
-            workflow(
-                { ...baseOptions, onNeedsAttention: NeedsAttentionPolicy.Halt },
-                testRuntime(firstCalls, firstStates, {
-                    issueLists: [[initialIssue]],
-                    outcomes: [needsAttention],
-                }),
-            ),
-        ).rejects.toMatchObject({ name: "NeedsAttentionStop" });
-        const resumeState = firstStates.at(-1);
-        if (resumeState === undefined)
-            throw new Error("Missing resumable state");
-
-        const currentIssue = {
-            ...initialIssue,
-            updatedAt: "2026-08-29T00:00:00.000Z",
-            commentCount: 2,
-            commentVersion: "2026-08-29T00:00:00.000Z",
-        };
-        const contexts: IssueExecutionContext[] = [];
-        await expect(
-            workflow(
-                {
-                    ...baseOptions,
-                    onNeedsAttention: NeedsAttentionPolicy.Halt,
-                    resumeState,
-                },
-                testRuntime([], [], {
-                    issueLists: [[currentIssue]],
-                    outcomes: [needsAttention],
-                    executionContexts: contexts,
-                    captureStart: 1,
-                }),
-            ),
-        ).rejects.toMatchObject({ name: "NeedsAttentionStop" });
-
-        expect(contexts[0]?.issue).toEqual(currentIssue);
-    });
-
     test("refreshes the selected issue before execution", async () => {
         const calls: string[] = [];
         const refreshedIssue = {
@@ -2041,7 +1878,7 @@ describe("workflow", () => {
         },
     );
 
-    test("halts, persists the active issue, and releases the agent on failure", async () => {
+    test("records a failed issue, restores its checkout, and reports the drained failure", async () => {
         const calls: string[] = [];
         const states: RunState[] = [];
         await expect(
@@ -2056,13 +1893,22 @@ describe("workflow", () => {
                     ],
                 }),
             ),
-        ).rejects.toThrow("Issue #42 failed");
-        expect(states.at(-1)?.status).toBe(RunStateStatus.Active);
-        expect(states.at(-1)?.activeIssue?.issueNumber).toBe(42);
+        ).rejects.toThrow("Run drained with issue failures");
         expect(
-            states.at(-1)?.queue.pending.map(({ number }) => number),
-        ).toEqual([42]);
-        expect(states.at(-1)?.queue.processedCount).toBe(0);
+            states.some(
+                (state) =>
+                    state.activeIssue?.issueNumber === 42 &&
+                    state.queue.pending
+                        .map(({ number }) => number)
+                        .includes(42),
+            ),
+        ).toBeTrue();
+        expect(calls).toContain("restoreCheckout");
+        expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
+        expect(states.at(-1)?.outcomes[0]).toMatchObject({
+            issueNumber: 42,
+            outcome: { kind: IssueExecutionOutcomeKind.Failed },
+        });
         expect(calls.at(-1)).toBe("closeRuntime");
     });
 
@@ -2074,7 +1920,6 @@ describe("workflow", () => {
                 {
                     ...baseOptions,
                     maxIssues: 2,
-                    issueFailurePolicy: IssueFailurePolicy.Continue,
                 },
                 testRuntime(calls, states, {
                     issueLists: [[firstIssue, secondIssue]],
@@ -2160,7 +2005,6 @@ describe("workflow", () => {
         const summary = await workflow(
             {
                 ...baseOptions,
-                onNeedsAttention: NeedsAttentionPolicy.Halt,
                 resumeState,
             },
             testRuntime(calls, resumedStates, {
@@ -2174,9 +2018,6 @@ describe("workflow", () => {
         );
         expect(summary.counts.completed).toBe(1);
         expect(resumedStates.at(-1)?.status).toBe(RunStateStatus.Complete);
-        expect(resumedStates.at(-1)?.onNeedsAttention).toBe(
-            NeedsAttentionPolicy.Continue,
-        );
     });
 
     test("resumes a saved verified closure without rerunning grounding or verification", async () => {

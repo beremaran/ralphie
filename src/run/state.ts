@@ -11,15 +11,9 @@ import {
     nonBlankStringSchema,
 } from "../issues/decisions.ts";
 import { RalphieError } from "../shared/error.ts";
-import {
-    DEFAULT_NEEDS_ATTENTION_POLICY,
-    DEFAULT_ISSUE_FAILURE_POLICY,
-    DEFAULT_MAX_DECOMPOSITION_DEPTH,
-    IssueFailurePolicy,
-    NeedsAttentionPolicy,
-} from "../options.ts";
+import { DEFAULT_MAX_DECOMPOSITION_DEPTH } from "../options.ts";
 
-export const RUN_STATE_VERSION = 10 as const;
+export const RUN_STATE_VERSION = 11 as const;
 
 const dryRunRouteSchema = z.enum(DRY_RUN_ROUTES);
 
@@ -50,43 +44,51 @@ const issueSchema = z.object({
     commentVersion: z.string().min(1).optional(),
 });
 
-const needsAttentionOutcomeSchema = z.union([
-    z
-        .object({
-            kind: z.literal(IssueExecutionOutcomeKind.NeedsAttention),
-            reason: z.enum(NeedsAttentionReason),
-            summary: nonBlankStringSchema,
-            evidence: z.array(nonBlankStringSchema).min(1),
-            questions: z.array(nonBlankStringSchema).min(1),
-            artifactPath: z.string().min(1),
-            route: z.literal("needs-attention").optional(),
-            policy: z.enum(NeedsAttentionPolicy).optional(),
-        })
-        .strict(),
-    z
-        .object({
-            kind: z.literal(IssueExecutionOutcomeKind.NeedsAttention),
-            reason: z.enum(NeedsAttentionReason),
-            summary: nonBlankStringSchema,
-            evidence: z.array(nonBlankStringSchema).min(1),
-            questions: z.array(nonBlankStringSchema).min(1),
-            diagnosticsPath: z.string().min(1),
-            route: z.literal("needs-attention").optional(),
-            policy: z.enum(NeedsAttentionPolicy).optional(),
-        })
-        .strict(),
-    z
-        .object({
-            kind: z.literal(IssueExecutionOutcomeKind.NeedsAttention),
-            reason: z.enum(NeedsAttentionReason),
-            summary: nonBlankStringSchema,
-            evidence: z.array(nonBlankStringSchema).min(1),
-            questions: z.array(nonBlankStringSchema).min(1),
-            route: z.literal("needs-attention"),
-            policy: z.enum(NeedsAttentionPolicy).optional(),
-        })
-        .strict(),
-]);
+const stripLegacyPolicy = (value: unknown): unknown => {
+    if (typeof value !== "object" || value === null || !("policy" in value)) {
+        return value;
+    }
+    const { policy: _policy, ...rest } = value as Record<string, unknown>;
+    return rest;
+};
+
+const needsAttentionOutcomeSchema = z.preprocess(
+    stripLegacyPolicy,
+    z.union([
+        z
+            .object({
+                kind: z.literal(IssueExecutionOutcomeKind.NeedsAttention),
+                reason: z.enum(NeedsAttentionReason),
+                summary: nonBlankStringSchema,
+                evidence: z.array(nonBlankStringSchema).min(1),
+                questions: z.array(nonBlankStringSchema).min(1),
+                artifactPath: z.string().min(1),
+                route: z.literal("needs-attention").optional(),
+            })
+            .strict(),
+        z
+            .object({
+                kind: z.literal(IssueExecutionOutcomeKind.NeedsAttention),
+                reason: z.enum(NeedsAttentionReason),
+                summary: nonBlankStringSchema,
+                evidence: z.array(nonBlankStringSchema).min(1),
+                questions: z.array(nonBlankStringSchema).min(1),
+                diagnosticsPath: z.string().min(1),
+                route: z.literal("needs-attention").optional(),
+            })
+            .strict(),
+        z
+            .object({
+                kind: z.literal(IssueExecutionOutcomeKind.NeedsAttention),
+                reason: z.enum(NeedsAttentionReason),
+                summary: nonBlankStringSchema,
+                evidence: z.array(nonBlankStringSchema).min(1),
+                questions: z.array(nonBlankStringSchema).min(1),
+                route: z.literal("needs-attention"),
+            })
+            .strict(),
+    ]),
+);
 
 const currentOutcomeSchema = z.union([
     z.object({
@@ -147,8 +149,6 @@ const runStateFields = {
     runId: z.string().min(1),
     repository: z.string().min(1),
     branch: z.string().min(1),
-    onNeedsAttention: z.enum(NeedsAttentionPolicy),
-    onIssueFailure: z.enum(IssueFailurePolicy).optional(),
     dryRun: z.boolean().optional(),
     /** Whether needs-attention outcomes should be published to GitHub. */
     notificationsEnabled: z.boolean().optional(),
@@ -219,10 +219,9 @@ const legacyRunStateSchema = z.object({
         z.literal(7),
         z.literal(8),
         z.literal(9),
+        z.literal(10),
     ]),
     ...runStateFields,
-    onNeedsAttention: z.enum(NeedsAttentionPolicy).optional(),
-    onIssueFailure: z.enum(IssueFailurePolicy).optional(),
     maxDecompositionDepth: z.number().int().positive().optional(),
 });
 
@@ -232,7 +231,7 @@ type RunStateFields = z.infer<z.ZodObject<typeof runStateFields>>;
 export type RunState = Omit<RunStateFields, "maxDecompositionDepth"> & {
     /** Optional only for typed legacy-state fixtures; loading fills the default. */
     readonly maxDecompositionDepth?: number;
-    readonly version: 4 | 5 | 6 | 7 | 8 | 9 | 10;
+    readonly version: 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
 };
 
 type LoadedRunState = {
@@ -252,17 +251,14 @@ const migrateRunState = (value: unknown): LoadedRunState => {
             value.version === 6 ||
             value.version === 7 ||
             value.version === 8 ||
-            value.version === 9)
+            value.version === 9 ||
+            value.version === 10)
     ) {
         const legacy = legacyRunStateSchema.parse(value);
         return {
             state: runStateSchema.parse({
                 ...legacy,
                 version: RUN_STATE_VERSION,
-                onNeedsAttention:
-                    legacy.onNeedsAttention ?? DEFAULT_NEEDS_ATTENTION_POLICY,
-                onIssueFailure:
-                    legacy.onIssueFailure ?? DEFAULT_ISSUE_FAILURE_POLICY,
                 notificationsEnabled: legacy.notificationsEnabled ?? false,
                 maxDecompositionDepth:
                     legacy.maxDecompositionDepth ??

@@ -35,19 +35,9 @@ import {
     type RunState,
     RunStateStatus,
 } from "./run/state.ts";
-import {
-    isNeedsAttentionStop,
-    NeedsAttentionStop,
-} from "./process/exit-code.ts";
 import { RalphieError } from "./shared/error.ts";
 import { resolveWorkspacePath } from "./workspace/workspace.ts";
-import {
-    DEFAULT_NEEDS_ATTENTION_POLICY,
-    DEFAULT_ISSUE_FAILURE_POLICY,
-    DEFAULT_MAX_DECOMPOSITION_DEPTH,
-    NeedsAttentionPolicy,
-    IssueFailurePolicy,
-} from "./options.ts";
+import { DEFAULT_MAX_DECOMPOSITION_DEPTH } from "./options.ts";
 import type { IssueWorkflowRuntime } from "./runtime.ts";
 
 const errorMessage = (error: unknown): string =>
@@ -125,7 +115,6 @@ const copyNeedsAttentionOutcome = (
         evidence: [...outcome.evidence],
         questions: [...outcome.questions],
         ...(outcome.route === undefined ? {} : { route: outcome.route }),
-        ...(outcome.policy === undefined ? {} : { policy: outcome.policy }),
     };
     if (outcome.artifactPath !== undefined) {
         return { ...details, artifactPath: outcome.artifactPath };
@@ -203,7 +192,6 @@ type NeedsAttentionOutcome = Extract<
     { readonly kind: IssueExecutionOutcomeKind.NeedsAttention }
 > & {
     readonly route?: "needs-attention";
-    readonly policy?: NeedsAttentionPolicy;
     readonly artifactPath?: string;
     readonly diagnosticsPath?: string;
 };
@@ -239,7 +227,6 @@ const needsAttentionProgressMessage = (
 
 const needsAttentionProgressDetails = (input: {
     readonly outcome: NeedsAttentionOutcome;
-    readonly policy: NeedsAttentionPolicy;
     readonly dryRun: boolean;
     readonly current: number;
     readonly budget?: number;
@@ -254,7 +241,6 @@ const needsAttentionProgressDetails = (input: {
             : {}
         : { route: input.outcome.route }),
     ...needsAttentionArtifactDetails(input.outcome),
-    policy: input.policy,
     dryRun: input.dryRun,
     queuePosition: input.current,
     budget: input.budget ?? "unlimited",
@@ -343,8 +329,6 @@ type PersistWorkflowStateInput = {
     readonly actualRunId: string;
     readonly repository: string;
     readonly branch: string;
-    readonly onNeedsAttention: NeedsAttentionPolicy;
-    readonly issueFailurePolicy: IssueFailurePolicy;
     readonly dryRun: boolean;
     readonly notificationsEnabled: boolean;
     readonly needsAttentionLabel?: string;
@@ -401,8 +385,6 @@ const persistWorkflowState = async (
         runId: input.actualRunId,
         repository: input.repository,
         branch: input.branch,
-        onNeedsAttention: input.onNeedsAttention,
-        onIssueFailure: input.issueFailurePolicy,
         maxDecompositionDepth: input.maxDecompositionDepth,
         dryRun: input.dryRun,
         notificationsEnabled: input.notificationsEnabled,
@@ -442,24 +424,18 @@ type WorkflowIssueContext = {
 /**
  * Dependency-blocked issues are never handed to the executor, so no agent
  * session can report them. Surface them explicitly as needs-attention
- * outcomes: evidence naming each open dependency, and the halt/continue
- * policy, instead of failing the run with a bare "blocked by open
- * dependencies" error. Blocked issues stay pending in the persisted queue
- * and become ready when their dependencies complete. Returns whether any
- * blocked issue was recorded.
+ * outcomes: evidence naming each open dependency instead of failing the run
+ * with a bare "blocked by open dependencies" error. Blocked issues stay
+ * pending in the persisted queue and become ready when their dependencies
+ * complete.
  */
 type DependencyBlockedHandlers = {
     readonly queue: ReturnType<typeof createIssueQueue>;
-    readonly onNeedsAttention: NeedsAttentionPolicy;
     readonly recordIssueOutcome: (
         issueNumber: number,
         outcome: IssueExecutionOutcome,
     ) => void;
     readonly emitNeedsAttentionEvent: (
-        issueContext: Pick<WorkflowIssueContext, "issue" | "current" | "total">,
-        outcome: NeedsAttentionOutcome,
-    ) => Promise<void>;
-    readonly emitHandledNeedsAttention: (
         issueContext: Pick<WorkflowIssueContext, "issue" | "current" | "total">,
         outcome: NeedsAttentionOutcome,
     ) => Promise<void>;
@@ -473,11 +449,7 @@ type DependencyBlockedHandlers = {
 const emitDependencyBlockedIssue = async (
     handlers: Pick<
         DependencyBlockedHandlers,
-        | "onNeedsAttention"
-        | "recordIssueOutcome"
-        | "emitNeedsAttentionEvent"
-        | "emitHandledNeedsAttention"
-        | "persistState"
+        "recordIssueOutcome" | "emitNeedsAttentionEvent" | "persistState"
     > & {
         readonly issue: GitHubIssue;
         readonly openDependencies: ReadonlyArray<number>;
@@ -486,10 +458,8 @@ const emitDependencyBlockedIssue = async (
     },
 ): Promise<void> => {
     const {
-        onNeedsAttention,
         recordIssueOutcome,
         emitNeedsAttentionEvent,
-        emitHandledNeedsAttention,
         persistState,
         issue,
         openDependencies,
@@ -510,21 +480,13 @@ const emitDependencyBlockedIssue = async (
         questions: [
             `Complete ${dependencyList} before this issue can be queued, or confirm the dependencies should be treated as satisfied.`,
         ],
-        policy: onNeedsAttention,
         route: "needs-attention",
     };
     recordIssueOutcome(issue.number, outcome);
-    const issueContext = { issue, current, total };
-    await emitNeedsAttentionEvent(issueContext, outcome);
-    if (onNeedsAttention !== NeedsAttentionPolicy.Halt) return;
+    await emitNeedsAttentionEvent({ issue, current, total }, outcome);
     await persistState(RunStateStatus.Active, {
         issueNumber: issue.number,
         stage: "grounding",
-    });
-    await emitHandledNeedsAttention(issueContext, outcome);
-    throw new NeedsAttentionStop({
-        issueNumber: issue.number,
-        summary: outcome.summary,
     });
 };
 
@@ -537,9 +499,8 @@ const emitDependencyBlockedIssue = async (
  * notification or label: an issue waiting on open queue items resolves by
  * queue completion, not by human attention, so the opt-in notifier is
  * reserved for agent-reported blockers. Blocked issues stay pending in the
- * persisted queue, the halt/continue policy still governs the run, and the
- * fail-closed error is thrown only when the blocked state is spurious (no
- * pending entry has an unmet dependency).
+ * persisted queue, and the fail-closed error is thrown only when the blocked
+ * state is spurious (no pending entry has an unmet dependency).
  */
 const handleDependencyBlockedQueue = async (
     handlers: DependencyBlockedHandlers,
@@ -620,8 +581,6 @@ export type WorkflowOptions = {
     readonly runId?: string;
     readonly resumeState?: RunState;
     readonly resumePath?: string;
-    readonly issueFailurePolicy?: IssueFailurePolicy;
-    readonly onNeedsAttention?: NeedsAttentionPolicy;
     /** Publish needs-attention outcomes through the runtime notifier. */
     readonly notificationsEnabled?: boolean;
     /** Optional additive label applied with a needs-attention notification. */
@@ -648,8 +607,6 @@ type WorkflowConfiguration = {
     readonly runId: string;
     readonly resumeState?: RunState;
     readonly resumePath?: string;
-    readonly issueFailurePolicy: IssueFailurePolicy;
-    readonly onNeedsAttention: NeedsAttentionPolicy;
     readonly notificationsEnabled: boolean;
     readonly needsAttentionLabel?: string;
     readonly dryRun: boolean;
@@ -687,15 +644,11 @@ const makeWorkflowConfiguration = (
         runId = crypto.randomUUID(),
         resumeState,
         resumePath,
-        issueFailurePolicy = DEFAULT_ISSUE_FAILURE_POLICY,
-        onNeedsAttention = DEFAULT_NEEDS_ATTENTION_POLICY,
         notificationsEnabled = false,
         needsAttentionLabel,
         dryRun = false,
     } = options;
     const actualRunId = resumeState?.runId ?? runId;
-    const effectiveOnNeedsAttention =
-        resumeState?.onNeedsAttention ?? onNeedsAttention;
     const effectiveNotificationsEnabled =
         resumeState?.notificationsEnabled ?? notificationsEnabled;
     const effectiveNeedsAttentionLabel =
@@ -730,8 +683,6 @@ const makeWorkflowConfiguration = (
         runId,
         resumeState,
         resumePath,
-        issueFailurePolicy,
-        onNeedsAttention: effectiveOnNeedsAttention,
         notificationsEnabled: effectiveNotificationsEnabled,
         ...(effectiveNeedsAttentionLabel === undefined
             ? {}
@@ -787,8 +738,6 @@ const emitRunStarted = async (
             ...(config.needsAttentionLabel === undefined
                 ? {}
                 : { needsAttentionLabel: config.needsAttentionLabel }),
-            policy: config.onNeedsAttention,
-            onNeedsAttention: config.onNeedsAttention,
             ...(config.resumeState === undefined
                 ? {}
                 : { resumed: true, statePath: config.statePath }),
@@ -810,7 +759,6 @@ const emitRunSucceeded = async (
             counts: summary.counts,
             routes: routeSummary(summary.outcomes),
             statePath: config.statePath,
-            policy: config.onNeedsAttention,
             budget:
                 config.resumeState?.maxIssues ??
                 config.maxIssues ??
@@ -903,8 +851,6 @@ export const workflow = async (
         startClean,
         signal,
         resumeState,
-        issueFailurePolicy,
-        onNeedsAttention,
         notificationsEnabled,
         needsAttentionLabel,
         actualRunId,
@@ -1121,8 +1067,6 @@ export const workflow = async (
                         actualRunId,
                         repository: repo,
                         branch,
-                        onNeedsAttention,
-                        issueFailurePolicy,
                         dryRun: effectiveDryRun,
                         notificationsEnabled,
                         needsAttentionLabel,
@@ -1329,7 +1273,6 @@ export const workflow = async (
                         implementationFallbackModel:
                             config.implementationFallbackModel,
                         signal,
-                        needsAttentionPolicy: onNeedsAttention,
                         maxDecompositionDepth,
                     }),
                 (result) => outcomeMessage(issueContext.issue.number, result),
@@ -1409,7 +1352,6 @@ export const workflow = async (
             >,
             outcome: NeedsAttentionOutcome,
         ): Promise<void> => {
-            const policy = outcome.policy ?? onNeedsAttention;
             await progress.emit({
                 issue: {
                     number: issueContext.issue.number,
@@ -1426,52 +1368,10 @@ export const workflow = async (
                 ),
                 details: needsAttentionProgressDetails({
                     outcome,
-                    policy,
                     dryRun: effectiveDryRun,
                     current: issueContext.current,
                     budget: resumeState?.maxIssues ?? maxIssues,
                 }),
-            });
-        };
-
-        const emitHandledNeedsAttention = async (
-            issueContext: Pick<
-                WorkflowIssueContext,
-                "issue" | "current" | "total"
-            >,
-            outcome: NeedsAttentionOutcome,
-        ): Promise<void> => {
-            const { issue, current, total } = issueContext;
-            const summary = summarize(actualRunId, outcomes);
-            const policy = outcome.policy ?? onNeedsAttention;
-            await progress.emit({
-                stage: "run",
-                status: "needs-attention",
-                issue: { number: issue.number, title: issue.title },
-                current,
-                total,
-                message: summaryMessage(
-                    `Run halted after issue #${issue.number} needs attention`,
-                    summary.counts,
-                ),
-                details: {
-                    runId: summary.runId,
-                    counts: summary.counts,
-                    routes: routeSummary(summary.outcomes),
-                    statePath,
-                    issueNumber: issue.number,
-                    issueTitle: issue.title,
-                    queuePosition: current,
-                    queueTotal: total,
-                    ...needsAttentionProgressDetails({
-                        outcome,
-                        policy,
-                        dryRun: effectiveDryRun,
-                        current,
-                        budget: resumeState?.maxIssues ?? maxIssues,
-                    }),
-                    handled: true,
-                },
             });
         };
 
@@ -1559,36 +1459,14 @@ export const workflow = async (
             pendingNotification = undefined;
         };
 
-        const clearHaltedNeedsAttention = async (
-            issueNumber: number,
-        ): Promise<void> => {
-            // Clear only the notification intent. Keep the open issue in the
-            // persisted queue without marking it completed, so resume can
-            // retry the issue after its needs-attention condition changes.
-            activeIssue = {
-                issueNumber,
-                stage: "grounding",
-            };
-            await persistState(RunStateStatus.Active, activeIssue);
-        };
-
         const handleFailedIssue = async (
             issueContext: WorkflowIssueContext,
-            outcome: Extract<
-                IssueExecutionOutcome,
-                { readonly kind: IssueExecutionOutcomeKind.Failed }
-            >,
         ): Promise<void> => {
             checkout = await captureCheckout();
             await persistState(RunStateStatus.Active, {
                 issueNumber: issueContext.issue.number,
                 stage: "issue-execution",
             });
-            if (issueFailurePolicy === IssueFailurePolicy.Halt) {
-                throw new RalphieError({
-                    message: `Issue #${issueContext.issue.number} failed: ${outcome.message}`,
-                });
-            }
             await restoreCancellationCheckout?.();
             activeQueueIssues.delete(issueContext.issue.number);
             activeIssue = undefined;
@@ -1604,7 +1482,6 @@ export const workflow = async (
                 { readonly kind: IssueExecutionOutcomeKind.NeedsAttention }
             >,
         ): Promise<void> => {
-            const policy = outcome.policy ?? onNeedsAttention;
             checkout = await captureNeedsAttentionCheckout(issueContext);
             await emitNeedsAttentionEvent(issueContext, outcome);
             const notificationEnabled =
@@ -1619,19 +1496,9 @@ export const workflow = async (
                     intent,
                 );
             }
-            if (policy !== NeedsAttentionPolicy.Halt) return;
-            if (notificationEnabled) {
-                await clearHaltedNeedsAttention(issueContext.issue.number);
-            } else {
-                await persistState(RunStateStatus.Active, {
-                    issueNumber: issueContext.issue.number,
-                    stage: "grounding",
-                });
-            }
-            await emitHandledNeedsAttention(issueContext, outcome);
-            throw new NeedsAttentionStop({
+            await persistState(RunStateStatus.Active, {
                 issueNumber: issueContext.issue.number,
-                summary: outcome.summary,
+                stage: "grounding",
             });
         };
 
@@ -1695,7 +1562,7 @@ export const workflow = async (
                 recordIssueOutcome(issueContext.issue.number, outcome);
             }
             if (outcome.kind === IssueExecutionOutcomeKind.Failed) {
-                await handleFailedIssue(issueContext, outcome);
+                await handleFailedIssue(issueContext);
                 return;
             }
             if (outcome.kind === IssueExecutionOutcomeKind.NeedsAttention) {
@@ -1766,22 +1633,6 @@ export const workflow = async (
             };
             await persistState(RunStateStatus.Active, activeIssue);
             await publishPendingNotification(issue.number, pending);
-            if (onNeedsAttention === NeedsAttentionPolicy.Halt) {
-                await clearHaltedNeedsAttention(issue.number);
-                const current = queue.processedCount();
-                await emitHandledNeedsAttention(
-                    {
-                        issue,
-                        current,
-                        total: queueTotalFor(current),
-                    },
-                    pending.outcome,
-                );
-                throw new NeedsAttentionStop({
-                    issueNumber: issue.number,
-                    summary: pending.outcome.summary,
-                });
-            }
             activeQueueIssues.delete(issue.number);
             activeIssue = undefined;
             restoreCancellationCheckout = undefined;
@@ -1857,10 +1708,8 @@ export const workflow = async (
         if (queue.state() === IssueQueueState.DependencyBlocked) {
             await handleDependencyBlockedQueue({
                 queue,
-                onNeedsAttention,
                 recordIssueOutcome,
                 emitNeedsAttentionEvent,
-                emitHandledNeedsAttention,
                 persistState,
                 queueTotalFor,
             });
@@ -1920,7 +1769,6 @@ export const workflow = async (
             restoreCancellationCheckout,
         });
         if (
-            !isNeedsAttentionStop(finalError) &&
             !(
                 finalError instanceof
                     NeedsAttentionNotificationRecoveryBoundaryError ||

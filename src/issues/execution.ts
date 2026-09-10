@@ -10,7 +10,6 @@ import type {
 import type { AgentModel, AgentSelection } from "../agent/model.ts";
 import type { AgentSessionDiagnostics } from "../agent/task-session.ts";
 import type { GitRepositoryInvariantService } from "../git/repository-invariant.ts";
-import type { NeedsAttentionPolicy } from "../options.ts";
 
 export const DRY_RUN_ROUTES = [
     "implementation",
@@ -68,19 +67,16 @@ export type IssueExecutionOutcome =
                 readonly artifactPath: string;
                 readonly diagnosticsPath?: never;
                 readonly route?: "needs-attention";
-                readonly policy?: NeedsAttentionPolicy;
             }
           | {
                 /** Alternate name used when the local record is diagnostic output. */
                 readonly artifactPath?: never;
                 readonly diagnosticsPath: string;
                 readonly route?: "needs-attention";
-                readonly policy?: NeedsAttentionPolicy;
             }
           | {
                 /** Controlled route with no per-issue recovery artifact. */
                 readonly route: "needs-attention";
-                readonly policy?: NeedsAttentionPolicy;
                 readonly artifactPath?: never;
                 readonly diagnosticsPath?: never;
             }
@@ -130,8 +126,6 @@ export type IssueExecutionContext = {
     readonly repositoryInvariant: GitRepositoryInvariantService;
     readonly verificationCommands?: ReadonlyArray<string>;
     readonly signal?: AbortSignal;
-    /** The policy selected for this run, used by dry-run reporting. */
-    readonly needsAttentionPolicy?: NeedsAttentionPolicy;
     /** Maximum generated-child lineage depth allowed for decomposition. */
     readonly maxDecompositionDepth?: number;
 };

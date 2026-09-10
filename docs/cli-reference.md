@@ -27,8 +27,6 @@ command schema.
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `--on-needs-attention <policy>` | `halt` | Halt with exit status `2`, or `continue` through the remaining queue, when an issue needs attention. |
-| `--on-issue-failure <policy>` | `halt` | Halt on an ordinary issue failure, or restore its checkout and continue independent queued work. Continued runs exit non-zero after draining if any issue failed. |
 | `--notify-needs-attention` | off | Opt in to publishing needs-attention outcomes as an idempotent GitHub comment and optional label. Notifications are never enabled implicitly. |
 | `--needs-attention-label <name>` | none | Add a trimmed, non-empty label to needs-attention notifications; requires `--notify-needs-attention`. |
 | `-b, --branch <name>` | `main`, otherwise `master` | Base branch pushed directly after verified delivery. |

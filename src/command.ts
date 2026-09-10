@@ -3,8 +3,6 @@ import { dirname, join } from "node:path";
 import { z } from "zod";
 
 import {
-    IssueFailurePolicy,
-    NeedsAttentionPolicy,
     type ResolvedRalphieConfig,
     resolveRalphieConfig,
     type IssueRalphieConfig,
@@ -23,11 +21,7 @@ import { makePiAgentService, type PiAgentService } from "./pi/runtime.ts";
 import type { PiAgentConfig } from "./pi/config.ts";
 import { makeLiveRuntime, type IssueWorkflowRuntime } from "./runtime.ts";
 import type { AgentEventListener } from "./agent/contracts.ts";
-import {
-    exitCodeForError,
-    isNeedsAttentionStop,
-    RalphieExitCode,
-} from "./process/exit-code.ts";
+import { exitCodeForError, RalphieExitCode } from "./process/exit-code.ts";
 import { workflow } from "./workflow.ts";
 import { BUILD_INFO } from "./build-info.ts";
 import { type RunState, RunStateStoreLive } from "./run/state.ts";
@@ -37,8 +31,6 @@ import { RalphieError } from "./shared/error.ts";
 
 const cliOptions = {
     branch: { type: "string", short: "b" },
-    "on-needs-attention": { type: "string" },
-    "on-issue-failure": { type: "string" },
     "notify-needs-attention": { type: "boolean" },
     "needs-attention-label": { type: "string" },
     "max-issues": { type: "string" },
@@ -99,24 +91,6 @@ const asNumber = (
 
 const asBoolean = (values: Record<string, unknown>, name: string): boolean =>
     values[name] === true;
-
-const parseNeedsAttentionPolicy = (
-    values: Record<string, unknown>,
-): NeedsAttentionPolicy | undefined => {
-    const value = asNonEmptyString(values, "on-needs-attention");
-    return value === undefined
-        ? undefined
-        : z.enum(NeedsAttentionPolicy).parse(value);
-};
-
-const parseIssueFailurePolicy = (
-    values: Record<string, unknown>,
-): IssueFailurePolicy | undefined => {
-    const value = asNonEmptyString(values, "on-issue-failure");
-    return value === undefined
-        ? undefined
-        : z.enum(IssueFailurePolicy).parse(value);
-};
 
 const parseModel = (values: Record<string, unknown>, name: string) => {
     const value = asNonEmptyString(values, name);
@@ -186,7 +160,6 @@ const parseCliOptions = (
     values: Record<string, unknown>,
     repo: string | undefined,
 ): Parameters<typeof resolveRalphieConfig>[0] => {
-    const onNeedsAttention = parseNeedsAttentionPolicy(values);
     const notificationOptions = parseNotificationOptions(values);
     const issueSortValue = asNonEmptyString(values, "issue-sort");
     const thinkingValue = asNonEmptyString(values, "thinking");
@@ -198,8 +171,6 @@ const parseCliOptions = (
     return {
         repo,
         branch: asString(values, "branch"),
-        onNeedsAttention,
-        onIssueFailure: parseIssueFailurePolicy(values),
         ...notificationOptions,
         maxIssues: asNumber(values, "max-issues"),
         maxDecompositionDepth: asNumber(values, "max-decomposition-depth"),
@@ -288,10 +259,6 @@ Turn open GitHub issues into reviewed commits through pi.
 
 Options:
   -b, --branch <name>          Base branch to operate on
-      --on-needs-attention <halt|continue>
-                               Needs-attention policy (default halt)
-      --on-issue-failure <halt|continue>
-                               Ordinary issue failure policy (default halt)
       --notify-needs-attention Enable needs-attention GitHub notifications (default disabled)
       --needs-attention-label <name>
                                Add this label to notifications (requires the opt-in flag)
@@ -372,22 +339,11 @@ const resolveCommandFactories = (
 
 const loadResumeState = async (
     config: ResolvedRalphieConfig,
-    explicitPolicy?: NeedsAttentionPolicy,
     explicitMaxDecompositionDepth?: number,
 ): Promise<RunState | undefined> => {
     if (config.resume === undefined) return undefined;
 
     const resumeState = await RunStateStoreLive.load(config.resume);
-    if (
-        explicitPolicy !== undefined &&
-        explicitPolicy !== resumeState.onNeedsAttention
-    ) {
-        throw new RalphieError({
-            message:
-                `Cannot resume run ${resumeState.runId}: saved on-needs-attention policy is ` +
-                `${resumeState.onNeedsAttention}, but requested policy is ${explicitPolicy}.`,
-        });
-    }
     if (
         explicitMaxDecompositionDepth !== undefined &&
         explicitMaxDecompositionDepth !==
@@ -481,24 +437,13 @@ const workflowOptionsFor = (
     resumeState,
     resumePath: config.resume,
     dryRun: config.dryRun,
-    onNeedsAttention: resumeState?.onNeedsAttention ?? config.onNeedsAttention,
-    issueFailurePolicy: resumeState?.onIssueFailure ?? config.onIssueFailure,
     notificationsEnabled:
         resumeState?.notificationsEnabled ?? config.notificationsEnabled,
     needsAttentionLabel:
         resumeState?.needsAttentionLabel ?? config.needsAttentionLabel,
 });
 
-const commandErrorFor = (
-    error: unknown,
-    signal: AbortSignal,
-): Error | undefined => {
-    if (isNeedsAttentionStop(error)) {
-        process.exitCode = signal.aborted
-            ? RalphieExitCode.Cancelled
-            : RalphieExitCode.NeedsAttention;
-        return undefined;
-    }
+const commandErrorFor = (error: unknown, signal: AbortSignal): Error => {
     const message = error instanceof Error ? error.message : String(error);
     process.exitCode = exitCodeForError(error, signal);
     return new Error(message, { cause: error });
@@ -547,7 +492,6 @@ export const runCommand = async (
     const config = resolveRalphieConfig(parsed.options);
     const resumeState = await loadResumeState(
         config,
-        parsed.options.onNeedsAttention,
         parsed.options.maxDecompositionDepth,
     );
 
@@ -580,13 +524,11 @@ export const runCommand = async (
         );
         process.exitCode = RalphieExitCode.Success;
     } catch (error) {
-        const commandFailure = commandErrorFor(
+        commandError = commandErrorFor(
             error,
             input.signal ?? new AbortController().signal,
         );
-        if (commandFailure === undefined) return;
-        commandError = commandFailure;
-        throw commandFailure;
+        throw commandError;
     } finally {
         await disposeCommandResources(runtime, coordinator, commandError);
     }

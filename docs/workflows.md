@@ -16,18 +16,15 @@ references.
 Before normal execution, every matching open issue is checked by a read-only,
 schema-validated grounding session. Actionable issues then receive a complexity
 score from 0 through 5. An issue whose prerequisite is still open, or which
-otherwise needs human attention, is left open and recorded with its reason. The
-grounding prompt pins the exact checked-out commit so evidence is never
-mistaken for a newer revision. The
-`halt` policy stops at that handled boundary by default; `continue` advances
-with the next queue item without closing or marking the issue complete.
+otherwise needs human attention, is left open and recorded with its reason
+while Ralphie continues with the next queue item, without closing or marking
+the issue complete. The grounding prompt pins the exact checked-out commit so
+evidence is never mistaken for a newer revision.
 
 ```mermaid
 flowchart TD
     A[Open GitHub issue] --> Z[Structured readiness check]
-    Z -->|Needs attention or open dependency| Q{onNeedsAttention policy}
-    Q -->|halt (default)| Y1[Handled stop, exit 2, resume later]
-    Q -->|continue| Y[Defer, leave open, continue queue]
+    Z -->|Needs attention or open dependency| Y[Defer, leave open, continue queue]
     Z -->|Actionable or apparently resolved| B[Structured complexity assessment]
     B -->|0–3| C[Implementation session]
     C --> D[Deterministically stage changes]
@@ -182,8 +179,7 @@ The positive `--max-decomposition-depth` setting (default `3`) bounds recursive
 splitting and is persisted in run state. If direct complexity routing or review
 exhaustion would exceed it, Ralphie does not attempt another breakdown: it
 leaves the issue open, records `decomposition_limit_reached` needs attention,
-and continues independent queued work even when the general
-`--on-needs-attention` policy is `halt`. The issue is not marked complete, so
+and continues independent queued work. The issue is not marked complete, so
 its dependents remain blocked.
 Ralphie discovers those markers and reconciles them with the persisted mapping
 before creating anything. Thus a lost create response, a restart, or a partial
@@ -203,10 +199,8 @@ final child closed in a previous run is completed on a later run. The open-issue
 queue is refreshed after decomposition; newly eligible children can run during
 the same invocation. If dependencies remain open after the queue is exhausted,
 Ralphie records each blocked issue as a needs-attention outcome and leaves it
-pending instead of handing it to an agent. The default halt policy persists
-active state and stops with exit status `2`; `--on-needs-attention continue`
-drains later work and can complete with exit status `0`. Blocked issues remain
-open.
+pending instead of handing it to an agent, then drains later work and completes
+the run. Blocked issues remain open.
 
 A direct complexity 4–5 route returns `decomposed`. Review exhaustion returns an
 `escalated` outcome containing the recovery diagnostic path and, after

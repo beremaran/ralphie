@@ -7,22 +7,18 @@ import { runCli } from "../src/cli.ts";
 import { HELP_TEXT, parseCliArgs, runCommand } from "../src/command.ts";
 import { RalphieExitCode } from "../src/process/exit-code.ts";
 import { RalphieError } from "../src/shared/error.ts";
-import { IssueFailurePolicy, NeedsAttentionPolicy } from "../src/options.ts";
 import { IssueOrder, IssueSort } from "../src/github/issues.ts";
 import { RUN_STATE_VERSION, RunStateStatus } from "../src/run/state.ts";
 import { makeTestProgressRecorder } from "./shared/progress-recorder.ts";
 
 describe("native CLI parser", () => {
     test("documents the issue workflow in help", () => {
-        expect(HELP_TEXT).toContain("--on-needs-attention <halt|continue>");
-        expect(HELP_TEXT).toContain("--on-issue-failure <halt|continue>");
         expect(HELP_TEXT).toContain("--thinking <level>");
         expect(HELP_TEXT).toContain("--implementation-attempts <n>");
         expect(HELP_TEXT).toContain("--implementation-fallback-model");
         expect(HELP_TEXT).toContain("--max-decomposition-depth <n>");
         expect(HELP_TEXT).toContain("--notify-needs-attention");
         expect(HELP_TEXT).toContain("--needs-attention-label <name>");
-        expect(HELP_TEXT).toContain("default halt");
         expect(HELP_TEXT).not.toContain("maintain-issues");
         expect(HELP_TEXT).not.toContain("get-pipelines-green");
     });
@@ -48,37 +44,13 @@ describe("native CLI parser", () => {
         });
     });
 
-    test("parses and validates the needs-attention policy", () => {
-        expect(
-            parseCliArgs(["owner/repository"]).options.onNeedsAttention,
-        ).toBeUndefined();
-        expect(
-            parseCliArgs(["owner/repository", "--on-needs-attention", "halt"])
-                .options.onNeedsAttention,
-        ).toBe(NeedsAttentionPolicy.Halt);
-        expect(
-            parseCliArgs([
-                "owner/repository",
-                "--on-needs-attention",
-                "continue",
-            ]).options.onNeedsAttention,
-        ).toBe(NeedsAttentionPolicy.Continue);
-        expect(() =>
-            parseCliArgs(["owner/repository", "--on-needs-attention", "retry"]),
-        ).toThrow();
-    });
-
-    test("parses and validates the ordinary issue failure policy", () => {
-        expect(
-            parseCliArgs(["owner/repository"]).options.onIssueFailure,
-        ).toBeUndefined();
-        expect(
-            parseCliArgs(["owner/repository", "--on-issue-failure", "continue"])
-                .options.onIssueFailure,
-        ).toBe(IssueFailurePolicy.Continue);
-        expect(() =>
-            parseCliArgs(["owner/repository", "--on-issue-failure", "retry"]),
-        ).toThrow();
+    test("rejects the removed halt policy flags", () => {
+        for (const args of [
+            ["owner/repository", "--on-needs-attention", "halt"],
+            ["owner/repository", "--on-issue-failure", "continue"],
+        ]) {
+            expect(() => parseCliArgs(args)).toThrow();
+        }
     });
 
     test("parses the single thinking level and implementation controls", () => {
@@ -144,55 +116,6 @@ describe("native CLI parser", () => {
         );
     });
 
-    test("rejects a conflicting resume policy before creating runtime resources", async () => {
-        const directory = await mkdtemp(join(tmpdir(), "ralphie-command-"));
-        const path = join(directory, "state.json");
-        const sideEffects: string[] = [];
-        try {
-            await writeFile(
-                path,
-                JSON.stringify({
-                    version: RUN_STATE_VERSION,
-                    status: RunStateStatus.Active,
-                    runId: "run-1",
-                    repository: "owner/repository",
-                    branch: "main",
-                    onNeedsAttention: NeedsAttentionPolicy.Continue,
-                    selection: { agent: "build" },
-                    queue: {
-                        pending: [],
-                        completedIssueNumbers: [],
-                        processedCount: 0,
-                    },
-                    outcomes: [],
-                    updatedAt: "2026-08-24T00:00:00.000Z",
-                }),
-            );
-            await expect(
-                runCommand(
-                    [
-                        "owner/repository",
-                        "--resume",
-                        path,
-                        "--on-needs-attention",
-                        "halt",
-                    ],
-                    {
-                        factories: {
-                            makeCoordinator: () => {
-                                sideEffects.push("coordinator");
-                                throw new Error("unexpected side effect");
-                            },
-                        },
-                    },
-                ),
-            ).rejects.toThrow("saved on-needs-attention policy is continue");
-            expect(sideEffects).toEqual([]);
-        } finally {
-            await rm(directory, { recursive: true, force: true });
-        }
-    });
-
     test("passes saved notification intent and label through resume", async () => {
         const directory = await mkdtemp(join(tmpdir(), "ralphie-command-"));
         const path = join(directory, "state.json");
@@ -206,7 +129,6 @@ describe("native CLI parser", () => {
                     runId: "run-notification-resume",
                     repository: "owner/repository",
                     branch: "main",
-                    onNeedsAttention: NeedsAttentionPolicy.Halt,
                     notificationsEnabled: true,
                     needsAttentionLabel: "saved-label",
                     selection: { agent: "build" },
@@ -240,7 +162,6 @@ describe("native CLI parser", () => {
             });
 
             expect(workflowOptions).toMatchObject({
-                onNeedsAttention: NeedsAttentionPolicy.Halt,
                 notificationsEnabled: true,
                 needsAttentionLabel: "saved-label",
             });
@@ -303,7 +224,7 @@ describe("native CLI parser", () => {
                     runId: "Bearer private-value",
                     repository: "owner/repository",
                     branch: "main",
-                    onNeedsAttention: NeedsAttentionPolicy.Continue,
+                    maxDecompositionDepth: 3,
                     selection: { agent: "build" },
                     queue: {
                         pending: [],
@@ -323,8 +244,8 @@ describe("native CLI parser", () => {
                 "owner/repository",
                 "--resume",
                 path,
-                "--on-needs-attention",
-                "halt",
+                "--max-decomposition-depth",
+                "6",
             ]);
             const output = written.join("");
             expect(output).toContain("Cannot resume run Bearer private-value");

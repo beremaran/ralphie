@@ -3,11 +3,8 @@ import { describe, expect, test } from "bun:test";
 import { IssueOrder, IssueSort } from "../src/github/issues.ts";
 import {
     DEFAULT_WORKSPACE,
-    DEFAULT_NEEDS_ATTENTION_POLICY,
-    DEFAULT_ISSUE_FAILURE_POLICY,
     DEFAULT_MAX_DECOMPOSITION_DEPTH,
     DEFAULT_IMPLEMENTATION_ATTEMPTS,
-    NeedsAttentionPolicy,
     resolveRalphieConfig,
 } from "../src/options.ts";
 
@@ -25,8 +22,6 @@ describe("CLI configuration", () => {
             }),
         ).toEqual({
             repo: "owner/repo",
-            onNeedsAttention: DEFAULT_NEEDS_ATTENTION_POLICY,
-            onIssueFailure: DEFAULT_ISSUE_FAILURE_POLICY,
             maxDecompositionDepth: DEFAULT_MAX_DECOMPOSITION_DEPTH,
             implementationAttempts: DEFAULT_IMPLEMENTATION_ATTEMPTS,
             notificationsEnabled: false,
@@ -66,7 +61,6 @@ describe("CLI configuration", () => {
                 resume: "/tmp/state.json",
                 verbose: true,
                 json: true,
-                onNeedsAttention: NeedsAttentionPolicy.Continue,
                 notifyNeedsAttention: true,
                 needsAttentionLabel: "  needs-attention  ",
             }),
@@ -91,7 +85,6 @@ describe("CLI configuration", () => {
             verbose: true,
             json: true,
             quiet: false,
-            onNeedsAttention: NeedsAttentionPolicy.Continue,
             notificationsEnabled: true,
             needsAttentionLabel: "needs-attention",
         });

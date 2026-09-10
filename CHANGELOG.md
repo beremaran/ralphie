@@ -7,6 +7,12 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Removed
 
+- Remove the halt policies. `--on-needs-attention` and `--on-issue-failure` are
+  gone; a needs-attention outcome or an ordinary issue failure now always
+  records the outcome, leaves the issue open, and continues the queue. A
+  drained run exits `1` when any issue failed, and the former handled-stop exit
+  status `2` no longer exists. `RunState` is version 11.
+
 - Remove dead integration weight inherited from the removed modes: managed
   feature-branch revision safety, the feature-branch and base-restore Git
   operations, the always-false `allowMissingRemoteBranch` seam, unused safety
