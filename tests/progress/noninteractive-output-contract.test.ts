@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import type {
     AgentEventContext,
     AgentSessionEvent,
-} from "../../src/opencode/client.ts";
+} from "../../src/agent/contracts.ts";
 import { makeProgressCoordinator } from "../../src/progress/coordinator.ts";
 import type {
     ProgressRenderMode,
@@ -185,8 +185,8 @@ const parseJsonLines = (stdout: string): readonly JsonRecord[] => {
     return lines.slice(0, -1).map((line) => JSON.parse(line) as JsonRecord);
 };
 
-const isOpenCodeRecord = (record: JsonRecord): boolean =>
-    record.type === "opencode_event" &&
+const isAgentEventRecord = (record: JsonRecord): boolean =>
+    record.type === "agent_event" &&
     record.sessionID === context.sessionID &&
     record.directory === context.directory &&
     typeof record.event === "object" &&
@@ -268,12 +268,12 @@ describe("deterministic noninteractive output contracts", () => {
             agentEvents().length + progressUpdates().length,
         );
         const progressRecords = records.filter(isProgressRecord);
-        const eventRecords = records.filter(isOpenCodeRecord);
+        const eventRecords = records.filter(isAgentEventRecord);
         expect(progressRecords).toHaveLength(progressUpdates().length);
         expect(eventRecords).toHaveLength(agentEvents().length);
 
         for (const record of records) {
-            expect(isProgressRecord(record) || isOpenCodeRecord(record)).toBe(
+            expect(isProgressRecord(record) || isAgentEventRecord(record)).toBe(
                 true,
             );
             if (isProgressRecord(record)) {

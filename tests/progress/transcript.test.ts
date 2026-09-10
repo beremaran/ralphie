@@ -3,7 +3,7 @@ import { makeAgentTranscriptRenderer } from "../../src/progress/transcript.ts";
 import type {
     AgentEventContext,
     AgentSessionEvent,
-} from "../../src/opencode/client.ts";
+} from "../../src/agent/contracts.ts";
 
 const context: AgentEventContext = {
     sessionID: "session-1",
@@ -392,7 +392,7 @@ describe("transcript is lossless for sensitive-looking text", () => {
             },
         );
         const output = chunks.join("");
-        expect(output).toContain('"type":"opencode_event"');
+        expect(output).toContain('"type":"agent_event"');
         expect(output).toContain('"token":"sk-json-nested"');
         expect(output).toContain('"apiKey":"ghp_JSONKEYVALUESECRET"');
         expect(output).toContain("ghp_JSONTITLESECRET");

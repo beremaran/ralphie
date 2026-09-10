@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { Octokit } from "octokit";
 
-import type { AgentClient } from "../../src/opencode/client.ts";
+import type { AgentClient } from "../../src/agent/contracts.ts";
 import {
     ReviewFindingSeverity,
     ReviewVerdict,

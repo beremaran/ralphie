@@ -51,11 +51,8 @@ import { RalphieExitCode } from "../../src/process/exit-code.ts";
 import type { ProgressReporterService } from "../../src/progress/progress.ts";
 import { makeTestProgressRecorder } from "../shared/progress-recorder.ts";
 import type { MaintenanceRunStateStoreService } from "../../src/maintain-issues-state.ts";
-import type { AgentClient } from "../../src/opencode/client.ts";
-import type {
-    OpenCodeRuntime,
-    OpenCodeService,
-} from "../../src/opencode/server.ts";
+import type { AgentClient } from "../../src/agent/contracts.ts";
+import type { PiAgentRuntime, PiAgentService } from "../../src/pi/runtime.ts";
 import type { MaintenanceRuntime } from "../../src/runtime.ts";
 
 const REPOSITORY = "owner/repository";
@@ -601,7 +598,7 @@ const makeFakeGitHub = (options: FakeGitHubOptions): FakeGitHub => {
     };
 };
 
-const makeStubPi = (calls: string[]): OpenCodeService => {
+const makeStubPi = (calls: string[]): PiAgentService => {
     const client = {
         session: {
             create: async () => ({ data: { id: "stub-pi-session" } }),
@@ -610,10 +607,9 @@ const makeStubPi = (calls: string[]): OpenCodeService => {
         close: () => calls.push("pi-client-close"),
     } as unknown as AgentClient;
     const runtime = {
-        url: "http://127.0.0.1:1",
         client,
         close: async () => calls.push("pi-close"),
-    } as unknown as OpenCodeRuntime;
+    } as unknown as PiAgentRuntime;
     return {
         start: async () => {
             calls.push("pi-start");
@@ -650,13 +646,13 @@ const makeRuntime = (input: {
     readonly stateStore: MaintenanceRunStateStoreService;
     readonly calls: string[];
     readonly progress?: ProgressReporterService;
-    readonly opencode?: OpenCodeService;
+    readonly agentRuntime?: PiAgentService;
 }): MaintenanceRuntime => {
     const progress = input.progress ?? makeTestProgressRecorder([]);
-    const opencode = input.opencode ?? makeStubPi(input.calls);
+    const agentRuntime = input.agentRuntime ?? makeStubPi(input.calls);
     return {
         progress,
-        opencode,
+        agentRuntime,
         githubClient: {
             initialize: async () => {
                 input.calls.push("github-auth");
@@ -1308,15 +1304,15 @@ const runCommandMode = async (input: {
         terminal: { isInteractive: false, isCI: true, width: 80 },
         output: capture,
         factories: {
-            makeOpenCode: () => makeStubPi(calls),
-            makeRuntime: ({ opencode, progress }) =>
+            makeAgentRuntime: () => makeStubPi(calls),
+            makeRuntime: ({ agentRuntime, progress }) =>
                 makeRuntime({
                     snapshot,
                     planner: planner.service,
                     github,
                     stateStore: stateStore.service,
                     calls,
-                    opencode,
+                    agentRuntime,
                     progress,
                 }) as CommandRuntime,
         },
@@ -1459,15 +1455,15 @@ describe("maintain-issues command boundary", () => {
                         },
                         output: capture,
                         factories: {
-                            makeOpenCode: () => makeStubPi(github.calls),
-                            makeRuntime: ({ opencode, progress }) =>
+                            makeAgentRuntime: () => makeStubPi(github.calls),
+                            makeRuntime: ({ agentRuntime, progress }) =>
                                 makeRuntime({
                                     snapshot,
                                     planner: planner.service,
                                     github: { ...github, mutation: failing },
                                     stateStore: stateStore.service,
                                     calls: github.calls,
-                                    opencode,
+                                    agentRuntime,
                                     progress,
                                 }) as CommandRuntime,
                         },
@@ -1518,15 +1514,15 @@ describe("maintain-issues command boundary", () => {
                         },
                         output: capture,
                         factories: {
-                            makeOpenCode: () => makeStubPi(github.calls),
-                            makeRuntime: ({ opencode, progress }) =>
+                            makeAgentRuntime: () => makeStubPi(github.calls),
+                            makeRuntime: ({ agentRuntime, progress }) =>
                                 makeRuntime({
                                     snapshot,
                                     planner: planner.service,
                                     github,
                                     stateStore: stateStore.service,
                                     calls: github.calls,
-                                    opencode,
+                                    agentRuntime,
                                     progress,
                                 }) as CommandRuntime,
                         },

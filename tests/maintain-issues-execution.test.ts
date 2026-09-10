@@ -214,9 +214,9 @@ const baseRuntime = (input: {
         commandRunner: {
             run: async () => ({ exitCode: 1, stdout: "", stderr: "" }),
         },
-        opencode: {
+        agentRuntime: {
             start: async () => {
-                throw new Error("OpenCode must not start in this test");
+                throw new Error("pi agent runtime must not start in this test");
             },
         },
         workspace: {

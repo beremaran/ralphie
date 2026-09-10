@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import type {
     AgentEventContext,
     AgentSessionEvent,
-} from "../../src/opencode/client.ts";
+} from "../../src/agent/contracts.ts";
 import { makeProgressCoordinator } from "../../src/progress/coordinator.ts";
 import {
     INTERACTIVE_FOOTER_LAYOUT_STRATEGY,

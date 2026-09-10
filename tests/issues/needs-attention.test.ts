@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Octokit } from "octokit";
 
-import type { AgentClient } from "../../src/opencode/client.ts";
+import type { AgentClient } from "../../src/agent/contracts.ts";
 import type { GitHubIssue } from "../../src/github/issues.ts";
 import type { GitIssueCheckpointService } from "../../src/git/issue-checkpoint.ts";
 import type { IssueCheckpoint } from "../../src/git/issue-checkpoint.ts";

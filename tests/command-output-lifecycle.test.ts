@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import type {
     AgentEventContext,
     AgentEventListener,
-} from "../src/opencode/client.ts";
+} from "../src/agent/contracts.ts";
 import {
     runCommand,
     type CliTerminalInfo,
@@ -158,13 +158,13 @@ const runNoninteractiveCase = async (
             };
             return coordinator;
         },
-        makeOpenCode: (_config, eventListener) => {
+        makeAgentRuntime: (_config, eventListener) => {
             listener = eventListener;
             return { start: async () => undefined as never };
         },
-        makeRuntime: ({ opencode, progress }) =>
+        makeRuntime: ({ agentRuntime, progress }) =>
             ({
-                opencode,
+                agentRuntime,
                 progress,
                 dispose: async () => {
                     runtimeDisposeCount += 1;
@@ -309,12 +309,12 @@ describe("runCommand outcome and quiescence contracts", () => {
                     };
                     return coordinator;
                 },
-                makeOpenCode: (_config, eventListener) => {
+                makeAgentRuntime: (_config, eventListener) => {
                     listener = eventListener;
                     return { start: async () => undefined as never };
                 },
-                makeRuntime: ({ opencode, progress }) =>
-                    ({ opencode, progress }) as unknown as CommandRuntime,
+                makeRuntime: ({ agentRuntime, progress }) =>
+                    ({ agentRuntime, progress }) as unknown as CommandRuntime,
                 runWorkflow: async (_options, runtime) => {
                     await runtime.progress.emit({
                         stage: "implementation",

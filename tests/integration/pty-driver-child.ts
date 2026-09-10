@@ -44,12 +44,9 @@ import type {
     AgentEventContext,
     AgentEventListener,
     AgentSessionEvent,
-} from "../../src/opencode/client.ts";
-import type { OpenCodeProviderConfig } from "../../src/opencode/config.ts";
-import type {
-    OpenCodeRuntime,
-    OpenCodeService,
-} from "../../src/opencode/server.ts";
+} from "../../src/agent/contracts.ts";
+import type { PiAgentConfig } from "../../src/pi/config.ts";
+import type { PiAgentRuntime, PiAgentService } from "../../src/pi/runtime.ts";
 import {
     breadcrumbCandidateFor,
     DEFAULT_BREADCRUMB_THRESHOLD,
@@ -588,9 +585,8 @@ export const runPtyDriverChild = async (
     let runtime: ChildCommandRuntime | undefined;
 
     /** Fake agent service: only the event listener is ever used. */
-    const makeFakeAgentService = (): OpenCodeService => {
-        const opencodeRuntime = {
-            url: "http://127.0.0.1:1",
+    const makeFakeAgentService = (): PiAgentService => {
+        const piRuntime = {
             client: {
                 session: {
                     create: async () => ({ data: { id: context.sessionID } }),
@@ -599,9 +595,9 @@ export const runPtyDriverChild = async (
                 close: () => {},
             },
             close: async () => {},
-        } as unknown as OpenCodeRuntime;
+        } as unknown as PiAgentRuntime;
         return {
-            start: async () => opencodeRuntime,
+            start: async () => piRuntime,
         };
     };
 
@@ -974,12 +970,15 @@ export const runPtyDriverChild = async (
             },
             scenarioOptions.threshold,
         ),
-        makeOpenCode: (_config: OpenCodeProviderConfig, eventListener) => {
+        makeAgentRuntime: (_config: PiAgentConfig, eventListener) => {
             agentListener = eventListener;
             return makeFakeAgentService();
         },
-        makeRuntime: ({ opencode, progress }) => {
-            runtime = { opencode, progress } as unknown as ChildCommandRuntime;
+        makeRuntime: ({ agentRuntime, progress }) => {
+            runtime = {
+                agentRuntime,
+                progress,
+            } as unknown as ChildCommandRuntime;
             return runtime;
         },
         runWorkflow: (

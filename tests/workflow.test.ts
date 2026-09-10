@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { Octokit } from "octokit";
-import type { AgentClient } from "../src/opencode/client.ts";
-import type { OpenCodeModelInfo } from "../src/opencode/client.ts";
+import type { AgentClient } from "../src/agent/contracts.ts";
+import type { PiModelInfo } from "../src/pi/models.ts";
 
 import type { GitRepositoryService } from "../src/git/repository.ts";
 import type { GitRepositoryInvariantService } from "../src/git/repository-invariant.ts";
@@ -51,7 +51,8 @@ import {
     makeIssueArtifactStoreService,
 } from "../src/issues/artifacts.ts";
 import { DEFAULT_AGENT } from "../src/agent/model.ts";
-import type { OpenCodeService } from "../src/opencode/server.ts";
+import type { AgentModel } from "../src/agent/model.ts";
+import type { PiAgentService } from "../src/pi/runtime.ts";
 import type {
     ProgressReporterService,
     ProgressUpdate,
@@ -71,7 +72,6 @@ import {
 } from "../src/options.ts";
 import { IssueOrder, IssueSort } from "../src/github/issues.ts";
 import type { IssueWorkflowRuntime } from "../src/runtime.ts";
-import type { AntigravityRuntimeDiscovery } from "../src/harness/index.ts";
 import { RalphieError } from "../src/shared/error.ts";
 import {
     ComplexityLevel,
@@ -126,12 +126,7 @@ type TestRuntimeOptions = {
     readonly removeFailure?: RalphieError;
     readonly closeFailure?: RalphieError;
     readonly abortOnExecute?: AbortController;
-    readonly abortAt?:
-        | "github"
-        | "repository"
-        | "issues"
-        | "opencode"
-        | "between";
+    readonly abortAt?: "github" | "repository" | "issues" | "agent" | "between";
     readonly abortController?: AbortController;
     readonly captureStart?: number;
     readonly failPiReadyProgress?: boolean;
@@ -168,11 +163,10 @@ type TestRuntimeOptions = {
     readonly observeAbortController?: AbortController;
     /** When set, merging the pull request rejects with this error. */
     readonly mergePullRequestFailure?: RalphieError;
-    /** Model catalog exposed by the mock OpenCode runtime for variant checks. */
-    readonly opencodeModels?: ReadonlyArray<OpenCodeModelInfo>;
-    /** Default model exposed by the mock OpenCode runtime. */
-    readonly opencodeDefaultModel?: OpenCodeModelInfo;
-    readonly antigravityRuntimeDiscovery?: AntigravityRuntimeDiscovery;
+    /** Model catalog exposed by the mock pi runtime for thinking validation. */
+    readonly piCatalog?: ReadonlyArray<PiModelInfo>;
+    /** Default model exposed by the mock pi runtime. */
+    readonly piDefaultModel?: AgentModel;
 };
 
 const testRuntime = (
@@ -438,26 +432,17 @@ const testRuntime = (
                 );
             },
         };
-    const opencode: OpenCodeService = {
+    const agentRuntime: PiAgentService = {
         start: async () => {
             if (options.startFailure) throw options.startFailure;
             calls.push("startServer");
-            if (options.abortAt === "opencode")
-                options.abortController?.abort();
+            if (options.abortAt === "agent") options.abortController?.abort();
             return {
-                url: "http://127.0.0.1:4096",
                 client: {} as AgentClient,
-                ...(options.opencodeModels === undefined
+                catalog: options.piCatalog ?? [],
+                ...(options.piDefaultModel === undefined
                     ? {}
-                    : {
-                          modelList: async () => options.opencodeModels ?? [],
-                      }),
-                ...(options.opencodeDefaultModel === undefined
-                    ? {}
-                    : {
-                          modelDefault: async () =>
-                              options.opencodeDefaultModel,
-                      }),
+                    : { defaultModel: options.piDefaultModel }),
                 close: async () => {
                     calls.push("closeRuntime");
                 },
@@ -489,7 +474,7 @@ const testRuntime = (
               ...progressRecorder,
               emit: async (update) => {
                   if (
-                      update.stage === "opencode-runtime" &&
+                      update.stage === "agent-runtime" &&
                       update.status === "succeeded"
                   ) {
                       throw new Error("Agent ready progress emission failed");
@@ -555,12 +540,6 @@ const testRuntime = (
         issueOperations: operations,
     });
     return {
-        ...(options.antigravityRuntimeDiscovery === undefined
-            ? {}
-            : {
-                  antigravityRuntimeDiscovery:
-                      options.antigravityRuntimeDiscovery,
-              }),
         githubClient,
         githubIssues,
         githubIssueMutations: mutations,
@@ -582,7 +561,7 @@ const testRuntime = (
         gitIssueOperations: operations,
         dryRunIssueExecutor,
         issueExecutor,
-        opencode,
+        agentRuntime,
         progress,
         runStateStore: stateStore,
         workspace,
@@ -827,47 +806,6 @@ const postPrReviewFor = (
 });
 
 describe("workflow", () => {
-    test("runs Antigravity discovery before starting the agent runtime", async () => {
-        const calls: string[] = [];
-        const discovery: AntigravityRuntimeDiscovery = {
-            discover: async () => {
-                calls.push("discoverAntigravity");
-                return {
-                    status: "available",
-                    candidates: ["/bin/antigravity"],
-                    message: "Antigravity runtime is available and compatible.",
-                    setupHint: "",
-                    runtime: {
-                        executable: "/bin/antigravity",
-                        version: "1.4.2",
-                        protocolVersion: "1",
-                        features: [],
-                        capabilities: {
-                            resume: false,
-                            "structured-output": false,
-                            "model-catalog": false,
-                            variants: false,
-                            events: false,
-                            permissions: false,
-                        },
-                    },
-                };
-            },
-            probe: async () => ({
-                kind: "google-antigravity",
-                available: true,
-                authenticated: false,
-            }),
-        };
-
-        await workflow(
-            baseOptions,
-            testRuntime(calls, [], { antigravityRuntimeDiscovery: discovery }),
-        );
-
-        expectCallOrder(calls, ["discoverAntigravity", "startServer"]);
-    });
-
     test("executes an issue, persists completion, releases the agent, and cleans up", async () => {
         const calls: string[] = [];
         const states: RunState[] = [];
@@ -930,11 +868,13 @@ describe("workflow", () => {
                     },
                 },
                 testRuntime(calls, states, {
-                    opencodeModels: [
+                    piCatalog: [
                         {
-                            providerID: "opencode-go",
-                            modelID: "deepseek-v4-flash",
-                            variants: ["low", "high", "max"],
+                            provider: "opencode-go",
+                            id: "deepseek-v4-flash",
+                            name: "DeepSeek V4 Flash",
+                            reasoning: true,
+                            thinkingLevels: ["off", "low", "high", "max"],
                         },
                     ],
                 }),
@@ -944,7 +884,7 @@ describe("workflow", () => {
         expect(calls).toContain("closeRuntime");
     });
 
-    test("skips variant validation when the runtime exposes no model catalog", async () => {
+    test("skips thinking validation when the runtime exposes no model catalog", async () => {
         const calls: string[] = [];
         const states: RunState[] = [];
         const summary = await workflow(
@@ -3971,7 +3911,7 @@ describe("workflow", () => {
             workflow(
                 { ...baseOptions, cleanup: true, signal: controller.signal },
                 testRuntime(calls, states, {
-                    abortAt: "opencode",
+                    abortAt: "agent",
                     abortController: controller,
                 }),
             ),

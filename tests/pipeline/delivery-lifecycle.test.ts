@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import type { AgentSelection } from "../../src/agent/model.ts";
-import type { AgentClient } from "../../src/opencode/client.ts";
+import type { AgentClient } from "../../src/agent/contracts.ts";
 import type { PipelineDiagnosticsBoundary } from "../../src/github/pipeline-diagnostics-boundary.ts";
 import type {
     PipelineObservationResult,

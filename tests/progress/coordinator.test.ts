@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import type {
     AgentEventContext,
     AgentSessionEvent,
-} from "../../src/opencode/client.ts";
+} from "../../src/agent/contracts.ts";
 import { makeProgressCoordinator } from "../../src/progress/coordinator.ts";
 import { INTERACTIVE_REGION_MAX_ROWS } from "../../src/progress/terminal-controller.ts";
 import type { TerminalOutputStrategy } from "../../src/progress/terminal-controller.ts";
@@ -519,7 +519,7 @@ describe("coordinator mode-specific contracts", () => {
         await coordinator.dispose();
 
         const text = output();
-        expect(text).toContain("╭─ OpenCode · Task · session-1");
+        expect(text).toContain("╭─ pi · Task · session-1");
         expect(text).toContain("hello world");
         expect(text).toContain("│  $ echo hi");
         expect(text).toContain("│  ✓ bash done");
@@ -550,7 +550,7 @@ describe("coordinator mode-specific contracts", () => {
         expect(records.length).toBeGreaterThan(0);
         for (const record of records) {
             expect(
-                record.type === "opencode_event" || record.stage !== undefined,
+                record.type === "agent_event" || record.stage !== undefined,
             ).toBe(true);
         }
         // No human transcript rows and no cursor controls.

@@ -24,7 +24,7 @@ const ISSUE_KEYS = [
     "pullRequestClosure",
     "issueExecutor",
     "dryRunIssueExecutor",
-    "opencode",
+    "agentRuntime",
 ] as const;
 
 const MAINTENANCE_REQUIRED_KEYS = [
@@ -35,7 +35,7 @@ const MAINTENANCE_REQUIRED_KEYS = [
     "gitRepositoryInvariant",
     "commandRunner",
     "maintenanceSnapshot",
-    "opencode",
+    "agentRuntime",
 ] as const;
 
 const PIPELINE_KEYS = [
@@ -43,7 +43,7 @@ const PIPELINE_KEYS = [
     "workspace",
     "githubClient",
     "gitRepository",
-    "opencode",
+    "agentRuntime",
     "pipelineDeliveryLifecycle",
 ] as const;
 
@@ -65,7 +65,7 @@ describe("mode-local runtime seams", () => {
             pullRequestClosure: {} as never,
             issueExecutor: {} as never,
             dryRunIssueExecutor: {} as never,
-            opencode: {} as never,
+            agentRuntime: {} as never,
         };
 
         expect(Object.keys(narrow).sort()).toEqual([...ISSUE_KEYS].sort());
@@ -82,7 +82,7 @@ describe("mode-local runtime seams", () => {
             gitRepositoryInvariant: {} as never,
             commandRunner: {} as never,
             maintenanceSnapshot: {} as never,
-            opencode: {} as never,
+            agentRuntime: {} as never,
         };
 
         for (const key of MAINTENANCE_REQUIRED_KEYS) {
@@ -99,7 +99,7 @@ describe("mode-local runtime seams", () => {
             workspace: {} as never,
             githubClient: {} as never,
             gitRepository: {} as never,
-            opencode: {} as never,
+            agentRuntime: {} as never,
             pipelineDeliveryLifecycle: {} as never,
         };
 
@@ -110,7 +110,7 @@ describe("mode-local runtime seams", () => {
 
     test("centralized assembly satisfies every focused seam without projection", () => {
         const runtime = makeLiveRuntime({
-            opencode: {
+            agentRuntime: {
                 start: async () => {
                     throw new Error(
                         "The agent must not start while assembling",

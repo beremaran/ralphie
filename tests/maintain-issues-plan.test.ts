@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
-import type { AgentClient } from "../src/opencode/client.ts";
-import { AgentSessionProfile } from "../src/opencode/client.ts";
+import type { AgentClient } from "../src/agent/contracts.ts";
+import { AgentSessionProfile } from "../src/agent/contracts.ts";
 import {
     buildMaintenancePlanPrompt,
     issueMaintenancePlanSchema,

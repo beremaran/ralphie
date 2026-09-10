@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { describe, expect, test } from "bun:test";
 import type { Octokit } from "octokit";
 
-import type { AgentClient } from "../src/opencode/client.ts";
+import type { AgentClient } from "../src/agent/contracts.ts";
 import type { PipelineDiagnosticsService } from "../src/github/pipeline-diagnostics-service.ts";
 import type {
     PipelineObservationInput,
@@ -194,14 +194,14 @@ const makeRuntime = (input: {
                 calls.push("removeWorkspace");
             },
         },
-        opencode: {
+        agentRuntime: {
             start: async () => {
-                calls.push("startOpenCode");
+                calls.push("startAgent");
                 return {
-                    url: "http://127.0.0.1:4096",
                     client: {} as AgentClient,
+                    catalog: [],
                     close: async () => {
-                        calls.push("closeOpenCode");
+                        calls.push("closeAgent");
                     },
                 };
             },
@@ -226,7 +226,7 @@ describe("get-pipelines-green orchestration", () => {
             expect(summary.outcome.kind).toBe("green");
             expect(summary.wouldRepair).toBe(false);
             expect(calls).not.toContain("loop");
-            expect(calls).toContain("startOpenCode");
+            expect(calls).toContain("startAgent");
             const state = JSON.parse(
                 await readFile(
                     join(
@@ -290,7 +290,7 @@ describe("get-pipelines-green orchestration", () => {
                     }),
                 ),
             ).rejects.toBeInstanceOf(PipelineDeliveryOutcomeError);
-            expect(calls).not.toContain("startOpenCode");
+            expect(calls).not.toContain("startAgent");
             expect(calls).not.toContain("loop");
             expect(calls).not.toContain("pushNonForce");
             expect(calls).not.toContain("prepareExactCheckout");
@@ -346,7 +346,7 @@ describe("get-pipelines-green orchestration", () => {
 
             expect(resumed.runId).toBe(first.runId);
             expect(resumed.outcome.kind).toBe("green");
-            expect(resumeCalls).not.toContain("startOpenCode");
+            expect(resumeCalls).not.toContain("startAgent");
         } finally {
             await rm(workspace, { recursive: true, force: true });
         }

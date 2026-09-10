@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import type { AgentClient } from "../../src/opencode/client.ts";
+import type { AgentClient } from "../../src/agent/contracts.ts";
 import type { AgentSelection } from "../../src/agent/model.ts";
 import {
     ReviewFindingSeverity,
@@ -31,8 +31,8 @@ import {
 } from "../../src/issues/pipeline-repair-executor.ts";
 import {
     isDeniedShellResource,
-    isOpenCodeTaskCommandAllowed,
-} from "../../src/opencode/permissions.ts";
+    isTaskCommandAllowed,
+} from "../../src/pi/permissions.ts";
 
 const failingHeadSha = "a".repeat(40);
 const request: PipelineSnapshotRequest = {
@@ -515,10 +515,10 @@ describe("pipeline repair permission boundary", () => {
             "git -C /tmp/checkout add --all",
             "gh run rerun 123",
         ]) {
-            expect(isOpenCodeTaskCommandAllowed(command)).toBe(false);
+            expect(isTaskCommandAllowed(command)).toBe(false);
             expect(isDeniedShellResource(command)).toBe(true);
         }
-        expect(isOpenCodeTaskCommandAllowed("git diff --cached")).toBe(true);
-        expect(isOpenCodeTaskCommandAllowed("bun test tests")).toBe(true);
+        expect(isTaskCommandAllowed("git diff --cached")).toBe(true);
+        expect(isTaskCommandAllowed("bun test tests")).toBe(true);
     });
 });

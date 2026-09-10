@@ -131,7 +131,7 @@ describe("pipeline diagnostics runtime assembly", () => {
             const requests: PipelineSnapshotRequest[] = [];
             let fetches = 0;
             const runtime = makeLiveRuntime({
-                opencode: {
+                agentRuntime: {
                     start: async () => {
                         throw new Error("the agent must not start");
                     },
@@ -252,7 +252,7 @@ describe("pipeline diagnostics runtime assembly", () => {
                     ),
             };
             const runtime = makeLiveRuntime({
-                opencode: { start: async () => ({}) as never },
+                agentRuntime: { start: async () => ({}) as never },
                 progress: makeTestProgressRecorder([]),
                 pipelineDiagnosticsDependencies: {
                     collector: fakeCollector(collectionFor(records), []),

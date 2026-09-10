@@ -14,7 +14,7 @@ const request: PipelineSnapshotRequest = {
 describe("runtime factory", () => {
     test("instantiates the read-only pipeline snapshot service", () => {
         const runtime = makeLiveRuntime({
-            opencode: {
+            agentRuntime: {
                 start: async () => {
                     throw new Error(
                         "The agent must not start while assembling runtime",
@@ -55,7 +55,7 @@ describe("runtime factory", () => {
 
     test("lets consumers observe one exact SHA with an abort signal and bounded settings", async () => {
         const runtime = makeLiveRuntime({
-            opencode: {
+            agentRuntime: {
                 start: async () => {
                     throw new Error("The agent must not start while observing");
                 },

@@ -6,7 +6,7 @@ import { join } from "node:path";
 import type {
     AgentEventContext,
     AgentSessionEvent,
-} from "../../src/opencode/client.ts";
+} from "../../src/agent/contracts.ts";
 import { stripTerminalControls } from "../../src/shared/terminal.ts";
 import { makeProgressCoordinator } from "../../src/progress/coordinator.ts";
 import {
