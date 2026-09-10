@@ -565,14 +565,6 @@ const makeImplementationHarness = async (
         push: async () => {
             trace.push("ops:push");
         },
-        createOrCheckoutFeatureBranch: async () => ({
-            branch: "ralphie/issue-42",
-            baseBranch: "develop",
-            baseSha: CHECKPOINT.sha,
-            headSha: "h".repeat(40),
-            created: false,
-        }),
-        restoreBaseCheckout: async () => {},
     };
     const preparation: GitIssuePreparationService = {
         prepare: async () => CHECKPOINT,
@@ -586,32 +578,6 @@ const makeImplementationHarness = async (
                 origin: "origin",
                 commitsBehindBase: 0,
                 commitsAheadBase: 1,
-                pushMode: "non-force",
-            };
-        },
-        verifyManagedRevisionPush: async () => {
-            trace.push("ops:remoteSafety:managed");
-            return {
-                repository: "owner/repo",
-                branch: "develop",
-                origin: "origin",
-                baseSha: CHECKPOINT.sha,
-                expectedPriorHeadSha: CHECKPOINT.sha,
-                commitsBehindBase: 0,
-                commitsAheadBase: 0,
-                pushMode: "non-force",
-            };
-        },
-        verifyManagedRevisionPrePush: async () => {
-            trace.push("ops:remoteSafety:managed:prePush");
-            return {
-                repository: "owner/repo",
-                branch: "develop",
-                origin: "origin",
-                baseSha: CHECKPOINT.sha,
-                expectedPriorHeadSha: CHECKPOINT.sha,
-                commitsBehindBase: 0,
-                commitsAheadBase: 0,
                 pushMode: "non-force",
             };
         },

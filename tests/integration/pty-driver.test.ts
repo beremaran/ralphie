@@ -186,18 +186,6 @@ describe("PTY command driver", () => {
                     }),
                     expect.objectContaining({
                         kind: "agent",
-                        type: "compaction_start",
-                    }),
-                    expect.objectContaining({
-                        kind: "agent",
-                        type: "auto_retry_start",
-                    }),
-                    expect.objectContaining({
-                        kind: "agent",
-                        type: "summarization_retry_scheduled",
-                    }),
-                    expect.objectContaining({
-                        kind: "agent",
                         type: "tool_execution_start",
                     }),
                     expect.objectContaining({

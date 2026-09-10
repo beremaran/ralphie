@@ -7,6 +7,13 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Removed
 
+- Remove dead integration weight inherited from the removed modes: managed
+  feature-branch revision safety, the feature-branch and base-restore Git
+  operations, the always-false `allowMissingRemoteBranch` seam, unused safety
+  exports, and progress rendering for events pi never emits (compaction,
+  automatic/summarization retries, queue/session/entry updates, thinking-level
+  changes, and bash execution updates). No behavior change.
+
 - Remove the `pr` workflow. Ralphie now always delivers through the direct
   `lgtm` path: the `--workflow` flag, feature branches, pull requests, the
   post-PR review/revision coordinator, the check gate, and the read-only check

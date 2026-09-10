@@ -115,7 +115,6 @@ const transcriptFor = (
 const incrementalStreamEvent = (event: AgentSessionEvent): boolean => {
     switch (event.type) {
         case "tool_execution_update":
-        case "bash_execution_update":
             return true;
         case "message_update": {
             const type = event.assistantMessageEvent.type;
@@ -130,26 +129,12 @@ const incrementalStreamEvent = (event: AgentSessionEvent): boolean => {
     }
 };
 
-const lifecycleBreadcrumbEvent = (event: AgentSessionEvent): boolean => {
-    switch (event.type) {
-        case "tool_execution_end":
-        case "compaction_start":
-        case "compaction_end":
-        case "auto_retry_start":
-        case "auto_retry_end":
-        case "summarization_retry_scheduled":
-        case "summarization_retry_attempt_start":
-        case "summarization_retry_finished":
-            return true;
-        case "agent_end":
-            return event.willRetry;
-        default:
-            return false;
-    }
-};
+/** Tool completions are the only lifecycle breadcrumbs pi sessions emit. */
+const lifecycleBreadcrumbEvent = (event: AgentSessionEvent): boolean =>
+    event.type === "tool_execution_end";
 
 const closesTranscriptSession = (event: AgentSessionEvent): boolean =>
-    event.type === "agent_end" || event.type === "agent_settled";
+    event.type === "agent_end";
 
 const policyCandidateFor = (
     candidate: BreadcrumbLabelCandidate,

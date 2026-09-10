@@ -479,22 +479,6 @@ const reduceToolExecution = (
     return upsert(state, update, now);
 };
 
-const reduceBashUpdate = (
-    state: ActivityState,
-    event: Extract<AgentSessionEvent, { type: "bash_execution_update" }>,
-    now: ActivityClock,
-): ActivityState =>
-    upsert(
-        state,
-        {
-            id: `bash:${event.id ?? "bash"}`,
-            kind: "shell",
-            label: "bash",
-            status: "running",
-        },
-        now,
-    );
-
 const lifecycleAgentAndTurn = (
     state: ActivityState,
     event: AgentSessionEvent,
@@ -519,18 +503,6 @@ const lifecycleAgentAndTurn = (
                     id: "agent",
                     kind: "lifecycle",
                     label: "Agent",
-                    status: event.willRetry ? "failed" : "succeeded",
-                    ...(event.willRetry ? { detail: "will retry" } : {}),
-                },
-                now,
-            );
-        case "agent_settled":
-            return upsert(
-                state,
-                {
-                    id: "agent",
-                    kind: "lifecycle",
-                    label: "Agent",
                     status: "succeeded",
                 },
                 now,
@@ -554,112 +526,6 @@ const lifecycleAgentAndTurn = (
                     kind: "lifecycle",
                     label: "Turn",
                     status: "succeeded",
-                },
-                now,
-            );
-        default:
-            return state;
-    }
-};
-
-const lifecycleCompaction = (
-    state: ActivityState,
-    event: AgentSessionEvent,
-    now: ActivityClock,
-): ActivityState => {
-    switch (event.type) {
-        case "compaction_start":
-            return upsert(
-                state,
-                {
-                    id: "compaction",
-                    kind: "lifecycle",
-                    label: "Compacting context",
-                    target: event.reason,
-                    status: "running",
-                },
-                now,
-            );
-        case "compaction_end":
-            return upsert(
-                state,
-                {
-                    id: "compaction",
-                    kind: "lifecycle",
-                    label: "Compacting context",
-                    status:
-                        event.aborted || event.errorMessage !== undefined
-                            ? "failed"
-                            : "succeeded",
-                    ...(event.aborted
-                        ? { detail: "aborted" }
-                        : event.errorMessage === undefined
-                          ? {}
-                          : { detail: event.errorMessage }),
-                },
-                now,
-            );
-        default:
-            return state;
-    }
-};
-
-const lifecycleRetry = (
-    state: ActivityState,
-    event: AgentSessionEvent,
-    now: ActivityClock,
-): ActivityState => {
-    switch (event.type) {
-        case "auto_retry_start":
-            return upsert(
-                state,
-                {
-                    id: "retry",
-                    kind: "lifecycle",
-                    label: "Retrying pi request",
-                    target: `attempt ${event.attempt}/${event.maxAttempts}`,
-                    status: "running",
-                },
-                now,
-            );
-        case "auto_retry_end":
-            return upsert(
-                state,
-                {
-                    id: "retry",
-                    kind: "lifecycle",
-                    label: "Retrying pi request",
-                    status: event.success ? "succeeded" : "failed",
-                    ...(event.success || event.finalError === undefined
-                        ? {}
-                        : { detail: event.finalError }),
-                },
-                now,
-            );
-        case "summarization_retry_scheduled":
-            return upsert(
-                state,
-                {
-                    id: "context-summary",
-                    kind: "lifecycle",
-                    label: "Retrying context summary",
-                    target: `attempt ${event.attempt}/${event.maxAttempts}`,
-                    status: "running",
-                },
-                now,
-            );
-        case "summarization_retry_attempt_start":
-        case "summarization_retry_finished":
-            return upsert(
-                state,
-                {
-                    id: "context-summary",
-                    kind: "lifecycle",
-                    label: "Retrying context summary",
-                    status:
-                        event.type === "summarization_retry_finished"
-                            ? "succeeded"
-                            : "running",
                 },
                 now,
             );
@@ -676,19 +542,9 @@ const reduceLifecycleEvent = (
     switch (event.type) {
         case "agent_start":
         case "agent_end":
-        case "agent_settled":
         case "turn_start":
         case "turn_end":
             return lifecycleAgentAndTurn(state, event, now);
-        case "compaction_start":
-        case "compaction_end":
-            return lifecycleCompaction(state, event, now);
-        case "auto_retry_start":
-        case "auto_retry_end":
-        case "summarization_retry_scheduled":
-        case "summarization_retry_attempt_start":
-        case "summarization_retry_finished":
-            return lifecycleRetry(state, event, now);
         default:
             return state;
     }
@@ -697,10 +553,10 @@ const reduceLifecycleEvent = (
 /**
  * Reduce an agent session event into the activity registry.
  *
- * Tool calls are keyed by their call id, bash streams by their execution id,
- * and thinking/lifecycle work by a stable per-operation id, so repeated
- * updates replace the same row. Assistant response text (text deltas) and
- * lossless event payloads are deliberately ignored.
+ * Tool calls are keyed by their call id, thinking/lifecycle work by a stable
+ * per-operation id, so repeated updates replace the same row. Assistant
+ * response text (text deltas) and lossless event payloads are deliberately
+ * ignored.
  */
 export const reduceActivityEvent = (
     state: ActivityState | undefined,
@@ -713,22 +569,12 @@ export const reduceActivityEvent = (
         case "tool_execution_update":
         case "tool_execution_end":
             return reduceToolExecution(base, event, now);
-        case "bash_execution_update":
-            return reduceBashUpdate(base, event, now);
         case "message_update":
             return reduceMessageUpdate(base, event, now);
         case "agent_start":
         case "agent_end":
-        case "agent_settled":
         case "turn_start":
         case "turn_end":
-        case "compaction_start":
-        case "compaction_end":
-        case "auto_retry_start":
-        case "auto_retry_end":
-        case "summarization_retry_scheduled":
-        case "summarization_retry_attempt_start":
-        case "summarization_retry_finished":
             return reduceLifecycleEvent(base, event, now);
         default:
             return base;

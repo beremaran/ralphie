@@ -286,7 +286,6 @@ export const makeImplementationExecutorService = (
                 branch: context.targetBranch,
                 intendedBaseSha: storedCheckpoint.sha,
                 expectedCommitSha: createdCommit.sha,
-                allowMissingRemoteBranch: context.allowMissingRemoteBranch,
                 pushMode: "non-force",
             });
             await operations.push(
@@ -341,7 +340,6 @@ export const makeImplementationExecutorService = (
                     repositoryPath: context.repositoryPath,
                     branch: context.targetBranch,
                     intendedBaseSha: checkpoint.sha,
-                    allowMissingRemoteBranch: context.allowMissingRemoteBranch,
                     pushMode: "non-force",
                 }),
             "Repository push safety checks passed.",
@@ -719,7 +717,6 @@ export const makeImplementationExecutorService = (
                     branch: context.targetBranch,
                     intendedBaseSha: checkpoint.sha,
                     expectedCommitSha: commit.sha,
-                    allowMissingRemoteBranch: context.allowMissingRemoteBranch,
                     pushMode: "non-force",
                 });
                 await operations.push(

@@ -688,57 +688,6 @@ const renderUserMessage = (
     writer.endStream(key);
 };
 
-const renderLifecycleEvent = (
-    event: AgentSessionEvent,
-    styles: TranscriptStyles,
-    writer: TranscriptWriter,
-): void => {
-    switch (event.type) {
-        case "compaction_start":
-            writer.line(
-                `${styles.event("↻")} compacting context · ${oneLine(event.reason)}`,
-            );
-            return;
-        case "compaction_end": {
-            const state = event.aborted
-                ? "aborted"
-                : event.errorMessage === undefined
-                  ? "done"
-                  : `failed: ${oneLine(event.errorMessage)}`;
-            writer.line(`${styles.event("↻")} context compaction ${state}`);
-            return;
-        }
-        case "auto_retry_start":
-            writer.line(
-                `${styles.event("↻")} retrying pi request · attempt ${event.attempt}/${event.maxAttempts}`,
-            );
-            return;
-        case "auto_retry_end":
-            writer.line(
-                `${styles.event("↻")} pi retry ${event.success ? "succeeded" : "failed"}`,
-            );
-            return;
-        case "summarization_retry_scheduled":
-            writer.line(
-                `${styles.event("↻")} retrying context summary · attempt ${event.attempt}/${event.maxAttempts}`,
-            );
-            return;
-        case "summarization_retry_attempt_start":
-            writer.line(`${styles.event("↻")} retrying context summary`);
-            return;
-        case "summarization_retry_finished":
-            writer.line(`${styles.event("↻")} context summary finished`);
-            return;
-        case "thinking_level_changed":
-            writer.line(
-                `${styles.event("•")} thinking level · ${oneLine(event.level)}`,
-            );
-            return;
-        default:
-            return;
-    }
-};
-
 const renderTerminalEvent = (
     event: AgentSessionEvent,
     context: AgentEventContext,
@@ -753,11 +702,7 @@ const renderTerminalEvent = (
         return;
     }
     if (event.type === "agent_end") {
-        writer.finishSession(event.willRetry ? "retrying…" : "done");
-        return;
-    }
-    if (event.type === "agent_settled") {
-        writer.finishSession("settled");
+        writer.finishSession("done");
         return;
     }
 
@@ -777,7 +722,6 @@ const renderTerminalEvent = (
             );
             return;
         case "tool_execution_update":
-        case "bash_execution_update":
             // Intermediate tool output streams into the compact activity
             // surface; the human transcript only records the call and outcome.
             return;
@@ -786,20 +730,6 @@ const renderTerminalEvent = (
             return;
         case "turn_start":
         case "turn_end":
-        case "queue_update":
-        case "session_info_changed":
-        case "entry_appended":
-            return;
-        case "compaction_start":
-        case "compaction_end":
-        case "auto_retry_start":
-        case "auto_retry_end":
-        case "summarization_retry_scheduled":
-        case "summarization_retry_attempt_start":
-        case "summarization_retry_finished":
-        case "thinking_level_changed":
-            renderLifecycleEvent(event, styles, writer);
-            return;
         case "message_end":
             return;
         default:

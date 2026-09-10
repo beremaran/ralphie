@@ -78,7 +78,7 @@ const agentEvents = (): readonly AgentSessionEvent[] => [
         type: "message_update",
         assistantMessageEvent: { type: "text_end", contentIndex: 0 },
     }),
-    asEvent({ type: "agent_settled" }),
+    asEvent({ type: "agent_end" }),
 ];
 
 const richDetails: Readonly<Record<string, unknown>> = {

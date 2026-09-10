@@ -1317,7 +1317,6 @@ export const workflow = async (
                         repository: repo,
                         repositoryPath: prepared.path,
                         targetBranch: branch,
-                        allowMissingRemoteBranch: false,
                         workspace,
                         runId: actualRunId,
                         octokit,

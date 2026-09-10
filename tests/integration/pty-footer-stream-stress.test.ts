@@ -666,50 +666,7 @@ describe("interactive footer streaming stress (issue #311)", () => {
             await Bun.sleep(160);
             expect(await footerText()).toContain("Waiting");
 
-            await expectActivity(
-                asEvent({ type: "compaction_start", reason: "context full" }),
-                "Compacting",
-            );
-            coordinator.piListener(
-                asEvent({ type: "compaction_end" }),
-                CONTEXT,
-            );
-            await Bun.sleep(160);
-            expect(await footerText()).toContain("Waiting");
-
-            await expectActivity(
-                asEvent({
-                    type: "auto_retry_start",
-                    attempt: 2,
-                    maxAttempts: 3,
-                }),
-                "Retrying",
-            );
-            await expectActivity(
-                asEvent({
-                    type: "summarization_retry_scheduled",
-                    attempt: 1,
-                    maxAttempts: 2,
-                }),
-                "Retrying",
-            );
-            coordinator.piListener(
-                asEvent({ type: "summarization_retry_finished" }),
-                CONTEXT,
-            );
-            await Bun.sleep(160);
-            expect(await footerText()).toContain("Waiting");
-
-            coordinator.piListener(
-                asEvent({ type: "agent_end", willRetry: true }),
-                CONTEXT,
-            );
-            await Bun.sleep(160);
-            expect(await footerText()).toContain("Retrying");
-            coordinator.piListener(
-                asEvent({ type: "agent_end", willRetry: false }),
-                CONTEXT,
-            );
+            coordinator.piListener(asEvent({ type: "agent_end" }), CONTEXT);
             await Bun.sleep(160);
             expect(await footerText()).toContain("Waiting");
 

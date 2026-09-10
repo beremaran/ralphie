@@ -228,24 +228,6 @@ const testRuntime = (
         push: async (_path, branch) => {
             calls.push(`pushBranch:${branch}`);
         },
-        createOrCheckoutFeatureBranch: async (
-            _path,
-            featureBranch,
-            baseBranch,
-            baseSha,
-        ) => {
-            calls.push(`prepareFeatureBranch:${featureBranch}:${baseBranch}`);
-            return {
-                branch: featureBranch,
-                baseBranch,
-                baseSha,
-                headSha: baseSha,
-                created: true,
-            };
-        },
-        restoreBaseCheckout: async (_path, branch) => {
-            calls.push(`restoreBase:${branch}`);
-        },
     };
     const issueExecutor: IssueExecutorService = options.issueExecutor ?? {
         execute: async (context) => {
@@ -493,11 +475,9 @@ const groundedRouteExecutor = (
         {
             execute: async ({ context }) => {
                 calls.push(`implementation:${context.issue.number}`);
-                if (context.allowMissingRemoteBranch !== true) {
-                    calls.push(
-                        `directPush:${context.issue.number}:${context.targetBranch}`,
-                    );
-                }
+                calls.push(
+                    `directPush:${context.issue.number}:${context.targetBranch}`,
+                );
                 return {
                     kind: IssueExecutionOutcomeKind.Completed,
                     completion: "pushed-commit",

@@ -10,13 +10,7 @@ import type {
     ProgressUpdate,
 } from "./progress.ts";
 
-export type DisplayActivity =
-    | "thinking"
-    | "responding"
-    | "tool"
-    | "compacting"
-    | "retrying"
-    | "waiting";
+export type DisplayActivity = "thinking" | "responding" | "tool" | "waiting";
 
 export type DisplayIssue = {
     readonly current: number;
@@ -99,8 +93,6 @@ export const DISPLAY_ACTIVITY_LABELS: Readonly<
     thinking: "Thinking",
     responding: "Responding",
     tool: "Using tool",
-    compacting: "Compacting context",
-    retrying: "Retrying",
     waiting: "Waiting",
 };
 
@@ -420,24 +412,11 @@ const lifecycleActivity = (
 ): ActivityChange | undefined => {
     switch (event.type) {
         case "agent_start":
-            return change("thinking");
-        case "agent_settled":
-        case "turn_end":
-        case "auto_retry_end":
-        case "summarization_retry_finished":
-            return change("waiting");
-        case "agent_end":
-            return event.willRetry ? change("retrying") : change("waiting");
         case "turn_start":
             return change("thinking");
-        case "compaction_start":
-            return change("compacting");
-        case "compaction_end":
-            return event.willRetry ? change("retrying") : change("waiting");
-        case "auto_retry_start":
-        case "summarization_retry_scheduled":
-        case "summarization_retry_attempt_start":
-            return change("retrying");
+        case "turn_end":
+        case "agent_end":
+            return change("waiting");
         default:
             return undefined;
     }
@@ -455,9 +434,6 @@ const agentActivity = (
     }
     if (event.type === "tool_execution_end") {
         return change("waiting");
-    }
-    if (event.type === "bash_execution_update") {
-        return change("tool", activityLabelFor("tool", "bash"));
     }
     if (event.type === "message_start") {
         return recordValue(event.message).role === "assistant"

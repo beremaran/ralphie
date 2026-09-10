@@ -202,16 +202,7 @@ describe("coordinator activity wiring", () => {
             toolEnd("", "bash", { content: "x".repeat(200) }, false),
             context,
         );
-        for (let index = 0; index < 5; index += 1) {
-            coordinator.piListener(
-                asEvent({
-                    type: "bash_execution_update",
-                    delta: `chunk ${index}`,
-                }),
-                context,
-            );
-        }
-        coordinator.piListener(asEvent({ type: "agent_settled" }), context);
+        coordinator.piListener(asEvent({ type: "agent_end" }), context);
         await settle();
         await coordinator.dispose();
 
@@ -515,7 +506,7 @@ describe("coordinator mode-specific contracts", () => {
             status: "succeeded",
             message: "done now",
         });
-        coordinator.piListener(asEvent({ type: "agent_settled" }), context);
+        coordinator.piListener(asEvent({ type: "agent_end" }), context);
         await coordinator.dispose();
 
         const text = output();
@@ -540,7 +531,7 @@ describe("coordinator mode-specific contracts", () => {
             status: "succeeded",
             message: "done",
         });
-        coordinator.piListener(asEvent({ type: "agent_settled" }), context);
+        coordinator.piListener(asEvent({ type: "agent_end" }), context);
         await coordinator.dispose();
 
         const records = output()

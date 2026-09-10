@@ -173,36 +173,6 @@ describe("display state", () => {
             activity: "tool",
             activityLabel: "Using bash",
         });
-
-        state = reduceAgentSessionEvent(
-            state,
-            piEvent({ type: "compaction_start", reason: "threshold" }),
-            context,
-        );
-        expect(state.activity).toBe("compacting");
-
-        state = reduceAgentSessionEvent(
-            state,
-            piEvent({
-                type: "auto_retry_start",
-                attempt: 1,
-                maxAttempts: 2,
-                delayMs: 10,
-                errorMessage: "temporary",
-            }),
-            context,
-        );
-        expect(state.activity).toBe("retrying");
-
-        state = reduceAgentSessionEvent(
-            state,
-            piEvent({ type: "agent_settled" }),
-            context,
-        );
-        expect(state).toMatchObject({
-            activity: "waiting",
-            activityLabel: "Waiting",
-        });
     });
 
     test("retains review attempt metadata through agent events", () => {

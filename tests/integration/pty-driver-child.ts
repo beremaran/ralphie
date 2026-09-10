@@ -257,15 +257,11 @@ export const scenarioThinkingEvents = (): readonly AgentSessionEvent[] => [
  * The canonical lifecycle milestone script, in the exact order the PTY
  * coverage tracks share (see the issue's requirement list):
  *
- * 1. `compaction_start` then `compaction_end`;
- * 2. `auto_retry_start` then `auto_retry_end`;
- * 3. `summarization_retry_scheduled` then `summarization_retry_attempt_start`
- *    then `summarization_retry_finished`;
- * 4. one failing tool execution — `tool_execution_start`, three
+ * 1. one failing tool execution — `tool_execution_start`, three
  *    `tool_execution_update`s (the first carries `FAKE_TOKEN` inside
  *    `partialResult.content` only), then `tool_execution_end` with
  *    `isError: true`;
- * 5. the closing `tool_execution_end` (ordinary result, `isError: false`) and
+ * 2. the closing `tool_execution_end` (ordinary result, `isError: false`) and
  *    `agent_end`.
  *
  * The last {@link SCENARIO_CLOSE_EVENT_COUNT} events are the stream close:
@@ -273,20 +269,6 @@ export const scenarioThinkingEvents = (): readonly AgentSessionEvent[] => [
  * only then emits them, finalizing the session exactly once.
  */
 export const scenarioLifecycleEvents = (): readonly AgentSessionEvent[] => [
-    asEvent({
-        type: "compaction_start",
-        reason: "context window exceeded while the PTY scenario session streamed its long deterministic transcript across every lifecycle milestone before the resize gate admitted two driver resizes and the stream finalized exactly once",
-    }),
-    asEvent({ type: "compaction_end" }),
-    asEvent({ type: "auto_retry_start", attempt: 2, maxAttempts: 3 }),
-    asEvent({ type: "auto_retry_end", success: true }),
-    asEvent({
-        type: "summarization_retry_scheduled",
-        attempt: 1,
-        maxAttempts: 2,
-    }),
-    asEvent({ type: "summarization_retry_attempt_start" }),
-    asEvent({ type: "summarization_retry_finished" }),
     asEvent({
         type: "tool_execution_start",
         toolCallId: "pty-gate",

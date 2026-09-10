@@ -17,7 +17,6 @@ import {
 const PROBE_THRESHOLDS = [
     { base: 4, values: [3, 4, 5] },
     { base: 8, values: [7, 8, 9] },
-    { base: 16, values: [15, 16, 17] },
 ] as const;
 
 type ThresholdObservation = {

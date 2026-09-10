@@ -119,8 +119,6 @@ export type IssueExecutionContext = {
     readonly repository: string;
     readonly repositoryPath: string;
     readonly targetBranch: string;
-    /** PR feature branches may not exist remotely until the first commit is pushed. */
-    readonly allowMissingRemoteBranch?: boolean;
     readonly workspace: string;
     readonly runId: string;
     readonly octokit: Octokit;

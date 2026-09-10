@@ -70,47 +70,38 @@ const writeAssistant = (
     );
 };
 
-const settleSession = (
-    harness: BreadcrumbHarness,
-    settledEvent: AgentSessionEvent = event({ type: "agent_settled" }),
-): void => {
-    harness.coordinator.piListener(settledEvent, context);
+/** The only lifecycle breadcrumb pi emits besides `agent_end`. */
+const completeTool = (harness: BreadcrumbHarness): void => {
+    harness.coordinator.piListener(
+        event({
+            type: "tool_execution_end",
+            toolCallId: "tool-1",
+            toolName: "bash",
+            isError: false,
+            result: { content: [{ type: "text", text: "" }] },
+        }),
+        context,
+    );
+};
+
+const settleSession = (harness: BreadcrumbHarness): void => {
+    harness.coordinator.piListener(event({ type: "agent_end" }), context);
 };
 
 describe("assembled breadcrumb policy regressions", () => {
     test("does not add a breadcrumb when a session ends below threshold", () => {
-        const endings: ReadonlyArray<{
-            readonly event: AgentSessionEvent;
-            readonly footer: string;
-        }> = [
-            {
-                event: event({ type: "agent_end", willRetry: false }),
-                footer: "╰─ done",
-            },
-            {
-                event: event({ type: "agent_end", willRetry: true }),
-                footer: "╰─ retrying…",
-            },
-            {
-                event: event({ type: "agent_settled" }),
-                footer: "╰─ settled",
-            },
-        ];
+        const harness = makeBreadcrumbHarness();
+        startSession(harness);
+        writeAssistant(harness, "one");
+        settleSession(harness);
 
-        for (const ending of endings) {
-            const harness = makeBreadcrumbHarness();
-            startSession(harness);
-            writeAssistant(harness, "one");
-            settleSession(harness, ending.event);
-
-            expect(visibleLines(harness.output)).toEqual([
-                "╭─ pi · Task · session-1",
-                "│",
-                "│  ✦ assistant one",
-                ending.footer,
-            ]);
-            expect(breadcrumbLines(harness.output)).toEqual([]);
-        }
+        expect(visibleLines(harness.output)).toEqual([
+            "╭─ pi · Task · session-1",
+            "│",
+            "│  ✦ assistant one",
+            "╰─ done",
+        ]);
+        expect(breadcrumbLines(harness.output)).toEqual([]);
     });
 
     test("emits at the exact assembled visible-line threshold", () => {
@@ -127,30 +118,9 @@ describe("assembled breadcrumb policy regressions", () => {
             "│    three",
             "│    four",
             "│  › Responding",
-            "╰─ settled",
+            "╰─ done",
         ]);
         expect(breadcrumbLines(harness.output)).toEqual(["│  › Responding"]);
-    });
-
-    test("suppresses a lifecycle candidate when accumulation is insufficient", () => {
-        const harness = makeBreadcrumbHarness();
-        startSession(harness);
-        writeAssistant(harness, "one");
-        harness.coordinator.piListener(
-            event({ type: "compaction_start", reason: "threshold" }),
-            context,
-        );
-        settleSession(harness);
-
-        expect(visibleLines(harness.output)).toEqual([
-            "╭─ pi · Task · session-1",
-            "│",
-            "│  ✦ assistant one",
-            "│",
-            "│  ↻ compacting context · threshold",
-            "╰─ settled",
-        ]);
-        expect(breadcrumbLines(harness.output)).toEqual([]);
     });
 
     test("consumes many threshold crossings in one transition and clears the backlog", () => {
@@ -206,7 +176,7 @@ describe("assembled breadcrumb policy regressions", () => {
             "│  › Responding",
             "│",
             "│  ✦ assistant after",
-            "╰─ settled",
+            "╰─ done",
         ]);
         expect(breadcrumbLines(harness.output)).toEqual(["│  › Responding"]);
     });
@@ -216,13 +186,10 @@ describe("assembled breadcrumb policy regressions", () => {
         startSession(harness);
         // The assistant block leaves the periodic Responding candidate pending.
         writeAssistant(harness, "periodic one\nperiodic two");
-        // Compaction crosses the cadence boundary. Responding and Compacting
-        // context are both candidates at this transcript boundary, but the
+        // The tool completion crosses the cadence boundary. Responding and
+        // Waiting are both candidates at this transcript boundary, but the
         // lifecycle candidate must win.
-        harness.coordinator.piListener(
-            event({ type: "compaction_start", reason: "threshold" }),
-            context,
-        );
+        completeTool(harness);
         settleSession(harness);
 
         expect(visibleLines(harness.output)).toEqual([
@@ -230,13 +197,12 @@ describe("assembled breadcrumb policy regressions", () => {
             "│",
             "│  ✦ assistant periodic one",
             "│    periodic two",
-            "│",
-            "│  ↻ compacting context · threshold",
-            "│  › Compacting context",
-            "╰─ settled",
+            "│  ✓ bash done",
+            "│  › Waiting",
+            "╰─ done",
         ]);
         const breadcrumbs = breadcrumbLines(harness.output);
-        expect(breadcrumbs).toEqual(["│  › Compacting context"]);
+        expect(breadcrumbs).toEqual(["│  › Waiting"]);
         expect(breadcrumbs).not.toContain("│  › Responding");
     });
 
@@ -286,165 +252,14 @@ describe("assembled breadcrumb policy regressions", () => {
             "│",
             "│  $ printf tool-output",
             "│  ✓ bash done",
-            "╰─ settled",
+            "╰─ done",
         ]);
         expect(harness.output).not.toContain("tool line");
         expect(breadcrumbLines(harness.output)).toEqual([]);
     });
 
-    const lifecycleCases: ReadonlyArray<{
-        readonly name: string;
-        readonly event: AgentSessionEvent;
-        readonly renderedLine: string;
-        readonly breadcrumb: string;
-    }> = [
-        {
-            name: "compaction start",
-            event: event({ type: "compaction_start", reason: "threshold" }),
-            renderedLine: "│  ↻ compacting context · threshold",
-            breadcrumb: "│  › Compacting context",
-        },
-        {
-            name: "compaction end",
-            event: event({
-                type: "compaction_end",
-                reason: "threshold",
-                result: undefined,
-                aborted: false,
-                willRetry: false,
-            }),
-            renderedLine: "│  ↻ context compaction done",
-            breadcrumb: "│  › Waiting",
-        },
-        {
-            name: "automatic retry start",
-            event: event({
-                type: "auto_retry_start",
-                attempt: 1,
-                maxAttempts: 2,
-                delayMs: 10,
-                errorMessage: "temporary",
-            }),
-            renderedLine: "│  ↻ retrying pi request · attempt 1/2",
-            breadcrumb: "│  › Retrying",
-        },
-        {
-            name: "automatic retry end",
-            event: event({
-                type: "auto_retry_end",
-                success: true,
-                attempt: 1,
-            }),
-            renderedLine: "│  ↻ pi retry succeeded",
-            breadcrumb: "│  › Waiting",
-        },
-        {
-            name: "scheduled summary retry",
-            event: event({
-                type: "summarization_retry_scheduled",
-                attempt: 1,
-                maxAttempts: 2,
-                delayMs: 10,
-                errorMessage: "temporary",
-            }),
-            renderedLine: "│  ↻ retrying context summary · attempt 1/2",
-            breadcrumb: "│  › Retrying",
-        },
-        {
-            name: "summary retry attempt from a branch",
-            event: event({
-                type: "summarization_retry_attempt_start",
-                source: "branchSummary",
-            }),
-            renderedLine: "│  ↻ retrying context summary",
-            breadcrumb: "│  › Retrying",
-        },
-        {
-            name: "summary retry attempt from compaction",
-            event: event({
-                type: "summarization_retry_attempt_start",
-                source: "compaction",
-                reason: "overflow",
-            }),
-            renderedLine: "│  ↻ retrying context summary",
-            breadcrumb: "│  › Retrying",
-        },
-        {
-            name: "summary retry finished",
-            event: event({ type: "summarization_retry_finished" }),
-            renderedLine: "│  ↻ context summary finished",
-            breadcrumb: "│  › Waiting",
-        },
-    ];
-
-    for (const lifecycleCase of lifecycleCases) {
-        test(`arbitrates the lifecycle candidate for ${lifecycleCase.name}`, () => {
-            const harness = makeBreadcrumbHarness();
-            startSession(harness);
-            writeAssistant(harness, "one\ntwo");
-            harness.coordinator.piListener(lifecycleCase.event, context);
-            settleSession(harness);
-
-            expect(visibleLines(harness.output)).toEqual([
-                "╭─ pi · Task · session-1",
-                "│",
-                "│  ✦ assistant one",
-                "│    two",
-                "│",
-                lifecycleCase.renderedLine,
-                lifecycleCase.breadcrumb,
-                "╰─ settled",
-            ]);
-            expect(breadcrumbLines(harness.output)).toEqual([
-                lifecycleCase.breadcrumb,
-            ]);
-        });
-    }
-
-    test("de-duplicates adjacent canonical lifecycle keys without dropping cadence", () => {
-        const harness = makeBreadcrumbHarness(2);
-        startSession(harness);
-        writeAssistant(harness, "one");
-        const compactionStart = event({
-            type: "compaction_start",
-            reason: "threshold",
-        });
-        harness.coordinator.piListener(compactionStart, context);
-        harness.coordinator.piListener(compactionStart, context);
-        harness.coordinator.piListener(
-            event({
-                type: "compaction_end",
-                reason: "threshold",
-                result: undefined,
-                aborted: false,
-                willRetry: false,
-            }),
-            context,
-        );
-        settleSession(harness);
-
-        expect(visibleLines(harness.output)).toEqual([
-            "╭─ pi · Task · session-1",
-            "│",
-            "│  ✦ assistant one",
-            "│",
-            "│  ↻ compacting context · threshold",
-            "│  › Compacting context",
-            "│",
-            "│  ↻ compacting context · threshold",
-            "│",
-            "│  ↻ context compaction done",
-            "│  › Waiting",
-            "╰─ settled",
-        ]);
-        expect(breadcrumbLines(harness.output)).toEqual([
-            "│  › Compacting context",
-            "│  › Waiting",
-        ]);
-    });
-
     test("preserves token-like values in assembled breadcrumb context and its key", async () => {
-        const harness = makeBreadcrumbHarness();
+        const harness = makeBreadcrumbHarness(3);
         await harness.coordinator.progress.emit({
             stage: "implementation",
             status: "started",
@@ -457,27 +272,23 @@ describe("assembled breadcrumb policy regressions", () => {
         harness.clearOutput();
         startSession(harness);
         writeAssistant(harness, "one\ntwo");
-        harness.coordinator.piListener(
-            event({ type: "compaction_start", reason: "threshold" }),
-            context,
-        );
+        completeTool(harness);
         const candidate = breadcrumbCandidateFor(
             harness.coordinator.getDisplayState(),
         );
         settleSession(harness);
 
         expect(candidate.canonicalKey).toBe(
-            "[owner/repo?token=private-value] [1/1] #1 Bearer private-value › Implementing changes › Compacting context",
+            "[owner/repo?token=private-value] [1/1] #1 Bearer private-value › Implementing changes › Waiting",
         );
         expect(visibleLines(harness.output)).toEqual([
             "╭─ pi · Task · session-1 · owner/repo?token=private-value · issue 1/1 · #1 · Implementing changes",
             "│",
             "│  ✦ assistant one",
             "│    two",
-            "│",
-            "│  ↻ compacting context · threshold",
-            "│  [owner/repo?token=private-value] [1/1] #1 Bearer private-value › Implementing changes › Compacting context",
-            "╰─ settled",
+            "│  ✓ bash done",
+            "│  [owner/repo?token=private-value] [1/1] #1 Bearer private-value › Implementing changes › Waiting",
+            "╰─ done",
         ]);
         expect(harness.output).toContain("private-value");
         expect(breadcrumbLines(harness.output)).toHaveLength(1);
@@ -496,10 +307,7 @@ describe("assembled breadcrumb policy regressions", () => {
         });
         startSession(harness);
         writeAssistant(harness, "one\n");
-        harness.coordinator.piListener(
-            event({ type: "compaction_start", reason: "threshold" }),
-            context,
-        );
+        completeTool(harness);
         const firstCandidate = breadcrumbCandidateFor(
             harness.coordinator.getDisplayState(),
         );
@@ -513,10 +321,7 @@ describe("assembled breadcrumb policy regressions", () => {
             total: 1,
         });
         writeAssistant(harness, "two\n");
-        harness.coordinator.piListener(
-            event({ type: "compaction_start", reason: "threshold" }),
-            context,
-        );
+        completeTool(harness);
         const secondCandidate = breadcrumbCandidateFor(
             harness.coordinator.getDisplayState(),
         );
@@ -545,13 +350,10 @@ describe("assembled breadcrumb policy regressions", () => {
     });
 
     test("resumes an incomplete assistant stream after automatic insertion", () => {
-        const harness = makeBreadcrumbHarness();
+        const harness = makeBreadcrumbHarness(3);
         startSession(harness);
         writeAssistant(harness, "one\ntwo");
-        harness.coordinator.piListener(
-            event({ type: "compaction_start", reason: "threshold" }),
-            context,
-        );
+        completeTool(harness);
         writeAssistant(harness, "after");
         settleSession(harness);
 
@@ -560,15 +362,12 @@ describe("assembled breadcrumb policy regressions", () => {
             "│",
             "│  ✦ assistant one",
             "│    two",
-            "│",
-            "│  ↻ compacting context · threshold",
-            "│  › Compacting context",
+            "│  ✓ bash done",
+            "│  › Waiting",
             "│    after",
-            "╰─ settled",
+            "╰─ done",
         ]);
-        expect(breadcrumbLines(harness.output)).toEqual([
-            "│  › Compacting context",
-        ]);
+        expect(breadcrumbLines(harness.output)).toEqual(["│  › Waiting"]);
     });
 
     test("keeps the default CLI and output-mode surface free of breadcrumb options", () => {
@@ -605,7 +404,7 @@ describe("assembled breadcrumb policy regressions", () => {
         expect(records.map((record) => record.event.type)).toEqual([
             "agent_start",
             "message_update",
-            "agent_settled",
+            "agent_end",
         ]);
         expect(records.every((record) => record.type === "agent_event")).toBe(
             true,
