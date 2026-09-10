@@ -41,13 +41,8 @@ export type RalphieCliOptions = {
     readonly verificationCommands?: ReadonlyArray<string>;
     readonly model?: AgentModel;
     readonly thinking?: string;
-    readonly groundingThinking?: string;
-    readonly implementationThinking?: string;
     readonly implementationAttempts?: number;
     readonly implementationFallbackModel?: AgentModel;
-    readonly complexityThinking?: string;
-    readonly reviewThinking?: string;
-    readonly commitThinking?: string;
     readonly workspace?: string;
     readonly clean?: CleanWhen;
     readonly dryRun?: boolean;
@@ -86,13 +81,8 @@ export type IssueRalphieConfig = SharedRalphieConfig &
         readonly onIssueFailure: IssueFailurePolicy;
         readonly notificationsEnabled: boolean;
         readonly needsAttentionLabel?: string;
-        readonly groundingThinking?: string;
-        readonly implementationThinking?: string;
         readonly implementationAttempts: number;
         readonly implementationFallbackModel?: AgentModel;
-        readonly complexityThinking?: string;
-        readonly reviewThinking?: string;
-        readonly commitThinking?: string;
         readonly verificationCommands?: ReadonlyArray<string>;
         readonly maxDecompositionDepth: number;
     };
@@ -223,20 +213,12 @@ export const resolveRalphieConfig = (
             "needsAttentionLabel",
             options.needsAttentionLabel?.trim(),
         ),
-        ...optionalProperty("groundingThinking", options.groundingThinking),
-        ...optionalProperty(
-            "implementationThinking",
-            options.implementationThinking,
-        ),
         implementationAttempts:
             options.implementationAttempts ?? DEFAULT_IMPLEMENTATION_ATTEMPTS,
         ...optionalProperty(
             "implementationFallbackModel",
             options.implementationFallbackModel,
         ),
-        ...optionalProperty("complexityThinking", options.complexityThinking),
-        ...optionalProperty("reviewThinking", options.reviewThinking),
-        ...optionalProperty("commitThinking", options.commitThinking),
         verificationCommands: [...(options.verificationCommands ?? [])],
         maxDecompositionDepth:
             options.maxDecompositionDepth ?? DEFAULT_MAX_DECOMPOSITION_DEPTH,

@@ -6,7 +6,6 @@ import {
     findModelInfo,
     formatVariantViolations,
     isVariantAvailable,
-    plannedVariantChecks,
     validateModelVariants,
 } from "../src/pi/variants.ts";
 
@@ -24,6 +23,14 @@ const geminiFlash: PiModelInfo = {
     name: "Gemini 3.8 Flash",
     reasoning: true,
     thinkingLevels: ["off", "low", "medium", "high"],
+};
+
+const noReasoning: PiModelInfo = {
+    provider: "opencode-go",
+    id: "kimi-k2.7-code",
+    name: "Kimi K2.7 Code",
+    reasoning: false,
+    thinkingLevels: ["off"],
 };
 
 describe("thinking-level availability", () => {
@@ -67,74 +74,8 @@ describe("model lookup", () => {
     });
 });
 
-describe("planned stage checks", () => {
-    test("covers every stage and the implementation fallback model", () => {
-        const checks = plannedVariantChecks({
-            models: [deepseekFlash],
-            primaryModel: {
-                providerID: "opencode-go",
-                modelID: "deepseek-v4-flash",
-            },
-            fallbackModel: {
-                providerID: "openrouter",
-                modelID: "google/gemini-3.8-flash",
-            },
-            defaultVariant: "low",
-            stageVariants: {
-                complexity: "medium",
-            },
-        });
-
-        expect(checks.map((check) => check.stage)).toEqual([
-            "grounding",
-            "complexity",
-            "implementation",
-            "review",
-            "commitMessage",
-            "implementation (fallback model)",
-        ]);
-        expect(
-            checks.find((check) => check.stage === "complexity")?.variant,
-        ).toBe("medium");
-        expect(
-            checks.find((check) => check.stage === "grounding")?.variant,
-        ).toBe("low");
-    });
-});
-
 describe("thinking-level violations", () => {
-    test("flags the exact stage, model, and flag for an unsupported level", () => {
-        const violations = collectVariantViolations({
-            models: [deepseekFlash],
-            primaryModel: {
-                providerID: "opencode-go",
-                modelID: "deepseek-v4-flash",
-            },
-            stageVariants: {
-                grounding: "low",
-                complexity: "medium",
-                implementation: "high",
-                review: "max",
-                commitMessage: "low",
-            },
-        });
-
-        expect(violations).toHaveLength(1);
-        expect(violations[0]).toMatchObject({
-            stage: "complexity",
-            variant: "medium",
-            modelName: "opencode-go/deepseek-v4-flash",
-            flagOption: "--complexity-thinking",
-        });
-        expect(violations[0]?.availableVariants).toEqual([
-            "off",
-            "low",
-            "high",
-            "max",
-        ]);
-    });
-
-    test("skips validation when no catalog is available", () => {
+    test("skips validation when no level or catalog is available", () => {
         expect(
             collectVariantViolations({
                 models: [],
@@ -142,9 +83,47 @@ describe("thinking-level violations", () => {
                     providerID: "opencode-go",
                     modelID: "deepseek-v4-flash",
                 },
-                stageVariants: { complexity: "medium" },
+                variant: "medium",
             }),
         ).toEqual([]);
+        expect(
+            collectVariantViolations({
+                models: [deepseekFlash],
+                primaryModel: {
+                    providerID: "opencode-go",
+                    modelID: "deepseek-v4-flash",
+                },
+            }),
+        ).toEqual([]);
+        expect(
+            collectVariantViolations({
+                models: [deepseekFlash],
+                primaryModel: {
+                    providerID: "opencode-go",
+                    modelID: "deepseek-v4-flash",
+                },
+                variant: "default",
+            }),
+        ).toEqual([]);
+    });
+
+    test("flags an unsupported level for the primary model", () => {
+        const violations = collectVariantViolations({
+            models: [deepseekFlash],
+            primaryModel: {
+                providerID: "opencode-go",
+                modelID: "deepseek-v4-flash",
+            },
+            variant: "medium",
+        });
+
+        expect(violations).toEqual([
+            {
+                variant: "medium",
+                modelName: "opencode-go/deepseek-v4-flash",
+                availableVariants: ["off", "low", "high", "max"],
+            },
+        ]);
     });
 
     test("skips unknown models instead of failing the run", () => {
@@ -155,7 +134,7 @@ describe("thinking-level violations", () => {
                     providerID: "opencode-go",
                     modelID: "unknown-model",
                 },
-                stageVariants: { complexity: "medium" },
+                variant: "medium",
             }),
         ).toEqual([]);
     });
@@ -167,63 +146,55 @@ describe("thinking-level violations", () => {
                 providerID: "opencode-go",
                 modelID: "deepseek-v4-flash",
             },
-            stageVariants: { complexity: "banana" },
+            variant: "banana",
         });
 
         expect(violations).toHaveLength(1);
         expect(violations[0]?.variant).toBe("banana");
     });
 
-    test("validates the fallback model with the implementation level", () => {
+    test("validates the fallback model with the same level", () => {
         const violations = collectVariantViolations({
-            models: [deepseekFlash, geminiFlash],
+            models: [deepseekFlash, noReasoning],
             primaryModel: {
                 providerID: "opencode-go",
                 modelID: "deepseek-v4-flash",
             },
             fallbackModel: {
                 providerID: "opencode-go",
-                modelID: "deepseek-v4-flash",
+                modelID: "kimi-k2.7-code",
             },
-            stageVariants: {
-                implementation: "medium",
-            },
+            variant: "high",
         });
 
-        expect(violations.map((violation) => violation.stage)).toContain(
-            "implementation (fallback model)",
-        );
+        expect(violations).toHaveLength(1);
+        expect(violations[0]?.modelName).toBe("opencode-go/kimi-k2.7-code");
     });
 
     test("formats actionable guidance with available levels", () => {
         const message = formatVariantViolations([
             {
-                stage: "complexity",
                 variant: "medium",
                 modelName: "opencode-go/deepseek-v4-flash",
                 availableVariants: ["off", "low", "high", "max"],
-                flagOption: "--complexity-thinking",
             },
         ]);
 
-        expect(message).toMatch(/complexity/);
         expect(message).toMatch(/opencode-go\/deepseek-v4-flash/);
         expect(message).toMatch(/off, low, high, max/);
-        expect(message).toMatch(/--complexity-thinking/);
+        expect(message).toMatch(/--thinking <level>/);
     });
 
     test("explains models without reasoning support", () => {
         const message = formatVariantViolations([
             {
-                stage: "implementation",
                 variant: "low",
                 modelName: "opencode-go/kimi-k2.7-code",
-                availableVariants: [],
-                flagOption: "--implementation-thinking",
+                availableVariants: ["off"],
             },
         ]);
 
-        expect(message).toMatch(/does not support reasoning/);
+        expect(message).toMatch(/does not support thinking level "low"/);
     });
 
     test("validateModelVariants throws with remediation", () => {
@@ -234,9 +205,9 @@ describe("thinking-level violations", () => {
                     providerID: "opencode-go",
                     modelID: "deepseek-v4-flash",
                 },
-                stageVariants: { complexity: "medium" },
+                variant: "medium",
             }),
-        ).toThrow(/--complexity-thinking/);
+        ).toThrow(/--thinking/);
     });
 
     test("validateModelVariants passes for supported levels", () => {
@@ -247,13 +218,7 @@ describe("thinking-level violations", () => {
                     providerID: "opencode-go",
                     modelID: "deepseek-v4-flash",
                 },
-                stageVariants: {
-                    grounding: "low",
-                    complexity: "max",
-                    implementation: "high",
-                    review: "high",
-                    commitMessage: "low",
-                },
+                variant: "high",
             }),
         ).not.toThrow();
     });

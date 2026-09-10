@@ -37,14 +37,9 @@ command schema.
 | `--issue-label <label>` | none | Require a label; repeat the flag to require multiple labels. |
 | `--issue-sort <sort>` | `created` | Sort by `created`, `updated`, or `comments`, optionally `:asc` or `:desc`. |
 | `--model <provider/model>` | pi settings default | Override the pi model selection. |
-| `--thinking <level>` | `medium` | Thinking level (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`), or `default` for `medium`. |
-| `--grounding-thinking <level>` | `low` | Thinking level for issue grounding/readiness. |
-| `--implementation-thinking <level>` | `high` | Thinking level for implementation sessions, independent of the global level. |
+| `--thinking <level>` | `medium` | Thinking level for every session (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`); omit or pass `default` for `medium`. |
 | `--implementation-attempts <count>` | `3` | Positive number of implementation attempts allowed when sessions leave an unresolved empty diff. |
 | `--implementation-fallback-model <provider/model>` | none | Optional model used after the first unresolved empty implementation attempt. |
-| `--complexity-thinking <level>` | `medium` | Thinking level for complexity routing. |
-| `--review-thinking <level>` | `high` | Thinking level for staged-change reviews. |
-| `--commit-thinking <level>` | `low` | Thinking level for commit-message generation. |
 | `--verify-command <command>` | discovered `bun run check` | Deterministic verification command; repeat to run multiple commands in order. Each command runs under a 30-minute deadline. |
 | `--workspace <path>` | `~/.ralphie` | Root directory for repository checkouts and run artifacts. |
 | `--dry-run` | off | Preview the issue workflow: assess/routes without implementation, commits, pushes, or GitHub mutations. |
@@ -130,15 +125,11 @@ bunx @beremaran/ralphie owner/repository \
   --thinking high
 ```
 
-Use lower reasoning for routing and commit text while retaining a stronger
-review, and override the deterministic project gate when needed:
+Override the deterministic project gate when needed:
 
 ```bash
 bunx @beremaran/ralphie owner/repository \
-  --grounding-thinking low \
-  --complexity-thinking medium \
-  --review-thinking high \
-  --commit-thinking low \
+  --thinking high \
   --verify-command "bun run check"
 ```
 

@@ -372,9 +372,7 @@ export const makeImplementationExecutorService = (
                         context.implementationFallbackModel !== undefined
                             ? context.implementationFallbackModel
                             : context.agentSelection.model,
-                    variant:
-                        context.agentStageVariants?.implementation ??
-                        context.agentSelection.variant,
+                    variant: context.agentSelection.variant,
 
                     schema: implementationResultSchema,
                     prompt: implementationPrompt(
@@ -592,9 +590,7 @@ export const makeImplementationExecutorService = (
                     profile: AgentSessionProfile.Review,
                     agent: context.agentSelection.agent,
                     model: context.agentSelection.model,
-                    variant:
-                        context.agentStageVariants?.review ??
-                        context.agentSelection.variant,
+                    variant: context.agentSelection.variant,
                     runId: context.runId,
                     diagnostics: context.agentDiagnostics,
                     repositoryInvariant: invariant,
@@ -665,9 +661,7 @@ export const makeImplementationExecutorService = (
                     schema: commitMessageDecisionSchema,
                     agent: context.agentSelection.agent,
                     model: context.agentSelection.model,
-                    variant:
-                        context.agentStageVariants?.commitMessage ??
-                        context.agentSelection.variant,
+                    variant: context.agentSelection.variant,
                     runId: context.runId,
                     diagnostics: context.agentDiagnostics,
                     repositoryInvariant: invariant,

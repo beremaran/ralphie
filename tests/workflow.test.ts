@@ -598,7 +598,7 @@ describe("workflow", () => {
         );
     });
 
-    test("fails fast before any issue work when a stage variant is unsupported", async () => {
+    test("fails fast before any issue work when the thinking level is unsupported", async () => {
         const calls: string[] = [];
         const states: RunState[] = [];
         await expect(
@@ -609,13 +609,7 @@ describe("workflow", () => {
                         providerID: "opencode-go",
                         modelID: "deepseek-v4-flash",
                     },
-                    agentStageVariants: {
-                        grounding: "low",
-                        complexity: "medium",
-                        implementation: "high",
-                        review: "high",
-                        commitMessage: "low",
-                    },
+                    modelVariant: "medium",
                 },
                 testRuntime(calls, states, {
                     piCatalog: [
@@ -629,7 +623,7 @@ describe("workflow", () => {
                     ],
                 }),
             ),
-        ).rejects.toThrow(/--complexity-thinking/);
+        ).rejects.toThrow(/--thinking/);
         expectNoIssueWork(calls);
         expect(calls).toContain("closeRuntime");
     });
@@ -644,13 +638,7 @@ describe("workflow", () => {
                     providerID: "opencode-go",
                     modelID: "deepseek-v4-flash",
                 },
-                agentStageVariants: {
-                    grounding: "low",
-                    complexity: "medium",
-                    implementation: "high",
-                    review: "high",
-                    commitMessage: "low",
-                },
+                modelVariant: "medium",
             },
             testRuntime(calls, states, {}),
         );

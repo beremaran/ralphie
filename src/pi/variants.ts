@@ -7,19 +7,10 @@ import {
     type PiModelInfo,
 } from "./models.ts";
 
-export type StageVariantCheck = {
-    readonly stage: string;
-    readonly variant?: string;
-    readonly model?: AgentModel;
-    readonly flagOption: string;
-};
-
 export type VariantViolation = {
-    readonly stage: string;
     readonly variant: string;
     readonly modelName: string;
     readonly availableVariants: ReadonlyArray<string>;
-    readonly flagOption: string;
 };
 
 export type ValidateModelVariantsInput = {
@@ -27,14 +18,8 @@ export type ValidateModelVariantsInput = {
     readonly defaultModel?: AgentModel;
     readonly primaryModel?: AgentModel;
     readonly fallbackModel?: AgentModel;
-    readonly defaultVariant?: string;
-    readonly stageVariants?: {
-        readonly grounding?: string;
-        readonly complexity?: string;
-        readonly implementation?: string;
-        readonly review?: string;
-        readonly commitMessage?: string;
-    };
+    /** The single --thinking level applied to every session. */
+    readonly variant?: string;
 };
 
 export const findModelInfo = (
@@ -58,58 +43,6 @@ export const isVariantAvailable = (
     return availableVariants.includes(variant);
 };
 
-export const plannedVariantChecks = (
-    input: ValidateModelVariantsInput,
-): ReadonlyArray<StageVariantCheck> => {
-    const primary = input.primaryModel;
-    const stages = input.stageVariants;
-    const fallback = input.defaultVariant;
-
-    const checks: StageVariantCheck[] = [
-        {
-            stage: "grounding",
-            variant: stages?.grounding ?? fallback,
-            model: primary,
-            flagOption: "--grounding-thinking",
-        },
-        {
-            stage: "complexity",
-            variant: stages?.complexity ?? fallback,
-            model: primary,
-            flagOption: "--complexity-thinking",
-        },
-        {
-            stage: "implementation",
-            variant: stages?.implementation ?? fallback,
-            model: primary,
-            flagOption: "--implementation-thinking",
-        },
-        {
-            stage: "review",
-            variant: stages?.review ?? fallback,
-            model: primary,
-            flagOption: "--review-thinking",
-        },
-        {
-            stage: "commitMessage",
-            variant: stages?.commitMessage ?? fallback,
-            model: primary,
-            flagOption: "--commit-thinking",
-        },
-    ];
-
-    if (input.fallbackModel !== undefined) {
-        checks.push({
-            stage: "implementation (fallback model)",
-            variant: stages?.implementation ?? fallback,
-            model: input.fallbackModel,
-            flagOption: "--implementation-thinking",
-        });
-    }
-
-    return checks;
-};
-
 const normalizedLevel = (variant: string): string => {
     try {
         return thinkingLevelFor(variant);
@@ -118,47 +51,25 @@ const normalizedLevel = (variant: string): string => {
     }
 };
 
-const modelInfoForCheck = (
-    check: StageVariantCheck,
-    input: ValidateModelVariantsInput,
-): PiModelInfo | undefined => {
-    if (check.model !== undefined) {
-        return findModelInfo(input.models, check.model);
-    }
-    return input.defaultModel === undefined
-        ? undefined
-        : findModelInfo(input.models, input.defaultModel);
-};
-
-const violationForCheck = (
-    check: StageVariantCheck,
-    input: ValidateModelVariantsInput,
+const violationForModel = (
+    variant: string,
+    selection: AgentModel,
+    models: ReadonlyArray<PiModelInfo>,
 ): VariantViolation | undefined => {
-    if (
-        check.variant === undefined ||
-        check.variant === "" ||
-        check.variant === "default"
-    ) {
-        return undefined;
-    }
-    const modelInfo = modelInfoForCheck(check, input);
+    if (variant === "" || variant === "default") return undefined;
+    const modelInfo = findModelInfo(models, selection);
     if (
         modelInfo === undefined ||
-        isVariantAvailable(
-            modelInfo.thinkingLevels,
-            normalizedLevel(check.variant),
-        )
+        isVariantAvailable(modelInfo.thinkingLevels, normalizedLevel(variant))
     ) {
         return undefined;
     }
     return {
-        stage: check.stage,
-        variant: check.variant,
+        variant,
         modelName:
-            modelReference(check.model) ??
+            modelReference(selection) ??
             `${modelInfo.provider}/${modelInfo.id}`,
         availableVariants: modelInfo.thinkingLevels,
-        flagOption: check.flagOption,
     };
 };
 
@@ -168,8 +79,14 @@ export const collectVariantViolations = (
     if (input.models.length === 0 && input.defaultModel === undefined) {
         return [];
     }
-    return plannedVariantChecks(input).flatMap((check) => {
-        const violation = violationForCheck(check, input);
+    const variant = input.variant;
+    if (variant === undefined || variant === "") return [];
+    const selections = [
+        input.primaryModel ?? input.defaultModel,
+        input.fallbackModel,
+    ].filter((selection): selection is AgentModel => selection !== undefined);
+    return selections.flatMap((selection) => {
+        const violation = violationForModel(variant, selection, input.models);
         return violation === undefined ? [] : [violation];
     });
 };
@@ -180,19 +97,19 @@ export const formatVariantViolations = (
     const formatted = violations.map((v) => {
         const available =
             v.availableVariants.length === 0
-                ? 'none (model does not support reasoning; use "default" or omit)'
+                ? 'none (model does not support reasoning; omit --thinking or use "default")'
                 : `${v.availableVariants.join(", ")} (or "default")`;
         return (
-            `  • Stage "${v.stage}": thinking level "${v.variant}" is not supported by model "${v.modelName}".\n` +
+            `  • Model "${v.modelName}" does not support thinking level "${v.variant}".\n` +
             `    Available levels: ${available}.\n` +
-            `    Override with: ${v.flagOption} <level>`
+            `    Override with: --thinking <level>`
         );
     });
 
     return (
         "Pi model thinking-level validation failed before execution:\n" +
         formatted.join("\n") +
-        "\n\nAdjust the stage thinking options or pass --thinking default."
+        "\n\nAdjust --thinking or omit it to use the pi default."
     );
 };
 

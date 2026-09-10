@@ -16,7 +16,7 @@ describe("native CLI parser", () => {
     test("documents the issue workflow in help", () => {
         expect(HELP_TEXT).toContain("--on-needs-attention <halt|continue>");
         expect(HELP_TEXT).toContain("--on-issue-failure <halt|continue>");
-        expect(HELP_TEXT).toContain("--implementation-thinking <level>");
+        expect(HELP_TEXT).toContain("--thinking <level>");
         expect(HELP_TEXT).toContain("--implementation-attempts <n>");
         expect(HELP_TEXT).toContain("--implementation-fallback-model");
         expect(HELP_TEXT).toContain("--max-decomposition-depth <n>");
@@ -81,17 +81,17 @@ describe("native CLI parser", () => {
         ).toThrow();
     });
 
-    test("parses implementation-specific unattended controls", () => {
+    test("parses the single thinking level and implementation controls", () => {
         const options = parseCliArgs([
             "owner/repository",
-            "--implementation-thinking",
-            "medium",
+            "--thinking",
+            "high",
             "--implementation-attempts",
             "4",
             "--implementation-fallback-model",
             "openai/gpt-5.6-sol",
         ]).options;
-        expect(options.implementationThinking).toBe("medium");
+        expect(options.thinking).toBe("high");
         expect(options.implementationAttempts).toBe(4);
         expect(options.implementationFallbackModel).toEqual({
             providerID: "openai",

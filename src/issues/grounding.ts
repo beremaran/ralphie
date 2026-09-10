@@ -61,9 +61,7 @@ export const makeGroundingAssessmentService = (
                 schema: groundingDecisionSchema,
                 agent: context.agentSelection.agent,
                 model: context.agentSelection.model,
-                variant:
-                    context.agentStageVariants?.grounding ??
-                    context.agentSelection.variant,
+                variant: context.agentSelection.variant,
                 runId: context.runId,
                 diagnostics: context.agentDiagnostics,
                 repositoryInvariant: checkpoint,

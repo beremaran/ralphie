@@ -48,13 +48,8 @@ const cliOptions = {
     "verify-command": { type: "string", multiple: true },
     model: { type: "string" },
     thinking: { type: "string" },
-    "grounding-thinking": { type: "string" },
-    "implementation-thinking": { type: "string" },
     "implementation-attempts": { type: "string" },
     "implementation-fallback-model": { type: "string" },
-    "complexity-thinking": { type: "string" },
-    "review-thinking": { type: "string" },
-    "commit-thinking": { type: "string" },
     workspace: { type: "string" },
     "dry-run": { type: "boolean" },
     clean: { type: "string" },
@@ -104,16 +99,6 @@ const asNumber = (
 
 const asBoolean = (values: Record<string, unknown>, name: string): boolean =>
     values[name] === true;
-
-const parseThinking = (
-    values: Record<string, unknown>,
-    name: string,
-): string | undefined => {
-    const value = asNonEmptyString(values, name);
-    return value === undefined
-        ? undefined
-        : agentModelVariantSchema.parse(value);
-};
 
 const parseNeedsAttentionPolicy = (
     values: Record<string, unknown>,
@@ -226,19 +211,11 @@ const parseCliOptions = (
             thinkingValue === undefined
                 ? undefined
                 : agentModelVariantSchema.parse(thinkingValue),
-        groundingThinking: parseThinking(values, "grounding-thinking"),
-        implementationThinking: parseThinking(
-            values,
-            "implementation-thinking",
-        ),
         implementationAttempts: asNumber(values, "implementation-attempts"),
         implementationFallbackModel: parseModel(
             values,
             "implementation-fallback-model",
         ),
-        complexityThinking: parseThinking(values, "complexity-thinking"),
-        reviewThinking: parseThinking(values, "review-thinking"),
-        commitThinking: parseThinking(values, "commit-thinking"),
         workspace: asNonEmptyString(values, "workspace"),
         clean:
             cleanValue === undefined
@@ -325,15 +302,10 @@ Options:
       --issue-sort <sort>      created, updated, or comments, optionally :asc or :desc
       --verify-command <cmd>   Deterministic pre-commit gate (repeatable)
       --model <provider/model> Pi model selection (defaults to pi settings)
-      --thinking <level>       Thinking level: off, minimal, low, medium, high, xhigh, or max (default medium)
-      --grounding-thinking <level> Readiness reasoning (default low)
-      --implementation-thinking <level> Implementation reasoning (default high)
+      --thinking <level>       Thinking level for every session: off, minimal, low, medium, high, xhigh, or max (default medium)
       --implementation-attempts <n> Empty implementation retries (default 3)
       --implementation-fallback-model <provider/model>
                                Model used after the first empty implementation
-      --complexity-thinking <level> Complexity reasoning (default medium)
-      --review-thinking <level> Review reasoning (default high)
-      --commit-thinking <level> Commit-message reasoning (default low)
       --workspace <path>       Workspace directory
       --dry-run                Assess without mutations
       --resume <path>          Resume saved run state
@@ -497,13 +469,6 @@ const workflowOptionsFor = (
     },
     model: config.model,
     modelVariant: config.thinking,
-    agentStageVariants: {
-        grounding: config.groundingThinking ?? "low",
-        implementation: config.implementationThinking ?? "high",
-        complexity: config.complexityThinking ?? "medium",
-        review: config.reviewThinking ?? "high",
-        commitMessage: config.commitThinking ?? "low",
-    },
     verificationCommands: config.verificationCommands,
     implementationAttempts: config.implementationAttempts,
     implementationFallbackModel: config.implementationFallbackModel,

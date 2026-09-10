@@ -126,13 +126,6 @@ export type IssueExecutionContext = {
     readonly octokit: Octokit;
     readonly agent: AgentClient;
     readonly agentSelection: AgentSelection;
-    readonly agentStageVariants?: {
-        readonly implementation?: string;
-        readonly grounding?: string;
-        readonly complexity?: string;
-        readonly review?: string;
-        readonly commitMessage?: string;
-    };
     readonly implementationAttempts?: number;
     readonly implementationFallbackModel?: AgentModel;
     readonly agentDiagnostics: AgentSessionDiagnostics;

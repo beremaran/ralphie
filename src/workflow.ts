@@ -13,7 +13,6 @@ import {
 } from "./github/issues.ts";
 import { isDecomposedParent } from "./github/decomposition-markdown.ts";
 import {
-    type IssueExecutionContext,
     IssueExecutionOutcomeKind,
     type IssueExecutionOutcome,
 } from "./issues/execution.ts";
@@ -611,7 +610,6 @@ export type WorkflowOptions = {
     readonly agent: string;
     readonly model?: AgentModel;
     readonly modelVariant?: string;
-    readonly agentStageVariants?: IssueExecutionContext["agentStageVariants"];
     readonly verificationCommands?: ReadonlyArray<string>;
     readonly implementationAttempts?: number;
     readonly implementationFallbackModel?: AgentModel;
@@ -640,7 +638,6 @@ type WorkflowConfiguration = {
     readonly agent: string;
     readonly model?: AgentModel;
     readonly modelVariant?: string;
-    readonly agentStageVariants?: IssueExecutionContext["agentStageVariants"];
     readonly verificationCommands: ReadonlyArray<string>;
     readonly implementationAttempts?: number;
     readonly implementationFallbackModel?: AgentModel;
@@ -680,7 +677,6 @@ const makeWorkflowConfiguration = (
         agent,
         model,
         modelVariant,
-        agentStageVariants,
         verificationCommands = [],
         implementationAttempts,
         implementationFallbackModel,
@@ -724,7 +720,6 @@ const makeWorkflowConfiguration = (
         agent,
         model,
         modelVariant,
-        agentStageVariants,
         verificationCommands,
         implementationAttempts,
         implementationFallbackModel,
@@ -884,8 +879,7 @@ const validateRuntimeModelVariants = (
             : { fallbackModel: config.implementationFallbackModel }),
         ...(config.modelVariant === undefined
             ? {}
-            : { defaultVariant: config.modelVariant }),
-        stageVariants: config.agentStageVariants,
+            : { variant: config.modelVariant }),
     });
 };
 
@@ -1329,7 +1323,6 @@ export const workflow = async (
                         octokit,
                         agent: server.client,
                         agentSelection: selection,
-                        agentStageVariants: config.agentStageVariants,
                         agentDiagnostics: diagnostics,
                         repositoryInvariant: invariantService,
                         verificationCommands: config.verificationCommands,

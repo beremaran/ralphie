@@ -63,9 +63,7 @@ export const makeComplexityAssessmentService = (
                 schema: complexityDecisionSchema,
                 agent: context.agentSelection.agent,
                 model: context.agentSelection.model,
-                variant:
-                    context.agentStageVariants?.complexity ??
-                    context.agentSelection.variant,
+                variant: context.agentSelection.variant,
                 runId: context.runId,
                 diagnostics: context.agentDiagnostics,
                 verifyAfter: (signal) =>

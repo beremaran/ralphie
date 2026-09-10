@@ -48,6 +48,11 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Changed
 
+- Collapse every per-stage thinking setting into one `--thinking` level applied
+  to all sessions. The `--grounding-thinking`, `--implementation-thinking`,
+  `--complexity-thinking`, `--review-thinking`, and `--commit-thinking` flags
+  are gone; the default level remains `medium`.
+
 - Pi is now the only execution backend. `--model provider/model` resolves
   against pi's built-in catalog (defaulting to the model saved in pi's
   `settings.json`), thinking flags accept pi levels (`off` through `max`), and
