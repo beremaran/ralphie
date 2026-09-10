@@ -19,22 +19,25 @@ Ralphie is distributed as a single npm package. Running it needs:
 - [Git](https://git-scm.com/) and the
   [GitHub CLI](https://cli.github.com/) (`gh`);
 - a POSIX shell;
-- a running [OpenCode](https://opencode.ai/v2/docs/) server (`opencode2 serve`).
+- model credentials for [pi](https://pi.dev/docs/latest).
 
-Ralphie never starts the OpenCode server itself. Start it separately before
-running Ralphie (for example `opencode2 serve`), then point Ralphie at it.
-By default Ralphie discovers the local background service automatically. To
-use an explicit server, pass `--opencode-url <url>` (or set `OPENCODE_URL`)
-and, when the server requires one, `--opencode-token <token>` (or set
-`OPENCODE_TOKEN` in the environment).
+The pi agent runtime runs in-process; there is no server to start. Credentials
+resolve through the same `~/.pi/agent/auth.json` that the `pi` CLI uses
+(override the directory with `PI_CODING_AGENT_DIR`). If you already signed in
+with `pi /login`, Ralphie reuses that credential. Otherwise export a provider
+API key such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY`; a
+stored pi credential takes priority over the environment.
 
-The OpenCode server owns model credentials and tool permissions. For
-unattended runs, configure its permissions to allow `read`, `edit`, and
-`shell` work inside the checkout while denying mutating Git and GitHub
-commands (`git commit/push/branch/checkout/switch/worktree/reset/clean` and
-`gh *`). Ralphie additionally instructs agents never to run those commands,
-auto-rejects them when they surface as pending approvals, and fails the task
-when post-task verification finds the checkout was mutated anyway.
+Without `--model`, Ralphie uses the default model saved in pi's
+`~/.pi/agent/settings.json` (`defaultProvider` plus `defaultModel`). Select one
+explicitly with `--model provider/model`; the pi provider catalog is built in
+and available offline.
+
+Ralphie constrains every agent session to the repository checkout. Built-in
+`read`/`write`/`edit` tools are rooted at the checkout, `bash` commands that
+mutate delivery state (`git commit/push/branch/checkout/switch/worktree/reset/clean`
+and `gh *`) are denied before execution, and post-task verification fails the
+task when the checkout was mutated anyway.
 
 For interactive GitHub authentication, run `gh auth login` and verify the
 selected account with `gh auth status`. For unattended runs, set `GH_TOKEN`
@@ -98,7 +101,7 @@ bun run index.ts --version
 `ralphie --version` prints only the release version. For automation,
 `ralphie --version --output json` prints a stable object containing `version`
 and `commitSha`. Both forms work without a repository, GitHub credentials, or
-OpenCode configuration. Release builds embed the immutable commit SHA supplied by
+model configuration. Release builds embed the immutable commit SHA supplied by
 the build entry point; local builds use the documented `local` commit sentinel
 when no release SHA is supplied.
 
@@ -127,9 +130,9 @@ bun run index.ts owner/repository --dry-run --max-issues 1
 ```
 
 This performs authentication and Git preflight, prepares a clean checkout,
-discovers issues, and asks OpenCode for read-only grounding and a complexity
+discovers issues, and asks pi for read-only grounding and a complexity
 assessment. It may create or reset the local workspace and write run
-artifacts, but it does not ask OpenCode to edit the repository, create commits, push,
+artifacts, but it does not ask pi to edit the repository, create commits, push,
 or mutate GitHub. Dry-run also reports already-resolved and needs-attention
 routes, then remains mutation-free on resume. See [Workflows](workflows.md) for
 what the selected route means and [Operations and recovery](operations-and-recovery.md)

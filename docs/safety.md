@@ -127,12 +127,10 @@ Tracked modifications and untracked, non-ignored files inside that checkout are
 discarded. Keep unrelated work outside Ralphie's workspace.
 
 The workspace's `.ralphie` directory contains only repository checkouts and
-Ralphie's run state, events, and recovery artifacts. OpenCode configuration is
-supplied through `--opencode-url`/`OPENCODE_URL` and
-`--opencode-token`/`OPENCODE_TOKEN`, or through the operator-run local
-background service; it is never written under this path. An explicitly supplied
-server endpoint is operator-owned and is never removed; keep any server-side
-configuration outside the workspace.
+Ralphie's run state, events, and recovery artifacts. Pi credentials and
+default-model settings live in `~/.pi/agent` (or `PI_CODING_AGENT_DIR`) and are
+never written under this path; keep provider configuration outside the
+workspace.
 
 `--clean start` and `--clean end` recursively delete the workspace after
 protected-path checks. Their mode-specific dry-run and resume rules are
@@ -175,7 +173,7 @@ bunx @beremaran/ralphie owner/repository \
 
 It authenticates, prepares and inspects the checkout, reads and observes the
 current remote HEAD, waits/classifies visible checks, and collects bounded
-diagnostics for a failing snapshot. It never starts OpenCode, edits or stages
+diagnostics for a failing snapshot. It never starts the agent runtime, edits or stages
 files, commits, pushes, reruns Actions, mutates GitHub, or creates a pull
 request. A failing preview reports what repair would be attempted and exits
 `1`; a green preview still performs no delivery. Failed previews retain the
@@ -192,22 +190,21 @@ check the proposed pass before granting Issues write permission.
 
 ## Agent and mutation boundaries
 
-Structured decision sessions deny edits/writes and mutating Git/GitHub commands.
-Their required result is returned through OpenCode's structured JSON format and
-Ralphie's fenced-JSON parser; a repository-backed blocker is an optional fenced
-`needs-attention` block, not a mutation-capable tool. PR-review sessions use an
-explicit immutable profile: the committed patch and verification evidence are
-supplied in the prompt, and the reviewer cannot inspect the checkout or run
-shell/Git/GitHub commands. The implementation agent may edit the checkout, but
-it is denied commits, pushes, branch/reset/clean operations, and `gh` commands.
-Ralphie stages, verifies, commits, pushes, and mutates GitHub through
-deterministic domain services. Every decision task is schema-validated at the
-OpenCode response and Ralphie domain boundaries; invalid output or OpenCode
-failure becomes a failed issue outcome without proceeding to the next operation.
-The canonical Zod decision schemas are sent to OpenCode as JSON Schema with
-validation retries, and the returned value is re-validated at the Ralphie
-domain boundary. A turn that produces no assistant message fails instead of
-producing a decision.
+Agent sessions are rooted at the repository checkout. Review-profile sessions
+expose read-only tools (`read` and the non-mutating shell allowlist) and deny
+file writes; implementation sessions may edit the checkout. Every session
+enforces a shell denylist that rejects commits, pushes, branch/reset/clean
+operations, and `gh` commands before execution, and post-task verification
+fails the task when the checkout moved anyway. Structured decisions are
+returned as fenced JSON and re-validated at the Ralphie domain boundary; a
+repository-backed blocker is an optional fenced `needs-attention` block, not a
+mutation-capable tool. Ralphie stages, verifies, commits, pushes, and mutates
+GitHub through deterministic domain services. Invalid output or a pi failure
+becomes a failed issue outcome without proceeding to the next operation. The
+canonical Zod decision schemas are sent to pi as JSON Schema with validation
+retries, and the returned value is re-validated at the Ralphie domain boundary.
+A turn that produces no assistant message fails instead of producing a
+decision.
 
 Protected maintainer choices are also enforced before verification: a staged
 change that selects a project license fails closed unless that exact license

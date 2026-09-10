@@ -7,12 +7,12 @@ at the [documentation index](README.md) for other audience paths.
 
 ## Progress output
 
-Ralphie receives the complete OpenCode event stream while each task runs,
+Ralphie receives the complete pi event stream while each task runs,
 including thinking deltas, assistant text, tool calls, and tool results. Tasks
 and issues are intentionally processed sequentially so this event stream remains
 ordered. JSON output exposes it losslessly for integrations.
 
-Human-readable transcript output groups each OpenCode session into a compact block:
+Human-readable transcript output groups each pi session into a compact block:
 assistant text streams immediately within a 140-character bound; thinking deltas
 and intermediate tool output stay in the compact activity surface; tool calls are
 shown as readable commands; and each tool completion or failure gets one concise
@@ -34,7 +34,7 @@ in-place line erase (`\r\x1b[2K`) and single-row step-up (`\x1b[1A`) plus SGR
 color repaint the region, with strict clear-before-draw on every replacement.
 No reserved-row or scroll-region strategy is tested or published.
 
-- interactive terminals receive the streamed OpenCode transcript plus one replaceable
+- interactive terminals receive the streamed pi transcript plus one replaceable
   interactive region: the sticky stage/status line and the bounded activity
   rows run together in a single region of at most three physical terminal rows
   (the cap is measured in rows actually painted, never newline counts), each
@@ -63,7 +63,7 @@ No reserved-row or scroll-region strategy is tested or published.
 - `--output verbose` keeps the same mode selection and adds operational details
   (the structured details payload on durable rows) without expanding the
   interactive region beyond its three-row cap;
-- `--output json` writes progress and `opencode_event` objects one per line to
+- `--output json` writes progress and `agent_event` objects one per line to
   stdout with stderr empty: every non-empty line parses as one complete JSON
   record, human headers/footers/glyphs/breadcrumbs never appear, and values
   are preserved as supplied; and
@@ -80,17 +80,16 @@ JSON output retain those complete details. A handled halt emits a final
 needs-attention event with `handled: true` and every outcome count before exit.
 Depending on the event, it may also include the repository, review attempt,
 session ID, commit SHA, created issue numbers, or diagnostic paths. Supplied
-progress-event values are preserved as-is; OpenCode transcripts and breadcrumbs
+progress-event values are preserved as-is; pi transcripts and breadcrumbs
 are never redacted, and terminal control sequences are stripped at the
 reporting boundary.
 
 ## State and artifacts
 
 The workspace's `.ralphie` directory contains only repository checkouts and
-Ralphie's run state, events, and recovery artifacts. OpenCode configuration is
-supplied through `--opencode-url`/`OPENCODE_URL` and
-`--opencode-token`/`OPENCODE_TOKEN`, or through the operator-run local
-background service; it is never written under this path.
+Ralphie's run state, events, and recovery artifacts. Pi credentials and
+default-model settings live in `~/.pi/agent` (or `PI_CODING_AGENT_DIR`) and
+are never written under this path.
 
 Run artifacts live under:
 
@@ -122,7 +121,7 @@ terminal-reason fields keep it safe to reconcile after interruption. Stale or
 legacy un-fingerprinted decisions are removed on load without disturbing the
 other artifacts for the issue.
 
-A successful or interrupted run uses this more detailed layout (OpenCode
+A successful or interrupted run uses this more detailed layout (pi
 configuration is not stored in this tree):
 
 ```text
@@ -159,11 +158,11 @@ created/pushed commit evidence, ordered attempt records, and terminal outcome.
 Raw provider payloads and unbounded CI text do not enter this state file.
 Diagnostics are stored at `pipeline/diagnostics.json` by the read-only collector;
 they retain only bounded, terminal-sanitized evidence and are wrapped as
-untrusted input when supplied to OpenCode. Values are not redacted.
+untrusted input when supplied to pi. Values are not redacted.
 
 `state.json` is versioned, schema-validated, and atomically replaced. It
 contains the repository/branch/workflow, selected `onNeedsAttention` policy,
-notification settings and any pending notification intent, OpenCode selection,
+notification settings and any pending notification intent, pi model selection,
 budget, pending and completed queue numbers, processed count, outcomes, active
 issue/stage, checkout invariant, update time, and, for an active `pr`
 closure, the pull request number, base/head snapshot, latest normalized check
@@ -192,7 +191,7 @@ stateDiagram-v2
 ```
 
 - One issue failure uses the current halt policy: Ralphie persists the active
-  issue, releases OpenCode, retains artifacts, and stops before later issues.
+  issue, releases the agent runtime, retains artifacts, and stops before later issues.
 - A `pr` review, revision-delivery, publication, check, or merge gate that is
   failed, cancelled, timed out, absent, unknown, stale, exhausted, closed, or
   unmergeable never merges and never closes the source issue. Ralphie retains
@@ -211,9 +210,9 @@ stateDiagram-v2
   `unknown`, `no-pipelines-discovered`, stale-head, ambiguous-push, timeout,
   and repair failures remain non-green and retain pipeline state and
   diagnostics. Successful cleanup is not attempted for these outcomes.
-- OpenCode is closed on success, failure, cancellation, and scoped defects. Ordinary
+- The agent runtime is closed on success, failure, cancellation, and scoped defects. Ordinary
   failures set process exit code `1`.
-- Cancellation is checked before long-running boundaries and passed into OpenCode.
+- Cancellation is checked before long-running boundaries and passed into the agent runtime.
   Ralphie attempts to restore the clean issue checkpoint, saves resumable state,
   skips cleanup, and exits `130`.
 - Successful completion persists `complete` before optional `--clean end`
@@ -319,7 +318,7 @@ The repository and branch must match the saved run. On `--resume`:
 4. the saved pending queue, completed numbers, outcomes, and artifacts are
    restored; and
 5. the next safe deterministic step continues without unnecessarily rerunning
-   OpenCode work.
+   pi work.
 
 Examples of resumable boundaries:
 

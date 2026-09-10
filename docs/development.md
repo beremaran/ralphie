@@ -22,7 +22,7 @@ Useful individual commands:
 
 | Command | Purpose |
 | --- | --- |
-| `bun run test` | Run the full Bun test suite, including offline unit tests, local integration/PTY coverage, and in-memory GitHub clients and stubs. The suite does not require live GitHub, OpenCode, or registry credentials; some tests use temporary checkouts and local subprocesses. |
+| `bun run test` | Run the full Bun test suite, including offline unit tests, local integration/PTY coverage, and in-memory GitHub clients and stubs. The suite does not require live GitHub, model-provider, or registry credentials; some tests use temporary checkouts and local subprocesses. |
 | `bun run typecheck` | Type-check without emitting JavaScript. |
 | `bun run format` | Format the repository with Biome. |
 | `bun run format:check` | Verify formatting without modifying files. |
@@ -33,7 +33,6 @@ Useful individual commands:
 | `bun run package:check` | Pack, inspect, install, and run the local package in isolated temporary directories. |
 | `bun run package:inspect` | Inspect the local package-manager pack file list without installing it. |
 | `bun run source:audit` | Run the deterministic, offline source/module/export reachability audit as sorted JSON. |
-| `bun run probe:structured-output` | Exercise a real schema-validated OpenCode decision; `--union` probes the grounding decision union, and `--model provider/id`, `--agent`, `--variant` target a specific model. |
 
 The package check builds an actual tarball, verifies its allowlist, installs it
 with `npm install --omit=dev` in a fresh project, and invokes the installed bin
@@ -96,7 +95,7 @@ tag, and the tag-triggered publish workflow validates the tag/package version
 
 The `bun run test` suite is deliberately offline: it combines fast in-memory
 unit tests with local integration, PTY, and temporary-checkout coverage. It does
-not contact GitHub, OpenCode, npm, or a container registry.
+not contact GitHub, model providers, npm, or a container registry.
 The former distribution-channel and live network smoke suites (standalone
 installer, Docker image, Homebrew reconciliation, and release publication)
 were removed from the default gate; the package registry check remains an

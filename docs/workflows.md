@@ -55,7 +55,7 @@ flowchart TD
 ## Implementation workflow: complexity 0–3
 
 1. Capture the exact clean branch and commit as an issue checkpoint.
-2. Ask a fresh OpenCode session to implement the issue and require a schema-valid
+2. Ask a fresh pi session to implement the issue and require a schema-valid
    completion result; prose or premature model termination is not completion.
 3. Stage every change deterministically and capture the exact staged diff.
 4. Run deterministic verification. If a command exits non-zero, give its
@@ -106,33 +106,33 @@ sequenceDiagram
     participant R as Ralphie
     participant GH as GitHub
     participant G as Git
-    participant O as OpenCode
+    participant P as pi
 
     R->>G: Capture clean branch checkpoint
     R->>G: Verify destination and remote base
-    R->>O: Start fresh implementation session
-    O-->>R: Edit the checkout
+    R->>P: Start fresh implementation session
+    P-->>R: Edit the checkout
     R->>G: Stage all changes and read exact diff
 
     alt Changes present
         loop Until approved or five reviews
             R->>G: Run deterministic verification
             opt Verification command fails and repair budget remains
-                R->>O: Start fresh verification-fix session
-                O-->>R: Update the checkout
+                R->>P: Start fresh verification-fix session
+                P-->>R: Update the checkout
                 R->>G: Restage and rerun verification
             end
-            R->>O: Start fresh structured-review session
-            O-->>R: Return approved or changes requested
+            R->>P: Start fresh structured-review session
+            P-->>R: Return approved or changes requested
             opt Changes requested and budget remains
-                R->>O: Start fresh review-fix session
-                O-->>R: Update the checkout
+                R->>P: Start fresh review-fix session
+                P-->>R: Update the checkout
                 R->>G: Restage changes and read exact diff
             end
         end
         R->>G: Reverify the exact approved staged tree
     alt Review approved: lgtm mode
-            R->>O: Generate structured commit message
+            R->>P: Generate structured commit message
             R->>G: Commit exact staged tree
             R->>G: Revalidate destination, HEAD, and remote base
             R->>G: Push selected branch without force
@@ -140,7 +140,7 @@ sequenceDiagram
             GH-->>G: Accept or return authoritative policy rejection
             R->>GH: Close issue as completed
         else Review approved: pr mode
-            R->>O: Generate structured commit message
+            R->>P: Generate structured commit message
             R->>G: Commit exact staged tree on feature branch
             R->>GH: Open matching PR with Closes #issue; persist head SHA
             R->>GH: Publish review comments
@@ -151,8 +151,8 @@ sequenceDiagram
             R->>GH: Continue through decomposition
         end
     else No changes
-        R->>O: Start fresh structured resolution verification
-        O-->>R: Return status and concrete evidence
+        R->>P: Start fresh structured resolution verification
+        P-->>R: Return status and concrete evidence
         opt Resolved
             R->>GH: Close issue as completed
         end
@@ -161,7 +161,7 @@ sequenceDiagram
 
 ## Decomposition workflow: complexity 4–5
 
-1. Ask OpenCode to split the issue into the next set of independently actionable
+1. Ask pi to split the issue into the next set of independently actionable
    tasks and declare their dependencies.
 2. Create child issues in deterministic order with their stable markers.
 3. Attach each created or recovered child to the original issue as a **native
@@ -190,7 +190,7 @@ flowchart LR
     H --> I[Refresh open-issue queue]
 ```
 
-The decomposition OpenCode session is read-only and returns an
+The decomposition pi session is read-only and returns an
 `issueBreakdownDecisionSchema` result containing at least two independently
 actionable 0–3 children, stable keys, and an acyclic dependency graph. The
 breakdown is persisted before the first GitHub mutation.
@@ -315,7 +315,7 @@ configured, Ralphie uses `main` when it exists and otherwise `master`.
 The `maintain-issues` mode is reserved for deterministic issue maintenance. It
 accepts shared issue selection options and uses `--duplicate-action link` by
 default; `close` is also accepted. It captures one bounded open-issue snapshot,
-plans each selected issue in a read-only OpenCode session, validates that plan
+plans each selected issue in a read-only pi session, validates that plan
 independently, and then runs the allowed actions sequentially. Labels,
 comments, related links, and duplicate linking/closure are performed only by
 deterministic GitHub services after live revalidation. The mode never enters

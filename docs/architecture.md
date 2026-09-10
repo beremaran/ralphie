@@ -19,7 +19,7 @@ flowchart LR
         W --> Q[Issue queue and executors]
         W --> S[Run state and artifacts]
         W --> P[Progress and audit events]
-        Q --> OC[OpenCode adapter]
+        Q --> PI[In-process pi runtime]
         Q --> GD[Git domain]
         Q --> GHD[GitHub domain]
     end
@@ -27,7 +27,7 @@ flowchart LR
     AUTH[Local gh CLI] --> GHD
     GHD <--> GH[GitHub API]
     GD <--> REPO[Workspace checkout]
-    OC <--> SERVER[External OpenCode server]
+    PI <--> LLM[Model providers]
     S --> DISK[Versioned JSON and issue artifacts]
     P --> TERM[Terminal or JSON Lines]
 ```
@@ -41,7 +41,7 @@ effects and validate their invariants at the boundary.
 | `src/git/` | Checkout preparation, checkpoints, deterministic issue operations, invariants, and remote safety. |
 | `src/issues/` | Queueing, complexity routing, implementation, review, recovery, and decomposition. |
 | `src/agent/` | Ralphie's session, prompt, schema, diagnostics, and structured-output boundary. |
-| `src/opencode/` | External OpenCode server client, session lifecycle, and safety policy. |
+| `src/pi/` | In-process pi agent runtime: provider catalog, credential store, execution tools, session lifecycle, and safety policy. |
 | `src/progress/` | Typed events, audit persistence, and terminal/JSON renderers. |
 | `src/run/` | Versioned state, artifacts, reconciliation, and resume behavior. |
 | `src/workspace/` | Path expansion and protected workspace removal. |
@@ -108,7 +108,7 @@ cannot escape those markers or inject a second closing marker.
 
 `--mode get-pipelines-green` is deliberately not a branch in the issue queue.
 `src/get-pipelines-green.ts` is a thin command adapter for authentication,
-workspace cleanup, OpenCode lifetime, and terminal exit semantics. The public
+workspace cleanup, agent-runtime lifetime, and terminal exit semantics. The public
 Pipeline module is `src/pipeline/delivery-lifecycle.ts`; its single
 discriminated `execute` entry point accepts live, dry-run, or resume requests
 and owns repository preparation, remote-head capture, deadline creation, state
@@ -134,7 +134,7 @@ temporary file followed by an atomic rename. Resume re-reads the remote before
 any mutation, invalidates evidence for a changed SHA, reconciles a created
 commit that already arrived, and retains the original absolute deadline. This
 keeps the state seam small and makes failure, ambiguous-push, cancellation, and
-stale-head cases directly testable without an OpenCode server or GitHub write.
+stale-head cases directly testable without a live model request or GitHub write.
 
 The lifecycle exposes the same typed progress contract as the other modes.
 Pipeline phase events carry the phase boundary, exact remote SHA when known,
@@ -152,10 +152,11 @@ services under `src/git/` and `src/github/` perform those side effects and
 verify their invariants. The explicit runtime object makes these boundaries
 testable without a framework-specific execution model.
 
-OpenCode configuration is separate from persistent workspace state: Ralphie uses
-the explicitly supplied `--opencode-url`/`OPENCODE_URL` and optional
-`--opencode-token`/`OPENCODE_TOKEN`, or discovers the operator-run local
-background service. Ralphie never stores the server configuration under the
+Agent configuration is separate from persistent workspace state: the pi
+provider catalog is static and in-process, `--model provider/model` selects a
+model at runtime, and credentials resolve through `~/.pi/agent/auth.json`
+(overridable with `PI_CODING_AGENT_DIR`) plus provider environment variables.
+Ralphie never stores agent configuration under the
 workspace; run state and recovery artifacts belong under the workspace's
 `.ralphie` directory.
 
@@ -195,7 +196,7 @@ the normal check gate.
 | Decomposition and GitHub mutations | `src/issues/decomposition-executor.ts`, `src/github/issue-mutations.ts`, `src/github/issue-relationships.ts` |
 | Maintenance snapshot, planning, execution, and state | `src/maintain-issues.ts`, `src/maintain-issues-lifecycle.ts`, `src/maintain/snapshot.ts`, `src/maintain-issues-snapshot-service.ts`, `src/maintain-issues-candidates.ts`, `src/maintain-issues-plan.ts`, `src/maintain-issues-state.ts` |
 | Maintenance GitHub reconciliation | `src/github/issue-maintenance.ts`, `src/github/issue-maintenance-relationships.ts`, `src/maintain-issues-grounding-reader.ts` |
-| OpenCode sessions and structured results | `src/agent/`, `src/opencode/` |
+| Pi model catalog, credentials, tools, sessions, and structured results | `src/pi/`, `src/agent/` |
 | Git checkpoints, safety, and branches | `src/git/` |
 | Durable state and reconciliation | `src/run/`, `src/issues/artifacts.ts` |
 | Progress and exit semantics | `src/progress/`, `src/process/exit-code.ts` |

@@ -7,6 +7,15 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Removed
 
+- Replace the external OpenCode server integration and the multi-harness/ACP
+  discovery layer with the in-process pi agent runtime
+  (`@earendil-works/pi-agent-core` plus `@earendil-works/pi-ai`). Deleted
+  `src/harness/` (six-kind harness contracts and Antigravity
+  executable/ACP discovery) and `src/opencode/` (server client, transport,
+  permission watcher, and model-variant catalog). `--opencode-url`,
+  `--opencode-token`, `OPENCODE_URL`, `OPENCODE_TOKEN`, and the mandatory
+  Antigravity preflight are gone; no external agent server is required.
+
 - Remove every non-npm distribution channel: the native standalone bundles
   (four-platform `bun compile` builds, `scripts/install.sh`, `bun run targets`
   catalog machinery), the Homebrew tap/formula (generators, validators,
@@ -26,6 +35,20 @@ All notable changes to Ralphie are documented here. The project follows
   (`stripTerminalControls`).
 
 ### Changed
+
+- Pi is now the only execution backend. `--model provider/model` resolves
+  against pi's built-in catalog (defaulting to the model saved in pi's
+  `settings.json`), thinking flags accept pi levels (`off` through `max`), and
+  credentials resolve through `~/.pi/agent/auth.json`
+  (`PI_CODING_AGENT_DIR`) with provider environment variables as fallback.
+- Agent tools are pi's built-in `read`, `write`, `edit`, and `bash`, rooted at
+  the repository checkout and guarded before execution (delivery-state shell
+  denylist plus workspace path containment); review-profile sessions expose
+  read-only tools. JSON transcript records are now `agent_event`, and the
+  progress stage `opencode-runtime` is `agent-runtime`.
+- Add `@earendil-works/pi-agent-core`, `@earendil-works/pi-ai`, and
+  `proper-lockfile` as runtime dependencies; pi packages stay external to the
+  bundle so their lazy provider SDKs install through npm.
 
 - Complete the post-PR review and revision lifecycle. `pr` delivery now
   persists the immutable pull-request base/head, runs a resumable coordinator

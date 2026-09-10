@@ -1,11 +1,11 @@
 # Ralphie
 
-**Turn a GitHub issue queue into reviewed commits with OpenCode.**
+**Turn a GitHub issue queue into reviewed commits with pi.**
 
 [![CI](https://github.com/beremaran/ralphie/actions/workflows/ci.yml/badge.svg)](https://github.com/beremaran/ralphie/actions/workflows/ci.yml)
 
 Ralphie is an opinionated, resumable CLI that reads open GitHub issues, asks
-[OpenCode](https://opencode.ai/v2/docs/) for schema-validated decisions, and
+[pi](https://pi.dev/docs/latest) for schema-validated decisions, and
 routes each issue to either focused implementation or dependency-aware
 decomposition. Agents handle reasoning and code changes; Ralphie keeps Git,
 GitHub, run state, recovery, and safety checks deterministic.

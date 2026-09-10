@@ -39,20 +39,18 @@ command schema.
 | `--max-decomposition-depth <count>` | `3` | Positive maximum generated-child lineage depth. Reaching the ceiling leaves the issue open, records needs attention, and continues independent work. |
 | `--issue-label <label>` | none | Require a label; repeat the flag to require multiple labels. |
 | `--issue-sort <sort>` | `created` | Sort by `created`, `updated`, or `comments`, optionally `:asc` or `:desc`. |
-| `--model <provider/model>` | OpenCode default | Override the OpenCode model selection. |
-| `--thinking <variant>` | OpenCode default | OpenCode model variant (for example `low`, `medium`, `high`). |
-| `--grounding-thinking <variant>` | `low` | Model variant for issue grounding/readiness. |
-| `--implementation-thinking <variant>` | `high` | Model variant for implementation sessions, independent of the global variant. |
+| `--model <provider/model>` | pi settings default | Override the pi model selection. |
+| `--thinking <level>` | `medium` | Thinking level (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`), or `default` for `medium`. |
+| `--grounding-thinking <level>` | `low` | Thinking level for issue grounding/readiness. |
+| `--implementation-thinking <level>` | `high` | Thinking level for implementation sessions, independent of the global level. |
 | `--implementation-attempts <count>` | `3` | Positive number of implementation attempts allowed when sessions leave an unresolved empty diff. |
 | `--implementation-fallback-model <provider/model>` | none | Optional model used after the first unresolved empty implementation attempt. |
-| `--complexity-thinking <variant>` | `medium` | Model variant for complexity routing. |
-| `--review-thinking <variant>` | `high` | Model variant for staged-change reviews. |
-| `--commit-thinking <variant>` | `low` | Model variant for commit-message generation. |
+| `--complexity-thinking <level>` | `medium` | Thinking level for complexity routing. |
+| `--review-thinking <level>` | `high` | Thinking level for staged-change reviews. |
+| `--commit-thinking <level>` | `low` | Thinking level for commit-message generation. |
 | `--verify-command <command>` | discovered `bun run check` | Deterministic verification command; repeat to run multiple commands in order. Each command runs under a 30-minute deadline. |
 | `--max-attempts <count>` | `3` | Positive pipeline attempt count in `get-pipelines-green` mode. |
 | `--pipeline-timeout <duration>` | `30m` | Positive integer duration (`s`, `m`, or `h`) for `get-pipelines-green` mode; this is the total pipeline-run deadline. |
-| `--opencode-url <url>` | discovered service | OpenCode server URL (defaults to the local background service). |
-| `--opencode-token <token>` | service auth | OpenCode server token (defaults to background-service auth). |
 | `--workspace <path>` | `~/.ralphie` | Root directory for repository checkouts and run artifacts. |
 | `--dry-run` | off | Preview the selected mode. Issue mode assesses/routes, maintenance mode plans, and pipeline mode observes/diagnoses without agent or delivery mutations. |
 | `--resume <state.json>` | none | Continue a compatible saved run. |
@@ -73,7 +71,7 @@ When no branch is configured, Ralphie uses `main` when it exists and otherwise
 The `maintain-issues` mode accepts shared issue selection options and uses
 `--duplicate-action link` by default; `close` is also accepted. Its maintenance
 executor is a bounded one-shot pass: it captures one selected open-issue
-snapshot, asks a read-only OpenCode planner for a schema-validated plan, and
+snapshot, asks a read-only pi planner for a schema-validated plan, and
 reconciles allowed labels/comments/relationships through deterministic GitHub
 services after live revalidation. It never runs issue implementation,
 decomposition, commit/push, pull-request delivery, or completed closure. Issue
@@ -107,7 +105,7 @@ repairs whose new commit is confirmed on the remote. `--pipeline-timeout`
 defaults to `30m` and accepts exactly a positive integer followed immediately
 by one suffix: `s` (seconds), `m` (minutes), or `h` (hours). For example,
 `30s`, `10m`, and `2h` are valid; `0`, decimals, spaces, and compound values
-are rejected. The deadline is absolute across observation, OpenCode repair,
+are rejected. The deadline is absolute across observation, pi repair,
 verification, commit, push, reconciliation, and final proof, including after
 resume.
 
@@ -133,7 +131,7 @@ includes `--workflow`, `--max-issues`, `--issue-label`, `--issue-sort`,
 `--implementation-fallback-model`, and `--duplicate-action`.
 
 The pipeline runner never scrapes a browser page, reruns an Actions workflow,
-force-pushes, creates a pull request, or asks OpenCode to commit or push. A
+force-pushes, creates a pull request, or asks pi to commit or push. A
 failing snapshot is diagnosed through bounded, terminal-sanitized evidence and
 then repaired only inside the deterministic Git/checkpoint protocol. CI values
 are untrusted evidence, not instructions. The run state and diagnostics are
@@ -149,8 +147,8 @@ Ralphie also reads these environment variables:
 | --- | --- |
 | `GH_TOKEN` | GitHub.com token for noninteractive `gh` authentication (preferred). |
 | `GITHUB_TOKEN` | Fallback GitHub.com token alias for `gh`. |
-| `OPENCODE_URL` | OpenCode server URL (used when `--opencode-url` is absent). |
-| `OPENCODE_TOKEN` | OpenCode server token, used when `--opencode-token` is absent. |
+| `PI_CODING_AGENT_DIR` | Pi config directory (default `~/.pi/agent`); contains `auth.json` and `settings.json`. |
+| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, … | Provider credentials for models without a stored pi credential. A stored `auth.json` credential wins over the environment. |
 
 For interactive `github.com` use, authenticate with `gh auth login` and verify
 with `gh auth status`. For unattended use, provide `GH_TOKEN` (preferred) or
@@ -165,8 +163,8 @@ container setup.
 ### Preview one issue
 
 This performs authentication and Git preflight, prepares a clean checkout,
-discovers issues, and asks OpenCode for a complexity decision. It may create or reset
-the local workspace and write run artifacts, but it does not ask OpenCode to edit the
+discovers issues, and asks pi for a complexity decision. It may create or reset
+the local workspace and write run artifacts, but it does not ask pi to edit the
 repository, create commits, push, or mutate GitHub.
 
 ```bash
@@ -193,7 +191,7 @@ bunx @beremaran/ralphie owner/repository \
   --max-issues 10
 ```
 
-Require multiple labels and let OpenCode choose its configured model:
+Require multiple labels and let pi choose its configured default model:
 
 ```bash
 bunx @beremaran/ralphie owner/repository \
@@ -201,7 +199,7 @@ bunx @beremaran/ralphie owner/repository \
   --issue-label backend
 ```
 
-Select a OpenCode model and thinking level explicitly:
+Select a pi model and thinking level explicitly:
 
 ```bash
 bunx @beremaran/ralphie owner/repository \
@@ -260,7 +258,7 @@ recovery](operations-and-recovery.md) before resuming a failed run.
 
 Start with the mutation-free preview. It authenticates, prepares/inspects the
 checkout, observes the exact current remote HEAD, waits and classifies visible
-checks, and collects diagnostics for a failure. It does not start OpenCode or
+checks, and collects diagnostics for a failure. It does not start the agent runtime or
 mutate Git, GitHub, Actions, or pull requests:
 
 ```bash
@@ -330,6 +328,6 @@ mutation-enabled examples.
 `ralphie --version` prints only the release version. For automation,
 `ralphie --version --output json` prints a stable object containing `version`
 and `commitSha`. Both forms work without a repository, GitHub credentials, or
-OpenCode server. Release builds embed the immutable commit SHA supplied by
+a model provider. Release builds embed the immutable commit SHA supplied by
 the build entry point; local builds use the documented `local` commit sentinel
 when no release SHA is supplied.
