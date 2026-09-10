@@ -27,16 +27,15 @@ import {
     type ProgressCoordinatorOptions,
 } from "./progress/coordinator.ts";
 import { type ProgressRenderMode } from "./progress/progress.ts";
-import { type OpenCodeProviderConfig } from "./opencode/config.ts";
-import { makeOpenCodeService } from "./opencode/server.ts";
+import { makePiAgentService, type PiAgentService } from "./pi/runtime.ts";
+import type { PiAgentConfig } from "./pi/config.ts";
 import {
     makeLiveRuntime,
     type IssueWorkflowRuntime,
     type MaintenanceRuntime,
     type PipelineDeliveryRuntime,
 } from "./runtime.ts";
-import type { OpenCodeService } from "./opencode/server.ts";
-import type { AgentEventListener } from "./harness/index.ts";
+import type { AgentEventListener } from "./agent/contracts.ts";
 import {
     exitCodeForError,
     isNeedsAttentionStop,
@@ -86,8 +85,6 @@ const cliOptions = {
     "complexity-thinking": { type: "string" },
     "review-thinking": { type: "string" },
     "commit-thinking": { type: "string" },
-    "opencode-url": { type: "string" },
-    "opencode-token": { type: "string" },
     workspace: { type: "string" },
     "dry-run": { type: "boolean" },
     clean: { type: "string" },
@@ -300,8 +297,6 @@ const parseCliOptions = (
         complexityThinking: parseThinking(values, "complexity-thinking"),
         reviewThinking: parseThinking(values, "review-thinking"),
         commitThinking: parseThinking(values, "commit-thinking"),
-        opencodeUrl: asNonEmptyString(values, "opencode-url"),
-        opencodeToken: asNonEmptyString(values, "opencode-token"),
         workspace: asNonEmptyString(values, "workspace"),
         clean:
             cleanValue === undefined
@@ -341,13 +336,10 @@ export const parseCliArgs = (args: ReadonlyArray<string>): ParsedCli => {
     };
 };
 
-const resolveOpenCodeConfig = (
+const resolvePiAgentConfig = (
     config: ResolvedRalphieConfig,
-): OpenCodeProviderConfig => ({
-    workspace: config.workspace,
-    baseUrl: config.opencodeUrl,
-    token: config.opencodeToken,
-    model: config.model,
+): PiAgentConfig => ({
+    ...(config.model === undefined ? {} : { model: config.model }),
 });
 
 export type CliTerminalInfo = {
@@ -377,7 +369,7 @@ const resolveProgressMode = (
 
 export const HELP_TEXT = `Usage: ralphie <owner/repository> [options]
 
-Run an issue queue, maintain issues, or get-pipelines-green through OpenCode.
+Run an issue queue, maintain issues, or get-pipelines-green through pi.
 
 Options:
   -b, --branch <name>          Branch to operate on
@@ -400,18 +392,16 @@ Options:
       --verify-command <cmd>   Deterministic pre-commit gate (repeatable)
       --max-attempts <n>       Pipeline attempts (positive; default 3)
       --pipeline-timeout <t>  Pipeline timeout: e.g. 30s, 10m, or 2h
-      --model <provider/model> OpenCode model selection
-      --thinking <variant>     OpenCode model variant (for example low, medium, high)
-      --grounding-thinking <variant> Readiness reasoning (default low)
-      --implementation-thinking <variant> Implementation reasoning (default high)
+      --model <provider/model> Pi model selection
+      --thinking <level>       Thinking level: off, minimal, low, medium, high, xhigh, or max (default medium)
+      --grounding-thinking <level> Readiness reasoning (default low)
+      --implementation-thinking <level> Implementation reasoning (default high)
       --implementation-attempts <n> Empty implementation retries (default 3)
       --implementation-fallback-model <provider/model>
                                Model used after the first empty implementation
-      --complexity-thinking <variant> Complexity reasoning (default medium)
-      --review-thinking <variant> Review reasoning (default high)
-      --commit-thinking <variant> Commit-message reasoning (default low)
-      --opencode-url <url>     OpenCode server URL (defaults to discovered background service)
-      --opencode-token <token> OpenCode server token (defaults to service auth)
+      --complexity-thinking <level> Complexity reasoning (default medium)
+      --review-thinking <level> Review reasoning (default high)
+      --commit-thinking <level> Commit-message reasoning (default low)
       --workspace <path>       Workspace directory
       --dry-run                Assess without mutations
       --resume <path>          Resume saved run state
@@ -424,8 +414,9 @@ Environment:
   GH_TOKEN                     GitHub.com token for gh (preferred)
   GITHUB_TOKEN                 Fallback GitHub.com token alias for gh
                                Interactive \`gh auth login\` or a mounted GitHub CLI profile is not required
-  OPENCODE_URL                 OpenCode server URL (used when --opencode-url is absent)
-  OPENCODE_TOKEN               OpenCode server token (environment only)
+  PI_CODING_AGENT_DIR          Pi config directory (default ~/.pi/agent)
+  ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, ...
+                               Provider credentials; a stored pi auth.json credential wins
 `;
 
 export type CommandRuntime = IssueWorkflowRuntime &
@@ -438,12 +429,12 @@ export type CommandFactories = {
     readonly makeCoordinator?: (
         options: ProgressCoordinatorOptions,
     ) => ProgressCoordinator;
-    readonly makeOpenCode?: (
-        config: OpenCodeProviderConfig,
+    readonly makeAgentRuntime?: (
+        config: PiAgentConfig,
         listener: AgentEventListener,
-    ) => OpenCodeService;
+    ) => PiAgentService;
     readonly makeRuntime?: (input: {
-        readonly opencode: OpenCodeService;
+        readonly agentRuntime: PiAgentService;
         readonly progress: ProgressCoordinator["progress"];
     }) => CommandRuntime;
     readonly runWorkflow?: typeof workflow;
@@ -481,7 +472,7 @@ const resolveCommandFactories = (
     factories: CommandFactories = {},
 ): Required<CommandFactories> => ({
     makeCoordinator: factories.makeCoordinator ?? makeProgressCoordinator,
-    makeOpenCode: factories.makeOpenCode ?? makeOpenCodeService,
+    makeAgentRuntime: factories.makeAgentRuntime ?? makePiAgentService,
     makeRuntime: factories.makeRuntime ?? makeLiveRuntime,
     runWorkflow: factories.runWorkflow ?? workflow,
     runMaintenance: factories.runMaintenance ?? maintainIssues,
@@ -770,12 +761,12 @@ export const runCommand = async (
             factories.makeCoordinator,
             output,
         );
-        const opencode = factories.makeOpenCode(
-            resolveOpenCodeConfig(config),
+        const agentRuntime = factories.makeAgentRuntime(
+            resolvePiAgentConfig(config),
             coordinator.piListener,
         );
         runtime = factories.makeRuntime({
-            opencode,
+            agentRuntime,
             progress: coordinator.progress,
         });
         await dispatchCommand(

@@ -1,6 +1,11 @@
-import { RalphieError } from "../shared/error.ts";
 import type { AgentModel } from "../agent/model.ts";
-import type { OpenCodeModelInfo } from "./client.ts";
+import { RalphieError } from "../shared/error.ts";
+import {
+    modelReference,
+    piModelLookup,
+    thinkingLevelFor,
+    type PiModelInfo,
+} from "./models.ts";
 
 export type StageVariantCheck = {
     readonly stage: string;
@@ -18,8 +23,8 @@ export type VariantViolation = {
 };
 
 export type ValidateModelVariantsInput = {
-    readonly models: ReadonlyArray<OpenCodeModelInfo>;
-    readonly defaultModel?: OpenCodeModelInfo;
+    readonly models: ReadonlyArray<PiModelInfo>;
+    readonly defaultModel?: AgentModel;
     readonly primaryModel?: AgentModel;
     readonly fallbackModel?: AgentModel;
     readonly defaultVariant?: string;
@@ -32,22 +37,14 @@ export type ValidateModelVariantsInput = {
     };
 };
 
-export const modelReference = (model?: AgentModel): string | undefined => {
-    if (model === undefined) return undefined;
-    return `${model.providerID}/${model.modelID}`;
-};
-
 export const findModelInfo = (
-    models: ReadonlyArray<OpenCodeModelInfo>,
-    model: AgentModel,
-): OpenCodeModelInfo | undefined => {
-    const qualified = `${model.providerID}/${model.modelID}`;
+    models: ReadonlyArray<PiModelInfo>,
+    selection: AgentModel,
+): PiModelInfo | undefined => {
+    const lookup = piModelLookup(selection);
+    if (lookup === undefined) return undefined;
     return models.find(
-        (m) =>
-            (m.providerID === model.providerID &&
-                m.modelID === model.modelID) ||
-            m.id === qualified ||
-            m.modelID === qualified,
+        (model) => model.provider === lookup.provider && model.id === lookup.id,
     );
 };
 
@@ -113,15 +110,56 @@ export const plannedVariantChecks = (
     return checks;
 };
 
-const resolveTargetModelInfo = (
-    check: StageVariantCheck,
-    models: ReadonlyArray<OpenCodeModelInfo>,
-    defaultModel?: OpenCodeModelInfo,
-): OpenCodeModelInfo | undefined => {
-    if (check.model !== undefined) {
-        return findModelInfo(models, check.model);
+const normalizedLevel = (variant: string): string => {
+    try {
+        return thinkingLevelFor(variant);
+    } catch {
+        return variant;
     }
-    return defaultModel;
+};
+
+const modelInfoForCheck = (
+    check: StageVariantCheck,
+    input: ValidateModelVariantsInput,
+): PiModelInfo | undefined => {
+    if (check.model !== undefined) {
+        return findModelInfo(input.models, check.model);
+    }
+    return input.defaultModel === undefined
+        ? undefined
+        : findModelInfo(input.models, input.defaultModel);
+};
+
+const violationForCheck = (
+    check: StageVariantCheck,
+    input: ValidateModelVariantsInput,
+): VariantViolation | undefined => {
+    if (
+        check.variant === undefined ||
+        check.variant === "" ||
+        check.variant === "default"
+    ) {
+        return undefined;
+    }
+    const modelInfo = modelInfoForCheck(check, input);
+    if (
+        modelInfo === undefined ||
+        isVariantAvailable(
+            modelInfo.thinkingLevels,
+            normalizedLevel(check.variant),
+        )
+    ) {
+        return undefined;
+    }
+    return {
+        stage: check.stage,
+        variant: check.variant,
+        modelName:
+            modelReference(check.model) ??
+            `${modelInfo.provider}/${modelInfo.id}`,
+        availableVariants: modelInfo.thinkingLevels,
+        flagOption: check.flagOption,
+    };
 };
 
 export const collectVariantViolations = (
@@ -130,44 +168,10 @@ export const collectVariantViolations = (
     if (input.models.length === 0 && input.defaultModel === undefined) {
         return [];
     }
-
-    const checks = plannedVariantChecks(input);
-    const violations: VariantViolation[] = [];
-
-    for (const check of checks) {
-        if (
-            check.variant === undefined ||
-            check.variant === "" ||
-            check.variant === "default"
-        ) {
-            continue;
-        }
-
-        const modelInfo = resolveTargetModelInfo(
-            check,
-            input.models,
-            input.defaultModel,
-        );
-        if (modelInfo === undefined) {
-            continue;
-        }
-
-        if (!isVariantAvailable(modelInfo.variants, check.variant)) {
-            const modelName =
-                modelReference(check.model) ??
-                modelInfo.id ??
-                `${modelInfo.providerID}/${modelInfo.modelID}`;
-            violations.push({
-                stage: check.stage,
-                variant: check.variant,
-                modelName,
-                availableVariants: modelInfo.variants,
-                flagOption: check.flagOption,
-            });
-        }
-    }
-
-    return violations;
+    return plannedVariantChecks(input).flatMap((check) => {
+        const violation = violationForCheck(check, input);
+        return violation === undefined ? [] : [violation];
+    });
 };
 
 export const formatVariantViolations = (
@@ -176,17 +180,17 @@ export const formatVariantViolations = (
     const formatted = violations.map((v) => {
         const available =
             v.availableVariants.length === 0
-                ? 'none (model does not support reasoning variants; use "default" or omit)'
+                ? 'none (model does not support reasoning; use "default" or omit)'
                 : `${v.availableVariants.join(", ")} (or "default")`;
         return (
-            `  • Stage "${v.stage}": variant "${v.variant}" is not supported by model "${v.modelName}".\n` +
-            `    Available variants: ${available}.\n` +
-            `    Override with: ${v.flagOption} <variant>`
+            `  • Stage "${v.stage}": thinking level "${v.variant}" is not supported by model "${v.modelName}".\n` +
+            `    Available levels: ${available}.\n` +
+            `    Override with: ${v.flagOption} <level>`
         );
     });
 
     return (
-        "OpenCode model variant validation failed before execution:\n" +
+        "Pi model thinking-level validation failed before execution:\n" +
         formatted.join("\n") +
         "\n\nAdjust the stage thinking options or pass --thinking default."
     );

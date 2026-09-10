@@ -14,7 +14,7 @@ export type ProgressStage =
     | "repository-discovery"
     | "repository-preparation"
     | "issue-discovery"
-    | "opencode-runtime"
+    | "agent-runtime"
     | "issue-planning"
     | "issue-execution"
     | "issue-queue"

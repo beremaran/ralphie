@@ -1,4 +1,4 @@
-import type { AgentAssistantMessage, AgentClient } from "../harness/index.ts";
+import type { AgentAssistantMessage, AgentClient } from "./contracts.ts";
 import { z } from "zod";
 
 import {
@@ -175,7 +175,7 @@ const describeApiError = (error: unknown): string => {
         readonly data?: { readonly message?: unknown };
     };
     const name =
-        typeof candidate.name === "string" ? candidate.name : "OpenCodeError";
+        typeof candidate.name === "string" ? candidate.name : "AgentError";
     const message =
         typeof candidate.data?.message === "string"
             ? candidate.data.message
@@ -258,7 +258,7 @@ export const reportAgentFailure = async (
             ...(request.progressIssue === undefined
                 ? {}
                 : { issue: request.progressIssue }),
-            message: `OpenCode task failed: ${error.message}`,
+            message: `Pi task failed: ${error.message}`,
             details: {
                 directory: request.directory,
                 title: request.title,
@@ -322,14 +322,11 @@ const promptAgentTask = async (
 
     if (response.error !== undefined || response.data === undefined) {
         throw new Error(
-            `OpenCode task prompt failed: ${describeApiError(response.error)}`,
+            `Pi task prompt failed: ${describeApiError(response.error)}`,
         );
     }
     if (response.data.info.error !== undefined) {
-        throw assistantFailure(
-            "OpenCode assistant failed",
-            response.data.info.error,
-        );
+        throw assistantFailure("Pi assistant failed", response.data.info.error);
     }
 
     await verifyAgentTaskRequest(request);
@@ -387,7 +384,7 @@ export const createAgentTaskSession = async (
 
         if (response.error !== undefined || response.data === undefined) {
             throw new Error(
-                `Could not create OpenCode task session: ${describeApiError(response.error)}`,
+                `Could not create pi task session: ${describeApiError(response.error)}`,
             );
         }
 
@@ -411,7 +408,7 @@ export const createAgentTaskSession = async (
     } catch (cause) {
         if (cause instanceof RalphieError) throw cause;
         throw new RalphieError({
-            message: "Failed to create an OpenCode task session.",
+            message: "Failed to create a pi task session.",
             cause,
         });
     }
@@ -430,7 +427,7 @@ export const runAgentTask = async (
             cause instanceof RalphieError
                 ? cause
                 : new RalphieError({
-                      message: "Failed to run an OpenCode task.",
+                      message: "Failed to run a pi task.",
                       cause,
                   });
         await reportAgentFailure(request, error);

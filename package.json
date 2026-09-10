@@ -1,7 +1,7 @@
 {
   "name": "@beremaran/ralphie",
   "version": "0.1.2",
-  "description": "Turn a GitHub issue queue into reviewed commits with OpenCode.",
+  "description": "Turn a GitHub issue queue into reviewed commits with pi.",
   "module": "./dist/ralphie.js",
   "main": "./dist/ralphie.js",
   "type": "module",
@@ -41,7 +41,8 @@
     "github-issues",
     "automation",
     "ai",
-    "opencode",
+    "pi",
+    "agent",
     "npm"
   ],
   "engines": {
@@ -53,11 +54,14 @@
   "devDependencies": {
     "@biomejs/biome": "^2.5.10",
     "@types/bun": "latest",
+    "@types/proper-lockfile": "^4.1.4",
     "typescript": "^5"
   },
   "dependencies": {
-    "@opencode-ai/client": "^0.0.0-beta-18999",
+    "@earendil-works/pi-agent-core": "^0.85.1",
+    "@earendil-works/pi-ai": "^0.85.1",
     "octokit": "^5.0.5",
+    "proper-lockfile": "^4.1.2",
     "zod": "^4.4.3"
   },
   "scripts": {
@@ -72,7 +76,6 @@
     "package:check": "bun run scripts/package-smoke.ts",
     "package:inspect": "bun run scripts/package-smoke.ts --dry-run",
     "prepack": "bun run build:package",
-    "probe:structured-output": "bun run scripts/probe-structured-output.ts",
     "source:audit": "bun run scripts/source-reachability.ts --json",
     "test": "bun test tests",
     "typecheck": "bunx tsc --noEmit"

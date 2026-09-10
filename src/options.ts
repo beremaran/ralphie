@@ -2,7 +2,6 @@ import { IssueOrder, IssueSort } from "./github/issues.ts";
 import { DEFAULT_MAX_DECOMPOSITION_DEPTH } from "./github/decomposition-markdown.ts";
 export { DEFAULT_MAX_DECOMPOSITION_DEPTH } from "./github/decomposition-markdown.ts";
 import { parseRepositorySlug } from "./github/repository.ts";
-import { OPENCODE_TOKEN_ENV, OPENCODE_URL_ENV } from "./opencode/config.ts";
 import { DEFAULT_AGENT, type AgentModel } from "./agent/model.ts";
 import { RalphieError } from "./shared/error.ts";
 
@@ -129,8 +128,6 @@ export type RalphieCliOptions = {
     readonly complexityThinking?: string;
     readonly reviewThinking?: string;
     readonly commitThinking?: string;
-    readonly opencodeUrl?: string;
-    readonly opencodeToken?: string;
     readonly workspace?: string;
     readonly clean?: CleanWhen;
     readonly dryRun?: boolean;
@@ -145,8 +142,6 @@ type SharedRalphieConfig = {
     readonly branch?: string;
     readonly model?: AgentModel;
     readonly thinking?: string;
-    readonly opencodeUrl?: string;
-    readonly opencodeToken?: string;
     readonly agent: string;
     readonly workspace: string;
     readonly cleanStart: boolean;
@@ -442,14 +437,6 @@ const commonResolvedConfig = (
     ...optionalProperty("branch", options.branch),
     ...optionalProperty("model", options.model),
     ...optionalProperty("thinking", options.thinking),
-    ...optionalProperty(
-        "opencodeUrl",
-        options.opencodeUrl ?? process.env[OPENCODE_URL_ENV],
-    ),
-    ...optionalProperty(
-        "opencodeToken",
-        options.opencodeToken ?? process.env[OPENCODE_TOKEN_ENV],
-    ),
     agent: DEFAULT_AGENT,
     workspace: options.workspace ?? DEFAULT_WORKSPACE,
     cleanStart: options.clean === "start" || options.clean === "both",

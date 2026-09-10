@@ -169,10 +169,17 @@ const packRecordFrom = (
     } catch {
         return fail(`${label} did not produce JSON. Output was:\n${output}`);
     }
-    const record = (Array.isArray(parsed) ? parsed[0] : parsed) as Record<
-        string,
-        unknown
-    >;
+    const firstNamedRecord = Array.isArray(parsed)
+        ? parsed[0]
+        : (parsed as Record<string, unknown>).name !== undefined
+          ? parsed
+          : Object.values(parsed as Record<string, unknown>).find(
+                (value): value is Record<string, unknown> =>
+                    typeof value === "object" &&
+                    value !== null &&
+                    "name" in value,
+            );
+    const record = (firstNamedRecord ?? parsed) as Record<string, unknown>;
     if (typeof record !== "object" || record === null) {
         return fail(`${label} returned no package record.`);
     }

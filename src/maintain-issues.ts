@@ -26,7 +26,6 @@ import {
     validateMaintenanceResumeState,
 } from "./maintain-issues-state.ts";
 import { type MaintenanceRuntime } from "./runtime.ts";
-import { requireAntigravityRuntime } from "./harness/index.ts";
 import {
     DuplicateAction,
     type MaintainIssuesRalphieConfig,
@@ -48,7 +47,7 @@ export type MaintainIssuesOptions = {
     readonly signal?: AbortSignal;
     /** Set only when the operator supplied --duplicate-action on resume. */
     readonly explicitDuplicateAction?: DuplicateAction;
-    /** Loaded by the command before it creates OpenCode/output resources. */
+    /** Loaded by the command before it creates agent/output resources. */
     readonly resumeState?: MaintenanceRunState;
 };
 
@@ -652,8 +651,8 @@ const captureMaintenanceContext = async (input: {
     return { state: nextState, snapshot: captured, selectedIssueNumbers };
 };
 
-type StartedMaintenanceOpenCode = Awaited<
-    ReturnType<MaintenanceRuntime["opencode"]["start"]>
+type StartedMaintenanceAgent = Awaited<
+    ReturnType<MaintenanceRuntime["agentRuntime"]["start"]>
 >;
 
 const startMaintenancePlanner = async (input: {
@@ -661,23 +660,19 @@ const startMaintenancePlanner = async (input: {
     readonly runtime: MaintenanceRuntime;
     readonly emit: MaintenanceEmit;
     readonly signal?: AbortSignal;
-    readonly onStarted: (service: StartedMaintenanceOpenCode) => void;
+    readonly onStarted: (service: StartedMaintenanceAgent) => void;
 }): Promise<MaintenancePlanService> => {
     if (input.runtime.maintenancePlanner !== undefined) {
         return input.runtime.maintenancePlanner;
     }
     await input.emit({
-        stage: "opencode-runtime",
+        stage: "agent-runtime",
         status: "started",
         message:
-            "Starting OpenCode runtime for read-only maintenance planning...",
+            "Starting pi agent runtime for read-only maintenance planning...",
         repository: input.config.repo,
     });
-    await requireAntigravityRuntime(
-        input.runtime.antigravityRuntimeDiscovery,
-        input.signal,
-    );
-    const started = await input.runtime.opencode.start();
+    const started = await input.runtime.agentRuntime.start();
     input.onStarted(started);
     const planner =
         input.runtime.maintenancePlannerForAgent?.(started.client) ??
@@ -686,9 +681,9 @@ const startMaintenancePlanner = async (input: {
             repositoryInvariant: input.runtime.gitRepositoryInvariant,
         });
     await input.emit({
-        stage: "opencode-runtime",
+        stage: "agent-runtime",
         status: "succeeded",
-        message: "OpenCode runtime ready for read-only planning.",
+        message: "Pi agent runtime ready for read-only planning.",
         repository: input.config.repo,
     });
     return planner;
@@ -780,7 +775,7 @@ const executeMaintenanceIssues = async (input: {
     readonly reports: MaintenanceReportResult[];
     readonly emit: MaintenanceEmit;
     readonly persist: (state: MutableMaintenanceState) => Promise<void>;
-    readonly onOpenCodeStarted: (service: StartedMaintenanceOpenCode) => void;
+    readonly onAgentStarted: (service: StartedMaintenanceAgent) => void;
 }): Promise<MaintenanceRunSummary> => {
     if (input.selectedIssueNumbers.length === 0) {
         return finishMaintenanceRun({ ...input, noIssues: true });
@@ -790,7 +785,7 @@ const executeMaintenanceIssues = async (input: {
         runtime: input.runtime,
         emit: input.emit,
         signal: input.signal,
-        onStarted: input.onOpenCodeStarted,
+        onStarted: input.onAgentStarted,
     });
     const lifecycle = await executeMaintenanceLifecycle({
         config: input.config,
@@ -998,7 +993,7 @@ export const executeMaintenanceRun = async (
         reports,
     } = await maintenanceRunInputsFor(options, runtime);
     let state: MutableMaintenanceState | undefined;
-    let startedOpenCode: StartedMaintenanceOpenCode | undefined;
+    let startedAgent: StartedMaintenanceAgent | undefined;
 
     const persist = async (next: MutableMaintenanceState): Promise<void> => {
         state = next;
@@ -1076,8 +1071,8 @@ export const executeMaintenanceRun = async (
             reports,
             emit,
             persist,
-            onOpenCodeStarted: (started) => {
-                startedOpenCode = started;
+            onAgentStarted: (started) => {
+                startedAgent = started;
             },
         });
     } catch (error) {
@@ -1095,7 +1090,7 @@ export const executeMaintenanceRun = async (
         if (finalError instanceof Error) throw finalError;
         throw mutationFailure("Maintenance failed.", finalError);
     } finally {
-        await startedOpenCode?.close();
+        await startedAgent?.close();
     }
 };
 

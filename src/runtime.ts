@@ -147,10 +147,7 @@ import {
     makeNeedsAttentionRouterService,
     type NeedsAttentionRouterService,
 } from "./issues/needs-attention.ts";
-import {
-    makeOpenCodeService,
-    type OpenCodeService,
-} from "./opencode/server.ts";
+import { type PiAgentService } from "./pi/runtime.ts";
 import { makeMaintainIssuesGroundingReader } from "./maintain-issues-grounding-reader.ts";
 import {
     makeMaintenanceSnapshotService,
@@ -172,21 +169,13 @@ import {
     makeMaintenancePlanService,
     type MaintenancePlanService,
 } from "./maintain-issues-plan.ts";
-import type { AgentClient, HarnessFactory } from "./harness/index.ts";
-import {
-    makeAntigravityRuntimeDiscovery,
-    type AntigravityRuntimeDiscovery,
-} from "./harness/index.ts";
+import type { AgentClient } from "./agent/contracts.ts";
 import { type ProgressReporterService } from "./progress/progress.ts";
 import { RunStateStoreLive, type RunStateStoreService } from "./run/state.ts";
 import { WorkspaceLive, type WorkspaceService } from "./workspace/workspace.ts";
 
 /** Concrete adapter assembly for one run. Only the command wiring consumes this broad shape; execution modes depend on their focused seams. */
 export type RalphieRuntime = {
-    /** Optional provider-neutral harness factory for future workflow migration. */
-    readonly harnessFactory?: HarnessFactory;
-    /** Read-only Antigravity runtime discovery; auth and session setup stay separate. */
-    readonly antigravityRuntimeDiscovery?: AntigravityRuntimeDiscovery;
     readonly commandRunner: CommandRunnerService;
     readonly githubClient: GitHubClientService;
     readonly pipelineSnapshot: PipelineSnapshotCollectorService;
@@ -246,7 +235,7 @@ export type RalphieRuntime = {
     readonly issueExecutor: IssueExecutorService;
     readonly issueRecovery: IssueRecoveryService;
     readonly needsAttentionRouter: NeedsAttentionRouterService;
-    readonly opencode: OpenCodeService;
+    readonly agentRuntime: PiAgentService;
     readonly progress: ProgressReporterService;
     readonly runStateStore: RunStateStoreService;
     /** Pipeline-only state; never shared with issue-mode state. */
@@ -256,8 +245,6 @@ export type RalphieRuntime = {
 
 /** Focused dependencies consumed directly by the issue workflow entrypoint. */
 export type IssueWorkflowRuntime = {
-    /** Optional Antigravity preflight; when supplied it runs before agent startup. */
-    readonly antigravityRuntimeDiscovery?: AntigravityRuntimeDiscovery;
     readonly progress: ProgressReporterService;
     readonly runStateStore: RunStateStoreService;
     readonly workspace: WorkspaceService;
@@ -274,13 +261,11 @@ export type IssueWorkflowRuntime = {
     readonly pullRequestClosure: PullRequestClosureService;
     readonly issueExecutor: IssueExecutorService;
     readonly dryRunIssueExecutor: DryRunIssueExecutorService;
-    readonly opencode: OpenCodeService;
+    readonly agentRuntime: PiAgentService;
 };
 
 /** Focused dependencies consumed directly by maintenance execution. */
 export type MaintenanceRuntime = {
-    /** Optional Antigravity preflight; when supplied it runs before agent startup. */
-    readonly antigravityRuntimeDiscovery?: AntigravityRuntimeDiscovery;
     readonly progress: ProgressReporterService;
     readonly workspace: WorkspaceService;
     readonly githubClient: GitHubClientService;
@@ -300,27 +285,21 @@ export type MaintenanceRuntime = {
     readonly maintenanceRelationships?: GitHubIssueMaintenanceRelationshipService;
     /** Mode-specific state store; it is never shared with issue queue state. */
     readonly maintenanceRunStateStore?: MaintenanceRunStateStoreService;
-    readonly opencode: OpenCodeService;
+    readonly agentRuntime: PiAgentService;
 };
 
 /** Focused dependencies consumed directly by Pipeline delivery. */
 export type PipelineDeliveryRuntime = {
-    /** Optional Antigravity preflight; when supplied it runs before agent startup. */
-    readonly antigravityRuntimeDiscovery?: AntigravityRuntimeDiscovery;
     readonly progress: ProgressReporterService;
     readonly workspace: WorkspaceService;
     readonly githubClient: GitHubClientService;
     readonly gitRepository: GitRepositoryService;
-    readonly opencode: OpenCodeService;
+    readonly agentRuntime: PiAgentService;
     readonly pipelineDeliveryLifecycle: PipelineDeliveryLifecycle;
 };
 
 export type RuntimeOverrides = {
-    readonly opencode: OpenCodeService;
-    /** Optional provider-neutral harness factory seam. */
-    readonly harnessFactory?: HarnessFactory;
-    /** Optional deterministic Antigravity discovery seam. */
-    readonly antigravityRuntimeDiscovery?: AntigravityRuntimeDiscovery;
+    readonly agentRuntime: PiAgentService;
     readonly progress: ProgressReporterService;
     /** Optional deterministic seams for the read-only pipeline observer. */
     readonly pipelineObservationDependencies?: PipelineObservationServiceDependencies;
@@ -338,7 +317,7 @@ export type RuntimeOverrides = {
     readonly maintenanceSnapshot?: MaintenanceSnapshotService;
     /** Optional deterministic maintenance planner used by runner tests. */
     readonly maintenancePlanner?: MaintenancePlanService;
-    /** Optional factory for a planner bound to the live OpenCode client. */
+    /** Optional factory for a planner bound to the live agent client. */
     readonly maintenancePlannerForAgent?: (
         agent: AgentClient,
     ) => MaintenancePlanService;
@@ -353,9 +332,7 @@ export type RuntimeOverrides = {
 
 /** Assemble the small object graph for one run. */
 export const makeLiveRuntime = ({
-    opencode,
-    harnessFactory,
-    antigravityRuntimeDiscovery: antigravityRuntimeDiscoveryOverride,
+    agentRuntime,
     progress,
     commandRunner = CommandRunnerLive,
     runStateStore = RunStateStoreLive,
@@ -375,9 +352,6 @@ export const makeLiveRuntime = ({
     maintenanceRunStateStore: maintenanceRunStateStoreOverride,
 }: RuntimeOverrides): RalphieRuntime => {
     const githubClient = makeGitHubClientService(commandRunner);
-    const antigravityRuntimeDiscovery =
-        antigravityRuntimeDiscoveryOverride ??
-        makeAntigravityRuntimeDiscovery();
     const pipelineSnapshot = makePipelineSnapshotCollectorService();
     const pipelineObservation = makePipelineObservationService(
         pipelineObservationDependencies,
@@ -533,8 +507,6 @@ export const makeLiveRuntime = ({
         needsAttentionRouter,
     );
     return {
-        ...(harnessFactory === undefined ? {} : { harnessFactory }),
-        antigravityRuntimeDiscovery,
         commandRunner,
         githubClient,
         pipelineSnapshot,
@@ -578,12 +550,10 @@ export const makeLiveRuntime = ({
         issueExecutor,
         issueRecovery,
         needsAttentionRouter,
-        opencode,
+        agentRuntime,
         progress,
         runStateStore,
         pipelineRunStateStore: actualPipelineRunStateStore,
         workspace,
     };
 };
-
-export { makeOpenCodeService };

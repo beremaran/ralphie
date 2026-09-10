@@ -2,9 +2,10 @@
 
 /**
  * The get-pipelines-green command is the CLI adapter for Pipeline delivery.
- * Authentication, workspace cleanup, OpenCode lifetime, and exit semantics
- * stay here; the delivery lifecycle owns repository preparation, state,
- * observation, repair, push reconciliation, resume, and dry-run behavior.
+ * Authentication, workspace cleanup, agent-runtime lifetime, and exit
+ * semantics stay here; the delivery lifecycle owns repository preparation,
+ * state, observation, repair, push reconciliation, resume, and dry-run
+ * behavior.
  */
 import { makeAgentSessionDiagnostics } from "./agent/task-session.ts";
 import type { AgentSelection } from "./agent/model.ts";
@@ -17,9 +18,8 @@ import type {
     ProgressReporterService,
     ProgressStage,
 } from "./progress/progress.ts";
-import type { OpenCodeRuntime } from "./opencode/server.ts";
+import type { PiAgentRuntime } from "./pi/runtime.ts";
 import type { PipelineDeliveryRuntime } from "./runtime.ts";
-import { requireAntigravityRuntime } from "./harness/index.ts";
 import type {
     PipelineDeliveryContext,
     PipelineDeliveryOutcome,
@@ -125,7 +125,7 @@ const requestFor = (input: {
     readonly client: Awaited<
         ReturnType<PipelineDeliveryRuntime["githubClient"]["initialize"]>
     >;
-    readonly startServer: () => Promise<OpenCodeRuntime>;
+    readonly startAgent: () => Promise<PiAgentRuntime>;
 }): PipelineDeliveryRequest => {
     const context: PipelineDeliveryContext = {
         repository: input.config.repo,
@@ -167,9 +167,9 @@ const requestFor = (input: {
               mode: "live",
               context,
               acquireAgent: async () => {
-                  const server = await input.startServer();
+                  const started = await input.startAgent();
                   return {
-                      agent: server.client,
+                      agent: started.client,
                       agentSelection: selection,
                       agentDiagnostics: makeAgentSessionDiagnostics(),
                   };
@@ -180,9 +180,9 @@ const requestFor = (input: {
               resumePath: input.config.resume,
               context,
               acquireAgent: async () => {
-                  const server = await input.startServer();
+                  const started = await input.startAgent();
                   return {
-                      agent: server.client,
+                      agent: started.client,
                       agentSelection: selection,
                       agentDiagnostics: makeAgentSessionDiagnostics(),
                   };
@@ -204,7 +204,7 @@ export const getPipelinesGreen: GetPipelinesGreenEntryPoint = async (
     runtime,
 ): Promise<PipelineRunSummary> => {
     const { config } = options;
-    let server: OpenCodeRuntime | undefined;
+    let agentRuntime: PiAgentRuntime | undefined;
     try {
         if (config.cleanStart && config.resume === undefined) {
             await track({
@@ -244,21 +244,17 @@ export const getPipelinesGreen: GetPipelinesGreenEntryPoint = async (
         });
         checkCancellation(options.signal);
 
-        const startServer = async (): Promise<OpenCodeRuntime> => {
-            if (server !== undefined) return server;
-            await requireAntigravityRuntime(
-                runtime.antigravityRuntimeDiscovery,
-                options.signal,
-            );
-            server = await track({
+        const startAgent = async (): Promise<PiAgentRuntime> => {
+            if (agentRuntime !== undefined) return agentRuntime;
+            agentRuntime = await track({
                 progress: runtime.progress,
-                stage: "opencode-runtime",
-                message: "Starting OpenCode runtime...",
-                operation: () => runtime.opencode.start(),
-                success: "OpenCode runtime ready.",
+                stage: "agent-runtime",
+                message: "Starting pi agent runtime...",
+                operation: () => runtime.agentRuntime.start(),
+                success: "Pi agent runtime ready.",
                 repository: config.repo,
             });
-            return server;
+            return agentRuntime;
         };
 
         const result = await runtime.pipelineDeliveryLifecycle.execute(
@@ -267,7 +263,7 @@ export const getPipelinesGreen: GetPipelinesGreenEntryPoint = async (
                 runId: options.runId,
                 signal: options.signal,
                 client: octokit,
-                startServer,
+                startAgent,
             }),
         );
         if (result.outcome.kind !== "green") {
@@ -285,6 +281,6 @@ export const getPipelinesGreen: GetPipelinesGreenEntryPoint = async (
         }
         return summaryFrom({ result, dryRun: config.dryRun });
     } finally {
-        await server?.close();
+        await agentRuntime?.close();
     }
 };

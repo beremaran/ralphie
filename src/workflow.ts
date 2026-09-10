@@ -23,9 +23,8 @@ import {
     IssueQueueState,
     toQueuedIssues,
 } from "./issues/queue.ts";
-import type { OpenCodeRuntime } from "./opencode/server.ts";
-import { validateModelVariants } from "./opencode/variants.ts";
-import { requireAntigravityRuntime } from "./harness/index.ts";
+import type { PiAgentRuntime } from "./pi/runtime.ts";
+import { validateModelVariants } from "./pi/variants.ts";
 import {
     type ProgressReporterService,
     type ProgressStage,
@@ -793,8 +792,8 @@ const emitRunStarted = async (
             workspace: config.workspace,
             model: config.model
                 ? `${config.model.providerID}/${config.model.modelID}`
-                : "OpenCode default",
-            variant: config.modelVariant ?? "OpenCode default",
+                : "pi default",
+            variant: config.modelVariant ?? "pi default",
             agent: config.agent,
             issueLimit:
                 config.resumeState?.maxIssues ??
@@ -891,28 +890,24 @@ const emitRunFailed = async (
     });
 };
 
-const validateRuntimeModelVariants = async (
-    server: OpenCodeRuntime,
+const validateRuntimeModelVariants = (
+    runtime: PiAgentRuntime,
     config: WorkflowConfiguration,
-    directory: string,
-): Promise<void> => {
-    if (server.modelList === undefined) return;
-    try {
-        const [models, defaultModel] = await Promise.all([
-            server.modelList({ directory }),
-            server.modelDefault?.({ directory }),
-        ]);
-        validateModelVariants({
-            models,
-            defaultModel,
-            primaryModel: config.model,
-            fallbackModel: config.implementationFallbackModel,
-            defaultVariant: config.modelVariant,
-            stageVariants: config.agentStageVariants,
-        });
-    } catch (cause) {
-        if (cause instanceof RalphieError) throw cause;
-    }
+): void => {
+    validateModelVariants({
+        models: runtime.catalog,
+        ...(runtime.defaultModel === undefined
+            ? {}
+            : { defaultModel: runtime.defaultModel }),
+        ...(config.model === undefined ? {} : { primaryModel: config.model }),
+        ...(config.implementationFallbackModel === undefined
+            ? {}
+            : { fallbackModel: config.implementationFallbackModel }),
+        ...(config.modelVariant === undefined
+            ? {}
+            : { defaultVariant: config.modelVariant }),
+        stageVariants: config.agentStageVariants,
+    });
 };
 
 /** Run Ralphie using an explicit dependency object. */
@@ -961,8 +956,7 @@ export const workflow = async (
         pullRequestClosure,
         issueExecutor: normalIssueExecutor,
         dryRunIssueExecutor,
-        opencode,
-        antigravityRuntimeDiscovery,
+        agentRuntime,
     } = runtime;
 
     await emitRunStarted(progress, config);
@@ -1414,7 +1408,7 @@ export const workflow = async (
 
         const executeIssue = async (
             issueContext: WorkflowIssueContext,
-            server: OpenCodeRuntime,
+            server: PiAgentRuntime,
         ): Promise<IssueExecutionOutcome> => {
             if (issueContext.resumedClosureOutcome !== undefined) {
                 return issueContext.resumedClosureOutcome;
@@ -1475,7 +1469,7 @@ export const workflow = async (
          */
         const deliverPullRequest = async (
             issueContext: WorkflowIssueContext,
-            server: OpenCodeRuntime,
+            server: PiAgentRuntime,
         ): Promise<void> => {
             const result = await pullRequestClosure.close({
                 client: octokit,
@@ -1513,7 +1507,7 @@ export const workflow = async (
                 IssueExecutionOutcome,
                 { readonly kind: IssueExecutionOutcomeKind.Completed }
             >,
-            server: OpenCodeRuntime,
+            server: PiAgentRuntime,
         ): Promise<void> => {
             if (effectiveDryRun) return;
             if (usesPullRequests && outcome.completion === "pushed-commit") {
@@ -1558,7 +1552,7 @@ export const workflow = async (
         const completeIssue = async (
             issueContext: WorkflowIssueContext,
             outcome: IssueExecutionOutcome,
-            server: OpenCodeRuntime,
+            server: PiAgentRuntime,
         ): Promise<void> => {
             if (outcome.kind !== IssueExecutionOutcomeKind.Completed) return;
             checkout = await captureCheckout();
@@ -1876,7 +1870,7 @@ export const workflow = async (
         const finalizeIssue = async (
             issueContext: WorkflowIssueContext,
             outcome: IssueExecutionOutcome,
-            server: OpenCodeRuntime,
+            server: PiAgentRuntime,
         ): Promise<void> => {
             if (issueContext.resumedClosureOutcome === undefined) {
                 recordIssueOutcome(issueContext.issue.number, outcome);
@@ -1977,7 +1971,7 @@ export const workflow = async (
         };
 
         const processNextIssue = async (
-            server: OpenCodeRuntime,
+            server: PiAgentRuntime,
         ): Promise<boolean> => {
             checkCancellation(signal);
             const queuedIssue = queue.next();
@@ -2012,7 +2006,7 @@ export const workflow = async (
             return true;
         };
 
-        const processQueue = async (server: OpenCodeRuntime): Promise<void> => {
+        const processQueue = async (server: PiAgentRuntime): Promise<void> => {
             const worker = async (): Promise<void> => {
                 while (queue.state() === IssueQueueState.Ready) {
                     if (!(await processNextIssue(server))) break;
@@ -2023,29 +2017,21 @@ export const workflow = async (
 
         await recoverPendingNotification();
 
-        let server: OpenCodeRuntime | undefined;
+        let server: PiAgentRuntime | undefined;
         try {
-            const startedServer = await track(
+            const startedAgent = await track(
                 progress,
-                "opencode-runtime",
-                "Starting OpenCode runtime...",
+                "agent-runtime",
+                "Starting pi agent runtime...",
                 async () => {
-                    await requireAntigravityRuntime(
-                        antigravityRuntimeDiscovery,
-                        signal,
-                    );
-                    const started = await opencode.start();
+                    const started = await agentRuntime.start();
                     server = started;
-                    await validateRuntimeModelVariants(
-                        started,
-                        config,
-                        prepared.path,
-                    );
+                    validateRuntimeModelVariants(started, config);
                     return started;
                 },
-                "OpenCode runtime ready.",
+                "Pi agent runtime ready.",
             );
-            await processQueue(startedServer);
+            await processQueue(startedAgent);
         } finally {
             await server?.close();
         }

@@ -1,8 +1,7 @@
 /**
- * JSON-in-text helpers for the OpenCode backend.
+ * JSON-in-text helpers for assistant responses.
  *
- * OpenCode's external server exposes no mandatory structured-result tool, so
- * every decision is returned as assistant text. Structured callers ask the
+ * Pi agents return decisions as assistant text. Structured callers ask the
  * model for exactly one fenced `json` block matching their schema and retry
  * with a follow-up prompt when parsing or validation fails. A blocked task
  * may additionally emit a fenced `needs-attention` block carrying a
@@ -98,9 +97,6 @@ export const extractNeedsAttentionJson = (
     text: string,
 ): unknown | undefined => {
     const fenced = fencedContent(text, "needs-attention");
-    if (fenced !== undefined) {
-        const parsed = tryParseJson(fenced);
-        if (parsed !== undefined) return parsed;
-    }
-    return undefined;
+    if (fenced === undefined) return undefined;
+    return tryParseJson(fenced);
 };

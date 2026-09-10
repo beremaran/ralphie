@@ -1,4 +1,4 @@
-import type { AgentSessionEvent } from "../harness/index.ts";
+import type { AgentSessionEvent } from "../agent/contracts.ts";
 import { stripTerminalControls } from "../shared/terminal.ts";
 import { green, red, yellow } from "./colors.ts";
 import { PROGRESS_STAGE_LABELS } from "./display-state.ts";
@@ -616,7 +616,7 @@ const lifecycleRetry = (
                 {
                     id: "retry",
                     kind: "lifecycle",
-                    label: "Retrying OpenCode request",
+                    label: "Retrying pi request",
                     target: `attempt ${event.attempt}/${event.maxAttempts}`,
                     status: "running",
                 },
@@ -628,7 +628,7 @@ const lifecycleRetry = (
                 {
                     id: "retry",
                     kind: "lifecycle",
-                    label: "Retrying OpenCode request",
+                    label: "Retrying pi request",
                     status: event.success ? "succeeded" : "failed",
                     ...(event.success || event.finalError === undefined
                         ? {}

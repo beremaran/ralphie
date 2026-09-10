@@ -5,13 +5,13 @@
  * treats every model field as untrusted, resolves all references against one
  * immutable maintenance snapshot, derives action keys itself, and returns a
  * frozen plan only after the additive-label and duplicate-only-close policy is
- * satisfied. The planner adapter owns the single restricted OpenCode session;
+ * satisfied. The planner adapter owns the single restricted pi session;
  * it has no GitHub or mutation dependency.
  */
 import { createHash } from "node:crypto";
 import { z } from "zod";
 
-import { AgentSessionProfile, type AgentClient } from "./harness/index.ts";
+import { AgentSessionProfile, type AgentClient } from "./agent/contracts.ts";
 import {
     requestStructuredOutput,
     type StructuredOutputResult,

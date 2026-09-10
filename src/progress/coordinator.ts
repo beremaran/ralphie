@@ -2,7 +2,7 @@ import type {
     AgentEventContext,
     AgentEventListener,
     AgentSessionEvent,
-} from "../harness/index.ts";
+} from "../agent/contracts.ts";
 import {
     arbitrateBreadcrumbCandidates,
     breadcrumbCandidateFor,

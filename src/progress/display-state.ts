@@ -1,4 +1,7 @@
-import type { AgentEventContext, AgentSessionEvent } from "../harness/index.ts";
+import type {
+    AgentEventContext,
+    AgentSessionEvent,
+} from "../agent/contracts.ts";
 import { stripTerminalControls } from "../shared/terminal.ts";
 import type {
     ProgressEvent,
@@ -62,7 +65,7 @@ export const PROGRESS_STAGE_LABELS: Readonly<Record<ProgressStage, string>> = {
     "repository-discovery": "Discovering repository",
     "repository-preparation": "Preparing repository",
     "issue-discovery": "Discovering issues",
-    "opencode-runtime": "Starting OpenCode",
+    "agent-runtime": "Starting agent runtime",
     "issue-planning": "Planning issue",
     "issue-execution": "Executing issue",
     "issue-queue": "Updating issue queue",

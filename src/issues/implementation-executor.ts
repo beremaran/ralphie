@@ -14,7 +14,7 @@ import {
     buildVerificationFixPrompt,
 } from "../agent/prompts.ts";
 import { requestStructuredOutput } from "../agent/structured-output.ts";
-import { AgentSessionProfile } from "../harness/index.ts";
+import { AgentSessionProfile } from "../agent/contracts.ts";
 import {
     runAgentTask,
     type NeedsAttentionRequest,

@@ -17,7 +17,7 @@ import type {
     PipelineObservationTransition,
     PipelineSnapshot,
 } from "../github/pipeline-observation.ts";
-import type { AgentClient } from "../harness/index.ts";
+import type { AgentClient } from "../agent/contracts.ts";
 import type {
     ProgressReporterService,
     ProgressStatus,

@@ -1,12 +1,11 @@
 /**
- * Client-side safety denylist for the external OpenCode server.
+ * Client-side safety denylist for unattended agent sessions.
  *
- * The server owns tool execution, so Ralphie cannot prevent a dangerous
- * command the way the embedded runtime could. These helpers provide
- * defense in depth: prompts forbid the commands, a background permission
- * watcher rejects them when they surface as pending approvals, and the
- * deterministic repository-invariant check fails the task when the checkout
- * was mutated anyway.
+ * Agent sessions may inspect and edit files, but deterministic Ralphie code
+ * owns the index, refs, commits, pushes, and remote workflow state. The prompt
+ * contract forbids these commands, the tool guard rejects them before
+ * execution, and the deterministic repository-invariant check fails the task
+ * when the checkout was mutated anyway.
  */
 
 /**
@@ -23,7 +22,7 @@ const deniedGitCommand = new RegExp(
 );
 const deniedGithubCommand = /(?:^|\s)gh(?:\s|$)/i;
 
-export const isOpenCodeTaskCommandAllowed = (command: string): boolean => {
+export const isTaskCommandAllowed = (command: string): boolean => {
     const trimmed = command.trim();
     return (
         trimmed.length > 0 &&
@@ -33,7 +32,7 @@ export const isOpenCodeTaskCommandAllowed = (command: string): boolean => {
 };
 
 /** Shell resources that must never run in an unattended agent session. */
-export const OPENCODE_DENIED_SHELL_PATTERNS: ReadonlyArray<string> = [
+export const DENIED_SHELL_PATTERNS: ReadonlyArray<string> = [
     "git commit*",
     "git push*",
     "git branch*",
@@ -58,9 +57,8 @@ export const OPENCODE_DENIED_SHELL_PATTERNS: ReadonlyArray<string> = [
 ];
 
 /**
- * True when a pending OpenCode shell permission request targets a denied
- * command. Matching is intentionally conservative: any denied substring
- * rejects the request.
+ * True when a shell command targets a denied command. Matching is
+ * intentionally conservative: any denied substring rejects the command.
  */
 export const isDeniedShellResource = (resource: string): boolean => {
     const normalized = resource.trim().toLowerCase();

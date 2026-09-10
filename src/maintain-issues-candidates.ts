@@ -1060,7 +1060,7 @@ const analyzeSnapshot = (
     });
 };
 
-/** Analyze one subject issue without OpenCode, Git, GitHub, or mutation services. */
+/** Analyze one subject issue without pi, Git, GitHub, or mutation services. */
 export const analyzeMaintenanceCandidates = (
     snapshot: MaintenanceSnapshot,
     subjectIssueNumber: number,

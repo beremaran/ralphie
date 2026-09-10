@@ -1,5 +1,5 @@
 import type { Octokit } from "octokit";
-import type { AgentClient } from "../harness/index.ts";
+import type { AgentClient } from "../agent/contracts.ts";
 
 import type { GitHubIssue } from "../github/issues.ts";
 import type { IssueArtifactStore } from "./artifacts.ts";
@@ -111,7 +111,7 @@ export type IssueExecutionOutcome =
  * dry-run decision services inspect it without mutation. Workspace is retained
  * separately because it owns run artifacts and cleanup. The clients
  * are passed in from the workflow runtime so an issue executor does not need
- * to perform authentication or start another OpenCode runtime.
+ * to perform authentication or start another agent runtime.
  */
 export type IssueExecutionContext = {
     readonly issue: GitHubIssue;

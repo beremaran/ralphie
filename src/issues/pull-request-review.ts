@@ -4,7 +4,7 @@ import type { Octokit } from "octokit";
 
 import { buildPullRequestReviewPrompt } from "../agent/prompts.ts";
 import type { AgentSelection } from "../agent/model.ts";
-import { AgentSessionProfile, type AgentClient } from "../harness/index.ts";
+import { AgentSessionProfile, type AgentClient } from "../agent/contracts.ts";
 import type {
     AgentSessionDiagnostics,
     NeedsAttentionRequest,
@@ -126,7 +126,7 @@ export type PullRequestReviewAttemptInput = {
     readonly targetBranch: string;
     readonly issue: GitHubIssue;
     readonly snapshot: PullRequestSnapshot;
-    /** OpenCode client; the service creates one new session per call. */
+    /** Agent client; the service creates one new session per call. */
     readonly agent: AgentClient;
     readonly agentSelection: AgentSelection;
     readonly artifacts: IssueArtifactStore;
@@ -233,7 +233,7 @@ const requestReviewDecision = async (
 
 /**
  * Assemble one immutable, fresh-session PR review attempt. GitHub reread,
- * committed-diff loading, OpenCode execution, and artifact writes are deliberately
+ * committed-diff loading, agent execution, and artifact writes are deliberately
  * injected so the orchestration policy remains outside this service.
  */
 export const makePullRequestReviewAttemptService = (

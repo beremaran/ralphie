@@ -1,4 +1,4 @@
-import { AgentSessionProfile, type AgentClient } from "../harness/index.ts";
+import { AgentSessionProfile, type AgentClient } from "./contracts.ts";
 import { z } from "zod";
 
 import { RalphieError } from "../shared/error.ts";
@@ -61,7 +61,7 @@ const describeApiError = (error: unknown): string => {
         readonly data?: { readonly message?: unknown };
     };
     const name =
-        typeof candidate.name === "string" ? candidate.name : "OpenCodeError";
+        typeof candidate.name === "string" ? candidate.name : "AgentError";
     const message =
         typeof candidate.data?.message === "string"
             ? candidate.data.message
@@ -177,14 +177,14 @@ const promptForStructuredOutput = async <Output>(
 
     if (response.error !== undefined || response.data === undefined) {
         throw new Error(
-            `OpenCode prompt failed: ${describeApiError(response.error)}`,
+            `Pi prompt failed: ${describeApiError(response.error)}`,
         );
     }
 
     if (response.data.info.error !== undefined) {
         const assistantError = toAgentAssistantError(response.data.info.error);
         throw new RalphieError({
-            message: `OpenCode assistant failed (${assistantError.kind}): ${assistantError.message}`,
+            message: `Pi assistant failed (${assistantError.kind}): ${assistantError.message}`,
             cause: assistantError,
         });
     }
@@ -192,7 +192,7 @@ const promptForStructuredOutput = async <Output>(
     const parsed = request.schema.safeParse(response.data.info.structured);
     if (!parsed.success) {
         throw new Error(
-            `OpenCode returned invalid structured output: ${z.prettifyError(parsed.error)}`,
+            `Pi returned invalid structured output: ${z.prettifyError(parsed.error)}`,
         );
     }
 
@@ -220,7 +220,7 @@ export const requestStructuredOutput = async <Output>(
 
         if (session.error !== undefined || session.data === undefined) {
             throw new Error(
-                `Could not create OpenCode session: ${describeApiError(session.error)}`,
+                `Could not create pi session: ${describeApiError(session.error)}`,
             );
         }
 
@@ -236,7 +236,7 @@ export const requestStructuredOutput = async <Output>(
             cause instanceof RalphieError
                 ? cause
                 : new RalphieError({
-                      message: `Failed to get structured output from OpenCode. Cause: ${describeFailureCause(cause)}`,
+                      message: `Failed to get structured output from pi. Cause: ${describeFailureCause(cause)}`,
                       cause,
                   });
         await reportAgentFailure(request, error);
