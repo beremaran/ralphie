@@ -11,11 +11,10 @@ decomposition. Agents handle reasoning and code changes; Ralphie keeps Git,
 GitHub, run state, recovery, and safety checks deterministic.
 
 > [!CAUTION]
-> Ralphie defaults to the `lgtm` workflow: it works directly on the branch
-> selected by `--branch`, commits approved work, and pushes directly to that
-> branch. Use `--workflow pr` to deliver through an automatically merged feature
-> branch and pull request instead. Ralphie is pre-1.0. Start with a one-issue
-> `--dry-run` against a repository you control before enabling mutations.
+> Ralphie works directly on the branch selected by `--branch`, commits approved
+> work, and pushes directly to that branch. Ralphie is pre-1.0. Start with a
+> one-issue `--dry-run` against a repository you control before enabling
+> mutations.
 
 ## Quick start
 

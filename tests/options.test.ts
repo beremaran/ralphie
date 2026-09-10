@@ -3,14 +3,12 @@ import { describe, expect, test } from "bun:test";
 import { IssueOrder, IssueSort } from "../src/github/issues.ts";
 import {
     DEFAULT_WORKSPACE,
-    DEFAULT_WORKFLOW_MODE,
     DEFAULT_NEEDS_ATTENTION_POLICY,
     DEFAULT_ISSUE_FAILURE_POLICY,
     DEFAULT_MAX_DECOMPOSITION_DEPTH,
     DEFAULT_IMPLEMENTATION_ATTEMPTS,
     NeedsAttentionPolicy,
     resolveRalphieConfig,
-    WorkflowMode,
 } from "../src/options.ts";
 
 describe("CLI configuration", () => {
@@ -27,7 +25,6 @@ describe("CLI configuration", () => {
             }),
         ).toEqual({
             repo: "owner/repo",
-            workflow: DEFAULT_WORKFLOW_MODE,
             onNeedsAttention: DEFAULT_NEEDS_ATTENTION_POLICY,
             onIssueFailure: DEFAULT_ISSUE_FAILURE_POLICY,
             maxDecompositionDepth: DEFAULT_MAX_DECOMPOSITION_DEPTH,
@@ -52,7 +49,6 @@ describe("CLI configuration", () => {
         expect(
             resolveRalphieConfig({
                 repo: "https://github.com/Owner/Repo.git",
-                workflow: WorkflowMode.Pr,
                 branch: "develop",
                 maxIssues: 3,
                 maxDecompositionDepth: 6,
@@ -76,7 +72,6 @@ describe("CLI configuration", () => {
             }),
         ).toMatchObject({
             repo: "Owner/Repo",
-            workflow: WorkflowMode.Pr,
             branch: "develop",
             maxIssues: 3,
             maxDecompositionDepth: 6,

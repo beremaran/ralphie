@@ -7,13 +7,6 @@ import { RalphieError } from "./shared/error.ts";
 
 export const DEFAULT_WORKSPACE = "~/.ralphie";
 
-export enum WorkflowMode {
-    Lgtm = "lgtm",
-    Pr = "pr",
-}
-
-export const DEFAULT_WORKFLOW_MODE = WorkflowMode.Lgtm;
-
 /** Policy used when an issue executor reports that an issue needs attention. */
 export enum NeedsAttentionPolicy {
     Halt = "halt",
@@ -35,7 +28,6 @@ export type CleanWhen = "start" | "end" | "both";
 
 export type RalphieCliOptions = {
     readonly repo?: string;
-    readonly workflow?: WorkflowMode;
     readonly onNeedsAttention?: NeedsAttentionPolicy;
     readonly onIssueFailure?: IssueFailurePolicy;
     readonly notifyNeedsAttention?: boolean;
@@ -90,7 +82,6 @@ type SharedIssueSelection = {
 
 export type IssueRalphieConfig = SharedRalphieConfig &
     SharedIssueSelection & {
-        readonly workflow: WorkflowMode;
         readonly onNeedsAttention: NeedsAttentionPolicy;
         readonly onIssueFailure: IssueFailurePolicy;
         readonly notificationsEnabled: boolean;
@@ -219,7 +210,6 @@ export const resolveRalphieConfig = (
     return {
         ...commonResolvedConfig(options, json, quiet),
         ...issueSelectionConfig(options),
-        workflow: withDefault(options.workflow, DEFAULT_WORKFLOW_MODE),
         onNeedsAttention: withDefault(
             options.onNeedsAttention,
             DEFAULT_NEEDS_ATTENTION_POLICY,

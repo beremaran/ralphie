@@ -6,10 +6,9 @@ credential setup, verification, and the first dry run. Return to the
 [documentation index](README.md) for other task paths.
 
 > [!CAUTION]
-> Ralphie defaults to the `lgtm` workflow, which commits approved work and
-> pushes directly to the selected branch. Ralphie is pre-1.0. The commands on
-> this page use `--dry-run`; read the [safety model](safety.md) before enabling
-> mutations.
+> Ralphie commits approved work and pushes directly to the selected branch.
+> Ralphie is pre-1.0. The commands on this page use `--dry-run`; read the
+> [safety model](safety.md) before enabling mutations.
 
 ## Prerequisites and authentication
 
@@ -46,11 +45,10 @@ credential is supplied as an input and does not need to be printed or exposed;
 a mounted GitHub CLI profile is not required when an environment token is
 provided. This contract covers `github.com` only.
 
-Permission needs depend on the workflow. The default issue workflow needs
+Permission needs depend on the run. The issue workflow needs
 read access to the target repository and its issues. A non-dry issue run also
 needs permission to push to the selected branch and create, update, and close
-issues. `--workflow pr` additionally needs permission to create, comment on, and
-merge pull requests. Dry runs do not need these write permissions.
+issues. Dry runs do not need these write permissions.
 
 ## Installation
 

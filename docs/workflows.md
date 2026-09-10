@@ -7,10 +7,9 @@ see the [documentation index](README.md) for setup, CLI, safety, and recovery
 references.
 
 > [!CAUTION]
-> The default `lgtm` workflow commits and pushes directly to the selected
-> branch. The `pr` workflow also mutates GitHub by creating and merging a pull
-> request. Use [dry-run](safety.md#dry-run-validation) for mutation-free
-> validation before running either delivery mode.
+> Ralphie commits and pushes directly to the selected branch. Use
+> [dry-run](safety.md#dry-run-validation) for mutation-free validation before
+> enabling delivery mutations.
 
 ## Routing overview
 
@@ -69,18 +68,8 @@ flowchart TD
    commit; if repair changes an approved tree, review the repaired tree again.
 8. Generate a validated commit message — the subject is non-empty and at most
    72 characters, with an optional body — and commit the changes.
-9. In `lgtm` mode, recheck the remote and push the commit without force, then
-   close the source issue after the push is verified. In `pr` mode, create a
-   feature branch, push it, open or find the pull request linked with
-   `Closes #<issue>`, and capture its immutable base/head snapshot. A resumable
-   post-PR coordinator then runs fresh structured review and, when necessary,
-   fresh fix, verification, exact-tree commit, and non-force revision-delivery
-   sessions. The shared budget is at most five review attempts. Approved
-   attempts are published with a deterministic PR/head marker; only after that
-   publication does the exact-head check gate run. Ralphie re-reads the PR and
-   submits a merge proof containing the approved review and green checks for
-   the same base/head, so GitHub closes the issue only after that proof is
-   accepted.
+9. Recheck the remote and push the commit without force, then close the
+   source issue after the push is verified.
 
 When implementation produces no changes, a fresh read-only session must prove
 that the current checkout already resolves the issue and return concrete
@@ -131,7 +120,7 @@ sequenceDiagram
             end
         end
         R->>G: Reverify the exact approved staged tree
-    alt Review approved: lgtm mode
+    alt Review approved
             R->>P: Generate structured commit message
             R->>G: Commit exact staged tree
             R->>G: Revalidate destination, HEAD, and remote base
@@ -139,13 +128,6 @@ sequenceDiagram
             G->>GH: Send branch update
             GH-->>G: Accept or return authoritative policy rejection
             R->>GH: Close issue as completed
-        else Review approved: pr mode
-            R->>P: Generate structured commit message
-            R->>G: Commit exact staged tree on feature branch
-            R->>GH: Open matching PR with Closes #issue; persist head SHA
-            R->>GH: Publish review comments
-            R->>GH: Wait for checks on head SHA, re-read, then merge
-            GH-->>R: Confirm merge; GitHub closes linked issue
         else Review budget exhausted
             R->>G: Preserve patch and restore checkpoint
             R->>GH: Continue through decomposition
@@ -252,58 +234,16 @@ Ralphie never silently degrades to body-only hierarchy semantics.
   `gh api repos/{owner}/{repo}/issues/1/dependencies/blocked_by` should return
   `200` (an empty list) rather than `404`.
 
-## Delivery modes
+## Delivery
 
 | Mode | Issue checkout | Delivery | Source issue closure |
 | --- | --- | --- | --- |
-| `lgtm` | Selected base branch | Commit and non-force push directly to that branch; verify remote SHA and clean checkout | Close directly as `completed` after verified delivery. |
-| `pr` | `ralphie/issue-<number>` in the main checkout | Push feature branch, create/find matching PR, persist its number and base/head snapshot, run the resumable post-PR review/revision coordinator for at most five shared attempts, publish approved head-scoped review attempts, wait for checks on that exact head SHA to pass, re-read the PR, and invoke a proof-bearing merge only when the review, checks, base, and head still match | PR body contains `Closes #<issue>`; GitHub closes the issue on merge. A failed, cancelled, timed-out, absent, unknown, changed-head, closed, or unmergeable review, revision, or check gate retains the feature branch and PR, leaves the issue open, and persists recoverable run state. The serial run restores the base checkout afterward. |
-| `--dry-run` | Prepared normal checkout; preparation may reset, clean, or switch the branch | Ground the issue, then assess complexity and report implementation or decomposition when actionable; report already-resolved and needs-attention routes otherwise. A decomposition dry run also performs the read-only breakdown session and reports the intended native sub-issue hierarchy, children to create or reuse, and dependency edges. No implementation or decomposition mutation, delivery, commit, push, issue, or PR mutation; preparation may still change the local checkout | No issue is closed. The result is `skipped` except needs-attention, which remains a needs-attention outcome. |
+| delivery | Selected base branch | Commit and non-force push directly to that branch; verify remote SHA and clean checkout | Close directly as `completed` after verified delivery. |
+| `--dry-run` | Prepared normal checkout; preparation may reset, clean, or switch the branch | Ground the issue, then assess complexity and report implementation or decomposition when actionable; report already-resolved and needs-attention routes otherwise. A decomposition dry run also performs the read-only breakdown session and reports the intended native sub-issue hierarchy, children to create or reuse, and dependency edges. No implementation or decomposition mutation, delivery, commit, push, or issue mutation; preparation may still change the local checkout | No issue is closed. The result is `skipped` except needs-attention, which remains a needs-attention outcome. |
 
 The direct-push path never uses force. A push rejection is authoritative: the
 created commit and artifacts are retained, the run halts, and resume can
 reconcile a commit that may already have reached the remote.
-
-Managed feature-branch revisions (follow-up deliveries to an existing `pr`
-feature branch) are delivered with the same non-force boundary, an exact-tree
-revision commit, and an authoritative post-push `git ls-remote` read. Delivery
-is `confirmed` only when the remote equals the new commit and the checkout is
-clean; a lost push response is reconciled to success by that read. When the
-remote no longer equals the expected prior head the outcome is
-`external-movement` and Ralphie halts without retrying or force-pushing, and
-when the remote read cannot prove whether the new commit arrived the outcome
-is `ambiguous`, retaining the created clean commit for safe reconciliation.
-
-The `pr` delivery is a resumable lifecycle with two linked gates. Once the
-matching pull request is created or found, Ralphie persists its number and
-immutable base/head snapshot before starting post-PR review. Each review
-attempt is tied to the exact committed head. A requested change starts a fresh
-fix session, re-verifies the repaired tree, creates an exact-tree revision, and
-delivers it with the same non-force and authoritative remote-HEAD boundary as
-the initial commit. A moved head invalidates the current approval and causes
-the coordinator to review the new head; it never delivers an old approval or
-force-pushes over external movement. Review, fix, revision-delivery,
-publication, check, and merge stages are persisted in run state and in the
-per-issue delivery-state artifact so cancellation and process loss can resume
-at a known boundary without duplicating comments, commits, pushes, or merges.
-
-The coordinator stops after approval or five shared review attempts. Exhaustion
-is terminal for that run: the issue and pull request remain open, the feature
-branch and diagnostics are retained, and no check-gate merge is attempted.
-After approval, head-scoped review attempts are published idempotently. The
-read-only check observer then polls checks for the approved exact SHA until it
-reaches its documented green state. The gate uses a 30-second registration
-grace, bounded exponential backoff from 5 seconds to a 60-second cap, a
-30-minute deadline, and two stable green confirmations; a head move
-invalidates the observation. Immediately before merging, Ralphie
-re-reads the PR and requires a proof containing the approved review and green
-checks for the same PR number, base, and head. A changed head, stale review,
-non-green check, failed/cancelled/timed-out/no-checks/unknown gate, closed
-PR, or unmergeable PR never merges and never closes the source issue; the
-feature branch and PR are retained with recoverable state. Resuming locates the
-existing matching PR, reuses only same-head approval evidence, continues or
-re-observes the check gate as appropriate, and reconciles an already-merged PR
-without another merge call.
 
 ## Queue behavior
 

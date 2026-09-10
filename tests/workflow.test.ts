@@ -8,24 +8,6 @@ import type { GitRepositoryInvariantService } from "../src/git/repository-invari
 import type { GitIssueCheckpointService } from "../src/git/issue-checkpoint.ts";
 import type { GitIssueOperationsService } from "../src/git/issue-operations.ts";
 import type { GitHubClientService } from "../src/github/client.ts";
-import type {
-    GitHubPullRequest,
-    GitHubPullRequestService,
-    PullRequestSnapshot,
-} from "../src/github/pull-requests.ts";
-import type {
-    PullRequestReviewCoordinatorResult,
-    PullRequestReviewCoordinatorService,
-} from "../src/issues/pull-request-review-coordinator.ts";
-import type { PullRequestReviewAttemptResult } from "../src/issues/pull-request-review.ts";
-import type {
-    PipelineObservationOutcome,
-    PipelineObservationService,
-    PipelineSnapshot,
-    PipelineSnapshotFetcher,
-} from "../src/github/pipeline-observation.ts";
-import { makePipelineObservationService } from "../src/github/pipeline-observation.ts";
-import { makePullRequestClosureService } from "../src/issues/pull-request-closure.ts";
 import type { GitHubIssueMutationService } from "../src/github/issue-mutations.ts";
 import { makeParentCompletionService } from "../src/github/parent-completion.ts";
 import type { GitHubNeedsAttentionNotificationService } from "../src/github/needs-attention.ts";
@@ -65,11 +47,7 @@ import {
 } from "../src/run/state.ts";
 import type { WorkspaceService } from "../src/workspace/workspace.ts";
 import { workflow } from "../src/workflow.ts";
-import {
-    IssueFailurePolicy,
-    NeedsAttentionPolicy,
-    WorkflowMode,
-} from "../src/options.ts";
+import { IssueFailurePolicy, NeedsAttentionPolicy } from "../src/options.ts";
 import { IssueOrder, IssueSort } from "../src/github/issues.ts";
 import type { IssueWorkflowRuntime } from "../src/runtime.ts";
 import { RalphieError } from "../src/shared/error.ts";
@@ -79,7 +57,6 @@ import {
     GroundingDisposition,
     IssueResolutionStatus,
     NeedsAttentionReason,
-    ReviewVerdict,
 } from "../src/issues/decisions.ts";
 
 const firstIssue: GitHubIssue = {
@@ -100,20 +77,6 @@ const secondIssue: GitHubIssue = {
     title: "Second test issue",
     url: "https://github.com/owner/repo/issues/43",
 };
-
-const greenSnapshot = (observedSha: string): PipelineSnapshot => ({
-    repository: "owner/repo",
-    branch: "ralphie/issue-42",
-    commitSha: observedSha,
-    state: "non-empty",
-    items: [],
-    sourceErrors: [],
-    completenessErrors: [],
-    diagnostics: [],
-    reason: "success",
-    greenCandidate: true,
-    fingerprint: `success-${observedSha}`,
-});
 
 type TestRuntimeOptions = {
     readonly outcomes?: ReadonlyArray<IssueExecutionOutcome>;
@@ -141,28 +104,6 @@ type TestRuntimeOptions = {
     readonly onStateSave?: (state: RunState) => void;
     /** Native sub-issues reported for every parent during reconciliation. */
     readonly parentSubIssues?: ReadonlyArray<GitHubIssue>;
-    /** Result of creating or re-reading the matching pull request. */
-    readonly prOverride?: GitHubPullRequest;
-    /** Optional post-creation review coordinator used by PR lifecycle tests. */
-    readonly pullRequestReviewCoordinator?: PullRequestReviewCoordinatorService;
-    /** Authoritative snapshot returned before a post-creation review. */
-    readonly prSnapshotOverride?: PullRequestSnapshot;
-    /** Assign a stable fake PR number from its feature branch. */
-    readonly prNumberForHead?: (head: string) => number;
-    /** Result of the gate's pre-merge re-read. */
-    readonly prReadOverride?: GitHubPullRequest;
-    /** Sequential results returned by pull-request reads, in call order. */
-    readonly prReadSequence?: ReadonlyArray<GitHubPullRequest>;
-    /** Replaces the gate observer entirely (used by the local fake-check e2e). */
-    readonly pipelineObservationOverride?: PipelineObservationService;
-    /** Invoked when the pull-request merge mutation is attempted. */
-    readonly onMergeCall?: () => void;
-    /** Outcomes returned by the gate's check observer, in call order. */
-    readonly pipelineObservationOutcomes?: ReadonlyArray<PipelineObservationOutcome>;
-    /** When set, the observer aborts the controller before returning. */
-    readonly observeAbortController?: AbortController;
-    /** When set, merging the pull request rejects with this error. */
-    readonly mergePullRequestFailure?: RalphieError;
     /** Model catalog exposed by the mock pi runtime for thinking validation. */
     readonly piCatalog?: ReadonlyArray<PiModelInfo>;
     /** Default model exposed by the mock pi runtime. */
@@ -179,8 +120,6 @@ const testRuntime = (
     let refreshIndex = 0;
     let outcomeIndex = 0;
     let captureIndex = options.captureStart ?? 0;
-    let gateIndex = 0;
-    let readIndex = 0;
     const outcomes = options.outcomes ?? [
         {
             kind: IssueExecutionOutcomeKind.Completed,
@@ -281,96 +220,9 @@ const testRuntime = (
             );
         },
     };
-    const pullRequests: GitHubPullRequestService = {
-        createOrFind: async (_client, repo, input) => {
-            calls.push(`createPullRequest:${repo}:${input.head}:${input.base}`);
-            const number = options.prNumberForHead?.(input.head) ?? 1;
-            return (
-                options.prOverride ?? {
-                    number,
-                    url: `https://github.com/owner/repo/pull/${number}`,
-                    merged: false,
-                    headSha: "feature-head-sha",
-                    state: "open",
-                }
-            );
-        },
-        read: async (_client, repo, number) => {
-            calls.push(`readPullRequest:${repo}:${number}`);
-            const sequenced =
-                options.prReadSequence === undefined
-                    ? undefined
-                    : options.prReadSequence[
-                          Math.min(readIndex, options.prReadSequence.length - 1)
-                      ];
-            readIndex += 1;
-            return (
-                sequenced ??
-                options.prReadOverride ??
-                options.prOverride ?? {
-                    number,
-                    url: `https://github.com/owner/repo/pull/${number}`,
-                    merged: false,
-                    headSha: "feature-head-sha",
-                    state: "open",
-                }
-            );
-        },
-        readSnapshot: async (_client, _repo, number) => {
-            calls.push(`readPullRequestSnapshot:${number}`);
-            return (
-                options.prSnapshotOverride ?? {
-                    number,
-                    url: `https://github.com/owner/repo/pull/${number}`,
-                    baseSha: "a".repeat(40),
-                    headSha: options.prOverride?.headSha ?? "feature-head-sha",
-                }
-            );
-        },
-        rereadMatchingSnapshot: async () => {
-            throw new RalphieError({ message: "unused" });
-        },
-        publishPullRequestReviewAttempts: async (_client, repo, attempts) => {
-            calls.push(`publishPullRequestReviews:${repo}:${attempts.length}`);
-        },
-        publishReviewAttempts: async (_client, repo, number) => {
-            calls.push(`publishReviews:${repo}:${number}`);
-        },
-        merge: async (_client, repo, number, expectedHeadSha) => {
-            calls.push(`mergePullRequest:${repo}:${number}:${expectedHeadSha}`);
-            options.onMergeCall?.();
-            if (options.mergePullRequestFailure) {
-                throw options.mergePullRequestFailure;
-            }
-            return {
-                number,
-                url: `https://github.com/owner/repo/pull/${number}`,
-                merged: true,
-                headSha: expectedHeadSha,
-                state: "closed",
-            };
-        },
-        mergeWithProof: async (_client, repo, proof) => {
-            if (proof === undefined) {
-                throw new RalphieError({ message: "missing proof" });
-            }
-            calls.push(
-                `mergeWithProof:${repo}:${proof.pullRequestNumber}:${proof.headSha}`,
-            );
-            options.onMergeCall?.();
-            return {
-                number: proof.pullRequestNumber,
-                url: `https://github.com/owner/repo/pull/${proof.pullRequestNumber}`,
-                merged: true,
-                headSha: proof.headSha,
-                state: "closed",
-            };
-        },
-    };
     const operations: GitIssueOperationsService = {
         stageAll: async () => {},
         readStagedBinaryDiff: async () => "",
-        readCommittedBinaryDiff: async () => "",
         hasStagedChanges: async () => false,
         commit: async () => ({ sha: "a".repeat(40), treeSha: "b".repeat(40) }),
         push: async (_path, branch) => {
@@ -394,10 +246,6 @@ const testRuntime = (
         restoreBaseCheckout: async (_path, branch) => {
             calls.push(`restoreBase:${branch}`);
         },
-    };
-    const artifactStore: IssueArtifactStoreService = options.artifactStore ?? {
-        forIssue: (issueNumber, _scope, signal) =>
-            makeIssueArtifactStore(issueNumber, signal),
     };
     const issueExecutor: IssueExecutorService = options.issueExecutor ?? {
         execute: async (context) => {
@@ -483,46 +331,6 @@ const testRuntime = (
               },
           }
         : progressRecorder;
-    const snapshotForOutcome = (
-        observedSha: string,
-        reason: PipelineSnapshot["reason"],
-    ): PipelineSnapshot => ({
-        repository: "owner/repo",
-        branch: "ralphie/issue-42",
-        commitSha: observedSha,
-        state: "non-empty",
-        items: [],
-        sourceErrors: [],
-        completenessErrors: [],
-        diagnostics: [],
-        reason,
-        greenCandidate: reason === "success",
-        fingerprint: `${reason}-${observedSha}`,
-    });
-    const pipelineObservation: PipelineObservationService =
-        options.pipelineObservationOverride ?? {
-            observe: async (input) => {
-                calls.push("observePrGate");
-                if (options.observeAbortController !== undefined) {
-                    options.observeAbortController.abort();
-                }
-                const observedSha =
-                    input.request?.commitSha ?? "feature-head-sha";
-                const outcomesList = options.pipelineObservationOutcomes ?? [
-                    {
-                        kind: "green",
-                        observedSha,
-                        snapshot: snapshotForOutcome(observedSha, "success"),
-                        elapsedMs: 1_000,
-                        polls: 2,
-                    } satisfies PipelineObservationOutcome,
-                ];
-                const outcome =
-                    outcomesList[Math.min(gateIndex, outcomesList.length - 1)]!;
-                gateIndex += 1;
-                return { outcome, transitions: [] };
-            },
-        };
     const relationships = {
         listSubIssues: async () => options.parentSubIssues ?? [],
         parentOf: async () => undefined,
@@ -530,15 +338,6 @@ const testRuntime = (
         listBlockedBy: async () => [],
         addBlockedBy: async () => {},
     };
-    const pullRequestClosure = makePullRequestClosureService({
-        pullRequests,
-        ...(options.pullRequestReviewCoordinator === undefined
-            ? {}
-            : { reviewCoordinator: options.pullRequestReviewCoordinator }),
-        observation: pipelineObservation,
-        artifacts: artifactStore,
-        issueOperations: operations,
-    });
     return {
         githubClient,
         githubIssues,
@@ -548,7 +347,6 @@ const testRuntime = (
             relationships,
             mutations,
         }),
-        pullRequestClosure,
         githubNeedsAttentionNotification:
             options.needsAttentionNotification ?? {
                 notify: async () => {
@@ -569,17 +367,10 @@ const testRuntime = (
 };
 
 const issueWorkCallPrefixes = [
-    "prepareFeatureBranch:",
     "executeIssue:",
     "dryRunIssue:",
     "pushBranch:",
     "closeIssue:",
-    "createPullRequest:",
-    "publishReviews:",
-    "observePrGate",
-    "readPullRequest:",
-    "mergePullRequest:",
-    "restoreBase:",
     "restoreCheckout",
 ] as const;
 
@@ -597,8 +388,6 @@ const artifactMutationMethods = new Set<PropertyKey>([
     "beginNeedsAttentionHandoff",
     "recordNeedsAttentionDecision",
     "appendReview",
-    "appendPullRequestReview",
-    "recordPullRequestDeliveryState",
     "recordCreatedIssue",
     "resetImplementationAttempt",
     "clearUnresolvedResolutionDecision",
@@ -766,45 +555,6 @@ const baseOptions = {
     onNeedsAttention: NeedsAttentionPolicy.Continue,
 } as const;
 
-const postPrSnapshot: PullRequestSnapshot = {
-    number: 1,
-    url: "https://github.com/owner/repo/pull/1",
-    baseSha: "a".repeat(40),
-    headSha: "b".repeat(40),
-};
-
-const postPrReviewFor = (
-    snapshot: PullRequestSnapshot,
-): PullRequestReviewAttemptResult => ({
-    identity: {
-        pullRequestNumber: snapshot.number,
-        baseSha: snapshot.baseSha,
-        reviewedHeadSha: snapshot.headSha,
-        attempt: 1,
-        sessionID: "post-pr-review-1",
-    },
-    attempt: {
-        pullRequestNumber: snapshot.number,
-        baseSha: snapshot.baseSha,
-        reviewedHeadSha: snapshot.headSha,
-        attempt: 1,
-        sessionID: "post-pr-review-1",
-        decision: {
-            verdict: ReviewVerdict.Approved,
-            summary: "The committed PR head is safe to merge.",
-            findings: [],
-        },
-    },
-    snapshot,
-    decision: {
-        verdict: ReviewVerdict.Approved,
-        summary: "The committed PR head is safe to merge.",
-        findings: [],
-    },
-    committedDiff: "diff --git a/file b/file\n+safe change\n",
-    approved: true,
-});
-
 describe("workflow", () => {
     test("executes an issue, persists completion, releases the agent, and cleans up", async () => {
         const calls: string[] = [];
@@ -930,1180 +680,6 @@ describe("workflow", () => {
         expect(calls).toContain("closeIssue:42");
     });
 
-    test("uses an issue branch and merged pull request without closing the issue directly", async () => {
-        const calls: string[] = [];
-        const states: RunState[] = [];
-        const contexts: IssueExecutionContext[] = [];
-        const summary = await workflow(
-            { ...baseOptions, workflow: WorkflowMode.Pr },
-            testRuntime(calls, states, { executionContexts: contexts }),
-        );
-        expect(summary.counts.completed).toBe(1);
-        expect(contexts[0]?.targetBranch).toBe("ralphie/issue-42");
-        expect(calls).toContain(
-            "prepareFeatureBranch:ralphie/issue-42:develop",
-        );
-        expect(calls).toContain("pushBranch:ralphie/issue-42");
-        expect(calls).toContain(
-            "createPullRequest:owner/repo:ralphie/issue-42:develop",
-        );
-        expect(calls).toContain("publishReviews:owner/repo:1");
-        expect(calls).toContain("observePrGate");
-        expect(calls).toContain("readPullRequest:owner/repo:1");
-        expect(calls).toContain(
-            "mergePullRequest:owner/repo:1:feature-head-sha",
-        );
-        expect(calls).toContain("restoreBase:develop");
-        expect(calls).not.toContain("closeIssue:42");
-        expect(
-            states.filter((state) => state.prClosure !== undefined).at(-1)
-                ?.prClosure,
-        ).toMatchObject({
-            pullRequestNumber: 1,
-            observedHeadSha: "feature-head-sha",
-            gate: "merged",
-        });
-    });
-
-    test("runs the resumable post-PR review lifecycle and merges only with a proof", async () => {
-        const calls: string[] = [];
-        const states: RunState[] = [];
-        const review = postPrReviewFor(postPrSnapshot);
-        const coordinatorResult: PullRequestReviewCoordinatorResult = {
-            reviews: [review],
-            revisions: [],
-            status: "approved",
-            snapshot: postPrSnapshot,
-            review,
-        };
-        const coordinator: PullRequestReviewCoordinatorService = {
-            review: async () => coordinatorResult,
-        };
-        const summary = await workflow(
-            { ...baseOptions, workflow: WorkflowMode.Pr },
-            testRuntime(calls, states, {
-                pullRequestReviewCoordinator: coordinator,
-                prOverride: {
-                    number: 1,
-                    url: postPrSnapshot.url,
-                    merged: false,
-                    headSha: postPrSnapshot.headSha,
-                    state: "open",
-                },
-                prSnapshotOverride: postPrSnapshot,
-            }),
-        );
-
-        expect(summary.counts.completed).toBe(1);
-        expect(calls).not.toContain("publishReviews:owner/repo:1");
-        expect(calls).toContain("readPullRequestSnapshot:1");
-        expect(calls).toContain("publishPullRequestReviews:owner/repo:1");
-        expect(calls).toContain(
-            `mergeWithProof:owner/repo:1:${postPrSnapshot.headSha}`,
-        );
-        expect(calls).not.toContain("mergePullRequest:owner/repo:1");
-        expect(
-            calls.indexOf("publishPullRequestReviews:owner/repo:1"),
-        ).toBeLessThan(calls.indexOf("observePrGate"));
-        expect(
-            states.filter((state) => state.prClosure !== undefined).at(-1)
-                ?.prClosure,
-        ).toMatchObject({
-            baseSha: postPrSnapshot.baseSha,
-            observedHeadSha: postPrSnapshot.headSha,
-            review: {
-                status: "approved",
-                stage: "merge",
-                currentHeadSha: postPrSnapshot.headSha,
-                attempts: [],
-                approved: {
-                    pullRequestNumber: postPrSnapshot.number,
-                    baseSha: postPrSnapshot.baseSha,
-                    reviewedHeadSha: postPrSnapshot.headSha,
-                    attempt: 1,
-                },
-            },
-        });
-    });
-
-    test("carries an interrupted revision intent into the resumed PR coordinator", async () => {
-        const revisionIntent = {
-            attempt: 1,
-            expectedPriorHeadSha: "b".repeat(40),
-            expectedStagedTreeSha: "c".repeat(40),
-            message: {
-                subject: "Fix: resume the revision",
-                body: "Apply the already prepared revision.",
-            },
-        };
-        const resumeState: RunState = {
-            version: 9,
-            status: RunStateStatus.Active,
-            runId: "interrupted-pr-revision",
-            repository: baseOptions.repo,
-            branch: "develop",
-            workflow: WorkflowMode.Pr,
-            onNeedsAttention: NeedsAttentionPolicy.Continue,
-            dryRun: false,
-            notificationsEnabled: false,
-            selection: { agent: DEFAULT_AGENT },
-            maxIssues: 1,
-            queue: {
-                pending: [{ ...firstIssue, labels: [...firstIssue.labels] }],
-                completedIssueNumbers: [],
-                processedCount: 0,
-            },
-            outcomes: [
-                {
-                    issueNumber: 42,
-                    outcome: {
-                        kind: IssueExecutionOutcomeKind.Completed,
-                        completion: "pushed-commit",
-                        commitSha: "initial-commit",
-                    },
-                },
-            ],
-            activeIssue: { issueNumber: 42, stage: "issue-closure" },
-            prClosure: {
-                pullRequestNumber: 1,
-                baseSha: "a".repeat(40),
-                observedHeadSha: "b".repeat(40),
-                startedAt: "2026-09-05T00:00:00.000Z",
-                updatedAt: "2026-09-05T00:00:00.000Z",
-                gate: "pending",
-                review: {
-                    status: "failed",
-                    stage: "revision-delivery",
-                    attempts: [],
-                    revisionIntent,
-                    currentHeadSha: "b".repeat(40),
-                    revisionCount: 1,
-                },
-            },
-            checkout: { branch: "develop", head: "head-0" },
-            updatedAt: "2026-09-05T00:00:00.000Z",
-        };
-        let resumedRevision: unknown;
-        const review = postPrReviewFor(postPrSnapshot);
-        const coordinatorResult: PullRequestReviewCoordinatorResult = {
-            reviews: [],
-            revisions: [],
-            status: "approved",
-            snapshot: postPrSnapshot,
-            review,
-        };
-        const coordinator: PullRequestReviewCoordinatorService = {
-            review: async (input) => {
-                resumedRevision = input.resumeRevision;
-                return coordinatorResult;
-            },
-        };
-        const calls: string[] = [];
-        const states: RunState[] = [];
-        const summary = await workflow(
-            {
-                ...baseOptions,
-                workflow: WorkflowMode.Pr,
-                resumeState,
-            },
-            testRuntime(calls, states, {
-                issueLists: [[]],
-                pullRequestReviewCoordinator: coordinator,
-                prOverride: {
-                    number: 1,
-                    url: postPrSnapshot.url,
-                    merged: false,
-                    headSha: postPrSnapshot.headSha,
-                    state: "open",
-                },
-                prSnapshotOverride: postPrSnapshot,
-            }),
-        );
-
-        expect(summary.counts.completed).toBe(1);
-        expect(resumedRevision).toEqual(revisionIntent);
-        expect(calls).toContain(
-            "prepareFeatureBranch:ralphie/issue-42:develop",
-        );
-        expect(calls).toContain(
-            `mergeWithProof:owner/repo:1:${postPrSnapshot.headSha}`,
-        );
-    });
-
-    test.each([
-        { name: "lgtm", workflowMode: WorkflowMode.Lgtm },
-        { name: "pr", workflowMode: WorkflowMode.Pr },
-    ])(
-        "safely finalizes grounded outcome routes in $name mode",
-        async ({ workflowMode }) => {
-            const prNumberForHead = (head: string): number =>
-                Number(head.match(/\d+$/)?.[0] ?? 1);
-
-            const actionableCalls: string[] = [];
-            const actionableStates: RunState[] = [];
-            const actionable = await workflow(
-                { ...baseOptions, workflow: workflowMode },
-                testRuntime(actionableCalls, actionableStates, {
-                    issueExecutor: groundedRouteExecutor(actionableCalls, {
-                        42: "actionable",
-                    }),
-                    prNumberForHead,
-                }),
-            );
-
-            expect(actionable.outcomes).toEqual([
-                {
-                    issueNumber: 42,
-                    outcome: {
-                        kind: IssueExecutionOutcomeKind.Completed,
-                        completion: "pushed-commit",
-                        commitSha: "commit-42",
-                        reviewCount: 1,
-                    },
-                },
-            ]);
-            expect(
-                actionableStates.at(-1)?.queue.completedIssueNumbers,
-            ).toEqual([42]);
-            expectCallOrder(actionableCalls, [
-                "refreshIssue:42",
-                "grounding:42",
-                "complexity:42",
-                "implementation:42",
-            ]);
-            if (workflowMode === WorkflowMode.Lgtm) {
-                expect(actionableCalls).toContain("directPush:42:develop");
-                expect(actionableCalls).toContain("closeIssue:42");
-                expect(actionableCalls).not.toContainEqual(
-                    expect.stringContaining("createPullRequest:"),
-                );
-            } else {
-                expect(actionableCalls).toContain(
-                    "pushBranch:ralphie/issue-42",
-                );
-                expect(actionableCalls).toContain(
-                    "createPullRequest:owner/repo:ralphie/issue-42:develop",
-                );
-                expect(actionableCalls).toContain(
-                    "publishReviews:owner/repo:42",
-                );
-                expect(actionableCalls).toContain(
-                    "mergePullRequest:owner/repo:42:feature-head-sha",
-                );
-                expect(actionableCalls).not.toContain("closeIssue:42");
-            }
-
-            const resolvedCalls: string[] = [];
-            const resolvedStates: RunState[] = [];
-            const resolvedEvents: ProgressUpdate[] = [];
-            const resolved = await workflow(
-                { ...baseOptions, workflow: workflowMode },
-                testRuntime(
-                    resolvedCalls,
-                    resolvedStates,
-                    {
-                        issueExecutor: groundedRouteExecutor(resolvedCalls, {
-                            42: "already-resolved",
-                        }),
-                        prNumberForHead,
-                    },
-                    resolvedEvents,
-                ),
-            );
-
-            const resolvedOutcome = {
-                kind: IssueExecutionOutcomeKind.Completed,
-                completion: "already-resolved",
-                resolutionSummary: "The requested behavior is already present.",
-                evidence: ["The focused regression test passes."],
-            } satisfies IssueExecutionOutcome;
-            expect(resolved.outcomes).toEqual([
-                { issueNumber: 42, outcome: resolvedOutcome },
-            ]);
-            expect(resolvedStates.at(-1)?.outcomes).toEqual([
-                { issueNumber: 42, outcome: resolvedOutcome },
-            ]);
-            expect(resolvedCalls).toContain("closeIssue:42");
-            expect(resolvedCalls).not.toContain("directPush:42:develop");
-            expect(resolvedCalls).not.toContain("pushBranch:ralphie/issue-42");
-            expect(resolvedCalls).not.toContainEqual(
-                expect.stringContaining("createPullRequest:"),
-            );
-            expect(resolvedCalls).not.toContainEqual(
-                expect.stringContaining("publishReviews:"),
-            );
-            expect(resolvedCalls).not.toContainEqual(
-                expect.stringContaining("mergePullRequest:"),
-            );
-            expectCallOrder(resolvedCalls, [
-                "refreshIssue:42",
-                "grounding:42",
-                "verification:42",
-                "closeIssue:42",
-            ]);
-            expect(resolvedEvents).toContainEqual(
-                expect.objectContaining({
-                    stage: "issue-closure",
-                    status: "succeeded",
-                    details: { completion: "already-resolved" },
-                }),
-            );
-
-            const needsAttentionCalls: string[] = [];
-            const needsAttentionStates: RunState[] = [];
-            const needsAttentionEvents: ProgressUpdate[] = [];
-            const needsAttention = await workflow(
-                {
-                    ...baseOptions,
-                    workflow: workflowMode,
-                    maxIssues: 2,
-                },
-                testRuntime(
-                    needsAttentionCalls,
-                    needsAttentionStates,
-                    {
-                        issueLists: [[firstIssue, secondIssue]],
-                        issueExecutor: groundedRouteExecutor(
-                            needsAttentionCalls,
-                            { 42: "needs-attention", 43: "actionable" },
-                        ),
-                        prNumberForHead,
-                    },
-                    needsAttentionEvents,
-                ),
-            );
-
-            expect(
-                needsAttention.outcomes.map(({ issueNumber }) => issueNumber),
-            ).toEqual([42, 43]);
-            expect(needsAttention.counts).toEqual({
-                completed: 1,
-                decomposed: 0,
-                escalated: 0,
-                "needs-attention": 1,
-                skipped: 0,
-                failed: 0,
-            });
-            const finalNeedsAttentionState = needsAttentionStates.at(-1);
-            expect(
-                finalNeedsAttentionState?.queue.completedIssueNumbers,
-            ).toEqual([43]);
-            expect(finalNeedsAttentionState).toMatchObject({
-                status: RunStateStatus.Complete,
-                queue: {
-                    pending: [],
-                    completedIssueNumbers: [43],
-                    processedCount: 2,
-                },
-            });
-            expect(
-                finalNeedsAttentionState?.outcomes.map(
-                    ({ issueNumber }) => issueNumber,
-                ),
-            ).toEqual([42, 43]);
-            expect(
-                finalNeedsAttentionState?.outcomes.find(
-                    ({ issueNumber }) => issueNumber === 42,
-                ),
-            ).toMatchObject({
-                issueNumber: 42,
-                outcome: {
-                    kind: IssueExecutionOutcomeKind.NeedsAttention,
-                    reason: NeedsAttentionReason.ExternalDependency,
-                    summary: "A prerequisite is still open.",
-                    evidence: ["Issue body links the open prerequisite."],
-                    questions: ["Complete the prerequisite, then retry."],
-                    artifactPath: expect.any(String),
-                },
-            });
-            expect(needsAttentionCalls).not.toContain("closeIssue:42");
-            expect(needsAttentionCalls).not.toContain("directPush:42:develop");
-            expect(needsAttentionCalls).not.toContain(
-                "pushBranch:ralphie/issue-42",
-            );
-            expect(needsAttentionCalls).not.toContain(
-                "createPullRequest:owner/repo:ralphie/issue-42:develop",
-            );
-            expect(needsAttentionCalls).not.toContain(
-                "publishReviews:owner/repo:42",
-            );
-            expect(needsAttentionCalls).not.toContainEqual(
-                expect.stringContaining("mergePullRequest:owner/repo:42:"),
-            );
-            expectCallOrder(needsAttentionCalls, [
-                "refreshIssue:42",
-                "grounding:42",
-                "refreshIssue:43",
-                "grounding:43",
-            ]);
-            expect(needsAttentionEvents).toContainEqual(
-                expect.objectContaining({
-                    issue: { number: 42, title: "Test issue" },
-                    stage: "grounding",
-                    status: "needs-attention",
-                    details: expect.objectContaining({
-                        reason: NeedsAttentionReason.ExternalDependency,
-                        summary: "A prerequisite is still open.",
-                        evidence: ["Issue body links the open prerequisite."],
-                        questions: ["Complete the prerequisite, then retry."],
-                        artifactPath: expect.any(String),
-                    }),
-                }),
-            );
-            if (workflowMode === WorkflowMode.Lgtm) {
-                expect(needsAttentionCalls).toContain("directPush:43:develop");
-                expect(needsAttentionCalls).toContain("closeIssue:43");
-            } else {
-                expect(needsAttentionCalls).toContain(
-                    "pushBranch:ralphie/issue-43",
-                );
-                expect(needsAttentionCalls).toContain(
-                    "createPullRequest:owner/repo:ralphie/issue-43:develop",
-                );
-                expect(needsAttentionCalls).toContain(
-                    "publishReviews:owner/repo:43",
-                );
-                expect(needsAttentionCalls).toContain(
-                    "mergePullRequest:owner/repo:43:feature-head-sha",
-                );
-            }
-        },
-    );
-
-    test("keeps the feature branch and PR and persists an active gate when checks fail", async () => {
-        const calls: string[] = [];
-        const states: RunState[] = [];
-        await expect(
-            workflow(
-                { ...baseOptions, workflow: WorkflowMode.Pr },
-                testRuntime(calls, states, {
-                    pipelineObservationOutcomes: [
-                        {
-                            kind: "failed",
-                            observedSha: "feature-head-sha",
-                            reason: "failing",
-                            message: "check failed",
-                            snapshot: {
-                                ...greenSnapshot("feature-head-sha"),
-                                reason: "failure",
-                                greenCandidate: false,
-                                fingerprint: "failure-feature-head-sha",
-                            },
-                            elapsedMs: 500,
-                            polls: 1,
-                        } satisfies PipelineObservationOutcome,
-                    ],
-                }),
-            ),
-        ).rejects.toThrow("PR gate did not pass");
-        expect(calls).toContain(
-            "createPullRequest:owner/repo:ralphie/issue-42:develop",
-        );
-        expect(calls).toContain("publishReviews:owner/repo:1");
-        expect(calls).toContain("observePrGate");
-        expect(calls).not.toContain("mergePullRequest");
-        expect(calls).not.toContain("closeIssue:42");
-        expect(states.at(-1)?.status).toBe(RunStateStatus.Active);
-        expect(states.at(-1)?.activeIssue).toEqual({
-            issueNumber: 42,
-            stage: "issue-closure",
-        });
-        expect(states.at(-1)?.prClosure).toMatchObject({
-            pullRequestNumber: 1,
-            observedHeadSha: "feature-head-sha",
-            gate: "failed",
-        });
-        expect(states.at(-1)?.prClosure?.terminalReason).toContain("failing");
-        expect(
-            states.at(-1)?.queue.pending.map(({ number }) => number),
-        ).toEqual([42]);
-    });
-
-    test.each([
-        {
-            name: "times out",
-            outcome: {
-                kind: "timeout",
-                observedSha: "feature-head-sha",
-                elapsedMs: 30_000,
-                polls: 6,
-            } satisfies PipelineObservationOutcome,
-            gate: "timeout",
-        },
-        {
-            name: "discovers no pipelines",
-            outcome: {
-                kind: "no-pipelines-discovered",
-                observedSha: "feature-head-sha",
-                elapsedMs: 30_000,
-                polls: 6,
-            } satisfies PipelineObservationOutcome,
-            gate: "no-pipelines",
-        },
-        {
-            name: "observes cancelled checks",
-            outcome: {
-                kind: "failed",
-                observedSha: "feature-head-sha",
-                reason: "cancelled",
-                message: "cancelled",
-                snapshot: greenSnapshot("feature-head-sha"),
-                elapsedMs: 500,
-                polls: 1,
-            } satisfies PipelineObservationOutcome,
-            gate: "cancelled",
-        },
-    ])(
-        "does not merge or close when the PR gate $name",
-        async ({ outcome, gate }) => {
-            const calls: string[] = [];
-            const states: RunState[] = [];
-            await expect(
-                workflow(
-                    { ...baseOptions, workflow: WorkflowMode.Pr },
-                    testRuntime(calls, states, {
-                        pipelineObservationOutcomes: [outcome],
-                    }),
-                ),
-            ).rejects.toThrow("PR gate did not pass");
-            expect(calls).not.toContain("mergePullRequest");
-            expect(calls).not.toContain("closeIssue:42");
-            expect(states.at(-1)?.prClosure?.gate).toBe(gate);
-            expect(states.at(-1)?.status).toBe(RunStateStatus.Active);
-        },
-    );
-
-    test("resumes a failed PR gate by re-observing the existing PR and merging once checks pass", async () => {
-        const failingOutcome = {
-            kind: "failed",
-            observedSha: "feature-head-sha",
-            reason: "failing",
-            message: "check failed",
-            snapshot: greenSnapshot("feature-head-sha"),
-            elapsedMs: 500,
-            polls: 1,
-        } satisfies PipelineObservationOutcome;
-        const firstCalls: string[] = [];
-        const firstStates: RunState[] = [];
-        await expect(
-            workflow(
-                { ...baseOptions, workflow: WorkflowMode.Pr },
-                testRuntime(firstCalls, firstStates, {
-                    pipelineObservationOutcomes: [failingOutcome],
-                }),
-            ),
-        ).rejects.toThrow("PR gate did not pass");
-        const resumeState = firstStates.at(-1);
-        if (resumeState === undefined) {
-            throw new Error("Missing resumable state");
-        }
-        const calls: string[] = [];
-        const states: RunState[] = [];
-        const contexts: IssueExecutionContext[] = [];
-        const summary = await workflow(
-            { ...baseOptions, workflow: WorkflowMode.Pr, resumeState },
-            testRuntime(calls, states, {
-                issueLists: [[]],
-                executionContexts: contexts,
-                captureStart: 1,
-            }),
-        );
-        expect(
-            calls.some((call) => call.startsWith("executeIssue:")),
-        ).toBeFalse();
-        expect(calls).toContain(
-            "prepareFeatureBranch:ralphie/issue-42:develop",
-        );
-        expect(calls).not.toContain(
-            "createPullRequest:owner/repo:ralphie/issue-42:develop",
-        );
-        expect(calls).toContain("readPullRequest:owner/repo:1");
-        expect(calls).toContain("observePrGate");
-        expect(calls).toContain(
-            "mergePullRequest:owner/repo:1:feature-head-sha",
-        );
-        expect(summary.counts.completed).toBe(1);
-        expect(
-            states.filter((state) => state.prClosure !== undefined).at(-1)
-                ?.prClosure,
-        ).toMatchObject({ gate: "merged" });
-    });
-
-    test("trusts a saved green gate only after confirming the same current head, then merges without re-observing", async () => {
-        const resumeState: RunState = {
-            version: 6,
-            status: RunStateStatus.Active,
-            runId: "green-gate-resume",
-            repository: baseOptions.repo,
-            branch: "develop",
-            workflow: WorkflowMode.Pr,
-            onNeedsAttention: NeedsAttentionPolicy.Continue,
-            dryRun: false,
-            notificationsEnabled: false,
-            selection: { agent: DEFAULT_AGENT },
-            maxIssues: 1,
-            queue: {
-                pending: [{ ...firstIssue, labels: [...firstIssue.labels] }],
-                completedIssueNumbers: [],
-                processedCount: 0,
-            },
-            outcomes: [
-                {
-                    issueNumber: 42,
-                    outcome: {
-                        kind: IssueExecutionOutcomeKind.Completed,
-                        completion: "pushed-commit",
-                        commitSha: "abc123",
-                    },
-                },
-            ],
-            activeIssue: { issueNumber: 42, stage: "issue-closure" },
-            prClosure: {
-                pullRequestNumber: 1,
-                observedHeadSha: "feature-head-sha",
-                startedAt: "2026-08-28T00:00:00.000Z",
-                updatedAt: "2026-08-28T00:00:00.000Z",
-                gate: "green",
-            },
-            checkout: { branch: "develop", head: "head-0" },
-            updatedAt: "2026-08-28T00:00:00.000Z",
-        };
-        const calls: string[] = [];
-        const states: RunState[] = [];
-        const summary = await workflow(
-            { ...baseOptions, workflow: WorkflowMode.Pr, resumeState },
-            testRuntime(calls, states, { issueLists: [[]] }),
-        );
-        expect(calls).not.toContain("observePrGate");
-        expect(calls).toContain(
-            "mergePullRequest:owner/repo:1:feature-head-sha",
-        );
-        expect(summary.counts.completed).toBe(1);
-        expect(
-            states.filter((state) => state.prClosure !== undefined).at(-1)
-                ?.prClosure,
-        ).toMatchObject({ gate: "merged" });
-    });
-
-    test("invalidates all prior evidence when a saved green gate no longer matches the PR head", async () => {
-        const resumeState: RunState = {
-            version: 6,
-            status: RunStateStatus.Active,
-            runId: "stale-gate-resume",
-            repository: baseOptions.repo,
-            branch: "develop",
-            workflow: WorkflowMode.Pr,
-            onNeedsAttention: NeedsAttentionPolicy.Continue,
-            dryRun: false,
-            notificationsEnabled: false,
-            selection: { agent: DEFAULT_AGENT },
-            maxIssues: 1,
-            queue: {
-                pending: [{ ...firstIssue, labels: [...firstIssue.labels] }],
-                completedIssueNumbers: [],
-                processedCount: 0,
-            },
-            outcomes: [
-                {
-                    issueNumber: 42,
-                    outcome: {
-                        kind: IssueExecutionOutcomeKind.Completed,
-                        completion: "pushed-commit",
-                        commitSha: "abc123",
-                    },
-                },
-            ],
-            activeIssue: { issueNumber: 42, stage: "issue-closure" },
-            prClosure: {
-                pullRequestNumber: 1,
-                observedHeadSha: "feature-head-sha",
-                startedAt: "2026-08-28T00:00:00.000Z",
-                updatedAt: "2026-08-28T00:00:00.000Z",
-                gate: "green",
-            },
-            checkout: { branch: "develop", head: "head-0" },
-            updatedAt: "2026-08-28T00:00:00.000Z",
-        };
-        const calls: string[] = [];
-        const states: RunState[] = [];
-        await expect(
-            workflow(
-                { ...baseOptions, workflow: WorkflowMode.Pr, resumeState },
-                testRuntime(calls, states, {
-                    issueLists: [[]],
-                    prOverride: {
-                        number: 1,
-                        url: "https://github.com/owner/repo/pull/1",
-                        merged: false,
-                        headSha: "new-head-sha",
-                        state: "open",
-                    },
-                    pipelineObservationOutcomes: [
-                        {
-                            kind: "failed",
-                            observedSha: "new-head-sha",
-                            reason: "failing",
-                            message: "check failed",
-                            snapshot: greenSnapshot("new-head-sha"),
-                            elapsedMs: 500,
-                            polls: 1,
-                        } satisfies PipelineObservationOutcome,
-                    ],
-                }),
-            ),
-        ).rejects.toThrow("PR gate did not pass");
-        expect(calls).not.toContain("mergePullRequest");
-        expect(calls).not.toContain("closeIssue:42");
-        expect(states.at(-1)?.prClosure).toMatchObject({
-            observedHeadSha: "new-head-sha",
-            gate: "failed",
-        });
-        expect(states.at(-1)?.status).toBe(RunStateStatus.Active);
-    });
-
-    test("reconciles an already-merged PR without publishing, observing, or merging again", async () => {
-        const calls: string[] = [];
-        const states: RunState[] = [];
-        const summary = await workflow(
-            { ...baseOptions, workflow: WorkflowMode.Pr },
-            testRuntime(calls, states, {
-                prOverride: {
-                    number: 1,
-                    url: "https://github.com/owner/repo/pull/1",
-                    merged: true,
-                    headSha: "feature-head-sha",
-                    state: "closed",
-                },
-            }),
-        );
-        expect(calls).not.toContain("observePrGate");
-        expect(calls).not.toContain("publishReviews");
-        expect(calls).not.toContain("mergePullRequest");
-        expect(calls).not.toContain("closeIssue:42");
-        expect(summary.counts.completed).toBe(1);
-        expect(
-            states.filter((state) => state.prClosure !== undefined).at(-1)
-                ?.prClosure,
-        ).toMatchObject({ gate: "merged" });
-    });
-
-    test("does not merge or close when the matching PR is closed without merging", async () => {
-        const calls: string[] = [];
-        const states: RunState[] = [];
-        await expect(
-            workflow(
-                { ...baseOptions, workflow: WorkflowMode.Pr },
-                testRuntime(calls, states, {
-                    prOverride: {
-                        number: 1,
-                        url: "https://github.com/owner/repo/pull/1",
-                        merged: false,
-                        headSha: "feature-head-sha",
-                        state: "closed",
-                    },
-                }),
-            ),
-        ).rejects.toThrow("closed without merging");
-        expect(calls).not.toContain("observePrGate");
-        expect(calls).not.toContain("mergePullRequest");
-        expect(calls).not.toContain("closeIssue:42");
-        expect(states.at(-1)?.prClosure?.gate).toBe("closed");
-        expect(states.at(-1)?.status).toBe(RunStateStatus.Active);
-    });
-
-    test("discards a green decision and halts when the PR head changes before the merge", async () => {
-        const calls: string[] = [];
-        const states: RunState[] = [];
-        await expect(
-            workflow(
-                { ...baseOptions, workflow: WorkflowMode.Pr },
-                testRuntime(calls, states, {
-                    prReadOverride: {
-                        number: 1,
-                        url: "https://github.com/owner/repo/pull/1",
-                        merged: false,
-                        headSha: "new-head-sha",
-                        state: "open",
-                    },
-                }),
-            ),
-        ).rejects.toThrow("head changed");
-        expect(calls).toContain("observePrGate");
-        expect(calls).not.toContain("mergePullRequest");
-        expect(calls).not.toContain("closeIssue:42");
-        expect(states.at(-1)?.prClosure).toMatchObject({
-            observedHeadSha: "new-head-sha",
-            gate: "stale",
-            terminalReason: expect.stringContaining("discarded"),
-        });
-        expect(states.at(-1)?.status).toBe(RunStateStatus.Active);
-    });
-
-    test("preserves cancellation exit behavior and records an aborted gate", async () => {
-        const calls: string[] = [];
-        const states: RunState[] = [];
-        const controller = new AbortController();
-        await expect(
-            workflow(
-                {
-                    ...baseOptions,
-                    workflow: WorkflowMode.Pr,
-                    signal: controller.signal,
-                },
-                testRuntime(calls, states, {
-                    observeAbortController: controller,
-                    pipelineObservationOutcomes: [
-                        {
-                            kind: "aborted",
-                            observedSha: "feature-head-sha",
-                            elapsedMs: 10,
-                            polls: 1,
-                        } satisfies PipelineObservationOutcome,
-                    ],
-                }),
-            ),
-        ).rejects.toThrow("Run cancelled");
-        expect(calls).not.toContain("mergePullRequest");
-        expect(calls).not.toContain("closeIssue:42");
-        expect(states.at(-1)?.status).toBe(RunStateStatus.Active);
-        expect(states.at(-1)?.prClosure?.gate).toBe("aborted");
-    });
-
-    test("emits pr-gate progress events with the PR number, head SHA, and reason when checks fail", async () => {
-        const calls: string[] = [];
-        const states: RunState[] = [];
-        const events: ProgressUpdate[] = [];
-        await expect(
-            workflow(
-                { ...baseOptions, workflow: WorkflowMode.Pr },
-                testRuntime(
-                    calls,
-                    states,
-                    {
-                        pipelineObservationOutcomes: [
-                            {
-                                kind: "failed",
-                                observedSha: "feature-head-sha",
-                                reason: "failing",
-                                message: "check failed",
-                                snapshot: {
-                                    ...greenSnapshot("feature-head-sha"),
-                                    reason: "failure",
-                                    greenCandidate: false,
-                                    fingerprint: "failure-feature-head-sha",
-                                },
-                                elapsedMs: 500,
-                                polls: 1,
-                            } satisfies PipelineObservationOutcome,
-                        ],
-                    },
-                    events,
-                ),
-            ),
-        ).rejects.toThrow("PR gate did not pass");
-        const prGateEvents = events.filter(({ stage }) => stage === "pr-gate");
-        expect(prGateEvents.map(({ status }) => status)).toEqual([
-            "started",
-            "failed",
-        ]);
-        const failed = prGateEvents.find(({ status }) => status === "failed");
-        expect(failed?.message).toContain("PR #1");
-        expect(failed?.message).toContain("feature-head-sha");
-        expect(failed?.details).toMatchObject({
-            pullRequestNumber: 1,
-            observedHeadSha: "feature-head-sha",
-            gate: "failed",
-            elapsedMs: 500,
-        });
-        expect(calls).not.toContain("mergePullRequest");
-    });
-
-    test("does not merge before the fake check service reaches its stable green snapshot", async () => {
-        const gateHeadSha = "f".repeat(40);
-        const gateItem = (
-            status: PipelineSnapshot["items"][number]["status"],
-        ): PipelineSnapshot["items"][number] => ({
-            source: "check-run",
-            provider: "github-actions",
-            name: "build",
-            status,
-            rawState: {},
-            diagnostic: {
-                source: "check-run",
-                disposition: "selected",
-                provider: "github-actions",
-                name: "build",
-                rawState: {},
-                rawValues: {},
-                errors: [],
-            },
-        });
-        const gateSnapshot = (
-            items: ReadonlyArray<PipelineSnapshot["items"][number]>,
-            reason: PipelineSnapshot["reason"],
-        ): PipelineSnapshot => ({
-            repository: "owner/repo",
-            branch: "ralphie/issue-42",
-            commitSha: gateHeadSha,
-            state: items.length === 0 ? "empty" : "non-empty",
-            items,
-            sourceErrors: [],
-            completenessErrors: [],
-            diagnostics: [],
-            reason,
-            greenCandidate: reason === "success",
-            fingerprint: `${reason}-${gateHeadSha}-${items.length}`,
-        });
-        const scenario = [
-            gateSnapshot([], "no-checks"),
-            gateSnapshot([gateItem("pending")], "pending"),
-            gateSnapshot([gateItem("passing")], "success"),
-        ];
-        const timeline: string[] = [];
-        let fetchCount = 0;
-        const fetchSnapshot: PipelineSnapshotFetcher = async () => {
-            const snapshot =
-                scenario[Math.min(fetchCount, scenario.length - 1)]!;
-            fetchCount += 1;
-            timeline.push(`fetch:${snapshot.reason}`);
-            return { kind: "snapshot", snapshot };
-        };
-        const fakeCheckService = makePipelineObservationService({
-            now: () => 0,
-            sleep: async () => {},
-        });
-        const observedService: PipelineObservationService = {
-            observe: async (input) =>
-                fakeCheckService.observe({
-                    client: input.client,
-                    request: input.request,
-                    options: input.options,
-                    signal: input.signal,
-                    fetchSnapshot,
-                    readHead: async () => gateHeadSha,
-                    ...(input.onTransition === undefined
-                        ? {}
-                        : { onTransition: input.onTransition }),
-                }),
-        };
-
-        const calls: string[] = [];
-        const states: RunState[] = [];
-        const events: ProgressUpdate[] = [];
-        const summary = await workflow(
-            { ...baseOptions, workflow: WorkflowMode.Pr },
-            testRuntime(
-                calls,
-                states,
-                {
-                    prOverride: {
-                        number: 1,
-                        url: "https://github.com/owner/repo/pull/1",
-                        merged: false,
-                        headSha: gateHeadSha,
-                        state: "open",
-                    },
-                    pipelineObservationOverride: observedService,
-                    onMergeCall: () => timeline.push("merge"),
-                },
-                events,
-            ),
-        );
-        expect(summary.counts.completed).toBe(1);
-        // The fake GitHub check service records every poll and every merge;
-        // the merge must come only after a stable green snapshot (two
-        // consecutive identical success reads plus the final verification read).
-        expect(timeline).toEqual([
-            "fetch:no-checks",
-            "fetch:pending",
-            "fetch:success",
-            "fetch:success",
-            "fetch:success",
-            "merge",
-        ]);
-        const mergeIndex = timeline.indexOf("merge");
-        expect(
-            timeline
-                .slice(0, mergeIndex)
-                .filter((entry) => entry === "fetch:success"),
-        ).toHaveLength(3);
-        expect(timeline.slice(0, mergeIndex)).not.toContain("merge");
-        const prGateEvents = events.filter(({ stage }) => stage === "pr-gate");
-        expect(prGateEvents.map(({ status }) => status)).toEqual([
-            "started",
-            "info",
-            "info",
-            "info",
-            "succeeded",
-            "succeeded",
-        ]);
-        expect(prGateEvents[1]?.message).toContain("waiting for registration");
-        expect(prGateEvents[2]?.message).toContain("1 check registered");
-        expect(prGateEvents[3]?.message).toContain("pending -> passing");
-        const checksPassed = prGateEvents.find(
-            (event) =>
-                event.status === "succeeded" &&
-                (event.message ?? "").includes("Checks passed"),
-        );
-        expect(checksPassed?.message).toContain("PR #1");
-        expect(checksPassed?.message).toContain(gateHeadSha);
-        expect(checksPassed?.message).toContain("success (passing)");
-        expect(checksPassed?.details).toMatchObject({
-            pullRequestNumber: 1,
-            observedHeadSha: gateHeadSha,
-            gate: "green",
-            polls: 4,
-        });
-        expect(checksPassed?.details?.snapshot).toBeDefined();
-        const merged = prGateEvents.find(
-            (event) =>
-                event.status === "succeeded" &&
-                (event.message ?? "").includes("merged at head"),
-        );
-        expect(merged?.message).toContain("PR #1");
-        expect(merged?.details).toMatchObject({
-            pullRequestNumber: 1,
-            gate: "merged",
-        });
-    });
-
-    test("resumes a pending PR gate by continuing to poll and merging once checks pass", async () => {
-        const resumeState: RunState = {
-            version: 6,
-            status: RunStateStatus.Active,
-            runId: "pending-gate-resume",
-            repository: baseOptions.repo,
-            branch: "develop",
-            workflow: WorkflowMode.Pr,
-            onNeedsAttention: NeedsAttentionPolicy.Continue,
-            dryRun: false,
-            notificationsEnabled: false,
-            selection: { agent: DEFAULT_AGENT },
-            maxIssues: 1,
-            queue: {
-                pending: [{ ...firstIssue, labels: [...firstIssue.labels] }],
-                completedIssueNumbers: [],
-                processedCount: 0,
-            },
-            outcomes: [
-                {
-                    issueNumber: 42,
-                    outcome: {
-                        kind: IssueExecutionOutcomeKind.Completed,
-                        completion: "pushed-commit",
-                        commitSha: "abc123",
-                    },
-                },
-            ],
-            activeIssue: { issueNumber: 42, stage: "issue-closure" },
-            prClosure: {
-                pullRequestNumber: 1,
-                observedHeadSha: "feature-head-sha",
-                startedAt: "2026-08-28T00:00:00.000Z",
-                updatedAt: "2026-08-28T00:00:00.000Z",
-                gate: "pending",
-            },
-            checkout: { branch: "develop", head: "head-0" },
-            updatedAt: "2026-08-28T00:00:00.000Z",
-        };
-        const calls: string[] = [];
-        const states: RunState[] = [];
-        const summary = await workflow(
-            { ...baseOptions, workflow: WorkflowMode.Pr, resumeState },
-            testRuntime(calls, states, { issueLists: [[]] }),
-        );
-        expect(calls.some((call) => call.startsWith("executeIssue:"))).toBe(
-            false,
-        );
-        expect(calls).not.toContain(
-            "createPullRequest:owner/repo:ralphie/issue-42:develop",
-        );
-        expect(calls).toContain("observePrGate");
-        expect(calls).toContain(
-            "mergePullRequest:owner/repo:1:feature-head-sha",
-        );
-        expect(summary.counts.completed).toBe(1);
-        expect(
-            states.filter((state) => state.prClosure !== undefined).at(-1)
-                ?.prClosure,
-        ).toMatchObject({
-            pullRequestNumber: 1,
-            observedHeadSha: "feature-head-sha",
-            gate: "merged",
-        });
-    });
-
-    test("does not merge or close when the gate observes unknown checks", async () => {
-        const calls: string[] = [];
-        const states: RunState[] = [];
-        await expect(
-            workflow(
-                { ...baseOptions, workflow: WorkflowMode.Pr },
-                testRuntime(calls, states, {
-                    pipelineObservationOutcomes: [
-                        {
-                            kind: "failed",
-                            observedSha: "feature-head-sha",
-                            reason: "unknown",
-                            message: "ambiguous checks",
-                            snapshot: {
-                                ...greenSnapshot("feature-head-sha"),
-                                reason: "unknown",
-                                greenCandidate: false,
-                                fingerprint: "unknown-feature-head-sha",
-                            },
-                            elapsedMs: 500,
-                            polls: 1,
-                        } satisfies PipelineObservationOutcome,
-                    ],
-                }),
-            ),
-        ).rejects.toThrow("PR gate did not pass");
-        expect(calls).not.toContain("mergePullRequest");
-        expect(calls).not.toContain("closeIssue:42");
-        expect(states.at(-1)?.prClosure?.gate).toBe("unknown");
-        expect(states.at(-1)?.status).toBe(RunStateStatus.Active);
-    });
-
-    test("records a stale gate when the expected-head merge is rejected", async () => {
-        const calls: string[] = [];
-        const states: RunState[] = [];
-        const oldHead: GitHubPullRequest = {
-            number: 1,
-            url: "https://github.com/owner/repo/pull/1",
-            merged: false,
-            headSha: "feature-head-sha",
-            state: "open",
-        };
-        const newHead: GitHubPullRequest = {
-            ...oldHead,
-            headSha: "new-head-sha",
-        };
-        await expect(
-            workflow(
-                { ...baseOptions, workflow: WorkflowMode.Pr },
-                testRuntime(calls, states, {
-                    prReadSequence: [oldHead, newHead],
-                    mergePullRequestFailure: new RalphieError({
-                        message:
-                            "Pull request #1 head changed from feature-head-sha to new-head-sha.",
-                    }),
-                }),
-            ),
-        ).rejects.toThrow("Failed to merge");
-        expect(calls).toContain(
-            "mergePullRequest:owner/repo:1:feature-head-sha",
-        );
-        expect(calls).not.toContain("closeIssue:42");
-        expect(states.at(-1)?.prClosure).toMatchObject({
-            pullRequestNumber: 1,
-            observedHeadSha: "new-head-sha",
-            gate: "stale",
-            terminalReason: expect.stringContaining("head changed"),
-        });
-        expect(states.at(-1)?.status).toBe(RunStateStatus.Active);
-    });
-
     test("dry-run assesses through the queue without invoking mutation execution", async () => {
         const calls: string[] = [];
         const states: RunState[] = [];
@@ -2151,7 +727,6 @@ describe("workflow", () => {
                     runId: "resumed-dry-run",
                     repository: baseOptions.repo,
                     branch: "develop",
-                    workflow: WorkflowMode.Lgtm,
                     onNeedsAttention: NeedsAttentionPolicy.Continue,
                     dryRun: true,
                     selection: { agent: DEFAULT_AGENT },
@@ -2178,195 +753,14 @@ describe("workflow", () => {
         );
     });
 
-    test.each([
-        { name: "lgtm", workflowMode: WorkflowMode.Lgtm },
-        { name: "pr", workflowMode: WorkflowMode.Pr },
-    ])(
-        "isolates every dry-run route in $name mode",
-        async ({ workflowMode }) => {
-            const routes: ReadonlyArray<GroundedRoute> = [
-                "actionable",
-                "decomposition",
-                "already-resolved",
-                "needs-attention",
-            ];
-            for (const route of routes) {
-                const calls: string[] = [];
-                const states: RunState[] = [];
-                const events: ProgressUpdate[] = [];
-                const artifactCalls: string[] = [];
-                const artifactMutations: string[] = [];
-                const storeService = makeIssueArtifactStoreService();
-                const artifactStore: IssueArtifactStoreService = {
-                    forIssue: async () => {
-                        artifactCalls.push("writable-loader");
-                        throw new Error("dry run used writable artifacts");
-                    },
-                    forIssueReadOnly: async (issueNumber, scope) => {
-                        artifactCalls.push("read-only-loader");
-                        return readOnlyArtifactSpy(
-                            await storeService.forIssueReadOnly!(
-                                issueNumber,
-                                scope,
-                            ),
-                            artifactMutations,
-                        );
-                    },
-                };
-                let groundingCalls = 0;
-                let complexityCalls = 0;
-                const dryRunExecutor = makeDryRunIssueExecutorService(
-                    artifactStore,
-                    {
-                        assess: async () => {
-                            complexityCalls += 1;
-                            if (
-                                route === "already-resolved" ||
-                                route === "needs-attention"
-                            ) {
-                                throw new Error(
-                                    "unexpected complexity assessment",
-                                );
-                            }
-                            return {
-                                sessionID: "dry-run-complexity",
-                                decision: {
-                                    complexity:
-                                        route === "actionable"
-                                            ? ComplexityLevel.Level2
-                                            : ComplexityLevel.Level4,
-                                    rationale: "Read-only route fixture.",
-                                },
-                            };
-                        },
-                    },
-                    makeTestProgressRecorder(events),
-                    {
-                        assess: async () => {
-                            groundingCalls += 1;
-                            return {
-                                sessionID: "dry-run-grounding",
-                                decision: groundingDecisionFor(route),
-                            };
-                        },
-                    },
-                );
-                const summary = await workflow(
-                    {
-                        ...baseOptions,
-                        workflow: workflowMode,
-                        dryRun: true,
-                        onNeedsAttention: NeedsAttentionPolicy.Continue,
-                    },
-                    testRuntime(
-                        calls,
-                        states,
-                        {
-                            artifactStore,
-                            dryRunIssueExecutor: dryRunExecutor,
-                            issueExecutor: {
-                                execute: async () => {
-                                    calls.push("executeIssue:unexpected");
-                                    throw new Error(
-                                        "mutation executor escaped dry run",
-                                    );
-                                },
-                            },
-                        },
-                        events,
-                    ),
-                );
-
-                expect(summary.outcomes[0]?.outcome).toMatchObject({
-                    route: route === "actionable" ? "implementation" : route,
-                });
-                expect(groundingCalls).toBe(1);
-                expect(complexityCalls).toBe(
-                    route === "already-resolved" || route === "needs-attention"
-                        ? 0
-                        : 1,
-                );
-                expect(artifactCalls).toEqual(["read-only-loader"]);
-                expect(artifactMutations).toEqual([]);
-                expectNoIssueWork(calls);
-                expect(calls).toEqual([
-                    "prepareWorkspace:/tmp/ralphie",
-                    "initializeGitHub",
-                    "verifyGitInstalled",
-                    "prepareRepository:owner/repo:develop:/tmp/ralphie",
-                    "listIssues:owner/repo:bug:created:asc",
-                    "startServer",
-                    "refreshIssue:42",
-                    "closeRuntime",
-                ]);
-                expect(firstIssue.state).toBe("open");
-                expect(events).toContainEqual(
-                    expect.objectContaining({
-                        stage: "run",
-                        status: "info",
-                        details: expect.objectContaining({
-                            workflow: workflowMode,
-                            dryRun: true,
-                        }),
-                    }),
-                );
-                expect(events).toContainEqual(
-                    expect.objectContaining({
-                        stage: "run",
-                        status: "succeeded",
-                        details: expect.objectContaining({
-                            workflow: workflowMode,
-                            routes: [
-                                {
-                                    issueNumber: 42,
-                                    route:
-                                        route === "actionable"
-                                            ? "implementation"
-                                            : route,
-                                },
-                            ],
-                        }),
-                    }),
-                );
-                expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
-            }
-        },
-    );
-
-    test.each([
-        {
-            name: "lgtm-actionable",
-            workflowMode: WorkflowMode.Lgtm,
-            route: "actionable" as const,
-        },
-        {
-            name: "lgtm-already-resolved",
-            workflowMode: WorkflowMode.Lgtm,
-            route: "already-resolved" as const,
-        },
-        {
-            name: "lgtm-needs-attention",
-            workflowMode: WorkflowMode.Lgtm,
-            route: "needs-attention" as const,
-        },
-        {
-            name: "pr-actionable",
-            workflowMode: WorkflowMode.Pr,
-            route: "actionable" as const,
-        },
-        {
-            name: "pr-already-resolved",
-            workflowMode: WorkflowMode.Pr,
-            route: "already-resolved" as const,
-        },
-        {
-            name: "pr-needs-attention",
-            workflowMode: WorkflowMode.Pr,
-            route: "needs-attention" as const,
-        },
-    ])(
-        "keeps a resumed dry run isolated in $name mode",
-        async ({ workflowMode, route }) => {
+    test("isolates every dry-run route", async () => {
+        const routes: ReadonlyArray<GroundedRoute> = [
+            "actionable",
+            "decomposition",
+            "already-resolved",
+            "needs-attention",
+        ];
+        for (const route of routes) {
             const calls: string[] = [];
             const states: RunState[] = [];
             const events: ProgressUpdate[] = [];
@@ -2376,7 +770,7 @@ describe("workflow", () => {
             const artifactStore: IssueArtifactStoreService = {
                 forIssue: async () => {
                     artifactCalls.push("writable-loader");
-                    throw new Error("resumed dry run used writable artifacts");
+                    throw new Error("dry run used writable artifacts");
                 },
                 forIssueReadOnly: async (issueNumber, scope) => {
                     artifactCalls.push("read-only-loader");
@@ -2389,61 +783,47 @@ describe("workflow", () => {
                     );
                 },
             };
+            let groundingCalls = 0;
+            let complexityCalls = 0;
             const dryRunExecutor = makeDryRunIssueExecutorService(
                 artifactStore,
                 {
-                    assess: async () => ({
-                        sessionID: "resumed-complexity",
-                        decision: {
-                            complexity:
-                                route === "actionable"
-                                    ? ComplexityLevel.Level2
-                                    : ComplexityLevel.Level4,
-                            rationale: "Resumed read-only route fixture.",
-                        },
-                    }),
+                    assess: async () => {
+                        complexityCalls += 1;
+                        if (
+                            route === "already-resolved" ||
+                            route === "needs-attention"
+                        ) {
+                            throw new Error("unexpected complexity assessment");
+                        }
+                        return {
+                            sessionID: "dry-run-complexity",
+                            decision: {
+                                complexity:
+                                    route === "actionable"
+                                        ? ComplexityLevel.Level2
+                                        : ComplexityLevel.Level4,
+                                rationale: "Read-only route fixture.",
+                            },
+                        };
+                    },
                 },
                 makeTestProgressRecorder(events),
                 {
-                    assess: async () => ({
-                        sessionID: "resumed-grounding",
-                        decision: groundingDecisionFor(route),
-                    }),
+                    assess: async () => {
+                        groundingCalls += 1;
+                        return {
+                            sessionID: "dry-run-grounding",
+                            decision: groundingDecisionFor(route),
+                        };
+                    },
                 },
             );
             const summary = await workflow(
                 {
                     ...baseOptions,
-                    workflow: workflowMode,
-                    dryRun: false,
-                    resumeState: {
-                        version: 4,
-                        status: RunStateStatus.Active,
-                        runId: `resumed-${workflowMode}`,
-                        repository: baseOptions.repo,
-                        branch: baseOptions.branch,
-                        workflow: workflowMode,
-                        onNeedsAttention: NeedsAttentionPolicy.Continue,
-                        dryRun: true,
-                        selection: { agent: DEFAULT_AGENT },
-                        maxIssues: 1,
-                        queue: {
-                            pending: [
-                                {
-                                    ...firstIssue,
-                                    labels: [...firstIssue.labels],
-                                },
-                            ],
-                            completedIssueNumbers: [],
-                            processedCount: 0,
-                        },
-                        outcomes: [],
-                        checkout: {
-                            branch: baseOptions.branch,
-                            head: "head-0",
-                        },
-                        updatedAt: "2026-08-28T00:00:00.000Z",
-                    },
+                    dryRun: true,
+                    onNeedsAttention: NeedsAttentionPolicy.Continue,
                 },
                 testRuntime(
                     calls,
@@ -2455,7 +835,7 @@ describe("workflow", () => {
                             execute: async () => {
                                 calls.push("executeIssue:unexpected");
                                 throw new Error(
-                                    "mutation executor escaped resume",
+                                    "mutation executor escaped dry run",
                                 );
                             },
                         },
@@ -2467,6 +847,12 @@ describe("workflow", () => {
             expect(summary.outcomes[0]?.outcome).toMatchObject({
                 route: route === "actionable" ? "implementation" : route,
             });
+            expect(groundingCalls).toBe(1);
+            expect(complexityCalls).toBe(
+                route === "already-resolved" || route === "needs-attention"
+                    ? 0
+                    : 1,
+            );
             expect(artifactCalls).toEqual(["read-only-loader"]);
             expect(artifactMutations).toEqual([]);
             expectNoIssueWork(calls);
@@ -2486,9 +872,7 @@ describe("workflow", () => {
                     stage: "run",
                     status: "info",
                     details: expect.objectContaining({
-                        workflow: workflowMode,
                         dryRun: true,
-                        resumed: true,
                     }),
                 }),
             );
@@ -2497,7 +881,6 @@ describe("workflow", () => {
                     stage: "run",
                     status: "succeeded",
                     details: expect.objectContaining({
-                        workflow: workflowMode,
                         routes: [
                             {
                                 issueNumber: 42,
@@ -2510,8 +893,159 @@ describe("workflow", () => {
                     }),
                 }),
             );
+            expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
+        }
+    });
+
+    test.each([
+        {
+            name: "lgtm-actionable",
+            route: "actionable" as const,
         },
-    );
+        {
+            name: "lgtm-already-resolved",
+            route: "already-resolved" as const,
+        },
+        {
+            name: "lgtm-needs-attention",
+            route: "needs-attention" as const,
+        },
+    ])("keeps a resumed dry run isolated in $name mode", async ({ route }) => {
+        const calls: string[] = [];
+        const states: RunState[] = [];
+        const events: ProgressUpdate[] = [];
+        const artifactCalls: string[] = [];
+        const artifactMutations: string[] = [];
+        const storeService = makeIssueArtifactStoreService();
+        const artifactStore: IssueArtifactStoreService = {
+            forIssue: async () => {
+                artifactCalls.push("writable-loader");
+                throw new Error("resumed dry run used writable artifacts");
+            },
+            forIssueReadOnly: async (issueNumber, scope) => {
+                artifactCalls.push("read-only-loader");
+                return readOnlyArtifactSpy(
+                    await storeService.forIssueReadOnly!(issueNumber, scope),
+                    artifactMutations,
+                );
+            },
+        };
+        const dryRunExecutor = makeDryRunIssueExecutorService(
+            artifactStore,
+            {
+                assess: async () => ({
+                    sessionID: "resumed-complexity",
+                    decision: {
+                        complexity:
+                            route === "actionable"
+                                ? ComplexityLevel.Level2
+                                : ComplexityLevel.Level4,
+                        rationale: "Resumed read-only route fixture.",
+                    },
+                }),
+            },
+            makeTestProgressRecorder(events),
+            {
+                assess: async () => ({
+                    sessionID: "resumed-grounding",
+                    decision: groundingDecisionFor(route),
+                }),
+            },
+        );
+        const summary = await workflow(
+            {
+                ...baseOptions,
+                dryRun: false,
+                resumeState: {
+                    version: 4,
+                    status: RunStateStatus.Active,
+                    runId: `resumed-${route}`,
+                    repository: baseOptions.repo,
+                    branch: baseOptions.branch,
+                    onNeedsAttention: NeedsAttentionPolicy.Continue,
+                    dryRun: true,
+                    selection: { agent: DEFAULT_AGENT },
+                    maxIssues: 1,
+                    queue: {
+                        pending: [
+                            {
+                                ...firstIssue,
+                                labels: [...firstIssue.labels],
+                            },
+                        ],
+                        completedIssueNumbers: [],
+                        processedCount: 0,
+                    },
+                    outcomes: [],
+                    checkout: {
+                        branch: baseOptions.branch,
+                        head: "head-0",
+                    },
+                    updatedAt: "2026-08-28T00:00:00.000Z",
+                },
+            },
+            testRuntime(
+                calls,
+                states,
+                {
+                    artifactStore,
+                    dryRunIssueExecutor: dryRunExecutor,
+                    issueExecutor: {
+                        execute: async () => {
+                            calls.push("executeIssue:unexpected");
+                            throw new Error("mutation executor escaped resume");
+                        },
+                    },
+                },
+                events,
+            ),
+        );
+
+        expect(summary.outcomes[0]?.outcome).toMatchObject({
+            route: route === "actionable" ? "implementation" : route,
+        });
+        expect(artifactCalls).toEqual(["read-only-loader"]);
+        expect(artifactMutations).toEqual([]);
+        expectNoIssueWork(calls);
+        expect(calls).toEqual([
+            "prepareWorkspace:/tmp/ralphie",
+            "initializeGitHub",
+            "verifyGitInstalled",
+            "prepareRepository:owner/repo:develop:/tmp/ralphie",
+            "listIssues:owner/repo:bug:created:asc",
+            "startServer",
+            "refreshIssue:42",
+            "closeRuntime",
+        ]);
+        expect(firstIssue.state).toBe("open");
+        expect(events).toContainEqual(
+            expect.objectContaining({
+                stage: "run",
+                status: "info",
+                details: expect.objectContaining({
+                    dryRun: true,
+                    resumed: true,
+                }),
+            }),
+        );
+        expect(events).toContainEqual(
+            expect.objectContaining({
+                stage: "run",
+                status: "succeeded",
+                details: expect.objectContaining({
+                    routes: [
+                        {
+                            issueNumber: 42,
+                            route:
+                                route === "actionable"
+                                    ? "implementation"
+                                    : route,
+                        },
+                    ],
+                }),
+            }),
+        );
+    });
 
     test("defers an issue needing attention and continues with the queue", async () => {
         const calls: string[] = [];
@@ -2964,185 +1498,160 @@ describe("workflow", () => {
         expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
     });
 
-    test.each([
-        { name: "lgtm", workflowMode: WorkflowMode.Lgtm },
-        { name: "pr", workflowMode: WorkflowMode.Pr },
-    ])(
-        "persists halt recovery in $name mode after its artifact and reuses grounding on resume",
-        async ({ workflowMode }) => {
-            const calls: string[] = [];
-            const states: RunState[] = [];
-            const events: ProgressUpdate[] = [];
-            const executor = groundedRouteExecutor(calls, {
-                42: "needs-attention",
-                43: "actionable",
-            });
-            let savedOutcome = false;
+    test("persists halt recovery after its artifact and reuses grounding on resume", async () => {
+        const calls: string[] = [];
+        const states: RunState[] = [];
+        const events: ProgressUpdate[] = [];
+        const executor = groundedRouteExecutor(calls, {
+            42: "needs-attention",
+            43: "actionable",
+        });
+        let savedOutcome = false;
 
-            await expect(
-                workflow(
+        await expect(
+            workflow(
+                {
+                    ...baseOptions,
+                    maxIssues: 2,
+                    onNeedsAttention: undefined,
+                },
+                testRuntime(
+                    calls,
+                    states,
                     {
-                        ...baseOptions,
-                        maxIssues: 2,
-                        onNeedsAttention: undefined,
-                        workflow: workflowMode,
+                        issueLists: [[firstIssue, secondIssue]],
+                        issueExecutor: executor,
+                        onStateSave: (state) => {
+                            if (
+                                !savedOutcome &&
+                                state.activeIssue?.issueNumber === 42 &&
+                                state.checkout?.head === "head-1" &&
+                                state.queue.pending
+                                    .map(({ number }) => number)
+                                    .join(",") === "42,43" &&
+                                state.outcomes.some(
+                                    ({ issueNumber, outcome }) =>
+                                        issueNumber === 42 &&
+                                        outcome.kind ===
+                                            IssueExecutionOutcomeKind.NeedsAttention,
+                                )
+                            ) {
+                                savedOutcome = true;
+                                calls.push("save:needs-attention");
+                            }
+                        },
                     },
-                    testRuntime(
-                        calls,
-                        states,
-                        {
-                            issueLists: [[firstIssue, secondIssue]],
-                            issueExecutor: executor,
-                            onStateSave: (state) => {
-                                if (
-                                    !savedOutcome &&
-                                    state.activeIssue?.issueNumber === 42 &&
-                                    state.checkout?.head === "head-1" &&
-                                    state.queue.pending
-                                        .map(({ number }) => number)
-                                        .join(",") === "42,43" &&
-                                    state.outcomes.some(
-                                        ({ issueNumber, outcome }) =>
-                                            issueNumber === 42 &&
-                                            outcome.kind ===
-                                                IssueExecutionOutcomeKind.NeedsAttention,
-                                    )
-                                ) {
-                                    savedOutcome = true;
-                                    calls.push("save:needs-attention");
-                                }
-                            },
-                        },
-                        events,
-                    ),
+                    events,
                 ),
-            ).rejects.toMatchObject({ name: "NeedsAttentionStop" });
+            ),
+        ).rejects.toMatchObject({ name: "NeedsAttentionStop" });
 
-            const haltState = states.at(-1);
-            if (haltState === undefined)
-                throw new Error("Missing halted state");
-            expect(haltState).toMatchObject({
-                status: RunStateStatus.Active,
-                runId: "test-run",
-                onNeedsAttention: NeedsAttentionPolicy.Halt,
-                activeIssue: { issueNumber: 42, stage: "grounding" },
-                checkout: { branch: "develop", head: "head-1" },
-                queue: {
-                    pending: [
-                        { number: 42, state: "open" },
-                        { number: 43, state: "open" },
-                    ],
-                    completedIssueNumbers: [],
-                    processedCount: 0,
+        const haltState = states.at(-1);
+        if (haltState === undefined) throw new Error("Missing halted state");
+        expect(haltState).toMatchObject({
+            status: RunStateStatus.Active,
+            runId: "test-run",
+            onNeedsAttention: NeedsAttentionPolicy.Halt,
+            activeIssue: { issueNumber: 42, stage: "grounding" },
+            checkout: { branch: "develop", head: "head-1" },
+            queue: {
+                pending: [
+                    { number: 42, state: "open" },
+                    { number: 43, state: "open" },
+                ],
+                completedIssueNumbers: [],
+                processedCount: 0,
+            },
+        });
+        expect(haltState.outcomes).toHaveLength(1);
+        expect(haltState.outcomes[0]).toMatchObject({
+            issueNumber: 42,
+            outcome: {
+                kind: IssueExecutionOutcomeKind.NeedsAttention,
+            },
+        });
+        expect(
+            haltState.outcomes[0]?.outcome.kind ===
+                IssueExecutionOutcomeKind.NeedsAttention &&
+                "artifactPath" in haltState.outcomes[0].outcome &&
+                haltState.outcomes[0].outcome.artifactPath,
+        ).toBeString();
+        expectCallOrder(calls, [
+            `artifact:42:${IssueArtifactKind.NeedsAttentionDecision}`,
+            "save:needs-attention",
+            "closeRuntime",
+        ]);
+        expect(calls).not.toContain("grounding:43");
+        expect(events.some(({ status }) => status === "failed")).toBeFalse();
+        expect(events).toContainEqual(
+            expect.objectContaining({
+                stage: "run",
+                status: "needs-attention",
+                details: expect.objectContaining({
+                    handled: true,
+                    counts: {
+                        completed: 0,
+                        decomposed: 0,
+                        escalated: 0,
+                        "needs-attention": 1,
+                        skipped: 0,
+                        failed: 0,
+                    },
+                }),
+            }),
+        );
+
+        const resumedStates: RunState[] = [];
+        const resumedEvents: ProgressUpdate[] = [];
+        await expect(
+            workflow(
+                {
+                    ...baseOptions,
+                    maxIssues: 2,
+                    resumeState: haltState,
                 },
-            });
-            expect(haltState.outcomes).toHaveLength(1);
-            expect(haltState.outcomes[0]).toMatchObject({
-                issueNumber: 42,
-                outcome: {
-                    kind: IssueExecutionOutcomeKind.NeedsAttention,
-                },
-            });
-            expect(
-                haltState.outcomes[0]?.outcome.kind ===
-                    IssueExecutionOutcomeKind.NeedsAttention &&
-                    "artifactPath" in haltState.outcomes[0].outcome &&
-                    haltState.outcomes[0].outcome.artifactPath,
-            ).toBeString();
-            expectCallOrder(calls, [
-                `artifact:42:${IssueArtifactKind.NeedsAttentionDecision}`,
-                "save:needs-attention",
-                "closeRuntime",
-            ]);
-            expect(calls).not.toContain("grounding:43");
-            expect(
-                events.some(({ status }) => status === "failed"),
-            ).toBeFalse();
-            expect(events).toContainEqual(
-                expect.objectContaining({
-                    stage: "run",
-                    status: "needs-attention",
-                    details: expect.objectContaining({
-                        handled: true,
-                        counts: {
-                            completed: 0,
-                            decomposed: 0,
-                            escalated: 0,
-                            "needs-attention": 1,
-                            skipped: 0,
-                            failed: 0,
-                        },
+                testRuntime(
+                    calls,
+                    resumedStates,
+                    {
+                        issueLists: [[firstIssue, secondIssue]],
+                        issueExecutor: executor,
+                        captureStart: 1,
+                    },
+                    resumedEvents,
+                ),
+            ),
+        ).rejects.toMatchObject({ name: "NeedsAttentionStop" });
+
+        expect(calls.filter((call) => call === "grounding:42")).toHaveLength(1);
+        expect(calls).not.toContain("grounding:43");
+        expect(calls.filter((call) => call === "closeRuntime")).toHaveLength(2);
+        expect(calls).not.toContain("directPush:42:develop");
+        expect(calls).not.toContain("closeIssue:42");
+        expect(resumedStates.at(-1)).toMatchObject({
+            status: RunStateStatus.Active,
+            runId: haltState.runId,
+            activeIssue: { issueNumber: 42, stage: "grounding" },
+            queue: {
+                pending: [{ number: 42 }, { number: 43 }],
+                completedIssueNumbers: [],
+                processedCount: 0,
+            },
+        });
+        expect(resumedStates.at(-1)?.outcomes).toHaveLength(1);
+        expect(resumedEvents).toContainEqual(
+            expect.objectContaining({
+                stage: "run",
+                status: "needs-attention",
+                details: expect.objectContaining({
+                    counts: expect.objectContaining({
+                        "needs-attention": 1,
+                        failed: 0,
                     }),
                 }),
-            );
-
-            const resumedStates: RunState[] = [];
-            const resumedEvents: ProgressUpdate[] = [];
-            await expect(
-                workflow(
-                    {
-                        ...baseOptions,
-                        maxIssues: 2,
-                        resumeState: haltState,
-                        workflow: workflowMode,
-                    },
-                    testRuntime(
-                        calls,
-                        resumedStates,
-                        {
-                            issueLists: [[firstIssue, secondIssue]],
-                            issueExecutor: executor,
-                            captureStart: 1,
-                        },
-                        resumedEvents,
-                    ),
-                ),
-            ).rejects.toMatchObject({ name: "NeedsAttentionStop" });
-
-            expect(
-                calls.filter((call) => call === "grounding:42"),
-            ).toHaveLength(1);
-            expect(calls).not.toContain("grounding:43");
-            expect(
-                calls.filter((call) => call === "closeRuntime"),
-            ).toHaveLength(2);
-            expect(calls).not.toContain("directPush:42:develop");
-            expect(calls).not.toContain("pushBranch:ralphie/issue-42");
-            expect(calls).not.toContain("closeIssue:42");
-            expect(calls).not.toContainEqual(
-                expect.stringContaining("createPullRequest:"),
-            );
-            expect(calls).not.toContainEqual(
-                expect.stringContaining("publishReviews:"),
-            );
-            expect(calls).not.toContainEqual(
-                expect.stringContaining("mergePullRequest:"),
-            );
-            expect(resumedStates.at(-1)).toMatchObject({
-                status: RunStateStatus.Active,
-                runId: haltState.runId,
-                activeIssue: { issueNumber: 42, stage: "grounding" },
-                queue: {
-                    pending: [{ number: 42 }, { number: 43 }],
-                    completedIssueNumbers: [],
-                    processedCount: 0,
-                },
-            });
-            expect(resumedStates.at(-1)?.outcomes).toHaveLength(1);
-            expect(resumedEvents).toContainEqual(
-                expect.objectContaining({
-                    stage: "run",
-                    status: "needs-attention",
-                    details: expect.objectContaining({
-                        counts: expect.objectContaining({
-                            "needs-attention": 1,
-                            failed: 0,
-                        }),
-                    }),
-                }),
-            );
-        },
-    );
+            }),
+        );
+    });
 
     test("persists the needs-attention outcome before notification and clears the intent after success", async () => {
         const calls: string[] = [];
@@ -3345,7 +1854,6 @@ describe("workflow", () => {
             runId: "disabled-notification-resume",
             repository: baseOptions.repo,
             branch: "develop",
-            workflow: WorkflowMode.Lgtm,
             onNeedsAttention: NeedsAttentionPolicy.Continue,
             dryRun: false,
             notificationsEnabled: false,
@@ -3441,35 +1949,6 @@ describe("workflow", () => {
         expect(notified).toBeFalse();
     });
 
-    test("does not deliver a PR branch for a needs-attention outcome", async () => {
-        const calls: string[] = [];
-        const states: RunState[] = [];
-        await workflow(
-            {
-                ...baseOptions,
-                workflow: WorkflowMode.Pr,
-                onNeedsAttention: NeedsAttentionPolicy.Continue,
-            },
-            testRuntime(calls, states, {
-                outcomes: [
-                    {
-                        kind: IssueExecutionOutcomeKind.NeedsAttention,
-                        reason: NeedsAttentionReason.ExternalDependency,
-                        summary: "A prerequisite is still open.",
-                        evidence: ["The prerequisite is unresolved."],
-                        questions: ["When will it be available?"],
-                        artifactPath: "/tmp/needs-attention.json",
-                    },
-                ],
-            }),
-        );
-        expect(calls).not.toContain("pushBranch:ralphie/issue-42");
-        expect(calls).not.toContain("createPullRequest:owner/repo");
-        expect(calls).not.toContain("mergePullRequest:owner/repo:1");
-        expect(calls).not.toContain("closeIssue:42");
-        expect(states.at(-1)?.queue.processedCount).toBe(1);
-    });
-
     test("refreshes issue freshness metadata before active resume", async () => {
         const initialIssue = {
             ...firstIssue,
@@ -3526,7 +2005,7 @@ describe("workflow", () => {
         expect(contexts[0]?.issue).toEqual(currentIssue);
     });
 
-    test("refreshes the selected issue before branch preparation and execution", async () => {
+    test("refreshes the selected issue before execution", async () => {
         const calls: string[] = [];
         const refreshedIssue = {
             ...firstIssue,
@@ -3538,7 +2017,7 @@ describe("workflow", () => {
         const contexts: IssueExecutionContext[] = [];
 
         await workflow(
-            { ...baseOptions, workflow: WorkflowMode.Pr },
+            { ...baseOptions },
             testRuntime(calls, [], {
                 refreshedIssues: { 42: refreshedIssue },
                 executionContexts: contexts,
@@ -3546,9 +2025,6 @@ describe("workflow", () => {
         );
 
         expect(contexts[0]?.issue).toEqual(refreshedIssue);
-        expect(calls.indexOf("refreshIssue:42")).toBeLessThan(
-            calls.indexOf("prepareFeatureBranch:ralphie/issue-42:develop"),
-        );
         expect(calls.indexOf("refreshIssue:42")).toBeLessThan(
             calls.findIndex((call) => call.startsWith("executeIssue:42:")),
         );
@@ -3987,53 +2463,12 @@ describe("workflow", () => {
         expect(calls).toEqual([]);
     });
 
-    test("uses the refreshed issue before preparing a PR branch", async () => {
-        const calls: string[] = [];
-        const contexts: IssueExecutionContext[] = [];
-        const refreshed = {
-            ...firstIssue,
-            title: "Refreshed title",
-            body: "Refreshed body",
-            labels: ["BUG", "ready"],
-            comments: [
-                {
-                    id: 1,
-                    body: "Refreshed comment",
-                    updatedAt: "2026-08-29T00:00:00.000Z",
-                },
-            ],
-            updatedAt: "2026-08-29T00:00:00.000Z",
-            commentCount: 1,
-            commentVersion: "2026-08-29T00:00:00.000Z",
-        } as const;
-
-        await workflow(
-            { ...baseOptions, workflow: WorkflowMode.Pr },
-            testRuntime(calls, [], {
-                refreshIssues: [refreshed],
-                executionContexts: contexts,
-            }),
-        );
-
-        expect(contexts[0]?.issue).toEqual(refreshed);
-        const refreshIndex = calls.indexOf("refreshIssue:42");
-        expect(
-            calls.indexOf("listIssues:owner/repo:bug:created:asc"),
-        ).toBeLessThan(refreshIndex);
-        expect(refreshIndex).toBeLessThan(
-            calls.indexOf("prepareFeatureBranch:ralphie/issue-42:develop"),
-        );
-        expect(refreshIndex).toBeLessThan(
-            calls.indexOf("pushBranch:ralphie/issue-42"),
-        );
-    });
-
     test("fails closed when live issue refresh fails", async () => {
         const calls: string[] = [];
         const states: RunState[] = [];
         await expect(
             workflow(
-                { ...baseOptions, workflow: WorkflowMode.Pr },
+                { ...baseOptions },
                 testRuntime(calls, states, {
                     refreshFailure: new RalphieError({
                         message: "refresh failed",
@@ -4143,12 +2578,12 @@ describe("workflow", () => {
             reason: "Live reconciliation found that the issue no longer has every required label.",
         },
     ])(
-        "does no issue or mutation work when a PR-mode snapshot is $name",
+        "does no issue or mutation work when the live snapshot is $name",
         async ({ ineligible, reason }) => {
             const calls: string[] = [];
             const states: RunState[] = [];
             const summary = await workflow(
-                { ...baseOptions, workflow: WorkflowMode.Pr },
+                { ...baseOptions },
                 testRuntime(calls, states, {
                     issueLists: [[firstIssue]],
                     refreshIssues: [ineligible],
@@ -4183,7 +2618,6 @@ describe("workflow", () => {
             const resumed = await workflow(
                 {
                     ...baseOptions,
-                    workflow: WorkflowMode.Pr,
                     resumeState: completedState,
                 },
                 testRuntime(resumedCalls, resumedStates, {

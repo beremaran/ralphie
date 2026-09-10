@@ -7,15 +7,13 @@ workspace risks. Return to the [documentation index](README.md) for the full
 reading map.
 
 > [!CAUTION]
-> Ralphie defaults to `lgtm`: it commits approved work and pushes directly to
-> the branch selected by `--branch`. Use `--workflow pr` for automatically
-> merged feature-branch delivery, or start with the dry-run command below.
+> Ralphie commits approved work and pushes directly to the branch selected by
+> `--branch`. Start with the dry-run command below before enabling mutations.
 
 ## Delivery guardrails
 
-Delivery automation deserves explicit guardrails. For `lgtm` delivery, and for
-the feature-branch pushes used by `pr`, Ralphie verifies before agent work and
-again before a push that:
+Delivery automation deserves explicit guardrails. Before agent work and again
+before a push, Ralphie verifies that:
 
 - the checkout and `origin` match the requested GitHub repository;
 - the local checkout is still on the selected branch and expected commit;
@@ -26,37 +24,16 @@ again before a push that:
 If any invariant fails, Ralphie halts instead of guessing or retrying a
 dangerous operation.
 
-For revisions delivered to an existing managed feature branch (the `pr`
-workflow), a revision-specific contract applies: the local checkout and the
-remote branch must both still sit at the exact expected prior feature head
-(the first delivery may use the original PR/base commit as its prior head and
-may find the remote branch absent), the feature head must descend from the
-original PR/base commit however many commits it is ahead of it, and every push
-stays non-force. A stale local head, an externally moved remote head, a
-missing remote branch beyond the first delivery, an unanchored feature head,
-or a force push halts the revision instead of following or resetting over the
-expected head.
-
-Managed feature-branch revisions are delivered as one deterministic
-operation that runs those safety checks before staging/commit, creates exactly
-one commit from the allowed staged tree, re-checks the local branch/parent and
-the remote feature/PR head immediately before the push, and pushes only with
-Git's non-force mode to the explicit `HEAD:refs/heads/<branch>` destination
-ref. After both a successful push and a push/transport error the operation
-reads the authoritative remote branch with `git ls-remote`; it never infers
-success from a local tracking ref or from the push command's response alone.
-The discriminated, typed outcome tells a coordinator exactly what happened:
-`confirmed` when the remote equals the new commit and the checkout is clean
-(including a lost push response reconciled to success by the remote read),
-`external-movement` when the remote no longer equals the expected prior head
-(halt without retrying or overwriting; the created commit is retained), or
-`ambiguous` when the remote read cannot prove whether the new commit arrived
-(the created clean commit is retained and requires safe reconciliation).
-Movement detected before staging/commit prevents the commit from being
-created; movement detected before or during delivery is never followed, reset
-over, or force-pushed over. Cancellation is checked at every mutation
-boundary, the push is attempted at most once, and failures and cancellations
-leave a clean, recoverable checkout.
+Delivery is one deterministic operation: it creates exactly one commit from the
+allowed staged tree, re-checks the local branch/head and the remote base
+immediately before the push, and pushes only with Git's non-force mode. A push
+response is not proof; an authoritative remote branch read establishes whether
+the commit arrived, including reconciliation of a lost push response. Movement
+detected before staging/commit prevents the commit from being created; movement
+detected before or during delivery is never followed, reset over, or
+force-pushed over. Cancellation is checked at every mutation boundary, the push
+is attempted at most once, and failures and cancellations leave a clean,
+recoverable checkout.
 
 Implementation agents may use normal shell composition, pipes, redirection,
 and language runtimes. Ralphie's shell hook rejects explicit agent requests for
@@ -64,9 +41,6 @@ orchestration-owned Git/GitHub mutations such as commits, pushes, branch
 changes, resets, cleans, and `gh` calls. This hook is a guardrail, not a
 security sandbox: deterministic repository invariants and the isolated
 delivery services remain authoritative.
-
-In `pr` mode, the feature branch, pull request, review comments, and merge are
-reconciled through GitHub before the linked issue is considered complete.
 
 ## Workspace risk
 

@@ -40,9 +40,6 @@ export type GitCommitResult = {
     readonly treeSha: string;
 };
 
-/** Maximum committed patch accepted for a PR review (1 MiB, measured as UTF-8). */
-export const MAX_COMMITTED_DIFF_BYTES = 1024 * 1024;
-
 export type GitFeatureBranchResult = {
     readonly branch: string;
     readonly baseBranch: string;
@@ -56,13 +53,6 @@ export type GitIssueOperationsService = {
     readonly stageAll: (repositoryPath: string) => Promise<void>;
     /** Read the complete staged patch, retaining Git's binary patch bytes/text. */
     readonly readStagedBinaryDiff: (repositoryPath: string) => Promise<string>;
-    /** Read only the committed base..head patch. Never consults the index. */
-    readonly readCommittedBinaryDiff: (
-        repositoryPath: string,
-        baseSha: string,
-        headSha: string,
-        signal?: AbortSignal,
-    ) => Promise<string>;
     /** Check whether the index contains any staged changes. */
     readonly hasStagedChanges: (repositoryPath: string) => Promise<boolean>;
     /** Commit the validated generated message and verify the staged tree. */
@@ -430,43 +420,6 @@ export const makeGitIssueOperationsService = (
                 "Failed to read the staged issue diff",
                 { trimStdout: false },
             ).then((result) => result.stdout),
-
-        readCommittedBinaryDiff: async (
-            repositoryPath,
-            baseSha,
-            headSha,
-            signal,
-        ) => {
-            if (!validGitSha.test(baseSha) || !validGitSha.test(headSha)) {
-                throw new RalphieError({
-                    message:
-                        "Committed diff requires explicit full base and head object IDs.",
-                });
-            }
-            const patch = (
-                await requireSuccess(
-                    runner,
-                    "git",
-                    [
-                        "-C",
-                        repositoryPath,
-                        "diff",
-                        "--binary",
-                        "--no-ext-diff",
-                        `${baseSha}..${headSha}`,
-                    ],
-                    "Failed to read the committed pull request diff",
-                    { trimStdout: false, signal },
-                )
-            ).stdout;
-            const bytes = Buffer.byteLength(patch, "utf8");
-            if (bytes > MAX_COMMITTED_DIFF_BYTES) {
-                throw new RalphieError({
-                    message: `Committed pull request diff is ${bytes} bytes; maximum is ${MAX_COMMITTED_DIFF_BYTES} bytes.`,
-                });
-            }
-            return patch;
-        },
 
         hasStagedChanges: async (repositoryPath) => {
             const result = await runner.run("git", [

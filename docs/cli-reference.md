@@ -27,12 +27,11 @@ command schema.
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `--workflow <mode>` | `lgtm` | Select direct-push `lgtm` or automatically merged `pr` delivery in issue mode. |
 | `--on-needs-attention <policy>` | `halt` | Halt with exit status `2`, or `continue` through the remaining queue, when an issue needs attention. |
 | `--on-issue-failure <policy>` | `halt` | Halt on an ordinary issue failure, or restore its checkout and continue independent queued work. Continued runs exit non-zero after draining if any issue failed. |
 | `--notify-needs-attention` | off | Opt in to publishing needs-attention outcomes as an idempotent GitHub comment and optional label. Notifications are never enabled implicitly. |
 | `--needs-attention-label <name>` | none | Add a trimmed, non-empty label to needs-attention notifications; requires `--notify-needs-attention`. |
-| `-b, --branch <name>` | `main`, otherwise `master` | Base branch; `lgtm` pushes it directly, while PR workflows open against it. |
+| `-b, --branch <name>` | `main`, otherwise `master` | Base branch pushed directly after verified delivery. |
 | `--max-issues <count>` | unlimited | Positive maximum number of issues charged to this run. |
 | `--max-decomposition-depth <count>` | `3` | Positive maximum generated-child lineage depth. Reaching the ceiling leaves the issue open, records needs attention, and continues independent work. |
 | `--issue-label <label>` | none | Require a label; repeat the flag to require multiple labels. |
@@ -100,7 +99,6 @@ bunx @beremaran/ralphie owner/repository --dry-run --max-issues 1
 
 ```bash
 bunx @beremaran/ralphie owner/repository \
-  --workflow pr \
   --branch main \
   --issue-label bug \
   --max-issues 10
@@ -185,20 +183,10 @@ recovery](operations-and-recovery.md) before resuming a failed run.
 bunx @beremaran/ralphie owner/repository --max-issues 5
 ```
 
-The default `lgtm` workflow commits and pushes directly to the selected branch.
-The `pr` workflow creates and pushes a feature branch, opens or reuses a
-matching pull request, publishes the automated review attempts, waits for
-every check on the exact head SHA to pass, and then merges only while the
-head is unchanged. It is not a wait-for-human-review mode. A gate that
-fails, times out, sees no checks, or finds the head changed retains the
-feature branch and pull request and persists resumable state instead of
-merging or closing. The pull request body links the source issue with
-`Closes #<issue>` so GitHub closes the issue automatically when the pull
-request is merged:
-
-```bash
-bunx @beremaran/ralphie owner/repository --workflow pr
-```
+The workflow commits and pushes directly to the selected branch. It is not a
+wait-for-human-review mode: approved work is committed, the remote head is
+revalidated, and the commit is pushed without force before the source issue is
+closed.
 
 Read [Workflows](workflows.md) and [Safety](safety.md) before running these
 mutation-enabled examples.

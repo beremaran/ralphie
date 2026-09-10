@@ -7,11 +7,7 @@ import { runCli } from "../src/cli.ts";
 import { HELP_TEXT, parseCliArgs, runCommand } from "../src/command.ts";
 import { RalphieExitCode } from "../src/process/exit-code.ts";
 import { RalphieError } from "../src/shared/error.ts";
-import {
-    IssueFailurePolicy,
-    NeedsAttentionPolicy,
-    WorkflowMode,
-} from "../src/options.ts";
+import { IssueFailurePolicy, NeedsAttentionPolicy } from "../src/options.ts";
 import { IssueOrder, IssueSort } from "../src/github/issues.ts";
 import { RUN_STATE_VERSION, RunStateStatus } from "../src/run/state.ts";
 import { makeTestProgressRecorder } from "./shared/progress-recorder.ts";
@@ -34,8 +30,6 @@ describe("native CLI parser", () => {
     test("parses positional repository, repeatable labels, flags, and values", () => {
         const parsed = parseCliArgs([
             "owner/repository",
-            "--workflow",
-            "pr",
             "--issue-label",
             "bug",
             "--issue-label=ready",
@@ -48,7 +42,6 @@ describe("native CLI parser", () => {
         expect(parsed.version).toBe(false);
         expect(parsed.options).toMatchObject({
             repo: "owner/repository",
-            workflow: WorkflowMode.Pr,
             issueLabels: ["bug", "ready"],
             maxIssues: 3,
             dryRun: true,

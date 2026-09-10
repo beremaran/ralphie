@@ -7,12 +7,17 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Removed
 
+- Remove the `pr` workflow. Ralphie now always delivers through the direct
+  `lgtm` path: the `--workflow` flag, feature branches, pull requests, the
+  post-PR review/revision coordinator, the check gate, and the read-only check
+  observer are gone, along with their Git, run-state, artifact, prompt, test,
+  and documentation surfaces. `RunState` is version 10.
+
 - Remove every top-level execution mode other than the issue workflow. The
   `--mode` flag, `maintain-issues`, `get-pipelines-green`, and
   `--duplicate-action`/`--max-attempts`/`--pipeline-timeout` are gone, along
   with the maintenance snapshot/planning/state subsystem, the pipeline
   delivery/diagnostics/repair subsystem, and their tests and docs.
-  `--workflow lgtm|pr` remains the only delivery selector.
 
 - Replace the external OpenCode server integration and the multi-harness/ACP
   discovery layer with the in-process pi agent runtime

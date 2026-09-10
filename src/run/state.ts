@@ -10,11 +10,6 @@ import {
     NeedsAttentionReason,
     nonBlankStringSchema,
 } from "../issues/decisions.ts";
-import {
-    approvedPullRequestReviewEvidenceSchema,
-    pullRequestRevisionIntentSchema,
-    pullRequestReviewAttemptsSchema,
-} from "../issues/pull-request-review.ts";
 import { RalphieError } from "../shared/error.ts";
 import {
     DEFAULT_NEEDS_ATTENTION_POLICY,
@@ -22,53 +17,9 @@ import {
     DEFAULT_MAX_DECOMPOSITION_DEPTH,
     IssueFailurePolicy,
     NeedsAttentionPolicy,
-    WorkflowMode,
 } from "../options.ts";
 
-export const RUN_STATE_VERSION = 9 as const;
-
-/** Terminal and transitional states of an active PR delivery gate. */
-export const PR_CLOSURE_GATE_STATUSES = [
-    "pending",
-    "green",
-    "failed",
-    "cancelled",
-    "unknown",
-    "no-pipelines",
-    "timeout",
-    "aborted",
-    "stale",
-    "unmergeable",
-    "closed",
-    "merged",
-] as const;
-
-export type PrClosureGateStatus = (typeof PR_CLOSURE_GATE_STATUSES)[number];
-
-/** Durable post-creation review outcomes, distinct from check-gate status. */
-export const PR_REVIEW_STATUSES = [
-    "pending",
-    "approved",
-    "pr-review-exhausted",
-    "needs-attention",
-    "failed",
-    "stale",
-    "delivery-recoverable",
-] as const;
-
-export type PrReviewStatus = (typeof PR_REVIEW_STATUSES)[number];
-
-/** Durable lifecycle boundaries for the resumable post-PR review loop. */
-export const PR_REVIEW_STAGES = [
-    "review",
-    "revision-fix",
-    "revision-delivery",
-    "publication",
-    "checks",
-    "merge",
-] as const;
-
-export type PrReviewStage = (typeof PR_REVIEW_STAGES)[number];
+export const RUN_STATE_VERSION = 10 as const;
 
 const dryRunRouteSchema = z.enum(DRY_RUN_ROUTES);
 
@@ -191,76 +142,11 @@ const outcomeSchema = z.preprocess((value) => {
     return value;
 }, currentOutcomeSchema);
 
-const pipelineSnapshotSchema = z
-    .object({
-        repository: z.string().min(1),
-        branch: z.string().min(1),
-        commitSha: z.string().min(1),
-        state: z.enum(["empty", "non-empty"]),
-        items: z.array(z.record(z.string(), z.unknown())).readonly(),
-        sourceErrors: z.array(z.record(z.string(), z.unknown())).readonly(),
-        completenessErrors: z.array(z.string()).readonly(),
-        diagnostics: z.array(z.record(z.string(), z.unknown())).readonly(),
-        reason: z.enum([
-            "success",
-            "pending",
-            "failure",
-            "no-checks",
-            "timeout",
-            "unknown",
-            "cancelled",
-            "error",
-        ]),
-        greenCandidate: z.boolean(),
-        fingerprint: z.string().min(1),
-    })
-    .strict();
-
-/**
- * Durable state of an active PR closure gate. The snapshot and status are
- * updated atomically whenever polling changes them; the record is kept in
- * run state so a resumed run can continue polling or re-evaluate a saved
- * decision without re-creating the PR.
- */
-const prClosureSchema = z
-    .object({
-        pullRequestNumber: z.number().int().positive(),
-        /** PR base SHA captured with the first authoritative snapshot. */
-        baseSha: z.string().min(1).optional(),
-        observedHeadSha: z.string().min(1),
-        /** Latest normalized check snapshot observed by the gate. */
-        snapshot: pipelineSnapshotSchema.optional(),
-        /** Observation start timestamp, kept across resume. */
-        startedAt: z.string().datetime(),
-        /** Timestamp of the last atomic state update. */
-        updatedAt: z.string().datetime(),
-        gate: z.enum(PR_CLOSURE_GATE_STATUSES),
-        /** Details when the gate reached a terminal non-merged state. */
-        terminalReason: z.string().min(1).optional(),
-        /** Post-creation review/revision state, separate from check status. */
-        review: z
-            .object({
-                status: z.enum(PR_REVIEW_STATUSES),
-                stage: z.enum(PR_REVIEW_STAGES).optional(),
-                attempts: pullRequestReviewAttemptsSchema.max(5).optional(),
-                approved: approvedPullRequestReviewEvidenceSchema.optional(),
-                revisionIntent: pullRequestRevisionIntentSchema.optional(),
-                currentHeadSha: z.string().min(1).optional(),
-                revisionCount: z.number().int().nonnegative(),
-                terminalReason: z.string().min(1).optional(),
-            })
-            .strict()
-            .optional(),
-    })
-    .strict()
-    .optional();
-
 const runStateFields = {
     status: z.enum(RunStateStatus),
     runId: z.string().min(1),
     repository: z.string().min(1),
     branch: z.string().min(1),
-    workflow: z.enum(WorkflowMode).optional(),
     onNeedsAttention: z.enum(NeedsAttentionPolicy),
     onIssueFailure: z.enum(IssueFailurePolicy).optional(),
     dryRun: z.boolean().optional(),
@@ -302,14 +188,13 @@ const runStateFields = {
             outcome: outcomeSchema,
         }),
     ),
+    /** Active issue stage for resumable progress, when known. */
     activeIssue: z
         .object({
             issueNumber: z.number().int().positive(),
             stage: z.string().min(1),
         })
         .optional(),
-    /** Active PR closure gate state for the current issue (pr workflow). */
-    prClosure: prClosureSchema,
     checkout: z
         .object({
             branch: z.string().min(1),
@@ -333,6 +218,7 @@ const legacyRunStateSchema = z.object({
         z.literal(6),
         z.literal(7),
         z.literal(8),
+        z.literal(9),
     ]),
     ...runStateFields,
     onNeedsAttention: z.enum(NeedsAttentionPolicy).optional(),
@@ -346,7 +232,7 @@ type RunStateFields = z.infer<z.ZodObject<typeof runStateFields>>;
 export type RunState = Omit<RunStateFields, "maxDecompositionDepth"> & {
     /** Optional only for typed legacy-state fixtures; loading fills the default. */
     readonly maxDecompositionDepth?: number;
-    readonly version: 4 | 5 | 6 | 7 | 8 | 9;
+    readonly version: 4 | 5 | 6 | 7 | 8 | 9 | 10;
 };
 
 type LoadedRunState = {
@@ -365,7 +251,8 @@ const migrateRunState = (value: unknown): LoadedRunState => {
             value.version === 5 ||
             value.version === 6 ||
             value.version === 7 ||
-            value.version === 8)
+            value.version === 8 ||
+            value.version === 9)
     ) {
         const legacy = legacyRunStateSchema.parse(value);
         return {

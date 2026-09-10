@@ -102,8 +102,7 @@ Run artifacts live under:
 
 New runs write the durable event log to
 `<workspace>/.ralphie/runs/<run-id>/events.jsonl`; a resumed run reuses the
-directory containing its supplied state file. A maintenance dry run has no
-event-log path and writes no event log.
+directory containing its supplied state file.
 
 A normal issue execution obtains a durable per-issue artifact store at:
 
@@ -112,14 +111,10 @@ A normal issue execution obtains a durable per-issue artifact store at:
 ```
 
 The store prevents accidental overwrites and records readiness deferrals,
-complexity decisions, checkpoints, review attempts, approved PR review proof,
-post-PR review/revision/publication/check/merge state, commit messages, created
+complexity decisions, checkpoints, review attempts, commit messages, created
 commits, resolution proof, decomposition decisions, and created child-number
-mappings. The post-PR delivery-state record is replaced idempotently as the
-latest compact lifecycle projection; head, attempt, revision, check, and
-terminal-reason fields keep it safe to reconcile after interruption. Stale or
-legacy un-fingerprinted decisions are removed on load without disturbing the
-other artifacts for the issue.
+mappings. Stale or legacy un-fingerprinted decisions are removed on load
+without disturbing the other artifacts for the issue.
 
 A successful or interrupted run uses this more detailed layout (pi
 configuration is not stored in this tree):
@@ -137,18 +132,14 @@ configuration is not stored in this tree):
 ```
 
 `state.json` is versioned, schema-validated, and atomically replaced. It
-contains the repository/branch/workflow, selected `onNeedsAttention` policy,
+contains the repository/branch, selected `onNeedsAttention` policy,
 notification settings and any pending notification intent, pi model selection,
 budget, pending and completed queue numbers, processed count, outcomes, active
-issue/stage, checkout invariant, update time, and, for an active `pr`
-closure, the pull request number, base/head snapshot, latest normalized check
-snapshot, review status and stage, bounded attempts, approved review evidence,
-revision count, gate status, and terminal reason. State is saved before the
+issue/stage, checkout invariant, and update time. State is saved before the
 queue starts, when an issue becomes active, before and after review/revision/
-publication/check/merge boundaries, after outcomes and queue refreshes, at
-each PR gate transition, and at final completion. Version 9 accepts and
-migrates the previous version-8 closure shape while preserving resumable
-evidence.
+publication boundaries, after outcomes and queue refreshes, and at final
+completion. Version 10 accepts and migrates previous versions while preserving
+resumable evidence.
 
 ## Failure, cancellation, and exit status
 
@@ -168,17 +159,6 @@ stateDiagram-v2
 
 - One issue failure uses the current halt policy: Ralphie persists the active
   issue, releases the agent runtime, retains artifacts, and stops before later issues.
-- A `pr` review, revision-delivery, publication, check, or merge gate that is
-  failed, cancelled, timed out, absent, unknown, stale, exhausted, closed, or
-  unmergeable never merges and never closes the source issue. Ralphie retains
-  the feature branch and pull request, persists the active recoverable closure
-  gate (PR number, base/head, review stage and attempts, approved evidence,
-  check snapshot, revision count, gate status, and terminal reason), and stops
-  before merging. Review exhaustion is terminal for that run and leaves the
-  issue/PR open. Resuming locates the existing matching pull request, reuses
-  only same-head approval evidence, continues or re-observes pending/failed
-  gates, reconciles ambiguous revision delivery using the remote-head boundary,
-  and reconciles an already-merged PR without another merge call.
 - The agent runtime is closed on success, failure, cancellation, and scoped defects. Ordinary
   failures set process exit code `1`.
 - Cancellation is checked before long-running boundaries and passed into the agent runtime.

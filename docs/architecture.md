@@ -37,7 +37,7 @@ effects and validate their invariants at the boundary.
 
 | Area | Responsibility |
 | --- | --- |
-| `src/github/` | GitHub CLI authentication, Octokit, issue discovery, mutations, native sub-issues/dependencies, decomposition links, check snapshot normalization, and bounded, deadline-aware check observation. |
+| `src/github/` | GitHub CLI authentication, Octokit, issue discovery, mutations, native sub-issues/dependencies, and decomposition links. |
 | `src/git/` | Checkout preparation, checkpoints, deterministic issue operations, invariants, and remote safety. |
 | `src/issues/` | Queueing, complexity routing, implementation, review, recovery, and decomposition. |
 | `src/agent/` | Ralphie's session, prompt, schema, diagnostics, and structured-output boundary. |
@@ -49,41 +49,6 @@ effects and validate their invariants at the boundary.
 
 `src/workflow.ts` orchestrates the issue modules. `src/runtime.ts` assembles
 their live implementations into one explicit runtime object.
-
-## Read-only check observation contract
-
-The live runtime exposes `runtime.pipelineObservation.observe(...)` for the PR
-delivery check gate. It observes one immutable 40- or 64-character commit SHA and is
-read-only: with an Octokit client it uses paginated Check Run and legacy commit
-status reads plus `repos.getBranch` for the final HEAD race check. Tests and
-other read-only callers may provide `fetchSnapshot`, `readHead`, and injected
-clock/sleep/request dependencies without importing the collector internals.
-
-The canonical settings and defaults are:
-
-| Setting | Default | Policy |
-| --- | ---: | --- |
-| `registrationGraceMs` | `0` | Keep polling an empty `no-checks` snapshot until grace expires, then return `no-pipelines-discovered`. |
-| `quiescenceMs` | `0` | Require the terminal normalized set to remain unchanged for this window. |
-| `deadlineMs` | `30,000` | Absolute bound from `observe` start; timeout wins over a late read or sleep. |
-| `initialBackoffMs` / `maxBackoffMs` | `1,000` / `30,000` | Exponential polling backoff, capped at the maximum and remaining deadline. |
-| `backoffFactor` | `2` | Multiplier for ordinary polling delays. |
-| `rateLimitRetries` | `3` | Maximum retries per poll when a usable server hint is available. |
-| `maxRateLimitDelayMs` | `30,000` | A larger `Retry-After` or reset delay fails closed instead of being silently capped. |
-| `stableTerminalConfirmations` | `1` | Number of identical green terminal snapshots required. |
-
-A green result requires at least one complete item, every item to be `passing`,
-no source or completeness errors, the configured stability checks, and a final
-branch HEAD equal to the observed SHA. Pending items continue polling until the
-absolute deadline. Failing or cancelled items fail closed; neutral and skipped
-items are retained as `acceptable` but are not green. Unknown API values,
-malformed records, missing scope, collection failures, and no checks after grace
-are non-green outcomes. Rate-limit hints are honored exactly only when the
-hint fits both the configured cap and remaining deadline. Every request and
-sleep receives an abortable derived signal; caller cancellation returns an
-`aborted` outcome with its original reason, distinct from timeout or read
-failure. Normalized items retain source/producer identity and raw diagnostic
-fields for audit consumers.
 
 ## Dependency and side-effect rules
 
@@ -103,8 +68,7 @@ workspace; run state and recovery artifacts belong under the workspace's
 
 For workflow behavior and the agent/deterministic boundary, see [Workflows](workflows.md)
 and [Safety](safety.md). For state transitions and reconciliation, see
-[Operations and recovery](operations-and-recovery.md). For maintenance
-behavior, see [Workflows](workflows.md#modes-and-queue-behavior).
+[Operations and recovery](operations-and-recovery.md).
 
 ## Distribution boundary
 
@@ -127,10 +91,8 @@ the normal check gate.
 | Public trigger and flags | `index.ts`, `src/cli.ts`, `src/command.ts`, `src/options.ts` |
 | Runtime dependency assembly | `src/runtime.ts` |
 | Run orchestration, queue, state transitions | `src/workflow.ts`, `src/issues/queue.ts` |
-| Check snapshot normalization and collection | `src/github/pipeline-snapshot.ts`, `src/github/pipeline-snapshot-collector.ts` |
-| Bounded, deadline-aware check observation, paginated exact-SHA reads, retries, and final HEAD check | `src/github/pipeline-observation.ts`, `src/github/pipeline-snapshot-collector.ts` |
 | Complexity routing | `src/issues/executor.ts`, `src/issues/complexity.ts` |
-| Implementation/review/delivery | `src/issues/implementation-executor.ts`, `src/issues/pull-request-review.ts`, `src/issues/pull-request-review-coordinator.ts`, `src/github/pull-requests.ts` |
+| Implementation/review/delivery | `src/issues/implementation-executor.ts`, `src/issues/verification.ts`, `src/git/issue-operations.ts`, `src/git/remote-safety.ts` |
 | Decomposition and GitHub mutations | `src/issues/decomposition-executor.ts`, `src/github/issue-mutations.ts`, `src/github/issue-relationships.ts` |
 | Pi model catalog, credentials, tools, sessions, and structured results | `src/pi/`, `src/agent/` |
 | Git checkpoints, safety, and branches | `src/git/` |

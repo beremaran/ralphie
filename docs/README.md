@@ -25,7 +25,7 @@ buried in a landing page.
 3. [Operations and recovery](operations-and-recovery.md) — interpret output,
    inspect artifacts, resume interrupted runs, and clean up safely.
 4. [Workflows](workflows.md) — understand implementation, decomposition, and
-   `lgtm` versus `pr` delivery.
+   direct-push delivery.
 
 ### Contributor
 
@@ -50,7 +50,7 @@ buried in a landing page.
 | Page | Purpose |
 | --- | --- |
 | [Getting started](getting-started.md) | Install Ralphie, configure credentials, verify it, and run the first dry run. |
-| [Workflows](workflows.md) | Explain issue routing, implementation, decomposition, and delivery modes. |
+| [Workflows](workflows.md) | Explain issue routing, implementation, decomposition, and direct-push delivery. |
 | [Safety](safety.md) | Define deterministic Git/GitHub safety checks and destructive workspace behavior. |
 | [CLI reference](cli-reference.md) | Record the command syntax, options, defaults, environment variables, and recipes. |
 | [Operations and recovery](operations-and-recovery.md) | Document progress, artifacts, state, resume, cancellation, failure, and cleanup. |

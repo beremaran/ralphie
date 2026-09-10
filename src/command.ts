@@ -9,7 +9,6 @@ import {
     resolveRalphieConfig,
     type IssueRalphieConfig,
     validateRalphieCliOptions,
-    WorkflowMode,
     DEFAULT_MAX_DECOMPOSITION_DEPTH,
 } from "./options.ts";
 import { IssueOrder, IssueSort } from "./github/issues.ts";
@@ -38,7 +37,6 @@ import { RalphieError } from "./shared/error.ts";
 
 const cliOptions = {
     branch: { type: "string", short: "b" },
-    workflow: { type: "string" },
     "on-needs-attention": { type: "string" },
     "on-issue-failure": { type: "string" },
     "notify-needs-attention": { type: "boolean" },
@@ -215,10 +213,6 @@ const parseCliOptions = (
     return {
         repo,
         branch: asString(values, "branch"),
-        workflow:
-            asString(values, "workflow") === undefined
-                ? undefined
-                : z.enum(WorkflowMode).parse(asString(values, "workflow")),
         onNeedsAttention,
         onIssueFailure: parseIssueFailurePolicy(values),
         ...notificationOptions,
@@ -317,7 +311,6 @@ Turn open GitHub issues into reviewed commits through pi.
 
 Options:
   -b, --branch <name>          Base branch to operate on
-      --workflow <mode>        Issue workflow: lgtm or pr (default lgtm)
       --on-needs-attention <halt|continue>
                                Needs-attention policy (default halt)
       --on-issue-failure <halt|continue>
@@ -492,7 +485,6 @@ const workflowOptionsFor = (
     runId: string,
     resumeState: RunState | undefined,
 ) => ({
-    workflow: config.workflow,
     repo: config.repo,
     branch: config.branch,
     maxIssues: config.maxIssues,

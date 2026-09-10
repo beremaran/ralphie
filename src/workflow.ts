@@ -46,10 +46,8 @@ import {
     DEFAULT_NEEDS_ATTENTION_POLICY,
     DEFAULT_ISSUE_FAILURE_POLICY,
     DEFAULT_MAX_DECOMPOSITION_DEPTH,
-    DEFAULT_WORKFLOW_MODE,
     NeedsAttentionPolicy,
     IssueFailurePolicy,
-    WorkflowMode,
 } from "./options.ts";
 import type { IssueWorkflowRuntime } from "./runtime.ts";
 
@@ -89,9 +87,6 @@ const checkCancellation = (signal: AbortSignal | undefined): void => {
         });
     }
 };
-
-const issueFeatureBranch = (issueNumber: number): string =>
-    `ralphie/issue-${issueNumber}`;
 
 const outcomeMessage = (
     issueNumber: number,
@@ -349,14 +344,12 @@ type PersistWorkflowStateInput = {
     readonly actualRunId: string;
     readonly repository: string;
     readonly branch: string;
-    readonly workflowMode: WorkflowMode;
     readonly onNeedsAttention: NeedsAttentionPolicy;
     readonly issueFailurePolicy: IssueFailurePolicy;
     readonly dryRun: boolean;
     readonly notificationsEnabled: boolean;
     readonly needsAttentionLabel?: string;
     readonly pendingNotification?: RunState["pendingNotification"];
-    readonly prClosure?: RunState["prClosure"];
     readonly selection: AgentSelection;
     readonly issueLimit?: number;
     readonly maxDecompositionDepth: number;
@@ -409,7 +402,6 @@ const persistWorkflowState = async (
         runId: input.actualRunId,
         repository: input.repository,
         branch: input.branch,
-        workflow: input.workflowMode,
         onNeedsAttention: input.onNeedsAttention,
         onIssueFailure: input.issueFailurePolicy,
         maxDecompositionDepth: input.maxDecompositionDepth,
@@ -421,9 +413,6 @@ const persistWorkflowState = async (
         ...(input.pendingNotification === undefined
             ? {}
             : { pendingNotification: input.pendingNotification }),
-        ...(input.prClosure === undefined
-            ? {}
-            : { prClosure: input.prClosure }),
         selection: input.selection,
         ...(input.issueLimit === undefined
             ? {}
@@ -447,9 +436,7 @@ type WorkflowIssueContext = {
     readonly issue: GitHubIssue;
     readonly current: number;
     readonly total: number;
-    readonly featureBranch: string;
     readonly issueBaseCheckout: WorkflowCheckout;
-    readonly issueRepositories: ReadonlyArray<RepositoryCheckout>;
     readonly resumedClosureOutcome?: IssueExecutionOutcome;
 };
 
@@ -592,6 +579,11 @@ type RepositoryCheckout = {
     readonly branch: string;
 };
 
+/**
+ * When a run stopped after a completed issue's commit was pushed but before
+ * the issue was closed, resume must finish the closure instead of rerunning
+ * implementation.
+ */
 const resumedClosureOutcomeFor = (
     resumeState: RunState | undefined,
     issueNumber: number,
@@ -611,7 +603,6 @@ const resumedClosureOutcomeFor = (
 };
 
 export type WorkflowOptions = {
-    readonly workflow?: WorkflowMode;
     readonly repo: string;
     readonly branch?: string;
     readonly maxIssues?: number;
@@ -641,7 +632,6 @@ export type WorkflowOptions = {
 };
 
 type WorkflowConfiguration = {
-    readonly requestedWorkflow: WorkflowMode;
     readonly repo: string;
     readonly requestedBranch?: string;
     readonly maxIssues?: number;
@@ -668,8 +658,6 @@ type WorkflowConfiguration = {
     readonly dryRun: boolean;
     readonly actualRunId: string;
     readonly effectiveDryRun: boolean;
-    readonly workflowMode: WorkflowMode;
-    readonly usesPullRequests: boolean;
     readonly statePath: string;
 };
 
@@ -684,7 +672,6 @@ const makeWorkflowConfiguration = (
     options: WorkflowOptions,
 ): WorkflowConfiguration => {
     const {
-        workflow: requestedWorkflow = DEFAULT_WORKFLOW_MODE,
         repo,
         branch: requestedBranch,
         maxIssues,
@@ -718,8 +705,6 @@ const makeWorkflowConfiguration = (
     const effectiveNeedsAttentionLabel =
         resumeState?.needsAttentionLabel ?? needsAttentionLabel;
     const effectiveDryRun = resumeState?.dryRun ?? dryRun;
-    const workflowMode = resumeState?.workflow ?? requestedWorkflow;
-    const usesPullRequests = workflowMode === WorkflowMode.Pr;
     const statePath =
         resumePath ??
         join(
@@ -730,7 +715,6 @@ const makeWorkflowConfiguration = (
             "state.json",
         );
     return {
-        requestedWorkflow,
         repo,
         requestedBranch,
         maxIssues,
@@ -760,8 +744,6 @@ const makeWorkflowConfiguration = (
         dryRun,
         actualRunId,
         effectiveDryRun,
-        workflowMode,
-        usesPullRequests,
         statePath,
     };
 };
@@ -806,7 +788,6 @@ const emitRunStarted = async (
             maxDecompositionDepth: config.maxDecompositionDepth,
             runId: config.actualRunId,
             dryRun: config.effectiveDryRun,
-            workflow: config.workflowMode,
             notificationsEnabled: config.notificationsEnabled,
             ...(config.needsAttentionLabel === undefined
                 ? {}
@@ -831,7 +812,6 @@ const emitRunSucceeded = async (
         message: summaryMessage("Run completed", summary.counts),
         details: {
             runId: summary.runId,
-            workflow: config.workflowMode,
             counts: summary.counts,
             routes: routeSummary(summary.outcomes),
             statePath: config.statePath,
@@ -884,7 +864,6 @@ const emitRunFailed = async (
         message: `Run failed: ${errorMessage(error)}`,
         details: {
             runId: config.actualRunId,
-            workflow: config.workflowMode,
             statePath: config.statePath,
         },
     });
@@ -936,8 +915,6 @@ export const workflow = async (
         needsAttentionLabel,
         actualRunId,
         effectiveDryRun,
-        workflowMode,
-        usesPullRequests,
         statePath,
     } = config;
     const {
@@ -951,9 +928,7 @@ export const workflow = async (
         gitRepository: repository,
         gitRepositoryInvariant: invariantService,
         gitIssueCheckpoint: checkpoints,
-        gitIssueOperations: issueOperations,
         parentCompletion,
-        pullRequestClosure,
         issueExecutor: normalIssueExecutor,
         dryRunIssueExecutor,
         agentRuntime,
@@ -964,7 +939,6 @@ export const workflow = async (
     let activeIssue: RunState["activeIssue"] | undefined;
     let pendingNotification: RunState["pendingNotification"] =
         resumeState?.pendingNotification;
-    let prClosure: RunState["prClosure"] = resumeState?.prClosure;
     const activeQueueIssues = new Map<number, GitHubIssue>();
     let persistCancellationState: (() => Promise<void>) | undefined;
     let restoreCancellationCheckout: (() => Promise<void>) | undefined;
@@ -1153,14 +1127,12 @@ export const workflow = async (
                         actualRunId,
                         repository: repo,
                         branch,
-                        workflowMode,
                         onNeedsAttention,
                         issueFailurePolicy,
                         dryRun: effectiveDryRun,
                         notificationsEnabled,
                         needsAttentionLabel,
                         pendingNotification,
-                        prClosure,
                         selection,
                         issueLimit: resumeState?.maxIssues ?? maxIssues,
                         maxDecompositionDepth,
@@ -1208,57 +1180,6 @@ export const workflow = async (
             diagnostics,
             discoveredIssues,
         } = await prepareWorkflow();
-
-        const prepareIssueBranch = async (
-            issueRepositories: ReadonlyArray<RepositoryCheckout>,
-            featureBranch: string,
-            issueBaseCheckout: WorkflowCheckout,
-            resumedClosureOutcome: IssueExecutionOutcome | undefined,
-        ): Promise<void> => {
-            if (
-                !usesPullRequests ||
-                effectiveDryRun ||
-                (resumedClosureOutcome?.kind ===
-                    IssueExecutionOutcomeKind.Completed &&
-                    resumedClosureOutcome.completion === "already-resolved")
-            ) {
-                return;
-            }
-            await Promise.all(
-                issueRepositories.map((issueRepository) =>
-                    issueOperations.createOrCheckoutFeatureBranch(
-                        issueRepository.repositoryPath,
-                        featureBranch,
-                        issueRepository.branch,
-                        issueBaseCheckout.head,
-                    ),
-                ),
-            );
-        };
-
-        const deliverIssueBranch = async (
-            issueContext: WorkflowIssueContext,
-            outcome: IssueExecutionOutcome,
-        ): Promise<void> => {
-            if (
-                !usesPullRequests ||
-                effectiveDryRun ||
-                issueContext.resumedClosureOutcome !== undefined ||
-                outcome.kind !== IssueExecutionOutcomeKind.Completed ||
-                outcome.completion !== "pushed-commit"
-            ) {
-                return;
-            }
-            await Promise.all(
-                issueContext.issueRepositories.map((issueRepository) =>
-                    issueOperations.push(
-                        issueRepository.repositoryPath,
-                        issueContext.featureBranch,
-                        outcome.commitSha,
-                    ),
-                ),
-            );
-        };
 
         const restoreIssueCheckout =
             (issueBaseCheckout: WorkflowCheckout): (() => Promise<void>) =>
@@ -1342,20 +1263,7 @@ export const workflow = async (
         const captureNeedsAttentionCheckout = async (
             issueContext: WorkflowIssueContext,
         ): Promise<WorkflowCheckout> => {
-            if (
-                usesPullRequests &&
-                !effectiveDryRun &&
-                issueContext.resumedClosureOutcome === undefined
-            ) {
-                await Promise.all(
-                    issueContext.issueRepositories.map((issueRepository) =>
-                        issueOperations.restoreBaseCheckout(
-                            issueRepository.repositoryPath,
-                            issueRepository.branch,
-                        ),
-                    ),
-                );
-            }
+            void issueContext;
             return await captureCheckout();
         };
 
@@ -1383,14 +1291,6 @@ export const workflow = async (
                         : "issue-closure",
             };
             const issueBaseCheckout = { ...checkout };
-            const featureBranch = issueFeatureBranch(issue.number);
-            const issueRepositories = repositoryCheckouts;
-            await prepareIssueBranch(
-                issueRepositories,
-                featureBranch,
-                issueBaseCheckout,
-                resumedClosureOutcome,
-            );
             restoreCancellationCheckout = effectiveDryRun
                 ? undefined
                 : restoreIssueCheckout(issueBaseCheckout);
@@ -1399,10 +1299,10 @@ export const workflow = async (
                 issue,
                 current,
                 total,
-                featureBranch,
                 issueBaseCheckout,
-                issueRepositories,
-                resumedClosureOutcome,
+                ...(resumedClosureOutcome === undefined
+                    ? {}
+                    : { resumedClosureOutcome }),
             };
         };
 
@@ -1413,11 +1313,6 @@ export const workflow = async (
             if (issueContext.resumedClosureOutcome !== undefined) {
                 return issueContext.resumedClosureOutcome;
             }
-            const repositoryPath =
-                issueContext.issueRepositories.find(
-                    ({ repository }) =>
-                        repository.toLowerCase() === repo.toLowerCase(),
-                )?.repositoryPath ?? prepared.path;
             return await track(
                 progress,
                 "issue-execution",
@@ -1426,13 +1321,9 @@ export const workflow = async (
                     issueExecutor.execute({
                         issue: issueContext.issue,
                         repository: repo,
-                        repositoryPath,
-                        targetBranch:
-                            usesPullRequests && !effectiveDryRun
-                                ? issueContext.featureBranch
-                                : branch,
-                        allowMissingRemoteBranch:
-                            usesPullRequests && !effectiveDryRun,
+                        repositoryPath: prepared.path,
+                        targetBranch: branch,
+                        allowMissingRemoteBranch: false,
                         workspace,
                         runId: actualRunId,
                         octokit,
@@ -1461,72 +1352,14 @@ export const workflow = async (
             );
         };
 
-        /**
-         * Deliver the pull request through the focused post-PR closure seam.
-         * Review and revision decisions stay inside the review coordinator;
-         * this workflow passes explicit inputs and consumes the closure
-         * outcome without tracking the internal closure lifecycle.
-         */
-        const deliverPullRequest = async (
-            issueContext: WorkflowIssueContext,
-            server: PiAgentRuntime,
-        ): Promise<void> => {
-            const result = await pullRequestClosure.close({
-                client: octokit,
-                repository: repo,
-                branch,
-                featureBranch: issueContext.featureBranch,
-                issue: issueContext.issue,
-                repositoryPath:
-                    issueContext.issueRepositories[0]!.repositoryPath,
-                agent: server.client,
-                agentSelection: selection,
-                verificationCommands: config.verificationCommands,
-                runId: actualRunId,
-                workspace,
-                diagnostics,
-                signal,
-                initialClosure: prClosure,
-                progress,
-                current: issueContext.current,
-                total: issueContext.total,
-                onClosure: async (next) => {
-                    prClosure = next;
-                    await persistState(RunStateStatus.Active, {
-                        issueNumber: issueContext.issue.number,
-                        stage: "issue-closure",
-                    });
-                },
-            });
-            prClosure = result.closure;
-        };
-
         const closeCompletedIssue = async (
             issueContext: WorkflowIssueContext,
             outcome: Extract<
                 IssueExecutionOutcome,
                 { readonly kind: IssueExecutionOutcomeKind.Completed }
             >,
-            server: PiAgentRuntime,
         ): Promise<void> => {
             if (effectiveDryRun) return;
-            if (usesPullRequests && outcome.completion === "pushed-commit") {
-                await track(
-                    progress,
-                    "issue-closure",
-                    `Gating pull request delivery for issue #${issueContext.issue.number}...`,
-                    () => deliverPullRequest(issueContext, server),
-                    "Pull request merged; GitHub will close the issue.",
-                    {
-                        issue: {
-                            number: issueContext.issue.number,
-                            title: issueContext.issue.title,
-                        },
-                        details: { completion: outcome.completion },
-                    },
-                );
-                return;
-            }
             await track(
                 progress,
                 "issue-closure",
@@ -1552,17 +1385,15 @@ export const workflow = async (
         const completeIssue = async (
             issueContext: WorkflowIssueContext,
             outcome: IssueExecutionOutcome,
-            server: PiAgentRuntime,
         ): Promise<void> => {
             if (outcome.kind !== IssueExecutionOutcomeKind.Completed) return;
             checkout = await captureCheckout();
-            await deliverIssueBranch(issueContext, outcome);
             activeIssue = {
                 issueNumber: issueContext.issue.number,
                 stage: "issue-closure",
             };
             await persistState(RunStateStatus.Active, activeIssue);
-            await closeCompletedIssue(issueContext, outcome, server);
+            await closeCompletedIssue(issueContext, outcome);
             await reconcileParentOfCompletedChild(issueContext);
         };
 
@@ -1633,7 +1464,6 @@ export const workflow = async (
                 ),
                 details: {
                     runId: summary.runId,
-                    workflow: workflowMode,
                     counts: summary.counts,
                     routes: routeSummary(summary.outcomes),
                     statePath,
@@ -1770,7 +1600,6 @@ export const workflow = async (
             await restoreCancellationCheckout?.();
             activeQueueIssues.delete(issueContext.issue.number);
             activeIssue = undefined;
-            prClosure = undefined;
             restoreCancellationCheckout = undefined;
             checkout = await captureCheckout();
             await persistState(RunStateStatus.Active);
@@ -1819,7 +1648,6 @@ export const workflow = async (
         ): Promise<void> => {
             activeIssue = undefined;
             activeQueueIssues.delete(issueContext.issue.number);
-            prClosure = undefined;
             restoreCancellationCheckout = undefined;
             checkout = await captureCheckout();
             await persistState(RunStateStatus.Active);
@@ -1870,7 +1698,6 @@ export const workflow = async (
         const finalizeIssue = async (
             issueContext: WorkflowIssueContext,
             outcome: IssueExecutionOutcome,
-            server: PiAgentRuntime,
         ): Promise<void> => {
             if (issueContext.resumedClosureOutcome === undefined) {
                 recordIssueOutcome(issueContext.issue.number, outcome);
@@ -1884,7 +1711,7 @@ export const workflow = async (
                 await finishSuccessfulIssue(issueContext);
                 return;
             }
-            await completeIssue(issueContext, outcome, server);
+            await completeIssue(issueContext, outcome);
             completeQueueItem(issueContext.issue.number, outcome);
             await finishSuccessfulIssue(issueContext);
             await refreshAfterDecomposition(outcome);
@@ -1994,7 +1821,6 @@ export const workflow = async (
                 queue.skip(issue.number);
                 activeQueueIssues.delete(issue.number);
                 activeIssue = undefined;
-                prClosure = undefined;
                 restoreCancellationCheckout = undefined;
                 await persistState(RunStateStatus.Active);
                 return true;
@@ -2002,7 +1828,7 @@ export const workflow = async (
             activeQueueIssues.set(issue.number, issue);
             const issueContext = await prepareIssue(issue);
             const outcome = await executeIssue(issueContext, server);
-            await finalizeIssue(issueContext, outcome, server);
+            await finalizeIssue(issueContext, outcome);
             return true;
         };
 

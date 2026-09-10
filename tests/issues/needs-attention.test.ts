@@ -357,14 +357,6 @@ const makeTrackedStore = async (
             throwIfFailing("appendReview");
             await store.appendReview(review, signal);
         },
-        appendPullRequestReview: async (review, signal) => {
-            throwIfFailing("appendPullRequestReview");
-            await store.appendPullRequestReview(review, signal);
-        },
-        recordPullRequestDeliveryState: async (value, signal) => {
-            throwIfFailing("recordPullRequestDeliveryState");
-            await store.recordPullRequestDeliveryState(value, signal);
-        },
         recordCreatedIssue: async (key, createdIssueNumber, signal) => {
             throwIfFailing("recordCreatedIssue");
             await store.recordCreatedIssue(key, createdIssueNumber, signal);
@@ -562,7 +554,6 @@ const makeImplementationHarness = async (
             trace.push("ops:readDiff");
             return "";
         },
-        readCommittedBinaryDiff: async () => "",
         hasStagedChanges: async () => {
             trace.push("ops:hasStaged");
             return true;

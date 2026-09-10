@@ -21,7 +21,3 @@ created commit.
 An authoritative remote branch result that matches neither the expected prior
 commit nor the created commit.
 _Avoid_: Ambiguous push (when this remote evidence is available)
-
-**Check snapshot**:
-Normalized all-visible-checks evidence for one exact commit.
-_Avoid_: pipeline snapshot, PR snapshot

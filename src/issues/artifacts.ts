@@ -25,15 +25,6 @@ import {
     IssueResolutionStatus,
     type NeedsAttentionDecision,
 } from "./decisions.ts";
-import {
-    approvedPullRequestReviewEvidenceSchema,
-    pullRequestRevisionIntentSchema,
-    pullRequestReviewAttemptsSchema,
-    pullRequestReviewAttemptSchema,
-    type ApprovedPullRequestReviewEvidence,
-    type PullRequestRevisionIntent,
-    type PullRequestReviewAttempt,
-} from "./pull-request-review.ts";
 import type { ReviewAttempt } from "./recovery.ts";
 import { REVIEW_ITERATION_LIMIT } from "./stage.ts";
 import { verificationEvidenceSchema } from "./verification.ts";
@@ -42,9 +33,6 @@ export enum IssueArtifactKind {
     ComplexityDecision = "complexity-decision",
     IssueCheckpoint = "issue-checkpoint",
     ReviewAttempts = "review-attempts",
-    PullRequestReviewAttempts = "pull-request-review-attempts",
-    ApprovedPullRequestReviewEvidence = "approved-pull-request-review-evidence",
-    PullRequestDeliveryState = "pull-request-delivery-state",
     CommitMessageDecision = "commit-message-decision",
     CreatedCommit = "created-commit",
     IssueResolutionDecision = "issue-resolution-decision",
@@ -99,55 +87,10 @@ export type NeedsAttentionHandoffArtifact = {
     readonly checkpoint: IssueCheckpoint;
 };
 
-/**
- * Compact per-issue checkpoint for the post-creation PR lifecycle. Large
- * provider snapshots remain in run state; this record is the artifact-side
- * identity and mutation boundary used to resume review/publication safely.
- */
-export type PullRequestDeliveryStateArtifact = {
-    readonly pullRequestNumber: number;
-    readonly baseSha: string;
-    readonly headSha: string;
-    readonly stage:
-        | "review"
-        | "revision-fix"
-        | "revision-delivery"
-        | "publication"
-        | "checks"
-        | "merge";
-    readonly status:
-        | "pending"
-        | "approved"
-        | "green"
-        | "merged"
-        | "failed"
-        | "exhausted"
-        | "stale"
-        | "delivery-recoverable";
-    readonly reviewAttempts: number;
-    readonly revisionCount: number;
-    readonly checkHeadSha?: string;
-    readonly checkStatus?: "green" | "pending" | "failed" | "unknown";
-    readonly checkFingerprint?: string;
-    readonly revisionIntent?: PullRequestRevisionIntent;
-    readonly delivery?: {
-        readonly status: "confirmed" | "external-movement" | "ambiguous";
-        readonly headSha: string;
-        readonly parentSha: string;
-        readonly remoteSha?: string;
-        readonly pushResponseLost?: boolean;
-    };
-    readonly terminalReason?: string;
-    readonly updatedAt: string;
-};
-
 export type IssueArtifactValues = {
     readonly [IssueArtifactKind.ComplexityDecision]: ComplexityDecisionArtifact;
     readonly [IssueArtifactKind.IssueCheckpoint]: IssueCheckpoint;
     readonly [IssueArtifactKind.ReviewAttempts]: ReadonlyArray<ReviewAttempt>;
-    readonly [IssueArtifactKind.PullRequestReviewAttempts]: ReadonlyArray<PullRequestReviewAttempt>;
-    readonly [IssueArtifactKind.ApprovedPullRequestReviewEvidence]: ApprovedPullRequestReviewEvidence;
-    readonly [IssueArtifactKind.PullRequestDeliveryState]: PullRequestDeliveryStateArtifact;
     readonly [IssueArtifactKind.CommitMessageDecision]: CommitMessageDecision;
     readonly [IssueArtifactKind.CreatedCommit]: {
         readonly sha: string;
@@ -189,15 +132,6 @@ export type IssueArtifactStore = {
     ) => Promise<void>;
     readonly appendReview: (
         review: ReviewAttempt,
-        signal?: AbortSignal,
-    ) => Promise<void>;
-    readonly appendPullRequestReview: (
-        review: PullRequestReviewAttempt,
-        signal?: AbortSignal,
-    ) => Promise<void>;
-    /** Replace the latest compact post-PR lifecycle checkpoint. */
-    readonly recordPullRequestDeliveryState: (
-        value: PullRequestDeliveryStateArtifact,
         signal?: AbortSignal,
     ) => Promise<void>;
     readonly recordCreatedIssue: (
@@ -405,56 +339,6 @@ export const needsAttentionHandoffArtifactSchema = z
     })
     .strict();
 
-export const pullRequestDeliveryStateArtifactSchema = z
-    .object({
-        pullRequestNumber: z.number().int().positive(),
-        baseSha: z.string().min(1),
-        headSha: z.string().min(1),
-        stage: z.enum([
-            "review",
-            "revision-fix",
-            "revision-delivery",
-            "publication",
-            "checks",
-            "merge",
-        ]),
-        status: z.enum([
-            "pending",
-            "approved",
-            "green",
-            "merged",
-            "failed",
-            "exhausted",
-            "stale",
-            "delivery-recoverable",
-        ]),
-        reviewAttempts: z
-            .number()
-            .int()
-            .nonnegative()
-            .max(REVIEW_ITERATION_LIMIT),
-        revisionCount: z.number().int().nonnegative(),
-        checkHeadSha: z.string().min(1).optional(),
-        checkStatus: z
-            .enum(["green", "pending", "failed", "unknown"])
-            .optional(),
-        checkFingerprint: z.string().min(1).optional(),
-        revisionIntent: pullRequestRevisionIntentSchema.optional(),
-        delivery: z
-            .object({
-                status: z.enum(["confirmed", "external-movement", "ambiguous"]),
-                headSha: z.string().min(1),
-                parentSha: z.string().min(1),
-                remoteSha: z.string().min(1).optional(),
-                pushResponseLost: z.boolean().optional(),
-            })
-            .strict()
-            .optional(),
-        terminalReason: z.string().min(1).optional(),
-        updatedAt: z.string().datetime(),
-    })
-    .strict();
-
 const validatedArtifactSchemas: Partial<Record<IssueArtifactKind, z.ZodType>> =
     {
         [IssueArtifactKind.NeedsAttentionDecision]:
@@ -463,10 +347,6 @@ const validatedArtifactSchemas: Partial<Record<IssueArtifactKind, z.ZodType>> =
             complexityDecisionArtifactSchema,
         [IssueArtifactKind.IssueResolutionDecision]:
             issueResolutionDecisionArtifactSchema,
-        [IssueArtifactKind.ApprovedPullRequestReviewEvidence]:
-            approvedPullRequestReviewEvidenceSchema,
-        [IssueArtifactKind.PullRequestDeliveryState]:
-            pullRequestDeliveryStateArtifactSchema,
         [IssueArtifactKind.NeedsAttentionHandoff]:
             needsAttentionHandoffArtifactSchema,
     };
@@ -475,61 +355,6 @@ const createdCommitSchema = z.object({
     sha: z.string().min(1),
     treeSha: z.string().min(1),
 });
-
-const matchingPullRequestApproval = (
-    attempts: ReadonlyArray<PullRequestReviewAttempt> | undefined,
-    evidence: ApprovedPullRequestReviewEvidence | undefined,
-): boolean =>
-    evidence === undefined ||
-    attempts?.some(
-        (attempt) =>
-            attempt.pullRequestNumber === evidence.pullRequestNumber &&
-            attempt.baseSha.toLowerCase() === evidence.baseSha.toLowerCase() &&
-            attempt.reviewedHeadSha.toLowerCase() ===
-                evidence.reviewedHeadSha.toLowerCase() &&
-            attempt.attempt === evidence.attempt &&
-            attempt.sessionID === evidence.sessionID &&
-            JSON.stringify(attempt.decision) ===
-                JSON.stringify(evidence.decision),
-    ) === true;
-
-const invalidateApprovalForDifferentHead = (
-    nextValues: Map<IssueArtifactKind, unknown>,
-    currentValues: ReadonlyMap<IssueArtifactKind, unknown>,
-    reviewedHeadSha: string,
-): void => {
-    const approval = currentValues.get(
-        IssueArtifactKind.ApprovedPullRequestReviewEvidence,
-    ) as ApprovedPullRequestReviewEvidence | undefined;
-    if (
-        approval !== undefined &&
-        approval.reviewedHeadSha.toLowerCase() !== reviewedHeadSha.toLowerCase()
-    ) {
-        nextValues.delete(IssueArtifactKind.ApprovedPullRequestReviewEvidence);
-    }
-};
-
-const validatePullRequestApproval = (
-    artifacts: {
-        readonly [IssueArtifactKind.PullRequestReviewAttempts]?: ReadonlyArray<PullRequestReviewAttempt>;
-        readonly [IssueArtifactKind.ApprovedPullRequestReviewEvidence]?: ApprovedPullRequestReviewEvidence;
-    },
-    context: z.RefinementCtx,
-): void => {
-    if (
-        !matchingPullRequestApproval(
-            artifacts[IssueArtifactKind.PullRequestReviewAttempts],
-            artifacts[IssueArtifactKind.ApprovedPullRequestReviewEvidence],
-        )
-    ) {
-        context.addIssue({
-            code: "custom",
-            message:
-                "Approved pull request review evidence must match a stored approved attempt.",
-            path: [IssueArtifactKind.ApprovedPullRequestReviewEvidence],
-        });
-    }
-};
 
 const persistedArtifactsV2BaseSchema = z
     .object({
@@ -540,14 +365,6 @@ const persistedArtifactsV2BaseSchema = z
             .array(reviewAttemptSchema)
             .max(REVIEW_ITERATION_LIMIT)
             .optional(),
-        [IssueArtifactKind.PullRequestReviewAttempts]:
-            pullRequestReviewAttemptsSchema
-                .max(REVIEW_ITERATION_LIMIT)
-                .optional(),
-        [IssueArtifactKind.ApprovedPullRequestReviewEvidence]:
-            approvedPullRequestReviewEvidenceSchema.optional(),
-        [IssueArtifactKind.PullRequestDeliveryState]:
-            pullRequestDeliveryStateArtifactSchema.optional(),
         [IssueArtifactKind.CommitMessageDecision]:
             commitMessageDecisionSchema.optional(),
         [IssueArtifactKind.CreatedCommit]: createdCommitSchema.optional(),
@@ -564,9 +381,7 @@ const persistedArtifactsV2BaseSchema = z
     })
     .strict();
 
-const persistedArtifactsV2Schema = persistedArtifactsV2BaseSchema.superRefine(
-    validatePullRequestApproval,
-);
+const persistedArtifactsV2Schema = persistedArtifactsV2BaseSchema;
 
 const persistedArtifactsSchema = persistedArtifactsV2BaseSchema
     .omit({
@@ -583,8 +398,7 @@ const persistedArtifactsSchema = persistedArtifactsV2BaseSchema
         [IssueArtifactKind.NeedsAttentionHandoff]:
             needsAttentionHandoffArtifactSchema.optional(),
     })
-    .strict()
-    .superRefine(validatePullRequestApproval);
+    .strict();
 
 // Keep the needs-attention artifact unparsed while loading so a malformed
 // freshness record can be removed without discarding the other artifacts for
@@ -1123,19 +937,6 @@ const makeStore = (
                     message: `Created issue numbers for issue ${issueNumber} must use non-empty keys and positive issue numbers.`,
                 });
             }
-            if (
-                kind === IssueArtifactKind.ApprovedPullRequestReviewEvidence &&
-                !matchingPullRequestApproval(
-                    values.get(IssueArtifactKind.PullRequestReviewAttempts) as
-                        | ReadonlyArray<PullRequestReviewAttempt>
-                        | undefined,
-                    value as ApprovedPullRequestReviewEvidence,
-                )
-            ) {
-                throw new RalphieError({
-                    message: `Approved pull request review evidence for issue ${issueNumber} must match a stored approved attempt.`,
-                });
-            }
             const nextValues = new Map(values);
             nextValues.set(kind, value);
             await save(nextValues, signal);
@@ -1187,68 +988,6 @@ const makeStore = (
             );
             const nextValues = new Map(values);
             nextValues.set(IssueArtifactKind.NeedsAttentionDecision, value);
-            await save(nextValues, signal);
-        },
-
-        appendPullRequestReview: async (review, signal) => {
-            throwIfArtifactWriteAborted(signal, issueNumber);
-            let validated: PullRequestReviewAttempt;
-            try {
-                validated = pullRequestReviewAttemptSchema.parse(review);
-            } catch (cause) {
-                throw new RalphieError({
-                    message: `Invalid pull request review attempt for issue ${issueNumber}.`,
-                    cause,
-                });
-            }
-            const existing = (values.get(
-                IssueArtifactKind.PullRequestReviewAttempts,
-            ) ?? []) as ReadonlyArray<PullRequestReviewAttempt>;
-            if (validated.attempt !== existing.length + 1) {
-                throw new RalphieError({
-                    message: `Pull request review attempts for issue ${issueNumber} must be appended in order.`,
-                });
-            }
-            if (existing.length >= REVIEW_ITERATION_LIMIT) {
-                throw new RalphieError({
-                    message: `Pull request review attempt budget exhausted for issue ${issueNumber}.`,
-                });
-            }
-            const first = existing[0];
-            if (
-                first &&
-                (first.pullRequestNumber !== validated.pullRequestNumber ||
-                    first.baseSha !== validated.baseSha)
-            ) {
-                throw new RalphieError({
-                    message: `Pull request review attempt does not match the stored PR/base for issue ${issueNumber}.`,
-                });
-            }
-            const nextValues = new Map(values);
-            nextValues.set(IssueArtifactKind.PullRequestReviewAttempts, [
-                ...existing,
-                validated,
-            ]);
-            invalidateApprovalForDifferentHead(
-                nextValues,
-                values,
-                validated.reviewedHeadSha,
-            );
-            await save(nextValues, signal);
-        },
-
-        recordPullRequestDeliveryState: async (value, signal) => {
-            throwIfArtifactWriteAborted(signal, issueNumber);
-            try {
-                pullRequestDeliveryStateArtifactSchema.parse(value);
-            } catch (cause) {
-                throw new RalphieError({
-                    message: `Invalid pull request delivery state for issue ${issueNumber}.`,
-                    cause,
-                });
-            }
-            const nextValues = new Map(values);
-            nextValues.set(IssueArtifactKind.PullRequestDeliveryState, value);
             await save(nextValues, signal);
         },
 
