@@ -1,6 +1,7 @@
 import type {
     BoxRenderable,
     CliRenderer,
+    InputRenderable,
     ScrollBoxRenderable,
     SelectRenderable,
     StyledText,
@@ -90,7 +91,8 @@ const SPINNER_INTERVAL_MS = 120;
 const PAUSE_HINT = "p pause · s stop · q quit";
 const RESUME_HINT = "p resume · s stop · q quit";
 const NAVIGATION_HINT = "m model · [ ] issue · ↑↓";
-const PICKER_HINT = "↑↓ move · Tab pane · Enter apply · Esc cancel";
+const PICKER_HINT =
+    "type to search · ↑↓ move · Tab pane · Enter apply · Esc cancel";
 const PICKER_COLORS = {
     backgroundColor: "#16161e",
     focusedBackgroundColor: "#1a1b26",
@@ -149,6 +151,7 @@ type Ui = {
     readonly transcript: ScrollBoxRenderable;
     readonly status: TextRenderable;
     readonly pickerOverlay: BoxRenderable;
+    readonly searchInput: InputRenderable;
     readonly modelList: SelectRenderable;
     readonly levelList: SelectRenderable;
 };
@@ -219,6 +222,7 @@ export const makeTuiProgressCoordinator = (
     let paused = true;
     let stopRequested = false;
     let modelPickerOpen = false;
+    let modelQuery = "";
     let pickedSelection: RunControlSelection | undefined;
     const resumeWaiters: Array<() => void> = [];
 
@@ -587,8 +591,18 @@ export const makeTuiProgressCoordinator = (
             ? pickedSelection.variant
             : state.model?.variant;
 
+    const pickerModels = (): ReadonlyArray<DisplayModel> => {
+        const query = modelQuery.trim().toLowerCase();
+        if (query === "") return state.models;
+        return state.models.filter((model) =>
+            `${model.name} ${model.provider}/${model.id}`
+                .toLowerCase()
+                .includes(query),
+        );
+    };
+
     const currentPickerModel = (current: Ui): DisplayModel | undefined =>
-        state.models[current.modelList.getSelectedIndex()];
+        pickerModels()[current.modelList.getSelectedIndex()];
 
     const pickerLevelOptions = (
         model: DisplayModel | undefined,
@@ -617,6 +631,15 @@ export const makeTuiProgressCoordinator = (
         current.levelList.setSelectedIndex(selectedLevelIndex(model));
     };
 
+    const refreshModelOptions = (current: Ui): void => {
+        current.modelList.options = pickerModels().map((model) => ({
+            name: model.name,
+            description: `${model.provider}/${model.id}`,
+        }));
+        current.modelList.setSelectedIndex(0);
+        refreshLevelOptions(current);
+    };
+
     const closeModelPicker = (current: Ui): void => {
         if (!modelPickerOpen) return;
         modelPickerOpen = false;
@@ -641,18 +664,17 @@ export const makeTuiProgressCoordinator = (
             return;
         }
         modelPickerOpen = true;
-        current.modelList.options = state.models.map((model) => ({
-            name: model.name,
-            description: `${model.provider}/${model.id}`,
-        }));
+        modelQuery = "";
+        current.searchInput.value = "";
+        refreshModelOptions(current);
         const reference = activeModelReference();
-        const index = state.models.findIndex(
+        const index = pickerModels().findIndex(
             (model) => `${model.provider}/${model.id}` === reference,
         );
         current.modelList.setSelectedIndex(index >= 0 ? index : 0);
         refreshLevelOptions(current);
         current.pickerOverlay.visible = true;
-        current.modelList.focus();
+        current.searchInput.focus();
         current.renderer.requestRender();
     };
 
@@ -674,11 +696,39 @@ export const makeTuiProgressCoordinator = (
     };
 
     const togglePickerPane = (current: Ui): void => {
+        if (current.searchInput.focused) {
+            current.modelList.focus();
+            return;
+        }
         if (current.modelList.focused) {
             current.levelList.focus();
             return;
         }
-        current.modelList.focus();
+        current.searchInput.focus();
+    };
+
+    const moveFocusFromSearch = (key: {
+        readonly name?: string;
+        readonly preventDefault?: () => void;
+    }): void => {
+        withUi((current) => {
+            if (!current.searchInput.focused) return;
+            key.preventDefault?.();
+            current.modelList.focus();
+            if (key.name === "down") current.modelList.moveDown();
+            else current.modelList.moveUp();
+        });
+    };
+
+    const modelPickerToggleKey = (key: {
+        readonly ctrl?: boolean;
+        readonly name?: string;
+        readonly preventDefault?: () => void;
+    }): boolean => {
+        if (key.ctrl === true || key.name !== "m") return false;
+        key.preventDefault?.();
+        withUi(openModelPicker);
+        return true;
     };
 
     const dispatchModelPickerKey = (key: {
@@ -686,12 +736,7 @@ export const makeTuiProgressCoordinator = (
         readonly name?: string;
         readonly preventDefault?: () => void;
     }): boolean => {
-        if (key.ctrl !== true && key.name === "m") {
-            key.preventDefault?.();
-            withUi(modelPickerOpen ? closeModelPicker : openModelPicker);
-            return true;
-        }
-        if (!modelPickerOpen) return false;
+        if (!modelPickerOpen) return modelPickerToggleKey(key);
         if (key.name === "escape") {
             key.preventDefault?.();
             withUi(closeModelPicker);
@@ -702,7 +747,12 @@ export const makeTuiProgressCoordinator = (
             withUi(togglePickerPane);
             return true;
         }
-        // Up/Down/Enter reach the focused Select inside the picker.
+        if (key.name === "down" || key.name === "up") {
+            moveFocusFromSearch(key);
+            return true;
+        }
+        // Typing reaches the focused search input; Up/Down/Enter reach the
+        // focused Select.
         return true;
     };
 
@@ -1199,6 +1249,17 @@ export const makeTuiProgressCoordinator = (
             width: "100%",
             wrapMode: "none",
         });
+        const searchInput = new mod.InputRenderable(renderer, {
+            id: "tui-model-search",
+            width: "100%",
+            value: "",
+            placeholder: "Search models…",
+            backgroundColor: PICKER_COLORS.backgroundColor,
+            focusedBackgroundColor: PICKER_COLORS.focusedBackgroundColor,
+            textColor: PICKER_COLORS.textColor,
+            focusedTextColor: PICKER_COLORS.focusedTextColor,
+            placeholderColor: THEME.dim,
+        });
         const pickerRow = new mod.BoxRenderable(renderer, {
             id: "tui-model-picker-row",
             flexDirection: "row",
@@ -1250,6 +1311,7 @@ export const makeTuiProgressCoordinator = (
             ...PICKER_COLORS,
         });
         pickerBox.add(pickerHint);
+        pickerBox.add(searchInput);
         pickerBox.add(pickerRow);
         pickerRow.add(modelColumn);
         pickerRow.add(levelColumn);
@@ -1290,12 +1352,27 @@ export const makeTuiProgressCoordinator = (
             transcript,
             status,
             pickerOverlay,
+            searchInput,
             modelList,
             levelList,
         };
         transcript.focus();
         modelList.on("selectionChanged", () => {
             if (ui !== undefined) refreshLevelOptions(ui);
+        });
+        searchInput.on("input", (value: string) => {
+            withUi((current) => {
+                modelQuery = value;
+                refreshModelOptions(current);
+                current.renderer.requestRender();
+            });
+        });
+        searchInput.on("enter", () => {
+            withUi((current) => {
+                if (currentPickerModel(current) !== undefined) {
+                    applyModelPick(current);
+                }
+            });
         });
         modelList.on("itemSelected", () => {
             if (ui !== undefined) applyModelPick(ui);

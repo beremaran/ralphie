@@ -583,6 +583,25 @@ describe("OpenTUI progress coordinator", () => {
             variant: "low",
         });
 
+        // Typing filters the catalog; Enter applies the top match.
+        setup.mockInput.pressKey("m");
+        await setup.renderOnce();
+        await setup.mockInput.typeText("gpt-4o");
+        await setup.renderOnce();
+        frame = setup.captureCharFrame();
+        expect(frame).toContain("Select model");
+        expect(frame).toContain("GPT-4o");
+        expect(frame).not.toContain("GPT-5");
+        expect(frame).not.toContain("Claude Sonnet 4");
+        setup.mockInput.pressEnter();
+        await setup.renderOnce();
+        frame = setup.captureCharFrame();
+        expect(frame).not.toContain("Select model");
+        expect(frame).toContain("openai/gpt-4o");
+        expect(control.issueSelection?.()).toEqual({
+            model: { providerID: "openai", modelID: "gpt-4o" },
+        });
+
         await coordinator.dispose();
     });
 
