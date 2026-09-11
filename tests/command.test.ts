@@ -1,26 +1,30 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
 
 import { runCli } from "../src/cli.ts";
 import { HELP_TEXT, parseCliArgs, runCommand } from "../src/command.ts";
 import { RalphieExitCode } from "../src/process/exit-code.ts";
 import { RalphieError } from "../src/shared/error.ts";
 import { IssueOrder, IssueSort } from "../src/github/issues.ts";
-import { RUN_STATE_VERSION, RunStateStatus } from "../src/run/state.ts";
 import { makeTestProgressRecorder } from "./shared/progress-recorder.ts";
 
 describe("native CLI parser", () => {
     test("documents the issue workflow in help", () => {
         expect(HELP_TEXT).toContain("--thinking <level>");
         expect(HELP_TEXT).toContain("--implementation-attempts <n>");
-        expect(HELP_TEXT).toContain("--implementation-fallback-model");
         expect(HELP_TEXT).toContain("--max-decomposition-depth <n>");
         expect(HELP_TEXT).toContain("--notify-needs-attention");
         expect(HELP_TEXT).toContain("--needs-attention-label <name>");
-        expect(HELP_TEXT).not.toContain("maintain-issues");
-        expect(HELP_TEXT).not.toContain("get-pipelines-green");
+        for (const removed of [
+            "maintain-issues",
+            "get-pipelines-green",
+            "--max-issues",
+            "--dry-run",
+            "--resume",
+            "--clean",
+            "--implementation-fallback-model",
+        ]) {
+            expect(HELP_TEXT).not.toContain(removed);
+        }
     });
 
     test("parses positional repository, repeatable labels, flags, and values", () => {
@@ -29,9 +33,6 @@ describe("native CLI parser", () => {
             "--issue-label",
             "bug",
             "--issue-label=ready",
-            "--max-issues",
-            "3",
-            "--dry-run",
         ]);
 
         expect(parsed.help).toBe(false);
@@ -39,8 +40,6 @@ describe("native CLI parser", () => {
         expect(parsed.options).toMatchObject({
             repo: "owner/repository",
             issueLabels: ["bug", "ready"],
-            maxIssues: 3,
-            dryRun: true,
         });
     });
 
@@ -60,15 +59,9 @@ describe("native CLI parser", () => {
             "high",
             "--implementation-attempts",
             "4",
-            "--implementation-fallback-model",
-            "openai/gpt-5.6-sol",
         ]).options;
         expect(options.thinking).toBe("high");
         expect(options.implementationAttempts).toBe(4);
-        expect(options.implementationFallbackModel).toEqual({
-            providerID: "openai",
-            modelID: "gpt-5.6-sol",
-        });
         expect(() =>
             parseCliArgs([
                 "owner/repository",
@@ -116,33 +109,16 @@ describe("native CLI parser", () => {
         );
     });
 
-    test("passes saved notification intent and label through resume", async () => {
-        const directory = await mkdtemp(join(tmpdir(), "ralphie-command-"));
-        const path = join(directory, "state.json");
+    test("passes notification opt-in and label to the workflow", async () => {
         let workflowOptions: Record<string, unknown> | undefined;
-        try {
-            await writeFile(
-                path,
-                JSON.stringify({
-                    version: RUN_STATE_VERSION,
-                    status: RunStateStatus.Active,
-                    runId: "run-notification-resume",
-                    repository: "owner/repository",
-                    branch: "main",
-                    notificationsEnabled: true,
-                    needsAttentionLabel: "saved-label",
-                    selection: { agent: "build" },
-                    queue: {
-                        pending: [],
-                        completedIssueNumbers: [],
-                        processedCount: 0,
-                    },
-                    outcomes: [],
-                    updatedAt: "2026-08-24T00:00:00.000Z",
-                }),
-            );
-
-            await runCommand(["owner/repository", "--resume", path], {
+        await runCommand(
+            [
+                "owner/repository",
+                "--notify-needs-attention",
+                "--needs-attention-label",
+                "needs-attention",
+            ],
+            {
                 factories: {
                     makeCoordinator: () => ({
                         progress: makeTestProgressRecorder([]),
@@ -159,15 +135,13 @@ describe("native CLI parser", () => {
                         return undefined as never;
                     },
                 },
-            });
+            },
+        );
 
-            expect(workflowOptions).toMatchObject({
-                notificationsEnabled: true,
-                needsAttentionLabel: "saved-label",
-            });
-        } finally {
-            await rm(directory, { recursive: true, force: true });
-        }
+        expect(workflowOptions).toMatchObject({
+            notificationsEnabled: true,
+            needsAttentionLabel: "needs-attention",
+        });
     });
 
     test("keeps sensitive values verbatim in wrapped command errors", async () => {
@@ -211,49 +185,21 @@ describe("native CLI parser", () => {
     });
 
     test("emits thrown error text verbatim on stderr", async () => {
-        const directory = await mkdtemp(join(tmpdir(), "ralphie-command-"));
-        const path = join(directory, "state.json");
         const originalWrite = process.stderr.write.bind(process.stderr);
         const written: string[] = [];
         try {
-            await writeFile(
-                path,
-                JSON.stringify({
-                    version: RUN_STATE_VERSION,
-                    status: RunStateStatus.Active,
-                    runId: "Bearer private-value",
-                    repository: "owner/repository",
-                    branch: "main",
-                    maxDecompositionDepth: 3,
-                    selection: { agent: "build" },
-                    queue: {
-                        pending: [],
-                        completedIssueNumbers: [],
-                        processedCount: 0,
-                    },
-                    outcomes: [],
-                    updatedAt: "2026-08-24T00:00:00.000Z",
-                }),
-            );
             process.stderr.write = ((text: string) => {
                 written.push(text);
                 return true;
             }) as typeof process.stderr.write;
             process.exitCode = 0;
-            await runCli([
-                "owner/repository",
-                "--resume",
-                path,
-                "--max-decomposition-depth",
-                "6",
-            ]);
+            await runCli(["not-a-slug Bearer private-value"]);
             const output = written.join("");
-            expect(output).toContain("Cannot resume run Bearer private-value");
+            expect(output).toContain("Bearer private-value");
             expect(process.exitCode).toBe(RalphieExitCode.Failure);
         } finally {
             process.stderr.write = originalWrite;
             process.exitCode = 0;
-            await rm(directory, { recursive: true, force: true });
         }
     });
 
@@ -263,6 +209,11 @@ describe("native CLI parser", () => {
             ["owner/repository", "--max-attempts", "2"],
             ["owner/repository", "--pipeline-timeout", "10m"],
             ["owner/repository", "--duplicate-action", "close"],
+            ["owner/repository", "--max-issues", "1"],
+            ["owner/repository", "--dry-run"],
+            ["owner/repository", "--resume", "state.json"],
+            ["owner/repository", "--clean", "both"],
+            ["owner/repository", "--implementation-fallback-model", "o/m"],
         ]) {
             expect(() => parseCliArgs(args)).toThrow();
         }
@@ -297,15 +248,7 @@ describe("native CLI parser", () => {
         expect(String(IssueOrder.Ascending)).toBe("asc");
     });
 
-    test("parses clean and every supported output mode", () => {
-        expect(
-            parseCliArgs(["owner/repository", "--clean", "both"]).options,
-        ).toMatchObject({
-            clean: "both",
-            verbose: false,
-            json: false,
-            quiet: false,
-        });
+    test("parses every supported output mode", () => {
         expect(parseCliArgs(["owner/repository"]).options).toMatchObject({
             verbose: false,
             json: false,
@@ -323,9 +266,6 @@ describe("native CLI parser", () => {
         expect(
             parseCliArgs(["owner/repository", "--output", "quiet"]).options,
         ).toMatchObject({ verbose: false, json: false, quiet: true });
-        expect(() =>
-            parseCliArgs(["owner/repository", "--clean", "sometimes"]),
-        ).toThrow();
         expect(() =>
             parseCliArgs(["owner/repository", "--output", "trace"]),
         ).toThrow();

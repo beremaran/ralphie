@@ -2,10 +2,7 @@ import { join } from "node:path";
 
 import { makeAgentSessionDiagnostics } from "./agent/task-session.ts";
 import type { AgentModel, AgentSelection } from "./agent/model.ts";
-import {
-    GitHubNeedsAttentionNotificationRecoveryError,
-    type NeedsAttentionNotificationInput,
-} from "./github/needs-attention.ts";
+import { type NeedsAttentionNotificationInput } from "./github/needs-attention.ts";
 import {
     isIssueEligible,
     type GitHubIssue,
@@ -29,7 +26,6 @@ import {
     type ProgressStage,
     type ProgressUpdate,
 } from "./progress/progress.ts";
-import { reconcileRunState } from "./run/reconciliation.ts";
 import {
     RUN_STATE_VERSION,
     type RunState,
@@ -42,23 +38,6 @@ import type { IssueWorkflowRuntime } from "./runtime.ts";
 
 const errorMessage = (error: unknown): string =>
     error instanceof Error ? error.message : String(error);
-
-/** Durable boundary reached after core needs-attention work was saved. */
-export class NeedsAttentionNotificationRecoveryBoundaryError extends RalphieError {
-    readonly issueNumber: number;
-
-    constructor(input: {
-        readonly issueNumber: number;
-        readonly cause: unknown;
-    }) {
-        super({
-            message: `Needs-attention notification recovery is required for issue #${input.issueNumber}.`,
-            cause: input.cause,
-        });
-        this.name = "NeedsAttentionNotificationRecoveryBoundaryError";
-        this.issueNumber = input.issueNumber;
-    }
-}
 
 const unreachableOutcome = (outcome: never): never => {
     throw new RalphieError({
@@ -139,7 +118,6 @@ const copySkippedOutcome = (
 ): RunStateOutcome => ({
     kind: outcome.kind,
     reason: outcome.reason,
-    ...(outcome.route === undefined ? {} : { route: outcome.route }),
 });
 
 const copyOutcome = (outcome: IssueExecutionOutcome): RunStateOutcome => {
@@ -217,33 +195,23 @@ const needsAttentionArtifactDetails = (
 const needsAttentionProgressMessage = (
     issueNumber: number,
     outcome: NeedsAttentionOutcome,
-    dryRun: boolean,
 ): string =>
-    dryRun
-        ? `Dry run would route #${issueNumber} to needs-attention ` +
-          `(${outcome.reason}): ${outcome.summary}`
-        : `Issue #${issueNumber} needs attention ` +
-          `(${outcome.reason}): ${outcome.summary}`;
+    `Issue #${issueNumber} needs attention ` +
+    `(${outcome.reason}): ${outcome.summary}`;
 
 const needsAttentionProgressDetails = (input: {
     readonly outcome: NeedsAttentionOutcome;
-    readonly dryRun: boolean;
     readonly current: number;
-    readonly budget?: number;
 }): Readonly<Record<string, unknown>> => ({
     reason: input.outcome.reason,
     summary: input.outcome.summary,
     evidence: [...input.outcome.evidence],
     questions: [...input.outcome.questions],
     ...(input.outcome.route === undefined
-        ? input.dryRun
-            ? { route: "needs-attention" }
-            : {}
+        ? {}
         : { route: input.outcome.route }),
     ...needsAttentionArtifactDetails(input.outcome),
-    dryRun: input.dryRun,
     queuePosition: input.current,
-    budget: input.budget ?? "unlimited",
 });
 
 type ProgressContext = Omit<ProgressUpdate, "stage" | "status" | "message">;
@@ -308,15 +276,11 @@ const summarize = (
 const routeSummary = (
     outcomes: WorkflowSummary["outcomes"],
 ): ReadonlyArray<{ readonly issueNumber: number; readonly route: string }> =>
-    outcomes.flatMap(({ issueNumber, outcome }) => {
-        const route =
-            outcome.kind === IssueExecutionOutcomeKind.NeedsAttention
-                ? "needs-attention"
-                : outcome.kind === IssueExecutionOutcomeKind.Skipped
-                  ? outcome.route
-                  : undefined;
-        return route === undefined ? [] : [{ issueNumber, route }];
-    });
+    outcomes.flatMap(({ issueNumber, outcome }) =>
+        outcome.kind === IssueExecutionOutcomeKind.NeedsAttention
+            ? [{ issueNumber, route: "needs-attention" }]
+            : [],
+    );
 
 type WorkflowCheckout = NonNullable<RunState["checkout"]>;
 type WorkflowOutcomeEntry = WorkflowSummary["outcomes"][number];
@@ -329,12 +293,9 @@ type PersistWorkflowStateInput = {
     readonly actualRunId: string;
     readonly repository: string;
     readonly branch: string;
-    readonly dryRun: boolean;
     readonly notificationsEnabled: boolean;
     readonly needsAttentionLabel?: string;
-    readonly pendingNotification?: RunState["pendingNotification"];
     readonly selection: AgentSelection;
-    readonly issueLimit?: number;
     readonly maxDecompositionDepth: number;
     readonly outcomes: ReadonlyArray<WorkflowOutcomeEntry>;
     readonly checkout: WorkflowCheckout;
@@ -386,18 +347,11 @@ const persistWorkflowState = async (
         repository: input.repository,
         branch: input.branch,
         maxDecompositionDepth: input.maxDecompositionDepth,
-        dryRun: input.dryRun,
         notificationsEnabled: input.notificationsEnabled,
         ...(input.needsAttentionLabel === undefined
             ? {}
             : { needsAttentionLabel: input.needsAttentionLabel }),
-        ...(input.pendingNotification === undefined
-            ? {}
-            : { pendingNotification: input.pendingNotification }),
         selection: input.selection,
-        ...(input.issueLimit === undefined
-            ? {}
-            : { maxIssues: input.issueLimit }),
         queue: {
             pending,
             completedIssueNumbers: [...snapshot.completedIssueNumbers],
@@ -418,7 +372,6 @@ type WorkflowIssueContext = {
     readonly current: number;
     readonly total: number;
     readonly issueBaseCheckout: WorkflowCheckout;
-    readonly resumedClosureOutcome?: IssueExecutionOutcome;
 };
 
 /**
@@ -539,33 +492,9 @@ type RepositoryCheckout = {
     readonly branch: string;
 };
 
-/**
- * When a run stopped after a completed issue's commit was pushed but before
- * the issue was closed, resume must finish the closure instead of rerunning
- * implementation.
- */
-const resumedClosureOutcomeFor = (
-    resumeState: RunState | undefined,
-    issueNumber: number,
-    outcomes: ReadonlyArray<WorkflowOutcomeEntry>,
-): IssueExecutionOutcome | undefined => {
-    if (
-        resumeState?.activeIssue?.issueNumber !== issueNumber ||
-        resumeState.activeIssue.stage !== "issue-closure"
-    ) {
-        return undefined;
-    }
-    return outcomes.find(
-        (entry) =>
-            entry.issueNumber === issueNumber &&
-            entry.outcome.kind === IssueExecutionOutcomeKind.Completed,
-    )?.outcome;
-};
-
 export type WorkflowOptions = {
     readonly repo: string;
     readonly branch?: string;
-    readonly maxIssues?: number;
     readonly maxDecompositionDepth?: number;
     readonly issueFilters: IssueFilters;
     readonly agent: string;
@@ -573,25 +502,18 @@ export type WorkflowOptions = {
     readonly modelVariant?: string;
     readonly verificationCommands?: ReadonlyArray<string>;
     readonly implementationAttempts?: number;
-    readonly implementationFallbackModel?: AgentModel;
     readonly workspace: string;
-    readonly cleanup: boolean;
-    readonly startClean: boolean;
     readonly signal?: AbortSignal;
     readonly runId?: string;
-    readonly resumeState?: RunState;
-    readonly resumePath?: string;
     /** Publish needs-attention outcomes through the runtime notifier. */
     readonly notificationsEnabled?: boolean;
     /** Optional additive label applied with a needs-attention notification. */
     readonly needsAttentionLabel?: string;
-    readonly dryRun?: boolean;
 };
 
 type WorkflowConfiguration = {
     readonly repo: string;
     readonly requestedBranch?: string;
-    readonly maxIssues?: number;
     readonly maxDecompositionDepth: number;
     readonly issueFilters: IssueFilters;
     readonly agent: string;
@@ -599,19 +521,11 @@ type WorkflowConfiguration = {
     readonly modelVariant?: string;
     readonly verificationCommands: ReadonlyArray<string>;
     readonly implementationAttempts?: number;
-    readonly implementationFallbackModel?: AgentModel;
     readonly workspace: string;
-    readonly cleanup: boolean;
-    readonly startClean: boolean;
     readonly signal?: AbortSignal;
-    readonly runId: string;
-    readonly resumeState?: RunState;
-    readonly resumePath?: string;
     readonly notificationsEnabled: boolean;
     readonly needsAttentionLabel?: string;
-    readonly dryRun: boolean;
     readonly actualRunId: string;
-    readonly effectiveDryRun: boolean;
     readonly statePath: string;
 };
 
@@ -628,7 +542,6 @@ const makeWorkflowConfiguration = (
     const {
         repo,
         branch: requestedBranch,
-        maxIssues,
         maxDecompositionDepth = DEFAULT_MAX_DECOMPOSITION_DEPTH,
         issueFilters,
         agent,
@@ -636,60 +549,34 @@ const makeWorkflowConfiguration = (
         modelVariant,
         verificationCommands = [],
         implementationAttempts,
-        implementationFallbackModel,
         workspace,
-        cleanup,
-        startClean,
         signal,
         runId = crypto.randomUUID(),
-        resumeState,
-        resumePath,
         notificationsEnabled = false,
         needsAttentionLabel,
-        dryRun = false,
     } = options;
-    const actualRunId = resumeState?.runId ?? runId;
-    const effectiveNotificationsEnabled =
-        resumeState?.notificationsEnabled ?? notificationsEnabled;
-    const effectiveNeedsAttentionLabel =
-        resumeState?.needsAttentionLabel ?? needsAttentionLabel;
-    const effectiveDryRun = resumeState?.dryRun ?? dryRun;
-    const statePath =
-        resumePath ??
-        join(
-            resolveWorkspacePath(workspace),
-            ".ralphie",
-            "runs",
-            actualRunId,
-            "state.json",
-        );
+    const statePath = join(
+        resolveWorkspacePath(workspace),
+        ".ralphie",
+        "runs",
+        runId,
+        "state.json",
+    );
     return {
         repo,
         requestedBranch,
-        maxIssues,
-        maxDecompositionDepth:
-            resumeState?.maxDecompositionDepth ?? maxDecompositionDepth,
+        maxDecompositionDepth,
         issueFilters,
         agent,
         model,
         modelVariant,
         verificationCommands,
         implementationAttempts,
-        implementationFallbackModel,
         workspace,
-        cleanup,
-        startClean,
         signal,
-        runId,
-        resumeState,
-        resumePath,
-        notificationsEnabled: effectiveNotificationsEnabled,
-        ...(effectiveNeedsAttentionLabel === undefined
-            ? {}
-            : { needsAttentionLabel: effectiveNeedsAttentionLabel }),
-        dryRun,
-        actualRunId,
-        effectiveDryRun,
+        notificationsEnabled,
+        ...(needsAttentionLabel === undefined ? {} : { needsAttentionLabel }),
+        actualRunId: runId,
         statePath,
     };
 };
@@ -723,24 +610,12 @@ const emitRunStarted = async (
                 : "pi default",
             variant: config.modelVariant ?? "pi default",
             agent: config.agent,
-            issueLimit:
-                config.resumeState?.maxIssues ??
-                config.maxIssues ??
-                "unlimited",
-            budget:
-                config.resumeState?.maxIssues ??
-                config.maxIssues ??
-                "unlimited",
             maxDecompositionDepth: config.maxDecompositionDepth,
             runId: config.actualRunId,
-            dryRun: config.effectiveDryRun,
             notificationsEnabled: config.notificationsEnabled,
             ...(config.needsAttentionLabel === undefined
                 ? {}
                 : { needsAttentionLabel: config.needsAttentionLabel }),
-            ...(config.resumeState === undefined
-                ? {}
-                : { resumed: true, statePath: config.statePath }),
         },
     });
 };
@@ -759,10 +634,6 @@ const emitRunSucceeded = async (
             counts: summary.counts,
             routes: routeSummary(summary.outcomes),
             statePath: config.statePath,
-            budget:
-                config.resumeState?.maxIssues ??
-                config.maxIssues ??
-                "unlimited",
         },
     });
 };
@@ -822,9 +693,6 @@ const validateRuntimeModelVariants = (
             ? {}
             : { defaultModel: runtime.defaultModel }),
         ...(config.model === undefined ? {} : { primaryModel: config.model }),
-        ...(config.implementationFallbackModel === undefined
-            ? {}
-            : { fallbackModel: config.implementationFallbackModel }),
         ...(config.modelVariant === undefined
             ? {}
             : { variant: config.modelVariant }),
@@ -840,21 +708,16 @@ export const workflow = async (
     const {
         repo,
         requestedBranch,
-        maxIssues,
         maxDecompositionDepth,
         issueFilters,
         agent,
         model,
         modelVariant,
         workspace,
-        cleanup,
-        startClean,
         signal,
-        resumeState,
         notificationsEnabled,
         needsAttentionLabel,
         actualRunId,
-        effectiveDryRun,
         statePath,
     } = config;
     const {
@@ -870,15 +733,12 @@ export const workflow = async (
         gitIssueCheckpoint: checkpoints,
         parentCompletion,
         issueExecutor: normalIssueExecutor,
-        dryRunIssueExecutor,
         agentRuntime,
     } = runtime;
 
     await emitRunStarted(progress, config);
 
     let activeIssue: RunState["activeIssue"] | undefined;
-    let pendingNotification: RunState["pendingNotification"] =
-        resumeState?.pendingNotification;
     const activeQueueIssues = new Map<number, GitHubIssue>();
     let persistCancellationState: (() => Promise<void>) | undefined;
     let restoreCancellationCheckout: (() => Promise<void>) | undefined;
@@ -888,15 +748,13 @@ export const workflow = async (
         let checkout: WorkflowCheckout;
 
         const prepareWorkspaceAndIssues = async () => {
-            if (startClean) {
-                await track(
-                    progress,
-                    "workspace-cleanup",
-                    `Removing existing workspace ${workspace}...`,
-                    () => workspaceService.remove(workspace),
-                    `Existing workspace removed: ${workspace}.`,
-                );
-            }
+            await track(
+                progress,
+                "workspace-cleanup",
+                `Removing existing workspace ${workspace}...`,
+                () => workspaceService.remove(workspace),
+                `Existing workspace removed: ${workspace}.`,
+            );
 
             await track(
                 progress,
@@ -970,60 +828,15 @@ export const workflow = async (
             };
         };
 
-        const verifyResumeState = (
-            branch: string,
-            checkout: WorkflowCheckout,
-            discoveredIssues: ReadonlyArray<GitHubIssue>,
-        ): void => {
-            if (resumeState === undefined) return;
-            const reconciliation = reconcileRunState(resumeState, {
-                repository: repo,
-                branch,
-                git: checkout,
-                github: {
-                    openIssueNumbers: discoveredIssues.map(
-                        ({ number }) => number,
-                    ),
-                },
-            });
-            if (!reconciliation.compatible) {
-                throw new RalphieError({
-                    message: `Cannot resume run ${resumeState.runId}: ${reconciliation.reasons.join("; ")}.`,
-                });
-            }
-        };
-
         const makeQueue = (initialIssues: ReadonlyArray<GitHubIssue>) =>
-            createIssueQueue(
-                toQueuedIssues(initialIssues),
-                resumeState?.maxIssues ?? maxIssues,
-                resumeState === undefined
-                    ? undefined
-                    : {
-                          completedIssueNumbers:
-                              resumeState.queue.completedIssueNumbers,
-                          processedCount: resumeState.queue.processedCount,
-                      },
-            );
-
-        const refreshedResumeIssues = (
-            discoveredIssues: ReadonlyArray<GitHubIssue>,
-        ): ReadonlyArray<GitHubIssue> => {
-            if (resumeState === undefined) return discoveredIssues;
-            const liveIssues = new Map(
-                discoveredIssues.map((issue) => [issue.number, issue]),
-            );
-            return resumeState.queue.pending.map(
-                (savedIssue) => liveIssues.get(savedIssue.number) ?? savedIssue,
-            );
-        };
+            createIssueQueue(toQueuedIssues(initialIssues));
 
         const prepareRunState = async (input: {
             readonly prepared: Awaited<ReturnType<typeof repository.prepare>>;
             readonly branch: string;
             readonly discoveredIssues: ReadonlyArray<GitHubIssue>;
         }) => {
-            const { prepared, branch, discoveredIssues } = input;
+            const { prepared, discoveredIssues } = input;
             const repositoryCheckouts: ReadonlyArray<RepositoryCheckout> = [
                 {
                     repository: repo,
@@ -1034,9 +847,7 @@ export const workflow = async (
             const captureCheckout = () =>
                 invariantService.capture(prepared.path, signal);
             checkout = await captureCheckout();
-            verifyResumeState(branch, checkout, discoveredIssues);
-            const initialIssues = refreshedResumeIssues(discoveredIssues);
-            const queue = makeQueue(initialIssues);
+            const queue = makeQueue(discoveredIssues);
             return { repositoryCheckouts, captureCheckout, queue };
         };
 
@@ -1045,9 +856,7 @@ export const workflow = async (
             const { repositoryCheckouts, captureCheckout, queue } =
                 await prepareRunState(preparedInput);
             const { octokit, prepared, branch } = preparedInput;
-            const outcomes: Array<WorkflowOutcomeEntry> = [
-                ...(resumeState?.outcomes ?? []),
-            ];
+            const outcomes: Array<WorkflowOutcomeEntry> = [];
             const selection: AgentSelection = {
                 agent,
                 model,
@@ -1067,12 +876,9 @@ export const workflow = async (
                         actualRunId,
                         repository: repo,
                         branch,
-                        dryRun: effectiveDryRun,
                         notificationsEnabled,
                         needsAttentionLabel,
-                        pendingNotification,
                         selection,
-                        issueLimit: resumeState?.maxIssues ?? maxIssues,
                         maxDecompositionDepth,
                         outcomes,
                         checkout,
@@ -1084,9 +890,7 @@ export const workflow = async (
             persistCancellationState = () =>
                 persistState(RunStateStatus.Active, activeIssue);
             await persistState(RunStateStatus.Active);
-            const issueExecutor = effectiveDryRun
-                ? dryRunIssueExecutor
-                : normalIssueExecutor;
+            const issueExecutor = normalIssueExecutor;
             const diagnostics = makeAgentSessionDiagnostics();
             return {
                 octokit,
@@ -1141,7 +945,6 @@ export const workflow = async (
         const reconcileDiscoveredParents = async (
             issues: ReadonlyArray<GitHubIssue>,
         ): Promise<void> => {
-            if (effectiveDryRun) return;
             for (const parent of issues.filter(isDecomposedParent)) {
                 await track(
                     progress,
@@ -1171,7 +974,6 @@ export const workflow = async (
         const reconcileParentOfCompletedChild = async (
             issueContext: WorkflowIssueContext,
         ): Promise<void> => {
-            if (effectiveDryRun) return;
             await track(
                 progress,
                 "issue-closure",
@@ -1206,8 +1008,6 @@ export const workflow = async (
         };
 
         const queueTotalFor = (current: number): number =>
-            resumeState?.maxIssues ??
-            maxIssues ??
             current + queue.pendingCount();
 
         const prepareIssue = async (
@@ -1215,32 +1015,20 @@ export const workflow = async (
         ): Promise<WorkflowIssueContext> => {
             const current = queue.processedCount();
             const total = queueTotalFor(current);
-            const resumedClosureOutcome = resumedClosureOutcomeFor(
-                resumeState,
-                issue.number,
-                outcomes,
-            );
             activeQueueIssues.set(issue.number, issue);
             activeIssue = {
                 issueNumber: issue.number,
-                stage:
-                    resumedClosureOutcome === undefined
-                        ? "grounding"
-                        : "issue-closure",
+                stage: "grounding",
             };
             const issueBaseCheckout = { ...checkout };
-            restoreCancellationCheckout = effectiveDryRun
-                ? undefined
-                : restoreIssueCheckout(issueBaseCheckout);
+            restoreCancellationCheckout =
+                restoreIssueCheckout(issueBaseCheckout);
             await persistState(RunStateStatus.Active, activeIssue);
             return {
                 issue,
                 current,
                 total,
                 issueBaseCheckout,
-                ...(resumedClosureOutcome === undefined
-                    ? {}
-                    : { resumedClosureOutcome }),
             };
         };
 
@@ -1248,9 +1036,6 @@ export const workflow = async (
             issueContext: WorkflowIssueContext,
             server: PiAgentRuntime,
         ): Promise<IssueExecutionOutcome> => {
-            if (issueContext.resumedClosureOutcome !== undefined) {
-                return issueContext.resumedClosureOutcome;
-            }
             return await track(
                 progress,
                 "issue-execution",
@@ -1270,8 +1055,6 @@ export const workflow = async (
                         repositoryInvariant: invariantService,
                         verificationCommands: config.verificationCommands,
                         implementationAttempts: config.implementationAttempts,
-                        implementationFallbackModel:
-                            config.implementationFallbackModel,
                         signal,
                         maxDecompositionDepth,
                     }),
@@ -1294,7 +1077,6 @@ export const workflow = async (
                 { readonly kind: IssueExecutionOutcomeKind.Completed }
             >,
         ): Promise<void> => {
-            if (effectiveDryRun) return;
             await track(
                 progress,
                 "issue-closure",
@@ -1364,13 +1146,10 @@ export const workflow = async (
                 message: needsAttentionProgressMessage(
                     issueContext.issue.number,
                     outcome,
-                    effectiveDryRun,
                 ),
                 details: needsAttentionProgressDetails({
                     outcome,
-                    dryRun: effectiveDryRun,
                     current: issueContext.current,
-                    budget: resumeState?.maxIssues ?? maxIssues,
                 }),
             });
         };
@@ -1379,21 +1158,16 @@ export const workflow = async (
             issueNumber: number,
             outcome: NeedsAttentionOutcome,
             labelName: string | undefined,
-            force = false,
         ): Promise<void> => {
-            if ((!notificationsEnabled && !force) || effectiveDryRun) return;
+            if (!notificationsEnabled) return;
             if (needsAttentionNotification === undefined) {
-                throw new NeedsAttentionNotificationRecoveryBoundaryError({
-                    issueNumber,
-                    cause: new RalphieError({
-                        message:
-                            "Needs-attention notifications are enabled, but no notification service is available.",
-                    }),
+                throw new RalphieError({
+                    message: `Needs-attention notifications are enabled, but no notification service is available for issue #${issueNumber}.`,
                 });
             }
             await track(
                 progress,
-                "notification-recovery",
+                "notification",
                 `Publishing needs-attention notification for issue #${issueNumber}...`,
                 () =>
                     needsAttentionNotification.notify(
@@ -1407,56 +1181,6 @@ export const workflow = async (
                     `Needs-attention notification published for issue #${issueNumber} (${result.comment} comment, ${result.label} label).`,
                 { issue: { number: issueNumber, title: "Needs attention" } },
             );
-        };
-
-        const savePendingNotification = async (
-            issueNumber: number,
-            outcome: NeedsAttentionOutcome,
-        ): Promise<NonNullable<RunState["pendingNotification"]>> => {
-            const intent: NonNullable<RunState["pendingNotification"]> = {
-                issueNumber,
-                outcome: copyNeedsAttentionOutcome(outcome),
-                ...(needsAttentionLabel === undefined
-                    ? {}
-                    : { labelName: needsAttentionLabel }),
-            };
-            pendingNotification = intent;
-            activeIssue = {
-                issueNumber,
-                stage: "notification-recovery",
-            };
-            // The outcome and its notification intent are durable before any
-            // GitHub comment or label mutation is attempted.
-            await persistState(RunStateStatus.Active, activeIssue);
-            return intent;
-        };
-
-        const publishPendingNotification = async (
-            issueNumber: number,
-            intent: NonNullable<RunState["pendingNotification"]>,
-        ): Promise<void> => {
-            try {
-                await publishNeedsAttentionNotification(
-                    issueNumber,
-                    intent.outcome as NeedsAttentionOutcome,
-                    intent.labelName,
-                    true,
-                );
-            } catch (cause) {
-                if (
-                    cause instanceof
-                        NeedsAttentionNotificationRecoveryBoundaryError ||
-                    cause instanceof
-                        GitHubNeedsAttentionNotificationRecoveryError
-                ) {
-                    throw cause;
-                }
-                throw new NeedsAttentionNotificationRecoveryBoundaryError({
-                    issueNumber,
-                    cause,
-                });
-            }
-            pendingNotification = undefined;
         };
 
         const handleFailedIssue = async (
@@ -1484,18 +1208,11 @@ export const workflow = async (
         ): Promise<void> => {
             checkout = await captureNeedsAttentionCheckout(issueContext);
             await emitNeedsAttentionEvent(issueContext, outcome);
-            const notificationEnabled =
-                notificationsEnabled && !effectiveDryRun;
-            if (notificationEnabled) {
-                const intent = await savePendingNotification(
-                    issueContext.issue.number,
-                    outcome,
-                );
-                await publishPendingNotification(
-                    issueContext.issue.number,
-                    intent,
-                );
-            }
+            await publishNeedsAttentionNotification(
+                issueContext.issue.number,
+                outcome,
+                needsAttentionLabel,
+            );
             await persistState(RunStateStatus.Active, {
                 issueNumber: issueContext.issue.number,
                 stage: "grounding",
@@ -1558,9 +1275,7 @@ export const workflow = async (
             issueContext: WorkflowIssueContext,
             outcome: IssueExecutionOutcome,
         ): Promise<void> => {
-            if (issueContext.resumedClosureOutcome === undefined) {
-                recordIssueOutcome(issueContext.issue.number, outcome);
-            }
+            recordIssueOutcome(issueContext.issue.number, outcome);
             if (outcome.kind === IssueExecutionOutcomeKind.Failed) {
                 await handleFailedIssue(issueContext);
                 return;
@@ -1574,70 +1289,6 @@ export const workflow = async (
             completeQueueItem(issueContext.issue.number, outcome);
             await finishSuccessfulIssue(issueContext);
             await refreshAfterDecomposition(outcome);
-        };
-
-        const throwPendingNotificationBoundary = (
-            issueNumber: number,
-            message: string,
-        ): never => {
-            throw new NeedsAttentionNotificationRecoveryBoundaryError({
-                issueNumber,
-                cause: new RalphieError({ message }),
-            });
-        };
-
-        const selectPendingNotificationIssue = (
-            pending: NonNullable<RunState["pendingNotification"]>,
-        ): GitHubIssue => {
-            const savedIssue = queue
-                .snapshot()
-                .pending.find(
-                    ({ issue }) => issue.number === pending.issueNumber,
-                )?.issue;
-            if (savedIssue === undefined) {
-                return throwPendingNotificationBoundary(
-                    pending.issueNumber,
-                    "The issue for the pending needs-attention notification is not in the saved queue.",
-                );
-            }
-            const issue = queue.next();
-            if (issue?.number !== pending.issueNumber) {
-                return throwPendingNotificationBoundary(
-                    pending.issueNumber,
-                    "The pending needs-attention issue could not be selected without changing queue order.",
-                );
-            }
-            return issue;
-        };
-
-        const recoverPendingNotification = async (): Promise<void> => {
-            const pending = pendingNotification;
-            if (pending === undefined) return;
-            if (!notificationsEnabled) {
-                return throwPendingNotificationBoundary(
-                    pending.issueNumber,
-                    "A pending needs-attention notification cannot be reconciled when notifications are disabled.",
-                );
-            }
-            if (effectiveDryRun) {
-                return throwPendingNotificationBoundary(
-                    pending.issueNumber,
-                    "A pending needs-attention notification cannot be reconciled during a dry run.",
-                );
-            }
-            const issue = selectPendingNotificationIssue(pending);
-            activeQueueIssues.set(issue.number, issue);
-            activeIssue = {
-                issueNumber: issue.number,
-                stage: "notification-recovery",
-            };
-            await persistState(RunStateStatus.Active, activeIssue);
-            await publishPendingNotification(issue.number, pending);
-            activeQueueIssues.delete(issue.number);
-            activeIssue = undefined;
-            restoreCancellationCheckout = undefined;
-            checkout = await captureCheckout();
-            await persistState(RunStateStatus.Active);
         };
 
         const processNextIssue = async (
@@ -1684,8 +1335,6 @@ export const workflow = async (
             await worker();
         };
 
-        await recoverPendingNotification();
-
         let server: PiAgentRuntime | undefined;
         try {
             const startedAgent = await track(
@@ -1728,32 +1377,30 @@ export const workflow = async (
                 ),
             });
         }
-        if (cleanup) {
-            const startedMessage = `Removing workspace ${workspace}...`;
+        const startedMessage = `Removing workspace ${workspace}...`;
+        await progress.emit({
+            stage: "workspace-cleanup",
+            status: "started",
+            message: startedMessage,
+        });
+        try {
+            await workspaceService.remove(workspace);
+        } catch (error) {
             await progress.emit({
                 stage: "workspace-cleanup",
-                status: "started",
-                message: startedMessage,
+                status: "failed",
+                message: `${startedMessage.replace(/\.{3}$/, "")} failed: ${errorMessage(error)}`,
             });
-            try {
-                await workspaceService.remove(workspace);
-            } catch (error) {
-                await progress.emit({
-                    stage: "workspace-cleanup",
-                    status: "failed",
-                    message: `${startedMessage.replace(/\.{3}$/, "")} failed: ${errorMessage(error)}`,
-                });
-                throw error;
-            }
-            // The event log lives inside the workspace. Disable durable writes after
-            // removal so cleanup-success and run-success events cannot recreate it.
-            await progress.stopPersisting();
-            await progress.emit({
-                stage: "workspace-cleanup",
-                status: "succeeded",
-                message: `Workspace removed: ${workspace}.`,
-            });
+            throw error;
         }
+        // The event log lives inside the workspace. Disable durable writes after
+        // removal so cleanup-success and run-success events cannot recreate it.
+        await progress.stopPersisting();
+        await progress.emit({
+            stage: "workspace-cleanup",
+            status: "succeeded",
+            message: `Workspace removed: ${workspace}.`,
+        });
         return summary;
     };
 
@@ -1768,16 +1415,7 @@ export const workflow = async (
             persistCancellationState,
             restoreCancellationCheckout,
         });
-        if (
-            !(
-                finalError instanceof
-                    NeedsAttentionNotificationRecoveryBoundaryError ||
-                finalError instanceof
-                    GitHubNeedsAttentionNotificationRecoveryError
-            )
-        ) {
-            await emitRunFailed(progress, config, finalError);
-        }
+        await emitRunFailed(progress, config, finalError);
         throw finalError;
     }
 };

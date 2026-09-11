@@ -7,8 +7,8 @@ reading paths.
 
 > [!CAUTION]
 > The default `lgtm` workflow commits and pushes directly to the selected
-> branch. Use `--dry-run --max-issues 1` first, and read the [safety model](safety.md)
-> before using mutation-enabled recipes.
+> branch. Test against a repository you control, and read the
+> [safety model](safety.md) before using mutation-enabled recipes.
 
 ## Invocation
 
@@ -30,19 +30,14 @@ command schema.
 | `--notify-needs-attention` | off | Opt in to publishing needs-attention outcomes as an idempotent GitHub comment and optional label. Notifications are never enabled implicitly. |
 | `--needs-attention-label <name>` | none | Add a trimmed, non-empty label to needs-attention notifications; requires `--notify-needs-attention`. |
 | `-b, --branch <name>` | `main`, otherwise `master` | Base branch pushed directly after verified delivery. |
-| `--max-issues <count>` | unlimited | Positive maximum number of issues charged to this run. |
 | `--max-decomposition-depth <count>` | `3` | Positive maximum generated-child lineage depth. Reaching the ceiling leaves the issue open, records needs attention, and continues independent work. |
 | `--issue-label <label>` | none | Require a label; repeat the flag to require multiple labels. |
 | `--issue-sort <sort>` | `created` | Sort by `created`, `updated`, or `comments`, optionally `:asc` or `:desc`. |
 | `--model <provider/model>` | pi settings default | Override the pi model selection. |
 | `--thinking <level>` | `medium` | Thinking level for every session (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`); omit or pass `default` for `medium`. |
 | `--implementation-attempts <count>` | `3` | Positive number of implementation attempts allowed when sessions leave an unresolved empty diff. |
-| `--implementation-fallback-model <provider/model>` | none | Optional model used after the first unresolved empty implementation attempt. |
 | `--verify-command <command>` | discovered `bun run check` | Deterministic verification command; repeat to run multiple commands in order. Each command runs under a 30-minute deadline. |
-| `--workspace <path>` | `~/.ralphie` | Root directory for repository checkouts and run artifacts. |
-| `--dry-run` | off | Preview the issue workflow: assess/routes without implementation, commits, pushes, or GitHub mutations. |
-| `--resume <state.json>` | none | Continue a compatible saved run. |
-| `--clean <when>` | off | Remove the workspace at `start`, `end`, or `both`; mode-specific dry-run and resume rules are documented under [cleanup](operations-and-recovery.md#cleanup). |
+| `--workspace <path>` | `~/.ralphie` | Root directory for repository checkouts and run artifacts. The workspace is removed before preparation and after a successful run. |
 | `--output <mode>` | `default` | Output mode: live transcript and progress, `verbose`, `quiet`, or `json`. |
 
 The short aliases are `-b` for `--branch`, `-h` for `--help`, and `-v` for
@@ -50,11 +45,10 @@ The short aliases are `-b` for `--branch`, `-h` for `--help`, and `-v` for
 configuration file: the repository and every setting are supplied explicitly
 as an option or environment variable.
 
-`--max-issues` is charged when an issue is dequeued, not when it succeeds. With
-the default `created:asc` sort, issues are processed oldest-first; all issue
-work is sequential. Without `--max-issues`, the issue budget is unlimited.
-When no branch is configured, Ralphie uses `main` when it exists and otherwise
-`master`.
+Every run processes the entire matching open-issue queue. With the default
+`created:asc` sort, issues are processed oldest-first; all issue work is
+sequential. When no branch is configured, Ralphie uses `main` when it exists
+and otherwise `master`.
 
 ## Environment variables
 
@@ -77,24 +71,12 @@ container setup.
 
 ## Common recipes
 
-### Preview one issue
-
-This performs authentication and Git preflight, prepares a clean checkout,
-discovers issues, and asks pi for a complexity decision. It may create or reset
-the local workspace and write run artifacts, but it does not ask pi to edit the
-repository, create commits, push, or mutate GitHub.
-
-```bash
-bunx @beremaran/ralphie owner/repository --dry-run --max-issues 1
-```
-
 ### Configure a run with CLI flags
 
 ```bash
 bunx @beremaran/ralphie owner/repository \
   --branch main \
-  --issue-label bug \
-  --max-issues 10
+  --issue-label bug
 ```
 
 Process bugs from oldest to newest on a non-default branch:
@@ -103,8 +85,7 @@ Process bugs from oldest to newest on a non-default branch:
 bunx @beremaran/ralphie owner/repository \
   --branch develop \
   --issue-label bug \
-  --issue-sort created:asc \
-  --max-issues 10
+  --issue-sort created:asc
 ```
 
 Require multiple labels and let pi choose its configured default model:
@@ -138,38 +119,25 @@ fails closed before review or commit.
 Write machine-readable progress to stdout:
 
 ```bash
-bunx @beremaran/ralphie owner/repository --max-issues 1 --output json > ralphie.jsonl
+bunx @beremaran/ralphie owner/repository --output json > ralphie.jsonl
 ```
 
-Start from an empty disposable workspace and remove it after success:
+Run from a dedicated disposable workspace:
 
 ```bash
 bunx @beremaran/ralphie owner/repository \
-  --workspace /tmp/ralphie \
-  --clean both
+  --workspace /tmp/ralphie
 ```
 
 > [!WARNING]
-> `--clean start` and `--clean end` delete the selected workspace recursively
-> after protected-path checks. Use a path dedicated to Ralphie.
-
-Resume an interrupted run:
-
-```bash
-bunx @beremaran/ralphie owner/repository \
-  --branch main \
-  --resume ~/.ralphie/.ralphie/runs/<run-id>/state.json
-```
-
-The repository and branch must match the saved run. Ralphie reconciles the
-checkout, queue, active issue, decomposition artifacts, and any commit that may
-already have reached the remote before continuing. See [Operations and
-recovery](operations-and-recovery.md) before resuming a failed run.
+> Ralphie deletes the selected workspace recursively before preparation and
+> after a successful run, subject to protected-path checks. Use a path dedicated
+> to Ralphie.
 
 ### Run the issue queue
 
 ```bash
-bunx @beremaran/ralphie owner/repository --max-issues 5
+bunx @beremaran/ralphie owner/repository
 ```
 
 The workflow commits and pushes directly to the selected branch. It is not a

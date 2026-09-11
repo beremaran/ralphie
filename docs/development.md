@@ -118,10 +118,10 @@ Before submitting a change:
 
 Add in-memory unit tests for new behavior, following the patterns in the
 remaining files under `tests/`. Do not
-run the mutating CLI against an uncontrolled repository while developing; use
-`--dry-run --max-issues 1` and a repository you control when a command-level
-check is needed. Reusing a workspace can reset and clean that checkout, and
-`--clean` can recursively delete it; see [Safety](safety.md).
+run the mutating CLI against an uncontrolled repository while developing; use a
+repository you control when a command-level check is needed. Ralphie removes the
+selected workspace recursively before and after successful runs, so keep it
+dedicated and disposable; see [Safety](safety.md).
 
 ## Where future documentation belongs
 

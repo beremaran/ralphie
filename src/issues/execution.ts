@@ -7,18 +7,9 @@ import type {
     IssueResolutionDecision,
     NeedsAttentionReason,
 } from "./decisions.ts";
-import type { AgentModel, AgentSelection } from "../agent/model.ts";
+import type { AgentSelection } from "../agent/model.ts";
 import type { AgentSessionDiagnostics } from "../agent/task-session.ts";
 import type { GitRepositoryInvariantService } from "../git/repository-invariant.ts";
-
-export const DRY_RUN_ROUTES = [
-    "implementation",
-    "decomposition",
-    "already-resolved",
-    "needs-attention",
-] as const;
-
-export type DryRunRoute = (typeof DRY_RUN_ROUTES)[number];
 
 /**
  * The terminal state reported by an issue executor.
@@ -92,8 +83,6 @@ export type IssueExecutionOutcome =
     | {
           readonly kind: IssueExecutionOutcomeKind.Skipped;
           readonly reason: string;
-          /** Dry-run routing result; ordinary skips leave this unset. */
-          readonly route?: DryRunRoute;
       }
     | {
           readonly kind: IssueExecutionOutcomeKind.Failed;
@@ -121,7 +110,6 @@ export type IssueExecutionContext = {
     readonly agent: AgentClient;
     readonly agentSelection: AgentSelection;
     readonly implementationAttempts?: number;
-    readonly implementationFallbackModel?: AgentModel;
     readonly agentDiagnostics: AgentSessionDiagnostics;
     readonly repositoryInvariant: GitRepositoryInvariantService;
     readonly verificationCommands?: ReadonlyArray<string>;

@@ -31,9 +31,6 @@ describe("CLI configuration", () => {
             verificationCommands: [],
             agent: "build",
             workspace: DEFAULT_WORKSPACE,
-            cleanStart: false,
-            cleanEnd: false,
-            dryRun: false,
             verbose: false,
             json: false,
             quiet: false,
@@ -45,7 +42,6 @@ describe("CLI configuration", () => {
             resolveRalphieConfig({
                 repo: "https://github.com/Owner/Repo.git",
                 branch: "develop",
-                maxIssues: 3,
                 maxDecompositionDepth: 6,
                 issueLabels: ["bug", "ready"],
                 issueSort: IssueSort.Updated,
@@ -56,9 +52,6 @@ describe("CLI configuration", () => {
                 },
                 thinking: "high",
                 workspace: "/tmp/ralphie",
-                clean: "both",
-                dryRun: true,
-                resume: "/tmp/state.json",
                 verbose: true,
                 json: true,
                 notifyNeedsAttention: true,
@@ -67,7 +60,6 @@ describe("CLI configuration", () => {
         ).toMatchObject({
             repo: "Owner/Repo",
             branch: "develop",
-            maxIssues: 3,
             maxDecompositionDepth: 6,
             issueLabels: ["bug", "ready"],
             issueSort: IssueSort.Updated,
@@ -78,10 +70,6 @@ describe("CLI configuration", () => {
             },
             thinking: "high",
             workspace: "/tmp/ralphie",
-            cleanStart: true,
-            cleanEnd: true,
-            dryRun: true,
-            resume: "/tmp/state.json",
             verbose: true,
             json: true,
             quiet: false,
@@ -99,27 +87,6 @@ describe("CLI configuration", () => {
         ).toThrow(
             "Option --needs-attention-label requires --notify-needs-attention.",
         );
-    });
-
-    test("maps clean to start, end, or both removal", () => {
-        expect(
-            resolveRalphieConfig({
-                repo: "owner/repo",
-                clean: "start",
-            }),
-        ).toMatchObject({
-            cleanStart: true,
-            cleanEnd: false,
-        });
-        expect(
-            resolveRalphieConfig({
-                repo: "owner/repo",
-                clean: "end",
-            }),
-        ).toMatchObject({
-            cleanStart: false,
-            cleanEnd: true,
-        });
     });
 
     test("rejects non-positive integer options", () => {

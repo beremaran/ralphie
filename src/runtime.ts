@@ -62,11 +62,6 @@ import {
     makeDecompositionExecutorService,
     type DecompositionExecutorService,
 } from "./issues/decomposition-executor.ts";
-import { makeDecompositionPlannerService } from "./issues/decomposition-planner.ts";
-import {
-    makeDryRunIssueExecutorService,
-    type DryRunIssueExecutorService,
-} from "./issues/dry-run-executor.ts";
 import {
     makeImplementationExecutorService,
     type ImplementationExecutorService,
@@ -120,7 +115,6 @@ export type RalphieRuntime = {
     readonly resolutionVerification: ResolutionVerificationService;
     readonly decompositionExecutor: DecompositionExecutorService;
     readonly implementationExecutor: ImplementationExecutorService;
-    readonly dryRunIssueExecutor: DryRunIssueExecutorService;
     readonly issueExecutor: IssueExecutorService;
     readonly issueRecovery: IssueRecoveryService;
     readonly needsAttentionRouter: NeedsAttentionRouterService;
@@ -145,7 +139,6 @@ export type IssueWorkflowRuntime = {
     readonly gitIssueOperations: GitIssueOperationsService;
     readonly parentCompletion: ParentCompletionService;
     readonly issueExecutor: IssueExecutorService;
-    readonly dryRunIssueExecutor: DryRunIssueExecutorService;
     readonly agentRuntime: PiAgentService;
 };
 
@@ -198,10 +191,6 @@ export const makeLiveRuntime = ({
     const complexityAssessment = makeComplexityAssessmentService(progress);
     const groundingAssessment = makeGroundingAssessmentService(progress);
     const resolutionVerification = makeResolutionVerificationService(progress);
-    const decompositionPlanner = makeDecompositionPlannerService(
-        githubIssues,
-        progress,
-    );
     const decompositionExecutor = makeDecompositionExecutorService(
         githubIssueMutations,
         githubIssues,
@@ -218,13 +207,6 @@ export const makeLiveRuntime = ({
         issueVerification,
         resolutionVerification,
         needsAttentionRouter,
-    );
-    const dryRunIssueExecutor = makeDryRunIssueExecutorService(
-        issueArtifactStore,
-        complexityAssessment,
-        progress,
-        groundingAssessment,
-        decompositionPlanner,
     );
     const issueExecutor = makeIssueExecutorService(
         issueArtifactStore,
@@ -256,7 +238,6 @@ export const makeLiveRuntime = ({
         resolutionVerification,
         decompositionExecutor,
         implementationExecutor,
-        dryRunIssueExecutor,
         issueExecutor,
         issueRecovery,
         needsAttentionRouter,

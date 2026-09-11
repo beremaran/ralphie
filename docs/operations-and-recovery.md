@@ -1,9 +1,10 @@
 # Operations and recovery
 
 This page is for operators inspecting a run, integrating Ralphie's output,
-or recovering after interruption or failure. It is the authoritative reference
-for progress output, artifacts, state, cancellation, resume, and cleanup. Start
-at the [documentation index](README.md) for other audience paths.
+or understanding what remains after interruption or failure. It is the
+authoritative reference for progress output, artifacts, state, cancellation,
+and cleanup. Start at the [documentation index](README.md) for other audience
+paths.
 
 ## Progress output
 
@@ -75,7 +76,7 @@ JSON events use a stable operational vocabulary and include `runId`,
 whether agent work was skipped. Human-readable needs-attention decisions name
 the issue number and title and show the current/total queue position. A
 `needs-attention` event includes its reason, summary, evidence, questions,
-diagnostic or artifact path, and issue budget; verbose and
+diagnostic or artifact path, and queue position; verbose and
 JSON output retain those complete details.
 Depending on the event, it may also include the repository, review attempt,
 session ID, commit SHA, created issue numbers, or diagnostic paths. Supplied
@@ -100,8 +101,7 @@ Run artifacts live under:
 ```
 
 New runs write the durable event log to
-`<workspace>/.ralphie/runs/<run-id>/events.jsonl`; a resumed run reuses the
-directory containing its supplied state file.
+`<workspace>/.ralphie/runs/<run-id>/events.jsonl`.
 
 A normal issue execution obtains a durable per-issue artifact store at:
 
@@ -131,26 +131,23 @@ configuration is not stored in this tree):
 ```
 
 `state.json` is versioned, schema-validated, and atomically replaced. It
-contains the repository/branch,
-notification settings and any pending notification intent, pi model selection,
-budget, pending and completed queue numbers, processed count, outcomes, active
+contains the repository/branch, notification settings, pi model selection,
+pending and completed queue numbers, processed count, outcomes, active
 issue/stage, checkout invariant, and update time. State is saved before the
-queue starts, when an issue becomes active, before and after review/revision/
-publication boundaries, after outcomes and queue refreshes, and at final
-completion. Version 11 accepts and migrates previous versions while preserving
-resumable evidence.
+queue starts, when an issue becomes active, after each issue outcome, after
+queue refreshes, and at final completion. State is written for observability
+only: Ralphie never loads a previous run's state.
 
 ## Failure, cancellation, and exit status
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Active: start or resume
+    [*] --> Active: start
     Active --> Active: persist issue/queue progress
-    Active --> Complete: queue empty or budget reached
+    Active --> Complete: queue empty
     Active --> Stopped: error (saved as active)
     Active --> Stopped: AbortSignal
-    Complete --> Cleaned: --clean end
-    Complete --> Retained: default
+    Complete --> Cleaned: workspace removed after success
     Stopped --> Retained: keep state/artifacts
     Cleaned --> [*]
     Retained --> [*]
@@ -161,11 +158,12 @@ stateDiagram-v2
 - The agent runtime is closed on success, failure, cancellation, and scoped defects. Ordinary
   failures set process exit code `1`.
 - Cancellation is checked before long-running boundaries and passed into the agent runtime.
-  Ralphie attempts to restore the clean issue checkpoint, saves resumable state,
-  skips cleanup, and exits `130`.
-- Successful completion persists `complete` before optional `--clean end`
-  removes the entire workspace. Cleanup is skipped on failure so state and
-  diagnostics remain available.
+  Ralphie attempts to restore the clean issue checkpoint, saves state with the
+  active issue, skips cleanup, and exits `130`.
+- Successful completion persists `complete`, then removes the entire workspace
+  (after protected-path checks). Cleanup is skipped when the run drains with
+  issue failures, fails, or is cancelled, so state and diagnostics remain
+  available.
 
 An ordinary issue failure never stops the queue. Ralphie restores the failed
 issue checkout, records its outcome, and continues independent issues. Failed
@@ -187,17 +185,14 @@ persists the summary, evidence, questions, and issue
 freshness metadata in the run artifacts, keeps the issue open, and continues
 with later work.
 Notifications are disabled unless `--notify-needs-attention` is supplied; a
-label by itself is rejected. When opted in, Ralphie first persists the
-structured outcome and notification label intent, then publishes through the
-GitHub notification service. Notification applies only to agent-reported
+label by itself is rejected. When opted in, Ralphie publishes through the
+GitHub notification service after recording the outcome and before moving to
+the next issue. Notification applies only to agent-reported
 needs-attention blockers: issues held back by open queue dependencies are
 recorded as needs-attention outcomes but never notified or labeled, because
 their blocker resolves by queue completion rather than by a human decision.
-A failed or uncertain notification remains at an explicit
-notification-recovery boundary; resume preserves the saved
-notification intent and label, reconciles the stable marker, and retries
-without rerunning agent work or closing the issue. Dry runs report
-needs-attention outcomes but never publish notifications.
+A notification failure fails the run; the issue remains open and a later run
+re-evaluates it from scratch.
 
 When any executor session requests needs attention, Ralphie first persists the
 bounded request, clean checkpoint, and issue freshness fingerprint. Exactly one
@@ -206,11 +201,11 @@ Git, or GitHub mutation. Only a `needs_attention` verifier disposition confirms
 it; actionable and already-resolved dispositions continue the original flow.
 The confirmed decision is persisted before recovery writes a bounded binary-safe
 patch and decision diagnostic, then restores and verifies the exact clean
-checkpoint. A verifier or recovery interruption retains the handoff so resume
-can retry verification or recovery without rerunning completed agent work.
-The saved decision and handoff are reused only when live `updatedAt` and comment
-freshness metadata exactly match; a changed or invalid fingerprint removes both
-atomically before routing continues.
+checkpoint. A verifier or recovery interruption retains the handoff so a later
+attempt can retry verification or recovery without rerunning completed agent
+work. The saved decision and handoff are reused only when live `updatedAt` and
+comment freshness metadata exactly match; a changed or invalid fingerprint
+removes both atomically before routing continues.
 
 ```mermaid
 stateDiagram-v2
@@ -219,14 +214,13 @@ stateDiagram-v2
     state "Artifacts retained" as Retained
     state "Workspace cleaned" as Cleaned
 
-    [*] --> Active: Start or resume
+    [*] --> Active: Start
     Active --> IssueInProgress: Dequeue issue
     IssueInProgress --> Active: Persist outcome and queue
     IssueInProgress --> RecoverableStop: Failure or interruption
-    RecoverableStop --> Active: Resume and reconcile
-    Active --> Complete: Queue empty or budget reached
-    Complete --> Retained: Keep workspace
-    Complete --> Cleaned: --clean end
+    Active --> Complete: Queue empty
+    Complete --> Cleaned: Remove workspace after success
+    RecoverableStop --> Retained: Keep workspace
     Retained --> [*]
     Cleaned --> [*]
 ```
@@ -234,51 +228,28 @@ stateDiagram-v2
 Needs-attention recovery diagnostics use the same issue directory and contain
 `changes.patch` plus `metadata.json` under a fingerprint-bound
 `needs-attention-<id>/` directory. The patch includes tracked staged and unstaged
-changes as well as untracked files. Matching diagnostics are reused on resume;
-a fresh fingerprint receives a distinct directory. Diagnostics are published
-atomically before the exact checkpoint is restored and verified.
+changes as well as untracked files. Matching diagnostics are reused within the
+run; a fresh fingerprint receives a distinct directory. Diagnostics are
+published atomically before the exact checkpoint is restored and verified.
 
-## Resume and reconciliation
+## Interruption and recovery
 
-On resume, Ralphie compares persisted intent with both local Git and live GitHub
-state before returning to `Active`. Pending issues use the freshly discovered
-GitHub snapshots, including issue update and comment freshness metadata. It can
-reconcile partially created child issues, a commit created immediately before
-interruption, an issue closure whose response was lost, and a needs-attention
-notification whose response or label mutation was uncertain without repeating
-the corresponding agent work.To resume an interrupted run, provide its saved state file:
+There is no resume command. When a run fails or is interrupted:
 
-```bash
-bunx @beremaran/ralphie owner/repository \
-  --branch main \
-  --resume ~/.ralphie/.ralphie/runs/<run-id>/state.json
-```
+1. the agent runtime is closed and the process exits `1` (or `130` on
+   cancellation);
+2. the workspace retains `state.json`, `events.jsonl`, and per-issue artifacts
+   for diagnosis;
+3. issues that were not closed remain open and are selected again on the next
+   run; and
+4. the next run removes the workspace, prepares a fresh checkout, and
+   re-evaluates every matching open issue from scratch.
 
-The repository and branch must match the saved run. On `--resume`:
-
-1. the command loads and validates the saved state;
-2. workflow preflight prepares the workspace and checkout and refetches issues;
-3. reconciliation compares saved intent with current Git and GitHub state;
-4. the saved pending queue, completed numbers, outcomes, and artifacts are
-   restored; and
-5. the next safe deterministic step continues without unnecessarily rerunning
-   pi work.
-
-Examples of resumable boundaries:
-
-- a saved complexity decision is reused;
-- a checkpoint plus created commit can finish a push without rerunning the
-  implementation/review loop;
-- an active `issue-closure` with a completed outcome resumes closure without
-  rerunning implementation;
-- an active `notification-recovery` retries the saved structured outcome and
-  stable GitHub marker without rerunning agent work; and
-- a partially created decomposition reuses marker-discovered children and the
-  saved key mapping; native sub-issue attachments and `blocked_by` dependencies
-  are reconciled idempotently, and a child attached to the wrong parent or a
-  native relationship that disagrees with a child's marker halts with a
-  recovery diagnostic instead of silently reparenting or duplicating issues.
-
+Because each run starts clean, recovery is a new run rather than a continuation:
+completed issues are already closed and no longer selected, while interrupted
+issues repeat grounding, implementation, and review. Inspect the retained
+`state.json` and artifacts before deleting them if the failure needs
+investigation.
 
 Native sub-issue and dependency endpoints require `github.com`; GitHub
 Enterprise Server is not supported by the current client. With an unavailable
@@ -299,9 +270,9 @@ reaches the ordinary failure boundary.
 
 ## Cleanup
 
-`--clean end` removes the entire workspace after success, including completed
-state, events, diagnostics, and the repository checkout. Cleanup is skipped on
-failure so recovery remains possible. `--clean start` removes the workspace
-before preparation, after protected-path checks; resumed runs skip start
-cleanup. `--clean both` does both. Use these options only with a path dedicated to
-Ralphie; see [Safety](safety.md) for the destructive workspace contract.
+Ralphie removes the entire workspace before preparing a run, after
+protected-path checks, and again after a successful run. This deletes completed
+state, events, diagnostics, and the repository checkout. Cleanup is skipped
+when the run drains with issue failures, fails, or is cancelled, so state and
+diagnostics remain available. Use a path dedicated to Ralphie; see
+[Safety](safety.md) for the destructive workspace contract.

@@ -17,7 +17,6 @@ export type ValidateModelVariantsInput = {
     readonly models: ReadonlyArray<PiModelInfo>;
     readonly defaultModel?: AgentModel;
     readonly primaryModel?: AgentModel;
-    readonly fallbackModel?: AgentModel;
     /** The single --thinking level applied to every session. */
     readonly variant?: string;
 };
@@ -81,14 +80,10 @@ export const collectVariantViolations = (
     }
     const variant = input.variant;
     if (variant === undefined || variant === "") return [];
-    const selections = [
-        input.primaryModel ?? input.defaultModel,
-        input.fallbackModel,
-    ].filter((selection): selection is AgentModel => selection !== undefined);
-    return selections.flatMap((selection) => {
-        const violation = violationForModel(variant, selection, input.models);
-        return violation === undefined ? [] : [violation];
-    });
+    const selection = input.primaryModel ?? input.defaultModel;
+    if (selection === undefined) return [];
+    const violation = violationForModel(variant, selection, input.models);
+    return violation === undefined ? [] : [violation];
 };
 
 export const formatVariantViolations = (

@@ -43,7 +43,7 @@ effects and validate their invariants at the boundary.
 | `src/agent/` | Ralphie's session, prompt, schema, diagnostics, and structured-output boundary. |
 | `src/pi/` | In-process pi agent runtime: provider catalog, credential store, execution tools, session lifecycle, and safety policy. |
 | `src/progress/` | Typed events, audit persistence, and terminal/JSON renderers. |
-| `src/run/` | Versioned state, artifacts, reconciliation, and resume behavior. |
+| `src/run/` | Versioned run state written for observability. |
 | `src/workspace/` | Path expansion and protected workspace removal. |
 | `src/process/` | External command execution and process exit semantics. |
 
@@ -67,7 +67,7 @@ workspace; run state and recovery artifacts belong under the workspace's
 `.ralphie` directory.
 
 For workflow behavior and the agent/deterministic boundary, see [Workflows](workflows.md)
-and [Safety](safety.md). For state transitions and reconciliation, see
+and [Safety](safety.md). For state transitions and retained diagnostics, see
 [Operations and recovery](operations-and-recovery.md).
 
 ## Distribution boundary

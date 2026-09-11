@@ -1,11 +1,8 @@
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { z } from "zod";
 
-import {
-    DRY_RUN_ROUTES,
-    IssueExecutionOutcomeKind,
-} from "../issues/execution.ts";
+import { IssueExecutionOutcomeKind } from "../issues/execution.ts";
 import {
     NeedsAttentionReason,
     nonBlankStringSchema,
@@ -13,9 +10,7 @@ import {
 import { RalphieError } from "../shared/error.ts";
 import { DEFAULT_MAX_DECOMPOSITION_DEPTH } from "../options.ts";
 
-export const RUN_STATE_VERSION = 11 as const;
-
-const dryRunRouteSchema = z.enum(DRY_RUN_ROUTES);
+export const RUN_STATE_VERSION = 12 as const;
 
 export enum RunStateStatus {
     Active = "active",
@@ -44,51 +39,40 @@ const issueSchema = z.object({
     commentVersion: z.string().min(1).optional(),
 });
 
-const stripLegacyPolicy = (value: unknown): unknown => {
-    if (typeof value !== "object" || value === null || !("policy" in value)) {
-        return value;
-    }
-    const { policy: _policy, ...rest } = value as Record<string, unknown>;
-    return rest;
-};
-
-const needsAttentionOutcomeSchema = z.preprocess(
-    stripLegacyPolicy,
-    z.union([
-        z
-            .object({
-                kind: z.literal(IssueExecutionOutcomeKind.NeedsAttention),
-                reason: z.enum(NeedsAttentionReason),
-                summary: nonBlankStringSchema,
-                evidence: z.array(nonBlankStringSchema).min(1),
-                questions: z.array(nonBlankStringSchema).min(1),
-                artifactPath: z.string().min(1),
-                route: z.literal("needs-attention").optional(),
-            })
-            .strict(),
-        z
-            .object({
-                kind: z.literal(IssueExecutionOutcomeKind.NeedsAttention),
-                reason: z.enum(NeedsAttentionReason),
-                summary: nonBlankStringSchema,
-                evidence: z.array(nonBlankStringSchema).min(1),
-                questions: z.array(nonBlankStringSchema).min(1),
-                diagnosticsPath: z.string().min(1),
-                route: z.literal("needs-attention").optional(),
-            })
-            .strict(),
-        z
-            .object({
-                kind: z.literal(IssueExecutionOutcomeKind.NeedsAttention),
-                reason: z.enum(NeedsAttentionReason),
-                summary: nonBlankStringSchema,
-                evidence: z.array(nonBlankStringSchema).min(1),
-                questions: z.array(nonBlankStringSchema).min(1),
-                route: z.literal("needs-attention"),
-            })
-            .strict(),
-    ]),
-);
+const needsAttentionOutcomeSchema = z.union([
+    z
+        .object({
+            kind: z.literal(IssueExecutionOutcomeKind.NeedsAttention),
+            reason: z.enum(NeedsAttentionReason),
+            summary: nonBlankStringSchema,
+            evidence: z.array(nonBlankStringSchema).min(1),
+            questions: z.array(nonBlankStringSchema).min(1),
+            artifactPath: z.string().min(1),
+            route: z.literal("needs-attention").optional(),
+        })
+        .strict(),
+    z
+        .object({
+            kind: z.literal(IssueExecutionOutcomeKind.NeedsAttention),
+            reason: z.enum(NeedsAttentionReason),
+            summary: nonBlankStringSchema,
+            evidence: z.array(nonBlankStringSchema).min(1),
+            questions: z.array(nonBlankStringSchema).min(1),
+            diagnosticsPath: z.string().min(1),
+            route: z.literal("needs-attention").optional(),
+        })
+        .strict(),
+    z
+        .object({
+            kind: z.literal(IssueExecutionOutcomeKind.NeedsAttention),
+            reason: z.enum(NeedsAttentionReason),
+            summary: nonBlankStringSchema,
+            evidence: z.array(nonBlankStringSchema).min(1),
+            questions: z.array(nonBlankStringSchema).min(1),
+            route: z.literal("needs-attention"),
+        })
+        .strict(),
+]);
 
 const currentOutcomeSchema = z.union([
     z.object({
@@ -118,7 +102,6 @@ const currentOutcomeSchema = z.union([
         .object({
             kind: z.literal(IssueExecutionOutcomeKind.Skipped),
             reason: z.string().min(1),
-            route: dryRunRouteSchema.optional(),
         })
         .strict(),
     z.object({
@@ -149,18 +132,9 @@ const runStateFields = {
     runId: z.string().min(1),
     repository: z.string().min(1),
     branch: z.string().min(1),
-    dryRun: z.boolean().optional(),
     /** Whether needs-attention outcomes should be published to GitHub. */
     notificationsEnabled: z.boolean().optional(),
     needsAttentionLabel: z.string().trim().min(1).optional(),
-    pendingNotification: z
-        .object({
-            issueNumber: z.number().int().positive(),
-            outcome: needsAttentionOutcomeSchema,
-            labelName: z.string().trim().min(1).optional(),
-        })
-        .strict()
-        .optional(),
     selection: z.object({
         agent: z.string().min(1),
         model: z
@@ -171,7 +145,6 @@ const runStateFields = {
             .optional(),
         variant: z.string().min(1).optional(),
     }),
-    maxIssues: z.number().int().positive().optional(),
     maxDecompositionDepth: z
         .number()
         .int()
@@ -188,7 +161,7 @@ const runStateFields = {
             outcome: outcomeSchema,
         }),
     ),
-    /** Active issue stage for resumable progress, when known. */
+    /** Active issue stage for progress reporting, when known. */
     activeIssue: z
         .object({
             issueNumber: z.number().int().positive(),
@@ -204,81 +177,12 @@ const runStateFields = {
     updatedAt: z.string().datetime(),
 };
 
-export const runStateSchema = z.object({
+const runStateSchema = z.object({
     version: z.literal(RUN_STATE_VERSION),
     ...runStateFields,
 });
 
-const legacyRunStateSchema = z.object({
-    version: z.union([
-        z.literal(2),
-        z.literal(3),
-        z.literal(4),
-        z.literal(5),
-        z.literal(6),
-        z.literal(7),
-        z.literal(8),
-        z.literal(9),
-        z.literal(10),
-    ]),
-    ...runStateFields,
-    maxDecompositionDepth: z.number().int().positive().optional(),
-});
-
-// Keep older versions resumable as in-memory inputs while newly persisted
-// state is validated at the current version.
-type RunStateFields = z.infer<z.ZodObject<typeof runStateFields>>;
-export type RunState = Omit<RunStateFields, "maxDecompositionDepth"> & {
-    /** Optional only for typed legacy-state fixtures; loading fills the default. */
-    readonly maxDecompositionDepth?: number;
-    readonly version: 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
-};
-
-type LoadedRunState = {
-    readonly state: RunState;
-    readonly migrated: boolean;
-};
-
-const migrateRunState = (value: unknown): LoadedRunState => {
-    if (
-        typeof value === "object" &&
-        value !== null &&
-        "version" in value &&
-        (value.version === 2 ||
-            value.version === 3 ||
-            value.version === 4 ||
-            value.version === 5 ||
-            value.version === 6 ||
-            value.version === 7 ||
-            value.version === 8 ||
-            value.version === 9 ||
-            value.version === 10)
-    ) {
-        const legacy = legacyRunStateSchema.parse(value);
-        return {
-            state: runStateSchema.parse({
-                ...legacy,
-                version: RUN_STATE_VERSION,
-                notificationsEnabled: legacy.notificationsEnabled ?? false,
-                maxDecompositionDepth:
-                    legacy.maxDecompositionDepth ??
-                    DEFAULT_MAX_DECOMPOSITION_DEPTH,
-            }),
-            migrated: true,
-        };
-    }
-    if (
-        typeof value === "object" &&
-        value !== null &&
-        "version" in value &&
-        value.version !== RUN_STATE_VERSION
-    ) {
-        throw new RalphieError({
-            message: `Run state uses unsupported version ${String(value.version)}; expected version ${RUN_STATE_VERSION}.`,
-        });
-    }
-    return { state: runStateSchema.parse(value), migrated: false };
-};
+export type RunState = z.infer<typeof runStateSchema>;
 
 const persistRunStateAtomically = async (
     path: string,
@@ -302,7 +206,6 @@ const persistRunStateAtomically = async (
 
 export type RunStateStoreService = {
     readonly save: (path: string, state: RunState) => Promise<void>;
-    readonly load: (path: string) => Promise<RunState>;
 };
 
 export const RunStateStoreLive: RunStateStoreService = {
@@ -313,26 +216,6 @@ export const RunStateStoreLive: RunStateStoreService = {
         } catch (cause) {
             throw new RalphieError({
                 message: `Failed to persist run state at ${path}.`,
-                cause,
-            });
-        }
-    },
-
-    load: async (path) => {
-        try {
-            const loaded = migrateRunState(
-                JSON.parse(await readFile(path, "utf8")),
-            );
-            if (loaded.migrated) {
-                await persistRunStateAtomically(path, loaded.state);
-            }
-            return loaded.state;
-        } catch (cause) {
-            throw new RalphieError({
-                message:
-                    cause instanceof RalphieError
-                        ? `Run state at ${path} is invalid or unreadable: ${cause.message}`
-                        : `Run state at ${path} is invalid or unreadable.`,
                 cause,
             });
         }

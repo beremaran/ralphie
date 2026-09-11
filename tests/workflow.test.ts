@@ -22,15 +22,9 @@ import {
     type IssueExecutorService,
 } from "../src/issues/executor.ts";
 import {
-    makeDryRunIssueExecutorService,
-    type DryRunIssueExecutorService,
-} from "../src/issues/dry-run-executor.ts";
-import {
     IssueArtifactKind,
-    type IssueArtifactStore,
     type IssueArtifactStoreService,
     makeIssueArtifactStore,
-    makeIssueArtifactStoreService,
 } from "../src/issues/artifacts.ts";
 import { DEFAULT_AGENT } from "../src/agent/model.ts";
 import type { AgentModel } from "../src/agent/model.ts";
@@ -95,11 +89,9 @@ type TestRuntimeOptions = {
     readonly executionContexts?: IssueExecutionContext[];
     readonly executeGate?: (context: IssueExecutionContext) => Promise<void>;
     readonly issueExecutor?: IssueExecutorService;
-    readonly dryRunIssueExecutor?: DryRunIssueExecutorService;
     readonly artifactStore?: IssueArtifactStoreService;
     readonly refreshedIssues?: Readonly<Record<number, GitHubIssue>>;
     readonly needsAttentionNotification?: GitHubNeedsAttentionNotificationService;
-    readonly dryRunOutcome?: IssueExecutionOutcome;
     readonly onStateSave?: (state: RunState) => void;
     /** Native sub-issues reported for every parent during reconciliation. */
     readonly parentSubIssues?: ReadonlyArray<GitHubIssue>;
@@ -248,19 +240,6 @@ const testRuntime = (
             return result;
         },
     };
-    const dryRunIssueExecutor: DryRunIssueExecutorService =
-        options.dryRunIssueExecutor ?? {
-            execute: async ({ issue }) => {
-                calls.push(`dryRunIssue:${issue.number}`);
-                return (
-                    options.dryRunOutcome ?? {
-                        kind: IssueExecutionOutcomeKind.Skipped,
-                        route: "implementation",
-                        reason: "dry run",
-                    }
-                );
-            },
-        };
     const agentRuntime: PiAgentService = {
         start: async () => {
             if (options.startFailure) throw options.startFailure;
@@ -279,9 +258,6 @@ const testRuntime = (
         },
     };
     const stateStore: RunStateStoreService = {
-        load: async () => {
-            throw new RalphieError({ message: "unused" });
-        },
         save: async (_path, state) => {
             const saved = structuredClone(state);
             savedStates.push(saved);
@@ -338,7 +314,6 @@ const testRuntime = (
         gitRepositoryInvariant: invariant,
         gitIssueCheckpoint: checkpoint,
         gitIssueOperations: operations,
-        dryRunIssueExecutor,
         issueExecutor,
         agentRuntime,
         progress,
@@ -349,7 +324,6 @@ const testRuntime = (
 
 const issueWorkCallPrefixes = [
     "executeIssue:",
-    "dryRunIssue:",
     "pushBranch:",
     "closeIssue:",
     "restoreCheckout",
@@ -362,39 +336,6 @@ const expectNoIssueWork = (calls: ReadonlyArray<string>): void => {
         ),
     ).toEqual([]);
 };
-
-const artifactMutationMethods = new Set<PropertyKey>([
-    "write",
-    "recordResolutionDecision",
-    "beginNeedsAttentionHandoff",
-    "recordNeedsAttentionDecision",
-    "appendReview",
-    "recordCreatedIssue",
-    "resetImplementationAttempt",
-    "clearUnresolvedResolutionDecision",
-    "invalidateStaleIssueDecisions",
-    "invalidateStaleNeedsAttentionDecision",
-    "invalidateNeedsAttentionDecision",
-    "clearNeedsAttentionHandoff",
-]);
-
-const readOnlyArtifactSpy = (
-    store: IssueArtifactStore,
-    mutations: string[],
-): IssueArtifactStore =>
-    new Proxy(store, {
-        get(target, property, receiver) {
-            if (artifactMutationMethods.has(property)) {
-                return async () => {
-                    mutations.push(String(property));
-                    throw new Error(
-                        `dry run attempted artifact mutation: ${String(property)}`,
-                    );
-                };
-            }
-            return Reflect.get(target, property, receiver);
-        },
-    });
 
 const expectCallOrder = (
     calls: ReadonlyArray<string>,
@@ -520,7 +461,6 @@ const groundedRouteExecutor = (
 const baseOptions = {
     repo: "owner/repo",
     branch: "develop",
-    maxIssues: 1,
     issueFilters: {
         labels: ["bug"],
         sort: IssueSort.Created,
@@ -528,8 +468,6 @@ const baseOptions = {
     },
     agent: DEFAULT_AGENT,
     workspace: "/tmp/ralphie",
-    cleanup: false,
-    startClean: false,
     runId: "test-run",
 } as const;
 
@@ -545,8 +483,6 @@ describe("workflow", () => {
                 modelVariant: "high",
                 agent: "reviewer",
                 maxDecompositionDepth: 6,
-                cleanup: true,
-                startClean: true,
             },
             testRuntime(calls, states, {}, events),
         );
@@ -643,376 +579,12 @@ describe("workflow", () => {
         expect(calls).toContain("closeIssue:42");
     });
 
-    test("dry-run assesses through the queue without invoking mutation execution", async () => {
-        const calls: string[] = [];
-        const states: RunState[] = [];
-        const events: ProgressUpdate[] = [];
-        const summary = await workflow(
-            { ...baseOptions, dryRun: true },
-            testRuntime(calls, states, {}, events),
-        );
-        expect(summary.outcomes).toEqual([
-            {
-                issueNumber: 42,
-                outcome: {
-                    kind: IssueExecutionOutcomeKind.Skipped,
-                    route: "implementation",
-                    reason: "dry run",
-                },
-            },
-        ]);
-        expect(calls).toContain("dryRunIssue:42");
-        expect(calls).not.toContain(
-            "executeIssue:42:/tmp/ralphie/repo:develop:build",
-        );
-        expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
-        expect(events).toContainEqual(
-            expect.objectContaining({
-                stage: "run",
-                status: "succeeded",
-                details: expect.objectContaining({
-                    routes: [{ issueNumber: 42, route: "implementation" }],
-                }),
-            }),
-        );
-    });
-
-    test("keeps a resumed dry run on the dry-run executor", async () => {
-        const calls: string[] = [];
-        const states: RunState[] = [];
-        const summary = await workflow(
-            {
-                ...baseOptions,
-                dryRun: false,
-                resumeState: {
-                    version: 4,
-                    status: RunStateStatus.Active,
-                    runId: "resumed-dry-run",
-                    repository: baseOptions.repo,
-                    branch: "develop",
-                    dryRun: true,
-                    selection: { agent: DEFAULT_AGENT },
-                    maxIssues: 1,
-                    queue: {
-                        pending: [
-                            { ...firstIssue, labels: [...firstIssue.labels] },
-                        ],
-                        completedIssueNumbers: [],
-                        processedCount: 0,
-                    },
-                    outcomes: [],
-                    checkout: { branch: "develop", head: "head-0" },
-                    updatedAt: "2026-08-28T00:00:00.000Z",
-                },
-            },
-            testRuntime(calls, states),
-        );
-
-        expect(summary.counts.skipped).toBe(1);
-        expect(calls).toContain("dryRunIssue:42");
-        expect(calls).not.toContain(
-            "executeIssue:42:/tmp/ralphie/repo:develop:build",
-        );
-    });
-
-    test("isolates every dry-run route", async () => {
-        const routes: ReadonlyArray<GroundedRoute> = [
-            "actionable",
-            "decomposition",
-            "already-resolved",
-            "needs-attention",
-        ];
-        for (const route of routes) {
-            const calls: string[] = [];
-            const states: RunState[] = [];
-            const events: ProgressUpdate[] = [];
-            const artifactCalls: string[] = [];
-            const artifactMutations: string[] = [];
-            const storeService = makeIssueArtifactStoreService();
-            const artifactStore: IssueArtifactStoreService = {
-                forIssue: async () => {
-                    artifactCalls.push("writable-loader");
-                    throw new Error("dry run used writable artifacts");
-                },
-                forIssueReadOnly: async (issueNumber, scope) => {
-                    artifactCalls.push("read-only-loader");
-                    return readOnlyArtifactSpy(
-                        await storeService.forIssueReadOnly!(
-                            issueNumber,
-                            scope,
-                        ),
-                        artifactMutations,
-                    );
-                },
-            };
-            let groundingCalls = 0;
-            let complexityCalls = 0;
-            const dryRunExecutor = makeDryRunIssueExecutorService(
-                artifactStore,
-                {
-                    assess: async () => {
-                        complexityCalls += 1;
-                        if (
-                            route === "already-resolved" ||
-                            route === "needs-attention"
-                        ) {
-                            throw new Error("unexpected complexity assessment");
-                        }
-                        return {
-                            sessionID: "dry-run-complexity",
-                            decision: {
-                                complexity:
-                                    route === "actionable"
-                                        ? ComplexityLevel.Level2
-                                        : ComplexityLevel.Level4,
-                                rationale: "Read-only route fixture.",
-                            },
-                        };
-                    },
-                },
-                makeTestProgressRecorder(events),
-                {
-                    assess: async () => {
-                        groundingCalls += 1;
-                        return {
-                            sessionID: "dry-run-grounding",
-                            decision: groundingDecisionFor(route),
-                        };
-                    },
-                },
-            );
-            const summary = await workflow(
-                {
-                    ...baseOptions,
-                    dryRun: true,
-                },
-                testRuntime(
-                    calls,
-                    states,
-                    {
-                        artifactStore,
-                        dryRunIssueExecutor: dryRunExecutor,
-                        issueExecutor: {
-                            execute: async () => {
-                                calls.push("executeIssue:unexpected");
-                                throw new Error(
-                                    "mutation executor escaped dry run",
-                                );
-                            },
-                        },
-                    },
-                    events,
-                ),
-            );
-
-            expect(summary.outcomes[0]?.outcome).toMatchObject({
-                route: route === "actionable" ? "implementation" : route,
-            });
-            expect(groundingCalls).toBe(1);
-            expect(complexityCalls).toBe(
-                route === "already-resolved" || route === "needs-attention"
-                    ? 0
-                    : 1,
-            );
-            expect(artifactCalls).toEqual(["read-only-loader"]);
-            expect(artifactMutations).toEqual([]);
-            expectNoIssueWork(calls);
-            expect(calls).toEqual([
-                "prepareWorkspace:/tmp/ralphie",
-                "initializeGitHub",
-                "verifyGitInstalled",
-                "prepareRepository:owner/repo:develop:/tmp/ralphie",
-                "listIssues:owner/repo:bug:created:asc",
-                "startServer",
-                "refreshIssue:42",
-                "closeRuntime",
-            ]);
-            expect(firstIssue.state).toBe("open");
-            expect(events).toContainEqual(
-                expect.objectContaining({
-                    stage: "run",
-                    status: "info",
-                    details: expect.objectContaining({
-                        dryRun: true,
-                    }),
-                }),
-            );
-            expect(events).toContainEqual(
-                expect.objectContaining({
-                    stage: "run",
-                    status: "succeeded",
-                    details: expect.objectContaining({
-                        routes: [
-                            {
-                                issueNumber: 42,
-                                route:
-                                    route === "actionable"
-                                        ? "implementation"
-                                        : route,
-                            },
-                        ],
-                    }),
-                }),
-            );
-            expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
-        }
-    });
-
-    test.each([
-        {
-            name: "lgtm-actionable",
-            route: "actionable" as const,
-        },
-        {
-            name: "lgtm-already-resolved",
-            route: "already-resolved" as const,
-        },
-        {
-            name: "lgtm-needs-attention",
-            route: "needs-attention" as const,
-        },
-    ])("keeps a resumed dry run isolated in $name mode", async ({ route }) => {
-        const calls: string[] = [];
-        const states: RunState[] = [];
-        const events: ProgressUpdate[] = [];
-        const artifactCalls: string[] = [];
-        const artifactMutations: string[] = [];
-        const storeService = makeIssueArtifactStoreService();
-        const artifactStore: IssueArtifactStoreService = {
-            forIssue: async () => {
-                artifactCalls.push("writable-loader");
-                throw new Error("resumed dry run used writable artifacts");
-            },
-            forIssueReadOnly: async (issueNumber, scope) => {
-                artifactCalls.push("read-only-loader");
-                return readOnlyArtifactSpy(
-                    await storeService.forIssueReadOnly!(issueNumber, scope),
-                    artifactMutations,
-                );
-            },
-        };
-        const dryRunExecutor = makeDryRunIssueExecutorService(
-            artifactStore,
-            {
-                assess: async () => ({
-                    sessionID: "resumed-complexity",
-                    decision: {
-                        complexity:
-                            route === "actionable"
-                                ? ComplexityLevel.Level2
-                                : ComplexityLevel.Level4,
-                        rationale: "Resumed read-only route fixture.",
-                    },
-                }),
-            },
-            makeTestProgressRecorder(events),
-            {
-                assess: async () => ({
-                    sessionID: "resumed-grounding",
-                    decision: groundingDecisionFor(route),
-                }),
-            },
-        );
-        const summary = await workflow(
-            {
-                ...baseOptions,
-                dryRun: false,
-                resumeState: {
-                    version: 4,
-                    status: RunStateStatus.Active,
-                    runId: `resumed-${route}`,
-                    repository: baseOptions.repo,
-                    branch: baseOptions.branch,
-                    dryRun: true,
-                    selection: { agent: DEFAULT_AGENT },
-                    maxIssues: 1,
-                    queue: {
-                        pending: [
-                            {
-                                ...firstIssue,
-                                labels: [...firstIssue.labels],
-                            },
-                        ],
-                        completedIssueNumbers: [],
-                        processedCount: 0,
-                    },
-                    outcomes: [],
-                    checkout: {
-                        branch: baseOptions.branch,
-                        head: "head-0",
-                    },
-                    updatedAt: "2026-08-28T00:00:00.000Z",
-                },
-            },
-            testRuntime(
-                calls,
-                states,
-                {
-                    artifactStore,
-                    dryRunIssueExecutor: dryRunExecutor,
-                    issueExecutor: {
-                        execute: async () => {
-                            calls.push("executeIssue:unexpected");
-                            throw new Error("mutation executor escaped resume");
-                        },
-                    },
-                },
-                events,
-            ),
-        );
-
-        expect(summary.outcomes[0]?.outcome).toMatchObject({
-            route: route === "actionable" ? "implementation" : route,
-        });
-        expect(artifactCalls).toEqual(["read-only-loader"]);
-        expect(artifactMutations).toEqual([]);
-        expectNoIssueWork(calls);
-        expect(calls).toEqual([
-            "prepareWorkspace:/tmp/ralphie",
-            "initializeGitHub",
-            "verifyGitInstalled",
-            "prepareRepository:owner/repo:develop:/tmp/ralphie",
-            "listIssues:owner/repo:bug:created:asc",
-            "startServer",
-            "refreshIssue:42",
-            "closeRuntime",
-        ]);
-        expect(firstIssue.state).toBe("open");
-        expect(events).toContainEqual(
-            expect.objectContaining({
-                stage: "run",
-                status: "info",
-                details: expect.objectContaining({
-                    dryRun: true,
-                    resumed: true,
-                }),
-            }),
-        );
-        expect(events).toContainEqual(
-            expect.objectContaining({
-                stage: "run",
-                status: "succeeded",
-                details: expect.objectContaining({
-                    routes: [
-                        {
-                            issueNumber: 42,
-                            route:
-                                route === "actionable"
-                                    ? "implementation"
-                                    : route,
-                        },
-                    ],
-                }),
-            }),
-        );
-    });
-
     test("defers an issue needing attention and continues with the queue", async () => {
         const calls: string[] = [];
         const states: RunState[] = [];
         const events: ProgressUpdate[] = [];
         const summary = await workflow(
-            { ...baseOptions, maxIssues: 2 },
+            { ...baseOptions },
             testRuntime(
                 calls,
                 states,
@@ -1043,13 +615,6 @@ describe("workflow", () => {
         expect(summary.outcomes.map(({ issueNumber }) => issueNumber)).toEqual([
             42, 43,
         ]);
-        expect(events[0]).toMatchObject({
-            stage: "run",
-            status: "info",
-            details: {
-                budget: 2,
-            },
-        });
         const needsAttention = events.find(
             ({ status }) => status === "needs-attention",
         );
@@ -1064,7 +629,6 @@ describe("workflow", () => {
                 questions: ["Complete the prerequisite, then retry."],
                 artifactPath: "/tmp/needs-attention.json",
                 queuePosition: 1,
-                budget: 2,
             },
         });
         expect(summary.counts[IssueExecutionOutcomeKind.NeedsAttention]).toBe(
@@ -1082,7 +646,7 @@ describe("workflow", () => {
         const diagnosticsPath =
             "/tmp/.ralphie/runs/run-1/issues/42/needs-attention-abc/changes.patch";
         const summary = await workflow(
-            { ...baseOptions, maxIssues: 2 },
+            { ...baseOptions },
             testRuntime(
                 calls,
                 states,
@@ -1154,7 +718,6 @@ describe("workflow", () => {
         const summary = await workflow(
             {
                 ...baseOptions,
-                maxIssues: 2,
             },
             testRuntime(calls, states, {
                 issueLists: [[firstIssue, secondIssue]],
@@ -1252,7 +815,6 @@ describe("workflow", () => {
         const summary = await workflow(
             {
                 ...baseOptions,
-                maxIssues: 2,
             },
             testRuntime(
                 calls,
@@ -1324,7 +886,6 @@ describe("workflow", () => {
         const summary = await workflow(
             {
                 ...baseOptions,
-                maxIssues: 2,
             },
             testRuntime(calls, states, {
                 issueLists: [[firstIssue, blockedIssue]],
@@ -1367,7 +928,6 @@ describe("workflow", () => {
         const summary = await workflow(
             {
                 ...baseOptions,
-                maxIssues: 2,
                 notificationsEnabled: true,
                 needsAttentionLabel: "needs-attention",
             },
@@ -1431,7 +991,6 @@ describe("workflow", () => {
         const summary = await workflow(
             {
                 ...baseOptions,
-                maxIssues: 2,
             },
             testRuntime(
                 calls,
@@ -1510,248 +1069,6 @@ describe("workflow", () => {
         expect(events.some(({ status }) => status === "failed")).toBeFalse();
     });
 
-    test("persists the needs-attention outcome before notification and clears the intent after success", async () => {
-        const calls: string[] = [];
-        const states: RunState[] = [];
-        const saveSequence: string[] = [];
-        let received:
-            | {
-                  readonly repository: string;
-                  readonly issueNumber: number;
-                  readonly reason: NeedsAttentionReason;
-                  readonly labelName?: string;
-              }
-            | undefined;
-        const notification: GitHubNeedsAttentionNotificationService = {
-            notify: async (
-                _client,
-                repository,
-                issueNumber,
-                input,
-                labelName,
-            ) => {
-                saveSequence.push("notify");
-                received = {
-                    repository,
-                    issueNumber,
-                    reason: input.reason,
-                    ...(labelName === undefined ? {} : { labelName }),
-                };
-                return { comment: "created", label: "applied" };
-            },
-        };
-        await workflow(
-            {
-                ...baseOptions,
-                notificationsEnabled: true,
-                needsAttentionLabel: "needs-attention",
-            },
-            testRuntime(calls, states, {
-                needsAttentionNotification: notification,
-                outcomes: [
-                    {
-                        kind: IssueExecutionOutcomeKind.NeedsAttention,
-                        reason: NeedsAttentionReason.ExternalDependency,
-                        summary: "A prerequisite is still open.",
-                        evidence: ["The prerequisite is unresolved."],
-                        questions: ["When will it be available?"],
-                        artifactPath: "/tmp/needs-attention.json",
-                    },
-                ],
-                onStateSave: (state) =>
-                    saveSequence.push(
-                        state.pendingNotification === undefined
-                            ? "save"
-                            : "save-pending",
-                    ),
-            }),
-        );
-
-        expect(received).toEqual({
-            repository: "owner/repo",
-            issueNumber: 42,
-            reason: NeedsAttentionReason.ExternalDependency,
-            labelName: "needs-attention",
-        });
-        expect(saveSequence.indexOf("save-pending")).toBeGreaterThanOrEqual(0);
-        expect(saveSequence.indexOf("notify")).toBeGreaterThan(
-            saveSequence.indexOf("save-pending"),
-        );
-        expect(
-            states.some(({ pendingNotification }) => pendingNotification),
-        ).toBeTrue();
-        expect(states.at(-1)?.pendingNotification).toBeUndefined();
-        expect(states.at(-1)?.outcomes[0]?.outcome.kind).toBe(
-            IssueExecutionOutcomeKind.NeedsAttention,
-        );
-    });
-
-    test("retains the needs-attention outcome and intent until the notification succeeds", async () => {
-        const states: RunState[] = [];
-        const notification: GitHubNeedsAttentionNotificationService = {
-            notify: async () => ({
-                comment: "created",
-                label: "not-configured",
-            }),
-        };
-
-        const summary = await workflow(
-            {
-                ...baseOptions,
-                notificationsEnabled: true,
-            },
-            testRuntime([], states, {
-                needsAttentionNotification: notification,
-                outcomes: [
-                    {
-                        kind: IssueExecutionOutcomeKind.NeedsAttention,
-                        reason: NeedsAttentionReason.ExternalDependency,
-                        summary: "A prerequisite is still open.",
-                        evidence: ["The prerequisite is unresolved."],
-                        questions: ["When will it be available?"],
-                        artifactPath: "/tmp/needs-attention.json",
-                    },
-                ],
-            }),
-        );
-
-        expect(summary.counts[IssueExecutionOutcomeKind.NeedsAttention]).toBe(
-            1,
-        );
-        expect(
-            states.some(
-                (state) =>
-                    state.activeIssue?.issueNumber === 42 &&
-                    state.pendingNotification !== undefined,
-            ),
-        ).toBeTrue();
-        const state = states.at(-1);
-        if (state === undefined) throw new Error("Missing final state");
-        expect(state.status).toBe(RunStateStatus.Complete);
-        expect(state.pendingNotification).toBeUndefined();
-        expect(state.outcomes[0]?.outcome.kind).toBe(
-            IssueExecutionOutcomeKind.NeedsAttention,
-        );
-    });
-
-    test("keeps notification recovery distinct and retries the saved outcome without agent work", async () => {
-        const firstStates: RunState[] = [];
-        let attempts = 0;
-        const notification: GitHubNeedsAttentionNotificationService = {
-            notify: async () => {
-                attempts += 1;
-                if (attempts === 1) throw new Error("GitHub unavailable");
-                return { comment: "unchanged", label: "not-configured" };
-            },
-        };
-        const outcome: IssueExecutionOutcome = {
-            kind: IssueExecutionOutcomeKind.NeedsAttention,
-            reason: NeedsAttentionReason.ExternalDependency,
-            summary: "A prerequisite is still open.",
-            evidence: ["The prerequisite is unresolved."],
-            questions: ["When will it be available?"],
-            artifactPath: "/tmp/needs-attention.json",
-        };
-        await expect(
-            workflow(
-                {
-                    ...baseOptions,
-                    notificationsEnabled: true,
-                },
-                testRuntime([], firstStates, {
-                    needsAttentionNotification: notification,
-                    outcomes: [outcome],
-                }),
-            ),
-        ).rejects.toMatchObject({
-            name: "NeedsAttentionNotificationRecoveryBoundaryError",
-        });
-
-        const failedState = firstStates.at(-1);
-        if (failedState === undefined)
-            throw new Error("Missing pending notification state");
-        expect(
-            failedState.outcomes.find(({ issueNumber }) => issueNumber === 42)
-                ?.outcome,
-        ).toEqual(failedState.pendingNotification?.outcome);
-
-        const resumedStates: RunState[] = [];
-        const resumedCalls: string[] = [];
-        const summary = await workflow(
-            {
-                ...baseOptions,
-                resumeState: failedState,
-            },
-            testRuntime(resumedCalls, resumedStates, {
-                needsAttentionNotification: notification,
-                outcomes: [outcome],
-                captureStart: 1,
-            }),
-        );
-        expect(summary.counts[IssueExecutionOutcomeKind.NeedsAttention]).toBe(
-            1,
-        );
-        expect(attempts).toBe(2);
-        expect(
-            resumedCalls.some((call) => call.startsWith("executeIssue:")),
-        ).toBeFalse();
-        expect(resumedStates.at(-1)?.status).toBe(RunStateStatus.Complete);
-        expect(resumedStates.at(-1)?.pendingNotification).toBeUndefined();
-    });
-
-    test("fails closed when a disabled resumed run contains pending notification intent", async () => {
-        const calls: string[] = [];
-        let notified = false;
-        const outcome = {
-            kind: IssueExecutionOutcomeKind.NeedsAttention as const,
-            reason: NeedsAttentionReason.ExternalDependency,
-            summary: "A prerequisite is still open.",
-            evidence: ["The prerequisite is unresolved."],
-            questions: ["When will it be available?"],
-            artifactPath: "/tmp/needs-attention.json",
-        };
-        const state: RunState = {
-            version: 5,
-            status: RunStateStatus.Active,
-            runId: "disabled-notification-resume",
-            repository: baseOptions.repo,
-            branch: "develop",
-            dryRun: false,
-            notificationsEnabled: false,
-            selection: { agent: DEFAULT_AGENT },
-            maxIssues: 1,
-            queue: {
-                pending: [{ ...firstIssue, labels: [...firstIssue.labels] }],
-                completedIssueNumbers: [],
-                processedCount: 0,
-            },
-            outcomes: [{ issueNumber: 42, outcome }],
-            activeIssue: { issueNumber: 42, stage: "notification-recovery" },
-            pendingNotification: { issueNumber: 42, outcome },
-            checkout: { branch: "develop", head: "head-0" },
-            updatedAt: "2026-08-28T00:00:00.000Z",
-        };
-        const notification: GitHubNeedsAttentionNotificationService = {
-            notify: async () => {
-                notified = true;
-                return { comment: "created", label: "applied" };
-            },
-        };
-
-        await expect(
-            workflow(
-                { ...baseOptions, resumeState: state },
-                testRuntime(calls, [], {
-                    needsAttentionNotification: notification,
-                }),
-            ),
-        ).rejects.toMatchObject({
-            name: "NeedsAttentionNotificationRecoveryBoundaryError",
-        });
-        expect(notified).toBeFalse();
-        expect(calls).not.toContain("startServer");
-    });
-
     test("does not notify when needs-attention notifications are disabled", async () => {
         const states: RunState[] = [];
         let notified = false;
@@ -1775,36 +1092,6 @@ describe("workflow", () => {
                         artifactPath: "/tmp/needs-attention.json",
                     },
                 ],
-            }),
-        );
-        expect(notified).toBeFalse();
-        expect(states.at(-1)?.pendingNotification).toBeUndefined();
-    });
-
-    test("does not notify during a dry run", async () => {
-        let notified = false;
-        const notification: GitHubNeedsAttentionNotificationService = {
-            notify: async () => {
-                notified = true;
-                return { comment: "created", label: "not-configured" };
-            },
-        };
-        await workflow(
-            {
-                ...baseOptions,
-                dryRun: true,
-                notificationsEnabled: true,
-            },
-            testRuntime([], [], {
-                needsAttentionNotification: notification,
-                dryRunOutcome: {
-                    kind: IssueExecutionOutcomeKind.NeedsAttention,
-                    reason: NeedsAttentionReason.ExternalDependency,
-                    summary: "A prerequisite is still open.",
-                    evidence: ["The prerequisite is unresolved."],
-                    questions: ["When will it be available?"],
-                    route: "needs-attention",
-                },
             }),
         );
         expect(notified).toBeFalse();
@@ -1919,7 +1206,6 @@ describe("workflow", () => {
             workflow(
                 {
                     ...baseOptions,
-                    maxIssues: 2,
                 },
                 testRuntime(calls, states, {
                     issueLists: [[firstIssue, secondIssue]],
@@ -1986,107 +1272,12 @@ describe("workflow", () => {
         expect(states.at(-1)?.outcomes).toHaveLength(1);
     });
 
-    test("resumes an interrupted closure without rerunning implementation", async () => {
-        const failedStates: RunState[] = [];
-        await expect(
-            workflow(
-                baseOptions,
-                testRuntime([], failedStates, {
-                    closeFailure: new RalphieError({
-                        message: "close response lost",
-                    }),
-                }),
-            ),
-        ).rejects.toThrow();
-        const resumeState = failedStates.at(-1);
-        if (!resumeState) throw new Error("Missing resumable state");
-        const calls: string[] = [];
-        const resumedStates: RunState[] = [];
-        const summary = await workflow(
-            {
-                ...baseOptions,
-                resumeState,
-            },
-            testRuntime(calls, resumedStates, {
-                issueLists: [[]],
-                captureStart: 1,
-            }),
-        );
-        expect(calls).toContain("closeIssue:42");
-        expect(calls.some((call) => call.startsWith("executeIssue:"))).toBe(
-            false,
-        );
-        expect(summary.counts.completed).toBe(1);
-        expect(resumedStates.at(-1)?.status).toBe(RunStateStatus.Complete);
-    });
-
-    test("resumes a saved verified closure without rerunning grounding or verification", async () => {
-        const failedCalls: string[] = [];
-        const failedStates: RunState[] = [];
-        await expect(
-            workflow(
-                baseOptions,
-                testRuntime(failedCalls, failedStates, {
-                    issueExecutor: groundedRouteExecutor(failedCalls, {
-                        42: "already-resolved",
-                    }),
-                    closeFailure: new RalphieError({
-                        message: "close response lost",
-                    }),
-                }),
-            ),
-        ).rejects.toThrow("close response lost");
-
-        const resumeState = failedStates.at(-1);
-        if (resumeState === undefined)
-            throw new Error("Missing resumable state");
-        expect(resumeState.activeIssue).toEqual({
-            issueNumber: 42,
-            stage: "issue-closure",
-        });
-        expect(resumeState.outcomes).toEqual([
-            {
-                issueNumber: 42,
-                outcome: {
-                    kind: IssueExecutionOutcomeKind.Completed,
-                    completion: "already-resolved",
-                    resolutionSummary:
-                        "The requested behavior is already present.",
-                    evidence: ["The focused regression test passes."],
-                },
-            },
-        ]);
-
-        const resumedCalls: string[] = [];
-        const resumedStates: RunState[] = [];
-        const summary = await workflow(
-            { ...baseOptions, resumeState },
-            testRuntime(resumedCalls, resumedStates, {
-                issueExecutor: groundedRouteExecutor(resumedCalls, {
-                    42: "actionable",
-                }),
-                issueLists: [[]],
-                captureStart: 1,
-            }),
-        );
-
-        expect(summary.counts.completed).toBe(1);
-        expect(resumedCalls).toContain("refreshIssue:42");
-        expect(resumedCalls).toContain("closeIssue:42");
-        expect(resumedCalls).not.toContain("grounding:42");
-        expect(resumedCalls).not.toContain("verification:42");
-        expect(resumedCalls).not.toContain("complexity:42");
-        expect(resumedCalls).not.toContain("implementation:42");
-        expect(resumedStates.at(-1)?.outcomes).toHaveLength(1);
-        expect(resumedStates.at(-1)?.status).toBe(RunStateStatus.Complete);
-    });
-
     test("refreshes the queue after decomposition and runs a new child within budget", async () => {
         const calls: string[] = [];
         const states: RunState[] = [];
         const child = { ...firstIssue, number: 51, title: "Child" };
         const summary = await workflow(
-            { ...baseOptions, maxIssues: 2 },
+            { ...baseOptions },
             testRuntime(calls, states, {
                 issueLists: [[firstIssue], [child]],
                 outcomes: [
@@ -2108,11 +1299,11 @@ describe("workflow", () => {
         expect(states.at(-1)?.queue.processedCount).toBe(2);
     });
 
-    test("stops before other work when start-clean fails", async () => {
+    test("stops before other work when workspace removal fails", async () => {
         const calls: string[] = [];
         await expect(
             workflow(
-                { ...baseOptions, startClean: true },
+                baseOptions,
                 testRuntime(calls, [], {
                     removeFailure: new RalphieError({
                         message: "cleanup failed",
@@ -2136,6 +1327,7 @@ describe("workflow", () => {
             ),
         ).rejects.toThrow("not logged in");
         expect(calls).toEqual([
+            "removeWorkspace:/tmp/ralphie",
             "prepareWorkspace:/tmp/ralphie",
             "initializeGitHub",
         ]);
@@ -2172,7 +1364,6 @@ describe("workflow", () => {
                 workflow(
                     {
                         ...baseOptions,
-                        cleanup: true,
                         signal: controller.signal,
                     },
                     testRuntime(calls, states, {
@@ -2181,9 +1372,14 @@ describe("workflow", () => {
                     }),
                 ),
             ).rejects.toThrow("Run cancelled");
-            expect(calls).toEqual([...expectedCalls]);
+            expect(calls).toEqual([
+                "removeWorkspace:/tmp/ralphie",
+                ...expectedCalls,
+            ]);
             expect(calls).not.toContain("startServer");
-            expect(calls).not.toContain("removeWorkspace:/tmp/ralphie");
+            expect(
+                calls.filter((call) => call === "removeWorkspace:/tmp/ralphie"),
+            ).toHaveLength(1);
             expect(states).toHaveLength(0);
         },
     );
@@ -2194,7 +1390,7 @@ describe("workflow", () => {
         const controller = new AbortController();
         await expect(
             workflow(
-                { ...baseOptions, cleanup: true, signal: controller.signal },
+                { ...baseOptions, signal: controller.signal },
                 testRuntime(calls, states, {
                     abortAt: "agent",
                     abortController: controller,
@@ -2206,7 +1402,9 @@ describe("workflow", () => {
         expect(calls).not.toContain(
             "executeIssue:42:/tmp/ralphie/repo:develop:build",
         );
-        expect(calls).not.toContain("removeWorkspace:/tmp/ralphie");
+        expect(
+            calls.filter((call) => call === "removeWorkspace:/tmp/ralphie"),
+        ).toHaveLength(1);
         expect(states.at(-1)?.status).toBe(RunStateStatus.Active);
     });
 
@@ -2219,8 +1417,6 @@ describe("workflow", () => {
             workflow(
                 {
                     ...baseOptions,
-                    maxIssues: 2,
-                    cleanup: true,
                     signal: controller.signal,
                 },
                 testRuntime(calls, states, {
@@ -2243,20 +1439,22 @@ describe("workflow", () => {
         ).toEqual([51]);
     });
 
-    test("restores the active checkout and saves resumable state on cancellation", async () => {
+    test("restores the active checkout and saves active state on cancellation", async () => {
         const calls: string[] = [];
         const states: RunState[] = [];
         const controller = new AbortController();
         await expect(
             workflow(
-                { ...baseOptions, cleanup: true, signal: controller.signal },
+                { ...baseOptions, signal: controller.signal },
                 testRuntime(calls, states, { abortOnExecute: controller }),
             ),
         ).rejects.toThrow("Run cancelled");
         expect(states.at(-1)?.status).toBe(RunStateStatus.Active);
         expect(states.at(-1)?.activeIssue?.issueNumber).toBe(42);
         expect(calls).toContain("restoreCheckout");
-        expect(calls).not.toContain("removeWorkspace:/tmp/ralphie");
+        expect(
+            calls.filter((call) => call === "removeWorkspace:/tmp/ralphie"),
+        ).toHaveLength(1);
     });
 
     test("fails before side effects when already cancelled", async () => {
@@ -2421,22 +1619,6 @@ describe("workflow", () => {
             expect(completedState?.activeIssue).toBeUndefined();
             if (completedState === undefined)
                 throw new Error("Missing completed state");
-
-            const resumedCalls: string[] = [];
-            const resumedStates: RunState[] = [];
-            const resumed = await workflow(
-                {
-                    ...baseOptions,
-                    resumeState: completedState,
-                },
-                testRuntime(resumedCalls, resumedStates, {
-                    issueLists: [[]],
-                }),
-            );
-            expect(resumed.outcomes).toEqual(summary.outcomes);
-            expect(resumedCalls).not.toContain("refreshIssue:42");
-            expectNoIssueWork(resumedCalls);
-            expect(resumedStates.at(-1)?.queue.pending).toEqual([]);
         },
     );
 
@@ -2486,36 +1668,6 @@ describe("workflow", () => {
             testRuntime(calls, states, {
                 issueLists: [[decomposedParent]],
                 parentSubIssues: [openChild],
-            }),
-        );
-        expect(calls).not.toContain("closeIssue:43");
-    });
-
-    test("never reconciles parents during a dry run", async () => {
-        const calls: string[] = [];
-        const states: RunState[] = [];
-        const decomposedParent: GitHubIssue = {
-            ...firstIssue,
-            number: 43,
-            title: "Decomposed parent",
-            body: "<!-- ralphie:decomposition original=43 depth=1 -->\n\nDecomposed work.",
-        };
-        const closedChild: GitHubIssue = {
-            ...secondIssue,
-            number: 101,
-            state: "closed",
-            body: '<!-- ralphie:decomposition root=43 parent=43 key="storage" depth=1 -->',
-        };
-        await workflow(
-            { ...baseOptions, dryRun: true },
-            testRuntime(calls, states, {
-                issueLists: [[decomposedParent]],
-                parentSubIssues: [closedChild],
-                dryRunOutcome: {
-                    kind: IssueExecutionOutcomeKind.Skipped,
-                    route: "decomposition",
-                    reason: "dry run",
-                },
             }),
         );
         expect(calls).not.toContain("closeIssue:43");

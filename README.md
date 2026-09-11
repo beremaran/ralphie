@@ -4,17 +4,16 @@
 
 [![CI](https://github.com/beremaran/ralphie/actions/workflows/ci.yml/badge.svg)](https://github.com/beremaran/ralphie/actions/workflows/ci.yml)
 
-Ralphie is an opinionated, resumable CLI that reads open GitHub issues, asks
+Ralphie is an opinionated CLI that reads open GitHub issues, asks
 [pi](https://pi.dev/docs/latest) for schema-validated decisions, and
 routes each issue to either focused implementation or dependency-aware
 decomposition. Agents handle reasoning and code changes; Ralphie keeps Git,
-GitHub, run state, recovery, and safety checks deterministic.
+GitHub, run state, diagnostics, and safety checks deterministic.
 
 > [!CAUTION]
 > Ralphie works directly on the branch selected by `--branch`, commits approved
-> work, and pushes directly to that branch. Ralphie is pre-1.0. Start with a
-> one-issue `--dry-run` against a repository you control before enabling
-> mutations.
+> work, and pushes directly to that branch. Ralphie is pre-1.0. Validate against
+> a repository you control before enabling mutations.
 
 ## Quick start
 
@@ -24,10 +23,10 @@ Run the latest release without installing globally:
 bunx @beremaran/ralphie --version
 ```
 
-Preview one issue without implementation, commits, pushes, or GitHub mutations:
+Run the issue queue:
 
 ```bash
-bunx @beremaran/ralphie owner/repository --dry-run --max-issues 1
+bunx @beremaran/ralphie owner/repository
 ```
 
 See [Getting started](./docs/getting-started.md) for prerequisites,

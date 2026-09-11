@@ -2,12 +2,12 @@
 
 This page is for a new operator setting up Ralphie and performing the first
 safe validation. It is the authoritative guide to prerequisites, installation,
-credential setup, verification, and the first dry run. Return to the
+credential setup, verification, and the first run. Return to the
 [documentation index](README.md) for other task paths.
 
 > [!CAUTION]
 > Ralphie commits approved work and pushes directly to the selected branch.
-> Ralphie is pre-1.0. The commands on this page use `--dry-run`; read the
+> Ralphie is pre-1.0. Validate against a repository you control and read the
 > [safety model](safety.md) before enabling mutations.
 
 ## Prerequisites and authentication
@@ -46,9 +46,8 @@ a mounted GitHub CLI profile is not required when an environment token is
 provided. This contract covers `github.com` only.
 
 Permission needs depend on the run. The issue workflow needs
-read access to the target repository and its issues. A non-dry issue run also
-needs permission to push to the selected branch and create, update, and close
-issues. Dry runs do not need these write permissions.
+read access to the target repository and its issues, permission to push to the
+selected branch, and permission to create, update, and close issues.
 
 ## Installation
 
@@ -110,27 +109,25 @@ Ralphie's runtime: a target whose check uses Bun, Node.js, or a project
 compiler simply needs those tools present in the environment you run Ralphie
 in.
 
-## First dry run
+## First run
 
-Preview one issue in a repository you control:
+Run against one issue in a repository you control:
 
 ```bash
-bunx @beremaran/ralphie owner/repository --dry-run --max-issues 1
+bunx @beremaran/ralphie owner/repository
 ```
 
 When running from source, use the source entry point instead:
 
 ```bash
-bun run index.ts owner/repository --dry-run --max-issues 1
+bun run index.ts owner/repository
 ```
 
 This performs authentication and Git preflight, prepares a clean checkout,
-discovers issues, and asks pi for read-only grounding and a complexity
-assessment. It may create or reset the local workspace and write run
-artifacts, but it does not ask pi to edit the repository, create commits, push,
-or mutate GitHub. Dry-run also reports already-resolved and needs-attention
-routes, then remains mutation-free on resume. See [Workflows](workflows.md) for
-what the selected route means and [Operations and recovery](operations-and-recovery.md)
+discovers issues, and asks pi to ground, implement, verify, and commit the
+work. Successful delivery pushes directly to the selected branch and closes the
+issue. See [Workflows](workflows.md) for what the selected route means and
+[Operations and recovery](operations-and-recovery.md)
 for the artifacts it leaves behind.
 
 For all available options and mode-specific commands, continue to the [CLI

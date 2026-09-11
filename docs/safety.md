@@ -2,13 +2,13 @@
 
 This page is for operators before they run Ralphie against a repository and for
 contributors changing mutation paths. It is the authoritative reference for
-Git/GitHub mutation boundaries, remote invariants, dry-run behavior, and
-workspace risks. Return to the [documentation index](README.md) for the full
+Git/GitHub mutation boundaries, remote invariants, and workspace risks. Return
+to the [documentation index](README.md) for the full
 reading map.
 
 > [!CAUTION]
 > Ralphie commits approved work and pushes directly to the branch selected by
-> `--branch`. Start with the dry-run command below before enabling mutations.
+> `--branch`. Test against a disposable repository before enabling mutations.
 
 ## Delivery guardrails
 
@@ -56,36 +56,16 @@ default-model settings live in `~/.pi/agent` (or `PI_CODING_AGENT_DIR`) and are
 never written under this path; keep provider configuration outside the
 workspace.
 
-`--clean start` and `--clean end` recursively delete the workspace after
-protected-path checks. Their mode-specific dry-run and resume rules are
-[documented with cleanup and recovery](operations-and-recovery.md#cleanup). Use a
-path dedicated to Ralphie:
+Ralphie removes the entire workspace recursively before preparing a run and
+again after a successful run, after protected-path checks. The retained
+workspace after a failure is
+[documented with cleanup and recovery](operations-and-recovery.md#cleanup). Use
+a path dedicated to Ralphie:
 
 ```bash
 bunx @beremaran/ralphie owner/repository \
-  --workspace /tmp/ralphie \
-  --clean both
+  --workspace /tmp/ralphie
 ```
-
-## Dry-run validation
-
-For a delivery-mutation-free validation, use:
-
-```bash
-bunx @beremaran/ralphie owner/repository --dry-run --max-issues 1
-```
-
-Dry-run mode performs real preflight, cloning, issue discovery, and read-only
-issue grounding. For actionable issues it performs a read-only complexity
-assessment and reports the implementation or decomposition route; it also
-reports already-resolved and needs-attention routes with
-blocker details. It may change the local workspace during preparation and
-persists only run-level state and progress. It reuses matching persisted
-routing decisions when available but never writes per-issue complexity or
-needs-attention artifacts. Preparation may reset, clean, or switch the local
-checkout, but dry-run logic cannot invoke implementation, decomposition
-mutation, delivery, commits, pushes, or GitHub mutations. A resumed dry run
-remains a dry run.
 
 ## Agent and mutation boundaries
 

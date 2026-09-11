@@ -12,7 +12,6 @@ export type QueuedIssue = {
 export enum IssueQueueState {
     Ready = "ready",
     DependencyBlocked = "dependency-blocked",
-    BudgetExhausted = "budget-exhausted",
     Exhausted = "exhausted",
 }
 
@@ -33,21 +32,11 @@ export type IssueQueue = {
 
 export const createIssueQueue = (
     initialIssues: ReadonlyArray<QueuedIssue>,
-    maxIssues?: number,
-    resume?: {
-        readonly completedIssueNumbers: ReadonlyArray<number>;
-        readonly processedCount: number;
-    },
 ): IssueQueue => {
     const pending: QueuedIssue[] = [];
     const known = new Set<number>();
     const completed = new Set<number>();
-    let processed = resume?.processedCount ?? 0;
-
-    for (const issueNumber of resume?.completedIssueNumbers ?? []) {
-        known.add(issueNumber);
-        completed.add(issueNumber);
-    }
+    let processed = 0;
 
     const refresh = (issues: ReadonlyArray<QueuedIssue>): number => {
         let added = 0;
@@ -65,9 +54,6 @@ export const createIssueQueue = (
 
     return {
         next: () => {
-            if (maxIssues !== undefined && processed >= maxIssues)
-                return undefined;
-
             const readyIndex = pending.findIndex((candidate) =>
                 (candidate.dependsOn ?? []).every((dependency) =>
                     completed.has(dependency),
@@ -93,9 +79,6 @@ export const createIssueQueue = (
         pendingCount: () => pending.length,
         processedCount: () => processed,
         state: () => {
-            if (maxIssues !== undefined && processed >= maxIssues) {
-                return IssueQueueState.BudgetExhausted;
-            }
             if (pending.length === 0) return IssueQueueState.Exhausted;
             return pending.some((candidate) =>
                 (candidate.dependsOn ?? []).every((dependency) =>

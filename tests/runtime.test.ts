@@ -20,8 +20,6 @@ describe("runtime factory", () => {
         expect(runtime.githubIssues.listOpen).toBeFunction();
         expect(runtime.issueExecutor).toBeDefined();
         expect(runtime.issueExecutor.execute).toBeFunction();
-        expect(runtime.dryRunIssueExecutor).toBeDefined();
-        expect(runtime.dryRunIssueExecutor.execute).toBeFunction();
         expect(runtime.decompositionExecutor).toBeDefined();
         expect(runtime.decompositionExecutor.execute).toBeFunction();
         expect(runtime.implementationExecutor).toBeDefined();

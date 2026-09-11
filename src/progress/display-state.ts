@@ -83,7 +83,7 @@ export const PROGRESS_STAGE_LABELS: Readonly<Record<ProgressStage, string>> = {
     "issue-relationships": "Linking issues",
     "issue-closure": "Closing issue",
     "pr-gate": "Waiting for PR checks",
-    "notification-recovery": "Publishing needs-attention notification",
+    notification: "Publishing needs-attention notification",
 };
 
 /** Stable labels for activities that do not carry a dynamic name. */

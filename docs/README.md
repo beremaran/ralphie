@@ -10,9 +10,8 @@ buried in a landing page.
 ### New user
 
 1. [Getting started](getting-started.md) — prerequisites, installation,
-   authentication, verification, and a safe first dry run.
-2. [Safety](safety.md) — understand what dry-run does and what mutation-enabled
-   runs can change.
+   authentication, verification, and a safe first run.
+2. [Safety](safety.md) — understand what a mutation-enabled run can change.
 3. [Workflows](workflows.md) — see how issues are routed and delivered.
 4. [CLI reference](cli-reference.md) — choose options and adapt the recipes.
 
@@ -20,10 +19,10 @@ buried in a landing page.
 
 1. [Safety](safety.md) — review direct-push defaults, invariants, and workspace
    risks before operating on a real repository.
-2. [CLI reference](cli-reference.md) — invocation, filters, modes, output, and
+2. [CLI reference](cli-reference.md) — invocation, filters, output, and
    environment variables.
 3. [Operations and recovery](operations-and-recovery.md) — interpret output,
-   inspect artifacts, resume interrupted runs, and clean up safely.
+   inspect artifacts, and understand what remains after interruption.
 4. [Workflows](workflows.md) — understand implementation, decomposition, and
    direct-push delivery.
 
@@ -39,7 +38,7 @@ buried in a landing page.
 ### Release maintainer
 
 1. [Getting started](getting-started.md) — the installation contract
-   (`bunx @beremaran/ralphie`) and first dry run.
+   (`bunx @beremaran/ralphie`) and first run.
 2. [Development](development.md) — build, package smoke, and the tag-triggered
    npm publish flow.
 3. [Operations and recovery](operations-and-recovery.md) — operational state and
@@ -49,11 +48,11 @@ buried in a landing page.
 
 | Page | Purpose |
 | --- | --- |
-| [Getting started](getting-started.md) | Install Ralphie, configure credentials, verify it, and run the first dry run. |
+| [Getting started](getting-started.md) | Install Ralphie, configure credentials, verify it, and run the first run. |
 | [Workflows](workflows.md) | Explain issue routing, implementation, decomposition, and direct-push delivery. |
 | [Safety](safety.md) | Define deterministic Git/GitHub safety checks and destructive workspace behavior. |
 | [CLI reference](cli-reference.md) | Record the command syntax, options, defaults, environment variables, and recipes. |
-| [Operations and recovery](operations-and-recovery.md) | Document progress, artifacts, state, resume, cancellation, failure, and cleanup. |
+| [Operations and recovery](operations-and-recovery.md) | Document progress, artifacts, state, cancellation, failure, and cleanup. |
 | [Architecture](architecture.md) | Map runtime, orchestrator, domain services, and source locations. |
 | [Development](development.md) | Explain local development, test commands, optional registry checks, and contribution rules. |
 

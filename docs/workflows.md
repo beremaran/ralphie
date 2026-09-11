@@ -7,8 +7,8 @@ see the [documentation index](README.md) for setup, CLI, safety, and recovery
 references.
 
 > [!CAUTION]
-> Ralphie commits and pushes directly to the selected branch. Use
-> [dry-run](safety.md#dry-run-validation) for mutation-free validation before
+> Ralphie commits and pushes directly to the selected branch. Read the
+> [safety model](safety.md) and validate against a repository you control before
 > enabling delivery mutations.
 
 ## Routing overview
@@ -72,8 +72,7 @@ When implementation produces no changes, a fresh read-only session must prove
 that the current checkout already resolves the issue and return concrete
 evidence. A proven resolution is completed and closed. An unresolved result is
 fed back to a fresh implementation session for up to
-`--implementation-attempts` attempts, optionally switching to
-`--implementation-fallback-model` after the first attempt. Only an exhausted
+`--implementation-attempts` attempts. Only an exhausted
 retry budget fails the issue. If the review budget is
 exhausted, Ralphie preserves the patch and review diagnostics, restores the
 clean checkpoint, and sends the issue through decomposition.
@@ -151,7 +150,7 @@ sequenceDiagram
    it is never closed as a duplicate merely because it was decomposed.
 
 Stable markers and persisted child mappings make the workflow retry-safe: a
-resumed run discovers previously created children instead of duplicating them,
+retry discovers previously created children instead of duplicating them,
 and native relationships are reconciled idempotently. Eligible children can
 enter the main implementation loop during the same run; the decomposed parent
 stays out of the queue because it is a tracking issue, not executable work.
@@ -181,11 +180,11 @@ exhaustion would exceed it, Ralphie does not attempt another breakdown: it
 leaves the issue open, records `decomposition_limit_reached` needs attention,
 and continues independent queued work. The issue is not marked complete, so
 its dependents remain blocked.
-Ralphie discovers those markers and reconciles them with the persisted mapping
-before creating anything. Thus a lost create response, a restart, or a partial
-linking failure can resume without blindly duplicating children. Creation,
+Ralphie discovers those markers and reconciles them with any persisted mapping
+before creating anything. Thus a lost create response or a partial linking
+failure does not blindly duplicate children. Creation,
 number recording, linking, native sub-issue attachment, dependency creation,
-and the parent rewrite are separate recoverable mutations; a child already
+and the parent rewrite are separate mutations; a child already
 attached to the wrong parent, or a native relationship that disagrees with a
 child's marker, halts with a recovery diagnostic instead of silently
 reparenting or duplicating issues.
@@ -193,7 +192,7 @@ reparenting or duplicating issues.
 The decomposed parent remains open as the native tracking issue and exposes
 GitHub's completion progress for its sub-issues. It is not queued again, and it
 is closed as `completed` only when its child work is finished: completing the
-final child reconciles its parent immediately, and every non-dry-run run also
+final child reconciles its parent immediately, and every run also
 reconciles decomposed parents it discovers or refreshes, so a parent whose
 final child closed in a previous run is completed on a later run. The open-issue
 queue is refreshed after decomposition; newly eligible children can run during
@@ -218,10 +217,9 @@ Ralphie never silently degrades to body-only hierarchy semantics.
   naming the missing platform capability when an endpoint is unavailable or the
   token lacks issue write permission.
 - The compatibility check is per live operation: the first relationship read or
-  write against an unsupported endpoint surfaces the error. A dry run reports
-  the planned native hierarchy but does not create or validate relationships.
+  write against an unsupported endpoint surfaces the error.
 - Recovery metadata (stable markers and the persisted key/dependency mappings)
-  remains the idempotency record, so a run can resume after a recoverable
+  remains the idempotency record, so a run can continue after a recoverable
   relationship failure without blindly duplicating children.
 - To verify the required `github.com` endpoints before a live run:
   `gh api repos/{owner}/{repo}/issues/1/sub_issues` and
@@ -230,22 +228,22 @@ Ralphie never silently degrades to body-only hierarchy semantics.
 
 ## Delivery
 
-| Mode | Issue checkout | Delivery | Source issue closure |
-| --- | --- | --- | --- |
-| delivery | Selected base branch | Commit and non-force push directly to that branch; verify remote SHA and clean checkout | Close directly as `completed` after verified delivery. |
-| `--dry-run` | Prepared normal checkout; preparation may reset, clean, or switch the branch | Ground the issue, then assess complexity and report implementation or decomposition when actionable; report already-resolved and needs-attention routes otherwise. A decomposition dry run also performs the read-only breakdown session and reports the intended native sub-issue hierarchy, children to create or reuse, and dependency edges. No implementation or decomposition mutation, delivery, commit, push, or issue mutation; preparation may still change the local checkout | No issue is closed. The result is `skipped` except needs-attention, which remains a needs-attention outcome. |
+| Issue checkout | Delivery | Source issue closure |
+| --- | --- | --- |
+| Selected base branch | Commit and non-force push directly to that branch; verify remote SHA and clean checkout | Close directly as `completed` after verified delivery. |
 
 The direct-push path never uses force. A push rejection is authoritative: the
-created commit and artifacts are retained, the run halts, and resume can
-reconcile a commit that may already have reached the remote.
+created commit and artifacts are retained, the run halts, and a later run
+re-evaluates the still-open issue from a fresh checkout. Inspect the retained
+workspace before the next run removes it.
 
 ## Queue behavior
 
 Issue work is sequential. With the default `created:asc` sort, issues are
-processed oldest-first; `--max-issues` is charged when an issue is dequeued, not
-when it succeeds. When no branch is configured, Ralphie uses `main` when it
-exists and otherwise `master`.
+processed oldest-first. When no branch is configured, Ralphie uses `main` when
+it exists and otherwise `master`.
 
 For command syntax and all defaults, see the [CLI reference](cli-reference.md).
-For workspace, Git, and GitHub guardrails, see [Safety](safety.md). For resume
-and failure boundaries, see [Operations and recovery](operations-and-recovery.md).
+For workspace, Git, and GitHub guardrails, see [Safety](safety.md). For
+interruption and failure boundaries, see
+[Operations and recovery](operations-and-recovery.md).

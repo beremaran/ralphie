@@ -1,5 +1,5 @@
 import { parseArgs } from "node:util";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { z } from "zod";
 
 import {
@@ -7,7 +7,6 @@ import {
     resolveRalphieConfig,
     type IssueRalphieConfig,
     validateRalphieCliOptions,
-    DEFAULT_MAX_DECOMPOSITION_DEPTH,
 } from "./options.ts";
 import { IssueOrder, IssueSort } from "./github/issues.ts";
 import { agentModelSchema, agentModelVariantSchema } from "./agent/model.ts";
@@ -24,16 +23,12 @@ import type { AgentEventListener } from "./agent/contracts.ts";
 import { exitCodeForError, RalphieExitCode } from "./process/exit-code.ts";
 import { workflow } from "./workflow.ts";
 import { BUILD_INFO } from "./build-info.ts";
-import { type RunState, RunStateStoreLive } from "./run/state.ts";
-import { reconcileRunState } from "./run/reconciliation.ts";
 import { resolveWorkspacePath } from "./workspace/workspace.ts";
-import { RalphieError } from "./shared/error.ts";
 
 const cliOptions = {
     branch: { type: "string", short: "b" },
     "notify-needs-attention": { type: "boolean" },
     "needs-attention-label": { type: "string" },
-    "max-issues": { type: "string" },
     "max-decomposition-depth": { type: "string" },
     "issue-label": { type: "string", multiple: true },
     "issue-sort": { type: "string" },
@@ -41,11 +36,7 @@ const cliOptions = {
     model: { type: "string" },
     thinking: { type: "string" },
     "implementation-attempts": { type: "string" },
-    "implementation-fallback-model": { type: "string" },
     workspace: { type: "string" },
-    "dry-run": { type: "boolean" },
-    clean: { type: "string" },
-    resume: { type: "string" },
     output: { type: "string" },
     help: { type: "boolean", short: "h" },
     version: { type: "boolean", short: "v" },
@@ -97,7 +88,6 @@ const parseModel = (values: Record<string, unknown>, name: string) => {
     return value === undefined ? undefined : agentModelSchema.parse(value);
 };
 
-const cleanWhenSchema = z.enum(["start", "end", "both"]);
 const outputModeSchema = z.enum(["default", "verbose", "quiet", "json"]);
 
 const parseIssueSort = (
@@ -163,7 +153,6 @@ const parseCliOptions = (
     const notificationOptions = parseNotificationOptions(values);
     const issueSortValue = asNonEmptyString(values, "issue-sort");
     const thinkingValue = asNonEmptyString(values, "thinking");
-    const cleanValue = asNonEmptyString(values, "clean");
     const rawOutput = asNonEmptyString(values, "output");
     const outputValue =
         rawOutput === undefined ? undefined : outputModeSchema.parse(rawOutput);
@@ -172,7 +161,6 @@ const parseCliOptions = (
         repo,
         branch: asString(values, "branch"),
         ...notificationOptions,
-        maxIssues: asNumber(values, "max-issues"),
         maxDecompositionDepth: asNumber(values, "max-decomposition-depth"),
         issueLabels: parseIssueLabels(values),
         verificationCommands: parseRepeatedStrings(values, "verify-command"),
@@ -183,17 +171,7 @@ const parseCliOptions = (
                 ? undefined
                 : agentModelVariantSchema.parse(thinkingValue),
         implementationAttempts: asNumber(values, "implementation-attempts"),
-        implementationFallbackModel: parseModel(
-            values,
-            "implementation-fallback-model",
-        ),
         workspace: asNonEmptyString(values, "workspace"),
-        clean:
-            cleanValue === undefined
-                ? undefined
-                : cleanWhenSchema.parse(cleanValue),
-        dryRun: asBoolean(values, "dry-run"),
-        resume: asNonEmptyString(values, "resume"),
         verbose: outputValue === "verbose",
         json: outputValue === "json",
         quiet: outputValue === "quiet",
@@ -262,7 +240,6 @@ Options:
       --notify-needs-attention Enable needs-attention GitHub notifications (default disabled)
       --needs-attention-label <name>
                                Add this label to notifications (requires the opt-in flag)
-      --max-issues <n>         Maximum issues to process
       --max-decomposition-depth <n>
                                Maximum recursive decomposition depth (default 3)
       --issue-label <label>    Include only issues with this label (repeatable)
@@ -271,12 +248,7 @@ Options:
       --model <provider/model> Pi model selection (defaults to pi settings)
       --thinking <level>       Thinking level for every session: off, minimal, low, medium, high, xhigh, or max (default medium)
       --implementation-attempts <n> Empty implementation retries (default 3)
-      --implementation-fallback-model <provider/model>
-                               Model used after the first empty implementation
-      --workspace <path>       Workspace directory
-      --dry-run                Assess without mutations
-      --resume <path>          Resume saved run state
-      --clean <when>           Remove the workspace at start, end, or both
+      --workspace <path>       Workspace directory (removed at start and after success)
       --output <mode>          Output: live transcript/progress, verbose, quiet, or json
   -h, --help                   Show this help
   -v, --version                Show version (use --output json for build metadata)
@@ -337,52 +309,17 @@ const resolveCommandFactories = (
     runWorkflow: factories.runWorkflow ?? workflow,
 });
 
-const loadResumeState = async (
-    config: ResolvedRalphieConfig,
-    explicitMaxDecompositionDepth?: number,
-): Promise<RunState | undefined> => {
-    if (config.resume === undefined) return undefined;
-
-    const resumeState = await RunStateStoreLive.load(config.resume);
-    if (
-        explicitMaxDecompositionDepth !== undefined &&
-        explicitMaxDecompositionDepth !==
-            (resumeState.maxDecompositionDepth ??
-                DEFAULT_MAX_DECOMPOSITION_DEPTH)
-    ) {
-        throw new RalphieError({
-            message:
-                `Cannot resume run ${resumeState.runId}: saved maximum decomposition depth is ` +
-                `${resumeState.maxDecompositionDepth ?? DEFAULT_MAX_DECOMPOSITION_DEPTH}, but requested maximum is ${explicitMaxDecompositionDepth}.`,
-        });
-    }
-    if (config.branch === undefined) return resumeState;
-
-    const reconciliation = reconcileRunState(resumeState, {
-        repository: config.repo,
-        branch: config.branch,
-    });
-    if (!reconciliation.compatible) {
-        throw new Error(
-            `Cannot resume run ${resumeState.runId}: ${reconciliation.reasons.join("; ")}.`,
-        );
-    }
-    return resumeState;
-};
-
 const eventLogPathFor = (
     config: ResolvedRalphieConfig,
     runId: string,
 ): string | undefined =>
-    config.resume === undefined
-        ? join(
-              resolveWorkspacePath(config.workspace),
-              ".ralphie",
-              "runs",
-              runId,
-              "events.jsonl",
-          )
-        : join(dirname(config.resume), "events.jsonl");
+    join(
+        resolveWorkspacePath(config.workspace),
+        ".ralphie",
+        "runs",
+        runId,
+        "events.jsonl",
+    );
 
 const makeCommandCoordinator = (
     config: ResolvedRalphieConfig,
@@ -411,13 +348,10 @@ const workflowOptionsFor = (
     config: IssueRalphieConfig,
     input: RunCommandInput,
     runId: string,
-    resumeState: RunState | undefined,
 ) => ({
     repo: config.repo,
     branch: config.branch,
-    maxIssues: config.maxIssues,
-    maxDecompositionDepth:
-        resumeState?.maxDecompositionDepth ?? config.maxDecompositionDepth,
+    maxDecompositionDepth: config.maxDecompositionDepth,
     issueFilters: {
         labels: config.issueLabels,
         sort: config.issueSort,
@@ -427,20 +361,12 @@ const workflowOptionsFor = (
     modelVariant: config.thinking,
     verificationCommands: config.verificationCommands,
     implementationAttempts: config.implementationAttempts,
-    implementationFallbackModel: config.implementationFallbackModel,
     agent: config.agent,
     workspace: config.workspace,
-    cleanup: config.cleanEnd,
-    startClean: config.cleanStart,
     signal: input.signal,
     runId,
-    resumeState,
-    resumePath: config.resume,
-    dryRun: config.dryRun,
-    notificationsEnabled:
-        resumeState?.notificationsEnabled ?? config.notificationsEnabled,
-    needsAttentionLabel:
-        resumeState?.needsAttentionLabel ?? config.needsAttentionLabel,
+    notificationsEnabled: config.notificationsEnabled,
+    needsAttentionLabel: config.needsAttentionLabel,
 });
 
 const commandErrorFor = (error: unknown, signal: AbortSignal): Error => {
@@ -490,13 +416,9 @@ export const runCommand = async (
     }
 
     const config = resolveRalphieConfig(parsed.options);
-    const resumeState = await loadResumeState(
-        config,
-        parsed.options.maxDecompositionDepth,
-    );
 
     const terminal = input.terminal ?? terminalInfo();
-    const runId = resumeState?.runId ?? crypto.randomUUID();
+    const runId = crypto.randomUUID();
     let coordinator: ProgressCoordinator | undefined;
     let runtime: CommandRuntime | undefined;
     let commandError: Error | undefined;
@@ -519,7 +441,7 @@ export const runCommand = async (
             progress: coordinator.progress,
         });
         await factories.runWorkflow(
-            workflowOptionsFor(config, input, runId, resumeState),
+            workflowOptionsFor(config, input, runId),
             runtime,
         );
         process.exitCode = RalphieExitCode.Success;

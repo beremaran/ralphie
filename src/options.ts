@@ -9,14 +9,11 @@ export const DEFAULT_WORKSPACE = "~/.ralphie";
 
 export const DEFAULT_IMPLEMENTATION_ATTEMPTS = 3;
 
-export type CleanWhen = "start" | "end" | "both";
-
 export type RalphieCliOptions = {
     readonly repo?: string;
     readonly notifyNeedsAttention?: boolean;
     readonly needsAttentionLabel?: string;
     readonly branch?: string;
-    readonly maxIssues?: number;
     readonly maxDecompositionDepth?: number;
     readonly issueLabels?: ReadonlyArray<string>;
     readonly issueSort?: IssueSort;
@@ -25,11 +22,7 @@ export type RalphieCliOptions = {
     readonly model?: AgentModel;
     readonly thinking?: string;
     readonly implementationAttempts?: number;
-    readonly implementationFallbackModel?: AgentModel;
     readonly workspace?: string;
-    readonly clean?: CleanWhen;
-    readonly dryRun?: boolean;
-    readonly resume?: string;
     readonly verbose?: boolean;
     readonly json?: boolean;
     readonly quiet?: boolean;
@@ -42,17 +35,12 @@ type SharedRalphieConfig = {
     readonly thinking?: string;
     readonly agent: string;
     readonly workspace: string;
-    readonly cleanStart: boolean;
-    readonly cleanEnd: boolean;
-    readonly dryRun: boolean;
-    readonly resume?: string;
     readonly verbose: boolean;
     readonly json: boolean;
     readonly quiet: boolean;
 };
 
 type SharedIssueSelection = {
-    readonly maxIssues?: number;
     readonly issueLabels: ReadonlyArray<string>;
     readonly issueSort: IssueSort;
     readonly issueOrder: IssueOrder;
@@ -63,7 +51,6 @@ export type IssueRalphieConfig = SharedRalphieConfig &
         readonly notificationsEnabled: boolean;
         readonly needsAttentionLabel?: string;
         readonly implementationAttempts: number;
-        readonly implementationFallbackModel?: AgentModel;
         readonly verificationCommands?: ReadonlyArray<string>;
         readonly maxDecompositionDepth: number;
     };
@@ -136,10 +123,6 @@ const commonResolvedConfig = (
     ...optionalProperty("thinking", options.thinking),
     agent: DEFAULT_AGENT,
     workspace: options.workspace ?? DEFAULT_WORKSPACE,
-    cleanStart: options.clean === "start" || options.clean === "both",
-    cleanEnd: options.clean === "end" || options.clean === "both",
-    dryRun: options.dryRun ?? false,
-    ...optionalProperty("resume", options.resume),
     verbose: options.verbose ?? false,
     json,
     quiet,
@@ -148,7 +131,6 @@ const commonResolvedConfig = (
 const issueSelectionConfig = (
     options: RalphieCliOptions,
 ): SharedIssueSelection => ({
-    ...optionalProperty("maxIssues", options.maxIssues),
     issueLabels: [...(options.issueLabels ?? [])],
     issueSort: options.issueSort ?? IssueSort.Created,
     issueOrder: options.issueOrder ?? IssueOrder.Ascending,
@@ -185,10 +167,6 @@ export const resolveRalphieConfig = (
         ),
         implementationAttempts:
             options.implementationAttempts ?? DEFAULT_IMPLEMENTATION_ATTEMPTS,
-        ...optionalProperty(
-            "implementationFallbackModel",
-            options.implementationFallbackModel,
-        ),
         verificationCommands: [...(options.verificationCommands ?? [])],
         maxDecompositionDepth:
             options.maxDecompositionDepth ?? DEFAULT_MAX_DECOMPOSITION_DEPTH,

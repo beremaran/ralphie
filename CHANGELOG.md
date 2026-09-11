@@ -7,11 +7,20 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Removed
 
+- Remove `--max-issues`, `--implementation-fallback-model`, `--resume`,
+  `--dry-run`, and `--clean`. Every run now processes the whole matching open
+  issue queue with no budget, retries always use the selected model, and there
+  is no preview or resume path. The workspace is removed before preparation
+  and after a successful run; cleanup is skipped when the run fails, drains
+  with issue failures, or is cancelled. Notification recovery, state loading,
+  legacy-state migration, and the read-only dry-run executor and planner are
+  gone. `RunState` is version 12.
+
 - Remove the halt policies. `--on-needs-attention` and `--on-issue-failure` are
   gone; a needs-attention outcome or an ordinary issue failure now always
   records the outcome, leaves the issue open, and continues the queue. A
   drained run exits `1` when any issue failed, and the former handled-stop exit
-  status `2` no longer exists. `RunState` is version 11.
+  status `2` no longer exists.
 
 - Remove dead integration weight inherited from the removed modes: managed
   feature-branch revision safety, the feature-branch and base-restore Git

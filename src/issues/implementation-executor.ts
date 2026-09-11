@@ -365,11 +365,7 @@ export const makeImplementationExecutorService = (
                     directory: context.repositoryPath,
                     title: `Implement issue #${context.issue.number}`,
                     agent: context.agentSelection.agent,
-                    model:
-                        attempt > 1 &&
-                        context.implementationFallbackModel !== undefined
-                            ? context.implementationFallbackModel
-                            : context.agentSelection.model,
+                    model: context.agentSelection.model,
                     variant: context.agentSelection.variant,
 
                     schema: implementationResultSchema,

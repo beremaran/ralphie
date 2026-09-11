@@ -25,14 +25,6 @@ const geminiFlash: PiModelInfo = {
     thinkingLevels: ["off", "low", "medium", "high"],
 };
 
-const noReasoning: PiModelInfo = {
-    provider: "opencode-go",
-    id: "kimi-k2.7-code",
-    name: "Kimi K2.7 Code",
-    reasoning: false,
-    thinkingLevels: ["off"],
-};
-
 describe("thinking-level availability", () => {
     test("accepts unset and default variants without a catalog lookup", () => {
         expect(isVariantAvailable([], undefined)).toBe(true);
@@ -151,24 +143,6 @@ describe("thinking-level violations", () => {
 
         expect(violations).toHaveLength(1);
         expect(violations[0]?.variant).toBe("banana");
-    });
-
-    test("validates the fallback model with the same level", () => {
-        const violations = collectVariantViolations({
-            models: [deepseekFlash, noReasoning],
-            primaryModel: {
-                providerID: "opencode-go",
-                modelID: "deepseek-v4-flash",
-            },
-            fallbackModel: {
-                providerID: "opencode-go",
-                modelID: "kimi-k2.7-code",
-            },
-            variant: "high",
-        });
-
-        expect(violations).toHaveLength(1);
-        expect(violations[0]?.modelName).toBe("opencode-go/kimi-k2.7-code");
     });
 
     test("formats actionable guidance with available levels", () => {
