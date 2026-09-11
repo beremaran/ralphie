@@ -107,16 +107,10 @@ describe("hexagonal boundaries", () => {
         ).toEqual([]);
     });
 
-    test("the GitHub SDK stays confined to the GitHub context", async () => {
+    test("the GitHub SDK stays confined to the GitHub adapters", async () => {
         expect(
             await offenders(
-                (file) => {
-                    const path = relativePath(file);
-                    return (
-                        path !== "github/ports.ts" &&
-                        !path.startsWith("github/adapters/")
-                    );
-                },
+                (file) => !relativePath(file).startsWith("github/adapters/"),
                 ({ target }) => target === "octokit",
             ),
         ).toEqual([]);

@@ -5,6 +5,7 @@ import { mapGitHubIssue } from "./issues.ts";
 import type { GitHubIssue } from "../domain.ts";
 import type { GitHubIssueRelationshipService } from "../ports.ts";
 import { parseRepositorySlug } from "../repository.ts";
+import type { GitHubSession } from "./session.ts";
 
 /**
  * Deterministic GitHub domain service for native issue hierarchy and
@@ -215,11 +216,25 @@ const addBlockedBy = async (
     }
 };
 
-export const makeGitHubIssueRelationshipService =
-    (): GitHubIssueRelationshipService => ({
-        listSubIssues,
-        parentOf,
-        attachSubIssue,
-        listBlockedBy,
-        addBlockedBy,
-    });
+export const makeGitHubIssueRelationshipService = (
+    session: GitHubSession,
+): GitHubIssueRelationshipService => {
+    const api = () => session.client();
+    return {
+        listSubIssues: (repository, issueNumber) =>
+            listSubIssues(api(), repository, issueNumber),
+        parentOf: (repository, issueNumber) =>
+            parentOf(api(), repository, issueNumber),
+        attachSubIssue: (repository, parentIssueNumber, childIssueNumber) =>
+            attachSubIssue(
+                api(),
+                repository,
+                parentIssueNumber,
+                childIssueNumber,
+            ),
+        listBlockedBy: (repository, issueNumber) =>
+            listBlockedBy(api(), repository, issueNumber),
+        addBlockedBy: (repository, issueNumber, blockerIssueNumber) =>
+            addBlockedBy(api(), repository, issueNumber, blockerIssueNumber),
+    };
+};

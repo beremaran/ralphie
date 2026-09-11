@@ -1,5 +1,3 @@
-import type { Octokit } from "octokit";
-
 import { RalphieError } from "../shared/error.ts";
 import type { NeedsAttentionReason } from "../issues/domain/decisions.ts";
 import type {
@@ -9,32 +7,21 @@ import type {
     IssueFilters,
 } from "./domain.ts";
 
-/**
- * Opaque GitHub API handle flowing through the core.
- *
- * The SDK type is confined to this port; application code passes the handle
- * to adapters without knowing the concrete client.
- */
-export type GitHubApiClient = Octokit;
-
-/** Outbound port for GitHub authentication and client initialization. */
-export type GitHubClientService = {
-    readonly initialize: () => Promise<GitHubApiClient>;
+/** Outbound port for authenticating against GitHub exactly once per run. */
+export type GitHubConnectionService = {
+    readonly connect: () => Promise<void>;
 };
 
 export type GitHubIssuesService = {
     readonly listOpen: (
-        client: GitHubApiClient,
         repository: string,
         filters: IssueFilters,
     ) => Promise<ReadonlyArray<GitHubIssue>>;
     readonly refresh: (
-        client: GitHubApiClient,
         repository: string,
         issueNumber: number,
     ) => Promise<GitHubIssue>;
     readonly listDecompositionChildren: (
-        client: GitHubApiClient,
         repository: string,
         query: DecompositionChildrenQuery,
     ) => Promise<ReadonlyArray<GitHubDecompositionChild>>;
@@ -75,18 +62,15 @@ export type UpdateGitHubIssueInput = {
 
 export type GitHubIssueMutationService = {
     readonly create: (
-        client: GitHubApiClient,
         repository: string,
         input: CreateGitHubIssueInput,
     ) => Promise<GitHubIssue>;
     readonly update: (
-        client: GitHubApiClient,
         repository: string,
         issueNumber: number,
         input: UpdateGitHubIssueInput,
     ) => Promise<GitHubIssue>;
     readonly close: (
-        client: GitHubApiClient,
         repository: string,
         issueNumber: number,
         reason: GitHubIssueCloseReason,
@@ -96,13 +80,11 @@ export type GitHubIssueMutationService = {
 export type GitHubIssueRelationshipService = {
     /** List the native sub-issues currently attached to an issue. */
     readonly listSubIssues: (
-        client: GitHubApiClient,
         repository: string,
         issueNumber: number,
     ) => Promise<ReadonlyArray<GitHubIssue>>;
     /** The native parent of an issue, or `undefined` when it has none. */
     readonly parentOf: (
-        client: GitHubApiClient,
         repository: string,
         issueNumber: number,
     ) => Promise<GitHubIssue | undefined>;
@@ -112,14 +94,12 @@ export type GitHubIssueRelationshipService = {
      * different parent fails closed instead of being silently reparented.
      */
     readonly attachSubIssue: (
-        client: GitHubApiClient,
         repository: string,
         parentIssueNumber: number,
         childIssueNumber: number,
     ) => Promise<void>;
     /** List the native issues blocking the given issue. */
     readonly listBlockedBy: (
-        client: GitHubApiClient,
         repository: string,
         issueNumber: number,
     ) => Promise<ReadonlyArray<GitHubIssue>>;
@@ -128,7 +108,6 @@ export type GitHubIssueRelationshipService = {
      * already exists.
      */
     readonly addBlockedBy: (
-        client: GitHubApiClient,
         repository: string,
         issueNumber: number,
         blockerIssueNumber: number,
@@ -142,7 +121,6 @@ export type ParentCompletionService = {
      * false when it must stay open.
      */
     readonly reconcileParent: (
-        client: GitHubApiClient,
         repository: string,
         parentIssueNumber: number,
     ) => Promise<boolean>;
@@ -152,7 +130,6 @@ export type ParentCompletionService = {
      * stable decomposition marker.
      */
     readonly reconcileAfterChildCompletion: (
-        client: GitHubApiClient,
         repository: string,
         childIssueNumber: number,
         childBody: string | null,
@@ -174,7 +151,6 @@ export type NeedsAttentionNotificationResult = {
 
 export type GitHubNeedsAttentionNotificationService = {
     readonly notify: (
-        client: GitHubApiClient,
         repository: string,
         sourceIssueNumber: number,
         input: NeedsAttentionNotificationInput,

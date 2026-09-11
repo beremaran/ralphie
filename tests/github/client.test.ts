@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { makeGitHubClientService } from "../../src/github/adapters/client.ts";
+import { makeGitHubConnection } from "../../src/github/adapters/session.ts";
 import {
     type CommandResult,
     type CommandRunnerService,
@@ -16,9 +16,9 @@ const result = (exitCode: number, stdout = "", stderr = ""): CommandResult => ({
 const authenticationError = async (
     runner: CommandRunnerService,
 ): Promise<Error> =>
-    (await makeGitHubClientService(runner)
-        .initialize()
-        .catch((caught) => caught as Error)) as Error;
+    (await makeGitHubConnection(runner)
+        .connect()
+        .catch((caught: unknown) => caught as Error)) as Error;
 
 describe("GitHub client authentication", () => {
     test("fails with gh auth status stderr verbatim", async () => {
@@ -81,10 +81,10 @@ describe("GitHub client authentication", () => {
             },
         };
 
-        const client = await makeGitHubClientService(runner).initialize();
+        const connection = makeGitHubConnection(runner);
+        await connection.connect();
 
         expect(calls).toBe(2);
-        expect(client).toBeDefined();
-        expect(client.rest).toBeDefined();
+        expect(connection.session.client().rest).toBeDefined();
     });
 });

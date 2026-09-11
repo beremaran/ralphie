@@ -1,4 +1,4 @@
-import type { GitHubClientService } from "../github/ports.ts";
+import type { GitHubConnectionService } from "../github/ports.ts";
 import type { GitHubIssuesService } from "../github/ports.ts";
 import type { GitHubIssueMutationService } from "../github/ports.ts";
 import type { GitHubNeedsAttentionNotificationService } from "../github/ports.ts";
@@ -27,7 +27,7 @@ export type IssueWorkflowRuntime = {
     readonly runEventLog: RunEventLog;
     readonly runStateStore: RunStateStoreService;
     readonly workspace: WorkspaceService;
-    readonly githubClient: GitHubClientService;
+    readonly githubConnection: GitHubConnectionService;
     readonly githubIssues: GitHubIssuesService;
     readonly githubIssueMutations: GitHubIssueMutationService;
     readonly githubNeedsAttentionNotification: GitHubNeedsAttentionNotificationService;

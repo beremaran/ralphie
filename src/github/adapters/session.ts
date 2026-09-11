@@ -1,7 +1,7 @@
 import { Octokit } from "octokit";
+
 import { requireSuccess } from "../../process/require-success.ts";
-import { type CommandRunnerService } from "../../process/ports.ts";
-import type { GitHubClientService } from "../ports.ts";
+import type { CommandRunnerService } from "../../process/ports.ts";
 import { RalphieError } from "../../shared/error.ts";
 
 /** Current GitHub REST contract; 2022-11-28 retires on 2028-03-10. */
@@ -25,11 +25,27 @@ export const githubAuthenticationEnvironment = (
     return token === undefined ? {} : { GH_TOKEN: token };
 };
 
-export const makeGitHubClientService = (
+/**
+ * Adapter-owned GitHub session.
+ *
+ * The authenticated Octokit client never crosses the port boundary; the
+ * capability adapters created with this session read it internally.
+ */
+export type GitHubSession = {
+    readonly client: () => Octokit;
+};
+
+export type GitHubConnection = {
+    readonly connect: () => Promise<void>;
+    readonly session: GitHubSession;
+};
+
+export const makeGitHubConnection = (
     runner: CommandRunnerService,
-): GitHubClientService => {
+): GitHubConnection => {
+    let octokit: Octokit | undefined;
     return {
-        initialize: async () => {
+        connect: async () => {
             const authOptions = {
                 env: githubAuthenticationEnvironment(),
             };
@@ -56,7 +72,7 @@ export const makeGitHubClientService = (
             }
 
             try {
-                return new Octokit({
+                octokit = new Octokit({
                     auth: authToken,
                     request: {
                         headers: {
@@ -70,6 +86,17 @@ export const makeGitHubClientService = (
                     cause,
                 });
             }
+        },
+        session: {
+            client: () => {
+                if (octokit === undefined) {
+                    throw new RalphieError({
+                        message:
+                            "GitHub session used before a successful connection.",
+                    });
+                }
+                return octokit;
+            },
         },
     };
 };

@@ -11,6 +11,7 @@ import {
 } from "../ports.ts";
 import { RalphieError } from "../../shared/error.ts";
 import { parseRepositorySlug } from "../repository.ts";
+import type { GitHubSession } from "./session.ts";
 
 export type GitHubNeedsAttentionNotificationRecoveryInput = {
     readonly message: string;
@@ -332,15 +333,13 @@ const notificationError = (
               cause,
           });
 
-export const makeGitHubNeedsAttentionNotificationService =
-    (): GitHubNeedsAttentionNotificationService => ({
-        notify: async (
-            client,
-            repository,
-            sourceIssueNumber,
-            input,
-            labelName,
-        ) => {
+export const makeGitHubNeedsAttentionNotificationService = (
+    session: GitHubSession,
+): GitHubNeedsAttentionNotificationService => {
+    const api = () => session.client();
+    return {
+        notify: async (repository, sourceIssueNumber, input, labelName) => {
+            const client = api();
             try {
                 const notification =
                     labelName === undefined ? input : { ...input, labelName };
@@ -369,7 +368,8 @@ export const makeGitHubNeedsAttentionNotificationService =
                 throw notificationError(repository, sourceIssueNumber, cause);
             }
         },
-    });
+    };
+};
 
 export type GitHubNeedsAttentionService =
     GitHubNeedsAttentionNotificationService;

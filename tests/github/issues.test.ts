@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { Octokit } from "octokit";
 
 import { makeGitHubIssuesService } from "../../src/github/adapters/issues.ts";
+import type { GitHubSession } from "../../src/github/adapters/session.ts";
 import {
     isIssueEligible,
     MAX_ISSUE_COMMENT_BODY_LENGTH,
@@ -10,8 +11,12 @@ import {
     IssueSort,
 } from "../../src/github/domain.ts";
 
+const sessionFor = (client: Octokit): GitHubSession => ({
+    client: () => client,
+});
+
 const listOpen = (client: Octokit, labels: ReadonlyArray<string> = []) =>
-    makeGitHubIssuesService().listOpen(client, "owner/repository", {
+    makeGitHubIssuesService(sessionFor(client)).listOpen("owner/repository", {
         labels,
         sort: IssueSort.Created,
         order: IssueOrder.Ascending,
@@ -174,8 +179,7 @@ describe("GitHub issues", () => {
             },
         } as unknown as Octokit;
 
-        const issue = await makeGitHubIssuesService().refresh(
-            client,
+        const issue = await makeGitHubIssuesService(sessionFor(client)).refresh(
             "owner/repository",
             12,
         );
@@ -235,7 +239,10 @@ describe("GitHub issues", () => {
         } as unknown as Octokit;
 
         await expect(
-            makeGitHubIssuesService().refresh(client, "owner/repository", 12),
+            makeGitHubIssuesService(sessionFor(client)).refresh(
+                "owner/repository",
+                12,
+            ),
         ).rejects.toThrow("Failed to refresh issue #12");
         expect(calls).toEqual(["get"]);
     });
@@ -272,7 +279,10 @@ describe("GitHub issues", () => {
         } as unknown as Octokit;
 
         await expect(
-            makeGitHubIssuesService().refresh(client, "owner/repository", 12),
+            makeGitHubIssuesService(sessionFor(client)).refresh(
+                "owner/repository",
+                12,
+            ),
         ).rejects.toThrow("Failed to refresh issue #12");
         expect(calls).toEqual(["get", "comments"]);
     });

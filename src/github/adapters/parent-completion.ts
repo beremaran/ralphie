@@ -1,5 +1,3 @@
-import type { Octokit } from "octokit";
-
 import {
     isDecomposedParent,
     parseDecompositionMarker,
@@ -19,19 +17,13 @@ export const makeParentCompletionService = (input: {
     const { issues, relationships, mutations } = input;
 
     const reconcileParent = async (
-        client: Octokit,
         repository: string,
         parentIssueNumber: number,
     ): Promise<boolean> => {
-        const parent = await issues.refresh(
-            client,
-            repository,
-            parentIssueNumber,
-        );
+        const parent = await issues.refresh(repository, parentIssueNumber);
         if (parent.state === "closed") return true;
         if (!isDecomposedParent(parent)) return false;
         const children = await relationships.listSubIssues(
-            client,
             repository,
             parentIssueNumber,
         );
@@ -39,23 +31,16 @@ export const makeParentCompletionService = (input: {
         // complete it while the attachment state is unresolved.
         if (children.length === 0) return false;
         if (children.some((child) => child.state !== "closed")) return false;
-        await mutations.close(
-            client,
-            repository,
-            parentIssueNumber,
-            "completed",
-        );
+        await mutations.close(repository, parentIssueNumber, "completed");
         return true;
     };
 
     const reconcileAfterChildCompletion = async (
-        client: Octokit,
         repository: string,
         childIssueNumber: number,
         childBody: string | null,
     ): Promise<boolean> => {
         const native = await relationships.parentOf(
-            client,
             repository,
             childIssueNumber,
         );
@@ -68,7 +53,7 @@ export const makeParentCompletionService = (input: {
         ) {
             return false;
         }
-        return reconcileParent(client, repository, parentIssueNumber);
+        return reconcileParent(repository, parentIssueNumber);
     };
 
     return { reconcileParent, reconcileAfterChildCompletion };

@@ -12,8 +12,8 @@ import { makeGitRepositoryInvariantService } from "./git/adapters/repository-inv
 import { type GitRepositoryInvariantService } from "./git/ports.ts";
 import { makeGitRepositoryService } from "./git/adapters/repository.ts";
 import { type GitRepositoryService } from "./git/ports.ts";
-import { makeGitHubClientService } from "./github/adapters/client.ts";
-import { type GitHubClientService } from "./github/ports.ts";
+import { makeGitHubConnection } from "./github/adapters/session.ts";
+import { type GitHubConnectionService } from "./github/ports.ts";
 import { makeGitHubIssueMutationsService } from "./github/adapters/issue-mutations.ts";
 import { type GitHubIssueMutationService } from "./github/ports.ts";
 import { makeGitHubIssueRelationshipService } from "./github/adapters/issue-relationships.ts";
@@ -76,7 +76,7 @@ export type { IssueWorkflowRuntime } from "./workflow/ports.ts";
 /** Concrete adapter assembly for one run. Only the command wiring consumes this broad shape; the workflow depends on its focused seam. */
 export type RalphieRuntime = {
     readonly commandRunner: CommandRunnerService;
-    readonly githubClient: GitHubClientService;
+    readonly githubConnection: GitHubConnectionService;
     readonly githubIssues: GitHubIssuesService;
     readonly githubIssueMutations: GitHubIssueMutationService;
     readonly githubIssueRelationships: GitHubIssueRelationshipService;
@@ -125,17 +125,21 @@ export const makeLiveRuntime = ({
     runStateStore = RunStateStoreLive,
     workspace = WorkspaceLive,
 }: RuntimeOverrides): RalphieRuntime => {
-    const githubClient = makeGitHubClientService(commandRunner);
-    const githubIssues = makeGitHubIssuesService();
-    const githubIssueMutations = makeGitHubIssueMutationsService();
-    const githubIssueRelationships = makeGitHubIssueRelationshipService();
+    const githubConnection = makeGitHubConnection(commandRunner);
+    const githubIssues = makeGitHubIssuesService(githubConnection.session);
+    const githubIssueMutations = makeGitHubIssueMutationsService(
+        githubConnection.session,
+    );
+    const githubIssueRelationships = makeGitHubIssueRelationshipService(
+        githubConnection.session,
+    );
     const parentCompletion = makeParentCompletionService({
         issues: githubIssues,
         relationships: githubIssueRelationships,
         mutations: githubIssueMutations,
     });
     const githubNeedsAttentionNotification =
-        makeGitHubNeedsAttentionNotificationService();
+        makeGitHubNeedsAttentionNotificationService(githubConnection.session);
     const gitRepository = makeGitRepositoryService(commandRunner);
     const gitRepositoryInvariant =
         makeGitRepositoryInvariantService(commandRunner);
@@ -189,7 +193,7 @@ export const makeLiveRuntime = ({
     );
     return {
         commandRunner,
-        githubClient,
+        githubConnection,
         githubIssues,
         githubIssueMutations,
         githubIssueRelationships,

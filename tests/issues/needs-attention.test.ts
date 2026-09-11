@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Octokit } from "octokit";
 
 import type { AgentClient } from "../../src/agent/ports.ts";
 import { type GitHubIssue } from "../../src/github/domain.ts";
@@ -257,7 +256,6 @@ const makeContext = (options: {
     targetBranch: "develop",
     workspace: "/work/workspace",
     runId: "test-run",
-    octokit: {} as Octokit,
     agent: options.agent,
     agentSelection: { agent: DEFAULT_AGENT },
     agentDiagnostics: makeAgentSessionDiagnostics(),

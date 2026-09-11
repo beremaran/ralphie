@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import type { Octokit } from "octokit";
 import type { AgentClient } from "../src/agent/ports.ts";
 import { type PiModelInfo } from "../src/agent/pi-models.ts";
 
@@ -7,7 +6,7 @@ import { type GitRepositoryService } from "../src/git/ports.ts";
 import { type GitRepositoryInvariantService } from "../src/git/ports.ts";
 import { type GitIssueCheckpointService } from "../src/git/ports.ts";
 import { type GitIssueOperationsService } from "../src/git/ports.ts";
-import { type GitHubClientService } from "../src/github/ports.ts";
+import { type GitHubConnectionService } from "../src/github/ports.ts";
 import { type GitHubIssueMutationService } from "../src/github/ports.ts";
 import { makeParentCompletionService } from "../src/github/adapters/parent-completion.ts";
 import { type GitHubNeedsAttentionNotificationService } from "../src/github/ports.ts";
@@ -121,12 +120,11 @@ const testRuntime = (
     ];
     const issueLists = options.issueLists ?? [[firstIssue]];
 
-    const githubClient: GitHubClientService = {
-        initialize: async () => {
+    const githubConnection: GitHubConnectionService = {
+        connect: async () => {
             calls.push("initializeGitHub");
             if (options.abortAt === "github") options.abortController?.abort();
             if (options.githubFailure) throw options.githubFailure;
-            return {} as Octokit;
         },
     };
     const repository: GitRepositoryService = {
@@ -163,7 +161,7 @@ const testRuntime = (
     };
     const githubIssues: GitHubIssuesService = {
         listDecompositionChildren: async () => [],
-        refresh: async (_client, _repo, issueNumber) => {
+        refresh: async (_repo, issueNumber) => {
             calls.push(`refreshIssue:${issueNumber}`);
             if (options.refreshFailure) throw options.refreshFailure;
             const configured =
@@ -183,7 +181,7 @@ const testRuntime = (
                 firstIssue
             );
         },
-        listOpen: async (_client, repo, filters) => {
+        listOpen: async (repo, filters) => {
             calls.push(
                 `listIssues:${repo}:${filters.labels.join(",")}:${filters.sort}:${filters.order}`,
             );
@@ -201,7 +199,7 @@ const testRuntime = (
         update: async () => {
             throw new RalphieError({ message: "unused" });
         },
-        close: async (_client, _repository, issueNumber) => {
+        close: async (_repository, issueNumber) => {
             calls.push(`closeIssue:${issueNumber}`);
             if (options.closeFailure) throw options.closeFailure;
             return (
@@ -302,7 +300,7 @@ const testRuntime = (
         addBlockedBy: async () => {},
     };
     return {
-        githubClient,
+        githubConnection,
         githubIssues,
         githubIssueMutations: mutations,
         parentCompletion: makeParentCompletionService({
@@ -952,13 +950,7 @@ describe("workflow", () => {
                     },
                 ],
                 needsAttentionNotification: {
-                    notify: async (
-                        _client,
-                        _repo,
-                        issueNumber,
-                        input,
-                        label,
-                    ) => {
+                    notify: async (_repo, issueNumber, input, label) => {
                         calls.push(`notifyNeedsAttention:${issueNumber}`);
                         expect(issueNumber).toBe(firstIssue.number);
                         expect(input.reason).toBe(

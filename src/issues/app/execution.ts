@@ -1,4 +1,3 @@
-import type { GitHubApiClient } from "../../github/ports.ts";
 import type { AgentClient } from "../../agent/ports.ts";
 
 import { type GitHubIssue } from "../../github/domain.ts";
@@ -106,7 +105,6 @@ export type IssueExecutionContext = {
     readonly targetBranch: string;
     readonly workspace: string;
     readonly runId: string;
-    readonly octokit: GitHubApiClient;
     readonly agent: AgentClient;
     readonly agentSelection: AgentSelection;
     readonly implementationAttempts?: number;

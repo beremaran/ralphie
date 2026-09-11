@@ -8,6 +8,7 @@ import type {
     GitHubIssueMutationService,
 } from "../ports.ts";
 import { parseRepositorySlug } from "../repository.ts";
+import type { GitHubSession } from "./session.ts";
 
 const repositoryParameters = (repository: string) => {
     const { slug } = parseRepositorySlug(repository);
@@ -69,9 +70,13 @@ const closeIssue = async (
     return updateAndReconcileClose(client, parameters, reason);
 };
 
-export const makeGitHubIssueMutationsService =
-    (): GitHubIssueMutationService => ({
-        create: async (client, repository, input) => {
+export const makeGitHubIssueMutationsService = (
+    session: GitHubSession,
+): GitHubIssueMutationService => {
+    const api = () => session.client();
+    return {
+        create: async (repository, input) => {
+            const client = api();
             try {
                 const response = await client.rest.issues.create({
                     ...repositoryParameters(repository),
@@ -87,7 +92,8 @@ export const makeGitHubIssueMutationsService =
             }
         },
 
-        update: async (client, repository, issueNumber, input) => {
+        update: async (repository, issueNumber, input) => {
+            const client = api();
             try {
                 if (input.title === undefined && input.body === undefined) {
                     throw new RalphieError({
@@ -112,7 +118,8 @@ export const makeGitHubIssueMutationsService =
             }
         },
 
-        close: async (client, repository, issueNumber, reason) => {
+        close: async (repository, issueNumber, reason) => {
+            const client = api();
             try {
                 return await closeIssue(
                     client,
@@ -127,4 +134,5 @@ export const makeGitHubIssueMutationsService =
                 );
             }
         },
-    });
+    };
+};

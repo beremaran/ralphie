@@ -725,7 +725,7 @@ export const workflow = async (
         runEventLog,
         runStateStore: stateStore,
         workspace: workspaceService,
-        githubClient,
+        githubConnection,
         githubIssues,
         githubIssueMutations: issueMutations,
         githubNeedsAttentionNotification: needsAttentionNotification,
@@ -765,12 +765,12 @@ export const workflow = async (
                 `Workspace ready: ${workspace}.`,
             );
 
-            const octokit = await track(
+            await track(
                 progress,
                 "github-authentication",
                 "Checking GitHub authentication...",
-                () => githubClient.initialize(),
-                "GitHub authentication verified and Octokit initialized.",
+                () => githubConnection.connect(),
+                "GitHub authentication verified.",
             );
             checkCancellation(signal);
 
@@ -812,7 +812,7 @@ export const workflow = async (
                 progress,
                 "issue-discovery",
                 "Fetching matching open issues...",
-                () => githubIssues.listOpen(octokit, repo, issueFilters),
+                () => githubIssues.listOpen(repo, issueFilters),
                 (result) =>
                     result.length === 0
                         ? "No open issues match the current filters."
@@ -822,7 +822,6 @@ export const workflow = async (
             checkCancellation(signal);
 
             return {
-                octokit,
                 prepared,
                 branch: prepared.branch,
                 discoveredIssues,
@@ -856,7 +855,7 @@ export const workflow = async (
             const preparedInput = await prepareWorkspaceAndIssues();
             const { repositoryCheckouts, captureCheckout, queue } =
                 await prepareRunState(preparedInput);
-            const { octokit, prepared, branch } = preparedInput;
+            const { prepared, branch } = preparedInput;
             const outcomes: Array<WorkflowOutcomeEntry> = [];
             const selection: AgentSelection = {
                 agent,
@@ -894,7 +893,6 @@ export const workflow = async (
             const issueExecutor = normalIssueExecutor;
             const diagnostics = makeAgentSessionDiagnostics();
             return {
-                octokit,
                 prepared,
                 branch,
                 repositoryCheckouts,
@@ -910,7 +908,6 @@ export const workflow = async (
         };
 
         const {
-            octokit,
             prepared,
             branch,
             repositoryCheckouts,
@@ -951,12 +948,7 @@ export const workflow = async (
                     progress,
                     "issue-closure",
                     `Checking whether parent issue #${parent.number} is complete...`,
-                    () =>
-                        parentCompletion.reconcileParent(
-                            octokit,
-                            repo,
-                            parent.number,
-                        ),
+                    () => parentCompletion.reconcileParent(repo, parent.number),
                     (completed) =>
                         completed
                             ? `Parent issue #${parent.number} completed; every sub-issue is closed.`
@@ -981,7 +973,6 @@ export const workflow = async (
                 `Checking whether the parent of #${issueContext.issue.number} is complete...`,
                 () =>
                     parentCompletion.reconcileAfterChildCompletion(
-                        octokit,
                         repo,
                         issueContext.issue.number,
                         issueContext.issue.body,
@@ -1049,7 +1040,6 @@ export const workflow = async (
                         targetBranch: branch,
                         workspace,
                         runId: actualRunId,
-                        octokit,
                         agent: server.client,
                         agentSelection: selection,
                         agentDiagnostics: diagnostics,
@@ -1084,7 +1074,6 @@ export const workflow = async (
                 `Closing issue #${issueContext.issue.number} as completed...`,
                 () =>
                     issueMutations.close(
-                        octokit,
                         repo,
                         issueContext.issue.number,
                         "completed",
@@ -1172,7 +1161,6 @@ export const workflow = async (
                 `Publishing needs-attention notification for issue #${issueNumber}...`,
                 () =>
                     needsAttentionNotification.notify(
-                        octokit,
                         repo,
                         issueNumber,
                         needsAttentionNotificationInput(outcome),
@@ -1243,7 +1231,7 @@ export const workflow = async (
                 progress,
                 "issue-discovery",
                 "Refreshing issue list...",
-                () => githubIssues.listOpen(octokit, repo, issueFilters),
+                () => githubIssues.listOpen(repo, issueFilters),
                 (result) => `Refreshed ${result.length} matching open issues.`,
             );
             const added = queue.refresh(toQueuedIssues(refreshed));
@@ -1298,11 +1286,7 @@ export const workflow = async (
             checkCancellation(signal);
             const queuedIssue = queue.next();
             if (queuedIssue === undefined) return false;
-            const issue = await githubIssues.refresh(
-                octokit,
-                repo,
-                queuedIssue.number,
-            );
+            const issue = await githubIssues.refresh(repo, queuedIssue.number);
             if (!isIssueEligible(issue, issueFilters)) {
                 const reason =
                     issue.state !== "open"

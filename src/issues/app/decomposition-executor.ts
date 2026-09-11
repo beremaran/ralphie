@@ -231,7 +231,6 @@ export const makeDecompositionExecutorService = (
     ): Promise<Map<string, number>> => {
         const { context } = input;
         const discovered = await issues.listDecompositionChildren(
-            context.octokit,
             context.repository,
             lineage,
         );
@@ -312,7 +311,7 @@ export const makeDecompositionExecutorService = (
             const created = await recoverableMutation(
                 `create-child-${child.key}`,
                 () =>
-                    mutations.create(context.octokit, context.repository, {
+                    mutations.create(context.repository, {
                         title: child.title,
                         body: `${decompositionMarker(lineage, child.key)}\n\n${child.body}`,
                     }),
@@ -350,18 +349,13 @@ export const makeDecompositionExecutorService = (
             await recoverableMutation(
                 `link-child-${child.key}`,
                 () =>
-                    mutations.update(
-                        context.octokit,
-                        context.repository,
-                        childNumber,
-                        {
-                            body: renderChildIssueBody({
-                                child,
-                                lineage,
-                                issueNumbers: mapping,
-                            }),
-                        },
-                    ),
+                    mutations.update(context.repository, childNumber, {
+                        body: renderChildIssueBody({
+                            child,
+                            lineage,
+                            issueNumbers: mapping,
+                        }),
+                    }),
                 input,
             );
         }
@@ -440,7 +434,6 @@ export const makeDecompositionExecutorService = (
                 `attach-child-${child.key}`,
                 () =>
                     relationships.attachSubIssue(
-                        context.octokit,
                         context.repository,
                         parentNumber,
                         childNumber,
@@ -489,7 +482,6 @@ export const makeDecompositionExecutorService = (
         const nativeByNumber = new Map(
             (
                 await relationships.listSubIssues(
-                    context.octokit,
                     context.repository,
                     parentNumber,
                 )
@@ -535,7 +527,6 @@ export const makeDecompositionExecutorService = (
         const existingNumbers = new Set(
             (
                 await relationships.listBlockedBy(
-                    context.octokit,
                     context.repository,
                     childNumber,
                 )
@@ -547,7 +538,6 @@ export const makeDecompositionExecutorService = (
                 `add-dependency-${childNumber}-on-${blockerNumber}`,
                 () =>
                     relationships.addBlockedBy(
-                        context.octokit,
                         context.repository,
                         childNumber,
                         blockerNumber,
@@ -658,19 +648,14 @@ export const makeDecompositionExecutorService = (
         await recoverableMutation(
             "rewrite-original",
             () =>
-                mutations.update(
-                    context.octokit,
-                    context.repository,
-                    context.issue.number,
-                    {
-                        body: renderDecomposedOriginalBody({
-                            original: context.issue,
-                            breakdown,
-                            issueNumbers: mapping,
-                            lineage,
-                        }),
-                    },
-                ),
+                mutations.update(context.repository, context.issue.number, {
+                    body: renderDecomposedOriginalBody({
+                        original: context.issue,
+                        breakdown,
+                        issueNumbers: mapping,
+                        lineage,
+                    }),
+                }),
             input,
         );
 

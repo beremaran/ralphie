@@ -12,6 +12,7 @@ import {
     type GitHubIssueState,
 } from "../domain.ts";
 import type { GitHubIssuesService } from "../ports.ts";
+import type { GitHubSession } from "./session.ts";
 
 const issueLabels = (
     labels: ReadonlyArray<
@@ -214,85 +215,99 @@ const mapDecompositionChild = (
     ];
 };
 
-export const makeGitHubIssuesService = (): GitHubIssuesService => ({
-    listOpen: async (client, repository, filters) => {
-        try {
-            const { owner, repo } = repositoryParameters(repository);
-            const data = await client.paginate(client.rest.issues.listForRepo, {
-                owner,
-                repo,
-                state: "open",
-                sort: filters.sort,
-                direction: filters.order,
-                per_page: 100,
-                ...(filters.labels.length > 0
-                    ? { labels: filters.labels.join(",") }
-                    : {}),
-            });
-            const issues = data.filter((issue) => !issue.pull_request);
-            return Promise.all(
-                issues.map(async (issue) => {
-                    const comments = await readIssueComments(client, {
+export const makeGitHubIssuesService = (
+    session: GitHubSession,
+): GitHubIssuesService => {
+    const api = () => session.client();
+    return {
+        listOpen: async (repository, filters) => {
+            const client = api();
+            try {
+                const { owner, repo } = repositoryParameters(repository);
+                const data = await client.paginate(
+                    client.rest.issues.listForRepo,
+                    {
                         owner,
                         repo,
-                        issue_number: issue.number,
-                    });
-                    return mapGitHubIssue(issue, comments);
-                }),
-            );
-        } catch (cause) {
-            if (cause instanceof RalphieError) throw cause;
-            throw new RalphieError({
-                message: `Failed to fetch open issues for ${repository}.`,
-                cause,
-            });
-        }
-    },
-
-    refresh: async (client, repository, issueNumber) => {
-        try {
-            const parameters = {
-                ...repositoryParameters(repository),
-                issue_number: issueNumber,
-            };
-            const response = await client.rest.issues.get(parameters);
-            if (response.data.pull_request) {
+                        state: "open",
+                        sort: filters.sort,
+                        direction: filters.order,
+                        per_page: 100,
+                        ...(filters.labels.length > 0
+                            ? { labels: filters.labels.join(",") }
+                            : {}),
+                    },
+                );
+                const issues = data.filter((issue) => !issue.pull_request);
+                return Promise.all(
+                    issues.map(async (issue) => {
+                        const comments = await readIssueComments(client, {
+                            owner,
+                            repo,
+                            issue_number: issue.number,
+                        });
+                        return mapGitHubIssue(issue, comments);
+                    }),
+                );
+            } catch (cause) {
+                if (cause instanceof RalphieError) throw cause;
                 throw new RalphieError({
-                    message: `Issue #${issueNumber} in ${repository} is a pull request.`,
+                    message: `Failed to fetch open issues for ${repository}.`,
+                    cause,
                 });
             }
-            const comments = await readIssueComments(client, parameters);
-            return mapGitHubIssue(response.data, comments);
-        } catch (cause) {
-            if (cause instanceof RalphieError) throw cause;
-            throw new RalphieError({
-                message: `Failed to refresh issue #${issueNumber} for ${repository}.`,
-                cause,
-            });
-        }
-    },
+        },
 
-    listDecompositionChildren: async (client, repository, query) => {
-        try {
-            const { owner, repo } = repositoryParameters(repository);
-            const data = await client.paginate(client.rest.issues.listForRepo, {
-                owner,
-                repo,
-                state: "all",
-                per_page: 100,
-            });
+        refresh: async (repository, issueNumber) => {
+            const client = api();
+            try {
+                const parameters = {
+                    ...repositoryParameters(repository),
+                    issue_number: issueNumber,
+                };
+                const response = await client.rest.issues.get(parameters);
+                if (response.data.pull_request) {
+                    throw new RalphieError({
+                        message: `Issue #${issueNumber} in ${repository} is a pull request.`,
+                    });
+                }
+                const comments = await readIssueComments(client, parameters);
+                return mapGitHubIssue(response.data, comments);
+            } catch (cause) {
+                if (cause instanceof RalphieError) throw cause;
+                throw new RalphieError({
+                    message: `Failed to refresh issue #${issueNumber} for ${repository}.`,
+                    cause,
+                });
+            }
+        },
 
-            const markerPattern =
-                /<!-- ralphie:decomposition root=(\d+) parent=(\d+) key=("(?:\\.|[^"\\])*") depth=(\d+) -->/;
-            return data.flatMap((issue) =>
-                mapDecompositionChild(issue, query, markerPattern),
-            );
-        } catch (cause) {
-            if (cause instanceof RalphieError) throw cause;
-            throw new RalphieError({
-                message: `Failed to discover decomposed child issues for ${repository}.`,
-                cause,
-            });
-        }
-    },
-});
+        listDecompositionChildren: async (repository, query) => {
+            const client = api();
+            try {
+                const { owner, repo } = repositoryParameters(repository);
+                const data = await client.paginate(
+                    client.rest.issues.listForRepo,
+                    {
+                        owner,
+                        repo,
+                        state: "all",
+                        per_page: 100,
+                    },
+                );
+
+                const markerPattern =
+                    /<!-- ralphie:decomposition root=(\d+) parent=(\d+) key=("(?:\\.|[^"\\])*") depth=(\d+) -->/;
+                return data.flatMap((issue) =>
+                    mapDecompositionChild(issue, query, markerPattern),
+                );
+            } catch (cause) {
+                if (cause instanceof RalphieError) throw cause;
+                throw new RalphieError({
+                    message: `Failed to discover decomposed child issues for ${repository}.`,
+                    cause,
+                });
+            }
+        },
+    };
+};
