@@ -476,8 +476,10 @@ export const makeTuiProgressCoordinator = (
             flexGrow: 1,
             width: "100%",
             stickyScroll: true,
+            stickyStart: "bottom",
             paddingLeft: 1,
             paddingRight: 1,
+            contentOptions: { minHeight: 0 },
         });
         const status = new mod.TextRenderable(renderer, {
             id: "tui-status",

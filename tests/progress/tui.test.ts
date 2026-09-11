@@ -103,6 +103,33 @@ describe("OpenTUI progress coordinator", () => {
         await coordinator.dispose();
     });
 
+    test("keeps the transcript pinned to the newest output", async () => {
+        const setup = await createTestRenderer({ width: 60, height: 10 });
+        const coordinator = makeProgressCoordinator({
+            mode: "interactive",
+            colors: false,
+            runId: "tui-run-3",
+            now: FIXED_NOW,
+            createRenderer: async () => setup.renderer,
+        });
+
+        for (let index = 0; index < 40; index += 1) {
+            await coordinator.progress.emit({
+                stage: "run",
+                status: "info",
+                message: `transcript-line-${String(index).padStart(2, "0")}`,
+            });
+        }
+
+        await coordinator.ready;
+        await setup.renderOnce();
+        const frame = setup.captureCharFrame();
+        expect(frame).toContain("transcript-line-39");
+        expect(frame).not.toContain("transcript-line-00");
+
+        await coordinator.dispose();
+    });
+
     test("renders progress outcomes and disposes without leaking timers", async () => {
         const setup = await createTestRenderer({ width: 80, height: 12 });
         const coordinator = makeProgressCoordinator({
