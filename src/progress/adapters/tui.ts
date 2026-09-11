@@ -1180,9 +1180,9 @@ export const makeTuiProgressCoordinator = (
         const pickerBox = new mod.BoxRenderable(renderer, {
             id: "tui-model-picker",
             flexDirection: "column",
-            width: 68,
+            width: 96,
             maxWidth: "94%",
-            height: 15,
+            height: 24,
             maxHeight: "90%",
             borderStyle: "rounded",
             borderColor: THEME.divider,
