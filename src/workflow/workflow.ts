@@ -32,7 +32,14 @@ import {
 import type { Clock } from "../run/ports.ts";
 import { RalphieError } from "../shared/error.ts";
 import { DEFAULT_MAX_DECOMPOSITION_DEPTH } from "../issues/domain/decomposition-markdown.ts";
-import type { IssueWorkflowRuntime } from "./ports.ts";
+import type {
+    IssueWorkflow,
+    IssueWorkflowRuntime,
+    WorkflowOptions,
+    WorkflowSummary,
+} from "./ports.ts";
+
+export type { WorkflowOptions, WorkflowSummary } from "./ports.ts";
 
 const errorMessage = (error: unknown): string =>
     error instanceof Error ? error.message : String(error);
@@ -249,15 +256,6 @@ const track = async <Result>(
         });
         throw error;
     }
-};
-
-export type WorkflowSummary = {
-    readonly runId: string;
-    readonly outcomes: ReadonlyArray<{
-        readonly issueNumber: number;
-        readonly outcome: IssueExecutionOutcome;
-    }>;
-    readonly counts: Readonly<Record<IssueExecutionOutcomeKind, number>>;
 };
 
 const summarize = (
@@ -489,25 +487,6 @@ type RepositoryCheckout = {
     readonly repository: string;
     readonly repositoryPath: string;
     readonly branch: string;
-};
-
-export type WorkflowOptions = {
-    readonly repo: string;
-    readonly branch?: string;
-    readonly maxDecompositionDepth?: number;
-    readonly issueFilters: IssueFilters;
-    readonly agent: string;
-    readonly model?: AgentModel;
-    readonly modelVariant?: string;
-    readonly verificationCommands?: ReadonlyArray<string>;
-    readonly implementationAttempts?: number;
-    readonly workspace: string;
-    readonly signal?: AbortSignal;
-    readonly runId: string;
-    /** Publish needs-attention outcomes through the runtime notifier. */
-    readonly notificationsEnabled?: boolean;
-    /** Optional additive label applied with a needs-attention notification. */
-    readonly needsAttentionLabel?: string;
 };
 
 type WorkflowConfiguration = {
@@ -1401,3 +1380,5 @@ export const workflow = async (
         throw finalError;
     }
 };
+
+export const issueWorkflow: IssueWorkflow = { run: workflow };

@@ -22,7 +22,8 @@ import { type PiAgentConfig } from "./pi/ports.ts";
 import { makeLiveRuntime, type IssueWorkflowRuntime } from "./runtime.ts";
 import type { AgentEventListener } from "./agent/ports.ts";
 import { exitCodeForError, RalphieExitCode } from "./workflow/exit-code.ts";
-import { workflow } from "./workflow/workflow.ts";
+import { issueWorkflow } from "./workflow/workflow.ts";
+import type { IssueWorkflow } from "./workflow/ports.ts";
 import { BUILD_INFO } from "./build-info.ts";
 import { makeRunEventLog } from "./run/adapters/event-log.ts";
 import type { RunEventLog, RunLayout } from "./run/ports.ts";
@@ -280,7 +281,7 @@ export type CommandFactories = {
         readonly runEventLog: RunEventLog;
         readonly layout: RunLayout;
     }) => CommandRuntime;
-    readonly runWorkflow?: typeof workflow;
+    readonly runWorkflow?: IssueWorkflow["run"];
 };
 
 export type CommandOutput = {
@@ -308,7 +309,7 @@ const resolveCommandFactories = (
     makeCoordinator: factories.makeCoordinator ?? makeProgressCoordinator,
     makeAgentRuntime: factories.makeAgentRuntime ?? makePiAgentService,
     makeRuntime: factories.makeRuntime ?? makeLiveRuntime,
-    runWorkflow: factories.runWorkflow ?? workflow,
+    runWorkflow: factories.runWorkflow ?? issueWorkflow.run,
 });
 
 const eventLogFor = (layout: RunLayout): RunEventLog =>

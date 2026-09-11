@@ -1,13 +1,13 @@
 import {
     isDecomposedParent,
     parseDecompositionMarker,
-} from "../../issues/domain/decomposition-markdown.ts";
+} from "../domain/decomposition-markdown.ts";
+import type { ParentCompletionService } from "../ports.ts";
 import type {
     GitHubIssueMutationService,
     GitHubIssueRelationshipService,
     GitHubIssuesService,
-    ParentCompletionService,
-} from "../ports.ts";
+} from "../../github/ports.ts";
 
 export const makeParentCompletionService = (input: {
     readonly issues: GitHubIssuesService;

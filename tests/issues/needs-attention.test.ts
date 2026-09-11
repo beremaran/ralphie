@@ -7,7 +7,7 @@ import type { AgentClient } from "../../src/agent/ports.ts";
 import { type GitHubIssue } from "../../src/github/domain.ts";
 import { type GitIssueCheckpointService } from "../../src/git/ports.ts";
 import { type IssueCheckpoint } from "../../src/git/ports.ts";
-import { type GitIssuePreparationService } from "../../src/git/ports.ts";
+import { type GitIssuePreparationService } from "../../src/issues/ports.ts";
 import { type GitIssueOperationsService } from "../../src/git/ports.ts";
 import { type GitRemoteSafetyService } from "../../src/git/ports.ts";
 import {

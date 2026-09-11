@@ -4,8 +4,8 @@ import { makeGitIssueCheckpointService } from "./git/adapters/issue-checkpoint.t
 import { type GitIssueCheckpointService } from "./git/ports.ts";
 import { makeGitIssueOperationsService } from "./git/adapters/issue-operations.ts";
 import { type GitIssueOperationsService } from "./git/ports.ts";
-import { makeGitIssuePreparationService } from "./git/adapters/issue-preparation.ts";
-import { type GitIssuePreparationService } from "./git/ports.ts";
+import { makeGitIssuePreparationService } from "./issues/app/issue-preparation.ts";
+import { type GitIssuePreparationService } from "./issues/ports.ts";
 import { makeGitRemoteSafetyService } from "./git/adapters/remote-safety.ts";
 import { type GitRemoteSafetyService } from "./git/ports.ts";
 import { makeGitRepositoryInvariantService } from "./git/adapters/repository-invariant.ts";
@@ -18,8 +18,8 @@ import { makeGitHubIssueMutationsService } from "./github/adapters/issue-mutatio
 import { type GitHubIssueMutationService } from "./github/ports.ts";
 import { makeGitHubIssueRelationshipService } from "./github/adapters/issue-relationships.ts";
 import { type GitHubIssueRelationshipService } from "./github/ports.ts";
-import { makeParentCompletionService } from "./github/adapters/parent-completion.ts";
-import { type ParentCompletionService } from "./github/ports.ts";
+import { makeParentCompletionService } from "./issues/app/parent-completion.ts";
+import { type ParentCompletionService } from "./issues/ports.ts";
 import { makeGitHubIssuesService } from "./github/adapters/issues.ts";
 import { type GitHubIssuesService } from "./github/ports.ts";
 import { makeGitHubNeedsAttentionNotificationService } from "./github/adapters/needs-attention.ts";

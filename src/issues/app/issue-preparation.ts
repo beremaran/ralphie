@@ -1,9 +1,7 @@
-import { IssueArtifactKind } from "../../issues/app/artifacts.ts";
-import { type IssueArtifactStoreService } from "../../issues/app/artifacts.ts";
-import {
-    type GitIssueCheckpointService,
-    type GitIssuePreparationService,
-} from "../ports.ts";
+import { IssueArtifactKind } from "./artifacts.ts";
+import { type IssueArtifactStoreService } from "./artifacts.ts";
+import type { GitIssueCheckpointService } from "../../git/ports.ts";
+import type { GitIssuePreparationService } from "../ports.ts";
 import { RalphieError } from "../../shared/error.ts";
 
 export const makeGitIssuePreparationService = (

@@ -2,7 +2,7 @@ import {
     type GitIssueOperationError,
     type GitIssueOperationsService,
 } from "../../git/ports.ts";
-import { type GitIssuePreparationService } from "../../git/ports.ts";
+import { type GitIssuePreparationService } from "../ports.ts";
 import { type GitRemoteSafetyService } from "../../git/ports.ts";
 import {
     buildCommitMessagePrompt,

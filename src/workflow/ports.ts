@@ -1,8 +1,14 @@
 import type { GitHubConnectionService } from "../github/ports.ts";
+import type { AgentModel } from "../agent/model.ts";
+import type { IssueFilters } from "../github/domain.ts";
+import type {
+    IssueExecutionOutcome,
+    IssueExecutionOutcomeKind,
+} from "../issues/app/execution.ts";
 import type { GitHubIssuesService } from "../github/ports.ts";
 import type { GitHubIssueMutationService } from "../github/ports.ts";
 import type { GitHubNeedsAttentionNotificationService } from "../github/ports.ts";
-import type { ParentCompletionService } from "../github/ports.ts";
+import type { ParentCompletionService } from "../issues/ports.ts";
 import type {
     GitIssueCheckpointService,
     GitIssueOperationsService,
@@ -47,4 +53,40 @@ export type IssueWorkflowRuntime = {
     readonly parentCompletion: ParentCompletionService;
     readonly issueExecutor: IssueExecutorService;
     readonly agentRuntime: PiAgentService;
+};
+
+export type WorkflowOptions = {
+    readonly repo: string;
+    readonly branch?: string;
+    readonly maxDecompositionDepth?: number;
+    readonly issueFilters: IssueFilters;
+    readonly agent: string;
+    readonly model?: AgentModel;
+    readonly modelVariant?: string;
+    readonly verificationCommands?: ReadonlyArray<string>;
+    readonly implementationAttempts?: number;
+    readonly workspace: string;
+    readonly signal?: AbortSignal;
+    readonly runId: string;
+    /** Publish needs-attention outcomes through the runtime notifier. */
+    readonly notificationsEnabled?: boolean;
+    /** Optional additive label applied with a needs-attention notification. */
+    readonly needsAttentionLabel?: string;
+};
+
+export type WorkflowSummary = {
+    readonly runId: string;
+    readonly outcomes: ReadonlyArray<{
+        readonly issueNumber: number;
+        readonly outcome: IssueExecutionOutcome;
+    }>;
+    readonly counts: Readonly<Record<IssueExecutionOutcomeKind, number>>;
+};
+
+/** Primary (driving) port: run the issue workflow. */
+export type IssueWorkflow = {
+    readonly run: (
+        options: WorkflowOptions,
+        runtime: IssueWorkflowRuntime,
+    ) => Promise<WorkflowSummary>;
 };

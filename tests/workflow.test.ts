@@ -8,7 +8,7 @@ import { type GitIssueCheckpointService } from "../src/git/ports.ts";
 import { type GitIssueOperationsService } from "../src/git/ports.ts";
 import { type GitHubConnectionService } from "../src/github/ports.ts";
 import { type GitHubIssueMutationService } from "../src/github/ports.ts";
-import { makeParentCompletionService } from "../src/github/adapters/parent-completion.ts";
+import { makeParentCompletionService } from "../src/issues/app/parent-completion.ts";
 import { type GitHubNeedsAttentionNotificationService } from "../src/github/ports.ts";
 import { type GitHubIssuesService } from "../src/github/ports.ts";
 import { type GitHubIssue } from "../src/github/domain.ts";

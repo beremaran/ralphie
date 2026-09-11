@@ -73,20 +73,6 @@ export type GitIssueOperationsService = {
     ) => Promise<void>;
 };
 
-export type IssuePreparationInput = {
-    readonly issueNumber: number;
-    readonly repositoryPath: string;
-    readonly branch: string;
-    readonly signal?: AbortSignal;
-};
-
-export type GitIssuePreparationService = {
-    /** Capture and persist the clean issue base before agent work starts. */
-    readonly prepare: (
-        input: IssuePreparationInput,
-    ) => Promise<IssueCheckpoint>;
-};
-
 export type GitRemoteSafetyFailureKind =
     | "origin-mismatch"
     | "diverged-base"
