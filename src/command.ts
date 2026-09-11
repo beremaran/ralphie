@@ -1,5 +1,5 @@
 import { parseArgs } from "node:util";
-import { join } from "node:path";
+
 import { z } from "zod";
 
 import {
@@ -25,8 +25,8 @@ import { exitCodeForError, RalphieExitCode } from "./workflow/exit-code.ts";
 import { workflow } from "./workflow/workflow.ts";
 import { BUILD_INFO } from "./build-info.ts";
 import { makeRunEventLog } from "./run/adapters/event-log.ts";
-import { type RunEventLog } from "./run/ports.ts";
-import { resolveWorkspacePath } from "./workspace/path.ts";
+import type { RunEventLog, RunLayout } from "./run/ports.ts";
+import { makeRunLayout } from "./run/adapters/layout.ts";
 
 const cliOptions = {
     branch: { type: "string", short: "b" },
@@ -278,6 +278,7 @@ export type CommandFactories = {
         readonly agentRuntime: PiAgentService;
         readonly progress: ProgressCoordinator["progress"];
         readonly runEventLog: RunEventLog;
+        readonly layout: RunLayout;
     }) => CommandRuntime;
     readonly runWorkflow?: typeof workflow;
 };
@@ -310,19 +311,8 @@ const resolveCommandFactories = (
     runWorkflow: factories.runWorkflow ?? workflow,
 });
 
-const eventLogFor = (
-    config: ResolvedRalphieConfig,
-    runId: string,
-): RunEventLog =>
-    makeRunEventLog({
-        path: join(
-            resolveWorkspacePath(config.workspace),
-            ".ralphie",
-            "runs",
-            runId,
-            "events.jsonl",
-        ),
-    });
+const eventLogFor = (layout: RunLayout): RunEventLog =>
+    makeRunEventLog({ path: layout.eventLogPath });
 
 const makeCommandCoordinator = (
     config: ResolvedRalphieConfig,
@@ -422,7 +412,8 @@ export const runCommand = async (
 
     const terminal = input.terminal ?? terminalInfo();
     const runId = crypto.randomUUID();
-    const runEventLog = eventLogFor(config, runId);
+    const layout = makeRunLayout(config.workspace, runId);
+    const runEventLog = eventLogFor(layout);
     let coordinator: ProgressCoordinator | undefined;
     let runtime: CommandRuntime | undefined;
     let commandError: Error | undefined;
@@ -445,6 +436,7 @@ export const runCommand = async (
             agentRuntime,
             progress: coordinator.progress,
             runEventLog,
+            layout,
         });
         await factories.runWorkflow(
             workflowOptionsFor(config, input, runId),

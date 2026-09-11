@@ -65,9 +65,15 @@ import {
 } from "./issues/app/needs-attention.ts";
 import { type PiAgentService } from "./pi/ports.ts";
 import { type ProgressReporterService } from "./progress/ports.ts";
-import { type RunEventLog } from "./run/ports.ts";
+import {
+    type Clock,
+    type IdGenerator,
+    type RunEventLog,
+    type RunLayout,
+} from "./run/ports.ts";
 import { RunStateStoreLive } from "./run/adapters/state.ts";
 import { type RunStateStoreService } from "./run/ports.ts";
+import { makeIdGenerator, systemClock } from "./run/adapters/env.ts";
 import { WorkspaceLive } from "./workspace/adapters/workspace.ts";
 import { type WorkspaceService } from "./workspace/ports.ts";
 
@@ -103,6 +109,9 @@ export type RalphieRuntime = {
     readonly progress: ProgressReporterService;
     readonly runEventLog: RunEventLog;
     readonly runStateStore: RunStateStoreService;
+    readonly layout: RunLayout;
+    readonly clock: Clock;
+    readonly ids: IdGenerator;
     readonly workspace: WorkspaceService;
 };
 
@@ -110,6 +119,9 @@ export type RuntimeOverrides = {
     readonly agentRuntime: PiAgentService;
     readonly progress: ProgressReporterService;
     readonly runEventLog: RunEventLog;
+    readonly layout: RunLayout;
+    readonly clock?: Clock;
+    readonly ids?: IdGenerator;
     /** Optional deterministic seam for the issue artifact store. */
     readonly commandRunner?: CommandRunnerService;
     readonly runStateStore?: RunStateStoreService;
@@ -121,6 +133,9 @@ export const makeLiveRuntime = ({
     agentRuntime,
     progress,
     runEventLog,
+    layout,
+    clock = systemClock,
+    ids = makeIdGenerator(),
     commandRunner = CommandRunnerLive,
     runStateStore = RunStateStoreLive,
     workspace = WorkspaceLive,
@@ -146,15 +161,22 @@ export const makeLiveRuntime = ({
     const gitIssueCheckpoint = makeGitIssueCheckpointService(commandRunner);
     const gitIssueOperations = makeGitIssueOperationsService(commandRunner);
     const gitRemoteSafety = makeGitRemoteSafetyService(commandRunner);
-    const issueArtifactStore = makeIssueArtifactStoreService(
-        nodeIssueArtifactFileSystem,
-    );
+    const issueArtifactStore = makeIssueArtifactStoreService({
+        fileSystem: nodeIssueArtifactFileSystem,
+        layout,
+        ids,
+    });
     const actualGitIssuePreparation = makeGitIssuePreparationService(
         gitIssueCheckpoint,
         issueArtifactStore,
     );
     const issueRecovery = makeIssueRecoveryService(
-        nodeRecoveryFileSystem,
+        {
+            fileSystem: nodeRecoveryFileSystem,
+            layout,
+            clock,
+            ids,
+        },
         gitIssueCheckpoint,
         progress,
         gitRepositoryInvariant,
@@ -218,6 +240,9 @@ export const makeLiveRuntime = ({
         progress,
         runEventLog,
         runStateStore,
+        layout,
+        clock,
+        ids,
         workspace,
     };
 };

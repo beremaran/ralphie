@@ -11,7 +11,13 @@ import type {
 } from "../git/ports.ts";
 import type { PiAgentService } from "../pi/ports.ts";
 import type { ProgressReporterService } from "../progress/ports.ts";
-import type { RunEventLog, RunStateStoreService } from "../run/ports.ts";
+import type {
+    Clock,
+    IdGenerator,
+    RunEventLog,
+    RunLayout,
+    RunStateStoreService,
+} from "../run/ports.ts";
 import type { WorkspaceService } from "../workspace/ports.ts";
 import type { IssueExecutorService } from "../issues/app/executor.ts";
 
@@ -26,6 +32,9 @@ export type IssueWorkflowRuntime = {
     readonly progress: ProgressReporterService;
     readonly runEventLog: RunEventLog;
     readonly runStateStore: RunStateStoreService;
+    readonly layout: RunLayout;
+    readonly clock: Clock;
+    readonly ids: IdGenerator;
     readonly workspace: WorkspaceService;
     readonly githubConnection: GitHubConnectionService;
     readonly githubIssues: GitHubIssuesService;

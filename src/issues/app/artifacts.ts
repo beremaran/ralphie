@@ -1,5 +1,3 @@
-import { randomUUID } from "node:crypto";
-import { dirname, join } from "node:path";
 import { z } from "zod";
 
 import { type IssueCheckpoint } from "../../git/ports.ts";
@@ -9,7 +7,7 @@ import {
     type NeedsAttentionRequest,
 } from "../../agent/task-session.ts";
 import { RalphieError } from "../../shared/error.ts";
-import { resolveWorkspacePath } from "../../workspace/path.ts";
+import type { IdGenerator, RunLayout } from "../../run/ports.ts";
 import {
     commitMessageDecisionSchema,
     complexityDecisionSchema,
@@ -166,8 +164,6 @@ export type IssueArtifactStore = {
 };
 
 export type IssueArtifactScope = {
-    readonly workspace: string;
-    readonly runId: string;
     readonly repository?: string;
 };
 
@@ -198,6 +194,10 @@ export type IssueArtifactFileSystem = {
 export type IssueArtifactStoreOptions = {
     readonly signal?: AbortSignal;
     readonly fileSystem?: IssueArtifactFileSystem;
+    /** Run layout resolved by the composition root. */
+    readonly layout?: RunLayout;
+    /** Unique-id generator for temporary write names. */
+    readonly ids?: IdGenerator;
 };
 
 export type ArtifactPersistenceAbortPhase =
@@ -460,23 +460,6 @@ type ArtifactPersistence = (
     signal?: AbortSignal,
 ) => Promise<void>;
 
-const safeRunId = (runId: string): string =>
-    runId.replace(/[^a-zA-Z0-9_-]/g, "_") || "run";
-
-export const issueArtifactPath = (
-    scope: IssueArtifactScope,
-    issueNumber: number,
-): string =>
-    join(
-        resolveWorkspacePath(scope.workspace),
-        ".ralphie",
-        "runs",
-        safeRunId(scope.runId),
-        "issues",
-        String(issueNumber),
-        "artifacts.json",
-    );
-
 const toPersistedState = (
     issueNumber: number,
     values: ReadonlyMap<IssueArtifactKind, unknown>,
@@ -498,13 +481,15 @@ const toPersistedState = (
 };
 
 const persistAtomically = async (
+    directory: string,
     filePath: string,
     state: PersistedArtifactState,
     signal: AbortSignal | undefined,
     fileSystem: IssueArtifactFileSystem,
+    ids: IdGenerator,
     issueNumber?: number,
 ): Promise<void> => {
-    const temporaryPath = `${filePath}.${randomUUID()}.tmp`;
+    const temporaryPath = `${filePath}.${ids.next()}.tmp`;
     const encoded = `${JSON.stringify(state, null, 2)}\n`;
     const abort = (
         phase: ArtifactPersistenceAbortPhase,
@@ -538,7 +523,7 @@ const persistAtomically = async (
     };
     try {
         throwIfAborted("before-write", false);
-        await fileSystem.mkdir(dirname(filePath), { recursive: true });
+        await fileSystem.mkdir(directory, { recursive: true });
         throwIfAborted("before-write", false);
         try {
             await fileSystem.writeFile(temporaryPath, encoded, {
@@ -1111,14 +1096,15 @@ export const makeDurableIssueArtifactStore = async (
             message: `Cannot create an artifact store for issue ${issueNumber}.`,
         });
     }
-    const { fileSystem } = settings;
-    if (fileSystem === undefined) {
+    const { fileSystem, layout, ids } = settings;
+    if (fileSystem === undefined || layout === undefined || ids === undefined) {
         throw new RalphieError({
             message:
-                "A durable issue artifact store requires a file system adapter.",
+                "A durable issue artifact store requires a file system adapter, a run layout, and an id generator.",
         });
     }
-    const filePath = issueArtifactPath(scope, issueNumber);
+    const directory = layout.issueArtifactsDirectory(issueNumber);
+    const filePath = layout.issueArtifactsPath(issueNumber);
     const loaded = await loadPersistedState(
         filePath,
         issueNumber,
@@ -1128,10 +1114,12 @@ export const makeDurableIssueArtifactStore = async (
     throwIfArtifactWriteAborted(settings.signal, issueNumber);
     if (loaded?.migrated === true || loaded?.decisionsInvalidated === true) {
         await persistAtomically(
+            directory,
             filePath,
             loaded.state,
             settings.signal,
             fileSystem,
+            ids,
             issueNumber,
         );
     }
@@ -1140,10 +1128,12 @@ export const makeDurableIssueArtifactStore = async (
         valuesFromLoadedState(loaded),
         (nextState, signal) =>
             persistAtomically(
+                directory,
                 filePath,
                 nextState,
                 signal,
                 fileSystem,
+                ids,
                 issueNumber,
             ),
         scope,
@@ -1167,15 +1157,15 @@ export const makeReadOnlyDurableIssueArtifactStore = async (
             message: `Cannot create an artifact store for issue ${issueNumber}.`,
         });
     }
-    const { fileSystem } = settings;
-    if (fileSystem === undefined) {
+    const { fileSystem, layout } = settings;
+    if (fileSystem === undefined || layout === undefined) {
         throw new RalphieError({
             message:
-                "A durable issue artifact store requires a file system adapter.",
+                "A durable issue artifact store requires a file system adapter and a run layout.",
         });
     }
     const loaded = await loadPersistedState(
-        issueArtifactPath(scope, issueNumber),
+        layout.issueArtifactsPath(issueNumber),
         issueNumber,
         scope,
         fileSystem,
@@ -1184,49 +1174,60 @@ export const makeReadOnlyDurableIssueArtifactStore = async (
     return makeStore(issueNumber, valuesFromLoadedState(loaded));
 };
 
+export type IssueArtifactStoreServiceOptions = {
+    readonly fileSystem?: IssueArtifactFileSystem;
+    readonly layout?: RunLayout;
+    readonly ids?: IdGenerator;
+};
+
 export const makeIssueArtifactStoreService = (
-    fileSystem?: IssueArtifactFileSystem,
+    options: IssueArtifactStoreServiceOptions = {},
 ): IssueArtifactStoreService => {
-    const stores = new Map<string, IssueArtifactStore>();
-    const readOnlyStores = new Map<string, IssueArtifactStore>();
+    const { fileSystem, layout, ids } = options;
+    const durable =
+        fileSystem !== undefined && layout !== undefined && ids !== undefined;
+    const stores = new Map<number, IssueArtifactStore>();
+    const readOnlyStores = new Map<number, IssueArtifactStore>();
 
     return {
         forIssue: async (issueNumber, scope, signal) => {
             throwIfArtifactWriteAborted(signal, issueNumber);
-            const key = scope
-                ? `${resolveWorkspacePath(scope.workspace)}\u0000${safeRunId(scope.runId)}\u0000${issueNumber}`
-                : `memory\u0000${issueNumber}`;
-            const existing = stores.get(key);
+            const existing = stores.get(issueNumber);
             if (existing !== undefined) return existing;
 
-            const store = scope
-                ? await makeDurableIssueArtifactStore(issueNumber, scope, {
-                      ...(fileSystem === undefined ? {} : { fileSystem }),
-                      ...(signal === undefined ? {} : { signal }),
-                  })
-                : await makeIssueArtifactStore(issueNumber, signal);
-            stores.set(key, store);
-            return store;
-        },
-        forIssueReadOnly: async (issueNumber, scope, signal) => {
-            throwIfArtifactWriteAborted(signal, issueNumber);
-            const key = scope
-                ? `${resolveWorkspacePath(scope.workspace)}\u0000${safeRunId(scope.runId)}\u0000${issueNumber}`
-                : `memory\u0000${issueNumber}`;
-            const existing = readOnlyStores.get(key);
-            if (existing !== undefined) return existing;
-
-            const store = scope
-                ? await makeReadOnlyDurableIssueArtifactStore(
+            const store = durable
+                ? await makeDurableIssueArtifactStore(
                       issueNumber,
-                      scope,
+                      scope ?? {},
                       {
-                          ...(fileSystem === undefined ? {} : { fileSystem }),
+                          fileSystem,
+                          layout,
+                          ids,
                           ...(signal === undefined ? {} : { signal }),
                       },
                   )
                 : await makeIssueArtifactStore(issueNumber, signal);
-            readOnlyStores.set(key, store);
+            stores.set(issueNumber, store);
+            return store;
+        },
+        forIssueReadOnly: async (issueNumber, scope, signal) => {
+            throwIfArtifactWriteAborted(signal, issueNumber);
+            const existing = readOnlyStores.get(issueNumber);
+            if (existing !== undefined) return existing;
+
+            const store = durable
+                ? await makeReadOnlyDurableIssueArtifactStore(
+                      issueNumber,
+                      scope ?? {},
+                      {
+                          fileSystem,
+                          layout,
+                          ids,
+                          ...(signal === undefined ? {} : { signal }),
+                      },
+                  )
+                : await makeIssueArtifactStore(issueNumber, signal);
+            readOnlyStores.set(issueNumber, store);
             return store;
         },
     };

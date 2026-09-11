@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { makeTestProgressRecorder } from "./shared/progress-recorder.ts";
 import { makeLiveRuntime } from "../src/runtime.ts";
+import { testLayout } from "./shared/test-values.ts";
 
 describe("runtime factory", () => {
     test("assembles the issue-mode services without starting the agent", () => {
@@ -15,6 +16,7 @@ describe("runtime factory", () => {
             },
             progress: makeTestProgressRecorder([]),
             runEventLog: { append: () => {}, close: () => {} },
+            layout: testLayout(),
         });
 
         expect(runtime.githubIssues).toBeDefined();

@@ -14,18 +14,17 @@ import { tmpdir } from "node:os";
 import {
     IssueArtifactKind,
     IssueArtifactWriteAbortedError,
-    issueArtifactPath,
     makeDurableIssueArtifactStore,
     type IssueArtifactFileSystem,
     type IssueArtifactScope,
 } from "../../src/issues/app/artifacts.ts";
+import { countingIds, testLayout } from "../shared/test-values.ts";
 import { ReviewVerdict } from "../../src/issues/domain/decisions.ts";
 import type { ReviewAttempt } from "../../src/issues/app/recovery.ts";
 
 const issueNumber = 42;
-const scopeFor = (workspace: string): IssueArtifactScope => ({
-    workspace,
-    runId: "cancellation-boundary",
+const runId = "cancellation-boundary";
+const scopeFor = (_workspace: string): IssueArtifactScope => ({
     repository: "owner/repo",
 });
 
@@ -96,10 +95,13 @@ describe("durable issue artifact cancellation", () => {
             const store = await makeDurableIssueArtifactStore(
                 issueNumber,
                 scopeFor(workspace),
-                { fileSystem },
+                {
+                    fileSystem,
+                    layout: testLayout(workspace, runId),
+                    ids: countingIds("temp"),
+                },
             );
-            const filePath = issueArtifactPath(
-                scopeFor(workspace),
+            const filePath = testLayout(workspace, runId).issueArtifactsPath(
                 issueNumber,
             );
             const controller = new AbortController();
@@ -148,9 +150,15 @@ describe("durable issue artifact cancellation", () => {
             const store = await makeDurableIssueArtifactStore(
                 issueNumber,
                 scope,
-                { fileSystem },
+                {
+                    fileSystem,
+                    layout: testLayout(workspace, runId),
+                    ids: countingIds("temp"),
+                },
             );
-            const filePath = issueArtifactPath(scope, issueNumber);
+            const filePath = testLayout(workspace, runId).issueArtifactsPath(
+                issueNumber,
+            );
 
             let failure: unknown;
             try {
@@ -202,7 +210,11 @@ describe("durable issue artifact cancellation", () => {
             const store = await makeDurableIssueArtifactStore(
                 issueNumber,
                 scopeFor(workspace),
-                { fileSystem },
+                {
+                    fileSystem,
+                    layout: testLayout(workspace, runId),
+                    ids: countingIds("temp"),
+                },
             );
             const controller = new AbortController();
             controller.abort(new Error("already cancelled"));

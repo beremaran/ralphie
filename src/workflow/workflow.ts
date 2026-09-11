@@ -1,5 +1,3 @@
-import { join } from "node:path";
-
 import { makeAgentSessionDiagnostics } from "../agent/task-session.ts";
 import type { AgentModel, AgentSelection } from "../agent/model.ts";
 import { type NeedsAttentionNotificationInput } from "../github/ports.ts";
@@ -31,8 +29,8 @@ import {
     type RunState,
     RunStateStatus,
 } from "../run/state.ts";
+import type { Clock } from "../run/ports.ts";
 import { RalphieError } from "../shared/error.ts";
-import { resolveWorkspacePath } from "../workspace/path.ts";
 import { DEFAULT_MAX_DECOMPOSITION_DEPTH } from "../issues/domain/decomposition-markdown.ts";
 import type { IssueWorkflowRuntime } from "./ports.ts";
 
@@ -298,6 +296,7 @@ type PersistWorkflowStateInput = {
     readonly selection: AgentSelection;
     readonly maxDecompositionDepth: number;
     readonly outcomes: ReadonlyArray<WorkflowOutcomeEntry>;
+    readonly clock: Clock;
     readonly checkout: WorkflowCheckout;
 };
 
@@ -363,7 +362,7 @@ const persistWorkflowState = async (
         })),
         ...(currentIssue === undefined ? {} : { activeIssue: currentIssue }),
         checkout: input.checkout,
-        updatedAt: new Date().toISOString(),
+        updatedAt: input.clock.now().toISOString(),
     });
 };
 
@@ -504,7 +503,7 @@ export type WorkflowOptions = {
     readonly implementationAttempts?: number;
     readonly workspace: string;
     readonly signal?: AbortSignal;
-    readonly runId?: string;
+    readonly runId: string;
     /** Publish needs-attention outcomes through the runtime notifier. */
     readonly notificationsEnabled?: boolean;
     /** Optional additive label applied with a needs-attention notification. */
@@ -538,6 +537,7 @@ type WorkflowLifecycle = {
 
 const makeWorkflowConfiguration = (
     options: WorkflowOptions,
+    statePath: string,
 ): WorkflowConfiguration => {
     const {
         repo,
@@ -551,17 +551,10 @@ const makeWorkflowConfiguration = (
         implementationAttempts,
         workspace,
         signal,
-        runId = crypto.randomUUID(),
+        runId,
         notificationsEnabled = false,
         needsAttentionLabel,
     } = options;
-    const statePath = join(
-        resolveWorkspacePath(workspace),
-        ".ralphie",
-        "runs",
-        runId,
-        "state.json",
-    );
     return {
         repo,
         requestedBranch,
@@ -704,23 +697,9 @@ export const workflow = async (
     options: WorkflowOptions,
     runtime: IssueWorkflowRuntime,
 ): Promise<WorkflowSummary> => {
-    const config = makeWorkflowConfiguration(options);
     const {
-        repo,
-        requestedBranch,
-        maxDecompositionDepth,
-        issueFilters,
-        agent,
-        model,
-        modelVariant,
-        workspace,
-        signal,
-        notificationsEnabled,
-        needsAttentionLabel,
-        actualRunId,
-        statePath,
-    } = config;
-    const {
+        clock,
+        layout,
         progress,
         runEventLog,
         runStateStore: stateStore,
@@ -736,7 +715,22 @@ export const workflow = async (
         issueExecutor: normalIssueExecutor,
         agentRuntime,
     } = runtime;
-
+    const config = makeWorkflowConfiguration(options, layout.statePath);
+    const {
+        repo,
+        requestedBranch,
+        maxDecompositionDepth,
+        issueFilters,
+        agent,
+        model,
+        modelVariant,
+        workspace,
+        signal,
+        notificationsEnabled,
+        needsAttentionLabel,
+        actualRunId,
+        statePath,
+    } = config;
     await emitRunStarted(progress, config);
 
     let activeIssue: RunState["activeIssue"] | undefined;
@@ -881,6 +875,7 @@ export const workflow = async (
                         selection,
                         maxDecompositionDepth,
                         outcomes,
+                        clock,
                         checkout,
                     },
                     status,
@@ -1040,6 +1035,7 @@ export const workflow = async (
                         targetBranch: branch,
                         workspace,
                         runId: actualRunId,
+                        runLayout: layout,
                         agent: server.client,
                         agentSelection: selection,
                         agentDiagnostics: diagnostics,

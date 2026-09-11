@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { parse, resolve, sep } from "node:path";
 
 import { RalphieError } from "../../shared/error.ts";
-import { resolveWorkspacePath } from "../path.ts";
+import { resolveWorkspacePath } from "../../shared/workspace-path.ts";
 
 const assertSafeCleanupTarget = (workspace: string): string => {
     const target = resolveWorkspacePath(workspace);

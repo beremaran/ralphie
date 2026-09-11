@@ -34,6 +34,7 @@ import type {
     ProgressUpdate,
 } from "../src/progress/ports.ts";
 import { makeTestProgressRecorder } from "./shared/progress-recorder.ts";
+import { countingIds, fixedClock, testLayout } from "./shared/test-values.ts";
 import { type RunEventLog } from "../src/run/ports.ts";
 import { type RunStateStoreService } from "../src/run/ports.ts";
 import { type RunState, RunStateStatus } from "../src/run/state.ts";
@@ -323,6 +324,9 @@ const testRuntime = (
         progress,
         runEventLog: eventLog,
         runStateStore: stateStore,
+        layout: testLayout(),
+        clock: fixedClock(),
+        ids: countingIds("test"),
         workspace,
     };
 };

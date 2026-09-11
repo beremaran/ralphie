@@ -25,7 +25,6 @@ import {
 } from "../../src/agent/task-session.ts";
 import {
     IssueArtifactKind,
-    issueArtifactPath,
     makeIssueArtifactStore,
     type IssueArtifactStore,
     type IssueArtifactStoreService,
@@ -78,6 +77,7 @@ import type {
     ProgressUpdate,
 } from "../../src/progress/ports.ts";
 import { makeTestProgressRecorder } from "../shared/progress-recorder.ts";
+import { countingIds, fixedClock, testLayout } from "../shared/test-values.ts";
 import { RalphieError } from "../../src/shared/error.ts";
 
 const issue: GitHubIssue = {
@@ -256,6 +256,7 @@ const makeContext = (options: {
     targetBranch: "develop",
     workspace: "/work/workspace",
     runId: "test-run",
+    runLayout: testLayout("/work/workspace", "test-run"),
     agent: options.agent,
     agentSelection: { agent: DEFAULT_AGENT },
     agentDiagnostics: makeAgentSessionDiagnostics(),
@@ -1122,12 +1123,7 @@ describe("issue executor needs-attention routing", () => {
         expect(outcome).toMatchObject({
             kind: IssueExecutionOutcomeKind.NeedsAttention,
             reason: NeedsAttentionReason.MissingInformation,
-            artifactPath: issueArtifactPath(
-                {
-                    workspace: context.workspace,
-                    runId: context.runId,
-                    repository: context.repository,
-                },
+            artifactPath: context.runLayout.issueArtifactsPath(
                 context.issue.number,
             ),
         });
@@ -1910,7 +1906,12 @@ describe("needs-attention recovery diagnostics", () => {
             const verifyCalls: Array<{ branch: string; head: string }> = [];
             const invariant = makeInvariant(verifyCalls);
             const recovery = makeIssueRecoveryService(
-                nodeRecoveryFileSystem,
+                {
+                    fileSystem: nodeRecoveryFileSystem,
+                    layout: testLayout(workspace, "run-1"),
+                    clock: fixedClock(),
+                    ids: countingIds("recovery"),
+                },
                 git,
                 progress,
                 invariant,
@@ -1959,7 +1960,12 @@ describe("needs-attention recovery diagnostics", () => {
                 },
             };
             const recovery = makeIssueRecoveryService(
-                nodeRecoveryFileSystem,
+                {
+                    fileSystem: nodeRecoveryFileSystem,
+                    layout: testLayout(workspace, "run-1"),
+                    clock: fixedClock(),
+                    ids: countingIds("recovery"),
+                },
                 git,
                 progress,
                 makeInvariant([]),
@@ -2008,7 +2014,12 @@ describe("needs-attention recovery diagnostics", () => {
                 },
             };
             const recovery = makeIssueRecoveryService(
-                nodeRecoveryFileSystem,
+                {
+                    fileSystem: nodeRecoveryFileSystem,
+                    layout: testLayout(workspace, "run-1"),
+                    clock: fixedClock(),
+                    ids: countingIds("recovery"),
+                },
                 git,
                 progress,
                 makeInvariant([]),
@@ -2054,7 +2065,12 @@ describe("needs-attention recovery diagnostics", () => {
             };
             const verifyCalls: Array<{ branch: string; head: string }> = [];
             const recovery = makeIssueRecoveryService(
-                nodeRecoveryFileSystem,
+                {
+                    fileSystem: nodeRecoveryFileSystem,
+                    layout: testLayout(workspace, "run-1"),
+                    clock: fixedClock(),
+                    ids: countingIds("recovery"),
+                },
                 git,
                 progress,
                 makeInvariant(verifyCalls),
@@ -2111,7 +2127,12 @@ describe("needs-attention recovery diagnostics", () => {
                 },
             };
             const recovery = makeIssueRecoveryService(
-                nodeRecoveryFileSystem,
+                {
+                    fileSystem: nodeRecoveryFileSystem,
+                    layout: testLayout(workspace, "run-1"),
+                    clock: fixedClock(),
+                    ids: countingIds("recovery"),
+                },
                 git,
                 progress,
                 invariant,

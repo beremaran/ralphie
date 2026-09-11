@@ -9,6 +9,7 @@ import type {
 import type { AgentSelection } from "../../agent/model.ts";
 import type { AgentSessionDiagnostics } from "../../agent/task-session.ts";
 import { type GitRepositoryInvariantService } from "../../git/ports.ts";
+import type { RunLayout } from "../../run/ports.ts";
 
 /**
  * The terminal state reported by an issue executor.
@@ -105,6 +106,8 @@ export type IssueExecutionContext = {
     readonly targetBranch: string;
     readonly workspace: string;
     readonly runId: string;
+    /** Run filesystem layout resolved by the composition root. */
+    readonly runLayout: RunLayout;
     readonly agent: AgentClient;
     readonly agentSelection: AgentSelection;
     readonly implementationAttempts?: number;

@@ -9,7 +9,7 @@ import { requireSuccess } from "../../process/require-success.ts";
 import { type CommandRunnerService } from "../../process/ports.ts";
 import type { GitRepositoryService, PreparedRepository } from "../ports.ts";
 import { RalphieError } from "../../shared/error.ts";
-import { resolveWorkspacePath } from "../../workspace/path.ts";
+import { resolveWorkspacePath } from "../../shared/workspace-path.ts";
 
 const pathExists = async (path: string): Promise<boolean> => {
     try {

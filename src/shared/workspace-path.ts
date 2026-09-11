@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 
-import { RalphieError } from "../shared/error.ts";
+import { RalphieError } from "./error.ts";
 
 /** Expand a user-supplied workspace path without touching the filesystem. */
 export const resolveWorkspacePath = (workspace: string): string => {

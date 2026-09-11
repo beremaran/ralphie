@@ -1,5 +1,5 @@
-import { createHash, randomUUID } from "node:crypto";
-import { dirname, join } from "node:path";
+import { createHash } from "node:crypto";
+import { join } from "node:path";
 
 import {
     type GitIssueCheckpointService,
@@ -16,7 +16,7 @@ import {
     type ReviewDecision,
     ReviewVerdict,
 } from "../domain/decisions.ts";
-import { resolveWorkspacePath } from "../../workspace/path.ts";
+import type { Clock, IdGenerator, RunLayout } from "../../run/ports.ts";
 import {
     IssueQueueResumeStrategy,
     REVIEW_ITERATION_LIMIT,
@@ -106,27 +106,16 @@ export type IssueRecoveryService = {
     ) => Promise<NeedsAttentionRecoveryResult>;
 };
 
-const safeRunId = (runId: string): string =>
-    runId.replace(/[^a-zA-Z0-9_-]/g, "_") || "run";
-
 const recoverableError = (message: string, cause: unknown): RalphieError =>
     cause instanceof RalphieError
         ? cause
         : new RalphieError({ message, cause });
 
 const diagnosticPath = (
-    input: Pick<ReviewExhaustionInput, "workspace" | "runId" | "issue">,
+    layout: RunLayout,
+    input: Pick<ReviewExhaustionInput, "issue">,
     name: string,
-): string =>
-    join(
-        resolveWorkspacePath(input.workspace),
-        ".ralphie",
-        "runs",
-        safeRunId(input.runId),
-        "issues",
-        String(input.issue.number),
-        name,
-    );
+): string => layout.diagnosticsPath(input.issue.number, name);
 
 const needsAttentionDiagnosticName = (
     fingerprint: IssueFreshnessFingerprint,
@@ -138,7 +127,9 @@ const needsAttentionDiagnosticName = (
 
 const persistDiagnostic = async (
     fileSystem: RecoveryFileSystem,
+    ids: IdGenerator,
     input: {
+        readonly directory: string;
         readonly diagnosticsPath: string;
         readonly patch: string;
         readonly metadata: string;
@@ -162,11 +153,9 @@ const persistDiagnostic = async (
         });
     }
 
-    const temporaryPath = `${input.diagnosticsPath}.${randomUUID()}.tmp`;
+    const temporaryPath = `${input.diagnosticsPath}.${ids.next()}.tmp`;
     try {
-        await fileSystem.mkdir(dirname(input.diagnosticsPath), {
-            recursive: true,
-        });
+        await fileSystem.mkdir(input.directory, { recursive: true });
         await fileSystem.mkdir(temporaryPath);
         await fileSystem.writeFile(
             join(temporaryPath, "changes.patch"),
@@ -193,6 +182,7 @@ const persistDiagnostic = async (
 const needsAttentionMetadata = (
     input: NeedsAttentionRecoveryInput,
     diagnosticsPath: string,
+    clock: Clock,
 ): string => {
     const request = input.request;
     try {
@@ -206,7 +196,7 @@ const needsAttentionMetadata = (
                 fingerprint: input.fingerprint,
                 decision: input.decision,
                 ...(request === undefined ? {} : { request }),
-                createdAt: new Date().toISOString(),
+                createdAt: clock.now().toISOString(),
             },
             null,
             2,
@@ -252,8 +242,15 @@ const matchingDiagnostic = async (
     }
 };
 
+export type IssueRecoveryServiceOptions = {
+    readonly fileSystem: RecoveryFileSystem;
+    readonly layout: RunLayout;
+    readonly clock: Clock;
+    readonly ids: IdGenerator;
+};
+
 export const makeIssueRecoveryService = (
-    fileSystem: RecoveryFileSystem,
+    { fileSystem, layout, clock, ids }: IssueRecoveryServiceOptions,
     git: GitIssueCheckpointService,
     progress: ProgressReporterService,
     repositoryInvariant?: GitRepositoryInvariantService,
@@ -278,7 +275,11 @@ export const makeIssueRecoveryService = (
         input: ReviewExhaustionInput,
         patch: string,
     ): Promise<string> => {
-        const diagnosticsPath = diagnosticPath(input, "review-exhaustion");
+        const diagnosticsPath = diagnosticPath(
+            layout,
+            input,
+            "review-exhaustion",
+        );
         const metadata = `${JSON.stringify(
             {
                 ...(input.repository === undefined
@@ -287,12 +288,13 @@ export const makeIssueRecoveryService = (
                 issue: input.issue,
                 checkpoint: input.checkpoint,
                 reviews: input.reviews,
-                createdAt: new Date().toISOString(),
+                createdAt: clock.now().toISOString(),
             },
             null,
             2,
         )}\n`;
-        await persistDiagnostic(fileSystem, {
+        await persistDiagnostic(fileSystem, ids, {
+            directory: layout.diagnosticsDirectory(input.issue.number),
             diagnosticsPath,
             patch,
             metadata,
@@ -349,15 +351,17 @@ export const makeIssueRecoveryService = (
         { readonly path: string; readonly reused: boolean } | undefined
     > => {
         const diagnosticsPath = diagnosticPath(
+            layout,
             input,
             needsAttentionDiagnosticName(input.fingerprint),
         );
-        const metadata = needsAttentionMetadata(input, diagnosticsPath);
+        const metadata = needsAttentionMetadata(input, diagnosticsPath, clock);
         if (await matchingDiagnostic(fileSystem, diagnosticsPath, metadata)) {
             return { path: diagnosticsPath, reused: true };
         }
         if (patch === undefined) return undefined;
-        await persistDiagnostic(fileSystem, {
+        await persistDiagnostic(fileSystem, ids, {
+            directory: layout.diagnosticsDirectory(input.issue.number),
             diagnosticsPath,
             patch,
             metadata,

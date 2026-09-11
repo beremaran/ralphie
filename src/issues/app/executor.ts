@@ -4,7 +4,6 @@ import { DecompositionDepthLimitError } from "../domain/decomposition-markdown.t
 import {
     IssueArtifactKind,
     issueFreshnessFingerprint,
-    issueArtifactPath,
     type IssueArtifactStoreService,
 } from "./artifacts.ts";
 import type { ComplexityAssessmentService } from "./complexity.ts";
@@ -153,12 +152,7 @@ export const makeIssueExecutorService = (
             return {
                 kind: IssueExecutionOutcomeKind.NeedsAttention,
                 ...details,
-                artifactPath: issueArtifactPath(
-                    {
-                        workspace: context.workspace,
-                        runId: context.runId,
-                        repository: context.repository,
-                    },
+                artifactPath: context.runLayout.issueArtifactsPath(
                     context.issue.number,
                 ),
             };
@@ -191,12 +185,7 @@ export const makeIssueExecutorService = (
         return {
             kind: IssueExecutionOutcomeKind.NeedsAttention,
             ...details,
-            artifactPath: issueArtifactPath(
-                {
-                    workspace: context.workspace,
-                    runId: context.runId,
-                    repository: context.repository,
-                },
+            artifactPath: context.runLayout.issueArtifactsPath(
                 context.issue.number,
             ),
         };
@@ -291,13 +280,7 @@ export const makeIssueExecutorService = (
             try {
                 const artifacts = await artifactStores.forIssue(
                     context.issue.number,
-                    context.workspace && context.runId
-                        ? {
-                              workspace: context.workspace,
-                              runId: context.runId,
-                              repository: context.repository,
-                          }
-                        : undefined,
+                    { repository: context.repository },
                     context.signal,
                 );
                 return await executeIssue(context, artifacts);

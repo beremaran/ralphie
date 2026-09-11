@@ -18,3 +18,30 @@ export type RunEventLog = {
     /** Stop persisting; later appends are ignored. */
     readonly close: () => void;
 };
+/** Injectable wall clock; adapters use the system clock, tests a fixed one. */
+export type Clock = {
+    readonly now: () => Date;
+};
+
+/** Injectable unique-id generator for run ids and temporary names. */
+export type IdGenerator = {
+    readonly next: () => string;
+};
+
+/**
+ * Filesystem layout for one run, resolved by the composition root.
+ *
+ * Core code passes these values around and never composes paths itself.
+ */
+export type RunLayout = {
+    /** Expanded workspace root. */
+    readonly workspaceRoot: string;
+    /** `<workspaceRoot>/.ralphie/runs/<runId>` */
+    readonly runRoot: string;
+    readonly statePath: string;
+    readonly eventLogPath: string;
+    readonly issueArtifactsDirectory: (issueNumber: number) => string;
+    readonly issueArtifactsPath: (issueNumber: number) => string;
+    readonly diagnosticsDirectory: (issueNumber: number) => string;
+    readonly diagnosticsPath: (issueNumber: number, name: string) => string;
+};
