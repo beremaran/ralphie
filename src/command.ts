@@ -244,7 +244,7 @@ Options:
                                Maximum recursive decomposition depth (default 3)
       --issue-label <label>    Include only issues with this label (repeatable)
       --issue-sort <sort>      created, updated, or comments, optionally :asc or :desc
-      --verify-command <cmd>   Deterministic pre-commit gate (repeatable)
+      --verify-command <cmd>   Optional deterministic gate (repeatable; skipped when omitted)
       --model <provider/model> Pi model selection (defaults to pi settings)
       --thinking <level>       Thinking level for every session: off, minimal, low, medium, high, xhigh, or max (default medium)
       --implementation-attempts <n> Empty implementation retries (default 3)

@@ -28,7 +28,7 @@ flowchart TD
     Z -->|Actionable or apparently resolved| B[Structured complexity assessment]
     B -->|0–3| C[Implementation session]
     C --> D[Deterministically stage changes]
-    D -->|Changes present| V[Deterministic verification]
+    D -->|Changes present| V[Configured verification]
     V -->|Passed| E[Fresh review session]
     V -->|Command failed| R[Fresh verification-fix session]
     R --> D
@@ -54,11 +54,11 @@ flowchart TD
 2. Ask a fresh pi session to implement the issue and require a schema-valid
    completion result; prose or premature model termination is not completion.
 3. Stage every change deterministically and capture the exact staged diff.
-4. Run deterministic verification. If a command exits non-zero, give its
-   bounded output and the staged diff to a fresh fix session, then restage and
-   retry up to five times.
-5. Ask a separate session for a schema-validated review only after verification
-   passes.
+4. Run the configured deterministic verification commands, when any. If a
+   command exits non-zero, give its bounded output and the staged diff to a
+   fresh fix session, then restage and retry up to five times.
+5. Ask a separate session for a schema-validated review after verification
+   passes or is skipped (no `--verify-command` configured).
 6. If changes are requested, give the review to a fresh fix session and repeat
    staging and review.
 7. Stop after approval or five review attempts. Reverify immediately before
@@ -101,7 +101,7 @@ sequenceDiagram
 
     alt Changes present
         loop Until approved or five reviews
-            R->>G: Run deterministic verification
+            R->>G: Run configured verification commands (when any)
             opt Verification command fails and repair budget remains
                 R->>P: Start fresh verification-fix session
                 P-->>R: Update the checkout

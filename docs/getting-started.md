@@ -101,13 +101,13 @@ when no release SHA is supplied.
 
 ## Target-repository verification dependencies
 
-Ralphie runs deterministic verification commands in the target checkout through
-`/bin/sh`. If the target has a `package.json` `check` script, Ralphie defaults
-to `bun run check`; otherwise provide one or more `--verify-command` values.
-The tools used by that command belong to the target repository's contract, not
-Ralphie's runtime: a target whose check uses Bun, Node.js, or a project
-compiler simply needs those tools present in the environment you run Ralphie
-in.
+Deterministic verification is opt-in. Provide one or more
+`--verify-command` values to run the target's checks in the checkout through
+`/bin/sh` after changes are staged; when omitted, the gate is skipped and
+review proceeds on the staged diff alone. The tools used by a supplied command
+belong to the target repository's contract, not Ralphie's runtime: a command
+that uses Bun, Node.js, or a project compiler needs those tools present in the
+environment you run Ralphie in.
 
 ## First run
 

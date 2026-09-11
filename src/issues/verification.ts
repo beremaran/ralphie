@@ -1,6 +1,4 @@
 import { z } from "zod";
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 
 import type { CommandRunnerService } from "../process/command-runner.ts";
 import { RalphieError } from "../shared/error.ts";
@@ -9,9 +7,9 @@ const OUTPUT_LIMIT = 8_000;
 
 /**
  * Deadline for user-configured verification commands. These run the repository's
- * own gate (for example a full `bun run check`), so they are deliberately more
- * generous than the generic process timeout, but still bounded: a hung
- * verification command fails the run instead of stalling it forever.
+ * own gate, so they are deliberately more generous than the generic process
+ * timeout, but still bounded: a hung verification command fails the run instead
+ * of stalling it forever.
  */
 export const VERIFICATION_COMMAND_TIMEOUT_MS = 30 * 60 * 1000;
 
@@ -66,7 +64,7 @@ export const verificationCommandResultSchema = z.object({
 
 export const verificationEvidenceSchema = z.object({
     stagedTreeSha: z.string().regex(/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/i),
-    commands: z.array(verificationCommandResultSchema).min(1),
+    commands: z.array(verificationCommandResultSchema),
 });
 
 export type VerificationEvidence = z.infer<typeof verificationEvidenceSchema>;
@@ -105,31 +103,6 @@ export type IssueVerificationService = {
 export const makeIssueVerificationService = (
     runner: CommandRunnerService,
 ): IssueVerificationService => {
-    const resolveCommands = async (
-        repositoryPath: string,
-        commands: ReadonlyArray<string>,
-        signal?: AbortSignal,
-    ): Promise<ReadonlyArray<string>> => {
-        signal?.throwIfAborted();
-        if (commands.length > 0) return commands;
-        try {
-            const manifest = JSON.parse(
-                await readFile(join(repositoryPath, "package.json"), {
-                    encoding: "utf8",
-                    ...(signal === undefined ? {} : { signal }),
-                }),
-            ) as { readonly scripts?: { readonly check?: unknown } };
-            if (typeof manifest.scripts?.check === "string") {
-                return ["bun run check"];
-            }
-        } catch {
-            // Fall through to the fail-closed error below.
-        }
-        throw new RalphieError({
-            message:
-                "No deterministic verification command is configured or discoverable. Supply --verify-command.",
-        });
-    };
     const stagedTreeSha = async (
         repositoryPath: string,
         signal?: AbortSignal,
@@ -152,14 +125,9 @@ export const makeIssueVerificationService = (
     return {
         stagedTreeSha,
         verify: async (repositoryPath, commands, signal) => {
-            const resolvedCommands = await resolveCommands(
-                repositoryPath,
-                commands,
-                signal,
-            );
             const tree = await stagedTreeSha(repositoryPath, signal);
             const results = [];
-            for (const command of resolvedCommands) {
+            for (const command of commands) {
                 signal?.throwIfAborted();
                 const result = await runner.run("/bin/sh", ["-c", command], {
                     cwd: repositoryPath,

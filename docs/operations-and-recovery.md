@@ -261,12 +261,13 @@ An ordinary issue failure never stops the queue. Ralphie restores the failed
 issue checkout, records its outcome, and continues independent work; the
 drained run exits `1` if any issue failed.
 
-A deterministic verification command returning non-zero is handled before it
-becomes an issue failure. Ralphie gives the bounded command output and staged
-diff to a fresh verification-fix session, restages its changes, and retries up
-to five times. Only repair exhaustion or a non-repairable verification fault
-(for example missing configuration or a command changing the staged tree)
-reaches the ordinary failure boundary.
+A configured deterministic verification command returning non-zero is handled
+before it becomes an issue failure. Ralphie gives the bounded command output and
+staged diff to a fresh verification-fix session, restages its changes, and
+retries up to five times. Only repair exhaustion or a non-repairable
+verification fault (for example a command changing the staged tree) reaches the
+ordinary failure boundary. When no `--verify-command` is configured, the gate
+is skipped.
 
 ## Cleanup
 

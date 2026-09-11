@@ -70,6 +70,12 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Changed
 
+- Verification is now opt-in. The `package.json` `bun run check` discovery
+  default is removed; when no `--verify-command` is supplied the deterministic
+  gate is skipped and review proceeds on the staged diff. Supplied commands
+  still run through `/bin/sh`, their evidence is still bound to the staged
+  tree, and non-zero exits still trigger the bounded repair loop.
+
 - Collapse every per-stage thinking setting into one `--thinking` level applied
   to all sessions. The `--grounding-thinking`, `--implementation-thinking`,
   `--complexity-thinking`, `--review-thinking`, and `--commit-thinking` flags

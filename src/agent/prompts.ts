@@ -151,10 +151,19 @@ const originalIssueBlock = (issue: GitHubIssue): string =>
 const stagedDiffBlock = (diff: string): string =>
     `<staged-diff>\n${diffForPrompt(diff)}\n</staged-diff>`;
 
-const verificationBlock = (verification?: VerificationEvidence): string =>
-    verification === undefined
-        ? "<trusted-verification-evidence>Not supplied.</trusted-verification-evidence>"
-        : `<trusted-verification-evidence>\n${JSON.stringify(verification, null, 2)}\n</trusted-verification-evidence>`;
+const verificationBlock = (verification?: VerificationEvidence): string => {
+    if (verification === undefined) {
+        return "<trusted-verification-evidence>Not supplied.</trusted-verification-evidence>";
+    }
+    if (verification.commands.length === 0) {
+        return (
+            "<trusted-verification-evidence>No --verify-command was configured; " +
+            "the deterministic gate was skipped and the staged tree binding still applies." +
+            "</trusted-verification-evidence>"
+        );
+    }
+    return `<trusted-verification-evidence>\n${JSON.stringify(verification, null, 2)}\n</trusted-verification-evidence>`;
+};
 
 const complexityRubric = [
     "0: No code change or a trivial one-line correction with no meaningful risk.",
@@ -354,8 +363,9 @@ either verdict, but "changes_requested" must contain at least one blocking
 finding and "approved" must contain none.
 
 The trusted verification evidence below was produced deterministically for the
-exact staged tree. Never approve when verification failed or when its staged
-tree does not match the reviewed change.
+exact staged tree; when no commands are configured, the gate was skipped. Never
+approve when verification failed or when its staged tree does not match the
+reviewed change.
 
 This is a read-only review. Do not edit files, stage or unstage changes, run
 Git commands that mutate state, create commits, push, switch branches, create

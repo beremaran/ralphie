@@ -36,7 +36,7 @@ command schema.
 | `--model <provider/model>` | pi settings default | Override the pi model selection. |
 | `--thinking <level>` | `medium` | Thinking level for every session (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`); omit or pass `default` for `medium`. |
 | `--implementation-attempts <count>` | `3` | Positive number of implementation attempts allowed when sessions leave an unresolved empty diff. |
-| `--verify-command <command>` | discovered `bun run check` | Deterministic verification command; repeat to run multiple commands in order. Each command runs under a 30-minute deadline. |
+| `--verify-command <command>` | none | Run this deterministic gate after changes are staged; repeat to run multiple commands in order. When omitted, the gate is skipped. Each command runs under a 30-minute deadline. |
 | `--workspace <path>` | `~/.ralphie` | Root directory for repository checkouts and run artifacts. The workspace is removed before preparation and after a successful run. |
 | `--output <mode>` | `default` | Output mode: live transcript and progress, `verbose`, `quiet`, or `json`. |
 
@@ -112,9 +112,8 @@ bunx @beremaran/ralphie owner/repository \
   --verify-command "bun run check"
 ```
 
-`--verify-command` is repeatable. Without it, Ralphie discovers a
-`package.json` `check` script and runs `bun run check`; if neither exists it
-fails closed before review or commit.
+`--verify-command` is repeatable. Without it, the deterministic gate is
+skipped and review proceeds on the staged diff alone.
 
 Write machine-readable progress to stdout:
 

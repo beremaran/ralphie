@@ -436,17 +436,18 @@ export const makeImplementationExecutorService = (
             input.context.repositoryPath,
         );
         assertProtectedDecisionsAuthorized(input.context.issue, diff);
+        const commands = input.context.verificationCommands ?? [];
         return stage(
             progress,
             input,
             "verification",
-            "Running deterministic verification...",
-            () =>
-                verification.verify(
-                    input.context.repositoryPath,
-                    input.context.verificationCommands ?? [],
-                ),
-            "Deterministic verification passed.",
+            commands.length === 0
+                ? "Skipping deterministic verification (no --verify-command configured)..."
+                : "Running deterministic verification...",
+            () => verification.verify(input.context.repositoryPath, commands),
+            commands.length === 0
+                ? "Deterministic verification skipped."
+                : "Deterministic verification passed.",
         );
     };
 

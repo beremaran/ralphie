@@ -90,11 +90,14 @@ change that selects a project license fails closed unless that exact license
 is authorized by the issue text, deferring to a maintainer decision instead of
 silently establishing policy.
 
-Verification commands are run against the staged tree and their evidence is
+Verification is opt-in: Ralphie runs only the commands supplied with
+`--verify-command`, and when none are supplied the gate is skipped and review
+proceeds on the staged diff. Configured commands run against the staged tree
+and their evidence is
 bound to that tree before review or commit. A non-zero command exit is treated
 as actionable implementation feedback: a fresh fix session receives bounded
-failure evidence, and Ralphie restages and retries up to five times. Missing
-verification configuration, staged-tree mutation, and exhausted repair remain
+failure evidence, and Ralphie restages and retries up to five times.
+Staged-tree mutation and exhausted repair remain
 hard safety stops. The direct-push path never uses force. See
 [Workflows](workflows.md) for the complete implementation and delivery sequence,
 and [Operations and recovery](operations-and-recovery.md) for what remains
@@ -113,10 +116,10 @@ process fails loudly instead of stalling an issue run:
   agent may retry with an explicit `timeout` for genuinely slower commands.
 - **Ralphie-owned commands** (git and `gh` operations against the repository,
   workspace preparation, authentication checks) default to a 10-minute timeout.
-- **Verification commands** (`--verify-command`, or the discovered
-  `bun run check`) run under a 30-minute timeout because they execute the
-  repository's full gate; they are the deliberate exception to the shorter
-  defaults.
+- **Verification commands** (`--verify-command`) run under a 30-minute timeout
+  because they execute the repository's full gate; they are the deliberate
+  exception to the shorter defaults. When no command is configured, no
+  verification process runs.
 
 A timed-out command is killed (including its process tree) and reported as
 `CommandTimeoutError` with the deadline and command in the message. These
