@@ -11,7 +11,9 @@ import { makePiModels, piModelCatalog, readPiDefaultModel } from "./models.ts";
  *
  * There is no server to discover or start: the pi provider catalog is static
  * and credentials resolve through pi's `auth.json` plus provider environment
- * variables when no stored credential exists.
+ * variables when no stored credential exists. The published catalog keeps only
+ * providers whose auth is configured, so the picker never offers a model that
+ * cannot authenticate.
  */
 export const makePiAgentService = (
     config: PiAgentConfig = {},
@@ -37,7 +39,7 @@ export const makePiAgentService = (
         let closed = false;
         return {
             client,
-            catalog: piModelCatalog(models),
+            catalog: await piModelCatalog(models),
             ...(defaultModel === undefined ? {} : { defaultModel }),
             close: async () => {
                 if (closed) return;

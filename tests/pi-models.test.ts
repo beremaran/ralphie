@@ -3,7 +3,11 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { createModels, fauxProvider } from "@earendil-works/pi-ai";
+import {
+    createModels,
+    createProvider,
+    fauxProvider,
+} from "@earendil-works/pi-ai";
 
 import {
     makePiModels,
@@ -145,15 +149,39 @@ describe("pi model resolution", () => {
         ).rejects.toThrow(/No model selected/);
     });
 
-    test("builds a catalog that includes provider, id, and thinking levels", () => {
+    test("builds a catalog that includes provider, id, and thinking levels", async () => {
         const { models } = makeFauxModels();
-        const catalog = piModelCatalog(models);
+        const catalog = await piModelCatalog(models);
         expect(catalog).toHaveLength(1);
         expect(catalog[0]).toMatchObject({
             provider: "faux",
             id: "faux-model",
         });
         expect(catalog[0]?.thinkingLevels.length).toBeGreaterThan(0);
+    });
+
+    test("excludes models whose provider has no auth configured", async () => {
+        const { models, faux } = makeFauxModels();
+        models.setProvider(
+            createProvider({
+                id: "unconfigured",
+                auth: {
+                    apiKey: {
+                        name: "Unconfigured key",
+                        resolve: async () => undefined,
+                    },
+                },
+                models: [{ ...faux.models[0], provider: "unconfigured" }],
+                api: {
+                    stream: faux.provider.stream,
+                    streamSimple: faux.provider.streamSimple,
+                },
+            }),
+        );
+
+        const catalog = await piModelCatalog(models);
+
+        expect(catalog.map((entry) => entry.provider)).toEqual(["faux"]);
     });
 
     test("builds the real built-in catalog offline", () => {

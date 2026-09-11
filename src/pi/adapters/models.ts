@@ -29,10 +29,11 @@ export const makePiModels = (
     options: CreateModelsOptions = {},
 ): MutableModels => builtinModels(options);
 
-export const piModelCatalog = (
+/** Models whose providers have complete auth, for the picker and validation. */
+export const piModelCatalog = async (
     models: MutableModels,
-): ReadonlyArray<PiModelInfo> =>
-    models.getModels().map((model) => ({
+): Promise<ReadonlyArray<PiModelInfo>> =>
+    (await models.getAvailable()).map((model) => ({
         provider: model.provider,
         id: model.id,
         name: model.name,

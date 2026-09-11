@@ -25,7 +25,7 @@ export type PiAgentConfig = {
 export type PiAgentRuntime = {
     readonly client: AgentClient;
     readonly close: () => Promise<void>;
-    /** Static provider catalog used for pre-execution thinking validation. */
+    /** Configured-provider catalog used for the picker and thinking validation. */
     readonly catalog: ReadonlyArray<PiModelInfo>;
     readonly defaultModel?: AgentModel;
 };
