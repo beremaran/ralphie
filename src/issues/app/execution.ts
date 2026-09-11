@@ -109,6 +109,7 @@ export type IssueExecutionContext = {
     /** Run filesystem layout resolved by the composition root. */
     readonly runLayout: RunLayout;
     readonly agent: AgentClient;
+    /** Read at each agent request; the workflow resolves it live. */
     readonly agentSelection: AgentSelection;
     readonly implementationAttempts?: number;
     readonly agentDiagnostics: AgentSessionDiagnostics;

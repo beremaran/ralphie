@@ -2,10 +2,21 @@ import type { AgentModel } from "../agent/model.ts";
 import type { AgentClient } from "../agent/ports.ts";
 import type { PiModelInfo } from "../agent/pi-models.ts";
 
+/** The operator's live model pick; `undefined` keeps the running session's model. */
+export type PiAgentSelection = {
+    readonly model: AgentModel;
+    readonly variant?: string;
+};
+
 /** Configuration for starting the in-process pi runtime. */
 export type PiAgentConfig = {
     /** Model selected by --model; when absent the pi settings default applies. */
     readonly model?: AgentModel;
+    /**
+     * Reads the operator's current pick. When set, a running turn switches to
+     * the picked model at its next provider request.
+     */
+    readonly liveSelection?: () => PiAgentSelection | undefined;
     /** Test seam: override the pi agent directory (default `~/.pi/agent`). */
     readonly agentDir?: string;
 };

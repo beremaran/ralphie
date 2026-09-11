@@ -36,9 +36,10 @@ export type RunControl = {
     readonly waitForQueue: () => Promise<void>;
     readonly stopAfterCurrent: () => boolean;
     /**
-     * Model and thinking level for issues started after the call; `undefined`
-     * keeps the CLI selection. The workflow reads this once per issue, so a
-     * pick never changes the session already in flight.
+     * Model and thinking level the operator picked; `undefined` keeps the CLI
+     * selection. The workflow reads this live, so a pick reaches the running
+     * issue: its next agent session starts with the pick, and an in-flight pi
+     * turn switches at its next provider request.
      */
     readonly issueSelection?: () => RunControlSelection | undefined;
 };

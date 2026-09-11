@@ -27,7 +27,7 @@ import {
     makeIssueArtifactStore,
 } from "../src/issues/app/artifacts.ts";
 import { DEFAULT_AGENT } from "../src/agent/model.ts";
-import type { AgentModel } from "../src/agent/model.ts";
+import type { AgentModel, AgentSelection } from "../src/agent/model.ts";
 import { type PiAgentService } from "../src/pi/ports.ts";
 import type {
     ProgressReporterService,
@@ -225,7 +225,9 @@ const testRuntime = (
     };
     const issueExecutor: IssueExecutorService = options.issueExecutor ?? {
         execute: async (context) => {
-            options.executionContexts?.push(context);
+            // Snapshot: agentSelection resolves live, so reading the captured
+            // context later would report a newer pick.
+            options.executionContexts?.push({ ...context });
             if (options.executeGate !== undefined)
                 await options.executeGate(context);
             calls.push(
@@ -1772,6 +1774,56 @@ describe("workflow", () => {
             agent: DEFAULT_AGENT,
             model: { providerID: "openai", modelID: "gpt-4o" },
         });
+    });
+
+    test("applies a pick made during an issue to that running issue", async () => {
+        const calls: string[] = [];
+        const states: RunState[] = [];
+        const selections: Array<AgentSelection> = [];
+        let override: RunControlSelection | undefined;
+        await workflow(
+            {
+                ...baseOptions,
+                model: { providerID: "openai", modelID: "gpt-5" },
+                control: {
+                    waitForQueue: async () => {},
+                    stopAfterCurrent: () => false,
+                    issueSelection: () => override,
+                },
+            },
+            testRuntime(calls, states, {
+                issueExecutor: {
+                    execute: async (context) => {
+                        selections.push(context.agentSelection);
+                        override = {
+                            model: {
+                                providerID: "anthropic",
+                                modelID: "claude-sonnet-4",
+                            },
+                            variant: "low",
+                        };
+                        selections.push(context.agentSelection);
+                        return {
+                            kind: IssueExecutionOutcomeKind.Completed,
+                            completion: "pushed-commit",
+                            commitSha: "abc123",
+                        };
+                    },
+                },
+            }),
+        );
+
+        expect(selections).toEqual([
+            {
+                agent: DEFAULT_AGENT,
+                model: { providerID: "openai", modelID: "gpt-5" },
+            },
+            {
+                agent: DEFAULT_AGENT,
+                model: { providerID: "anthropic", modelID: "claude-sonnet-4" },
+                variant: "low",
+            },
+        ]);
     });
 
     test.each([

@@ -29,6 +29,9 @@ export const makePiAgentService = (
             models,
             agentDir,
             ...(defaultModel === undefined ? {} : { defaultModel }),
+            ...(config.liveSelection === undefined
+                ? {}
+                : { liveSelection: config.liveSelection }),
             ...(eventListener === undefined ? {} : { eventListener }),
         });
         let closed = false;

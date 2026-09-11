@@ -1,6 +1,8 @@
 import { Agent } from "@earendil-works/pi-agent-core";
+import type { AgentLoopTurnUpdate } from "@earendil-works/pi-agent-core";
 import type {
     AssistantMessage,
+    Model,
     MutableModels,
     TextContent,
 } from "@earendil-works/pi-ai";
@@ -18,6 +20,7 @@ import {
     type AgentPart,
     type AgentPromptFormat,
     type AgentPromptInput,
+    type AgentSessionCreateInput,
     type AgentToolDescriptor,
 } from "../../agent/ports.ts";
 import { RalphieError } from "../../shared/error.ts";
@@ -28,6 +31,7 @@ import {
 import { modelReference } from "../../agent/pi-models.ts";
 import { resolvePiModel } from "./models.ts";
 import { makePiTools, type PiToolSet } from "./tools.ts";
+import type { PiAgentSelection } from "../ports.ts";
 
 export type PiAgentClientOptions = {
     readonly models: MutableModels;
@@ -35,6 +39,8 @@ export type PiAgentClientOptions = {
     readonly agentDir: string;
     /** Pre-resolved default model; falls back to the pi settings file. */
     readonly defaultModel?: AgentModel;
+    /** Reads the operator's live pick; sessions switch at their next turn. */
+    readonly liveSelection?: () => PiAgentSelection | undefined;
     readonly eventListener?: AgentEventListener;
     readonly systemPrompt?: string;
 };
@@ -366,6 +372,109 @@ const selectionOf = (input: {
     readonly model?: PiModelSelection;
 }): PiModelSelection | undefined => input.model;
 
+/** The model and level a session is currently running with. */
+type ActiveSelection = {
+    reference: string;
+    variant: string | undefined;
+};
+
+/**
+ * Build the per-turn hook that applies the operator's live pick.
+ *
+ * The pi agent loop calls this between provider requests, so a pick made while
+ * a turn is running takes effect on the next request without rebuilding the
+ * session or losing its transcript.
+ */
+const liveSelectionHook = (input: {
+    readonly models: MutableModels;
+    readonly agentDir: string;
+    readonly liveSelection?: () => PiAgentSelection | undefined;
+    readonly active: ActiveSelection;
+}):
+    | ((signal?: AbortSignal) => Promise<AgentLoopTurnUpdate | undefined>)
+    | undefined => {
+    if (input.liveSelection === undefined) return undefined;
+    const liveSelection = input.liveSelection;
+    return async () => {
+        const picked = liveSelection();
+        if (picked === undefined) return undefined;
+        const reference = modelReference(picked.model);
+        if (reference === undefined) return undefined;
+        if (
+            reference === input.active.reference &&
+            picked.variant === input.active.variant
+        ) {
+            return undefined;
+        }
+        try {
+            const model = await resolvePiModel({
+                models: input.models,
+                selection: picked.model,
+                agentDir: input.agentDir,
+            });
+            input.active.reference = reference;
+            input.active.variant = picked.variant;
+            return {
+                model,
+                thinkingLevel: thinkingLevelFor(picked.variant),
+            };
+        } catch {
+            // A stale pick must not abort the running turn.
+            return undefined;
+        }
+    };
+};
+
+/** Build one session agent, including the live model-switch hook. */
+const makeSessionAgent = (input: {
+    readonly options: PiAgentClientOptions;
+    readonly sessionInput: AgentSessionCreateInput;
+    readonly sessionID: string;
+    readonly resolvedModel: Model<never>;
+    readonly tools: PiToolSet;
+}): { readonly agent: Agent; readonly modelReference: string } => {
+    const active: ActiveSelection = {
+        reference:
+            modelReference(
+                selectionOf(input.sessionInput) ?? input.options.defaultModel,
+            ) ?? `${input.resolvedModel.provider}/${input.resolvedModel.id}`,
+        variant: input.sessionInput.variant,
+    };
+    const prepareNextTurn = liveSelectionHook({
+        models: input.options.models,
+        agentDir: input.options.agentDir,
+        ...(input.options.liveSelection === undefined
+            ? {}
+            : { liveSelection: input.options.liveSelection }),
+        active,
+    });
+    const agent = new Agent({
+        initialState: {
+            systemPrompt: input.options.systemPrompt ?? RALPHIE_SYSTEM_PROMPT,
+            model: input.resolvedModel,
+            thinkingLevel: thinkingLevelFor(input.sessionInput.variant),
+            tools: [...input.tools.tools],
+        },
+        streamFn: input.options.models.streamSimple.bind(input.options.models),
+        sessionId: input.sessionID,
+        beforeToolCall: input.tools.beforeToolCall,
+    });
+    if (prepareNextTurn !== undefined) {
+        // Assigned after construction so the hook can also update the agent's
+        // own state, which seeds later prompts on this session (a structured
+        // output retry, for example) with the same pick.
+        agent.prepareNextTurn = async (signal) => {
+            const update = await prepareNextTurn(signal);
+            if (update?.model !== undefined) agent.state.model = update.model;
+            if (update?.thinkingLevel !== undefined) {
+                agent.state.thinkingLevel = update.thinkingLevel;
+            }
+            return update;
+        };
+    }
+    return { modelReference: active.reference, agent };
+};
+
 export const makePiAgentClient = (
     options: PiAgentClientOptions,
 ): AgentClient => {
@@ -402,17 +511,12 @@ export const makePiAgentClient = (
                     directory,
                     readOnly: input.profile === AgentSessionProfile.Review,
                 });
-                const agent = new Agent({
-                    initialState: {
-                        systemPrompt:
-                            options.systemPrompt ?? RALPHIE_SYSTEM_PROMPT,
-                        model: resolvedModel,
-                        thinkingLevel: thinkingLevelFor(input.variant),
-                        tools: [...tools.tools],
-                    },
-                    streamFn: options.models.streamSimple.bind(options.models),
-                    sessionId: id,
-                    beforeToolCall: tools.beforeToolCall,
+                const { agent, modelReference } = makeSessionAgent({
+                    options,
+                    sessionInput: input,
+                    sessionID: id,
+                    resolvedModel,
+                    tools,
                 });
                 const context: AgentEventContext = {
                     sessionID: id,
@@ -430,10 +534,7 @@ export const makePiAgentClient = (
                     ...(input.title === undefined
                         ? {}
                         : { title: input.title }),
-                    modelReference:
-                        modelReference(
-                            selectionOf(input) ?? options.defaultModel,
-                        ) ?? `${resolvedModel.provider}/${resolvedModel.id}`,
+                    modelReference,
                     agent,
                     tools,
                     unsubscribe,

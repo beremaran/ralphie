@@ -1121,7 +1121,11 @@ export const workflow = async (
                         runId: actualRunId,
                         runLayout: layout,
                         agent: server.client,
-                        agentSelection: effectiveSelection(),
+                        // Read live so a picker change also reaches the agent
+                        // sessions this issue starts from now on.
+                        get agentSelection() {
+                            return effectiveSelection();
+                        },
                         agentDiagnostics: diagnostics,
                         repositoryInvariant: invariantService,
                         verificationCommands: config.verificationCommands,

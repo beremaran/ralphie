@@ -15,6 +15,7 @@ import {
     makePiAgentClient,
     type PiAgentClientOptions,
 } from "../src/pi/adapters/client.ts";
+import type { PiAgentSelection } from "../src/pi/ports.ts";
 import type { AgentClient } from "../src/agent/ports.ts";
 
 const structuredFormat = {
@@ -38,20 +39,26 @@ const makeClient = (options: {
         ReturnType<typeof fauxProvider>["setResponses"]
     >[0];
     readonly eventListener?: PiAgentClientOptions["eventListener"];
+    readonly liveSelection?: PiAgentClientOptions["liveSelection"];
+    readonly modelIds?: ReadonlyArray<string>;
 }) => {
+    const modelIds = options.modelIds ?? ["faux-test"];
     const faux = fauxProvider({
-        models: [{ id: "faux-test", reasoning: true }],
+        models: modelIds.map((id) => ({ id, reasoning: true })),
         tokensPerSecond: 100_000,
     });
     faux.setResponses(options.responses);
     const models = createModels();
     models.setProvider(faux.provider);
-    const model = faux.getModel("faux-test");
+    const model = faux.getModel(modelIds[0] ?? "faux-test");
     if (model === undefined) throw new Error("faux model missing");
     const client = makePiAgentClient({
         models,
         agentDir: join(tmpdir(), "ralphie-missing-pi-dir"),
         defaultModel: { providerID: model.provider, modelID: model.id },
+        ...(options.liveSelection === undefined
+            ? {}
+            : { liveSelection: options.liveSelection }),
         ...(options.eventListener === undefined
             ? {}
             : { eventListener: options.eventListener }),
@@ -205,6 +212,63 @@ describe("pi agent client", () => {
             reason: "missing_information",
             message: "Need the target version.",
         });
+    });
+
+    test("keeps a live model pick across the running turn and its retry", async () => {
+        const requestedModels: string[] = [];
+        let live: PiAgentSelection | undefined;
+        const { client, faux } = makeClient({
+            modelIds: ["faux-a", "faux-b"],
+            liveSelection: () => live,
+            responses: [
+                (_context, _options, _state, model) => {
+                    requestedModels.push(model.id);
+                    return fauxAssistantMessage(
+                        [
+                            fauxToolCall("request_needs_attention", {
+                                reason: "missing_information",
+                                message: "Need the target version.",
+                            }),
+                        ],
+                        { stopReason: "toolUse" },
+                    );
+                },
+                (_context, _options, _state, model) => {
+                    requestedModels.push(model.id);
+                    return fauxAssistantMessage("Still working.");
+                },
+                (_context, _options, _state, model) => {
+                    requestedModels.push(model.id);
+                    return fauxAssistantMessage(
+                        [fauxToolCall("submit_result", { ok: true })],
+                        { stopReason: "toolUse" },
+                    );
+                },
+            ],
+        });
+        const target = faux.getModel("faux-b");
+        if (target === undefined) throw new Error("faux model missing");
+        live = {
+            model: { providerID: target.provider, modelID: target.id },
+            variant: "low",
+        };
+        const sessionID = await createSession(client, "/repo");
+
+        const result = await client.session.prompt({
+            sessionID,
+            directory: "/repo",
+            parts: [{ type: "text", text: "Do the work." }],
+            format: { ...structuredFormat, retryCount: 1 },
+            needsAttentionTool: {
+                name: "request_needs_attention",
+                description: "Request needs attention.",
+                schema: { type: "object" },
+            },
+        });
+
+        expect(result.error).toBeUndefined();
+        expect(result.data?.info.structured).toEqual({ ok: true });
+        expect(requestedModels).toEqual(["faux-a", "faux-b", "faux-b"]);
     });
 
     test("maps an output-length stop reason to an assistant error", async () => {
