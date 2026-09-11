@@ -61,23 +61,19 @@ No reserved-row or scroll-region strategy is tested or published.
   neither ANSI cursor controls (`ESC`) nor
   carriage-return bytes and no footer/status residue (no `◐`, no
   `\r\x1b[2K`); `stripTerminalControls` is an identity no-op on these streams;
-- `--output verbose` keeps the same mode selection and adds operational details
-  (the structured details payload on durable rows) without expanding the
-  interactive region beyond its three-row cap;
 - `--output json` writes progress and `agent_event` objects one per line to
   stdout with stderr empty: every non-empty line parses as one complete JSON
   record, human headers/footers/glyphs/breadcrumbs never appear, and values
-  are preserved as supplied; and
-- `--output quiet` suppresses routine progress and transcript rows but retains failures
-  and needs-attention decisions.
+  are preserved as supplied.
 
 JSON events use a stable operational vocabulary and include `runId`,
 `timestamp`, `stage`, `status`, and `message`. Grounding events identify
 whether agent work was skipped. Human-readable needs-attention decisions name
-the issue number and title and show the current/total queue position. A
+the issue number and title and show the current/total queue position. JSON
+output retains the complete event payload, including the structured details
+field; human-readable output never renders that field. A
 `needs-attention` event includes its reason, summary, evidence, questions,
-diagnostic or artifact path, and queue position; verbose and
-JSON output retain those complete details.
+diagnostic or artifact path, and queue position.
 Depending on the event, it may also include the repository, review attempt,
 session ID, commit SHA, created issue numbers, or diagnostic paths. Supplied
 progress-event values are preserved as-is; pi transcripts and breadcrumbs

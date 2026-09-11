@@ -7,6 +7,11 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Removed
 
+- Remove the `quiet` and `verbose` output modes. `--output` now accepts only
+  `default` (live transcript and progress) and `json` (JSON Lines). The
+  structured `details` payload is no longer rendered on human-readable lines;
+  JSON output and the `events.jsonl` audit retain it.
+
 - Remove `--max-issues`, `--implementation-fallback-model`, `--resume`,
   `--dry-run`, and `--clean`. Every run now processes the whole matching open
   issue queue with no budget, retries always use the selected model, and there

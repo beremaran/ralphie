@@ -67,7 +67,7 @@ const makeFakeStrategy = (): TerminalOutputStrategy & {
  */
 const makeHarness = (
     options: {
-        readonly mode?: "interactive" | "plain" | "json" | "quiet";
+        readonly mode?: "interactive" | "plain" | "json";
         readonly width?: () => number;
         readonly footerLine?: () => string | undefined;
         readonly activityLines?: () => readonly string[] | undefined;
@@ -602,7 +602,7 @@ describe("dispose safety", () => {
 });
 
 describe("append-only surfaces emit no cursor controls", () => {
-    for (const mode of ["plain", "json", "quiet"] as const) {
+    for (const mode of ["plain", "json"] as const) {
         test(`${mode} mode stays append-only even through region calls`, async () => {
             const strategy = makeFakeStrategy();
             const controller = makeTerminalOutputController({

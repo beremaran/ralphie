@@ -250,24 +250,18 @@ describe("native CLI parser", () => {
 
     test("parses every supported output mode", () => {
         expect(parseCliArgs(["owner/repository"]).options).toMatchObject({
-            verbose: false,
             json: false,
-            quiet: false,
         });
         expect(
             parseCliArgs(["owner/repository", "--output", "default"]).options,
-        ).toMatchObject({ verbose: false, json: false, quiet: false });
-        expect(
-            parseCliArgs(["owner/repository", "--output", "verbose"]).options,
-        ).toMatchObject({ verbose: true, json: false, quiet: false });
+        ).toMatchObject({ json: false });
         expect(
             parseCliArgs(["owner/repository", "--output", "json"]).options,
-        ).toMatchObject({ verbose: false, json: true, quiet: false });
-        expect(
-            parseCliArgs(["owner/repository", "--output", "quiet"]).options,
-        ).toMatchObject({ verbose: false, json: false, quiet: true });
-        expect(() =>
-            parseCliArgs(["owner/repository", "--output", "trace"]),
-        ).toThrow();
+        ).toMatchObject({ json: true });
+        for (const removed of ["verbose", "quiet", "trace"]) {
+            expect(() =>
+                parseCliArgs(["owner/repository", "--output", removed]),
+            ).toThrow();
+        }
     });
 });

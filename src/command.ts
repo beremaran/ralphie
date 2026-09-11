@@ -88,7 +88,7 @@ const parseModel = (values: Record<string, unknown>, name: string) => {
     return value === undefined ? undefined : agentModelSchema.parse(value);
 };
 
-const outputModeSchema = z.enum(["default", "verbose", "quiet", "json"]);
+const outputModeSchema = z.enum(["default", "json"]);
 
 const parseIssueSort = (
     value: string,
@@ -172,9 +172,7 @@ const parseCliOptions = (
                 : agentModelVariantSchema.parse(thinkingValue),
         implementationAttempts: asNumber(values, "implementation-attempts"),
         workspace: asNonEmptyString(values, "workspace"),
-        verbose: outputValue === "verbose",
         json: outputValue === "json",
-        quiet: outputValue === "quiet",
     };
 };
 
@@ -224,7 +222,6 @@ const resolveProgressMode = (
     terminal: CliTerminalInfo,
 ): ProgressRenderMode => {
     if (config.json) return "json";
-    if (config.quiet) return "quiet";
     if (terminal.isInteractive && !terminal.isCI && process.stderr.isTTY) {
         return "interactive";
     }
@@ -249,7 +246,7 @@ Options:
       --thinking <level>       Thinking level for every session: off, minimal, low, medium, high, xhigh, or max (default medium)
       --implementation-attempts <n> Empty implementation retries (default 3)
       --workspace <path>       Workspace directory (removed at start and after success)
-      --output <mode>          Output: live transcript/progress, verbose, quiet, or json
+      --output <mode>          Output: default live transcript/progress or json
   -h, --help                   Show this help
   -v, --version                Show version (use --output json for build metadata)
 
@@ -330,7 +327,6 @@ const makeCommandCoordinator = (
 ): ProgressCoordinator =>
     factory({
         mode: resolveProgressMode(config, terminal),
-        verbose: config.verbose,
         width: () => process.stderr.columns ?? terminal.width,
         resize: {
             subscribe: (listener) => {

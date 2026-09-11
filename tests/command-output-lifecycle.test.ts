@@ -38,7 +38,7 @@ const NONINTERACTIVE_TERMINAL: CliTerminalInfo = {
 
 const FIXED_NOW = () => new Date("2026-09-09T00:00:00.000Z");
 
-type OutputMode = "plain" | "quiet" | "json";
+type OutputMode = "plain" | "json";
 type Outcome = "success" | "abort" | "failure";
 
 type Capture = CommandOutput & {
@@ -233,7 +233,7 @@ const runNoninteractiveCase = async (
 };
 
 describe("runCommand outcome and quiescence contracts", () => {
-    for (const mode of ["plain", "quiet", "json"] as const) {
+    for (const mode of ["plain", "json"] as const) {
         for (const outcome of ["success", "abort", "failure"] as const) {
             test(`${mode}/${outcome} disposes exactly once and stays quiescent`, async () => {
                 const result = await runNoninteractiveCase(mode, outcome);

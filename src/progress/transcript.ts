@@ -17,7 +17,6 @@ export type AgentTranscriptRendererOptions = {
     readonly write: (text: string) => void;
     readonly colors?: boolean;
     readonly json?: boolean;
-    readonly verbose?: boolean;
     readonly width?: () => number;
     /** Current sanitized workflow state, sampled when a session header opens. */
     readonly getDisplayState?: () => DisplayState;
@@ -479,13 +478,11 @@ const messageId = (message: unknown): string => {
 
 const previewText = (
     text: string,
-    _verbose: boolean,
 ): {
     readonly text: string;
     readonly omitted: boolean;
     readonly lines: number;
 } => {
-    void _verbose;
     const clean = sanitizeTerminalText(text).trim();
     if (clean === "") return { text: "", omitted: false, lines: 0 };
 
@@ -670,12 +667,11 @@ const renderUserMessage = (
     event: Extract<AgentSessionEvent, { type: "message_start" }>,
     styles: TranscriptStyles,
     writer: TranscriptWriter,
-    verbose: boolean,
 ): void => {
     if (event.message.role !== "user") return;
     const text = contentText(event.message);
     if (text === undefined) return;
-    const preview = previewText(text, verbose);
+    const preview = previewText(text);
     if (preview.text === "") return;
     const key = `user:${messageId(event.message)}`;
     writer.startStream(key, styles.event("› prompt "));
@@ -694,7 +690,6 @@ const renderTerminalEvent = (
     styles: TranscriptStyles,
     writer: TranscriptWriter,
     messageStates: Map<string, MessageStreamState>,
-    verbose: boolean,
     width: () => number,
 ): void => {
     if (event.type === "agent_start") {
@@ -709,7 +704,7 @@ const renderTerminalEvent = (
     writer.ensureSession(context);
     switch (event.type) {
         case "message_start":
-            renderUserMessage(event, styles, writer, verbose);
+            renderUserMessage(event, styles, writer);
             return;
         case "message_update":
             renderMessageUpdate(event, styles, writer, messageStates);
@@ -741,7 +736,6 @@ export const makeAgentTranscriptRenderer = ({
     write,
     colors = false,
     json = false,
-    verbose = false,
     width = () => process.stderr.columns ?? 100,
     getDisplayState,
     onSessionStart,
@@ -789,7 +783,6 @@ export const makeAgentTranscriptRenderer = ({
             styles,
             writer,
             messageStates,
-            verbose,
             width,
         );
     };

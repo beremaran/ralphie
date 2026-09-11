@@ -22,7 +22,6 @@ const makeCapture = () => {
         },
         colors: false,
         json: false,
-        verbose: false,
         width: () => 100,
     });
     return { chunks, renderer, output: () => chunks.join("") };

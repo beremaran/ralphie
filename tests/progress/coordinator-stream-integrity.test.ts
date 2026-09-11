@@ -159,7 +159,6 @@ const makeHarness = (initialWidth = 80) => {
     let controller: TerminalOutputController | undefined;
     const coordinator = makeProgressCoordinator({
         mode: "interactive",
-        verbose: false,
         colors: false,
         width: () => width,
         footer: { width: () => width, intervalMs: 5 },

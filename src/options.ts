@@ -23,9 +23,7 @@ export type RalphieCliOptions = {
     readonly thinking?: string;
     readonly implementationAttempts?: number;
     readonly workspace?: string;
-    readonly verbose?: boolean;
     readonly json?: boolean;
-    readonly quiet?: boolean;
 };
 
 type SharedRalphieConfig = {
@@ -35,9 +33,7 @@ type SharedRalphieConfig = {
     readonly thinking?: string;
     readonly agent: string;
     readonly workspace: string;
-    readonly verbose: boolean;
     readonly json: boolean;
-    readonly quiet: boolean;
 };
 
 type SharedIssueSelection = {
@@ -115,7 +111,6 @@ export const validateRalphieCliOptions = (options: RalphieCliOptions): void => {
 const commonResolvedConfig = (
     options: RalphieCliOptions,
     json: boolean,
-    quiet: boolean,
 ): SharedRalphieConfig => ({
     repo: parseRepositorySlug(options.repo!).slug,
     ...optionalProperty("branch", options.branch),
@@ -123,9 +118,7 @@ const commonResolvedConfig = (
     ...optionalProperty("thinking", options.thinking),
     agent: DEFAULT_AGENT,
     workspace: options.workspace ?? DEFAULT_WORKSPACE,
-    verbose: options.verbose ?? false,
     json,
-    quiet,
 });
 
 const issueSelectionConfig = (
@@ -148,17 +141,11 @@ export const resolveRalphieConfig = (
     }
 
     const json = options.json ?? false;
-    const quiet = options.quiet ?? false;
-    if (json && quiet) {
-        throw new RalphieError({
-            message: "JSON and quiet output modes cannot be enabled together.",
-        });
-    }
 
     validateRalphieCliOptions(options);
 
     return {
-        ...commonResolvedConfig(options, json, quiet),
+        ...commonResolvedConfig(options, json),
         ...issueSelectionConfig(options),
         notificationsEnabled: options.notifyNeedsAttention ?? false,
         ...optionalProperty(

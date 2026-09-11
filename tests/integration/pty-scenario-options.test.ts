@@ -104,7 +104,6 @@ describe("PTY scenario CLI options", () => {
             ALL_OPTIONS.threshold,
         )({
             mode: "plain",
-            verbose: false,
             width: () => 80,
             colors: false,
             runId: "pty-run",

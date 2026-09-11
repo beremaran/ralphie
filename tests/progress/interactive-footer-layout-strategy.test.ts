@@ -26,13 +26,10 @@ const CONTEXT: AgentEventContext = {
 const asEvent = (value: unknown): AgentSessionEvent =>
     value as AgentSessionEvent;
 
-const captureModeOutput = async (
-    mode: "plain" | "json" | "quiet",
-): Promise<string> => {
+const captureModeOutput = async (mode: "plain" | "json"): Promise<string> => {
     let output = "";
     const coordinator = makeProgressCoordinator({
         mode,
-        verbose: false,
         colors: false,
         width: () => 80,
         write: (text) => {
@@ -57,10 +54,7 @@ const captureModeOutput = async (
     return output;
 };
 
-const expectModeClean = (
-    mode: "plain" | "json" | "quiet",
-    output: string,
-): void => {
+const expectModeClean = (mode: "plain" | "json", output: string): void => {
     expect(output).not.toContain("\x1b");
     expect(output).not.toContain("\r");
     if (mode === "json") {
@@ -68,12 +62,6 @@ const expectModeClean = (
         for (const line of output.trim().split("\n")) {
             expect(() => JSON.parse(line)).not.toThrow();
         }
-        return;
-    }
-    if (mode === "quiet") {
-        expect(output).not.toContain("hello world");
-        expect(output).not.toContain("done now");
-        expect(output).toContain("boom");
         return;
     }
     expect(output).toContain("hello world");
@@ -272,7 +260,6 @@ describe("interactive footer layout strategy lock (issue #313)", () => {
         let fallback = "";
         const coordinator = makeProgressCoordinator({
             mode: "interactive",
-            verbose: false,
             colors: false,
             width: () => currentWidth,
             strategy: recording.strategy,
@@ -376,7 +363,6 @@ describe("interactive footer layout strategy lock (issue #313)", () => {
             const recording = makeRecordingStrategy();
             const coordinator = makeProgressCoordinator({
                 mode: "interactive",
-                verbose: false,
                 colors: false,
                 width: () => 80,
                 strategy: recording.strategy,
@@ -433,8 +419,8 @@ describe("interactive footer layout strategy lock (issue #313)", () => {
         }
     });
 
-    test("plain, JSON, and quiet modes stay cursor-free with coordinator routing intact", async () => {
-        for (const mode of ["plain", "json", "quiet"] as const) {
+    test("plain and JSON modes stay cursor-free with coordinator routing intact", async () => {
+        for (const mode of ["plain", "json"] as const) {
             expectModeClean(mode, await captureModeOutput(mode));
         }
     });

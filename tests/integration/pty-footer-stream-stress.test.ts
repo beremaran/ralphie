@@ -417,7 +417,6 @@ describe("interactive footer streaming stress (issue #311)", () => {
         const recording = makeRecordingStrategy();
         const coordinator = makeProgressCoordinator({
             mode: "interactive",
-            verbose: false,
             colors: false,
             width: () => 120,
             strategy: recording.strategy,
@@ -543,7 +542,6 @@ describe("interactive footer streaming stress (issue #311)", () => {
         const recording = makeRecordingStrategy();
         const coordinator = makeProgressCoordinator({
             mode: "interactive",
-            verbose: false,
             colors: false,
             width: () => 120,
             strategy: recording.strategy,
@@ -712,7 +710,6 @@ describe("interactive footer streaming stress (issue #311)", () => {
         const recording = makeRecordingStrategy(oracle, () => currentWidth);
         const coordinator = makeProgressCoordinator({
             mode: "interactive",
-            verbose: false,
             colors: false,
             width: () => currentWidth,
             strategy: recording.strategy,
@@ -920,7 +917,6 @@ describe("interactive footer streaming stress (issue #311)", () => {
         const recording = makeRecordingStrategy(oracle, () => currentWidth);
         const coordinator = makeProgressCoordinator({
             mode: "interactive",
-            verbose: false,
             colors: false,
             width: () => currentWidth,
             strategy: recording.strategy,

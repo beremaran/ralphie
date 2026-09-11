@@ -143,9 +143,7 @@ const splitSequenceCommand = [
     ].join(";"),
 ] as const;
 
-const runOutputMode = async (
-    outputMode: "plain" | "quiet" | "json",
-): Promise<void> => {
+const runOutputMode = async (outputMode: "plain" | "json"): Promise<void> => {
     const scenario = await launchPtyScenario(
         { columns: 80, rows: 24 },
         { outputMode },
@@ -165,10 +163,6 @@ const runOutputMode = async (
         const capture = assertControlFreeCapture(scenario.session.raw());
         if (outputMode === "plain") {
             expect(capture).toContain("PTY scenario");
-            return;
-        }
-        if (outputMode === "quiet") {
-            expect(capture).toContain(LONG_FAILURE_MESSAGE);
             return;
         }
         const records = capture
@@ -305,8 +299,8 @@ describe("real PTY lifecycle and output-mode matrix", () => {
         }
     }, 120_000);
 
-    test("keeps plain, quiet, and JSON captures control-free on the same runtime", async () => {
-        for (const outputMode of ["plain", "quiet", "json"] as const) {
+    test("keeps plain and JSON captures control-free on the same runtime", async () => {
+        for (const outputMode of ["plain", "json"] as const) {
             await runOutputMode(outputMode);
         }
     }, 120_000);

@@ -75,7 +75,6 @@ const runScenarioIn = (
     let output = "";
     const coordinator = makeProgressCoordinator({
         mode,
-        verbose: false,
         colors: false,
         width: () => width,
         breadcrumbThreshold: threshold,
@@ -279,7 +278,6 @@ describe("PTY scenario agent session", () => {
             };
             const coordinator = makeProgressCoordinator({
                 mode: "interactive",
-                verbose: false,
                 colors: false,
                 width: () => OPTIONS.columns,
                 breadcrumbThreshold: OPTIONS.threshold,

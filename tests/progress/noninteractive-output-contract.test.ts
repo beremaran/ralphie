@@ -133,7 +133,6 @@ const play = async (mode: ProgressRenderMode): Promise<Capture> => {
     const capture: Capture = { stdout: "", stderr: "" };
     const coordinator = makeProgressCoordinator({
         mode,
-        verbose: mode === "plain",
         colors: false,
         runId: RUN_ID,
         now: () => new Date(FIXED_TIMESTAMP),
@@ -231,29 +230,14 @@ describe("deterministic noninteractive output contracts", () => {
         expect(first.stderr.indexOf(RAW_TOKEN)).toBeLessThan(
             first.stderr.indexOf("raw-after"),
         );
-        expect(first.stderr).toContain('"zero":0');
-        expect(first.stderr).toContain('"flag":false');
-        expect(first.stderr).toContain('"array":[]');
-        expect(first.stderr).toContain('"object":{}');
-    });
-
-    test("quiet output suppresses routine rows but retains failures and needs-attention", async () => {
-        const result = await play("quiet");
-        expect(result.stdout).toBe("");
-        controlFree(result.stderr);
-        expect(result.stderr).not.toContain("routine-start-marker");
-        expect(result.stderr).not.toContain("routine-success-marker");
-        expect(result.stderr).not.toContain(ASSISTANT_TOKEN);
-        expect(result.stderr).not.toContain(RAW_TOKEN);
-        expect(result.stderr).toContain("✗");
-        expect(result.stderr).toContain("⚠");
-        expect(result.stderr.indexOf("failed-marker")).toBeLessThan(
-            result.stderr.indexOf("needs-attention-marker"),
-        );
-        expect(result.stderr).toContain('"zero":0');
-        expect(result.stderr).toContain('"flag":false');
-        expect(result.stderr).toContain('"array":[]');
-        expect(result.stderr).toContain('"object":{}');
+        // Human progress lines never render the structured details payload;
+        // use --output json or the events.jsonl audit for the full record.
+        const progressLine = first.stderr
+            .split("\n")
+            .find((line) => line.includes("routine-success-marker"));
+        expect(progressLine).toBeDefined();
+        expect(progressLine).not.toContain('"zero"');
+        expect(progressLine).not.toContain('"flag"');
     });
 
     test("JSON output is strict JSON Lines with fixed metadata, event order, and lossless values", async () => {

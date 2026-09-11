@@ -23,7 +23,6 @@ const makeBreadcrumbHarness = (
     let output = "";
     const coordinator = makeProgressCoordinator({
         mode,
-        verbose: false,
         colors: false,
         width: () => 120,
         breadcrumbThreshold,
@@ -372,24 +371,19 @@ describe("assembled breadcrumb policy regressions", () => {
 
     test("keeps the default CLI and output-mode surface free of breadcrumb options", () => {
         const defaults = parseCliArgs(["owner/repository"]).options;
-        expect(defaults).toMatchObject({
-            verbose: false,
-            json: false,
-            quiet: false,
-        });
+        expect(defaults).toMatchObject({ json: false });
         expect(defaults).not.toHaveProperty("breadcrumbThreshold");
         expect(HELP_TEXT).toContain("--output <mode>");
         expect(HELP_TEXT).not.toContain("breadcrumb");
 
         expect(
-            parseCliArgs(["owner/repository", "--output", "verbose"]).options,
-        ).toMatchObject({ verbose: true, json: false, quiet: false });
-        expect(
             parseCliArgs(["owner/repository", "--output", "json"]).options,
-        ).toMatchObject({ verbose: false, json: true, quiet: false });
-        expect(
-            parseCliArgs(["owner/repository", "--output", "quiet"]).options,
-        ).toMatchObject({ verbose: false, json: false, quiet: true });
+        ).toEqual({ repo: "owner/repository", json: true });
+        for (const removed of ["verbose", "quiet"]) {
+            expect(() =>
+                parseCliArgs(["owner/repository", "--output", removed]),
+            ).toThrow();
+        }
     });
 
     test("keeps breadcrumbs out of JSON output", () => {

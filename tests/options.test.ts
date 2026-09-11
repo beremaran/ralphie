@@ -31,9 +31,7 @@ describe("CLI configuration", () => {
             verificationCommands: [],
             agent: "build",
             workspace: DEFAULT_WORKSPACE,
-            verbose: false,
             json: false,
-            quiet: false,
         });
     });
 
@@ -52,7 +50,6 @@ describe("CLI configuration", () => {
                 },
                 thinking: "high",
                 workspace: "/tmp/ralphie",
-                verbose: true,
                 json: true,
                 notifyNeedsAttention: true,
                 needsAttentionLabel: "  needs-attention  ",
@@ -70,9 +67,7 @@ describe("CLI configuration", () => {
             },
             thinking: "high",
             workspace: "/tmp/ralphie",
-            verbose: true,
             json: true,
-            quiet: false,
             notificationsEnabled: true,
             needsAttentionLabel: "needs-attention",
         });
@@ -106,15 +101,5 @@ describe("CLI configuration", () => {
         ).toThrow(
             "Option --max-decomposition-depth requires a positive integer.",
         );
-    });
-
-    test("rejects incompatible output modes", () => {
-        expect(() =>
-            resolveRalphieConfig({
-                repo: "owner/repo",
-                json: true,
-                quiet: true,
-            }),
-        ).toThrow("JSON and quiet output modes cannot be enabled together.");
     });
 });

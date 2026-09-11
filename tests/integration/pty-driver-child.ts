@@ -120,7 +120,7 @@ export const CHILD_SCENARIOS = [
 export type ChildScenario = (typeof CHILD_SCENARIOS)[number];
 /** The lifecycle-cleanup scripts, each with its own outcome path. */
 export type LifecycleScenario = "completion" | "interrupt" | "failure";
-export type PtyOutputMode = "plain" | "quiet" | "json";
+export type PtyOutputMode = "plain" | "json";
 
 /** Live-only progress messages: fine on the painted region, never durable. */
 export const LIFECYCLE_MESSAGES = {
@@ -976,9 +976,7 @@ export const runPtyDriverChild = async (
     if (scenario === "smoke") {
         const outputMode = process.env.RALPHIE_PTY_OUTPUT;
         const outputArgs =
-            outputMode === "quiet" || outputMode === "json"
-                ? ["--output", outputMode]
-                : [];
+            outputMode === "json" ? ["--output", outputMode] : [];
         await runCommand(
             [
                 scenarioOptions.repository,

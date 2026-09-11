@@ -67,15 +67,12 @@ const makeStrategyRecorder = (): StrategyRecorder => {
  * Coordinator harness in interactive mode backed by a fake strategy and fake
  * resize source, mirroring `command.ts` wiring.
  */
-const makeInteractiveHarness = (
-    options: { readonly verbose?: boolean } = {},
-) => {
+const makeInteractiveHarness = () => {
     const strategy = makeStrategyRecorder();
     const resize = makeResizeSource();
     let fallback = "";
     const coordinator = makeProgressCoordinator({
         mode: "interactive",
-        verbose: options.verbose ?? false,
         colors: false,
         width: () => 80,
         strategy,
@@ -93,11 +90,10 @@ const makeInteractiveHarness = (
     };
 };
 
-const makeBoundedCapture = (mode: "plain" | "json" | "quiet") => {
+const makeBoundedCapture = (mode: "plain" | "json") => {
     let output = "";
     const coordinator = makeProgressCoordinator({
         mode,
-        verbose: false,
         colors: false,
         width: () => 80,
         write: (text) => {
@@ -373,49 +369,6 @@ describe("coordinator activity wiring", () => {
         expect(strategy.finalRegion()).toEqual([]);
     });
 
-    test("verbose mode does not expand the interactive live row count", async () => {
-        const { coordinator, strategy, settle } = makeInteractiveHarness({
-            verbose: true,
-        });
-        coordinator.piListener(asEvent({ type: "agent_start" }), context);
-        for (let index = 0; index < 3; index += 1) {
-            coordinator.piListener(
-                toolStart(`t${index}`, "bash", { command: `echo ${index}` }),
-                context,
-            );
-            coordinator.piListener(
-                toolEnd(`t${index}`, "bash", { content: `${index}` }, false),
-                context,
-            );
-        }
-        await coordinator.progress.emit({
-            stage: "implementation",
-            status: "started",
-            message: "writing",
-            details: { attempt: 1, mode: "full" },
-        });
-        await coordinator.progress.emit({
-            stage: "implementation",
-            status: "succeeded",
-            message: "fix written",
-            details: { attempt: 1, mode: "full" },
-        });
-        await settle();
-        const output = strategy.output();
-        // Verbose durable rows may carry details…
-        expect(output).toContain('"attempt":1');
-        expect(output).toContain("fix written");
-        // …but the live region never grows beyond the shared row cap.
-        const region = strategy.finalRegion();
-        expect(region.length).toBeLessThanOrEqual(INTERACTIVE_REGION_MAX_ROWS);
-        for (const row of region) {
-            expect(row.length).toBeLessThanOrEqual(80);
-        }
-        await coordinator.dispose();
-        // Disposal erases the region in place: nothing survives.
-        expect(strategy.finalRegion()).toEqual([]);
-    });
-
     test("interactive mode routes through the replaceable region and never the fallback sink", async () => {
         const { coordinator, strategy, settle, fallback } =
             makeInteractiveHarness();
@@ -551,29 +504,5 @@ describe("coordinator mode-specific contracts", () => {
         // Structured payloads stay lossless.
         expect(output()).toContain('"command":"echo hi"');
         expect(output()).toContain('"secret":"value"');
-    });
-
-    test("quiet mode suppresses routine transcript and progress", async () => {
-        const { coordinator, output } = makeBoundedCapture("quiet");
-        coordinator.piListener(asEvent({ type: "agent_start" }), context);
-        coordinator.piListener(textDelta("hidden"), context);
-        await coordinator.progress.emit({
-            stage: "implementation",
-            status: "succeeded",
-            message: "routine",
-        });
-        await coordinator.progress.emit({
-            stage: "implementation",
-            status: "failed",
-            message: "boom",
-        });
-        await coordinator.dispose();
-
-        const text = output();
-        expect(text).not.toContain("╭─");
-        expect(text).not.toContain("hidden");
-        expect(text).not.toContain("routine");
-        expect(text).toContain("✗");
-        expect(text).toContain("boom");
     });
 });

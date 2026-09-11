@@ -94,18 +94,15 @@ const transcriptFor = (
     output: ProgressOutput,
     getDisplayState: () => DisplayState,
     onSessionStart: () => void,
-): AgentTranscriptRenderer | undefined => {
-    if (options.mode === "quiet") return undefined;
-    return makeAgentTranscriptRenderer({
+): AgentTranscriptRenderer | undefined =>
+    makeAgentTranscriptRenderer({
         write: output.writeTranscript,
         colors: options.colors,
         json: options.mode === "json",
-        verbose: options.verbose,
         width: options.width,
         getDisplayState,
         onSessionStart,
     });
-};
 
 /**
  * Incremental stream deltas append to an already-open transcript line. They
@@ -358,7 +355,7 @@ export const makeProgressCoordinator = (
         },
         writeRaw: (text) => {
             if (disposed || text.length === 0) return;
-            if (options.mode === "quiet" || options.mode === "json") return;
+            if (options.mode === "json") return;
             transcript?.interruptLine();
             progressRenderer.writeRaw?.(text);
         },

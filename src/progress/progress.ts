@@ -48,7 +48,7 @@ export type ProgressStatus =
     | "needs-attention"
     | "info";
 
-export type ProgressRenderMode = "interactive" | "plain" | "json" | "quiet";
+export type ProgressRenderMode = "interactive" | "plain" | "json";
 
 export type ProgressIssue = {
     readonly number: number;
@@ -97,7 +97,6 @@ export type ProgressOutput = {
 
 export type ProgressRendererOptions = {
     readonly mode: ProgressRenderMode;
-    readonly verbose: boolean;
     readonly write?: (text: string) => void;
     readonly output?: ProgressOutput;
     readonly width?: () => number;
@@ -140,11 +139,6 @@ const statusSymbol = (status: ProgressStatus, colors: boolean): string => {
             return cyan("•");
     }
 };
-
-const formatDetails = (
-    details: Readonly<Record<string, unknown>> | undefined,
-): string =>
-    details === undefined ? "" : ` ${humanText(JSON.stringify(details))}`;
 
 type ProgressStyle = (render: (text: string) => string, text: string) => string;
 
@@ -269,8 +263,7 @@ type ActiveProgress = {
 
 export const makeProgressReporter = ({
     mode,
-    verbose,
-    colors = verbose,
+    colors = false,
     write = (text) => process.stderr.write(text),
     output: configuredOutput,
     width = () => process.stderr.columns ?? 80,
@@ -304,13 +297,8 @@ export const makeProgressReporter = ({
             event.attempt !== undefined && event.maxAttempts !== undefined
                 ? ` ${style(dim, `(${event.attempt}/${event.maxAttempts})`)}`
                 : "";
-        // Quiet mode surfaces failures and needs-attention events only; those
-        // events must carry their full payload so reporting never elides
-        // supplied values (GH-180 unredacted output contract).
-        const details =
-            verbose || mode === "quiet" ? formatDetails(event.details) : "";
         const status = statusSymbol(event.status, colors);
-        return `${status}${scope}${position}${attempt}${issue} ${humanText(event.message)}${details}`;
+        return `${status}${scope}${position}${attempt}${issue} ${humanText(event.message)}`;
     };
 
     const appendLine = (line: string) => {
@@ -386,7 +374,7 @@ export const makeProgressReporter = ({
 
     return {
         writeRaw: (text) => {
-            if (mode === "quiet" || mode === "json") return;
+            if (mode === "json") return;
             output.writeTranscript(stripTerminalControls(text));
         },
         emit: async (update) => {
@@ -398,14 +386,6 @@ export const makeProgressReporter = ({
                 output.writeLine(JSON.stringify(event));
                 return;
             }
-            if (
-                mode === "quiet" &&
-                event.status !== "failed" &&
-                event.status !== "needs-attention"
-            ) {
-                return;
-            }
-
             const line = renderLine(event);
             if (mode !== "interactive") {
                 output.writeLine(line);
