@@ -52,8 +52,14 @@ domain modules, never another context's `adapters/`; only the composition root
 context defines its file-system ports (`IssueArtifactFileSystem`,
 `RecoveryFileSystem`) in `issues/app/` and its node implementations live in
 `issues/adapters/`, so the atomic-write and diagnostic logic never touches
-`node:fs`. Git and GitHub adapters receive their command runner and Octokit
-handle from the composition root instead of constructing them.
+`node:fs`. Adapters receive their dependencies instead of constructing them:
+the GitHub capability adapters share one adapter-owned session, git adapters
+receive the command runner, and the run receives a composition-resolved
+`RunLayout` plus injected `Clock` and `IdGenerator`, so no application code
+reads the clock, generates ids, or composes workspace paths itself.
+Cross-cutting composed services such as parent completion and issue
+preparation live in `issues/app/`, and `workflow/ports.ts` exposes the
+driving `IssueWorkflow` port that the CLI invokes.
 
 The progress contract lives in `src/progress/ports.ts`; `src/progress/adapters/`
 implements it and is imported only by the composition root. `src/command.ts`
@@ -62,7 +68,9 @@ coordinator (for persistence) and the runtime (the run closes it before
 removing the workspace). `tests/architecture.test.ts` enforces the adapter
 import rules, the no-I/O rule for non-adapter code, the Octokit confinement
 (the `github` context is the only place the SDK appears), composition-root
-isolation, and process-stream ownership.
+isolation, and process-stream ownership. `tests/contracts/` holds the shared
+behavioral suites that both the in-memory fakes and the live adapters pass for
+`RunEventLog` and `IssueArtifactStore`.
 
 ## Dependency and side-effect rules
 
@@ -111,4 +119,5 @@ the normal check gate.
 | Pi model catalog, credentials, tools, sessions, and structured results | `src/pi/`, `src/agent/` |
 | Git checkpoints, safety, and branches | `src/git/` |
 | Durable run state, artifacts, diagnostics, and event audit | `src/issues/app/artifacts.ts`, `src/issues/app/recovery.ts`, `src/run/`, `src/issues/adapters/` |
+| Driving port and runtime bundle | `src/workflow/ports.ts`, `src/runtime.ts` |
 | Execution contracts, presentation, and exit semantics | `src/*/ports.ts`, `src/progress/adapters/`, `src/workflow/exit-code.ts` |

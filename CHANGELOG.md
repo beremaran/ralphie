@@ -75,6 +75,24 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Changed
 
+- Give GitHub adapters an owned session. `connect()` authenticates once and
+  the capability adapters read the client internally, so no port method,
+  executor context, or workflow call carries an Octokit handle; the SDK is
+  confined to `src/github/adapters/`.
+
+- Inject `Clock`, `IdGenerator`, and `RunLayout` through the runtime bundle.
+  Workflow, artifacts, and recovery no longer call `new Date()`,
+  `randomUUID()`, or compose workspace paths; the composition root resolves
+  the workspace expansion and run layout.
+
+- Move parent completion and issue preparation into `issues/app/` with their
+  contracts in `issues/ports.ts`, and add the `IssueWorkflow` driving port so
+  the CLI depends on the use-case contract rather than the workflow function.
+
+- Add shared port contract suites under `tests/contracts/` that run the same
+  behavioral spec against in-memory fakes and the live adapters for
+  `RunEventLog` and `IssueArtifactStore`.
+
 - Restructure the source into hexagonal, context-first packages: each bounded
   context (`agent`, `pi`, `github`, `git`, `issues`, `progress`, `run`,
   `process`, `workspace`, `workflow`) owns its `ports.ts` contract, its domain
