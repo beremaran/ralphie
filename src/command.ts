@@ -250,7 +250,7 @@ Options:
       --thinking <level>       Thinking level for every session: off, minimal, low, medium, high, xhigh, or max (default medium)
       --implementation-attempts <n> Empty implementation retries (default 3)
       --workspace <path>       Workspace directory (removed at start and after success)
-      --output <mode>          Output: default live transcript/progress or json
+      --output <mode>          Output: default (TUI on a terminal, plain when piped) or json
   -h, --help                   Show this help
   -v, --version                Show version (use --output json for build metadata)
 
@@ -326,12 +326,6 @@ const makeCommandCoordinator = (
     factory({
         mode: resolveProgressMode(config, terminal),
         width: () => process.stderr.columns ?? terminal.width,
-        resize: {
-            subscribe: (listener) => {
-                process.stderr.on("resize", listener);
-                return () => process.stderr.removeListener("resize", listener);
-            },
-        },
         write: config.json ? output.stdout : output.stderr,
         colors: terminal.isInteractive && !terminal.isCI,
         runId,

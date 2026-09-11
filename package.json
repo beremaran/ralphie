@@ -60,6 +60,7 @@
   "dependencies": {
     "@earendil-works/pi-agent-core": "^0.85.1",
     "@earendil-works/pi-ai": "^0.85.1",
+    "@opentui/core": "^0.5.11",
     "octokit": "^5.0.5",
     "proper-lockfile": "^4.1.2",
     "zod": "^4.4.3"

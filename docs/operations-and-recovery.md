@@ -13,58 +13,31 @@ including thinking deltas, assistant text, tool calls, and tool results. Tasks
 and issues are intentionally processed sequentially so this event stream remains
 ordered. JSON output exposes it losslessly for integrations.
 
-Human-readable transcript output groups each pi session into a compact block:
-assistant text streams immediately within a 140-character bound; thinking deltas
-and intermediate tool output stay in the compact activity surface; tool calls are
-shown as readable commands; and each tool completion or failure gets one concise
-summary line. Truncated assistant streams report their total with a `truncated`
-marker.
+Ralphie adapts its presentation to its environment. `--output default`
+resolves to the full-screen TUI only when stdin and stderr are both TTYs and
+`CI` is neither `"true"` nor `"1"`; otherwise it uses append-only `plain`
+lines.
 
-Ralphie adapts its progress renderer to its environment. `--output default`
-resolves to `interactive` only when stdin and stderr are both TTYs and `CI`
-is neither `"true"` nor `"1"` (rechecked against `stderr.isTTY`); otherwise
-it uses append-only `plain` output. The locked interactive layout strategy is
-`durable-transcript-breadcrumbs` (`INTERACTIVE_FOOTER_LAYOUT_STRATEGY`, with
-`INTERACTIVE_FOOTER_USES_SCROLL_REGION=false` and
-`INTERACTIVE_FOOTER_USES_RESERVED_ROW=false`): the status is an in-place
-replaceable region below streamed content, never a reserved bottom row or
-DECSTBM scroll region. Reserved-row/scroll-region cursor manipulation is
-disabled — the controller never emits DECSTBM (`...r`), absolute cursor
-addressing (CUP `H`/`f`), alternate-screen, or save/restore sequences; only
-in-place line erase (`\r\x1b[2K`) and single-row step-up (`\x1b[1A`) plus SGR
-color repaint the region, with strict clear-before-draw on every replacement.
-No reserved-row or scroll-region strategy is tested or published.
-
-- interactive terminals receive the streamed pi transcript plus one replaceable
-  interactive region: the sticky stage/status line and the bounded activity
-  rows run together in a single region of at most three physical terminal rows
-  (the cap is measured in rows actually painted, never newline counts), each
-  row is clipped before it can wrap at the width sampled for its own repaint,
-  and replacements repaint the region in
-  place — intermediate activity, long commands, and deep paths never spill
-  into scrollback or onto extra rows. Transcript token deltas stream
-  immediately without waiting for the footer scheduler, which coalesces
-  footer-only repaints at roughly 100–125 ms (clamped, default 100 ms).
-  Repaints defer while a transcript fragment is open mid-line or a control
-  sequence is incomplete, durable progress lines wait for a safe line boundary,
-  and resize clears and repaints at the new width only at a safe boundary. On
-  completion, interruption (SIGINT/Ctrl-C), failure, or disposal the live
-  region is erased in place, the cursor settles on a fresh line below durable
-  content, the resize subscription and refresh timer are released, and no
-  further bytes are emitted; no live-only row (`◐`, `›`, started progress,
-  activity) survives on screen or scrollback;
-- each tool completion and each failure surfaces one concise summary line
-  (`✓ <tool> done`, or a single sanitized, character-bounded failure line with
-  enough error detail to act on) instead of streamed multi-line output;
+- Interactive terminals get an OpenTUI application (the same rendering core
+  OpenCode 1.0 uses): a rounded frame with the repository header, a scrollable
+  transcript that streams assistant text as it arrives, compact thinking and
+  tool rows (`$ <command>`, `read <path>`, `✓ <tool> done`,
+  `✗ <tool> failed: <detail>`), and a one-line status bar with queue position,
+  issue, stage, activity, and elapsed time. Tool output, long commands, and
+  deep paths stay inside the transcript panel; resize is handled by the
+  renderer; Ctrl-C is forwarded as SIGINT so cancellation still restores the
+  checkout and saves state; disposal destroys the renderer and restores the
+  terminal.
 - CI and redirected output are the deterministic noninteractive fallback:
-  durable, append-only lines, byte-identical across identical runs, with
-  neither ANSI cursor controls (`ESC`) nor
-  carriage-return bytes and no footer/status residue (no `◐`, no
-  `\r\x1b[2K`); `stripTerminalControls` is an identity no-op on these streams;
+  append-only, byte-identical across identical runs, with neither ANSI cursor
+  controls (`ESC`) nor carriage-return bytes; `stripTerminalControls` is an
+  identity no-op on these streams. Assistant and thinking text are buffered per
+  part and printed as complete `│  ` lines; each tool completion gets one
+  summary line.
 - `--output json` writes progress and `agent_event` objects one per line to
   stdout with stderr empty: every non-empty line parses as one complete JSON
-  record, human headers/footers/glyphs/breadcrumbs never appear, and values
-  are preserved as supplied.
+  record, human headers/glyphs never appear, and values are preserved as
+  supplied.
 
 JSON events use a stable operational vocabulary and include `runId`,
 `timestamp`, `stage`, `status`, and `message`. Grounding events identify
@@ -76,8 +49,8 @@ field; human-readable output never renders that field. A
 diagnostic or artifact path, and queue position.
 Depending on the event, it may also include the repository, review attempt,
 session ID, commit SHA, created issue numbers, or diagnostic paths. Supplied
-progress-event values are preserved as-is; pi transcripts and breadcrumbs
-are never redacted, and terminal control sequences are stripped at the
+progress-event values are preserved as-is; pi transcripts are never
+redacted, and terminal control sequences are stripped at the
 reporting boundary.
 
 ## State and artifacts

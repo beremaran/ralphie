@@ -36,7 +36,7 @@ that binds concrete adapters into the runtime bundle.
 | `github` | `src/github/` | Issue value objects, repository slug parsing, and the Octokit/`gh` adapters. |
 | `git` | `src/git/` | Checkout preparation, checkpoints, issue operations, invariants, and remote-safety adapters. |
 | `issues` | `src/issues/` | Domain (`domain/`), executors and artifact/recovery logic (`app/`), filesystem adapters (`adapters/`). |
-| `progress` | `src/progress/` | `ports.ts` contract plus the terminal/JSON presentation adapters. |
+| `progress` | `src/progress/` | `ports.ts` contract plus the OpenTUI interactive adapter and the plain/JSON adapters. |
 | `run` | `src/run/` | Versioned run-state schemas, the state/event-log ports, and their adapters. |
 | `process` | `src/process/` | Bounded command runner port, the helper, and its adapter. |
 | `workspace` | `src/workspace/` | Path expansion, the workspace port, and the protected-removal adapter. |
@@ -120,4 +120,4 @@ the normal check gate.
 | Git checkpoints, safety, and branches | `src/git/` |
 | Durable run state, artifacts, diagnostics, and event audit | `src/issues/app/artifacts.ts`, `src/issues/app/recovery.ts`, `src/run/`, `src/issues/adapters/` |
 | Driving port and runtime bundle | `src/workflow/ports.ts`, `src/runtime.ts` |
-| Execution contracts, presentation, and exit semantics | `src/*/ports.ts`, `src/progress/adapters/`, `src/workflow/exit-code.ts` |
+| Execution contracts, presentation, and exit semantics | `src/*/ports.ts`, `src/progress/adapters/` (OpenTUI, plain, JSON), `src/workflow/exit-code.ts` |

@@ -75,6 +75,14 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Changed
 
+- Replace the hand-rolled interactive renderer with OpenTUI, the same
+  terminal rendering core OpenCode 1.0 uses. Interactive runs now render a
+  full-screen frame with a streaming transcript, compact tool rows, and a
+  status bar; the footer/breadcrumb/terminal-controller stack and its PTY test
+  suites are gone. Plain (piped/CI) and JSON output are unchanged in shape, and
+  the interactive renderer loads lazily so help, plain, and JSON paths never
+  touch the native module.
+
 - Replace fenced-JSON structured output with tool-call submission. Structured
   sessions register a `submit_result` tool whose parameters are the decision
   schema; invalid arguments are returned to the model as tool errors so it can

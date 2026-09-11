@@ -38,7 +38,7 @@ command schema.
 | `--implementation-attempts <count>` | `3` | Positive number of implementation attempts allowed when sessions leave an unresolved empty diff. |
 | `--verify-command <command>` | none | Run this deterministic gate after changes are staged; repeat to run multiple commands in order. When omitted, the gate is skipped. Each command runs under a 30-minute deadline. |
 | `--workspace <path>` | `~/.ralphie` | Root directory for repository checkouts and run artifacts. The workspace is removed before preparation and after a successful run. |
-| `--output <mode>` | `default` | Output mode: `default` for live transcript and progress, or `json` for JSON Lines on stdout. |
+| `--output <mode>` | `default` | Output mode: `default` renders the full-screen TUI on a terminal and plain append-only lines when piped or in CI; `json` writes JSON Lines on stdout. |
 
 The short aliases are `-b` for `--branch`, `-h` for `--help`, and `-v` for
 `--version`. `--issue-label` and `--verify-command` are repeatable. There is no

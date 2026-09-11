@@ -123,7 +123,7 @@ describe("native CLI parser", () => {
                     makeCoordinator: () => ({
                         progress: makeTestProgressRecorder([]),
                         piListener: () => {},
-                        getDisplayState: () => ({}) as never,
+                        ready: Promise.resolve(),
                         dispose: async () => {},
                     }),
                     makeAgentRuntime: () => ({
@@ -157,7 +157,7 @@ describe("native CLI parser", () => {
                     makeCoordinator: () => ({
                         progress: makeTestProgressRecorder([]),
                         piListener: () => {},
-                        getDisplayState: () => ({}) as never,
+                        ready: Promise.resolve(),
                         dispose: async () => {},
                     }),
                     makeAgentRuntime: () => ({

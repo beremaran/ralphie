@@ -138,7 +138,6 @@ const play = async (mode: ProgressRenderMode): Promise<Capture> => {
             else capture.stderr += text;
         },
         width: () => 80,
-        breadcrumbThreshold: 10_000,
     });
 
     const events = agentEvents();
@@ -216,6 +215,10 @@ describe("deterministic noninteractive output contracts", () => {
         expect(first.stderr).toContain("failed-marker");
         expect(first.stderr).toContain("needs-attention-marker");
         expect(first.stderr).toContain(`Bearer ${ASSISTANT_TOKEN}`);
+        expect(first.stderr).toContain("╭─ pi · Output contract");
+        expect(first.stderr).toContain("│  contract-tool ");
+        expect(first.stderr).toContain("│  ✓ contract-tool done");
+        expect(first.stderr).toContain("╰─ done");
         // Human progress lines never render the structured details payload;
         // use --output json or the events.jsonl audit for the full record.
         const progressLine = first.stderr
