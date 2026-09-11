@@ -22,6 +22,8 @@ import {
     progressStageLabel,
     reduceAgentSessionEvent,
     reduceProgressUpdate,
+    type DisplayQueueIssue,
+    type DisplayQueueStatus,
     type DisplayState,
 } from "./display-state.ts";
 import { contentText, toolTarget } from "./tool-line.ts";
@@ -63,8 +65,40 @@ const SPINNER_FRAMES = [
     "⠏",
 ] as const;
 const SPINNER_INTERVAL_MS = 120;
+const SIDEBAR_HINT = "[ ] switch issue";
+
+const QUEUE_STATUS_STYLES: Readonly<
+    Record<
+        DisplayQueueStatus,
+        { readonly glyph: string; readonly color: string }
+    >
+> = {
+    queued: { glyph: "○", color: "#565f89" },
+    active: { glyph: "▶", color: "#7aa2f7" },
+    completed: { glyph: "✓", color: "#9ece6a" },
+    failed: { glyph: "✗", color: "#f7768e" },
+    "needs-attention": { glyph: "⚠", color: "#e0af68" },
+    skipped: { glyph: "−", color: "#565f89" },
+};
 
 type TuiModule = typeof import("@opentui/core");
+
+/** `undefined` is the run-level transcript: everything not tied to a queue issue. */
+type TranscriptKey = number | undefined;
+
+type TranscriptLine = {
+    content: StyledText | string;
+    node?: TextRenderable;
+};
+
+type Transcript = {
+    readonly lines: Array<TranscriptLine>;
+    stream?: {
+        readonly kind: "text" | "thinking";
+        buffer: string;
+        readonly line: TranscriptLine;
+    };
+};
 
 type Ui = {
     readonly mod: TuiModule;
@@ -74,15 +108,10 @@ type Ui = {
         readonly add: (child: unknown) => unknown;
     };
     readonly header: TextRenderable;
-    readonly scroll: ScrollBoxRenderable;
+    readonly sidebar: ScrollBoxRenderable;
+    readonly sidebarRows: Map<TranscriptKey, TextRenderable>;
+    readonly transcript: ScrollBoxRenderable;
     readonly status: TextRenderable;
-    readonly lines: Array<TextRenderable>;
-};
-
-type StreamState = {
-    readonly node: TextRenderable;
-    readonly kind: "text" | "thinking";
-    buffer: string;
 };
 
 const elapsedLabel = (startedAt: number | undefined, now: number): string => {
@@ -99,6 +128,19 @@ export type TuiCoordinatorOptions = ProgressCoordinatorOptions & {
     readonly createRenderer?: () => Promise<CliRenderer>;
 };
 
+/** `[`/`]` and Ctrl+Left/Right move through the issue list. */
+const issueNavigation = (key: {
+    readonly ctrl?: boolean;
+    readonly name?: string;
+}): -1 | 0 | 1 => {
+    if (key.name === "[") return -1;
+    if (key.name === "]") return 1;
+    if (key.ctrl !== true) return 0;
+    if (key.name === "left") return -1;
+    if (key.name === "right") return 1;
+    return 0;
+};
+
 const createLiveRenderer = async (): Promise<CliRenderer> => {
     const { createCliRenderer } = await import("@opentui/core");
     return await createCliRenderer({
@@ -111,9 +153,9 @@ const createLiveRenderer = async (): Promise<CliRenderer> => {
 };
 
 /**
- * Full-screen OpenTUI coordinator: streamed transcript, activity status, and
- * progress in one terminal application. The renderer is created lazily so
- * plain, JSON, and help paths never load the native module.
+ * Full-screen OpenTUI coordinator: a sidebar lists every discovered issue and
+ * a transcript pane follows the selected issue's session. The renderer is
+ * created lazily so plain, JSON, and help paths never load the native module.
  */
 export const makeTuiProgressCoordinator = (
     options: TuiCoordinatorOptions,
@@ -124,10 +166,14 @@ export const makeTuiProgressCoordinator = (
     let state: DisplayState = createDisplayState();
     let ui: Ui | undefined;
     let disposed = false;
-    let stream: StreamState | undefined;
     let spinnerIndex = 0;
     let timer: ReturnType<typeof setInterval> | undefined;
     const queued: Array<() => void> = [];
+
+    const transcripts = new Map<TranscriptKey, Transcript>();
+    let selected: TranscriptKey = undefined;
+    let activeIssue: TranscriptKey = undefined;
+    let followActive = true;
 
     const withUi = (run: (current: Ui) => void): void => {
         if (disposed) return;
@@ -138,20 +184,136 @@ export const makeTuiProgressCoordinator = (
         run(ui);
     };
 
-    const appendLine = (current: Ui, content: StyledText | string): void => {
+    const transcriptFor = (key: TranscriptKey): Transcript => {
+        const existing = transcripts.get(key);
+        if (existing !== undefined) return existing;
+        const created: Transcript = { lines: [] };
+        transcripts.set(key, created);
+        return created;
+    };
+
+    const unmountLine = (current: Ui, line: TranscriptLine): void => {
+        if (line.node === undefined) return;
+        current.transcript.remove(line.node);
+        line.node.destroy();
+        line.node = undefined;
+    };
+
+    const trimTranscript = (current: Ui, transcript: Transcript): void => {
+        while (transcript.lines.length > MAX_TRANSCRIPT_LINES) {
+            const oldest = transcript.lines.shift();
+            if (oldest === undefined) break;
+            unmountLine(current, oldest);
+        }
+    };
+
+    const mountLine = (current: Ui, line: TranscriptLine): void => {
         const node = new current.mod.TextRenderable(current.renderer, {
-            content,
+            content: line.content,
             width: "100%",
             wrapMode: "word",
         });
-        current.scroll.add(node);
-        current.lines.push(node);
-        while (current.lines.length > MAX_TRANSCRIPT_LINES) {
-            const oldest = current.lines.shift();
-            if (oldest === undefined) break;
-            current.scroll.remove(oldest);
-            oldest.destroy();
+        line.node = node;
+        current.transcript.add(node);
+    };
+
+    const appendLine = (
+        current: Ui,
+        key: TranscriptKey,
+        content: StyledText | string,
+    ): TranscriptLine => {
+        const transcript = transcriptFor(key);
+        const line: TranscriptLine = { content };
+        transcript.lines.push(line);
+        if (key === selected) mountLine(current, line);
+        trimTranscript(current, transcript);
+        return line;
+    };
+
+    const mountTranscript = (current: Ui, key: TranscriptKey): void => {
+        for (const line of transcriptFor(key).lines) {
+            if (line.node === undefined) mountLine(current, line);
         }
+    };
+
+    const unmountTranscript = (current: Ui, key: TranscriptKey): void => {
+        const transcript = transcripts.get(key);
+        if (transcript === undefined) return;
+        for (const line of transcript.lines) unmountLine(current, line);
+    };
+
+    const sidebarRowId = (key: TranscriptKey): string =>
+        key === undefined ? "tui-sidebar-run" : `tui-sidebar-issue-${key}`;
+
+    const sidebarRowContent = (
+        current: Ui,
+        key: TranscriptKey,
+        issue: DisplayQueueIssue | undefined,
+    ): StyledText => {
+        const mod = current.mod;
+        const marker = key === selected ? mod.fg("#7aa2f7")("▌ ") : "  ";
+        if (issue === undefined) {
+            return styled(mod, marker, mod.fg("#7aa2f7")(mod.bold("Run")));
+        }
+        const status = QUEUE_STATUS_STYLES[issue.status];
+        const title = key === selected ? mod.bold(issue.title) : issue.title;
+        return styled(
+            mod,
+            marker,
+            mod.fg(status.color)(`${status.glyph} `),
+            mod.fg("#565f89")(`#${issue.number} `),
+            title,
+        );
+    };
+
+    const paintSidebar = (current: Ui): void => {
+        const entries: Array<DisplayQueueIssue | undefined> = [
+            undefined,
+            ...state.queue,
+        ];
+        for (const issue of entries) {
+            const key: TranscriptKey = issue?.number;
+            let row = current.sidebarRows.get(key);
+            if (row === undefined) {
+                row = new current.mod.TextRenderable(current.renderer, {
+                    id: sidebarRowId(key),
+                    content: "",
+                    width: "100%",
+                    height: 1,
+                    wrapMode: "none",
+                    paddingLeft: 1,
+                    paddingRight: 1,
+                });
+                row.onMouseDown = () => {
+                    if (ui !== undefined) selectTranscript(ui, key, true);
+                };
+                current.sidebar.add(row);
+                current.sidebarRows.set(key, row);
+            }
+            row.content = sidebarRowContent(current, key, issue);
+        }
+        current.sidebar.scrollChildIntoView(sidebarRowId(selected));
+    };
+
+    const selectTranscript = (
+        current: Ui,
+        key: TranscriptKey,
+        userInitiated: boolean,
+    ): void => {
+        if (userInitiated) followActive = key === activeIssue;
+        if (key === selected) {
+            paintSidebar(current);
+            return;
+        }
+        unmountTranscript(current, selected);
+        selected = key;
+        mountTranscript(current, key);
+        paintSidebar(current);
+        current.renderer.requestRender();
+    };
+
+    const endStreamFor = (key: TranscriptKey): void => {
+        transcriptFor(key).stream = undefined;
     };
 
     const renderStatus = (current: Ui): void => {
@@ -240,15 +402,6 @@ export const makeTuiProgressCoordinator = (
         );
     };
 
-    const trimLines = (current: Ui): void => {
-        while (current.lines.length > MAX_TRANSCRIPT_LINES) {
-            const oldest = current.lines.shift();
-            if (oldest === undefined) break;
-            current.scroll.remove(oldest);
-            oldest.destroy();
-        }
-    };
-
     const streamContent = (
         mod: TuiModule,
         kind: "text" | "thinking",
@@ -258,64 +411,64 @@ export const makeTuiProgressCoordinator = (
             ? styled(mod, mod.fg("#e0af68")("✦ "), mod.fg("#565f89")(buffer))
             : buffer;
 
-    const startStream = (
-        current: Ui,
-        kind: "text" | "thinking",
-        delta: string,
-    ): void => {
-        stream = undefined;
-        const node = new current.mod.TextRenderable(current.renderer, {
-            content: streamContent(current.mod, kind, delta),
-            width: "100%",
-            wrapMode: "word",
-        });
-        current.scroll.add(node);
-        current.lines.push(node);
-        stream = { node, kind, buffer: delta };
-        trimLines(current);
-    };
-
-    const continueStream = (
-        current: Ui,
-        kind: "text" | "thinking",
-        delta: string,
-    ): void => {
-        if (stream === undefined) return;
-        stream.buffer = `${stream.buffer}${delta}`;
-        if (stream.buffer.length > MAX_STREAM_CHARACTERS) {
-            stream.buffer = stream.buffer.slice(-MAX_STREAM_CHARACTERS);
-        }
-        stream.node.content = streamContent(current.mod, kind, stream.buffer);
-    };
-
     const streamDelta = (kind: "text" | "thinking", delta: string): void => {
+        // Capture the issue now: callbacks may run after the renderer is
+        // ready, by which time the active issue could have advanced.
+        const key = activeIssue;
         withUi((current) => {
-            if (stream === undefined || stream.kind !== kind) {
-                startStream(current, kind, delta);
-            } else {
-                continueStream(current, kind, delta);
+            const transcript = transcriptFor(key);
+            const streaming = transcript.stream;
+            if (streaming === undefined || streaming.kind !== kind) {
+                const buffer = delta.slice(-MAX_STREAM_CHARACTERS);
+                const line = appendLine(
+                    current,
+                    key,
+                    streamContent(current.mod, kind, buffer),
+                );
+                transcript.stream = { kind, buffer, line };
+                current.renderer.requestRender();
+                return;
+            }
+            streaming.buffer += delta;
+            if (streaming.buffer.length > MAX_STREAM_CHARACTERS) {
+                streaming.buffer = streaming.buffer.slice(
+                    -MAX_STREAM_CHARACTERS,
+                );
+            }
+            const content = streamContent(current.mod, kind, streaming.buffer);
+            streaming.line.content = content;
+            if (streaming.line.node !== undefined) {
+                streaming.line.node.content = content;
             }
             current.renderer.requestRender();
         });
     };
 
     const onToolStart = (event: AgentSessionEvent): void => {
-        stream = undefined;
-        withUi((current) => appendLine(current, toolStartLine(current, event)));
+        const key = activeIssue;
+        withUi((current) => {
+            endStreamFor(key);
+            appendLine(current, key, toolStartLine(current, event));
+        });
         refreshStatus();
     };
 
     const onToolEnd = (event: AgentSessionEvent): void => {
-        stream = undefined;
-        withUi((current) => appendLine(current, toolEndLine(current, event)));
+        const key = activeIssue;
+        withUi((current) => {
+            endStreamFor(key);
+            appendLine(current, key, toolEndLine(current, event));
+        });
         refreshStatus();
     };
 
     const onAgentStart = (context: AgentEventContext): void => {
-        stream = undefined;
-        withUi((current) =>
+        const key = activeIssue;
+        withUi((current) => {
+            endStreamFor(key);
             appendLine(
                 current,
+                key,
                 styled(
                     current.mod,
                     current.mod.fg("#7aa2f7")("╭─ "),
@@ -325,19 +478,21 @@ export const makeTuiProgressCoordinator = (
                         ),
                     ),
                 ),
-            ),
-        );
+            );
+        });
         refreshStatus();
     };
 
     const onAgentEnd = (): void => {
-        stream = undefined;
-        withUi((current) =>
+        const key = activeIssue;
+        withUi((current) => {
+            endStreamFor(key);
             appendLine(
                 current,
+                key,
                 styled(current.mod, current.mod.fg("#565f89")("╰─ done")),
-            ),
-        );
+            );
+        });
         refreshStatus();
     };
 
@@ -362,7 +517,8 @@ export const makeTuiProgressCoordinator = (
             return;
         }
         if (update?.type === "text_end" || update?.type === "thinking_end") {
-            stream = undefined;
+            const key = activeIssue;
+            withUi(() => endStreamFor(key));
             refreshStatus();
         }
     };
@@ -436,13 +592,47 @@ export const makeTuiProgressCoordinator = (
         }
     };
 
+    const transcriptKeyFor = (update: ProgressUpdate): TranscriptKey => {
+        const issueNumber = update.issue?.number;
+        return issueNumber !== undefined &&
+            state.queue.some((entry) => entry.number === issueNumber)
+            ? issueNumber
+            : undefined;
+    };
+
     const handleProgress = (update: ProgressUpdate): void => {
         state = reduceProgressUpdate(state, update, now);
+        const key = transcriptKeyFor(update);
+        // Only an issue that starts executing becomes the followed issue;
+        // skipped or needs-attention events keep the current view.
+        if (
+            key !== undefined &&
+            update.stage === "issue-execution" &&
+            update.status === "started"
+        ) {
+            activeIssue = key;
+        }
         withUi((current) => {
             const line = progressLine(current, update);
-            if (line !== undefined) appendLine(current, line);
-            refreshStatus();
+            if (line !== undefined) appendLine(current, key, line);
+            paintSidebar(current);
+            if (followActive && activeIssue !== selected) {
+                selectTranscript(current, activeIssue, false);
+            }
+            renderStatus(current);
+            renderHeader(current);
+            current.renderer.requestRender();
         });
+    };
+
+    const navigateIssues = (direction: -1 | 1): void => {
+        const keys: Array<TranscriptKey> = [
+            undefined,
+            ...state.queue.map(({ number }) => number),
+        ];
+        const index = keys.indexOf(selected);
+        const next = (index + direction + keys.length) % keys.length;
+        withUi((current) => selectTranscript(current, keys[next], true));
     };
 
     const readyPromise = (async () => {
@@ -471,10 +661,41 @@ export const makeTuiProgressCoordinator = (
             paddingLeft: 1,
             paddingRight: 1,
         });
-        const scroll = new mod.ScrollBoxRenderable(renderer, {
-            id: "tui-transcript",
+        const body = new mod.BoxRenderable(renderer, {
+            id: "tui-body",
+            flexDirection: "row",
             flexGrow: 1,
             width: "100%",
+        });
+        const sidebarPane = new mod.BoxRenderable(renderer, {
+            id: "tui-sidebar-pane",
+            flexDirection: "column",
+            width: 28,
+            minWidth: 18,
+            maxWidth: 36,
+            border: ["right"],
+            borderStyle: "single",
+            borderColor: "#3b4261",
+        });
+        const sidebar = new mod.ScrollBoxRenderable(renderer, {
+            id: "tui-sidebar",
+            flexGrow: 1,
+            width: "100%",
+            scrollY: true,
+            contentOptions: { minHeight: 0 },
+        });
+        const sidebarHint = new mod.TextRenderable(renderer, {
+            id: "tui-sidebar-hint",
+            content: styled(mod, mod.fg("#565f89")(SIDEBAR_HINT)),
+            height: 1,
+            width: "100%",
+            wrapMode: "none",
+            paddingLeft: 1,
+            paddingRight: 1,
+        });
+        const transcript = new mod.ScrollBoxRenderable(renderer, {
+            id: "tui-transcript",
+            flexGrow: 1,
             stickyScroll: true,
             stickyStart: "bottom",
             paddingLeft: 1,
@@ -492,20 +713,44 @@ export const makeTuiProgressCoordinator = (
         });
         renderer.root.add(root);
         root.add(header);
-        root.add(scroll);
+        root.add(body);
+        body.add(sidebarPane);
+        sidebarPane.add(sidebar);
+        sidebarPane.add(sidebarHint);
+        body.add(transcript);
         root.add(status);
-        ui = { mod, renderer, root, header, scroll, status, lines: [] };
+        // Rows select on click; keep events from moving focus off the
+        // transcript, which owns Up/Down/PgUp/PgDn scrolling.
+        sidebar.focusable = false;
+        ui = {
+            mod,
+            renderer,
+            root,
+            header,
+            sidebar,
+            sidebarRows: new Map(),
+            transcript,
+            status,
+        };
+        transcript.focus();
         renderer.keyInput.on("keypress", (key) => {
             const parsed = key as {
                 readonly ctrl?: boolean;
                 readonly name?: string;
+                readonly preventDefault?: () => void;
             };
             if (parsed.ctrl === true && parsed.name === "c") {
                 process.kill(process.pid, "SIGINT");
+                return;
             }
+            const direction = issueNavigation(parsed);
+            if (direction === 0) return;
+            parsed.preventDefault?.();
+            navigateIssues(direction);
         });
         renderHeader(ui);
         renderStatus(ui);
+        paintSidebar(ui);
         renderer.requestRender();
         timer = setInterval(() => {
             if (disposed) return;

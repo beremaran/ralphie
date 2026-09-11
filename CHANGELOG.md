@@ -77,11 +77,20 @@ All notable changes to Ralphie are documented here. The project follows
 
 - Replace the hand-rolled interactive renderer with OpenTUI, the same
   terminal rendering core OpenCode 1.0 uses. Interactive runs now render a
-  full-screen frame with a streaming transcript, compact tool rows, and a
-  status bar; the footer/breadcrumb/terminal-controller stack and its PTY test
-  suites are gone. Plain (piped/CI) and JSON output are unchanged in shape, and
-  the interactive renderer loads lazily so help, plain, and JSON paths never
-  touch the native module.
+  full-screen frame with an issue sidebar, a streaming transcript per issue,
+  compact tool rows, and a status bar. The sidebar lists the discovered queue
+  with each issue's outcome and follows the active issue until the user
+  navigates; `[`/`]` (or Ctrl+Left/Right) switch between processed, active, and
+  queued issues. The footer/breadcrumb/terminal-controller stack and its PTY
+  test suites are gone. Plain (piped/CI) and JSON output are unchanged in
+  shape, and the interactive renderer loads lazily so help, plain, and JSON
+  paths never touch the native module.
+
+- Report the discovered issue queue and skipped issues through progress:
+  `issue-queue` events carry the pending issue numbers and titles, and an issue
+  that no longer matches the filters is reported as skipped instead of
+  disappearing silently. Plain output gains one line per skipped issue and the
+  JSON audit gains the queue details.
 
 - Replace fenced-JSON structured output with tool-call submission. Structured
   sessions register a `submit_result` tool whose parameters are the decision

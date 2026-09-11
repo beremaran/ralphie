@@ -553,6 +553,15 @@ const makeWorkflowConfiguration = (
     };
 };
 
+/** The pending queue as presentation code needs it: number and title only. */
+const queueDisplayIssues = (
+    queue: ReturnType<typeof createIssueQueue>,
+): ReadonlyArray<{ readonly number: number; readonly title: string }> =>
+    queue.snapshot().pending.map(({ issue }) => ({
+        number: issue.number,
+        title: issue.title,
+    }));
+
 const summaryMessage = (
     prefix: string,
     counts: Readonly<Record<IssueExecutionOutcomeKind, number>>,
@@ -821,6 +830,12 @@ export const workflow = async (
                 invariantService.capture(prepared.path, signal);
             checkout = await captureCheckout();
             const queue = makeQueue(discoveredIssues);
+            await progress.emit({
+                stage: "issue-queue",
+                status: "info",
+                message: `Issue queue ready with ${queue.pendingCount()} ${queue.pendingCount() === 1 ? "issue" : "issues"}.`,
+                details: { issues: queueDisplayIssues(queue) },
+            });
             return { repositoryCheckouts, captureCheckout, queue };
         };
 
@@ -1214,7 +1229,11 @@ export const workflow = async (
                 stage: "issue-queue",
                 status: "info",
                 message: `Issue queue refreshed; added ${added} new issues.`,
-                details: { added, pending: queue.pendingCount() },
+                details: {
+                    added,
+                    pending: queue.pendingCount(),
+                    issues: queueDisplayIssues(queue),
+                },
             });
             await reconcileDiscoveredParents(refreshed);
             await persistState(RunStateStatus.Active);
@@ -1273,6 +1292,12 @@ export const workflow = async (
                 } as const;
                 outcomes.push({ issueNumber: issue.number, outcome });
                 queue.skip(issue.number);
+                await progress.emit({
+                    stage: "issue-queue",
+                    status: "skipped",
+                    message: reason,
+                    issue: { number: issue.number, title: issue.title },
+                });
                 activeQueueIssues.delete(issue.number);
                 activeIssue = undefined;
                 restoreCancellationCheckout = undefined;

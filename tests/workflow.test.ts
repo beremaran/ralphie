@@ -1501,6 +1501,49 @@ describe("workflow", () => {
         ).toEqual([42]);
     });
 
+    test("reports the discovered queue and each skipped issue to progress subscribers", async () => {
+        const calls: string[] = [];
+        const states: RunState[] = [];
+        const events: ProgressUpdate[] = [];
+        await workflow(
+            baseOptions,
+            testRuntime(
+                calls,
+                states,
+                {
+                    issueLists: [[firstIssue, secondIssue]],
+                    refreshIssues: [
+                        { ...firstIssue, state: "closed" },
+                        secondIssue,
+                    ],
+                },
+                events,
+            ),
+        );
+
+        const queueReady = events.find(
+            ({ stage, status }) => stage === "issue-queue" && status === "info",
+        );
+        expect(queueReady).toMatchObject({
+            message: "Issue queue ready with 2 issues.",
+            details: {
+                issues: [
+                    { number: 42, title: "Test issue" },
+                    { number: 43, title: "Second test issue" },
+                ],
+            },
+        });
+        const skipped = events.find(
+            ({ stage, status }) =>
+                stage === "issue-queue" && status === "skipped",
+        );
+        expect(skipped).toMatchObject({
+            issue: { number: 42, title: "Test issue" },
+            message:
+                "Live reconciliation found that the issue is no longer open.",
+        });
+    });
+
     test.each([
         {
             name: "closed",

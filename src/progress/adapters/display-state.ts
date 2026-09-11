@@ -19,6 +19,21 @@ export type DisplayIssue = {
     readonly title: string;
 };
 
+/** Lifecycle of one issue in the run's queue, from discovery to outcome. */
+export type DisplayQueueStatus =
+    | "queued"
+    | "active"
+    | "completed"
+    | "failed"
+    | "needs-attention"
+    | "skipped";
+
+export type DisplayQueueIssue = {
+    readonly number: number;
+    readonly title: string;
+    readonly status: DisplayQueueStatus;
+};
+
 export type DisplayReviewAttempt = {
     readonly current: number;
     readonly total: number;
@@ -37,6 +52,8 @@ export type DisplayState = {
     readonly reviewAttempt?: DisplayReviewAttempt;
     readonly activity: DisplayActivity;
     readonly activityLabel: string;
+    /** Every issue discovered in this run, in queue order, with its latest status. */
+    readonly queue: ReadonlyArray<DisplayQueueIssue>;
     /** Epoch milliseconds at which the current stage became active. */
     readonly stageStartedAt?: number;
 };
@@ -99,6 +116,7 @@ export const DISPLAY_ACTIVITY_LABELS: Readonly<
 const makeInitialDisplayState = (): DisplayState => ({
     activity: "waiting",
     activityLabel: DISPLAY_ACTIVITY_LABELS.waiting,
+    queue: [],
 });
 
 export const createDisplayState = (): DisplayState => makeInitialDisplayState();
@@ -279,6 +297,78 @@ const issueFor = (
     };
 };
 
+const displayIssuesFrom = (
+    value: unknown,
+): ReadonlyArray<{ readonly number: number; readonly title: string }> => {
+    if (!Array.isArray(value)) return [];
+    const issues: Array<{ number: number; title: string }> = [];
+    for (const entry of value) {
+        const record = recordValue(entry);
+        const number = numberValue(record.number);
+        const title = stringValue(record.title);
+        if (number !== undefined && title !== undefined) {
+            issues.push({ number, title });
+        }
+    }
+    return issues;
+};
+
+/**
+ * Status transitions are driven only by terminal queue events, so mid-issue
+ * stages (grounding, verification, review) never overwrite an outcome and a
+ * later needs-attention decision can still supersede an execution success.
+ */
+const displayQueueStatusFor = (
+    update: ProgressUpdate,
+): DisplayQueueStatus | undefined => {
+    if (update.status === "needs-attention") return "needs-attention";
+    if (update.stage === "issue-execution") {
+        if (update.status === "started") return "active";
+        if (update.status === "succeeded") return "completed";
+        if (update.status === "failed") return "failed";
+    }
+    if (update.stage === "issue-closure" && update.status === "succeeded") {
+        return "completed";
+    }
+    if (update.stage === "issue-queue" && update.status === "skipped") {
+        return "skipped";
+    }
+    return undefined;
+};
+
+const displayQueueFor = (
+    state: DisplayState,
+    update: ProgressUpdate,
+): ReadonlyArray<DisplayQueueIssue> => {
+    const discovered = displayIssuesFrom(recordValue(update.details).issues);
+    let queue = state.queue;
+    if (discovered.length > 0) {
+        const known = new Set(queue.map(({ number }) => number));
+        const appended = discovered
+            .filter(({ number }) => !known.has(number))
+            .map(({ number, title }) => ({
+                number,
+                title: displayText(title),
+                status: "queued" as const,
+            }));
+        if (appended.length > 0) queue = [...queue, ...appended];
+    }
+
+    const issueNumber = update.issue?.number;
+    const status = displayQueueStatusFor(update);
+    if (issueNumber === undefined || status === undefined) return queue;
+    if (
+        !queue.some(
+            (entry) => entry.number === issueNumber && entry.status !== status,
+        )
+    ) {
+        return queue;
+    }
+    return queue.map((entry) =>
+        entry.number === issueNumber ? { ...entry, status } : entry,
+    );
+};
+
 const reviewAttemptFor = (
     state: DisplayState,
     update: ProgressUpdate,
@@ -336,6 +426,7 @@ export const reduceProgressUpdate = (
     const timestamp = timestampFromProgress(update, clock);
     const repository = repositoryFor(state, update);
     const issue = issueFor(state, update);
+    const queue = displayQueueFor(state, update);
     const nestedIssueContext = nestedIssueContextFor(state, update);
     const reviewAttempt = isLeafCompletion(update)
         ? undefined
@@ -350,6 +441,7 @@ export const reduceProgressUpdate = (
         ...stateWithoutAttempt,
         ...(repository === undefined ? {} : { repository }),
         ...(issue === undefined ? {} : { issue }),
+        queue,
         ...nestedIssueContext,
         ...(reviewAttempt === undefined ? {} : { reviewAttempt }),
         stage,

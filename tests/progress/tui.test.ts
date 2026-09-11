@@ -123,9 +123,263 @@ describe("OpenTUI progress coordinator", () => {
 
         await coordinator.ready;
         await setup.renderOnce();
-        const frame = setup.captureCharFrame();
+        let frame = setup.captureCharFrame();
         expect(frame).toContain("transcript-line-39");
         expect(frame).not.toContain("transcript-line-00");
+
+        // The transcript owns Up/Down/PgUp/PgDn/Home/End while focused.
+        setup.mockInput.pressKey("HOME");
+        await setup.renderOnce();
+        frame = setup.captureCharFrame();
+        expect(frame).toContain("transcript-line-00");
+        expect(frame).not.toContain("transcript-line-39");
+
+        setup.mockInput.pressKey("END");
+        await setup.renderOnce();
+        frame = setup.captureCharFrame();
+        expect(frame).toContain("transcript-line-39");
+
+        await coordinator.dispose();
+    });
+
+    test("lists every discovered issue and switches transcripts on navigation", async () => {
+        const setup = await createTestRenderer({ width: 80, height: 16 });
+        const coordinator = makeProgressCoordinator({
+            mode: "interactive",
+            colors: false,
+            runId: "tui-run-sidebar",
+            now: FIXED_NOW,
+            createRenderer: async () => setup.renderer,
+        });
+
+        await coordinator.progress.emit({
+            stage: "issue-queue",
+            status: "info",
+            message: "Issue queue ready with 3 issues.",
+            details: {
+                issues: [
+                    { number: 41, title: "First task" },
+                    { number: 42, title: "Second task" },
+                    { number: 43, title: "Third task" },
+                ],
+            },
+        });
+
+        const execute = async (
+            number: number,
+            title: string,
+            text: string,
+        ): Promise<void> => {
+            await coordinator.progress.emit({
+                stage: "issue-execution",
+                status: "started",
+                message: `Executing #${number}...`,
+                issue: { number, title },
+                current: 1,
+                total: 3,
+            });
+            coordinator.piListener({ type: "agent_start" }, context);
+            coordinator.piListener(
+                {
+                    type: "message_update",
+                    assistantMessageEvent: {
+                        type: "text_delta",
+                        contentIndex: 0,
+                        delta: text,
+                    },
+                },
+                context,
+            );
+            await coordinator.progress.emit({
+                stage: "issue-execution",
+                status: "succeeded",
+                message: `Issue #${number} completed.`,
+                issue: { number, title },
+            });
+        };
+
+        await execute(41, "First task", "alpha work");
+        await execute(42, "Second task", "beta work");
+
+        await coordinator.ready;
+        await setup.renderOnce();
+        let frame = setup.captureCharFrame();
+        expect(frame).toContain("✓ #41 First task");
+        expect(frame).toContain("▌ ✓ #42 Second task");
+        expect(frame).toContain("○ #43 Third task");
+        expect(frame).toContain("beta work");
+        expect(frame).not.toContain("alpha work");
+
+        setup.mockInput.pressArrow("left", { ctrl: true });
+        await setup.renderOnce();
+        frame = setup.captureCharFrame();
+        expect(frame).toContain("▌ ✓ #41");
+        expect(frame).toContain("alpha work");
+        expect(frame).not.toContain("beta work");
+
+        // The hidden transcript keeps recording while the view is pinned.
+        coordinator.piListener(
+            {
+                type: "message_update",
+                assistantMessageEvent: {
+                    type: "text_delta",
+                    contentIndex: 0,
+                    delta: " extended",
+                },
+            },
+            context,
+        );
+        setup.mockInput.pressKey("]");
+        await setup.renderOnce();
+        frame = setup.captureCharFrame();
+        expect(frame).toContain("beta work extended");
+
+        await coordinator.dispose();
+    });
+
+    test("follows the active issue until the user navigates away", async () => {
+        const setup = await createTestRenderer({ width: 80, height: 16 });
+        const coordinator = makeProgressCoordinator({
+            mode: "interactive",
+            colors: false,
+            runId: "tui-run-follow",
+            now: FIXED_NOW,
+            createRenderer: async () => setup.renderer,
+        });
+
+        await coordinator.progress.emit({
+            stage: "issue-queue",
+            status: "info",
+            message: "Issue queue ready with 3 issues.",
+            details: {
+                issues: [
+                    { number: 51, title: "First task" },
+                    { number: 52, title: "Second task" },
+                    { number: 53, title: "Third task" },
+                ],
+            },
+        });
+
+        const execute = async (
+            number: number,
+            title: string,
+            text: string,
+            complete: boolean,
+        ): Promise<void> => {
+            await coordinator.progress.emit({
+                stage: "issue-execution",
+                status: "started",
+                message: `Executing #${number}...`,
+                issue: { number, title },
+            });
+            coordinator.piListener({ type: "agent_start" }, context);
+            coordinator.piListener(
+                {
+                    type: "message_update",
+                    assistantMessageEvent: {
+                        type: "text_delta",
+                        contentIndex: 0,
+                        delta: text,
+                    },
+                },
+                context,
+            );
+            if (!complete) return;
+            await coordinator.progress.emit({
+                stage: "issue-execution",
+                status: "succeeded",
+                message: `Issue #${number} completed.`,
+                issue: { number, title },
+            });
+        };
+
+        await execute(51, "First task", "first work", true);
+        await execute(52, "Second task", "second work", true);
+
+        await coordinator.ready;
+        await setup.renderOnce();
+        let frame = setup.captureCharFrame();
+        expect(frame).toContain("▌ ✓ #52 Second task");
+        expect(frame).toContain("second work");
+
+        setup.mockInput.pressKey("[");
+        await setup.renderOnce();
+        frame = setup.captureCharFrame();
+        expect(frame).toContain("first work");
+
+        // A new active issue must not steal the view while browsing.
+        await execute(53, "Third task", "third work", false);
+        await setup.renderOnce();
+        frame = setup.captureCharFrame();
+        expect(frame).toContain("first work");
+        expect(frame).not.toContain("third work");
+
+        // Selecting the active issue re-engages the follow.
+        setup.mockInput.pressKey("]");
+        setup.mockInput.pressKey("]");
+        await setup.renderOnce();
+        frame = setup.captureCharFrame();
+        expect(frame).toContain("▌ ▶ #53 Third task");
+        expect(frame).toContain("third work");
+
+        await coordinator.progress.emit({
+            stage: "issue-queue",
+            status: "info",
+            message: "Issue queue refreshed; added 1 new issues.",
+            details: {
+                added: 1,
+                issues: [
+                    { number: 51, title: "First task" },
+                    { number: 52, title: "Second task" },
+                    { number: 53, title: "Third task" },
+                    { number: 54, title: "Fourth task" },
+                ],
+            },
+        });
+        await execute(54, "Fourth task", "fourth work", false);
+        await setup.renderOnce();
+        frame = setup.captureCharFrame();
+        expect(frame).toContain("▌ ▶ #54 Fourth task");
+        expect(frame).toContain("fourth work");
+
+        await coordinator.dispose();
+    });
+
+    test("scrolls the sidebar to keep the selected issue visible", async () => {
+        const setup = await createTestRenderer({ width: 80, height: 10 });
+        const coordinator = makeProgressCoordinator({
+            mode: "interactive",
+            colors: false,
+            runId: "tui-run-scroll",
+            now: FIXED_NOW,
+            createRenderer: async () => setup.renderer,
+        });
+
+        const issues = Array.from({ length: 30 }, (_, index) => ({
+            number: 100 + index,
+            title: `Task ${index}`,
+        }));
+        await coordinator.progress.emit({
+            stage: "issue-queue",
+            status: "info",
+            message: "Issue queue ready with 30 issues.",
+            details: { issues },
+        });
+
+        await coordinator.ready;
+        await setup.renderOnce();
+        let frame = setup.captureCharFrame();
+        expect(frame).toContain("#100");
+        expect(frame).not.toContain("#129");
+
+        // Run plus 30 issues: 30 steps forward reaches the last issue.
+        for (let index = 0; index < 30; index += 1) {
+            setup.mockInput.pressKey("]");
+        }
+        await setup.renderOnce();
+        frame = setup.captureCharFrame();
+        expect(frame).toContain("▌ ○ #129 Task 29");
+        expect(frame).not.toContain("#100");
 
         await coordinator.dispose();
     });

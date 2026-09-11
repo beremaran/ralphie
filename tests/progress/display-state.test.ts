@@ -44,7 +44,97 @@ describe("display state", () => {
         expect(createDisplayState()).toEqual({
             activity: "waiting",
             activityLabel: DISPLAY_ACTIVITY_LABELS.waiting,
+            queue: [],
         });
+    });
+
+    test("tracks the discovered queue with lifecycle statuses", () => {
+        let state = reduceProgressUpdate(undefined, {
+            stage: "issue-queue",
+            status: "info",
+            message: "Issue queue ready with 3 issues.",
+            details: {
+                issues: [
+                    { number: 13, title: "Display state" },
+                    { number: 14, title: "Next issue" },
+                    { number: 15, title: "Third issue" },
+                ],
+            },
+        });
+
+        expect(state.queue).toEqual([
+            { number: 13, title: "Display state", status: "queued" },
+            { number: 14, title: "Next issue", status: "queued" },
+            { number: 15, title: "Third issue", status: "queued" },
+        ]);
+
+        state = reduceProgressUpdate(state, {
+            stage: "issue-execution",
+            status: "started",
+            message: "Executing #13...",
+            issue: { number: 13, title: "Display state" },
+        });
+        expect(state.queue[0]?.status).toBe("active");
+
+        state = reduceProgressUpdate(state, {
+            stage: "issue-execution",
+            status: "succeeded",
+            message: "Issue #13 completed.",
+            issue: { number: 13, title: "Display state" },
+        });
+        expect(state.queue[0]?.status).toBe("completed");
+
+        // A later needs-attention decision supersedes the execution success.
+        state = reduceProgressUpdate(state, {
+            stage: "grounding",
+            status: "needs-attention",
+            message: "Issue #13 needs attention.",
+            issue: { number: 13, title: "Display state" },
+        });
+        expect(state.queue[0]?.status).toBe("needs-attention");
+
+        state = reduceProgressUpdate(state, {
+            stage: "issue-queue",
+            status: "skipped",
+            message: "Issue #15 is no longer open.",
+            issue: { number: 15, title: "Third issue" },
+        });
+        expect(state.queue[2]?.status).toBe("skipped");
+
+        // Issues the queue never discovered stay out of the sidebar.
+        state = reduceProgressUpdate(state, {
+            stage: "issue-closure",
+            status: "succeeded",
+            message: "Parent #99 completed.",
+            issue: { number: 99, title: "Tracking parent" },
+        });
+        expect(state.queue.map(({ number }) => number)).toEqual([13, 14, 15]);
+    });
+
+    test("appends refreshed issues to the queue without duplicates", () => {
+        const first = reduceProgressUpdate(undefined, {
+            stage: "issue-queue",
+            status: "info",
+            message: "Issue queue ready with 1 issue.",
+            details: { issues: [{ number: 20, title: "Parent" }] },
+        });
+        const refreshed = reduceProgressUpdate(first, {
+            stage: "issue-queue",
+            status: "info",
+            message: "Issue queue refreshed; added 2 new issues.",
+            details: {
+                added: 2,
+                issues: [
+                    { number: 20, title: "Parent" },
+                    { number: 21, title: "Child one" },
+                    { number: 22, title: "Child two" },
+                ],
+            },
+        });
+
+        expect(refreshed.queue.map(({ number }) => number)).toEqual([
+            20, 21, 22,
+        ]);
     });
 
     test("provides a label for every progress stage", () => {

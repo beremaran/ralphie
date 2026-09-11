@@ -19,15 +19,19 @@ resolves to the full-screen TUI only when stdin and stderr are both TTYs and
 lines.
 
 - Interactive terminals get an OpenTUI application (the same rendering core
-  OpenCode 1.0 uses): a rounded frame with the repository header, a scrollable
-  transcript that streams assistant text as it arrives, compact thinking and
-  tool rows (`$ <command>`, `read <path>`, `✓ <tool> done`,
-  `✗ <tool> failed: <detail>`), and a one-line status bar with queue position,
-  issue, stage, activity, and elapsed time. Tool output, long commands, and
-  deep paths stay inside the transcript panel; resize is handled by the
-  renderer; Ctrl-C is forwarded as SIGINT so cancellation still restores the
-  checkout and saves state; disposal destroys the renderer and restores the
-  terminal.
+  OpenCode 1.0 uses): a rounded frame with the repository header, an issue
+  sidebar, a scrollable transcript that streams assistant text as it arrives,
+  compact thinking and tool rows (`$ <command>`, `read <path>`,
+  `✓ <tool> done`, `✗ <tool> failed: <detail>`), and a one-line status bar
+  with queue position, issue, stage, activity, and elapsed time. The sidebar
+  lists every issue discovered in the run with its outcome (`○` queued,
+  `▶` active, `✓` completed, `✗` failed, `⚠` needs-attention, `−` skipped)
+  and follows the active issue until you navigate away with `[`/`]` or
+  Ctrl+Left/Right; each issue keeps its own transcript, so processed issues
+  stay browsable while the run continues. Tool output, long commands, and deep
+  paths stay inside the transcript panel; resize is handled by the renderer;
+  Ctrl-C is forwarded as SIGINT so cancellation still restores the checkout
+  and saves state; disposal destroys the renderer and restores the terminal.
 - CI and redirected output are the deterministic noninteractive fallback:
   append-only, byte-identical across identical runs, with neither ANSI cursor
   controls (`ESC`) nor carriage-return bytes; `stripTerminalControls` is an
