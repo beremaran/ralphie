@@ -2,7 +2,7 @@ import type { AgentSessionEvent } from "../agent/contracts.ts";
 import { stripTerminalControls } from "../shared/terminal.ts";
 import { green, red, yellow } from "./colors.ts";
 import { PROGRESS_STAGE_LABELS } from "./display-state.ts";
-import type { ProgressStatus, ProgressUpdate } from "./progress.ts";
+import type { ProgressStatus, ProgressUpdate } from "../ports/progress.ts";
 
 /**
  * Rendering-independent activity view contract.

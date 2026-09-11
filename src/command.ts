@@ -23,6 +23,7 @@ import type { AgentEventListener } from "./agent/contracts.ts";
 import { exitCodeForError, RalphieExitCode } from "./process/exit-code.ts";
 import { workflow } from "./workflow.ts";
 import { BUILD_INFO } from "./build-info.ts";
+import { makeRunEventLog, type RunEventLog } from "./run/event-log.ts";
 import { resolveWorkspacePath } from "./workspace/workspace.ts";
 
 const cliOptions = {
@@ -274,6 +275,7 @@ export type CommandFactories = {
     readonly makeRuntime?: (input: {
         readonly agentRuntime: PiAgentService;
         readonly progress: ProgressCoordinator["progress"];
+        readonly runEventLog: RunEventLog;
     }) => CommandRuntime;
     readonly runWorkflow?: typeof workflow;
 };
@@ -306,17 +308,19 @@ const resolveCommandFactories = (
     runWorkflow: factories.runWorkflow ?? workflow,
 });
 
-const eventLogPathFor = (
+const eventLogFor = (
     config: ResolvedRalphieConfig,
     runId: string,
-): string | undefined =>
-    join(
-        resolveWorkspacePath(config.workspace),
-        ".ralphie",
-        "runs",
-        runId,
-        "events.jsonl",
-    );
+): RunEventLog =>
+    makeRunEventLog({
+        path: join(
+            resolveWorkspacePath(config.workspace),
+            ".ralphie",
+            "runs",
+            runId,
+            "events.jsonl",
+        ),
+    });
 
 const makeCommandCoordinator = (
     config: ResolvedRalphieConfig,
@@ -324,6 +328,7 @@ const makeCommandCoordinator = (
     runId: string,
     factory: NonNullable<CommandFactories["makeCoordinator"]>,
     output: CommandOutput,
+    eventLog: RunEventLog,
 ): ProgressCoordinator =>
     factory({
         mode: resolveProgressMode(config, terminal),
@@ -337,7 +342,7 @@ const makeCommandCoordinator = (
         write: config.json ? output.stdout : output.stderr,
         colors: terminal.isInteractive && !terminal.isCI,
         runId,
-        eventLogPath: eventLogPathFor(config, runId),
+        eventLog,
     });
 
 const workflowOptionsFor = (
@@ -415,6 +420,7 @@ export const runCommand = async (
 
     const terminal = input.terminal ?? terminalInfo();
     const runId = crypto.randomUUID();
+    const runEventLog = eventLogFor(config, runId);
     let coordinator: ProgressCoordinator | undefined;
     let runtime: CommandRuntime | undefined;
     let commandError: Error | undefined;
@@ -427,6 +433,7 @@ export const runCommand = async (
             runId,
             factories.makeCoordinator,
             output,
+            runEventLog,
         );
         const agentRuntime = factories.makeAgentRuntime(
             resolvePiAgentConfig(config),
@@ -435,6 +442,7 @@ export const runCommand = async (
         runtime = factories.makeRuntime({
             agentRuntime,
             progress: coordinator.progress,
+            runEventLog,
         });
         await factories.runWorkflow(
             workflowOptionsFor(config, input, runId),

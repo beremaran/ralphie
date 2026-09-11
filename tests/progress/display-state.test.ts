@@ -13,7 +13,7 @@ import {
     reduceProgressUpdate,
     type DisplayClock,
 } from "../../src/progress/display-state.ts";
-import type { ProgressStage } from "../../src/progress/progress.ts";
+import type { ProgressStage } from "../../src/ports/progress.ts";
 
 const context: AgentEventContext = {
     sessionID: "session-1",

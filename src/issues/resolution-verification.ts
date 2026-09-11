@@ -1,6 +1,6 @@
 import { buildResolutionVerificationPrompt } from "../agent/prompts.ts";
 import { requestStructuredOutput } from "../agent/structured-output.ts";
-import type { ProgressReporterService } from "../progress/progress.ts";
+import type { ProgressReporterService } from "../ports/progress.ts";
 import { RalphieError } from "../shared/error.ts";
 import {
     resolutionVerificationDecisionSchema,

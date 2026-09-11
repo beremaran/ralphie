@@ -97,7 +97,9 @@ Run artifacts live under:
 ```
 
 New runs write the durable event log to
-`<workspace>/.ralphie/runs/<run-id>/events.jsonl`.
+`<workspace>/.ralphie/runs/<run-id>/events.jsonl`. The run closes the log
+immediately before removing the workspace, so post-cleanup progress still
+renders but is not persisted.
 
 A normal issue execution obtains a durable per-issue artifact store at:
 

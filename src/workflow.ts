@@ -25,7 +25,7 @@ import {
     type ProgressReporterService,
     type ProgressStage,
     type ProgressUpdate,
-} from "./progress/progress.ts";
+} from "./ports/progress.ts";
 import {
     RUN_STATE_VERSION,
     type RunState,
@@ -722,6 +722,7 @@ export const workflow = async (
     } = config;
     const {
         progress,
+        runEventLog,
         runStateStore: stateStore,
         workspace: workspaceService,
         githubClient,
@@ -1393,9 +1394,10 @@ export const workflow = async (
             });
             throw error;
         }
-        // The event log lives inside the workspace. Disable durable writes after
-        // removal so cleanup-success and run-success events cannot recreate it.
-        await progress.stopPersisting();
+        // The audit log lives inside the workspace; close it before the
+        // post-removal event so cleanup-success and run-success cannot
+        // recreate the deleted workspace.
+        runEventLog.close();
         await progress.emit({
             stage: "workspace-cleanup",
             status: "succeeded",

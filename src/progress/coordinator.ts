@@ -29,11 +29,13 @@ import {
     makeProgressOutput,
     makeProgressReporter,
     type ProgressOutput,
-    type ProgressReporterService,
     type ProgressRenderMode,
     type ProgressRendererOptions,
-    type ProgressUpdate,
 } from "./progress.ts";
+import type {
+    ProgressReporterService,
+    ProgressUpdate,
+} from "../ports/progress.ts";
 import {
     createActivityState,
     reduceActivityEvent,
@@ -353,13 +355,6 @@ export const makeProgressCoordinator = (
             transcript?.interruptLine();
             await progressRenderer.emit(update);
         },
-        writeRaw: (text) => {
-            if (disposed || text.length === 0) return;
-            if (options.mode === "json") return;
-            transcript?.interruptLine();
-            progressRenderer.writeRaw?.(text);
-        },
-        stopPersisting: progressRenderer.stopPersisting,
     };
 
     const insertBreadcrumb = (

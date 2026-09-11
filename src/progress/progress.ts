@@ -1,85 +1,14 @@
-import { appendFileSync, mkdirSync } from "node:fs";
-import { dirname } from "node:path";
-
 import { stripTerminalControls } from "../shared/terminal.ts";
+import type {
+    ProgressEvent,
+    ProgressReporterService,
+    ProgressStatus,
+    ProgressUpdate,
+} from "../ports/progress.ts";
+import type { RunEventLog } from "../run/event-log.ts";
 import { cyan, dim, green, red, yellow } from "./colors.ts";
 
-export type ProgressStage =
-    | "run"
-    | "workspace-preparation"
-    | "workspace-cleanup"
-    | "github-authentication"
-    | "git-verification"
-    | "remote-safety"
-    | "repository-discovery"
-    | "repository-preparation"
-    | "issue-discovery"
-    | "agent-runtime"
-    | "issue-planning"
-    | "issue-execution"
-    | "issue-queue"
-    | "grounding"
-    | "issue-grounding"
-    | "complexity-assessment"
-    | "implementation"
-    | "change-staging"
-    | "verification"
-    | "verification-fix"
-    | "resolution-verification"
-    | "review"
-    | "review-fix"
-    | "review-exhaustion"
-    | "checkout-restore"
-    | "commit-message"
-    | "commit"
-    | "push"
-    | "decomposition"
-    | "issue-creation"
-    | "issue-relationships"
-    | "issue-closure"
-    | "pr-gate"
-    | "notification";
-
-export type ProgressStatus =
-    | "started"
-    | "succeeded"
-    | "failed"
-    | "skipped"
-    | "needs-attention"
-    | "info";
-
 export type ProgressRenderMode = "interactive" | "plain" | "json";
-
-export type ProgressIssue = {
-    readonly number: number;
-    readonly title: string;
-};
-
-export type ProgressUpdate = {
-    readonly stage: ProgressStage;
-    readonly status: ProgressStatus;
-    readonly message: string;
-    readonly repository?: string;
-    readonly issue?: ProgressIssue;
-    readonly current?: number;
-    readonly total?: number;
-    readonly attempt?: number;
-    readonly maxAttempts?: number;
-    readonly details?: Readonly<Record<string, unknown>>;
-};
-
-export type ProgressEvent = ProgressUpdate & {
-    readonly runId: string;
-    readonly timestamp: string;
-};
-
-export type ProgressReporterService = {
-    readonly emit: (update: ProgressUpdate) => Promise<void>;
-    /** Write streamed agent output without allowing an interactive status line to corrupt it. */
-    readonly writeRaw?: (text: string) => void;
-    /** Stop writing durable events while continuing to render progress. */
-    readonly stopPersisting: () => Promise<void>;
-};
 
 /**
  * Shared output primitives used by progress and transcript renderers.
@@ -103,8 +32,8 @@ export type ProgressRendererOptions = {
     readonly colors?: boolean;
     readonly now?: () => Date;
     readonly runId?: string;
-    /** Optional durable JSON Lines audit log. */
-    readonly eventLogPath?: string;
+    /** Optional run audit sink for already-stamped progress events. */
+    readonly eventLog?: RunEventLog;
 };
 
 const statusSymbol = (status: ProgressStatus, colors: boolean): string => {
@@ -269,7 +198,7 @@ export const makeProgressReporter = ({
     width = () => process.stderr.columns ?? 80,
     now = () => new Date(),
     runId = crypto.randomUUID(),
-    eventLogPath,
+    eventLog,
 }: ProgressRendererOptions): ProgressReporterService => {
     const output =
         configuredOutput ??
@@ -278,7 +207,6 @@ export const makeProgressReporter = ({
             write,
         });
     const activeProgress: ActiveProgress[] = [];
-    let persistEvents = true;
 
     const renderLine = (event: ProgressEvent): string => {
         const style = (
@@ -320,9 +248,7 @@ export const makeProgressReporter = ({
     };
 
     const persistEvent = (event: ProgressEvent): void => {
-        if (eventLogPath === undefined || !persistEvents) return;
-        mkdirSync(dirname(eventLogPath), { recursive: true });
-        appendFileSync(eventLogPath, `${JSON.stringify(event)}\n`, "utf8");
+        eventLog?.append(event);
     };
 
     const renderInteractiveEvent = (
@@ -373,10 +299,6 @@ export const makeProgressReporter = ({
     };
 
     return {
-        writeRaw: (text) => {
-            if (mode === "json") return;
-            output.writeTranscript(stripTerminalControls(text));
-        },
         emit: async (update) => {
             const emittedAt = now();
             const event = makeProgressEvent(update, runId, emittedAt);
@@ -393,9 +315,6 @@ export const makeProgressReporter = ({
             }
 
             renderInteractiveEvent(event, line, emittedAt);
-        },
-        stopPersisting: async () => {
-            persistEvents = false;
         },
     };
 };

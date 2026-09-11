@@ -14,6 +14,7 @@ describe("runtime factory", () => {
                 },
             },
             progress: makeTestProgressRecorder([]),
+            runEventLog: { append: () => {}, close: () => {} },
         });
 
         expect(runtime.githubIssues).toBeDefined();

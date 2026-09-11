@@ -1,4 +1,4 @@
-import { type ProgressReporterService } from "../progress/progress.ts";
+import { type ProgressReporterService } from "../ports/progress.ts";
 import { RalphieError } from "../shared/error.ts";
 import { DecompositionDepthLimitError } from "../github/decomposition-markdown.ts";
 import {

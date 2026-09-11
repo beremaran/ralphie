@@ -76,7 +76,7 @@ import type { IssueVerificationService } from "../../src/issues/verification.ts"
 import type {
     ProgressReporterService,
     ProgressUpdate,
-} from "../../src/progress/progress.ts";
+} from "../../src/ports/progress.ts";
 import { makeTestProgressRecorder } from "../shared/progress-recorder.ts";
 import { RalphieError } from "../../src/shared/error.ts";
 

@@ -5,7 +5,7 @@ import {
     type ProgressStage,
     type ProgressIssue,
     type ProgressReporterService,
-} from "../progress/progress.ts";
+} from "../ports/progress.ts";
 import { RalphieError } from "../shared/error.ts";
 import type { AgentModel, AgentSelection } from "./model.ts";
 

@@ -8,7 +8,7 @@ import type {
     ProgressStage,
     ProgressStatus,
     ProgressUpdate,
-} from "./progress.ts";
+} from "../ports/progress.ts";
 
 export type DisplayActivity = "thinking" | "responding" | "tool" | "waiting";
 

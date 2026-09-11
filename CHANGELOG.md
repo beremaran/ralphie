@@ -75,6 +75,14 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Changed
 
+- Decouple execution from presentation. The progress contract now lives in
+  `src/ports/progress.ts` (no rendering or I/O dependencies), the renderers in
+  `src/progress/` implement it, and execution code no longer imports the
+  presentation layer. The `events.jsonl` audit moved out of the renderer into
+  `src/run/event-log.ts` and is closed by the run before workspace removal; the
+  dead `writeRaw`/`stopPersisting` surface is gone. `tests/architecture.test.ts`
+  enforces the import directions and process-stream ownership.
+
 - Verification is now opt-in. The `package.json` `bun run check` discovery
   default is removed; when no `--verify-command` is supplied the deterministic
   gate is skipped and review proceeds on the staged diff. Supplied commands

@@ -42,13 +42,21 @@ effects and validate their invariants at the boundary.
 | `src/issues/` | Queueing, complexity routing, implementation, review, recovery, and decomposition. |
 | `src/agent/` | Ralphie's session, prompt, schema, diagnostics, and structured-output boundary. |
 | `src/pi/` | In-process pi agent runtime: provider catalog, credential store, execution tools, session lifecycle, and safety policy. |
-| `src/progress/` | Typed events, audit persistence, and terminal/JSON renderers. |
-| `src/run/` | Versioned run state written for observability. |
+| `src/ports/` | Execution-facing contracts with no rendering or I/O dependencies. |
+| `src/progress/` | Presentation adapters implementing the progress port: terminal/JSON renderers, activity, footer, and transcript. |
+| `src/run/` | Versioned run state and the workspace-scoped event audit. |
 | `src/workspace/` | Path expansion and protected workspace removal. |
 | `src/process/` | External command execution and process exit semantics. |
 
 `src/workflow.ts` orchestrates the issue modules. `src/runtime.ts` assembles
 their live implementations into one explicit runtime object.
+
+Execution depends on `src/ports/progress.ts` only; it never imports the
+renderer. `src/command.ts` is the composition root: it resolves the output
+mode, constructs the coordinator, and passes the same `RunEventLog` to both
+the coordinator (for persistence) and the workflow (which closes it before
+removing the workspace). `tests/architecture.test.ts` enforces these import
+directions and the process-stream ownership rule.
 
 ## Dependency and side-effect rules
 
@@ -96,5 +104,5 @@ the normal check gate.
 | Decomposition and GitHub mutations | `src/issues/decomposition-executor.ts`, `src/github/issue-mutations.ts`, `src/github/issue-relationships.ts` |
 | Pi model catalog, credentials, tools, sessions, and structured results | `src/pi/`, `src/agent/` |
 | Git checkpoints, safety, and branches | `src/git/` |
-| Durable state and reconciliation | `src/run/`, `src/issues/artifacts.ts` |
-| Progress and exit semantics | `src/progress/`, `src/process/exit-code.ts` |
+| Durable run state and event audit | `src/run/`, `src/issues/artifacts.ts` |
+| Execution contracts, presentation, and exit semantics | `src/ports/`, `src/progress/`, `src/process/exit-code.ts` |

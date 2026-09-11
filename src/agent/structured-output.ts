@@ -15,7 +15,7 @@ import {
     type ProgressStage,
     type ProgressIssue,
     type ProgressReporterService,
-} from "../progress/progress.ts";
+} from "../ports/progress.ts";
 
 export type StructuredOutputRequest<Output> = {
     readonly directory: string;

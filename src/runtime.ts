@@ -88,7 +88,8 @@ import {
     type NeedsAttentionRouterService,
 } from "./issues/needs-attention.ts";
 import { type PiAgentService } from "./pi/runtime.ts";
-import { type ProgressReporterService } from "./progress/progress.ts";
+import { type ProgressReporterService } from "./ports/progress.ts";
+import { type RunEventLog } from "./run/event-log.ts";
 import { RunStateStoreLive, type RunStateStoreService } from "./run/state.ts";
 import { WorkspaceLive, type WorkspaceService } from "./workspace/workspace.ts";
 
@@ -120,6 +121,7 @@ export type RalphieRuntime = {
     readonly needsAttentionRouter: NeedsAttentionRouterService;
     readonly agentRuntime: PiAgentService;
     readonly progress: ProgressReporterService;
+    readonly runEventLog: RunEventLog;
     readonly runStateStore: RunStateStoreService;
     readonly workspace: WorkspaceService;
 };
@@ -127,6 +129,7 @@ export type RalphieRuntime = {
 /** Focused dependencies consumed directly by the issue workflow entrypoint. */
 export type IssueWorkflowRuntime = {
     readonly progress: ProgressReporterService;
+    readonly runEventLog: RunEventLog;
     readonly runStateStore: RunStateStoreService;
     readonly workspace: WorkspaceService;
     readonly githubClient: GitHubClientService;
@@ -145,6 +148,7 @@ export type IssueWorkflowRuntime = {
 export type RuntimeOverrides = {
     readonly agentRuntime: PiAgentService;
     readonly progress: ProgressReporterService;
+    readonly runEventLog: RunEventLog;
     /** Optional deterministic seam for the issue artifact store. */
     readonly commandRunner?: CommandRunnerService;
     readonly runStateStore?: RunStateStoreService;
@@ -155,6 +159,7 @@ export type RuntimeOverrides = {
 export const makeLiveRuntime = ({
     agentRuntime,
     progress,
+    runEventLog,
     commandRunner = CommandRunnerLive,
     runStateStore = RunStateStoreLive,
     workspace = WorkspaceLive,
@@ -243,6 +248,7 @@ export const makeLiveRuntime = ({
         needsAttentionRouter,
         agentRuntime,
         progress,
+        runEventLog,
         runStateStore,
         workspace,
     };

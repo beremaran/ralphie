@@ -206,15 +206,13 @@ describe("coordinator transcript and stream integrity", () => {
         await coordinator.dispose();
     });
 
-    test("keeps interleaved assistant, raw, tool, and progress markers in emit order", async () => {
+    test("keeps interleaved assistant, tool, and progress markers in emit order", async () => {
         const { coordinator, strategy } = makeHarness();
         coordinator.piListener(asEvent({ type: "agent_start" }), context);
         coordinator.piListener(textStart(), context);
         coordinator.piListener(textDelta("assistant-A "), context);
-        coordinator.progress.writeRaw?.("raw-A ");
         coordinator.piListener(toolStart("tool-A"), context);
         coordinator.piListener(textDelta("assistant-B "), context);
-        coordinator.progress.writeRaw?.("raw-B\n");
         coordinator.piListener(toolUpdate("tool-A"), context);
         await coordinator.progress.emit({
             stage: "implementation",
@@ -233,10 +231,8 @@ describe("coordinator transcript and stream integrity", () => {
         const output = strategy.durableBytes();
         ordered(output, [
             "assistant-A",
-            "raw-A",
             "tool-A",
             "assistant-B",
-            "raw-B",
             "progress-A",
             "assistant-C",
             "integrity-tool done",

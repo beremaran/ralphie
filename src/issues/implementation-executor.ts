@@ -23,7 +23,7 @@ import { z } from "zod";
 import {
     type ProgressStage,
     type ProgressReporterService,
-} from "../progress/progress.ts";
+} from "../ports/progress.ts";
 import { RalphieError } from "../shared/error.ts";
 import {
     IssueExecutionOutcomeKind,

@@ -107,7 +107,7 @@ describe("PTY scenario CLI options", () => {
             width: () => 80,
             colors: false,
             runId: "pty-run",
-            eventLogPath: "/tmp/pty-events.jsonl",
+            eventLog: { append: () => {}, close: () => {} },
             breadcrumbThreshold: 99,
         });
 

@@ -32,8 +32,9 @@ import type { PiAgentService } from "../src/pi/runtime.ts";
 import type {
     ProgressReporterService,
     ProgressUpdate,
-} from "../src/progress/progress.ts";
+} from "../src/ports/progress.ts";
 import { makeTestProgressRecorder } from "./shared/progress-recorder.ts";
+import type { RunEventLog } from "../src/run/event-log.ts";
 import {
     type RunState,
     RunStateStatus,
@@ -93,6 +94,7 @@ type TestRuntimeOptions = {
     readonly refreshedIssues?: Readonly<Record<number, GitHubIssue>>;
     readonly needsAttentionNotification?: GitHubNeedsAttentionNotificationService;
     readonly onStateSave?: (state: RunState) => void;
+    readonly eventLog?: RunEventLog;
     /** Native sub-issues reported for every parent during reconciliation. */
     readonly parentSubIssues?: ReadonlyArray<GitHubIssue>;
     /** Model catalog exposed by the mock pi runtime for thinking validation. */
@@ -257,6 +259,12 @@ const testRuntime = (
             };
         },
     };
+    const eventLog: RunEventLog = options.eventLog ?? {
+        append: () => {},
+        close: () => {
+            calls.push("closeEventLog");
+        },
+    };
     const stateStore: RunStateStoreService = {
         save: async (_path, state) => {
             const saved = structuredClone(state);
@@ -317,6 +325,7 @@ const testRuntime = (
         issueExecutor,
         agentRuntime,
         progress,
+        runEventLog: eventLog,
         runStateStore: stateStore,
         workspace,
     };
@@ -503,6 +512,7 @@ describe("workflow", () => {
             "closeIssue:42",
             "closeRuntime",
             "removeWorkspace:/tmp/ralphie",
+            "closeEventLog",
         ]);
         expect(events.some(({ stage }) => stage === "issue-execution")).toBe(
             true,

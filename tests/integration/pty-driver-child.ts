@@ -59,7 +59,7 @@ import {
 import type {
     ProgressIssue,
     ProgressUpdate,
-} from "../../src/progress/progress.ts";
+} from "../../src/ports/progress.ts";
 import type { TerminalOutputController } from "../../src/progress/terminal-controller.ts";
 import type { IssueWorkflowRuntime } from "../../src/runtime.ts";
 import type { WorkflowOptions } from "../../src/workflow.ts";

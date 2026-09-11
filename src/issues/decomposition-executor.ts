@@ -15,7 +15,7 @@ import type { GitHubIssue, GitHubIssuesService } from "../github/issues.ts";
 import type { GitHubIssueRelationshipService } from "../github/issue-relationships.ts";
 import { buildDecompositionPrompt } from "../agent/prompts.ts";
 import { requestStructuredOutput } from "../agent/structured-output.ts";
-import type { ProgressReporterService } from "../progress/progress.ts";
+import type { ProgressReporterService } from "../ports/progress.ts";
 import { RalphieError } from "../shared/error.ts";
 import {
     IssueArtifactKind,

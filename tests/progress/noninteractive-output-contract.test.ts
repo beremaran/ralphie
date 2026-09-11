@@ -5,16 +5,13 @@ import type {
     AgentSessionEvent,
 } from "../../src/agent/contracts.ts";
 import { makeProgressCoordinator } from "../../src/progress/coordinator.ts";
-import type {
-    ProgressRenderMode,
-    ProgressUpdate,
-} from "../../src/progress/progress.ts";
+import type { ProgressRenderMode } from "../../src/progress/progress.ts";
+import type { ProgressUpdate } from "../../src/ports/progress.ts";
 import { stripTerminalControls } from "../../src/shared/terminal.ts";
 
 const FIXED_TIMESTAMP = "2026-09-09T00:00:00.000Z";
 const RUN_ID = "fixed-output-run";
 const ASSISTANT_TOKEN = "ghx_0123456789abcdef0123456789abcdef";
-const RAW_TOKEN = "sk-proj-0123456789ABCDEF0123456789AbcDEF";
 
 const context: AgentEventContext = {
     sessionID: "output-session",
@@ -149,10 +146,6 @@ const play = async (mode: ProgressRenderMode): Promise<Capture> => {
     coordinator.piListener(events[1] as AgentSessionEvent, context);
     coordinator.piListener(events[2] as AgentSessionEvent, context);
     coordinator.piListener(events[3] as AgentSessionEvent, context);
-    coordinator.progress.writeRaw?.("raw-before ");
-    coordinator.progress.writeRaw?.(RAW_TOKEN.slice(0, 21));
-    coordinator.progress.writeRaw?.(RAW_TOKEN.slice(21));
-    coordinator.progress.writeRaw?.("\nraw-after\n");
     coordinator.piListener(events[4] as AgentSessionEvent, context);
     coordinator.piListener(events[5] as AgentSessionEvent, context);
     coordinator.piListener(events[6] as AgentSessionEvent, context);
@@ -223,13 +216,6 @@ describe("deterministic noninteractive output contracts", () => {
         expect(first.stderr).toContain("failed-marker");
         expect(first.stderr).toContain("needs-attention-marker");
         expect(first.stderr).toContain(`Bearer ${ASSISTANT_TOKEN}`);
-        expect(first.stderr).toContain(RAW_TOKEN);
-        expect(first.stderr.indexOf("raw-before")).toBeLessThan(
-            first.stderr.indexOf(RAW_TOKEN),
-        );
-        expect(first.stderr.indexOf(RAW_TOKEN)).toBeLessThan(
-            first.stderr.indexOf("raw-after"),
-        );
         // Human progress lines never render the structured details payload;
         // use --output json or the events.jsonl audit for the full record.
         const progressLine = first.stderr
@@ -286,9 +272,6 @@ describe("deterministic noninteractive output contracts", () => {
             .map((event) => event.assistantMessageEvent.delta)
             .join("");
         expect(assistantDeltas).toBe(`Bearer ${ASSISTANT_TOKEN}`);
-        expect(first.stdout).not.toContain(RAW_TOKEN);
-        expect(first.stdout).not.toContain("raw-before");
-        expect(first.stdout).not.toContain("raw-after");
         for (const glyph of humanGlyphs) {
             expect(first.stdout).not.toContain(glyph);
         }

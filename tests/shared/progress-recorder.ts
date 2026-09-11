@@ -1,7 +1,7 @@
 import type {
     ProgressReporterService,
     ProgressUpdate,
-} from "../../src/progress/progress.ts";
+} from "../../src/ports/progress.ts";
 
 export const makeTestProgressRecorder = (
     events: ProgressUpdate[],
@@ -9,5 +9,4 @@ export const makeTestProgressRecorder = (
     emit: async (event) => {
         events.push(event);
     },
-    stopPersisting: async () => {},
 });
