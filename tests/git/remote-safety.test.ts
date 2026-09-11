@@ -1,13 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
+import { makeGitRemoteSafetyService } from "../../src/adapters/git/remote-safety.ts";
+import { GitRemoteSafetyError } from "../../src/core/ports/git.ts";
 import {
-    GitRemoteSafetyError,
-    makeGitRemoteSafetyService,
-} from "../../src/adapters/git/remote-safety.ts";
-import type {
-    CommandResult,
-    CommandRunnerService,
-} from "../../src/adapters/process/command-runner.ts";
+    type CommandResult,
+    type CommandRunnerService,
+} from "../../src/core/ports/process.ts";
 
 const REPOSITORY = "owner/repository";
 const REPOSITORY_PATH = "/work/repository";

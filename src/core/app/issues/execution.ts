@@ -1,15 +1,15 @@
-import type { Octokit } from "octokit";
+import type { GitHubApiClient } from "../../ports/github.ts";
 import type { AgentClient } from "../../ports/agent.ts";
 
-import type { GitHubIssue } from "../../../adapters/github/issues.ts";
-import type { IssueArtifactStore } from "../../../adapters/issues/artifacts.ts";
+import { type GitHubIssue } from "../../domain/github.ts";
+import type { IssueArtifactStore } from "./artifacts.ts";
 import type {
     IssueResolutionDecision,
     NeedsAttentionReason,
-} from "./decisions.ts";
+} from "../../domain/decisions.ts";
 import type { AgentSelection } from "../../domain/agent-model.ts";
 import type { AgentSessionDiagnostics } from "../agent/task-session.ts";
-import type { GitRepositoryInvariantService } from "../../../adapters/git/repository-invariant.ts";
+import { type GitRepositoryInvariantService } from "../../ports/git.ts";
 
 /**
  * The terminal state reported by an issue executor.
@@ -106,7 +106,7 @@ export type IssueExecutionContext = {
     readonly targetBranch: string;
     readonly workspace: string;
     readonly runId: string;
-    readonly octokit: Octokit;
+    readonly octokit: GitHubApiClient;
     readonly agent: AgentClient;
     readonly agentSelection: AgentSelection;
     readonly implementationAttempts?: number;

@@ -5,7 +5,7 @@ import { RalphieError } from "../../../shared/error.ts";
 import {
     complexityDecisionSchema,
     type ComplexityDecision,
-} from "./decisions.ts";
+} from "../../domain/decisions.ts";
 import type { IssueExecutionContext } from "./execution.ts";
 import type { NeedsAttentionRequest } from "../agent/task-session.ts";
 

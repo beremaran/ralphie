@@ -6,7 +6,7 @@ import {
     resolutionVerificationDecisionSchema,
     type ResolutionVerificationDecision,
     IssueResolutionStatus,
-} from "./decisions.ts";
+} from "../../domain/decisions.ts";
 import type { IssueExecutionContext } from "./execution.ts";
 import type { NeedsAttentionRequest } from "../agent/task-session.ts";
 

@@ -5,7 +5,7 @@ import type {
     ProgressStatus,
     ProgressUpdate,
 } from "../../core/ports/progress.ts";
-import type { RunEventLog } from "../run/event-log.ts";
+import { type RunEventLog } from "../../core/ports/run.ts";
 import { cyan, dim, green, red, yellow } from "./colors.ts";
 
 export type ProgressRenderMode = "interactive" | "plain" | "json";

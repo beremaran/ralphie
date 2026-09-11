@@ -1,4 +1,4 @@
-import type { GitHubIssue } from "../../../adapters/github/issues.ts";
+import { type GitHubIssue } from "../../domain/github.ts";
 import {
     isDecomposedParent,
     parseGeneratedIssueDependencies,

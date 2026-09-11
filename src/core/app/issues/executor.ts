@@ -6,7 +6,7 @@ import {
     issueFreshnessFingerprint,
     issueArtifactPath,
     type IssueArtifactStoreService,
-} from "../../../adapters/issues/artifacts.ts";
+} from "./artifacts.ts";
 import type { ComplexityAssessmentService } from "./complexity.ts";
 import {
     ComplexityLevel,
@@ -15,7 +15,7 @@ import {
     type IssueResolutionDecision,
     IssueResolutionStatus,
     resolutionVerificationDecisionSchema,
-} from "./decisions.ts";
+} from "../../domain/decisions.ts";
 import type {
     IssueExecutionContext,
     IssueExecutionOutcome,

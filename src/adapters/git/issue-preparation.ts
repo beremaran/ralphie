@@ -1,22 +1,10 @@
-import { IssueArtifactKind } from "../issues/artifacts.ts";
-import type { IssueArtifactStoreService } from "../issues/artifacts.ts";
-import type { IssueCheckpoint } from "./issue-checkpoint.ts";
-import type { GitIssueCheckpointService } from "./issue-checkpoint.ts";
+import { IssueArtifactKind } from "../../core/app/issues/artifacts.ts";
+import { type IssueArtifactStoreService } from "../../core/app/issues/artifacts.ts";
+import {
+    type GitIssueCheckpointService,
+    type GitIssuePreparationService,
+} from "../../core/ports/git.ts";
 import { RalphieError } from "../../shared/error.ts";
-
-export type IssuePreparationInput = {
-    readonly issueNumber: number;
-    readonly repositoryPath: string;
-    readonly branch: string;
-    readonly signal?: AbortSignal;
-};
-
-export type GitIssuePreparationService = {
-    /** Capture and persist the clean issue base before agent work starts. */
-    readonly prepare: (
-        input: IssuePreparationInput,
-    ) => Promise<IssueCheckpoint>;
-};
 
 export const makeGitIssuePreparationService = (
     checkpoints: GitIssueCheckpointService,

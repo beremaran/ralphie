@@ -5,19 +5,19 @@ import { join } from "node:path";
 import type { Octokit } from "octokit";
 
 import type { AgentClient } from "../../src/core/ports/agent.ts";
-import type { GitHubIssue } from "../../src/adapters/github/issues.ts";
-import type { GitIssueCheckpointService } from "../../src/adapters/git/issue-checkpoint.ts";
-import type { IssueCheckpoint } from "../../src/adapters/git/issue-checkpoint.ts";
-import type { GitIssuePreparationService } from "../../src/adapters/git/issue-preparation.ts";
-import type { GitIssueOperationsService } from "../../src/adapters/git/issue-operations.ts";
-import type { GitRemoteSafetyService } from "../../src/adapters/git/remote-safety.ts";
-import type {
-    GitRepositoryInvariant,
-    GitRepositoryInvariantService,
-} from "../../src/adapters/git/repository-invariant.ts";
-import type { GitHubIssueRelationshipService } from "../../src/adapters/github/issue-relationships.ts";
-import type { GitHubIssueMutationService } from "../../src/adapters/github/issue-mutations.ts";
-import type { GitHubIssuesService } from "../../src/adapters/github/issues.ts";
+import { type GitHubIssue } from "../../src/core/domain/github.ts";
+import { type GitIssueCheckpointService } from "../../src/core/ports/git.ts";
+import { type IssueCheckpoint } from "../../src/core/ports/git.ts";
+import { type GitIssuePreparationService } from "../../src/core/ports/git.ts";
+import { type GitIssueOperationsService } from "../../src/core/ports/git.ts";
+import { type GitRemoteSafetyService } from "../../src/core/ports/git.ts";
+import {
+    type GitRepositoryInvariant,
+    type GitRepositoryInvariantService,
+} from "../../src/core/ports/git.ts";
+import { type GitHubIssueRelationshipService } from "../../src/core/ports/github.ts";
+import { type GitHubIssueMutationService } from "../../src/core/ports/github.ts";
+import { type GitHubIssuesService } from "../../src/core/ports/github.ts";
 import { DEFAULT_AGENT } from "../../src/core/domain/agent-model.ts";
 import { requestStructuredOutput } from "../../src/core/app/agent/structured-output.ts";
 import {
@@ -31,7 +31,7 @@ import {
     type IssueArtifactStore,
     type IssueArtifactStoreService,
     type IssueFreshnessFingerprint,
-} from "../../src/adapters/issues/artifacts.ts";
+} from "../../src/core/app/issues/artifacts.ts";
 import type { ComplexityAssessmentService } from "../../src/core/app/issues/complexity.ts";
 import {
     makeDecompositionExecutorService,
@@ -47,7 +47,7 @@ import {
     complexityDecisionSchema,
     groundingDecisionSchema,
     type GroundingDecision,
-} from "../../src/core/app/issues/decisions.ts";
+} from "../../src/core/domain/decisions.ts";
 import {
     makeImplementationExecutorService,
     type ImplementationExecutorService,
@@ -62,11 +62,12 @@ import {
     makeNeedsAttentionRouterService,
     type NeedsAttentionRouterService,
 } from "../../src/core/app/issues/needs-attention.ts";
+import { nodeRecoveryFileSystem } from "../../src/adapters/issues/recovery-file-system.ts";
 import {
     makeIssueRecoveryService,
     type IssueRecoveryService,
     type NeedsAttentionRecoveryInput,
-} from "../../src/adapters/issues/recovery.ts";
+} from "../../src/core/app/issues/recovery.ts";
 import { makeResolutionVerificationService } from "../../src/core/app/issues/resolution-verification.ts";
 import {
     IssueQueueResumeStrategy,
@@ -1910,7 +1911,12 @@ describe("needs-attention recovery diagnostics", () => {
             };
             const verifyCalls: Array<{ branch: string; head: string }> = [];
             const invariant = makeInvariant(verifyCalls);
-            const recovery = makeIssueRecoveryService(git, progress, invariant);
+            const recovery = makeIssueRecoveryService(
+                nodeRecoveryFileSystem,
+                git,
+                progress,
+                invariant,
+            );
             const input: NeedsAttentionRecoveryInput = {
                 runId: "run-1",
                 repository: "owner/repo",
@@ -1955,6 +1961,7 @@ describe("needs-attention recovery diagnostics", () => {
                 },
             };
             const recovery = makeIssueRecoveryService(
+                nodeRecoveryFileSystem,
                 git,
                 progress,
                 makeInvariant([]),
@@ -2003,6 +2010,7 @@ describe("needs-attention recovery diagnostics", () => {
                 },
             };
             const recovery = makeIssueRecoveryService(
+                nodeRecoveryFileSystem,
                 git,
                 progress,
                 makeInvariant([]),
@@ -2048,6 +2056,7 @@ describe("needs-attention recovery diagnostics", () => {
             };
             const verifyCalls: Array<{ branch: string; head: string }> = [];
             const recovery = makeIssueRecoveryService(
+                nodeRecoveryFileSystem,
                 git,
                 progress,
                 makeInvariant(verifyCalls),
@@ -2103,7 +2112,12 @@ describe("needs-attention recovery diagnostics", () => {
                     });
                 },
             };
-            const recovery = makeIssueRecoveryService(git, progress, invariant);
+            const recovery = makeIssueRecoveryService(
+                nodeRecoveryFileSystem,
+                git,
+                progress,
+                invariant,
+            );
             const input: NeedsAttentionRecoveryInput = {
                 runId: "run-1",
                 repository: "owner/repo",

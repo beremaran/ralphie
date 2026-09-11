@@ -1,20 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import type { Octokit } from "octokit";
 import type { AgentClient } from "../src/core/ports/agent.ts";
-import type { PiModelInfo } from "../src/adapters/pi/models.ts";
+import { type PiModelInfo } from "../src/core/domain/pi-models.ts";
 
-import type { GitRepositoryService } from "../src/adapters/git/repository.ts";
-import type { GitRepositoryInvariantService } from "../src/adapters/git/repository-invariant.ts";
-import type { GitIssueCheckpointService } from "../src/adapters/git/issue-checkpoint.ts";
-import type { GitIssueOperationsService } from "../src/adapters/git/issue-operations.ts";
-import type { GitHubClientService } from "../src/adapters/github/client.ts";
-import type { GitHubIssueMutationService } from "../src/adapters/github/issue-mutations.ts";
+import { type GitRepositoryService } from "../src/core/ports/git.ts";
+import { type GitRepositoryInvariantService } from "../src/core/ports/git.ts";
+import { type GitIssueCheckpointService } from "../src/core/ports/git.ts";
+import { type GitIssueOperationsService } from "../src/core/ports/git.ts";
+import { type GitHubClientService } from "../src/core/ports/github.ts";
+import { type GitHubIssueMutationService } from "../src/core/ports/github.ts";
 import { makeParentCompletionService } from "../src/adapters/github/parent-completion.ts";
-import type { GitHubNeedsAttentionNotificationService } from "../src/adapters/github/needs-attention.ts";
-import type {
-    GitHubIssue,
-    GitHubIssuesService,
-} from "../src/adapters/github/issues.ts";
+import { type GitHubNeedsAttentionNotificationService } from "../src/core/ports/github.ts";
+import { type GitHubIssuesService } from "../src/core/ports/github.ts";
+import { type GitHubIssue } from "../src/core/domain/github.ts";
 import {
     type IssueExecutionContext,
     type IssueExecutionOutcome,
@@ -28,24 +26,21 @@ import {
     IssueArtifactKind,
     type IssueArtifactStoreService,
     makeIssueArtifactStore,
-} from "../src/adapters/issues/artifacts.ts";
+} from "../src/core/app/issues/artifacts.ts";
 import { DEFAULT_AGENT } from "../src/core/domain/agent-model.ts";
 import type { AgentModel } from "../src/core/domain/agent-model.ts";
-import type { PiAgentService } from "../src/adapters/pi/runtime.ts";
+import { type PiAgentService } from "../src/core/ports/pi.ts";
 import type {
     ProgressReporterService,
     ProgressUpdate,
 } from "../src/core/ports/progress.ts";
 import { makeTestProgressRecorder } from "./shared/progress-recorder.ts";
-import type { RunEventLog } from "../src/adapters/run/event-log.ts";
-import {
-    type RunState,
-    RunStateStatus,
-    type RunStateStoreService,
-} from "../src/adapters/run/state.ts";
-import type { WorkspaceService } from "../src/adapters/workspace/workspace.ts";
+import { type RunEventLog } from "../src/core/ports/run.ts";
+import { type RunStateStoreService } from "../src/core/ports/run.ts";
+import { type RunState, RunStateStatus } from "../src/core/domain/run-state.ts";
+import { type WorkspaceService } from "../src/core/ports/workspace.ts";
 import { workflow } from "../src/core/app/workflow.ts";
-import { IssueOrder, IssueSort } from "../src/adapters/github/issues.ts";
+import { IssueOrder, IssueSort } from "../src/core/domain/github.ts";
 import type { IssueWorkflowRuntime } from "../src/runtime.ts";
 import { RalphieError } from "../src/shared/error.ts";
 import {
@@ -54,7 +49,7 @@ import {
     GroundingDisposition,
     IssueResolutionStatus,
     NeedsAttentionReason,
-} from "../src/core/app/issues/decisions.ts";
+} from "../src/core/domain/decisions.ts";
 
 const firstIssue: GitHubIssue = {
     number: 42,

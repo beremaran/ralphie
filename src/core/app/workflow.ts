@@ -2,24 +2,24 @@ import { join } from "node:path";
 
 import { makeAgentSessionDiagnostics } from "./agent/task-session.ts";
 import type { AgentModel, AgentSelection } from "../domain/agent-model.ts";
-import { type NeedsAttentionNotificationInput } from "../../adapters/github/needs-attention.ts";
+import { type NeedsAttentionNotificationInput } from "../ports/github.ts";
 import {
     isIssueEligible,
     type GitHubIssue,
     type IssueFilters,
-} from "../../adapters/github/issues.ts";
+} from "../domain/github.ts";
 import { isDecomposedParent } from "../domain/decomposition-markdown.ts";
 import {
     IssueExecutionOutcomeKind,
     type IssueExecutionOutcome,
 } from "./issues/execution.ts";
-import { NeedsAttentionReason } from "./issues/decisions.ts";
+import { NeedsAttentionReason } from "../domain/decisions.ts";
 import {
     createIssueQueue,
     IssueQueueState,
     toQueuedIssues,
 } from "./issues/queue.ts";
-import type { PiAgentRuntime } from "../../adapters/pi/runtime.ts";
+import { type PiAgentRuntime } from "../ports/pi.ts";
 import { validateModelVariants } from "./agent/variants.ts";
 import {
     type ProgressReporterService,
@@ -30,11 +30,11 @@ import {
     RUN_STATE_VERSION,
     type RunState,
     RunStateStatus,
-} from "../../adapters/run/state.ts";
+} from "../domain/run-state.ts";
 import { RalphieError } from "../../shared/error.ts";
-import { resolveWorkspacePath } from "../../adapters/workspace/workspace.ts";
-import { DEFAULT_MAX_DECOMPOSITION_DEPTH } from "../../options.ts";
-import type { IssueWorkflowRuntime } from "../../runtime.ts";
+import { resolveWorkspacePath } from "../domain/workspace-path.ts";
+import { DEFAULT_MAX_DECOMPOSITION_DEPTH } from "../domain/decomposition-markdown.ts";
+import type { IssueWorkflowRuntime } from "../ports/runtime.ts";
 
 const errorMessage = (error: unknown): string =>
     error instanceof Error ? error.message : String(error);

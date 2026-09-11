@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { requestStructuredOutput } from "../../src/core/app/agent/structured-output.ts";
 import type { AgentClient } from "../../src/core/ports/agent.ts";
-import { CommandAbortedError } from "../../src/adapters/process/command-runner.ts";
+import { CommandAbortedError } from "../../src/core/ports/process.ts";
 import { makeGitRepositoryInvariantService } from "../../src/adapters/git/repository-invariant.ts";
 import { makeGitFixture } from "../shared/git-fixture.ts";
 

@@ -5,7 +5,7 @@ import {
     piModelLookup,
     thinkingLevelFor,
     type PiModelInfo,
-} from "../../../adapters/pi/models.ts";
+} from "../../domain/pi-models.ts";
 
 export type VariantViolation = {
     readonly variant: string;

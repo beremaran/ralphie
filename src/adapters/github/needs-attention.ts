@@ -3,27 +3,14 @@ import type { Octokit } from "octokit";
 import {
     GroundingDisposition,
     needsAttentionDecisionSchema,
-    type NeedsAttentionReason,
-} from "../../core/app/issues/decisions.ts";
-import { GitHubMutationRecoveryError } from "./issue-mutations.ts";
+} from "../../core/domain/decisions.ts";
+import {
+    GitHubMutationRecoveryError,
+    type GitHubNeedsAttentionNotificationService,
+    type NeedsAttentionNotificationInput,
+} from "../../core/ports/github.ts";
 import { RalphieError } from "../../shared/error.ts";
 import { parseRepositorySlug } from "../../core/domain/repository.ts";
-
-export type NeedsAttentionNotificationInput = {
-    readonly reason: NeedsAttentionReason;
-    readonly summary: string;
-    readonly evidence: ReadonlyArray<string>;
-    readonly questions: ReadonlyArray<string>;
-    readonly labelName?: string;
-};
-
-export type GitHubNeedsAttentionNotificationInput =
-    NeedsAttentionNotificationInput;
-
-export type NeedsAttentionNotificationResult = {
-    readonly comment: "created" | "updated" | "unchanged";
-    readonly label: "applied" | "not-configured";
-};
 
 export type GitHubNeedsAttentionNotificationRecoveryInput = {
     readonly message: string;
@@ -42,16 +29,6 @@ export class GitHubNeedsAttentionNotificationRecoveryError extends GitHubMutatio
         this.commentPublished = input.commentPublished;
     }
 }
-
-export type GitHubNeedsAttentionNotificationService = {
-    readonly notify: (
-        client: Octokit,
-        repository: string,
-        sourceIssueNumber: number,
-        input: NeedsAttentionNotificationInput,
-        labelName?: string,
-    ) => Promise<NeedsAttentionNotificationResult>;
-};
 
 export const NEEDS_ATTENTION_MARKER = "ralphie:needs-attention";
 

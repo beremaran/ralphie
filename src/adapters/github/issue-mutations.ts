@@ -1,61 +1,13 @@
 import type { Octokit } from "octokit";
 
 import { RalphieError } from "../../shared/error.ts";
-import { mapGitHubIssue, type GitHubIssue } from "./issues.ts";
+import { mapGitHubIssue } from "./issues.ts";
+import type { GitHubIssue } from "../../core/domain/github.ts";
+import type {
+    GitHubIssueCloseReason,
+    GitHubIssueMutationService,
+} from "../../core/ports/github.ts";
 import { parseRepositorySlug } from "../../core/domain/repository.ts";
-
-/** Reasons accepted by GitHub when closing an issue. */
-export type GitHubIssueCloseReason = "completed" | "not_planned" | "duplicate";
-
-export const GitHubMutationRecoveryOutcome = "recovery-required" as const;
-export type GitHubMutationRecoveryOutcome =
-    typeof GitHubMutationRecoveryOutcome;
-
-/** A mutation may have reached GitHub even though its response was lost. */
-export class GitHubMutationRecoveryError extends RalphieError {
-    readonly outcome = GitHubMutationRecoveryOutcome;
-    readonly operation: string;
-
-    constructor(input: {
-        readonly message: string;
-        readonly operation: string;
-        readonly cause?: unknown;
-    }) {
-        super(input);
-        this.name = "GitHubMutationRecoveryError";
-        this.operation = input.operation;
-    }
-}
-
-export type CreateGitHubIssueInput = {
-    readonly title: string;
-    readonly body: string;
-};
-
-export type UpdateGitHubIssueInput = {
-    readonly title?: string;
-    readonly body?: string;
-};
-
-export type GitHubIssueMutationService = {
-    readonly create: (
-        client: Octokit,
-        repository: string,
-        input: CreateGitHubIssueInput,
-    ) => Promise<GitHubIssue>;
-    readonly update: (
-        client: Octokit,
-        repository: string,
-        issueNumber: number,
-        input: UpdateGitHubIssueInput,
-    ) => Promise<GitHubIssue>;
-    readonly close: (
-        client: Octokit,
-        repository: string,
-        issueNumber: number,
-        reason: GitHubIssueCloseReason,
-    ) => Promise<GitHubIssue>;
-};
 
 const repositoryParameters = (repository: string) => {
     const { slug } = parseRepositorySlug(repository);

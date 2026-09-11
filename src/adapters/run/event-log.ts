@@ -1,21 +1,7 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
-import type { ProgressEvent } from "../../core/ports/progress.ts";
-
-/**
- * Append-only audit of run progress events (`events.jsonl`).
- *
- * The run that owns the workspace also owns this sink: it closes the log
- * before deleting the workspace so post-cleanup events cannot recreate it.
- * Presentation code only forwards already-stamped events.
- */
-export type RunEventLog = {
-    /** Append one event; a no-op after {@link RunEventLog.close}. */
-    readonly append: (event: ProgressEvent) => void;
-    /** Stop persisting; later appends are ignored. */
-    readonly close: () => void;
-};
+import type { RunEventLog } from "../../core/ports/run.ts";
 
 export const makeRunEventLog = (input: {
     /** Destination of the JSON Lines audit file. */

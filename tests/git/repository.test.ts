@@ -3,10 +3,10 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import type {
-    CommandResult,
-    CommandRunnerService,
-} from "../../src/adapters/process/command-runner.ts";
+import {
+    type CommandResult,
+    type CommandRunnerService,
+} from "../../src/core/ports/process.ts";
 import { makeGitRepositoryService } from "../../src/adapters/git/repository.ts";
 
 const result = (stdout = ""): CommandResult => ({

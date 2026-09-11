@@ -1,5 +1,5 @@
-import type { GitHubIssue } from "../../adapters/github/issues.ts";
-import type { IssueBreakdownDecision } from "../app/issues/decisions.ts";
+import { type GitHubIssue } from "./github.ts";
+import type { IssueBreakdownDecision } from "./decisions.ts";
 import { RalphieError } from "../../shared/error.ts";
 
 export const DEFAULT_MAX_DECOMPOSITION_DEPTH = 3;

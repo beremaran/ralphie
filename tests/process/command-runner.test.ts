@@ -1,14 +1,16 @@
 import { describe, expect, test } from "bun:test";
 
 import {
-    CommandAbortedError,
     CommandRunnerLive,
-    CommandTimeoutError,
     PROCESS_TERMINATION_ESCALATION_MS,
     requireSuccess,
+} from "../../src/adapters/process/command-runner.ts";
+import {
+    CommandAbortedError,
+    CommandTimeoutError,
     type CommandResult,
     type CommandRunnerService,
-} from "../../src/adapters/process/command-runner.ts";
+} from "../../src/core/ports/process.ts";
 import { RalphieError } from "../../src/shared/error.ts";
 
 const result = (

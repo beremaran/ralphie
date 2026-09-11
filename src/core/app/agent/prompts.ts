@@ -3,8 +3,8 @@ import {
     MAX_ISSUE_COMMENTS,
     type GitHubIssue,
     type GitHubIssueComment,
-} from "../../../adapters/github/issues.ts";
-import type { ReviewDecision } from "../issues/decisions.ts";
+} from "../../domain/github.ts";
+import type { ReviewDecision } from "../../domain/decisions.ts";
 import type { VerificationEvidence } from "../issues/verification.ts";
 
 export type GroundingPromptInput = ComplexityPromptInput;

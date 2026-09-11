@@ -2,10 +2,8 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import {
-    CommandRunnerLive,
-    type CommandRunnerService,
-} from "../../src/adapters/process/command-runner.ts";
+import { CommandRunnerLive } from "../../src/adapters/process/command-runner.ts";
+import { type CommandRunnerService } from "../../src/core/ports/process.ts";
 
 /**
  * A throwaway git repository with two committed revisions and deliberate

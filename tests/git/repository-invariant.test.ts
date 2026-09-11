@@ -6,7 +6,7 @@ import {
     type CommandResult,
     type CommandRunOptions,
     type CommandRunnerService,
-} from "../../src/adapters/process/command-runner.ts";
+} from "../../src/core/ports/process.ts";
 import { RalphieError } from "../../src/shared/error.ts";
 import { makeGitFixture } from "../shared/git-fixture.ts";
 

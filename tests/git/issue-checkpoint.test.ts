@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
 import { makeGitIssueCheckpointService } from "../../src/adapters/git/issue-checkpoint.ts";
-import type {
-    CommandResult,
-    CommandRunnerService,
-} from "../../src/adapters/process/command-runner.ts";
+import {
+    type CommandResult,
+    type CommandRunnerService,
+} from "../../src/core/ports/process.ts";
 import { RalphieError } from "../../src/shared/error.ts";
 
 const CHECKPOINT = { branch: "develop", sha: "a".repeat(40) };

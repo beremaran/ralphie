@@ -4,35 +4,12 @@ import {
     isDecomposedParent,
     parseDecompositionMarker,
 } from "../../core/domain/decomposition-markdown.ts";
-import type { GitHubIssueMutationService } from "./issue-mutations.ts";
-import type { GitHubIssueRelationshipService } from "./issue-relationships.ts";
-import type { GitHubIssuesService } from "./issues.ts";
-
-export type ParentCompletionService = {
-    /**
-     * Close a decomposed parent as `completed` when every native sub-issue is
-     * closed. Returns true when the parent is completed (possibly already),
-     * false when it must stay open. Parents without native sub-issue
-     * attachments or without a Ralphie tracking marker are left untouched so
-     * recovery can finish attaching children first.
-     */
-    readonly reconcileParent: (
-        client: Octokit,
-        repository: string,
-        parentIssueNumber: number,
-    ) => Promise<boolean>;
-    /**
-     * Reconcile the parent of a just-completed child. The parent is resolved
-     * from the native sub-issue relationship, falling back to the child's
-     * stable decomposition marker.
-     */
-    readonly reconcileAfterChildCompletion: (
-        client: Octokit,
-        repository: string,
-        childIssueNumber: number,
-        childBody: string | null,
-    ) => Promise<boolean>;
-};
+import type {
+    GitHubIssueMutationService,
+    GitHubIssueRelationshipService,
+    GitHubIssuesService,
+    ParentCompletionService,
+} from "../../core/ports/github.ts";
 
 export const makeParentCompletionService = (input: {
     readonly issues: GitHubIssuesService;

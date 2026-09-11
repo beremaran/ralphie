@@ -1,9 +1,9 @@
 import {
     type GitIssueOperationError,
     type GitIssueOperationsService,
-} from "../../../adapters/git/issue-operations.ts";
-import type { GitIssuePreparationService } from "../../../adapters/git/issue-preparation.ts";
-import { type GitRemoteSafetyService } from "../../../adapters/git/remote-safety.ts";
+} from "../../ports/git.ts";
+import { type GitIssuePreparationService } from "../../ports/git.ts";
+import { type GitRemoteSafetyService } from "../../ports/git.ts";
 import {
     buildCommitMessagePrompt,
     buildImplementationAfterResolutionCorrectionPrompt,
@@ -30,21 +30,15 @@ import {
     type WorkflowExecutorInput,
     type WorkflowExecutorResult,
 } from "./execution.ts";
-import {
-    IssueArtifactKind,
-    issueFreshnessFingerprint,
-} from "../../../adapters/issues/artifacts.ts";
+import { IssueArtifactKind, issueFreshnessFingerprint } from "./artifacts.ts";
 import {
     commitMessageDecisionSchema,
     type IssueResolutionDecision,
     IssueResolutionStatus,
     reviewDecisionSchema,
     ReviewVerdict,
-} from "./decisions.ts";
-import {
-    type IssueRecoveryService,
-    type ReviewAttempt,
-} from "../../../adapters/issues/recovery.ts";
+} from "../../domain/decisions.ts";
+import { type IssueRecoveryService, type ReviewAttempt } from "./recovery.ts";
 import { REVIEW_ITERATION_LIMIT } from "./stage.ts";
 import { assertProtectedDecisionsAuthorized } from "./scope-policy.ts";
 import type {

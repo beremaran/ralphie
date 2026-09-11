@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
 import { makeGitHubClientService } from "../../src/adapters/github/client.ts";
-import type {
-    CommandResult,
-    CommandRunnerService,
-} from "../../src/adapters/process/command-runner.ts";
+import {
+    type CommandResult,
+    type CommandRunnerService,
+} from "../../src/core/ports/process.ts";
 import { RalphieError } from "../../src/shared/error.ts";
 
 const result = (exitCode: number, stdout = "", stderr = ""): CommandResult => ({

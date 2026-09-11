@@ -1,64 +1,17 @@
-import type { CommitMessageDecision } from "../../core/app/issues/decisions.ts";
+import type { CommitMessageDecision } from "../../core/domain/decisions.ts";
 import {
     CommandRunnerLive,
     requireSuccess,
+} from "../process/command-runner.ts";
+import {
     type CommandResult,
     type CommandRunnerService,
-} from "../process/command-runner.ts";
+} from "../../core/ports/process.ts";
+import {
+    GitPushError,
+    type GitIssueOperationsService,
+} from "../../core/ports/git.ts";
 import { RalphieError } from "../../shared/error.ts";
-
-export type GitPushFailureKind = "non-fast-forward" | "other";
-
-/** Push failures halt so their created commit can be reconciled on resume. */
-export const GitPushFailurePolicy = "halt" as const;
-export type GitPushFailurePolicy = typeof GitPushFailurePolicy;
-
-export class GitPushError extends RalphieError {
-    readonly kind: GitPushFailureKind;
-    readonly policy: GitPushFailurePolicy;
-    readonly branch: string;
-
-    constructor(input: {
-        readonly kind: GitPushFailureKind;
-        readonly policy?: GitPushFailurePolicy;
-        readonly branch: string;
-        readonly message: string;
-        readonly cause?: unknown;
-    }) {
-        super(input);
-        this.name = "GitPushError";
-        this.kind = input.kind;
-        this.policy = input.policy ?? GitPushFailurePolicy;
-        this.branch = input.branch;
-    }
-}
-
-export type GitIssueOperationError = RalphieError | GitPushError;
-
-export type GitCommitResult = {
-    readonly sha: string;
-    readonly treeSha: string;
-};
-
-export type GitIssueOperationsService = {
-    /** Stage tracked, untracked, and deleted files in the issue checkout. */
-    readonly stageAll: (repositoryPath: string) => Promise<void>;
-    /** Read the complete staged patch, retaining Git's binary patch bytes/text. */
-    readonly readStagedBinaryDiff: (repositoryPath: string) => Promise<string>;
-    /** Check whether the index contains any staged changes. */
-    readonly hasStagedChanges: (repositoryPath: string) => Promise<boolean>;
-    /** Commit the validated generated message and verify the staged tree. */
-    readonly commit: (
-        repositoryPath: string,
-        message: CommitMessageDecision,
-    ) => Promise<GitCommitResult>;
-    /** Push a commit to the configured branch without force and verify origin. */
-    readonly push: (
-        repositoryPath: string,
-        branch: string,
-        expectedCommitSha: string,
-    ) => Promise<void>;
-};
 
 const validBranch = (branch: string): boolean => branch.trim().length > 0;
 

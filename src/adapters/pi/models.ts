@@ -9,55 +9,14 @@ import {
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
 
 import type { AgentModel } from "../../core/domain/agent-model.ts";
+import {
+    piModelLookup,
+    type PiModelInfo,
+    type PiModelLookup,
+    type PiModelSelection,
+} from "../../core/domain/pi-models.ts";
 import { RalphieError } from "../../shared/error.ts";
 import { piSettingsPathFor } from "./config.ts";
-
-export const THINKING_LEVELS = [
-    "off",
-    "minimal",
-    "low",
-    "medium",
-    "high",
-    "xhigh",
-    "max",
-] as const;
-
-export type PiThinkingLevel = (typeof THINKING_LEVELS)[number];
-
-export const DEFAULT_THINKING_LEVEL: PiThinkingLevel = "medium";
-
-export type PiModelSelection =
-    | AgentModel
-    | { readonly providerID: string; readonly id: string };
-
-export type PiModelInfo = {
-    readonly provider: string;
-    readonly id: string;
-    readonly name: string;
-    readonly reasoning: boolean;
-    readonly thinkingLevels: ReadonlyArray<string>;
-};
-
-export type PiModelLookup = {
-    readonly provider: string;
-    readonly id: string;
-};
-
-export const piModelLookup = (
-    selection: PiModelSelection | undefined,
-): PiModelLookup | undefined => {
-    if (selection === undefined) return undefined;
-    return "modelID" in selection
-        ? { provider: selection.providerID, id: selection.modelID }
-        : { provider: selection.providerID, id: selection.id };
-};
-
-export const modelReference = (
-    selection: PiModelSelection | undefined,
-): string | undefined => {
-    const lookup = piModelLookup(selection);
-    return lookup === undefined ? undefined : `${lookup.provider}/${lookup.id}`;
-};
 
 const isNotFound = (cause: unknown): boolean =>
     typeof cause === "object" &&
@@ -80,23 +39,6 @@ export const piModelCatalog = (
         reasoning: model.reasoning,
         thinkingLevels: getSupportedThinkingLevels(model).map(String),
     }));
-
-export const thinkingLevelFor = (variant?: string): PiThinkingLevel => {
-    const normalized = variant?.trim();
-    if (
-        normalized === undefined ||
-        normalized === "" ||
-        normalized === "default"
-    ) {
-        return DEFAULT_THINKING_LEVEL;
-    }
-    if ((THINKING_LEVELS as ReadonlyArray<string>).includes(normalized)) {
-        return normalized as PiThinkingLevel;
-    }
-    throw new RalphieError({
-        message: `Unsupported thinking level "${variant}". Supported levels: ${THINKING_LEVELS.join(", ")}, or default.`,
-    });
-};
 
 export const readPiDefaultModel = async (
     agentDir: string,

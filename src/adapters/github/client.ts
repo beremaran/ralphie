@@ -3,13 +3,10 @@ import { Octokit } from "octokit";
 import {
     CommandRunnerLive,
     requireSuccess,
-    type CommandRunnerService,
 } from "../process/command-runner.ts";
+import { type CommandRunnerService } from "../../core/ports/process.ts";
+import type { GitHubClientService } from "../../core/ports/github.ts";
 import { RalphieError } from "../../shared/error.ts";
-
-export type GitHubClientService = {
-    readonly initialize: () => Promise<Octokit>;
-};
 
 /** Current GitHub REST contract; 2022-11-28 retires on 2028-03-10. */
 export const GITHUB_REST_API_VERSION = "2026-03-10";

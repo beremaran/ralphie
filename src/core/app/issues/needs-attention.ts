@@ -1,4 +1,4 @@
-import type { IssueCheckpoint } from "../../../adapters/git/issue-checkpoint.ts";
+import { type IssueCheckpoint } from "../../ports/git.ts";
 import { buildGroundingPrompt } from "../agent/prompts.ts";
 import { requestStructuredOutput } from "../agent/structured-output.ts";
 import type { NeedsAttentionRequest } from "../agent/task-session.ts";
@@ -9,18 +9,18 @@ import {
     type IssueArtifactStore,
     type IssueFreshnessFingerprint,
     type NeedsAttentionHandoffArtifact,
-} from "../../../adapters/issues/artifacts.ts";
+} from "./artifacts.ts";
 import {
     GroundingDisposition,
     groundingDecisionSchema,
     type NeedsAttentionDecision,
-} from "./decisions.ts";
+} from "../../domain/decisions.ts";
 import {
     IssueExecutionOutcomeKind,
     type IssueExecutionContext,
     type IssueExecutionOutcome,
 } from "./execution.ts";
-import type { IssueRecoveryService } from "../../../adapters/issues/recovery.ts";
+import type { IssueRecoveryService } from "./recovery.ts";
 
 export type NeedsAttentionRouteInput = {
     readonly context: IssueExecutionContext;

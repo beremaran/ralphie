@@ -20,11 +20,11 @@ import {
 import { RalphieError } from "../../shared/error.ts";
 import { extractNeedsAttentionJson, extractStructuredJson } from "./json.ts";
 import {
-    modelReference,
-    resolvePiModel,
     thinkingLevelFor,
     type PiModelSelection,
-} from "./models.ts";
+} from "../../core/domain/pi-models.ts";
+import { modelReference } from "../../core/domain/pi-models.ts";
+import { resolvePiModel } from "./models.ts";
 import { makePiTools, type PiToolSet } from "./tools.ts";
 
 export type PiAgentClientOptions = {

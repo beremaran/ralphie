@@ -1,27 +1,10 @@
 import {
     CommandRunnerLive,
     requireSuccess,
-    type CommandRunnerService,
 } from "../process/command-runner.ts";
+import { type CommandRunnerService } from "../../core/ports/process.ts";
+import { type GitIssueCheckpointService } from "../../core/ports/git.ts";
 import { RalphieError } from "../../shared/error.ts";
-
-export type IssueCheckpoint = {
-    readonly branch: string;
-    readonly sha: string;
-};
-
-export type GitIssueCheckpointService = {
-    readonly capture: (
-        repositoryPath: string,
-        branch: string,
-    ) => Promise<IssueCheckpoint>;
-    /** Capture tracked and untracked changes without changing the checkout. */
-    readonly createPatch: (repositoryPath: string) => Promise<string>;
-    readonly restore: (
-        repositoryPath: string,
-        checkpoint: IssueCheckpoint,
-    ) => Promise<void>;
-};
 
 const validGitSha = /^[0-9a-f]{40}([0-9a-f]{24})?$/i;
 

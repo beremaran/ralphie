@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import type { PiModelInfo } from "../src/adapters/pi/models.ts";
+import { type PiModelInfo } from "../src/core/domain/pi-models.ts";
 import {
     collectVariantViolations,
     findModelInfo,

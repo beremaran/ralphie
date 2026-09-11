@@ -1,4 +1,4 @@
-import { IssueOrder, IssueSort } from "./adapters/github/issues.ts";
+import { IssueOrder, IssueSort } from "./core/domain/github.ts";
 import { DEFAULT_MAX_DECOMPOSITION_DEPTH } from "./core/domain/decomposition-markdown.ts";
 export { DEFAULT_MAX_DECOMPOSITION_DEPTH } from "./core/domain/decomposition-markdown.ts";
 import { parseRepositorySlug } from "./core/domain/repository.ts";

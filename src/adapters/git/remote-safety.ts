@@ -1,66 +1,17 @@
 import {
     CommandRunnerLive,
     requireSuccess,
-    type CommandRunnerService,
 } from "../process/command-runner.ts";
+import { type CommandRunnerService } from "../../core/ports/process.ts";
+import {
+    GitRemoteSafetyError,
+    type GitDirectPushPolicy,
+    type GitRemoteSafetyFailureKind,
+    type GitRemoteSafetyInput,
+    type GitRemoteSafetyService,
+} from "../../core/ports/git.ts";
 import { RalphieError } from "../../shared/error.ts";
 import { parseRepositorySlug } from "../../core/domain/repository.ts";
-
-export type GitRemoteSafetyFailureKind =
-    | "origin-mismatch"
-    | "diverged-base"
-    | "invalid-push-mode";
-
-export type GitDirectPushPolicy =
-    | "require-owned-origin"
-    | "require-expected-base"
-    | "non-force-only";
-
-export type GitPushMode = "non-force" | "force";
-
-export class GitRemoteSafetyError extends RalphieError {
-    readonly kind: GitRemoteSafetyFailureKind;
-    readonly policy: GitDirectPushPolicy;
-
-    constructor(input: {
-        readonly kind: GitRemoteSafetyFailureKind;
-        readonly policy: GitDirectPushPolicy;
-        readonly message: string;
-        readonly cause?: unknown;
-    }) {
-        super(input);
-        this.name = "GitRemoteSafetyError";
-        this.kind = input.kind;
-        this.policy = input.policy;
-    }
-}
-
-export type GitRemoteSafetyInput = {
-    readonly repository: string;
-    readonly repositoryPath: string;
-    readonly branch: string;
-    /** The exact clean checkout base captured before issue work began. */
-    readonly intendedBaseSha: string;
-    /** When supplied, HEAD must be this commit and exactly one commit ahead. */
-    readonly expectedCommitSha?: string;
-    readonly pushMode?: GitPushMode;
-};
-
-export type GitRemoteSafetyReport = {
-    readonly repository: string;
-    readonly branch: string;
-    readonly origin: string;
-    readonly commitsBehindBase: number;
-    readonly commitsAheadBase: number;
-    readonly pushMode: "non-force";
-};
-
-export type GitRemoteSafetyService = {
-    /** Verify all invariants required immediately before a direct branch push. */
-    readonly verifyDirectPush: (
-        input: GitRemoteSafetyInput,
-    ) => Promise<GitRemoteSafetyReport>;
-};
 
 const fail = (
     kind: GitRemoteSafetyFailureKind,

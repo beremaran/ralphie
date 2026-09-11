@@ -1,16 +1,15 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 
-import type { IssueCheckpoint } from "../git/issue-checkpoint.ts";
-import type { GitHubIssue } from "../github/issues.ts";
+import { type IssueCheckpoint } from "../../ports/git.ts";
+import type { GitHubIssue } from "../../domain/github.ts";
 import {
     needsAttentionRequestSchema,
     type NeedsAttentionRequest,
-} from "../../core/app/agent/task-session.ts";
-import { RalphieError } from "../../shared/error.ts";
-import { resolveWorkspacePath } from "../workspace/workspace.ts";
+} from "../agent/task-session.ts";
+import { RalphieError } from "../../../shared/error.ts";
+import { resolveWorkspacePath } from "../../domain/workspace-path.ts";
 import {
     commitMessageDecisionSchema,
     complexityDecisionSchema,
@@ -24,10 +23,10 @@ import {
     type IssueResolutionDecision,
     IssueResolutionStatus,
     type NeedsAttentionDecision,
-} from "../../core/app/issues/decisions.ts";
+} from "../../domain/decisions.ts";
 import type { ReviewAttempt } from "./recovery.ts";
-import { REVIEW_ITERATION_LIMIT } from "../../core/app/issues/stage.ts";
-import { verificationEvidenceSchema } from "../../core/app/issues/verification.ts";
+import { REVIEW_ITERATION_LIMIT } from "./stage.ts";
+import { verificationEvidenceSchema } from "./verification.ts";
 
 export enum IssueArtifactKind {
     ComplexityDecision = "complexity-decision",
@@ -461,23 +460,6 @@ type ArtifactPersistence = (
     signal?: AbortSignal,
 ) => Promise<void>;
 
-const liveArtifactFileSystem: IssueArtifactFileSystem = {
-    readFile: async (filePath, encoding) =>
-        await readFile(filePath, { encoding }),
-    mkdir: async (directory, options) => {
-        await mkdir(directory, options);
-    },
-    writeFile: async (filePath, contents, options) => {
-        await writeFile(filePath, contents, options);
-    },
-    rename: async (temporaryPath, filePath) => {
-        await rename(temporaryPath, filePath);
-    },
-    rm: async (filePath, options) => {
-        await rm(filePath, options);
-    },
-};
-
 const safeRunId = (runId: string): string =>
     runId.replace(/[^a-zA-Z0-9_-]/g, "_") || "run";
 
@@ -518,8 +500,8 @@ const toPersistedState = (
 const persistAtomically = async (
     filePath: string,
     state: PersistedArtifactState,
-    signal?: AbortSignal,
-    fileSystem: IssueArtifactFileSystem = liveArtifactFileSystem,
+    signal: AbortSignal | undefined,
+    fileSystem: IssueArtifactFileSystem,
     issueNumber?: number,
 ): Promise<void> => {
     const temporaryPath = `${filePath}.${randomUUID()}.tmp`;
@@ -688,11 +670,12 @@ const migrateArtifactState = (
 const loadPersistedState = async (
     filePath: string,
     issueNumber: number,
-    scope?: IssueArtifactScope,
+    scope: IssueArtifactScope | undefined,
+    fileSystem: IssueArtifactFileSystem,
 ): Promise<LoadedArtifactState | undefined> => {
     let encoded: string;
     try {
-        encoded = await readFile(filePath, "utf8");
+        encoded = await fileSystem.readFile(filePath, "utf8");
     } catch (cause) {
         if ((cause as NodeJS.ErrnoException).code === "ENOENT")
             return undefined;
@@ -1128,15 +1111,27 @@ export const makeDurableIssueArtifactStore = async (
             message: `Cannot create an artifact store for issue ${issueNumber}.`,
         });
     }
+    const { fileSystem } = settings;
+    if (fileSystem === undefined) {
+        throw new RalphieError({
+            message:
+                "A durable issue artifact store requires a file system adapter.",
+        });
+    }
     const filePath = issueArtifactPath(scope, issueNumber);
-    const loaded = await loadPersistedState(filePath, issueNumber, scope);
+    const loaded = await loadPersistedState(
+        filePath,
+        issueNumber,
+        scope,
+        fileSystem,
+    );
     throwIfArtifactWriteAborted(settings.signal, issueNumber);
     if (loaded?.migrated === true || loaded?.decisionsInvalidated === true) {
         await persistAtomically(
             filePath,
             loaded.state,
             settings.signal,
-            settings.fileSystem,
+            fileSystem,
             issueNumber,
         );
     }
@@ -1148,7 +1143,7 @@ export const makeDurableIssueArtifactStore = async (
                 filePath,
                 nextState,
                 signal,
-                settings.fileSystem,
+                fileSystem,
                 issueNumber,
             ),
         scope,
@@ -1172,16 +1167,26 @@ export const makeReadOnlyDurableIssueArtifactStore = async (
             message: `Cannot create an artifact store for issue ${issueNumber}.`,
         });
     }
+    const { fileSystem } = settings;
+    if (fileSystem === undefined) {
+        throw new RalphieError({
+            message:
+                "A durable issue artifact store requires a file system adapter.",
+        });
+    }
     const loaded = await loadPersistedState(
         issueArtifactPath(scope, issueNumber),
         issueNumber,
         scope,
+        fileSystem,
     );
     throwIfArtifactWriteAborted(settings.signal, issueNumber);
     return makeStore(issueNumber, valuesFromLoadedState(loaded));
 };
 
-export const makeIssueArtifactStoreService = (): IssueArtifactStoreService => {
+export const makeIssueArtifactStoreService = (
+    fileSystem?: IssueArtifactFileSystem,
+): IssueArtifactStoreService => {
     const stores = new Map<string, IssueArtifactStore>();
     const readOnlyStores = new Map<string, IssueArtifactStore>();
 
@@ -1195,11 +1200,10 @@ export const makeIssueArtifactStoreService = (): IssueArtifactStoreService => {
             if (existing !== undefined) return existing;
 
             const store = scope
-                ? await makeDurableIssueArtifactStore(
-                      issueNumber,
-                      scope,
-                      signal,
-                  )
+                ? await makeDurableIssueArtifactStore(issueNumber, scope, {
+                      ...(fileSystem === undefined ? {} : { fileSystem }),
+                      ...(signal === undefined ? {} : { signal }),
+                  })
                 : await makeIssueArtifactStore(issueNumber, signal);
             stores.set(key, store);
             return store;
@@ -1216,7 +1220,10 @@ export const makeIssueArtifactStoreService = (): IssueArtifactStoreService => {
                 ? await makeReadOnlyDurableIssueArtifactStore(
                       issueNumber,
                       scope,
-                      signal,
+                      {
+                          ...(fileSystem === undefined ? {} : { fileSystem }),
+                          ...(signal === undefined ? {} : { signal }),
+                      },
                   )
                 : await makeIssueArtifactStore(issueNumber, signal);
             readOnlyStores.set(key, store);

@@ -1,7 +1,9 @@
 import type { Octokit } from "octokit";
 
 import { RalphieError } from "../../shared/error.ts";
-import { mapGitHubIssue, type GitHubIssue } from "./issues.ts";
+import { mapGitHubIssue } from "./issues.ts";
+import type { GitHubIssue } from "../../core/domain/github.ts";
+import type { GitHubIssueRelationshipService } from "../../core/ports/github.ts";
 import { parseRepositorySlug } from "../../core/domain/repository.ts";
 
 /**
@@ -16,48 +18,6 @@ import { parseRepositorySlug } from "../../core/domain/repository.ts";
  * feature) or insufficient permissions produce actionable errors; nothing
  * silently degrades to body-link semantics.
  */
-export type GitHubIssueRelationshipService = {
-    /** List the native sub-issues currently attached to an issue. */
-    readonly listSubIssues: (
-        client: Octokit,
-        repository: string,
-        issueNumber: number,
-    ) => Promise<ReadonlyArray<GitHubIssue>>;
-    /** The native parent of an issue, or `undefined` when it has none. */
-    readonly parentOf: (
-        client: Octokit,
-        repository: string,
-        issueNumber: number,
-    ) => Promise<GitHubIssue | undefined>;
-    /**
-     * Attach a child to a parent as a native sub-issue. Idempotent when the
-     * child is already attached to the same parent; a child attached to a
-     * different parent fails closed instead of being silently reparented.
-     */
-    readonly attachSubIssue: (
-        client: Octokit,
-        repository: string,
-        parentIssueNumber: number,
-        childIssueNumber: number,
-    ) => Promise<void>;
-    /** List the native issues blocking the given issue. */
-    readonly listBlockedBy: (
-        client: Octokit,
-        repository: string,
-        issueNumber: number,
-    ) => Promise<ReadonlyArray<GitHubIssue>>;
-    /**
-     * Add a native `blocked_by` relationship. Idempotent when the dependency
-     * already exists.
-     */
-    readonly addBlockedBy: (
-        client: Octokit,
-        repository: string,
-        issueNumber: number,
-        blockerIssueNumber: number,
-    ) => Promise<void>;
-};
-
 const repositoryParameters = (repository: string) => {
     const { slug } = parseRepositorySlug(repository);
     const [owner, repo] = slug.split("/") as [string, string];

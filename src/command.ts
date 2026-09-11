@@ -8,7 +8,7 @@ import {
     type IssueRalphieConfig,
     validateRalphieCliOptions,
 } from "./options.ts";
-import { IssueOrder, IssueSort } from "./adapters/github/issues.ts";
+import { IssueOrder, IssueSort } from "./core/domain/github.ts";
 import {
     agentModelSchema,
     agentModelVariantSchema,
@@ -19,18 +19,17 @@ import {
     type ProgressCoordinatorOptions,
 } from "./adapters/progress/coordinator.ts";
 import { type ProgressRenderMode } from "./adapters/progress/progress.ts";
-import {
-    makePiAgentService,
-    type PiAgentService,
-} from "./adapters/pi/runtime.ts";
-import type { PiAgentConfig } from "./adapters/pi/config.ts";
+import { makePiAgentService } from "./adapters/pi/runtime.ts";
+import { type PiAgentService } from "./core/ports/pi.ts";
+import { type PiAgentConfig } from "./core/ports/pi.ts";
 import { makeLiveRuntime, type IssueWorkflowRuntime } from "./runtime.ts";
 import type { AgentEventListener } from "./core/ports/agent.ts";
 import { exitCodeForError, RalphieExitCode } from "./core/app/exit-code.ts";
 import { workflow } from "./core/app/workflow.ts";
 import { BUILD_INFO } from "./build-info.ts";
-import { makeRunEventLog, type RunEventLog } from "./adapters/run/event-log.ts";
-import { resolveWorkspacePath } from "./adapters/workspace/workspace.ts";
+import { makeRunEventLog } from "./adapters/run/event-log.ts";
+import { type RunEventLog } from "./core/ports/run.ts";
+import { resolveWorkspacePath } from "./core/domain/workspace-path.ts";
 
 const cliOptions = {
     branch: { type: "string", short: "b" },

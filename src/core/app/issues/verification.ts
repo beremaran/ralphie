@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { CommandRunnerService } from "../../../adapters/process/command-runner.ts";
+import { type CommandRunnerService } from "../../ports/process.ts";
 import { RalphieError } from "../../../shared/error.ts";
 
 const OUTPUT_LIMIT = 8_000;

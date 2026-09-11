@@ -10,12 +10,10 @@ import {
     GitHubMutationRecoveryError,
     GitHubMutationRecoveryOutcome,
     type GitHubIssueMutationService,
-} from "../../../adapters/github/issue-mutations.ts";
-import type {
-    GitHubIssue,
-    GitHubIssuesService,
-} from "../../../adapters/github/issues.ts";
-import type { GitHubIssueRelationshipService } from "../../../adapters/github/issue-relationships.ts";
+} from "../../ports/github.ts";
+import { type GitHubIssuesService } from "../../ports/github.ts";
+import { type GitHubIssue } from "../../domain/github.ts";
+import { type GitHubIssueRelationshipService } from "../../ports/github.ts";
 import { buildDecompositionPrompt } from "../agent/prompts.ts";
 import { requestStructuredOutput } from "../agent/structured-output.ts";
 import type { ProgressReporterService } from "../../ports/progress.ts";
@@ -24,19 +22,19 @@ import {
     IssueArtifactKind,
     type CreatedIssueDependencyMapping,
     type CreatedIssueNumberMapping,
-} from "../../../adapters/issues/artifacts.ts";
+} from "./artifacts.ts";
 import {
     issueBreakdownDecisionSchema,
     type IssueBreakdownDecision,
-} from "./decisions.ts";
+} from "../../domain/decisions.ts";
 import {
     IssueExecutionOutcomeKind,
     type WorkflowExecutorInput,
     type WorkflowExecutorResult,
 } from "./execution.ts";
-import type { ReviewAttempt } from "../../../adapters/issues/recovery.ts";
+import type { ReviewAttempt } from "./recovery.ts";
 import type { NeedsAttentionRouterService } from "./needs-attention.ts";
-import { DEFAULT_MAX_DECOMPOSITION_DEPTH } from "../../../options.ts";
+import { DEFAULT_MAX_DECOMPOSITION_DEPTH } from "../../domain/decomposition-markdown.ts";
 
 export type DecompositionExecutorService = {
     readonly execute: (

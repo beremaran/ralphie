@@ -1,4 +1,4 @@
-import type { GitHubIssue } from "../../../adapters/github/issues.ts";
+import { type GitHubIssue } from "../../domain/github.ts";
 import { RalphieError } from "../../../shared/error.ts";
 
 const licenseFileChange = /^diff --git a\/(?:LICENSE|COPYING)(?:\s|$)/im;

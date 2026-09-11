@@ -1,26 +1,13 @@
 import {
     CommandRunnerLive,
     requireSuccess,
-    type CommandRunnerService,
 } from "../process/command-runner.ts";
+import { type CommandRunnerService } from "../../core/ports/process.ts";
+import type {
+    GitRepositoryInvariant,
+    GitRepositoryInvariantService,
+} from "../../core/ports/git.ts";
 import { RalphieError } from "../../shared/error.ts";
-
-export type GitRepositoryInvariant = {
-    readonly branch: string;
-    readonly head: string;
-};
-
-export type GitRepositoryInvariantService = {
-    readonly capture: (
-        repositoryPath: string,
-        signal?: AbortSignal,
-    ) => Promise<GitRepositoryInvariant>;
-    readonly verify: (
-        repositoryPath: string,
-        expected: GitRepositoryInvariant,
-        signal?: AbortSignal,
-    ) => Promise<void>;
-};
 
 const readInvariant = async (
     runner: CommandRunnerService,

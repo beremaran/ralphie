@@ -1,5 +1,5 @@
 import type { DecompositionDepthLimitError } from "../../domain/decomposition-markdown.ts";
-import { NeedsAttentionReason } from "./decisions.ts";
+import { NeedsAttentionReason } from "../../domain/decisions.ts";
 import {
     IssueExecutionOutcomeKind,
     type IssueExecutionOutcome,

@@ -45,11 +45,11 @@ import type {
     AgentEventListener,
     AgentSessionEvent,
 } from "../../src/core/ports/agent.ts";
-import type { PiAgentConfig } from "../../src/adapters/pi/config.ts";
-import type {
-    PiAgentRuntime,
-    PiAgentService,
-} from "../../src/adapters/pi/runtime.ts";
+import { type PiAgentConfig } from "../../src/core/ports/pi.ts";
+import {
+    type PiAgentRuntime,
+    type PiAgentService,
+} from "../../src/core/ports/pi.ts";
 import {
     breadcrumbCandidateFor,
     DEFAULT_BREADCRUMB_THRESHOLD,

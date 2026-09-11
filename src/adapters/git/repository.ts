@@ -8,29 +8,14 @@ import {
 import {
     CommandRunnerLive,
     requireSuccess,
-    type CommandRunnerService,
 } from "../process/command-runner.ts";
+import { type CommandRunnerService } from "../../core/ports/process.ts";
+import type {
+    GitRepositoryService,
+    PreparedRepository,
+} from "../../core/ports/git.ts";
 import { RalphieError } from "../../shared/error.ts";
-import { resolveWorkspacePath } from "../workspace/workspace.ts";
-
-export type PreparedRepository = {
-    readonly path: string;
-    readonly branch: string;
-    readonly cloned: boolean;
-    readonly branchChanged: boolean;
-    readonly cleaned: boolean;
-};
-
-export type GitRepositoryService = {
-    readonly verifyInstalled: () => Promise<void>;
-    readonly prepare: (
-        repository: string,
-        branch: string | undefined,
-        workspace: string,
-        destinationPath?: string,
-        signal?: AbortSignal,
-    ) => Promise<PreparedRepository>;
-};
+import { resolveWorkspacePath } from "../../core/domain/workspace-path.ts";
 
 const pathExists = async (path: string): Promise<boolean> => {
     try {

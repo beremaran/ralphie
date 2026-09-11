@@ -1,33 +1,10 @@
-import type { AgentModel } from "../../core/domain/agent-model.ts";
-import type {
-    AgentClient,
-    AgentEventListener,
-} from "../../core/ports/agent.ts";
+import type { AgentEventListener } from "../../core/ports/agent.ts";
+import type { PiAgentService } from "../../core/ports/pi.ts";
 import { FileCredentialStore } from "./auth.ts";
 import { makePiAgentClient } from "./client.ts";
-import {
-    piAuthPathFor,
-    resolvePiAgentDir,
-    type PiAgentConfig,
-} from "./config.ts";
-import {
-    makePiModels,
-    piModelCatalog,
-    readPiDefaultModel,
-    type PiModelInfo,
-} from "./models.ts";
-
-export type PiAgentRuntime = {
-    readonly client: AgentClient;
-    readonly close: () => Promise<void>;
-    /** Static provider catalog used for pre-execution thinking validation. */
-    readonly catalog: ReadonlyArray<PiModelInfo>;
-    readonly defaultModel?: AgentModel;
-};
-
-export type PiAgentService = {
-    readonly start: () => Promise<PiAgentRuntime>;
-};
+import type { PiAgentConfig } from "../../core/ports/pi.ts";
+import { piAuthPathFor, resolvePiAgentDir } from "./config.ts";
+import { makePiModels, piModelCatalog, readPiDefaultModel } from "./models.ts";
 
 /**
  * In-process pi agent runtime.

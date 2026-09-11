@@ -1,59 +1,34 @@
-import {
-    CommandRunnerLive,
-    type CommandRunnerService,
-} from "./adapters/process/command-runner.ts";
-import {
-    makeGitIssueCheckpointService,
-    type GitIssueCheckpointService,
-} from "./adapters/git/issue-checkpoint.ts";
-import {
-    makeGitIssueOperationsService,
-    type GitIssueOperationsService,
-} from "./adapters/git/issue-operations.ts";
-import {
-    makeGitIssuePreparationService,
-    type GitIssuePreparationService,
-} from "./adapters/git/issue-preparation.ts";
-import {
-    makeGitRemoteSafetyService,
-    type GitRemoteSafetyService,
-} from "./adapters/git/remote-safety.ts";
-import {
-    makeGitRepositoryInvariantService,
-    type GitRepositoryInvariantService,
-} from "./adapters/git/repository-invariant.ts";
-import {
-    makeGitRepositoryService,
-    type GitRepositoryService,
-} from "./adapters/git/repository.ts";
-import {
-    makeGitHubClientService,
-    type GitHubClientService,
-} from "./adapters/github/client.ts";
-import {
-    makeGitHubIssueMutationsService,
-    type GitHubIssueMutationService,
-} from "./adapters/github/issue-mutations.ts";
-import {
-    makeGitHubIssueRelationshipService,
-    type GitHubIssueRelationshipService,
-} from "./adapters/github/issue-relationships.ts";
-import {
-    makeParentCompletionService,
-    type ParentCompletionService,
-} from "./adapters/github/parent-completion.ts";
-import {
-    makeGitHubIssuesService,
-    type GitHubIssuesService,
-} from "./adapters/github/issues.ts";
-import {
-    makeGitHubNeedsAttentionNotificationService,
-    type GitHubNeedsAttentionNotificationService,
-} from "./adapters/github/needs-attention.ts";
+import { CommandRunnerLive } from "./adapters/process/command-runner.ts";
+import { type CommandRunnerService } from "./core/ports/process.ts";
+import { makeGitIssueCheckpointService } from "./adapters/git/issue-checkpoint.ts";
+import { type GitIssueCheckpointService } from "./core/ports/git.ts";
+import { makeGitIssueOperationsService } from "./adapters/git/issue-operations.ts";
+import { type GitIssueOperationsService } from "./core/ports/git.ts";
+import { makeGitIssuePreparationService } from "./adapters/git/issue-preparation.ts";
+import { type GitIssuePreparationService } from "./core/ports/git.ts";
+import { makeGitRemoteSafetyService } from "./adapters/git/remote-safety.ts";
+import { type GitRemoteSafetyService } from "./core/ports/git.ts";
+import { makeGitRepositoryInvariantService } from "./adapters/git/repository-invariant.ts";
+import { type GitRepositoryInvariantService } from "./core/ports/git.ts";
+import { makeGitRepositoryService } from "./adapters/git/repository.ts";
+import { type GitRepositoryService } from "./core/ports/git.ts";
+import { makeGitHubClientService } from "./adapters/github/client.ts";
+import { type GitHubClientService } from "./core/ports/github.ts";
+import { makeGitHubIssueMutationsService } from "./adapters/github/issue-mutations.ts";
+import { type GitHubIssueMutationService } from "./core/ports/github.ts";
+import { makeGitHubIssueRelationshipService } from "./adapters/github/issue-relationships.ts";
+import { type GitHubIssueRelationshipService } from "./core/ports/github.ts";
+import { makeParentCompletionService } from "./adapters/github/parent-completion.ts";
+import { type ParentCompletionService } from "./core/ports/github.ts";
+import { makeGitHubIssuesService } from "./adapters/github/issues.ts";
+import { type GitHubIssuesService } from "./core/ports/github.ts";
+import { makeGitHubNeedsAttentionNotificationService } from "./adapters/github/needs-attention.ts";
+import { type GitHubNeedsAttentionNotificationService } from "./core/ports/github.ts";
 import {
     makeIssueArtifactStoreService,
     type IssueArtifactStoreService,
-} from "./adapters/issues/artifacts.ts";
+} from "./core/app/issues/artifacts.ts";
+import { nodeIssueArtifactFileSystem } from "./adapters/issues/artifact-file-system.ts";
 import {
     makeComplexityAssessmentService,
     type ComplexityAssessmentService,
@@ -78,7 +53,8 @@ import {
 import {
     makeIssueRecoveryService,
     type IssueRecoveryService,
-} from "./adapters/issues/recovery.ts";
+} from "./core/app/issues/recovery.ts";
+import { nodeRecoveryFileSystem } from "./adapters/issues/recovery-file-system.ts";
 import {
     makeGroundingAssessmentService,
     type GroundingAssessmentService,
@@ -87,17 +63,15 @@ import {
     makeNeedsAttentionRouterService,
     type NeedsAttentionRouterService,
 } from "./core/app/issues/needs-attention.ts";
-import { type PiAgentService } from "./adapters/pi/runtime.ts";
+import { type PiAgentService } from "./core/ports/pi.ts";
 import { type ProgressReporterService } from "./core/ports/progress.ts";
-import { type RunEventLog } from "./adapters/run/event-log.ts";
-import {
-    RunStateStoreLive,
-    type RunStateStoreService,
-} from "./adapters/run/state.ts";
-import {
-    WorkspaceLive,
-    type WorkspaceService,
-} from "./adapters/workspace/workspace.ts";
+import { type RunEventLog } from "./core/ports/run.ts";
+import { RunStateStoreLive } from "./adapters/run/state.ts";
+import { type RunStateStoreService } from "./core/ports/run.ts";
+import { WorkspaceLive } from "./adapters/workspace/workspace.ts";
+import { type WorkspaceService } from "./core/ports/workspace.ts";
+
+export type { IssueWorkflowRuntime } from "./core/ports/runtime.ts";
 
 /** Concrete adapter assembly for one run. Only the command wiring consumes this broad shape; the workflow depends on its focused seam. */
 export type RalphieRuntime = {
@@ -130,25 +104,6 @@ export type RalphieRuntime = {
     readonly runEventLog: RunEventLog;
     readonly runStateStore: RunStateStoreService;
     readonly workspace: WorkspaceService;
-};
-
-/** Focused dependencies consumed directly by the issue workflow entrypoint. */
-export type IssueWorkflowRuntime = {
-    readonly progress: ProgressReporterService;
-    readonly runEventLog: RunEventLog;
-    readonly runStateStore: RunStateStoreService;
-    readonly workspace: WorkspaceService;
-    readonly githubClient: GitHubClientService;
-    readonly githubIssues: GitHubIssuesService;
-    readonly githubIssueMutations: GitHubIssueMutationService;
-    readonly githubNeedsAttentionNotification: GitHubNeedsAttentionNotificationService;
-    readonly gitRepository: GitRepositoryService;
-    readonly gitRepositoryInvariant: GitRepositoryInvariantService;
-    readonly gitIssueCheckpoint: GitIssueCheckpointService;
-    readonly gitIssueOperations: GitIssueOperationsService;
-    readonly parentCompletion: ParentCompletionService;
-    readonly issueExecutor: IssueExecutorService;
-    readonly agentRuntime: PiAgentService;
 };
 
 export type RuntimeOverrides = {
@@ -187,12 +142,15 @@ export const makeLiveRuntime = ({
     const gitIssueCheckpoint = makeGitIssueCheckpointService(commandRunner);
     const gitIssueOperations = makeGitIssueOperationsService(commandRunner);
     const gitRemoteSafety = makeGitRemoteSafetyService(commandRunner);
-    const issueArtifactStore = makeIssueArtifactStoreService();
+    const issueArtifactStore = makeIssueArtifactStoreService(
+        nodeIssueArtifactFileSystem,
+    );
     const actualGitIssuePreparation = makeGitIssuePreparationService(
         gitIssueCheckpoint,
         issueArtifactStore,
     );
     const issueRecovery = makeIssueRecoveryService(
+        nodeRecoveryFileSystem,
         gitIssueCheckpoint,
         progress,
         gitRepositoryInvariant,

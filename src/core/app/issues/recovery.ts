@@ -1,29 +1,44 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import {
     type GitIssueCheckpointService,
     type IssueCheckpoint,
-} from "../git/issue-checkpoint.ts";
-import type { GitRepositoryInvariantService } from "../git/repository-invariant.ts";
-import type { NeedsAttentionRequest } from "../../core/app/agent/task-session.ts";
-import type { GitHubIssue } from "../github/issues.ts";
-import { type ProgressReporterService } from "../../core/ports/progress.ts";
-import { RalphieError } from "../../shared/error.ts";
+} from "../../ports/git.ts";
+import { type GitRepositoryInvariantService } from "../../ports/git.ts";
+import type { NeedsAttentionRequest } from "../agent/task-session.ts";
+import type { GitHubIssue } from "../../domain/github.ts";
+import { type ProgressReporterService } from "../../ports/progress.ts";
+import { RalphieError } from "../../../shared/error.ts";
 import {
     needsAttentionDecisionSchema,
     type NeedsAttentionDecision,
     type ReviewDecision,
     ReviewVerdict,
-} from "../../core/app/issues/decisions.ts";
-import { resolveWorkspacePath } from "../workspace/workspace.ts";
-import {
-    IssueQueueResumeStrategy,
-    REVIEW_ITERATION_LIMIT,
-} from "../../core/app/issues/stage.ts";
-import type { VerificationEvidence } from "../../core/app/issues/verification.ts";
+} from "../../domain/decisions.ts";
+import { resolveWorkspacePath } from "../../domain/workspace-path.ts";
+import { IssueQueueResumeStrategy, REVIEW_ITERATION_LIMIT } from "./stage.ts";
+import type { VerificationEvidence } from "./verification.ts";
 import type { IssueFreshnessFingerprint } from "./artifacts.ts";
+
+/** File operations used by the diagnostic archive boundary. */
+export type RecoveryFileSystem = {
+    readonly mkdir: (
+        directory: string,
+        options?: { readonly recursive: true },
+    ) => Promise<void>;
+    readonly readFile: (filePath: string, encoding: "utf8") => Promise<string>;
+    readonly writeFile: (
+        filePath: string,
+        contents: string,
+        options: { readonly encoding: "utf8"; readonly flag: "wx" },
+    ) => Promise<void>;
+    readonly rename: (temporaryPath: string, filePath: string) => Promise<void>;
+    readonly rm: (
+        filePath: string,
+        options: { readonly recursive: true; readonly force: true },
+    ) => Promise<void>;
+};
 
 export type ReviewAttempt = {
     readonly attempt: number;
@@ -118,12 +133,15 @@ const needsAttentionDiagnosticName = (
         .digest("hex")
         .slice(0, 16)}`;
 
-const persistDiagnostic = async (input: {
-    readonly diagnosticsPath: string;
-    readonly patch: string;
-    readonly metadata: string;
-    readonly description: string;
-}): Promise<void> => {
+const persistDiagnostic = async (
+    fileSystem: RecoveryFileSystem,
+    input: {
+        readonly diagnosticsPath: string;
+        readonly patch: string;
+        readonly metadata: string;
+        readonly description: string;
+    },
+): Promise<void> => {
     if (
         Buffer.byteLength(input.patch, "utf8") >
         REVIEW_DIAGNOSTIC_PATCH_LIMIT_BYTES
@@ -143,21 +161,25 @@ const persistDiagnostic = async (input: {
 
     const temporaryPath = `${input.diagnosticsPath}.${randomUUID()}.tmp`;
     try {
-        await mkdir(dirname(input.diagnosticsPath), { recursive: true });
-        await mkdir(temporaryPath);
-        await writeFile(join(temporaryPath, "changes.patch"), input.patch, {
-            encoding: "utf8",
-            flag: "wx",
+        await fileSystem.mkdir(dirname(input.diagnosticsPath), {
+            recursive: true,
         });
-        await writeFile(join(temporaryPath, "metadata.json"), input.metadata, {
-            encoding: "utf8",
-            flag: "wx",
-        });
-        await rename(temporaryPath, input.diagnosticsPath);
-    } catch (cause) {
-        await rm(temporaryPath, { recursive: true, force: true }).catch(
-            () => undefined,
+        await fileSystem.mkdir(temporaryPath);
+        await fileSystem.writeFile(
+            join(temporaryPath, "changes.patch"),
+            input.patch,
+            { encoding: "utf8", flag: "wx" },
         );
+        await fileSystem.writeFile(
+            join(temporaryPath, "metadata.json"),
+            input.metadata,
+            { encoding: "utf8", flag: "wx" },
+        );
+        await fileSystem.rename(temporaryPath, input.diagnosticsPath);
+    } catch (cause) {
+        await fileSystem
+            .rm(temporaryPath, { recursive: true, force: true })
+            .catch(() => undefined);
         throw new RalphieError({
             message: `Failed to preserve ${input.description.toLowerCase()} at ${input.diagnosticsPath}. Checkout was not restored.`,
             cause,
@@ -195,12 +217,16 @@ const needsAttentionMetadata = (
 };
 
 const matchingDiagnostic = async (
+    fileSystem: RecoveryFileSystem,
     diagnosticsPath: string,
     metadata: string,
 ): Promise<boolean> => {
     try {
         const existing = JSON.parse(
-            await readFile(join(diagnosticsPath, "metadata.json"), "utf8"),
+            await fileSystem.readFile(
+                join(diagnosticsPath, "metadata.json"),
+                "utf8",
+            ),
         ) as Record<string, unknown>;
         const expected = JSON.parse(metadata) as Record<string, unknown>;
         const { createdAt: _existingCreatedAt, ...existingBinding } = existing;
@@ -224,6 +250,7 @@ const matchingDiagnostic = async (
 };
 
 export const makeIssueRecoveryService = (
+    fileSystem: RecoveryFileSystem,
     git: GitIssueCheckpointService,
     progress: ProgressReporterService,
     repositoryInvariant?: GitRepositoryInvariantService,
@@ -262,7 +289,7 @@ export const makeIssueRecoveryService = (
             null,
             2,
         )}\n`;
-        await persistDiagnostic({
+        await persistDiagnostic(fileSystem, {
             diagnosticsPath,
             patch,
             metadata,
@@ -323,11 +350,11 @@ export const makeIssueRecoveryService = (
             needsAttentionDiagnosticName(input.fingerprint),
         );
         const metadata = needsAttentionMetadata(input, diagnosticsPath);
-        if (await matchingDiagnostic(diagnosticsPath, metadata)) {
+        if (await matchingDiagnostic(fileSystem, diagnosticsPath, metadata)) {
             return { path: diagnosticsPath, reused: true };
         }
         if (patch === undefined) return undefined;
-        await persistDiagnostic({
+        await persistDiagnostic(fileSystem, {
             diagnosticsPath,
             patch,
             metadata,
