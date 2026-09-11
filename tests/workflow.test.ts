@@ -1,46 +1,46 @@
 import { describe, expect, test } from "bun:test";
 import type { Octokit } from "octokit";
-import type { AgentClient } from "../src/core/ports/agent.ts";
-import { type PiModelInfo } from "../src/core/domain/pi-models.ts";
+import type { AgentClient } from "../src/agent/ports.ts";
+import { type PiModelInfo } from "../src/agent/pi-models.ts";
 
-import { type GitRepositoryService } from "../src/core/ports/git.ts";
-import { type GitRepositoryInvariantService } from "../src/core/ports/git.ts";
-import { type GitIssueCheckpointService } from "../src/core/ports/git.ts";
-import { type GitIssueOperationsService } from "../src/core/ports/git.ts";
-import { type GitHubClientService } from "../src/core/ports/github.ts";
-import { type GitHubIssueMutationService } from "../src/core/ports/github.ts";
-import { makeParentCompletionService } from "../src/adapters/github/parent-completion.ts";
-import { type GitHubNeedsAttentionNotificationService } from "../src/core/ports/github.ts";
-import { type GitHubIssuesService } from "../src/core/ports/github.ts";
-import { type GitHubIssue } from "../src/core/domain/github.ts";
+import { type GitRepositoryService } from "../src/git/ports.ts";
+import { type GitRepositoryInvariantService } from "../src/git/ports.ts";
+import { type GitIssueCheckpointService } from "../src/git/ports.ts";
+import { type GitIssueOperationsService } from "../src/git/ports.ts";
+import { type GitHubClientService } from "../src/github/ports.ts";
+import { type GitHubIssueMutationService } from "../src/github/ports.ts";
+import { makeParentCompletionService } from "../src/github/adapters/parent-completion.ts";
+import { type GitHubNeedsAttentionNotificationService } from "../src/github/ports.ts";
+import { type GitHubIssuesService } from "../src/github/ports.ts";
+import { type GitHubIssue } from "../src/github/domain.ts";
 import {
     type IssueExecutionContext,
     type IssueExecutionOutcome,
     IssueExecutionOutcomeKind,
-} from "../src/core/app/issues/execution.ts";
+} from "../src/issues/app/execution.ts";
 import {
     makeIssueExecutorService,
     type IssueExecutorService,
-} from "../src/core/app/issues/executor.ts";
+} from "../src/issues/app/executor.ts";
 import {
     IssueArtifactKind,
     type IssueArtifactStoreService,
     makeIssueArtifactStore,
-} from "../src/core/app/issues/artifacts.ts";
-import { DEFAULT_AGENT } from "../src/core/domain/agent-model.ts";
-import type { AgentModel } from "../src/core/domain/agent-model.ts";
-import { type PiAgentService } from "../src/core/ports/pi.ts";
+} from "../src/issues/app/artifacts.ts";
+import { DEFAULT_AGENT } from "../src/agent/model.ts";
+import type { AgentModel } from "../src/agent/model.ts";
+import { type PiAgentService } from "../src/pi/ports.ts";
 import type {
     ProgressReporterService,
     ProgressUpdate,
-} from "../src/core/ports/progress.ts";
+} from "../src/progress/ports.ts";
 import { makeTestProgressRecorder } from "./shared/progress-recorder.ts";
-import { type RunEventLog } from "../src/core/ports/run.ts";
-import { type RunStateStoreService } from "../src/core/ports/run.ts";
-import { type RunState, RunStateStatus } from "../src/core/domain/run-state.ts";
-import { type WorkspaceService } from "../src/core/ports/workspace.ts";
-import { workflow } from "../src/core/app/workflow.ts";
-import { IssueOrder, IssueSort } from "../src/core/domain/github.ts";
+import { type RunEventLog } from "../src/run/ports.ts";
+import { type RunStateStoreService } from "../src/run/ports.ts";
+import { type RunState, RunStateStatus } from "../src/run/state.ts";
+import { type WorkspaceService } from "../src/workspace/ports.ts";
+import { workflow } from "../src/workflow/workflow.ts";
+import { IssueOrder, IssueSort } from "../src/github/domain.ts";
 import type { IssueWorkflowRuntime } from "../src/runtime.ts";
 import { RalphieError } from "../src/shared/error.ts";
 import {
@@ -49,7 +49,7 @@ import {
     GroundingDisposition,
     IssueResolutionStatus,
     NeedsAttentionReason,
-} from "../src/core/domain/decisions.ts";
+} from "../src/issues/domain/decisions.ts";
 
 const firstIssue: GitHubIssue = {
     number: 42,

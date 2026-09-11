@@ -1,12 +1,13 @@
 import { describe, expect, test } from "bun:test";
 
-import { makeGitRepositoryInvariantService } from "../../src/adapters/git/repository-invariant.ts";
+import { makeGitRepositoryInvariantService } from "../../src/git/adapters/repository-invariant.ts";
+import { CommandRunnerLive } from "../../src/process/adapters/command-runner.ts";
 import {
     CommandAbortedError,
     type CommandResult,
     type CommandRunOptions,
     type CommandRunnerService,
-} from "../../src/core/ports/process.ts";
+} from "../../src/process/ports.ts";
 import { RalphieError } from "../../src/shared/error.ts";
 import { makeGitFixture } from "../shared/git-fixture.ts";
 
@@ -115,7 +116,8 @@ describe("repository-invariant cancellation boundary", () => {
     test("captures and verifies a real checkout at the live boundary", async () => {
         const fixture = await makeGitFixture();
         try {
-            const service = makeGitRepositoryInvariantService();
+            const service =
+                makeGitRepositoryInvariantService(CommandRunnerLive);
             const captured = await service.capture(fixture.repositoryPath);
 
             expect(captured.head.toLowerCase()).toBe(
@@ -136,7 +138,7 @@ describe("repository-invariant cancellation boundary", () => {
     test("rejects a cancelled invariant capture at the live boundary", async () => {
         const controller = new AbortController();
         controller.abort();
-        const service = makeGitRepositoryInvariantService();
+        const service = makeGitRepositoryInvariantService(CommandRunnerLive);
 
         await expect(
             service.capture(REPOSITORY_PATH, controller.signal),

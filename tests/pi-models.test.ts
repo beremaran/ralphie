@@ -10,8 +10,8 @@ import {
     piModelCatalog,
     readPiDefaultModel,
     resolvePiModel,
-} from "../src/adapters/pi/models.ts";
-import { thinkingLevelFor } from "../src/core/domain/pi-models.ts";
+} from "../src/pi/adapters/models.ts";
+import { thinkingLevelFor } from "../src/agent/pi-models.ts";
 
 const makeFauxModels = () => {
     const faux = fauxProvider({

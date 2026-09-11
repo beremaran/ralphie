@@ -75,16 +75,15 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Changed
 
-- Restructure the source into hexagonal ports and adapters. `src/core`
-  (ports, domain, application) now holds the workflow, issue executors, agent
-  sessions, verification, artifact logic, recovery, and every outbound
-  contract; `src/adapters` holds the GitHub/Octokit, git, pi, filesystem,
-  process, run-state, and presentation implementations; `src/runtime.ts` is
-  the composition root. Core no longer imports adapters, `node:fs`, or vendor
-  SDKs — the opaque `GitHubApiClient` alias is the single Octokit reference,
-  and the artifact/recovery file systems are injected ports implemented under
-  `src/adapters/issues/`. `tests/architecture.test.ts` enforces the layer
-  directions, the core no-I/O rule, and process-stream ownership.
+- Restructure the source into hexagonal, context-first packages: each bounded
+  context (`agent`, `pi`, `github`, `git`, `issues`, `progress`, `run`,
+  `process`, `workspace`, `workflow`) owns its `ports.ts` contract, its domain
+  model, and its `adapters/` implementation together. `src/runtime.ts` and
+  `src/command.ts` are the only modules that instantiate adapters. Non-adapter
+  code imports no `node:fs`, `node:child_process`, vendor SDK, or process
+  stream; Octokit appears only inside the `github` context; the artifact and
+  recovery file systems are injected ports implemented under
+  `src/issues/adapters/`. `tests/architecture.test.ts` enforces these rules.
 
 - Decouple execution from presentation. The progress contract now lives in
   `src/ports/progress.ts` (no rendering or I/O dependencies), the renderers in

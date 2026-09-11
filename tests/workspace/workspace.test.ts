@@ -3,8 +3,8 @@ import { mkdtemp, rm, stat } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { WorkspaceLive } from "../../src/adapters/workspace/workspace.ts";
-import { resolveWorkspacePath } from "../../src/core/domain/workspace-path.ts";
+import { WorkspaceLive } from "../../src/workspace/adapters/workspace.ts";
+import { resolveWorkspacePath } from "../../src/workspace/path.ts";
 
 describe("workspace cleanup", () => {
     test("expands the default workspace path", () => {

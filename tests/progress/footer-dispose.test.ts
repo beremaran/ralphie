@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { makeFooterRefreshScheduler } from "../../src/adapters/progress/footer.ts";
+import { makeFooterRefreshScheduler } from "../../src/progress/adapters/footer.ts";
 
 const makeRepaintSpy = () => {
     let calls = 0;

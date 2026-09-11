@@ -3,11 +3,11 @@ import { describe, expect, test } from "bun:test";
 import {
     INTERACTIVE_REGION_MAX_ROWS,
     makeTerminalOutputController,
-} from "../../src/adapters/progress/terminal-controller.ts";
+} from "../../src/progress/adapters/terminal-controller.ts";
 import type {
     TerminalOutputStrategy,
     TerminalResizeSubscription,
-} from "../../src/adapters/progress/terminal-controller.ts";
+} from "../../src/progress/adapters/terminal-controller.ts";
 import {
     PhysicalRowMeter,
     makeRecordingStrategy,

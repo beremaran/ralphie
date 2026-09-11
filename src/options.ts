@@ -1,8 +1,8 @@
-import { IssueOrder, IssueSort } from "./core/domain/github.ts";
-import { DEFAULT_MAX_DECOMPOSITION_DEPTH } from "./core/domain/decomposition-markdown.ts";
-export { DEFAULT_MAX_DECOMPOSITION_DEPTH } from "./core/domain/decomposition-markdown.ts";
-import { parseRepositorySlug } from "./core/domain/repository.ts";
-import { DEFAULT_AGENT, type AgentModel } from "./core/domain/agent-model.ts";
+import { IssueOrder, IssueSort } from "./github/domain.ts";
+import { DEFAULT_MAX_DECOMPOSITION_DEPTH } from "./issues/domain/decomposition-markdown.ts";
+export { DEFAULT_MAX_DECOMPOSITION_DEPTH } from "./issues/domain/decomposition-markdown.ts";
+import { parseRepositorySlug } from "./github/repository.ts";
+import { DEFAULT_AGENT, type AgentModel } from "./agent/model.ts";
 import { RalphieError } from "./shared/error.ts";
 
 export const DEFAULT_WORKSPACE = "~/.ralphie";

@@ -1,0 +1,236 @@
+import { requireSuccess } from "../../process/require-success.ts";
+import { type CommandRunnerService } from "../../process/ports.ts";
+import {
+    GitRemoteSafetyError,
+    type GitDirectPushPolicy,
+    type GitRemoteSafetyFailureKind,
+    type GitRemoteSafetyInput,
+    type GitRemoteSafetyService,
+} from "../ports.ts";
+import { RalphieError } from "../../shared/error.ts";
+import { parseRepositorySlug } from "../../github/repository.ts";
+
+const fail = (
+    kind: GitRemoteSafetyFailureKind,
+    policy: GitDirectPushPolicy,
+    message: string,
+    cause?: unknown,
+): never => {
+    throw new GitRemoteSafetyError({ kind, policy, message, cause });
+};
+
+const parseCounts = (output: string): readonly [number, number] | undefined => {
+    const values = output.trim().split(/\s+/).map(Number);
+    if (
+        values.length !== 2 ||
+        values.some((value) => !Number.isInteger(value) || value < 0)
+    ) {
+        return undefined;
+    }
+    return [values[0]!, values[1]!];
+};
+
+const validateDirectPushInput = (input: GitRemoteSafetyInput): string => {
+    if ((input.pushMode ?? "non-force") !== "non-force") {
+        fail(
+            "invalid-push-mode",
+            "non-force-only",
+            "Direct pushes must use Git's non-force mode; force pushes are refused.",
+        );
+    }
+
+    let slug: string;
+    try {
+        slug = parseRepositorySlug(input.repository).slug;
+    } catch (cause) {
+        if (cause instanceof RalphieError) throw cause;
+        throw new RalphieError({
+            message: `Invalid GitHub repository: ${input.repository}.`,
+            cause,
+        });
+    }
+    if (input.intendedBaseSha.trim().length === 0) {
+        fail(
+            "diverged-base",
+            "require-expected-base",
+            "An intended base commit is required before a direct push.",
+        );
+    }
+    return slug;
+};
+
+const readAndVerifyOrigin = async (
+    runner: CommandRunnerService,
+    input: GitRemoteSafetyInput,
+    slug: string,
+): Promise<string> => {
+    const origin = (
+        await requireSuccess(
+            runner,
+            "git",
+            ["-C", input.repositoryPath, "remote", "get-url", "origin"],
+            "Failed to read the repository origin.",
+        )
+    ).stdout;
+    let originSlug: string;
+    try {
+        originSlug = parseRepositorySlug(origin).slug;
+    } catch (cause) {
+        throw new GitRemoteSafetyError({
+            kind: "origin-mismatch",
+            policy: "require-owned-origin",
+            message: `Repository origin ${origin} is not a GitHub repository owned by ${slug}.`,
+            cause,
+        });
+    }
+    if (originSlug.toLowerCase() !== slug.toLowerCase()) {
+        fail(
+            "origin-mismatch",
+            "require-owned-origin",
+            `Repository origin ${originSlug} does not match ${slug}.`,
+        );
+    }
+    return origin;
+};
+
+const verifyBranch = (
+    input: GitRemoteSafetyInput,
+    localBranch: string,
+): void => {
+    if (localBranch !== input.branch) {
+        fail(
+            "origin-mismatch",
+            "require-owned-origin",
+            `Checkout is on ${localBranch}, expected ${input.branch}.`,
+        );
+    }
+};
+
+const verifyHead = (input: GitRemoteSafetyInput, head: string): void => {
+    if (
+        input.expectedCommitSha !== undefined &&
+        head.toLowerCase() !== input.expectedCommitSha.toLowerCase()
+    ) {
+        fail(
+            "diverged-base",
+            "require-expected-base",
+            `Local HEAD ${head} does not match expected commit ${input.expectedCommitSha}.`,
+        );
+    }
+};
+
+const verifyRemoteBase = (
+    input: GitRemoteSafetyInput,
+    remote: string,
+): void => {
+    const remoteSha = remote.split(/\s+/)[0] ?? "";
+    const normalizedRemoteSha = remoteSha.toLowerCase();
+    const remoteIsIntendedBase =
+        normalizedRemoteSha === input.intendedBaseSha.toLowerCase();
+    const remoteIsExpectedCommit =
+        input.expectedCommitSha !== undefined &&
+        normalizedRemoteSha === input.expectedCommitSha.toLowerCase();
+    if (!remoteIsIntendedBase && !remoteIsExpectedCommit) {
+        fail(
+            "diverged-base",
+            "require-expected-base",
+            `Remote origin/${input.branch} moved from intended base ${input.intendedBaseSha} to ${remoteSha || "no commit"}.`,
+        );
+    }
+};
+
+const verifyAheadBehindCounts = (
+    input: GitRemoteSafetyInput,
+    countsOutput: string,
+): readonly [number, number] => {
+    const counts = parseCounts(countsOutput);
+    if (counts === undefined) {
+        fail(
+            "diverged-base",
+            "require-expected-base",
+            `Git returned an invalid ahead/behind count: ${countsOutput}.`,
+        );
+        throw new Error("unreachable");
+    }
+    const [behind, ahead] = counts;
+    const expectedAhead = input.expectedCommitSha === undefined ? 0 : 1;
+    if (behind !== 0 || ahead !== expectedAhead) {
+        fail(
+            "diverged-base",
+            "require-expected-base",
+            `Checkout diverged from intended base: ${behind} behind and ${ahead} ahead; expected 0 behind and ${expectedAhead} ahead.`,
+        );
+    }
+    return counts;
+};
+
+export const makeGitRemoteSafetyService = (
+    runner: CommandRunnerService,
+): GitRemoteSafetyService => ({
+    verifyDirectPush: async (input) => {
+        const slug = validateDirectPushInput(input);
+        const origin = await readAndVerifyOrigin(runner, input, slug);
+
+        const localBranch = (
+            await requireSuccess(
+                runner,
+                "git",
+                ["-C", input.repositoryPath, "symbolic-ref", "--short", "HEAD"],
+                "Failed to read the checked-out branch.",
+            )
+        ).stdout;
+        verifyBranch(input, localBranch);
+
+        const head = (
+            await requireSuccess(
+                runner,
+                "git",
+                ["-C", input.repositoryPath, "rev-parse", "HEAD"],
+                "Failed to read the local HEAD.",
+            )
+        ).stdout;
+        verifyHead(input, head);
+
+        const remote = (
+            await requireSuccess(
+                runner,
+                "git",
+                [
+                    "-C",
+                    input.repositoryPath,
+                    "ls-remote",
+                    "origin",
+                    `refs/heads/${input.branch}`,
+                ],
+                `Failed to read origin/${input.branch}.`,
+            )
+        ).stdout;
+        verifyRemoteBase(input, remote);
+
+        const countsOutput = (
+            await requireSuccess(
+                runner,
+                "git",
+                [
+                    "-C",
+                    input.repositoryPath,
+                    "rev-list",
+                    "--left-right",
+                    "--count",
+                    `${input.intendedBaseSha}...HEAD`,
+                ],
+                "Failed to compare the checkout with its intended base.",
+            )
+        ).stdout;
+        const [behind, ahead] = verifyAheadBehindCounts(input, countsOutput);
+
+        return {
+            repository: slug,
+            branch: input.branch,
+            origin,
+            commitsBehindBase: behind,
+            commitsAheadBase: ahead,
+            pushMode: "non-force",
+        };
+    },
+});

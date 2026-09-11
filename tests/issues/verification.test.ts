@@ -6,11 +6,11 @@ import { tmpdir } from "node:os";
 import {
     type CommandResult,
     type CommandRunnerService,
-} from "../../src/core/ports/process.ts";
+} from "../../src/process/ports.ts";
 import {
     makeIssueVerificationService,
     VerificationCommandError,
-} from "../../src/core/app/issues/verification.ts";
+} from "../../src/issues/app/verification.ts";
 
 const TREE_SHA = "a".repeat(40);
 

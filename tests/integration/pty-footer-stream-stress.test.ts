@@ -6,13 +6,13 @@ import { join } from "node:path";
 import type {
     AgentEventContext,
     AgentSessionEvent,
-} from "../../src/core/ports/agent.ts";
+} from "../../src/agent/ports.ts";
 import { stripTerminalControls } from "../../src/shared/terminal.ts";
-import { makeProgressCoordinator } from "../../src/adapters/progress/coordinator.ts";
+import { makeProgressCoordinator } from "../../src/progress/adapters/coordinator.ts";
 import {
     INTERACTIVE_REGION_MAX_ROWS,
     makeTerminalOutputController,
-} from "../../src/adapters/progress/terminal-controller.ts";
+} from "../../src/progress/adapters/terminal-controller.ts";
 import {
     ACTIVE_MARKER,
     DONE_MARKER,

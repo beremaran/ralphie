@@ -1,4 +1,4 @@
-import type { TerminalOutputStrategy } from "../../src/adapters/progress/terminal-controller.ts";
+import type { TerminalOutputStrategy } from "../../src/progress/adapters/terminal-controller.ts";
 
 /**
  * Physical-row measurement primitives for the display regression suite.

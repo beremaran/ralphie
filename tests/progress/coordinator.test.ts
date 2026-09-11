@@ -3,10 +3,10 @@ import { describe, expect, test } from "bun:test";
 import type {
     AgentEventContext,
     AgentSessionEvent,
-} from "../../src/core/ports/agent.ts";
-import { makeProgressCoordinator } from "../../src/adapters/progress/coordinator.ts";
-import { INTERACTIVE_REGION_MAX_ROWS } from "../../src/adapters/progress/terminal-controller.ts";
-import type { TerminalOutputStrategy } from "../../src/adapters/progress/terminal-controller.ts";
+} from "../../src/agent/ports.ts";
+import { makeProgressCoordinator } from "../../src/progress/adapters/coordinator.ts";
+import { INTERACTIVE_REGION_MAX_ROWS } from "../../src/progress/adapters/terminal-controller.ts";
+import type { TerminalOutputStrategy } from "../../src/progress/adapters/terminal-controller.ts";
 
 const CLEAR = "\r\x1b[2K";
 

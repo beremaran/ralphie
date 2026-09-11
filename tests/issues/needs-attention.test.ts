@@ -4,26 +4,26 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Octokit } from "octokit";
 
-import type { AgentClient } from "../../src/core/ports/agent.ts";
-import { type GitHubIssue } from "../../src/core/domain/github.ts";
-import { type GitIssueCheckpointService } from "../../src/core/ports/git.ts";
-import { type IssueCheckpoint } from "../../src/core/ports/git.ts";
-import { type GitIssuePreparationService } from "../../src/core/ports/git.ts";
-import { type GitIssueOperationsService } from "../../src/core/ports/git.ts";
-import { type GitRemoteSafetyService } from "../../src/core/ports/git.ts";
+import type { AgentClient } from "../../src/agent/ports.ts";
+import { type GitHubIssue } from "../../src/github/domain.ts";
+import { type GitIssueCheckpointService } from "../../src/git/ports.ts";
+import { type IssueCheckpoint } from "../../src/git/ports.ts";
+import { type GitIssuePreparationService } from "../../src/git/ports.ts";
+import { type GitIssueOperationsService } from "../../src/git/ports.ts";
+import { type GitRemoteSafetyService } from "../../src/git/ports.ts";
 import {
     type GitRepositoryInvariant,
     type GitRepositoryInvariantService,
-} from "../../src/core/ports/git.ts";
-import { type GitHubIssueRelationshipService } from "../../src/core/ports/github.ts";
-import { type GitHubIssueMutationService } from "../../src/core/ports/github.ts";
-import { type GitHubIssuesService } from "../../src/core/ports/github.ts";
-import { DEFAULT_AGENT } from "../../src/core/domain/agent-model.ts";
-import { requestStructuredOutput } from "../../src/core/app/agent/structured-output.ts";
+} from "../../src/git/ports.ts";
+import { type GitHubIssueRelationshipService } from "../../src/github/ports.ts";
+import { type GitHubIssueMutationService } from "../../src/github/ports.ts";
+import { type GitHubIssuesService } from "../../src/github/ports.ts";
+import { DEFAULT_AGENT } from "../../src/agent/model.ts";
+import { requestStructuredOutput } from "../../src/agent/structured-output.ts";
 import {
     makeAgentSessionDiagnostics,
     type NeedsAttentionRequest,
-} from "../../src/core/app/agent/task-session.ts";
+} from "../../src/agent/task-session.ts";
 import {
     IssueArtifactKind,
     issueArtifactPath,
@@ -31,12 +31,12 @@ import {
     type IssueArtifactStore,
     type IssueArtifactStoreService,
     type IssueFreshnessFingerprint,
-} from "../../src/core/app/issues/artifacts.ts";
-import type { ComplexityAssessmentService } from "../../src/core/app/issues/complexity.ts";
+} from "../../src/issues/app/artifacts.ts";
+import type { ComplexityAssessmentService } from "../../src/issues/app/complexity.ts";
 import {
     makeDecompositionExecutorService,
     type DecompositionExecutorService,
-} from "../../src/core/app/issues/decomposition-executor.ts";
+} from "../../src/issues/app/decomposition-executor.ts";
 import {
     ComplexityLevel,
     GroundingDisposition,
@@ -47,37 +47,37 @@ import {
     complexityDecisionSchema,
     groundingDecisionSchema,
     type GroundingDecision,
-} from "../../src/core/domain/decisions.ts";
+} from "../../src/issues/domain/decisions.ts";
 import {
     makeImplementationExecutorService,
     type ImplementationExecutorService,
-} from "../../src/core/app/issues/implementation-executor.ts";
-import type { GroundingAssessmentService } from "../../src/core/app/issues/grounding.ts";
+} from "../../src/issues/app/implementation-executor.ts";
+import type { GroundingAssessmentService } from "../../src/issues/app/grounding.ts";
 import {
     type IssueExecutionContext,
     IssueExecutionOutcomeKind,
-} from "../../src/core/app/issues/execution.ts";
-import { makeIssueExecutorService } from "../../src/core/app/issues/executor.ts";
+} from "../../src/issues/app/execution.ts";
+import { makeIssueExecutorService } from "../../src/issues/app/executor.ts";
 import {
     makeNeedsAttentionRouterService,
     type NeedsAttentionRouterService,
-} from "../../src/core/app/issues/needs-attention.ts";
-import { nodeRecoveryFileSystem } from "../../src/adapters/issues/recovery-file-system.ts";
+} from "../../src/issues/app/needs-attention.ts";
+import { nodeRecoveryFileSystem } from "../../src/issues/adapters/recovery-file-system.ts";
 import {
     makeIssueRecoveryService,
     type IssueRecoveryService,
     type NeedsAttentionRecoveryInput,
-} from "../../src/core/app/issues/recovery.ts";
-import { makeResolutionVerificationService } from "../../src/core/app/issues/resolution-verification.ts";
+} from "../../src/issues/app/recovery.ts";
+import { makeResolutionVerificationService } from "../../src/issues/app/resolution-verification.ts";
 import {
     IssueQueueResumeStrategy,
     REVIEW_ITERATION_LIMIT,
-} from "../../src/core/app/issues/stage.ts";
-import type { IssueVerificationService } from "../../src/core/app/issues/verification.ts";
+} from "../../src/issues/domain/stage.ts";
+import type { IssueVerificationService } from "../../src/issues/app/verification.ts";
 import type {
     ProgressReporterService,
     ProgressUpdate,
-} from "../../src/core/ports/progress.ts";
+} from "../../src/progress/ports.ts";
 import { makeTestProgressRecorder } from "../shared/progress-recorder.ts";
 import { RalphieError } from "../../src/shared/error.ts";
 

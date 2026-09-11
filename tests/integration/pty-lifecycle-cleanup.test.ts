@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { stripTerminalControls } from "../../src/shared/terminal.ts";
-import { RalphieExitCode } from "../../src/core/app/exit-code.ts";
+import { RalphieExitCode } from "../../src/workflow/exit-code.ts";
 import {
     ACTIVE_MARKER,
     DISPOSED_MARKER,

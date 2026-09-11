@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import type { BeforeToolCallContext } from "@earendil-works/pi-agent-core";
 
-import { makePiTools } from "../src/adapters/pi/tools.ts";
+import { makePiTools } from "../src/pi/adapters/tools.ts";
 
 const guardContext = (input: {
     readonly name: string;

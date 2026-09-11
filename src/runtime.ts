@@ -1,77 +1,77 @@
-import { CommandRunnerLive } from "./adapters/process/command-runner.ts";
-import { type CommandRunnerService } from "./core/ports/process.ts";
-import { makeGitIssueCheckpointService } from "./adapters/git/issue-checkpoint.ts";
-import { type GitIssueCheckpointService } from "./core/ports/git.ts";
-import { makeGitIssueOperationsService } from "./adapters/git/issue-operations.ts";
-import { type GitIssueOperationsService } from "./core/ports/git.ts";
-import { makeGitIssuePreparationService } from "./adapters/git/issue-preparation.ts";
-import { type GitIssuePreparationService } from "./core/ports/git.ts";
-import { makeGitRemoteSafetyService } from "./adapters/git/remote-safety.ts";
-import { type GitRemoteSafetyService } from "./core/ports/git.ts";
-import { makeGitRepositoryInvariantService } from "./adapters/git/repository-invariant.ts";
-import { type GitRepositoryInvariantService } from "./core/ports/git.ts";
-import { makeGitRepositoryService } from "./adapters/git/repository.ts";
-import { type GitRepositoryService } from "./core/ports/git.ts";
-import { makeGitHubClientService } from "./adapters/github/client.ts";
-import { type GitHubClientService } from "./core/ports/github.ts";
-import { makeGitHubIssueMutationsService } from "./adapters/github/issue-mutations.ts";
-import { type GitHubIssueMutationService } from "./core/ports/github.ts";
-import { makeGitHubIssueRelationshipService } from "./adapters/github/issue-relationships.ts";
-import { type GitHubIssueRelationshipService } from "./core/ports/github.ts";
-import { makeParentCompletionService } from "./adapters/github/parent-completion.ts";
-import { type ParentCompletionService } from "./core/ports/github.ts";
-import { makeGitHubIssuesService } from "./adapters/github/issues.ts";
-import { type GitHubIssuesService } from "./core/ports/github.ts";
-import { makeGitHubNeedsAttentionNotificationService } from "./adapters/github/needs-attention.ts";
-import { type GitHubNeedsAttentionNotificationService } from "./core/ports/github.ts";
+import { CommandRunnerLive } from "./process/adapters/command-runner.ts";
+import { type CommandRunnerService } from "./process/ports.ts";
+import { makeGitIssueCheckpointService } from "./git/adapters/issue-checkpoint.ts";
+import { type GitIssueCheckpointService } from "./git/ports.ts";
+import { makeGitIssueOperationsService } from "./git/adapters/issue-operations.ts";
+import { type GitIssueOperationsService } from "./git/ports.ts";
+import { makeGitIssuePreparationService } from "./git/adapters/issue-preparation.ts";
+import { type GitIssuePreparationService } from "./git/ports.ts";
+import { makeGitRemoteSafetyService } from "./git/adapters/remote-safety.ts";
+import { type GitRemoteSafetyService } from "./git/ports.ts";
+import { makeGitRepositoryInvariantService } from "./git/adapters/repository-invariant.ts";
+import { type GitRepositoryInvariantService } from "./git/ports.ts";
+import { makeGitRepositoryService } from "./git/adapters/repository.ts";
+import { type GitRepositoryService } from "./git/ports.ts";
+import { makeGitHubClientService } from "./github/adapters/client.ts";
+import { type GitHubClientService } from "./github/ports.ts";
+import { makeGitHubIssueMutationsService } from "./github/adapters/issue-mutations.ts";
+import { type GitHubIssueMutationService } from "./github/ports.ts";
+import { makeGitHubIssueRelationshipService } from "./github/adapters/issue-relationships.ts";
+import { type GitHubIssueRelationshipService } from "./github/ports.ts";
+import { makeParentCompletionService } from "./github/adapters/parent-completion.ts";
+import { type ParentCompletionService } from "./github/ports.ts";
+import { makeGitHubIssuesService } from "./github/adapters/issues.ts";
+import { type GitHubIssuesService } from "./github/ports.ts";
+import { makeGitHubNeedsAttentionNotificationService } from "./github/adapters/needs-attention.ts";
+import { type GitHubNeedsAttentionNotificationService } from "./github/ports.ts";
 import {
     makeIssueArtifactStoreService,
     type IssueArtifactStoreService,
-} from "./core/app/issues/artifacts.ts";
-import { nodeIssueArtifactFileSystem } from "./adapters/issues/artifact-file-system.ts";
+} from "./issues/app/artifacts.ts";
+import { nodeIssueArtifactFileSystem } from "./issues/adapters/artifact-file-system.ts";
 import {
     makeComplexityAssessmentService,
     type ComplexityAssessmentService,
-} from "./core/app/issues/complexity.ts";
+} from "./issues/app/complexity.ts";
 import {
     makeDecompositionExecutorService,
     type DecompositionExecutorService,
-} from "./core/app/issues/decomposition-executor.ts";
+} from "./issues/app/decomposition-executor.ts";
 import {
     makeImplementationExecutorService,
     type ImplementationExecutorService,
-} from "./core/app/issues/implementation-executor.ts";
-import { makeIssueVerificationService } from "./core/app/issues/verification.ts";
+} from "./issues/app/implementation-executor.ts";
+import { makeIssueVerificationService } from "./issues/app/verification.ts";
 import {
     makeResolutionVerificationService,
     type ResolutionVerificationService,
-} from "./core/app/issues/resolution-verification.ts";
+} from "./issues/app/resolution-verification.ts";
 import {
     makeIssueExecutorService,
     type IssueExecutorService,
-} from "./core/app/issues/executor.ts";
+} from "./issues/app/executor.ts";
 import {
     makeIssueRecoveryService,
     type IssueRecoveryService,
-} from "./core/app/issues/recovery.ts";
-import { nodeRecoveryFileSystem } from "./adapters/issues/recovery-file-system.ts";
+} from "./issues/app/recovery.ts";
+import { nodeRecoveryFileSystem } from "./issues/adapters/recovery-file-system.ts";
 import {
     makeGroundingAssessmentService,
     type GroundingAssessmentService,
-} from "./core/app/issues/grounding.ts";
+} from "./issues/app/grounding.ts";
 import {
     makeNeedsAttentionRouterService,
     type NeedsAttentionRouterService,
-} from "./core/app/issues/needs-attention.ts";
-import { type PiAgentService } from "./core/ports/pi.ts";
-import { type ProgressReporterService } from "./core/ports/progress.ts";
-import { type RunEventLog } from "./core/ports/run.ts";
-import { RunStateStoreLive } from "./adapters/run/state.ts";
-import { type RunStateStoreService } from "./core/ports/run.ts";
-import { WorkspaceLive } from "./adapters/workspace/workspace.ts";
-import { type WorkspaceService } from "./core/ports/workspace.ts";
+} from "./issues/app/needs-attention.ts";
+import { type PiAgentService } from "./pi/ports.ts";
+import { type ProgressReporterService } from "./progress/ports.ts";
+import { type RunEventLog } from "./run/ports.ts";
+import { RunStateStoreLive } from "./run/adapters/state.ts";
+import { type RunStateStoreService } from "./run/ports.ts";
+import { WorkspaceLive } from "./workspace/adapters/workspace.ts";
+import { type WorkspaceService } from "./workspace/ports.ts";
 
-export type { IssueWorkflowRuntime } from "./core/ports/runtime.ts";
+export type { IssueWorkflowRuntime } from "./workflow/ports.ts";
 
 /** Concrete adapter assembly for one run. Only the command wiring consumes this broad shape; the workflow depends on its focused seam. */
 export type RalphieRuntime = {

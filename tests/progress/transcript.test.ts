@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { makeAgentTranscriptRenderer } from "../../src/adapters/progress/transcript.ts";
+import { makeAgentTranscriptRenderer } from "../../src/progress/adapters/transcript.ts";
 import type {
     AgentEventContext,
     AgentSessionEvent,
-} from "../../src/core/ports/agent.ts";
+} from "../../src/agent/ports.ts";
 
 const context: AgentEventContext = {
     sessionID: "session-1",

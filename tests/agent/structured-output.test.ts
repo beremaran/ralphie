@@ -1,10 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
 
-import { requestStructuredOutput } from "../../src/core/app/agent/structured-output.ts";
-import type { AgentClient } from "../../src/core/ports/agent.ts";
-import { CommandAbortedError } from "../../src/core/ports/process.ts";
-import { makeGitRepositoryInvariantService } from "../../src/adapters/git/repository-invariant.ts";
+import { requestStructuredOutput } from "../../src/agent/structured-output.ts";
+import type { AgentClient } from "../../src/agent/ports.ts";
+import { CommandAbortedError } from "../../src/process/ports.ts";
+import { makeGitRepositoryInvariantService } from "../../src/git/adapters/repository-invariant.ts";
+import { CommandRunnerLive } from "../../src/process/adapters/command-runner.ts";
 import { makeGitFixture } from "../shared/git-fixture.ts";
 
 const schema = z.object({ ok: z.boolean() });
@@ -108,7 +109,7 @@ describe("structured-output post-run verification cancellation", () => {
     test("surfaces a live-boundary abort from repository invariant verification", async () => {
         const fixture = await makeGitFixture();
         try {
-            const live = makeGitRepositoryInvariantService();
+            const live = makeGitRepositoryInvariantService(CommandRunnerLive);
             const controller = new AbortController();
             await expect(
                 requestStructuredOutput(structuredClient({ ok: true }), {

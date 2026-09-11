@@ -3,14 +3,14 @@ import { describe, expect, test } from "bun:test";
 import {
     CommandRunnerLive,
     PROCESS_TERMINATION_ESCALATION_MS,
-    requireSuccess,
-} from "../../src/adapters/process/command-runner.ts";
+} from "../../src/process/adapters/command-runner.ts";
+import { requireSuccess } from "../../src/process/require-success.ts";
 import {
     CommandAbortedError,
     CommandTimeoutError,
     type CommandResult,
     type CommandRunnerService,
-} from "../../src/core/ports/process.ts";
+} from "../../src/process/ports.ts";
 import { RalphieError } from "../../src/shared/error.ts";
 
 const result = (

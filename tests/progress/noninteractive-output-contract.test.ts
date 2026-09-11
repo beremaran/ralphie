@@ -3,10 +3,10 @@ import { describe, expect, test } from "bun:test";
 import type {
     AgentEventContext,
     AgentSessionEvent,
-} from "../../src/core/ports/agent.ts";
-import { makeProgressCoordinator } from "../../src/adapters/progress/coordinator.ts";
-import type { ProgressRenderMode } from "../../src/adapters/progress/progress.ts";
-import type { ProgressUpdate } from "../../src/core/ports/progress.ts";
+} from "../../src/agent/ports.ts";
+import { makeProgressCoordinator } from "../../src/progress/adapters/coordinator.ts";
+import type { ProgressRenderMode } from "../../src/progress/adapters/progress.ts";
+import type { ProgressUpdate } from "../../src/progress/ports.ts";
 import { stripTerminalControls } from "../../src/shared/terminal.ts";
 
 const FIXED_TIMESTAMP = "2026-09-09T00:00:00.000Z";

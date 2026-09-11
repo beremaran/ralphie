@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import type {
     AgentEventContext,
     AgentEventListener,
-} from "../src/core/ports/agent.ts";
+} from "../src/agent/ports.ts";
 import {
     runCommand,
     type CliTerminalInfo,
@@ -15,14 +15,14 @@ import {
     type CommandRuntime,
     type RunCommandInput,
 } from "../src/command.ts";
-import type { ProgressCoordinator } from "../src/adapters/progress/coordinator.ts";
-import { makeProgressCoordinator } from "../src/adapters/progress/coordinator.ts";
+import type { ProgressCoordinator } from "../src/progress/adapters/coordinator.ts";
+import { makeProgressCoordinator } from "../src/progress/adapters/coordinator.ts";
 import type {
     TerminalOutputController,
     TerminalOutputStrategy,
     TerminalResizeSubscription,
-} from "../src/adapters/progress/terminal-controller.ts";
-import { RalphieExitCode } from "../src/core/app/exit-code.ts";
+} from "../src/progress/adapters/terminal-controller.ts";
+import { RalphieExitCode } from "../src/workflow/exit-code.ts";
 
 const context: AgentEventContext = {
     sessionID: "command-lifecycle-session",

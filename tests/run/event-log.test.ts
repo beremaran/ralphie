@@ -3,8 +3,8 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { makeRunEventLog } from "../../src/adapters/run/event-log.ts";
-import type { ProgressEvent } from "../../src/core/ports/progress.ts";
+import { makeRunEventLog } from "../../src/run/adapters/event-log.ts";
+import type { ProgressEvent } from "../../src/progress/ports.ts";
 
 const event = (message: string): ProgressEvent => ({
     stage: "run",

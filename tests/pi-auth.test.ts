@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { FileCredentialStore } from "../src/adapters/pi/auth.ts";
+import { FileCredentialStore } from "../src/pi/adapters/auth.ts";
 
 const withStore = async (
     run: (input: {

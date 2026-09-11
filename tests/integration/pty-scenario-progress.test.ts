@@ -4,8 +4,8 @@ import {
     reduceProgressUpdate,
     type DisplayClock,
     type DisplayState,
-} from "../../src/adapters/progress/display-state.ts";
-import type { ProgressUpdate } from "../../src/core/ports/progress.ts";
+} from "../../src/progress/adapters/display-state.ts";
+import type { ProgressUpdate } from "../../src/progress/ports.ts";
 import {
     LONG_FAILURE_MESSAGE,
     scenarioProgressUpdates,

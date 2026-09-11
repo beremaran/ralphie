@@ -1,14 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import type { Octokit } from "octokit";
 
-import { makeGitHubIssuesService } from "../../src/adapters/github/issues.ts";
+import { makeGitHubIssuesService } from "../../src/github/adapters/issues.ts";
 import {
     isIssueEligible,
     MAX_ISSUE_COMMENT_BODY_LENGTH,
     MAX_ISSUE_COMMENTS,
     IssueOrder,
     IssueSort,
-} from "../../src/core/domain/github.ts";
+} from "../../src/github/domain.ts";
 
 const listOpen = (client: Octokit, labels: ReadonlyArray<string> = []) =>
     makeGitHubIssuesService().listOpen(client, "owner/repository", {

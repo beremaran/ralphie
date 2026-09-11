@@ -8,28 +8,25 @@ import {
     type IssueRalphieConfig,
     validateRalphieCliOptions,
 } from "./options.ts";
-import { IssueOrder, IssueSort } from "./core/domain/github.ts";
-import {
-    agentModelSchema,
-    agentModelVariantSchema,
-} from "./core/domain/agent-model.ts";
+import { IssueOrder, IssueSort } from "./github/domain.ts";
+import { agentModelSchema, agentModelVariantSchema } from "./agent/model.ts";
 import {
     makeProgressCoordinator,
     type ProgressCoordinator,
     type ProgressCoordinatorOptions,
-} from "./adapters/progress/coordinator.ts";
-import { type ProgressRenderMode } from "./adapters/progress/progress.ts";
-import { makePiAgentService } from "./adapters/pi/runtime.ts";
-import { type PiAgentService } from "./core/ports/pi.ts";
-import { type PiAgentConfig } from "./core/ports/pi.ts";
+} from "./progress/adapters/coordinator.ts";
+import { type ProgressRenderMode } from "./progress/adapters/progress.ts";
+import { makePiAgentService } from "./pi/adapters/runtime.ts";
+import { type PiAgentService } from "./pi/ports.ts";
+import { type PiAgentConfig } from "./pi/ports.ts";
 import { makeLiveRuntime, type IssueWorkflowRuntime } from "./runtime.ts";
-import type { AgentEventListener } from "./core/ports/agent.ts";
-import { exitCodeForError, RalphieExitCode } from "./core/app/exit-code.ts";
-import { workflow } from "./core/app/workflow.ts";
+import type { AgentEventListener } from "./agent/ports.ts";
+import { exitCodeForError, RalphieExitCode } from "./workflow/exit-code.ts";
+import { workflow } from "./workflow/workflow.ts";
 import { BUILD_INFO } from "./build-info.ts";
-import { makeRunEventLog } from "./adapters/run/event-log.ts";
-import { type RunEventLog } from "./core/ports/run.ts";
-import { resolveWorkspacePath } from "./core/domain/workspace-path.ts";
+import { makeRunEventLog } from "./run/adapters/event-log.ts";
+import { type RunEventLog } from "./run/ports.ts";
+import { resolveWorkspacePath } from "./workspace/path.ts";
 
 const cliOptions = {
     branch: { type: "string", short: "b" },

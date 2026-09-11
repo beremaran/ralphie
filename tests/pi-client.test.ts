@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 
-import { requestStructuredOutput } from "../src/core/app/agent/structured-output.ts";
+import { requestStructuredOutput } from "../src/agent/structured-output.ts";
 import {
     createModels,
     fauxAssistantMessage,
@@ -14,8 +14,8 @@ import {
 import {
     makePiAgentClient,
     type PiAgentClientOptions,
-} from "../src/adapters/pi/client.ts";
-import type { AgentClient } from "../src/core/ports/agent.ts";
+} from "../src/pi/adapters/client.ts";
+import type { AgentClient } from "../src/agent/ports.ts";
 
 const fencedJson = (value: unknown): string =>
     `Done.\n\`\`\`json\n${JSON.stringify(value)}\n\`\`\``;

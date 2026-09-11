@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
-import { DEFAULT_BREADCRUMB_THRESHOLD } from "../../src/adapters/progress/breadcrumb-label.ts";
+import { DEFAULT_BREADCRUMB_THRESHOLD } from "../../src/progress/adapters/breadcrumb-label.ts";
 import type {
     ProgressCoordinator,
     ProgressCoordinatorOptions,
-} from "../../src/adapters/progress/coordinator.ts";
+} from "../../src/progress/adapters/coordinator.ts";
 import {
     makeScenarioCoordinator,
     parsePtyScenarioArgs,

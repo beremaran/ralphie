@@ -4,22 +4,27 @@ import { dirname, join, relative, resolve } from "node:path";
 
 const SRC = resolve(import.meta.dir, "..", "src");
 
-const sourceFiles = async (root: string): Promise<readonly string[]> => {
-    const entries = await readdir(root, { recursive: true });
+const ROOT_MODULES = new Set([
+    "build-info.ts",
+    "cli.ts",
+    "command.ts",
+    "options.ts",
+    "runtime.ts",
+]);
+
+const sourceFiles = async (): Promise<readonly string[]> => {
+    const entries = await readdir(SRC, { recursive: true });
     return entries
         .filter((entry) => entry.endsWith(".ts"))
-        .map((entry) => join(root, entry))
+        .map((entry) => join(SRC, entry))
         .sort();
 };
 
-const importSpecifiers = (source: string): readonly string[] => {
-    const specifiers: string[] = [];
-    const pattern = /(?:from|import)\s*\(?\s*"([^"]+)"/g;
-    for (const match of source.matchAll(pattern)) {
-        const specifier = match[1];
-        if (specifier !== undefined) specifiers.push(specifier);
-    }
-    return specifiers;
+const importSpecifiers = async (file: string): Promise<readonly string[]> => {
+    const source = await readFile(file, "utf8");
+    return [...source.matchAll(/(?:from|import)\s*\(?\s*"([^"]+)"/g)].flatMap(
+        (match) => (match[1] === undefined ? [] : [match[1]]),
+    );
 };
 
 type ImportEdge = {
@@ -27,175 +32,151 @@ type ImportEdge = {
     readonly target: string;
 };
 
-/** Relative import edges of one file, resolved relative to `src/`. */
+/** Import edges of one file, resolved relative to `src/`. */
 const importEdges = async (file: string): Promise<readonly ImportEdge[]> => {
-    const source = await readFile(file, "utf8");
-    return importSpecifiers(source)
-        .filter((specifier) => specifier.startsWith("."))
-        .map((specifier) => ({
+    const edges: ImportEdge[] = [];
+    for (const specifier of await importSpecifiers(file)) {
+        edges.push({
             specifier,
-            target: relative(SRC, resolve(dirname(file), specifier)),
-        }));
+            target: specifier.startsWith(".")
+                ? relative(SRC, resolve(dirname(file), specifier))
+                : specifier,
+        });
+    }
+    return edges;
 };
 
-const externalImports = async (file: string): Promise<readonly string[]> => {
-    const source = await readFile(file, "utf8");
-    return importSpecifiers(source).filter(
-        (specifier) => !specifier.startsWith("."),
-    );
-};
+const relativePath = (file: string): string => relative(SRC, file);
 
-const offendersFor = async (
-    files: ReadonlyArray<string>,
-    forbidden: (target: string) => boolean,
+const isAdapterPath = (target: string): boolean =>
+    target.startsWith("adapters/") || target.includes("/adapters/");
+
+const offenders = async (
+    predicate: (file: string) => boolean,
+    forbidden: (edge: ImportEdge, file: string) => boolean,
 ): Promise<readonly string[]> => {
-    const offenders: string[] = [];
-    for (const file of files) {
-        const path = relative(SRC, file);
-        for (const { specifier, target } of await importEdges(file)) {
-            if (forbidden(target)) offenders.push(`${path} -> ${specifier}`);
+    const found: string[] = [];
+    for (const file of await sourceFiles()) {
+        if (!predicate(file)) continue;
+        for (const edge of await importEdges(file)) {
+            if (forbidden(edge, file)) {
+                found.push(`${relativePath(file)} -> ${edge.specifier}`);
+            }
         }
     }
-    return offenders;
+    return found;
 };
 
-const filesIn = async (category: string): Promise<readonly string[]> =>
-    (await sourceFiles(SRC)).filter((file) =>
-        relative(SRC, file).startsWith(`${category}/`),
-    );
-
-const isWithin = (target: string, category: string): boolean =>
-    target === category || target.startsWith(`${category}/`);
-
-const ADAPTER_CATEGORIES = [
-    "adapters/git",
-    "adapters/github",
-    "adapters/issues",
-    "adapters/pi",
-    "adapters/process",
-    "adapters/progress",
-    "adapters/run",
-    "adapters/workspace",
-] as const;
-
-const isAdapter = (target: string): boolean =>
-    ADAPTER_CATEGORIES.some((category) => isWithin(target, category));
+const IO_MODULES = new Set([
+    "node:fs",
+    "node:fs/promises",
+    "node:child_process",
+    "bun",
+    "proper-lockfile",
+    "@earendil-works/pi-agent-core",
+    "@earendil-works/pi-ai",
+]);
 
 describe("hexagonal boundaries", () => {
-    test("core never imports adapters or the composition root", async () => {
-        const importers = [
-            ...(await filesIn("core/app")),
-            ...(await filesIn("core/domain")),
-            ...(await filesIn("core/ports")),
-        ];
+    test("adapters are imported only by the composition root or their own context", async () => {
         expect(
-            await offendersFor(
-                importers,
-                (target) =>
-                    isAdapter(target) ||
-                    target === "command.ts" ||
-                    target === "cli.ts" ||
-                    target === "runtime.ts" ||
-                    target === "options.ts",
+            await offenders(
+                () => true,
+                ({ target }, file) => {
+                    if (!isAdapterPath(target)) return false;
+                    const importer = relativePath(file);
+                    if (
+                        importer === "runtime.ts" ||
+                        importer === "command.ts"
+                    ) {
+                        return false;
+                    }
+                    const adapterContext = target.split("/")[0] ?? target;
+                    return !importer.startsWith(`${adapterContext}/adapters/`);
+                },
             ),
         ).toEqual([]);
     });
 
-    test("core does not import I/O or vendor SDKs", async () => {
-        const forbidden = new Set([
-            "node:fs",
-            "node:fs/promises",
-            "node:child_process",
-            "bun",
-            "proper-lockfile",
-            "@earendil-works/pi-agent-core",
-            "@earendil-works/pi-ai",
-        ]);
-        const offenders: string[] = [];
-        for (const file of [
-            ...(await filesIn("core/app")),
-            ...(await filesIn("core/domain")),
-            ...(await filesIn("core/ports")),
-        ]) {
-            for (const specifier of await externalImports(file)) {
-                if (forbidden.has(specifier)) {
-                    offenders.push(`${relative(SRC, file)} -> ${specifier}`);
-                }
-            }
-        }
-        expect(offenders).toEqual([]);
-    });
-
-    test("the GitHub SDK handle is the only vendor type allowed in core/ports", async () => {
-        const allowedVendorTypes = new Set(["octokit"]);
-        const offenders: string[] = [];
-        for (const file of await filesIn("core/ports")) {
-            for (const specifier of await externalImports(file)) {
-                const allowed =
-                    specifier.startsWith("node:") ||
-                    allowedVendorTypes.has(specifier);
-                if (!allowed) {
-                    offenders.push(`${relative(SRC, file)} -> ${specifier}`);
-                }
-            }
-        }
-        expect(offenders).toEqual([]);
-    });
-
-    test("ports depend only on core contracts, the domain, and shared utilities", async () => {
+    test("non-adapter code does not import I/O or vendor SDKs", async () => {
         expect(
-            await offendersFor(
-                await filesIn("core/ports"),
-                (target) =>
-                    !isWithin(target, "core/ports") &&
-                    !isWithin(target, "core/domain") &&
-                    !isWithin(target, "shared") &&
-                    !isWithin(target, "core/app"),
+            await offenders(
+                (file) => !relativePath(file).includes("/adapters/"),
+                ({ target }) => IO_MODULES.has(target),
             ),
         ).toEqual([]);
     });
 
-    test("presentation imports only the composition root and core contracts", async () => {
-        const importers = (await sourceFiles(SRC)).filter((file) => {
-            const path = relative(SRC, file);
-            return (
-                path !== "command.ts" &&
-                path !== "runtime.ts" &&
-                !path.startsWith("adapters/progress/") &&
-                !path.startsWith("core/ports/")
-            );
-        });
+    test("the GitHub SDK stays confined to the GitHub context", async () => {
         expect(
-            await offendersFor(importers, (target) =>
-                isWithin(target, "adapters/progress"),
+            await offenders(
+                (file) => {
+                    const path = relativePath(file);
+                    return (
+                        path !== "github/ports.ts" &&
+                        !path.startsWith("github/adapters/")
+                    );
+                },
+                ({ target }) => target === "octokit",
             ),
         ).toEqual([]);
     });
 
-    test("the presentation adapter does not import execution code", async () => {
+    test("ports and domain modules never import adapters", async () => {
         expect(
-            await offendersFor(
-                await filesIn("adapters/progress"),
-                (target) =>
-                    !isWithin(target, "adapters/progress") &&
-                    !isWithin(target, "core/ports") &&
-                    !isWithin(target, "core/domain") &&
-                    !isWithin(target, "shared"),
+            await offenders(
+                (file) => {
+                    const path = relativePath(file);
+                    return (
+                        path.endsWith("ports.ts") || path.includes("/domain/")
+                    );
+                },
+                ({ target }) => isAdapterPath(target),
             ),
         ).toEqual([]);
     });
 
-    test("only inbound adapters and the composition root write to process streams", async () => {
-        const offenders: string[] = [];
-        for (const file of await sourceFiles(SRC)) {
-            const path = relative(SRC, file);
-            if (path === "command.ts" || path === "cli.ts") continue;
-            if (path.startsWith("adapters/progress/")) continue;
+    test("contexts do not import the composition root", async () => {
+        expect(
+            await offenders(
+                (file) => !ROOT_MODULES.has(relativePath(file)),
+                ({ target }) =>
+                    target.startsWith(".") && ROOT_MODULES.has(target),
+            ),
+        ).toEqual([]);
+    });
+
+    test("the progress adapter is imported only by the composition root", async () => {
+        expect(
+            await offenders(
+                () => true,
+                ({ target }, file) => {
+                    if (!target.startsWith("progress/adapters/")) return false;
+                    const importer = relativePath(file);
+                    return (
+                        !importer.startsWith("progress/adapters/") &&
+                        importer !== "command.ts" &&
+                        importer !== "runtime.ts"
+                    );
+                },
+            ),
+        ).toEqual([]);
+    });
+
+    test("only inbound adapters and the progress adapter write to process streams", async () => {
+        const allowed = (path: string): boolean =>
+            path === "cli.ts" ||
+            path === "command.ts" ||
+            path.startsWith("progress/adapters/");
+        const found: string[] = [];
+        for (const file of await sourceFiles()) {
+            const path = relativePath(file);
+            if (allowed(path)) continue;
             const source = await readFile(file, "utf8");
             if (/process\.(?:stdout|stderr)|console\./.test(source)) {
-                offenders.push(path);
+                found.push(path);
             }
         }
-        expect(offenders).toEqual([]);
+        expect(found).toEqual([]);
     });
 });
