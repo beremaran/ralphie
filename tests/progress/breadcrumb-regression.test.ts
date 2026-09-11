@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
 import { HELP_TEXT, parseCliArgs } from "../../src/command.ts";
-import type { AgentSessionEvent } from "../../src/agent/contracts.ts";
-import { makeProgressCoordinator } from "../../src/progress/coordinator.ts";
-import { breadcrumbCandidateFor } from "../../src/progress/breadcrumb-label.ts";
-import { makeBreadcrumbPolicy } from "../../src/progress/breadcrumb-label.ts";
+import type { AgentSessionEvent } from "../../src/core/ports/agent.ts";
+import { makeProgressCoordinator } from "../../src/adapters/progress/coordinator.ts";
+import { breadcrumbCandidateFor } from "../../src/adapters/progress/breadcrumb-label.ts";
+import { makeBreadcrumbPolicy } from "../../src/adapters/progress/breadcrumb-label.ts";
 
 const context = {
     sessionID: "session-1",

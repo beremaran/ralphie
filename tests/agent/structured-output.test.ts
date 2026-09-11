@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
 
-import { requestStructuredOutput } from "../../src/agent/structured-output.ts";
-import type { AgentClient } from "../../src/agent/contracts.ts";
-import { CommandAbortedError } from "../../src/process/command-runner.ts";
-import { makeGitRepositoryInvariantService } from "../../src/git/repository-invariant.ts";
+import { requestStructuredOutput } from "../../src/core/app/agent/structured-output.ts";
+import type { AgentClient } from "../../src/core/ports/agent.ts";
+import { CommandAbortedError } from "../../src/adapters/process/command-runner.ts";
+import { makeGitRepositoryInvariantService } from "../../src/adapters/git/repository-invariant.ts";
 import { makeGitFixture } from "../shared/git-fixture.ts";
 
 const schema = z.object({ ok: z.boolean() });

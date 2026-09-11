@@ -3,14 +3,14 @@ import { describe, expect, test } from "bun:test";
 import type {
     AgentEventContext,
     AgentSessionEvent,
-} from "../../src/agent/contracts.ts";
-import { breadcrumbCandidateFor } from "../../src/progress/breadcrumb-label.ts";
-import { makeProgressCoordinator } from "../../src/progress/coordinator.ts";
+} from "../../src/core/ports/agent.ts";
+import { breadcrumbCandidateFor } from "../../src/adapters/progress/breadcrumb-label.ts";
+import { makeProgressCoordinator } from "../../src/adapters/progress/coordinator.ts";
 import type {
     TerminalOutputController,
     TerminalOutputStrategy,
     TerminalResizeSubscription,
-} from "../../src/progress/terminal-controller.ts";
+} from "../../src/adapters/progress/terminal-controller.ts";
 import { stripTerminalControls } from "../../src/shared/terminal.ts";
 
 const context: AgentEventContext = {

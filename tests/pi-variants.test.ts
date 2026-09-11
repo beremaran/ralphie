@@ -1,13 +1,13 @@
 import { describe, expect, test } from "bun:test";
 
-import type { PiModelInfo } from "../src/pi/models.ts";
+import type { PiModelInfo } from "../src/adapters/pi/models.ts";
 import {
     collectVariantViolations,
     findModelInfo,
     formatVariantViolations,
     isVariantAvailable,
     validateModelVariants,
-} from "../src/pi/variants.ts";
+} from "../src/core/app/agent/variants.ts";
 
 const deepseekFlash: PiModelInfo = {
     provider: "opencode-go",

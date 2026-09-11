@@ -56,54 +56,54 @@ const filesIn = async (category: string): Promise<readonly string[]> =>
         relative(SRC, file).startsWith(`${category}/`),
     );
 
-const EXECUTION_PREFIXES = [
-    "issues",
-    "git",
-    "github",
-    "workflow.ts",
-    "command.ts",
-    "runtime.ts",
-] as const;
-
-const isExecutionTarget = (target: string): boolean =>
-    EXECUTION_PREFIXES.some(
-        (prefix) => target === prefix || target.startsWith(`${prefix}/`),
-    );
-
 describe("layer boundaries", () => {
-    test("only the composition root and the renderer import the presentation layer", async () => {
+    test("presentation imports only the composition root and adapters", async () => {
         const importers = (await sourceFiles(SRC)).filter((file) => {
             const path = relative(SRC, file);
-            return path !== "command.ts" && !path.startsWith("progress/");
+            return (
+                path !== "command.ts" &&
+                path !== "runtime.ts" &&
+                !path.startsWith("adapters/progress/") &&
+                !path.startsWith("core/ports/")
+            );
         });
         expect(
             await offendersFor(importers, (target) =>
-                target.startsWith("progress/"),
+                target.startsWith("adapters/progress/"),
             ),
         ).toEqual([]);
     });
 
-    test("the renderer imports only contracts, shared utilities, and the agent event surface", async () => {
+    test("the presentation adapter does not import execution code", async () => {
         expect(
-            await offendersFor(await filesIn("progress"), isExecutionTarget),
+            await offendersFor(
+                await filesIn("adapters/progress"),
+                (target) =>
+                    target.startsWith("core/") &&
+                    !target.startsWith("core/ports/"),
+            ),
         ).toEqual([]);
     });
 
     test("ports stay dependency-free leaf contracts", async () => {
         expect(
-            await offendersFor(
-                await filesIn("ports"),
-                (target) => !target.startsWith("ports/"),
-            ),
+            await offendersFor(await filesIn("core/ports"), (target) => {
+                if (target.startsWith("core/ports/")) return false;
+                if (target.startsWith("core/domain/")) return false;
+                if (target === "shared" || target.startsWith("shared/")) {
+                    return false;
+                }
+                return true;
+            }),
         ).toEqual([]);
     });
 
-    test("execution code never writes to process streams", async () => {
+    test("only inbound adapters and the composition root write to process streams", async () => {
         const offenders: string[] = [];
         for (const file of await sourceFiles(SRC)) {
             const path = relative(SRC, file);
             if (path === "command.ts" || path === "cli.ts") continue;
-            if (path.startsWith("progress/")) continue;
+            if (path.startsWith("adapters/progress/")) continue;
             const source = await readFile(file, "utf8");
             if (/process\.(?:stdout|stderr)|console\./.test(source)) {
                 offenders.push(path);

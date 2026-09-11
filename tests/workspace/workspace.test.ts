@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 import {
     resolveWorkspacePath,
     WorkspaceLive,
-} from "../../src/workspace/workspace.ts";
+} from "../../src/adapters/workspace/workspace.ts";
 
 describe("workspace cleanup", () => {
     test("expands the default workspace path", () => {

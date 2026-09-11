@@ -1,16 +1,16 @@
 import { describe, expect, test } from "bun:test";
 
-import type { DisplayState } from "../../src/progress/display-state.ts";
+import type { DisplayState } from "../../src/adapters/progress/display-state.ts";
 import {
     breadcrumbCandidateFor,
     breadcrumbLabelFor,
     canonicalBreadcrumbKey,
     prepareBreadcrumbCandidate,
     renderBreadcrumbLine,
-} from "../../src/progress/breadcrumb-label.ts";
-import type { BreadcrumbLabelCandidate } from "../../src/progress/breadcrumb-label.ts";
-import type { AgentSessionEvent } from "../../src/agent/contracts.ts";
-import { makeAgentTranscriptRenderer } from "../../src/progress/transcript.ts";
+} from "../../src/adapters/progress/breadcrumb-label.ts";
+import type { BreadcrumbLabelCandidate } from "../../src/adapters/progress/breadcrumb-label.ts";
+import type { AgentSessionEvent } from "../../src/core/ports/agent.ts";
+import { makeAgentTranscriptRenderer } from "../../src/adapters/progress/transcript.ts";
 
 const context = {
     sessionID: "session-1",

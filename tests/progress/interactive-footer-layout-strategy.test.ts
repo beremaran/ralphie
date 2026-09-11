@@ -3,8 +3,8 @@ import { describe, expect, test } from "bun:test";
 import type {
     AgentEventContext,
     AgentSessionEvent,
-} from "../../src/agent/contracts.ts";
-import { makeProgressCoordinator } from "../../src/progress/coordinator.ts";
+} from "../../src/core/ports/agent.ts";
+import { makeProgressCoordinator } from "../../src/adapters/progress/coordinator.ts";
 import {
     INTERACTIVE_FOOTER_LAYOUT_STRATEGY,
     INTERACTIVE_FOOTER_USES_RESERVED_ROW,
@@ -12,7 +12,7 @@ import {
     INTERACTIVE_REGION_MAX_ROWS,
     makeDefaultTerminalOutputStrategy,
     makeTerminalOutputController,
-} from "../../src/progress/terminal-controller.ts";
+} from "../../src/adapters/progress/terminal-controller.ts";
 import { stripTerminalControls } from "../../src/shared/terminal.ts";
 
 const CLEAR = "\r\x1b[2K";

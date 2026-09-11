@@ -1,97 +1,103 @@
 import {
     CommandRunnerLive,
     type CommandRunnerService,
-} from "./process/command-runner.ts";
+} from "./adapters/process/command-runner.ts";
 import {
     makeGitIssueCheckpointService,
     type GitIssueCheckpointService,
-} from "./git/issue-checkpoint.ts";
+} from "./adapters/git/issue-checkpoint.ts";
 import {
     makeGitIssueOperationsService,
     type GitIssueOperationsService,
-} from "./git/issue-operations.ts";
+} from "./adapters/git/issue-operations.ts";
 import {
     makeGitIssuePreparationService,
     type GitIssuePreparationService,
-} from "./git/issue-preparation.ts";
+} from "./adapters/git/issue-preparation.ts";
 import {
     makeGitRemoteSafetyService,
     type GitRemoteSafetyService,
-} from "./git/remote-safety.ts";
+} from "./adapters/git/remote-safety.ts";
 import {
     makeGitRepositoryInvariantService,
     type GitRepositoryInvariantService,
-} from "./git/repository-invariant.ts";
+} from "./adapters/git/repository-invariant.ts";
 import {
     makeGitRepositoryService,
     type GitRepositoryService,
-} from "./git/repository.ts";
+} from "./adapters/git/repository.ts";
 import {
     makeGitHubClientService,
     type GitHubClientService,
-} from "./github/client.ts";
+} from "./adapters/github/client.ts";
 import {
     makeGitHubIssueMutationsService,
     type GitHubIssueMutationService,
-} from "./github/issue-mutations.ts";
+} from "./adapters/github/issue-mutations.ts";
 import {
     makeGitHubIssueRelationshipService,
     type GitHubIssueRelationshipService,
-} from "./github/issue-relationships.ts";
+} from "./adapters/github/issue-relationships.ts";
 import {
     makeParentCompletionService,
     type ParentCompletionService,
-} from "./github/parent-completion.ts";
+} from "./adapters/github/parent-completion.ts";
 import {
     makeGitHubIssuesService,
     type GitHubIssuesService,
-} from "./github/issues.ts";
+} from "./adapters/github/issues.ts";
 import {
     makeGitHubNeedsAttentionNotificationService,
     type GitHubNeedsAttentionNotificationService,
-} from "./github/needs-attention.ts";
+} from "./adapters/github/needs-attention.ts";
 import {
     makeIssueArtifactStoreService,
     type IssueArtifactStoreService,
-} from "./issues/artifacts.ts";
+} from "./adapters/issues/artifacts.ts";
 import {
     makeComplexityAssessmentService,
     type ComplexityAssessmentService,
-} from "./issues/complexity.ts";
+} from "./core/app/issues/complexity.ts";
 import {
     makeDecompositionExecutorService,
     type DecompositionExecutorService,
-} from "./issues/decomposition-executor.ts";
+} from "./core/app/issues/decomposition-executor.ts";
 import {
     makeImplementationExecutorService,
     type ImplementationExecutorService,
-} from "./issues/implementation-executor.ts";
-import { makeIssueVerificationService } from "./issues/verification.ts";
+} from "./core/app/issues/implementation-executor.ts";
+import { makeIssueVerificationService } from "./core/app/issues/verification.ts";
 import {
     makeResolutionVerificationService,
     type ResolutionVerificationService,
-} from "./issues/resolution-verification.ts";
+} from "./core/app/issues/resolution-verification.ts";
 import {
     makeIssueExecutorService,
     type IssueExecutorService,
-} from "./issues/executor.ts";
+} from "./core/app/issues/executor.ts";
 import {
     makeIssueRecoveryService,
     type IssueRecoveryService,
-} from "./issues/recovery.ts";
+} from "./adapters/issues/recovery.ts";
 import {
     makeGroundingAssessmentService,
     type GroundingAssessmentService,
-} from "./issues/grounding.ts";
+} from "./core/app/issues/grounding.ts";
 import {
     makeNeedsAttentionRouterService,
     type NeedsAttentionRouterService,
-} from "./issues/needs-attention.ts";
-import { type PiAgentService } from "./pi/runtime.ts";
-import { type ProgressReporterService } from "./ports/progress.ts";
-import { type RunEventLog } from "./run/event-log.ts";
-import { RunStateStoreLive, type RunStateStoreService } from "./run/state.ts";
-import { WorkspaceLive, type WorkspaceService } from "./workspace/workspace.ts";
+} from "./core/app/issues/needs-attention.ts";
+import { type PiAgentService } from "./adapters/pi/runtime.ts";
+import { type ProgressReporterService } from "./core/ports/progress.ts";
+import { type RunEventLog } from "./adapters/run/event-log.ts";
+import {
+    RunStateStoreLive,
+    type RunStateStoreService,
+} from "./adapters/run/state.ts";
+import {
+    WorkspaceLive,
+    type WorkspaceService,
+} from "./adapters/workspace/workspace.ts";
 
 /** Concrete adapter assembly for one run. Only the command wiring consumes this broad shape; the workflow depends on its focused seam. */
 export type RalphieRuntime = {

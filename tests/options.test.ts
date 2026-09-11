@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { IssueOrder, IssueSort } from "../src/github/issues.ts";
+import { IssueOrder, IssueSort } from "../src/adapters/github/issues.ts";
 import {
     DEFAULT_WORKSPACE,
     DEFAULT_MAX_DECOMPOSITION_DEPTH,

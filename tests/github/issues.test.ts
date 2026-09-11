@@ -8,7 +8,7 @@ import {
     MAX_ISSUE_COMMENTS,
     IssueOrder,
     IssueSort,
-} from "../../src/github/issues.ts";
+} from "../../src/adapters/github/issues.ts";
 
 const listOpen = (client: Octokit, labels: ReadonlyArray<string> = []) =>
     makeGitHubIssuesService().listOpen(client, "owner/repository", {

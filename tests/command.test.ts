@@ -2,9 +2,9 @@ import { describe, expect, test } from "bun:test";
 
 import { runCli } from "../src/cli.ts";
 import { HELP_TEXT, parseCliArgs, runCommand } from "../src/command.ts";
-import { RalphieExitCode } from "../src/process/exit-code.ts";
+import { RalphieExitCode } from "../src/core/app/exit-code.ts";
 import { RalphieError } from "../src/shared/error.ts";
-import { IssueOrder, IssueSort } from "../src/github/issues.ts";
+import { IssueOrder, IssueSort } from "../src/adapters/github/issues.ts";
 import { makeTestProgressRecorder } from "./shared/progress-recorder.ts";
 
 describe("native CLI parser", () => {

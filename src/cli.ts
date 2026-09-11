@@ -1,5 +1,5 @@
 import { runCommand } from "./command.ts";
-import { exitCodeForError } from "./process/exit-code.ts";
+import { exitCodeForError } from "./core/app/exit-code.ts";
 
 /** Start the CLI with a native AbortSignal rather than a framework context. */
 export const runCli = async (

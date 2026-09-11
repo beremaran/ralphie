@@ -5,7 +5,7 @@ import { join } from "node:path";
 import {
     CommandRunnerLive,
     type CommandRunnerService,
-} from "../../src/process/command-runner.ts";
+} from "../../src/adapters/process/command-runner.ts";
 
 /**
  * A throwaway git repository with two committed revisions and deliberate

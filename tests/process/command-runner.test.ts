@@ -8,7 +8,7 @@ import {
     requireSuccess,
     type CommandResult,
     type CommandRunnerService,
-} from "../../src/process/command-runner.ts";
+} from "../../src/adapters/process/command-runner.ts";
 import { RalphieError } from "../../src/shared/error.ts";
 
 const result = (

@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
 
-import { makeGitRepositoryInvariantService } from "../../src/git/repository-invariant.ts";
+import { makeGitRepositoryInvariantService } from "../../src/adapters/git/repository-invariant.ts";
 import {
     CommandAbortedError,
     type CommandResult,
     type CommandRunOptions,
     type CommandRunnerService,
-} from "../../src/process/command-runner.ts";
+} from "../../src/adapters/process/command-runner.ts";
 import { RalphieError } from "../../src/shared/error.ts";
 import { makeGitFixture } from "../shared/git-fixture.ts";
 

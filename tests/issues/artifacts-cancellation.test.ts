@@ -18,9 +18,9 @@ import {
     makeDurableIssueArtifactStore,
     type IssueArtifactFileSystem,
     type IssueArtifactScope,
-} from "../../src/issues/artifacts.ts";
-import { ReviewVerdict } from "../../src/issues/decisions.ts";
-import type { ReviewAttempt } from "../../src/issues/recovery.ts";
+} from "../../src/adapters/issues/artifacts.ts";
+import { ReviewVerdict } from "../../src/core/app/issues/decisions.ts";
+import type { ReviewAttempt } from "../../src/adapters/issues/recovery.ts";
 
 const issueNumber = 42;
 const scopeFor = (workspace: string): IssueArtifactScope => ({

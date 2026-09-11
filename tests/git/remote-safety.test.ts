@@ -3,11 +3,11 @@ import { describe, expect, test } from "bun:test";
 import {
     GitRemoteSafetyError,
     makeGitRemoteSafetyService,
-} from "../../src/git/remote-safety.ts";
+} from "../../src/adapters/git/remote-safety.ts";
 import type {
     CommandResult,
     CommandRunnerService,
-} from "../../src/process/command-runner.ts";
+} from "../../src/adapters/process/command-runner.ts";
 
 const REPOSITORY = "owner/repository";
 const REPOSITORY_PATH = "/work/repository";

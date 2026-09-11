@@ -1,0 +1,383 @@
+import type {
+    AgentEventContext,
+    AgentEventListener,
+    AgentSessionEvent,
+} from "../../core/ports/agent.ts";
+import {
+    arbitrateBreadcrumbCandidates,
+    breadcrumbCandidateFor,
+    makeBreadcrumbPolicy,
+    type BreadcrumbArbitrationCandidate,
+    type BreadcrumbPolicy,
+} from "./breadcrumb-label.ts";
+import {
+    prepareBreadcrumbCandidate,
+    type BreadcrumbLabelCandidate,
+    type NormalizedBreadcrumb,
+} from "./breadcrumb-label.ts";
+import {
+    createDisplayState,
+    reduceAgentSessionEvent,
+    reduceProgressUpdate,
+    type DisplayState,
+} from "./display-state.ts";
+import {
+    makeAgentTranscriptRenderer,
+    type AgentTranscriptRenderer,
+} from "./transcript.ts";
+import {
+    makeProgressOutput,
+    makeProgressReporter,
+    type ProgressOutput,
+    type ProgressRenderMode,
+    type ProgressRendererOptions,
+} from "./progress.ts";
+import type {
+    ProgressReporterService,
+    ProgressUpdate,
+} from "../../core/ports/progress.ts";
+import {
+    createActivityState,
+    reduceActivityEvent,
+    renderActivitySnapshot,
+    updateActivityFromProgress,
+    type ActivityState,
+} from "./activity.ts";
+import { dim } from "./colors.ts";
+import { renderFooter } from "./footer.ts";
+import {
+    makeTerminalOutputController,
+    type TerminalFooterOptions,
+    type TerminalOutputController,
+    type TerminalOutputStrategy,
+    type TerminalResizeSubscription,
+} from "./terminal-controller.ts";
+
+/** Options for the shared progress/agent output coordinator. */
+export type ProgressCoordinatorOptions = Omit<
+    ProgressRendererOptions,
+    "output"
+> & {
+    /** Visible transcript rows required between breadcrumb opportunities. */
+    readonly breadcrumbThreshold?: number;
+    /** Shared output sink, primarily useful for deterministic tests. */
+    readonly output?: ProgressOutput;
+    /** Injectable sticky-footer scheduler and view settings. */
+    readonly footer?: Omit<TerminalFooterOptions, "footerLine">;
+    /** Test seam: observe the interactive terminal output controller. */
+    readonly onController?: (controller: TerminalOutputController) => void;
+    /** Injectable terminal surface, useful for deterministic coordinator tests. */
+    readonly strategy?: TerminalOutputStrategy;
+    /** Injectable resize source; the default listens to stderr in interactive mode. */
+    readonly resize?: TerminalResizeSubscription;
+};
+
+/**
+ * The shared presentation boundary for one workflow run.
+ *
+ * The coordinator is the only owner of the output sink. Both event sources
+ * update display state synchronously before their renderer is called, so a
+ * writer observing an event always sees the state that describes that event.
+ */
+export type ProgressCoordinator = {
+    readonly progress: ProgressReporterService;
+    /** Listener to pass to the agent service. */
+    readonly piListener: AgentEventListener;
+    /** Insert an approved breadcrumb through the transcript boundary. */
+    readonly insertBreadcrumb?: (
+        candidate: BreadcrumbLabelCandidate,
+    ) => NormalizedBreadcrumb;
+    readonly getDisplayState: () => DisplayState;
+    readonly dispose: () => Promise<void>;
+};
+
+const transcriptFor = (
+    options: ProgressCoordinatorOptions,
+    output: ProgressOutput,
+    getDisplayState: () => DisplayState,
+    onSessionStart: () => void,
+): AgentTranscriptRenderer | undefined =>
+    makeAgentTranscriptRenderer({
+        write: output.writeTranscript,
+        colors: options.colors,
+        json: options.mode === "json",
+        width: options.width,
+        getDisplayState,
+        onSessionStart,
+    });
+
+/**
+ * Incremental stream deltas append to an already-open transcript line. They
+ * must never force the line closed, otherwise every token renders on its own
+ * `│    `-prefixed row instead of streaming inline (see issue #409).
+ */
+const incrementalStreamEvent = (event: AgentSessionEvent): boolean => {
+    switch (event.type) {
+        case "tool_execution_update":
+            return true;
+        case "message_update": {
+            const type = event.assistantMessageEvent.type;
+            return (
+                type === "thinking_delta" ||
+                type === "text_delta" ||
+                type === "toolcall_delta"
+            );
+        }
+        default:
+            return false;
+    }
+};
+
+/** Tool completions are the only lifecycle breadcrumbs pi sessions emit. */
+const lifecycleBreadcrumbEvent = (event: AgentSessionEvent): boolean =>
+    event.type === "tool_execution_end";
+
+const closesTranscriptSession = (event: AgentSessionEvent): boolean =>
+    event.type === "agent_end";
+
+const policyCandidateFor = (
+    candidate: BreadcrumbLabelCandidate,
+    visibleLinePosition: number,
+): BreadcrumbArbitrationCandidate["candidate"] => ({
+    visibleLinePosition,
+    key: candidate.canonicalKey,
+});
+
+const considerBreadcrumbEvent = (input: {
+    readonly policy: BreadcrumbPolicy;
+    readonly transcript: AgentTranscriptRenderer;
+    /** Candidate describing the state after the lifecycle event. */
+    readonly candidate: BreadcrumbLabelCandidate;
+    /** Candidate pending from the state before the lifecycle event. */
+    readonly periodicCandidate: BreadcrumbLabelCandidate;
+    readonly visibleLinePosition: number;
+    readonly lifecycle: boolean;
+}): void => {
+    const lifecycleCandidate = policyCandidateFor(
+        input.candidate,
+        input.visibleLinePosition,
+    );
+    const periodicCandidate = policyCandidateFor(
+        input.periodicCandidate,
+        input.visibleLinePosition,
+    );
+    const candidates: BreadcrumbArbitrationCandidate[] = [
+        ...(input.lifecycle
+            ? [{ kind: "lifecycle" as const, candidate: lifecycleCandidate }]
+            : []),
+        { kind: "periodic", candidate: periodicCandidate },
+    ];
+    const result = arbitrateBreadcrumbCandidates(input.policy, candidates);
+    if (result.emitted === undefined) return;
+    const emittedCandidate =
+        result.emitted.kind === "lifecycle"
+            ? input.candidate
+            : input.periodicCandidate;
+    input.transcript.insertBreadcrumb(emittedCandidate);
+    input.policy.rebase(input.transcript.getVisibleLineCount());
+};
+
+const considerClosingBreadcrumb = (input: {
+    readonly policy: BreadcrumbPolicy;
+    readonly transcript: AgentTranscriptRenderer | undefined;
+    readonly candidate: BreadcrumbLabelCandidate | undefined;
+    readonly periodicCandidate: BreadcrumbLabelCandidate | undefined;
+    readonly before: number;
+    readonly closesSession: boolean;
+    readonly lifecycle: boolean;
+}): void => {
+    if (
+        input.transcript === undefined ||
+        input.candidate === undefined ||
+        input.periodicCandidate === undefined ||
+        !input.closesSession ||
+        !input.lifecycle
+    ) {
+        return;
+    }
+    considerBreadcrumbEvent({
+        policy: input.policy,
+        transcript: input.transcript,
+        candidate: input.candidate,
+        periodicCandidate: input.periodicCandidate,
+        visibleLinePosition: input.before,
+        lifecycle: input.lifecycle,
+    });
+};
+
+const considerRenderedBreadcrumb = (input: {
+    readonly policy: BreadcrumbPolicy;
+    readonly transcript: AgentTranscriptRenderer | undefined;
+    readonly candidate: BreadcrumbLabelCandidate | undefined;
+    readonly periodicCandidate: BreadcrumbLabelCandidate | undefined;
+    readonly eventOutputBaseline: number;
+    readonly closesSession: boolean;
+    readonly lifecycle: boolean;
+}): void => {
+    if (
+        input.transcript === undefined ||
+        input.candidate === undefined ||
+        input.periodicCandidate === undefined ||
+        input.closesSession
+    ) {
+        return;
+    }
+    const after = input.transcript.getVisibleLineCount();
+    if (after <= input.eventOutputBaseline) return;
+    considerBreadcrumbEvent({
+        policy: input.policy,
+        transcript: input.transcript,
+        candidate: input.candidate,
+        periodicCandidate: input.periodicCandidate,
+        visibleLinePosition: after,
+        lifecycle: input.lifecycle,
+    });
+};
+
+/** Construct the ordered progress and agent presentation services for a run. */
+export const makeProgressCoordinator = (
+    options: ProgressCoordinatorOptions,
+) => {
+    const now = options.now ?? (() => new Date());
+    let state = createDisplayState();
+    let activityState: ActivityState = createActivityState();
+    const footerWidth = options.footer?.width ?? options.width;
+    const controller =
+        options.mode === "interactive"
+            ? makeTerminalOutputController({
+                  mode: options.mode,
+                  write: options.write,
+                  strategy: options.strategy,
+                  width: footerWidth,
+                  resize: options.resize,
+                  footer: {
+                      ...options.footer,
+                      footerLine: () =>
+                          renderFooter(state, {
+                              now,
+                              width: footerWidth,
+                              color: options.colors ? dim : undefined,
+                          }),
+                      activityLines: () =>
+                          renderActivitySnapshot(activityState, {
+                              ...(footerWidth === undefined
+                                  ? {}
+                                  : { width: footerWidth() }),
+                              colors: options.colors,
+                          }),
+                  },
+              })
+            : undefined;
+    if (controller !== undefined) options.onController?.(controller);
+    const output: ProgressOutput =
+        controller ??
+        options.output ??
+        makeProgressOutput({
+            mode: options.mode,
+            write: options.write,
+        });
+    const progressRenderer = makeProgressReporter({
+        ...options,
+        output,
+    });
+    const breadcrumbPolicy = makeBreadcrumbPolicy({
+        ...(options.breadcrumbThreshold === undefined
+            ? {}
+            : { breadcrumbThreshold: options.breadcrumbThreshold }),
+    });
+    let eventOutputBaseline = 0;
+    let transcript: AgentTranscriptRenderer | undefined;
+    transcript = transcriptFor(
+        options,
+        output,
+        () => state,
+        () => {
+            eventOutputBaseline = transcript?.getVisibleLineCount() ?? 0;
+            breadcrumbPolicy.reset(eventOutputBaseline);
+        },
+    );
+    let disposed = false;
+
+    const piListener: AgentEventListener = (event, context) => {
+        if (disposed) return;
+        const before = transcript?.getVisibleLineCount() ?? 0;
+        eventOutputBaseline = before;
+        const lifecycle = lifecycleBreadcrumbEvent(event);
+        const periodicCandidate =
+            transcript === undefined
+                ? undefined
+                : breadcrumbCandidateFor(state);
+        state = reduceAgentSessionEvent(state, event, context, now);
+        activityState = reduceActivityEvent(activityState, event, () =>
+            now().getTime(),
+        );
+        controller?.invalidate();
+        if (!incrementalStreamEvent(event)) transcript?.interruptLine();
+        const candidate =
+            transcript === undefined
+                ? undefined
+                : breadcrumbCandidateFor(state);
+        const pendingPeriodicCandidate = lifecycle
+            ? periodicCandidate
+            : candidate;
+        const closesSession = closesTranscriptSession(event);
+        considerClosingBreadcrumb({
+            policy: breadcrumbPolicy,
+            transcript,
+            candidate,
+            periodicCandidate: pendingPeriodicCandidate,
+            before,
+            closesSession,
+            lifecycle,
+        });
+        transcript?.(event, context);
+        considerRenderedBreadcrumb({
+            policy: breadcrumbPolicy,
+            transcript,
+            candidate,
+            periodicCandidate: pendingPeriodicCandidate,
+            eventOutputBaseline,
+            closesSession,
+            lifecycle,
+        });
+    };
+
+    const progress: ProgressReporterService = {
+        emit: async (update: ProgressUpdate) => {
+            if (disposed) return;
+            state = reduceProgressUpdate(state, update, now);
+            activityState = updateActivityFromProgress(
+                activityState,
+                update,
+                () => now().getTime(),
+            );
+            controller?.invalidate();
+            transcript?.interruptLine();
+            await progressRenderer.emit(update);
+        },
+    };
+
+    const insertBreadcrumb = (
+        candidate: BreadcrumbLabelCandidate,
+    ): NormalizedBreadcrumb => {
+        const prepared = prepareBreadcrumbCandidate(candidate);
+        if (disposed) return prepared;
+        return transcript?.insertBreadcrumb(candidate) ?? prepared;
+    };
+
+    return {
+        progress,
+        piListener,
+        insertBreadcrumb,
+        getDisplayState: () => state,
+        dispose: async () => {
+            if (disposed) return;
+            disposed = true;
+            transcript?.interruptLine();
+            output.dispose();
+        },
+    };
+};
+
+export type { AgentEventContext, AgentSessionEvent };
+export type { ProgressRenderMode };

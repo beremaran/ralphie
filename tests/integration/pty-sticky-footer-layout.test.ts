@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { stripTerminalControls } from "../../src/shared/terminal.ts";
-import { INTERACTIVE_REGION_MAX_ROWS } from "../../src/progress/terminal-controller.ts";
+import { INTERACTIVE_REGION_MAX_ROWS } from "../../src/adapters/progress/terminal-controller.ts";
 import { FAKE_TOKEN, LONG_FAILURE_MESSAGE } from "./pty-driver-child.ts";
 import {
     cleanScreenRows,

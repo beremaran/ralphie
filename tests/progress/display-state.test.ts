@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import type {
     AgentEventContext,
     AgentSessionEvent,
-} from "../../src/agent/contracts.ts";
+} from "../../src/core/ports/agent.ts";
 import {
     DISPLAY_ACTIVITY_LABELS,
     PROGRESS_STAGE_LABELS,
@@ -12,8 +12,8 @@ import {
     reduceAgentSessionEvent,
     reduceProgressUpdate,
     type DisplayClock,
-} from "../../src/progress/display-state.ts";
-import type { ProgressStage } from "../../src/ports/progress.ts";
+} from "../../src/adapters/progress/display-state.ts";
+import type { ProgressStage } from "../../src/core/ports/progress.ts";
 
 const context: AgentEventContext = {
     sessionID: "session-1",

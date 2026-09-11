@@ -11,7 +11,7 @@ import {
     readPiDefaultModel,
     resolvePiModel,
     thinkingLevelFor,
-} from "../src/pi/models.ts";
+} from "../src/adapters/pi/models.ts";
 
 const makeFauxModels = () => {
     const faux = fauxProvider({

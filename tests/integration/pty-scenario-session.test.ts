@@ -3,9 +3,9 @@ import { describe, expect, test } from "bun:test";
 import type {
     AgentEventContext,
     AgentSessionEvent,
-} from "../../src/agent/contracts.ts";
-import { makeProgressCoordinator } from "../../src/progress/coordinator.ts";
-import type { TerminalOutputStrategy } from "../../src/progress/terminal-controller.ts";
+} from "../../src/core/ports/agent.ts";
+import { makeProgressCoordinator } from "../../src/adapters/progress/coordinator.ts";
+import type { TerminalOutputStrategy } from "../../src/adapters/progress/terminal-controller.ts";
 import {
     ACTIVE_MARKER,
     buildScenarioStreamDeltas,

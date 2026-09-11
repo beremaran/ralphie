@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import {
     GroundingDisposition,
     groundingDecisionSchema,
-} from "../../src/issues/decisions.ts";
+} from "../../src/core/app/issues/decisions.ts";
 
 describe("grounding decision schema", () => {
     test("accepts an actionable result", () => {

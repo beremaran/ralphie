@@ -6,8 +6,8 @@ import { tmpdir } from "node:os";
 import type {
     CommandResult,
     CommandRunnerService,
-} from "../../src/process/command-runner.ts";
-import { makeGitRepositoryService } from "../../src/git/repository.ts";
+} from "../../src/adapters/process/command-runner.ts";
+import { makeGitRepositoryService } from "../../src/adapters/git/repository.ts";
 
 const result = (stdout = ""): CommandResult => ({
     exitCode: 0,

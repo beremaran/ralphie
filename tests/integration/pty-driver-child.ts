@@ -44,25 +44,28 @@ import type {
     AgentEventContext,
     AgentEventListener,
     AgentSessionEvent,
-} from "../../src/agent/contracts.ts";
-import type { PiAgentConfig } from "../../src/pi/config.ts";
-import type { PiAgentRuntime, PiAgentService } from "../../src/pi/runtime.ts";
+} from "../../src/core/ports/agent.ts";
+import type { PiAgentConfig } from "../../src/adapters/pi/config.ts";
+import type {
+    PiAgentRuntime,
+    PiAgentService,
+} from "../../src/adapters/pi/runtime.ts";
 import {
     breadcrumbCandidateFor,
     DEFAULT_BREADCRUMB_THRESHOLD,
-} from "../../src/progress/breadcrumb-label.ts";
+} from "../../src/adapters/progress/breadcrumb-label.ts";
 import {
     makeProgressCoordinator,
     type ProgressCoordinator,
     type ProgressCoordinatorOptions,
-} from "../../src/progress/coordinator.ts";
+} from "../../src/adapters/progress/coordinator.ts";
 import type {
     ProgressIssue,
     ProgressUpdate,
-} from "../../src/ports/progress.ts";
-import type { TerminalOutputController } from "../../src/progress/terminal-controller.ts";
+} from "../../src/core/ports/progress.ts";
+import type { TerminalOutputController } from "../../src/adapters/progress/terminal-controller.ts";
 import type { IssueWorkflowRuntime } from "../../src/runtime.ts";
-import type { WorkflowOptions } from "../../src/workflow.ts";
+import type { WorkflowOptions } from "../../src/core/app/workflow.ts";
 
 /** Marker written after the interactive footer paints for the first time. */
 export const FOOTER_MARKER = "PTY_FOOTER";
