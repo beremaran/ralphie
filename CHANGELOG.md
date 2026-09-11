@@ -84,7 +84,9 @@ All notable changes to Ralphie are documented here. The project follows
   queued issues. Interactive runs start paused so the discovered plan can be
   inspected before work begins; `p` resumes or pauses the queue between issues,
   `s` stops the queue after the active issue and drains the run with a "Run
-  stopped by request" summary, and `q` cancels immediately. The
+  stopped by request" summary, and `q` cancels immediately. `m` opens a model
+  picker over the pi catalog with the selected model's thinking levels: Tab
+  switches panes, Enter applies the pick to later issues, and Esc cancels. The
   footer/breadcrumb/terminal-controller stack and its PTY test suites are gone. Plain (piped/CI) and JSON output are unchanged in
   shape, and the interactive renderer loads lazily so help, plain, and JSON
   paths never touch the native module.

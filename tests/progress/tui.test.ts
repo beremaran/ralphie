@@ -489,6 +489,99 @@ describe("OpenTUI progress coordinator", () => {
         await coordinator.dispose();
     });
 
+    test("picks a model and thinking level for later issues", async () => {
+        const setup = await createTestRenderer({ width: 100, height: 24 });
+        const coordinator = makeProgressCoordinator({
+            mode: "interactive",
+            colors: false,
+            runId: "tui-run-picker",
+            now: FIXED_NOW,
+            createRenderer: async () => setup.renderer,
+        });
+        const control = coordinator.control;
+        expect(control).toBeDefined();
+        if (control === undefined) return;
+
+        await coordinator.progress.emit({
+            stage: "agent-runtime",
+            status: "succeeded",
+            message: "Pi agent runtime ready.",
+            details: {
+                models: [
+                    {
+                        provider: "openai",
+                        id: "gpt-5",
+                        name: "GPT-5",
+                        reasoning: true,
+                        thinkingLevels: ["low", "medium", "high"],
+                    },
+                    {
+                        provider: "anthropic",
+                        id: "claude-sonnet-4",
+                        name: "Claude Sonnet 4",
+                        reasoning: true,
+                        thinkingLevels: ["low", "high", "max"],
+                    },
+                    {
+                        provider: "openai",
+                        id: "gpt-4o",
+                        name: "GPT-4o",
+                        reasoning: false,
+                        thinkingLevels: [],
+                    },
+                ],
+                selection: {
+                    model: { provider: "openai", id: "gpt-5" },
+                    variant: "high",
+                },
+            },
+        });
+
+        await coordinator.ready;
+        await setup.renderOnce();
+        let frame = setup.captureCharFrame();
+        expect(frame).toContain("openai/gpt-5 · high");
+
+        setup.mockInput.pressKey("m");
+        await setup.renderOnce();
+        frame = setup.captureCharFrame();
+        expect(frame).toContain("Select model");
+        expect(frame).toContain("Claude Sonnet 4");
+        expect(frame).toContain("Thinking level");
+
+        // Pick the second model at its second thinking level.
+        setup.mockInput.pressArrow("down");
+        setup.mockInput.pressTab();
+        setup.mockInput.pressArrow("down");
+        setup.mockInput.pressEnter();
+        await setup.renderOnce();
+        frame = setup.captureCharFrame();
+        expect(frame).not.toContain("Select model");
+        expect(frame).toContain("anthropic/claude-sonnet-4 · low");
+        expect(control.issueSelection?.()).toEqual({
+            model: { providerID: "anthropic", modelID: "claude-sonnet-4" },
+            variant: "low",
+        });
+
+        // Esc discards a pick. A lone Escape is flushed after the parser
+        // disambiguates it from an escape sequence.
+        setup.mockInput.pressKey("m");
+        await setup.renderOnce();
+        setup.mockInput.pressArrow("up");
+        setup.mockInput.pressEscape();
+        await Bun.sleep(30);
+        await setup.renderOnce();
+        frame = setup.captureCharFrame();
+        expect(frame).not.toContain("Select model");
+        expect(frame).toContain("anthropic/claude-sonnet-4 · low");
+        expect(control.issueSelection?.()).toEqual({
+            model: { providerID: "anthropic", modelID: "claude-sonnet-4" },
+            variant: "low",
+        });
+
+        await coordinator.dispose();
+    });
+
     test("renders progress outcomes and disposes without leaking timers", async () => {
         const setup = await createTestRenderer({ width: 80, height: 12 });
         const coordinator = makeProgressCoordinator({

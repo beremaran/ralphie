@@ -31,12 +31,15 @@ lines.
   stay browsable while the run continues. The queue starts paused so the
   discovered plan can be inspected before work begins; `p` resumes or pauses it
   between issues, `s` stops the queue after the active issue and drains the run
-  normally, and `q` (like Ctrl-C) cancels immediately. The status bar and the
-  sidebar hints show the pending pause or stop. Tool output, long commands, and
-  deep paths stay inside the transcript panel; resize is handled by the
-  renderer; Ctrl-C is forwarded as SIGINT so cancellation still restores the
-  checkout and saves state; disposal destroys the renderer and restores the
-  terminal.
+  normally, and `q` (like Ctrl-C) cancels immediately. `m` opens the model
+  picker: the pi catalog with the selected model's thinking levels, `Tab`
+  switches panes, `Enter` applies the pick to every later issue (the session in
+  flight keeps its model), and `Esc` cancels. The header shows the active model
+  and level; the status bar and sidebar hints show the pending pause or stop.
+  Tool output, long commands, and deep paths stay inside the transcript panel;
+  resize is handled by the renderer; Ctrl-C is forwarded as SIGINT so
+  cancellation still restores the checkout and saves state; disposal destroys
+  the renderer and restores the terminal.
 - CI and redirected output are the deterministic noninteractive fallback:
   append-only, byte-identical across identical runs, with neither ANSI cursor
   controls (`ESC`) nor carriage-return bytes; `stripTerminalControls` is an

@@ -251,12 +251,17 @@ const needsAttentionProgressDetails = (input: {
 
 type ProgressContext = Omit<ProgressUpdate, "stage" | "status" | "message">;
 
+type TrackedSuccess = {
+    readonly message: string;
+    readonly details?: Readonly<Record<string, unknown>>;
+};
+
 const track = async <Result>(
     progress: ProgressReporterService,
     stage: ProgressStage,
     startedMessage: string,
     operation: () => Promise<Result>,
-    succeededMessage: string | ((result: Result) => string),
+    succeededMessage: string | ((result: Result) => string | TrackedSuccess),
     context: ProgressContext = {},
 ): Promise<Result> => {
     await progress.emit({
@@ -267,14 +272,17 @@ const track = async <Result>(
     });
     try {
         const result = await operation();
+        const succeeded =
+            typeof succeededMessage === "function"
+                ? succeededMessage(result)
+                : succeededMessage;
         await progress.emit({
             ...context,
             stage,
             status: "succeeded",
-            message:
-                typeof succeededMessage === "function"
-                    ? succeededMessage(result)
-                    : succeededMessage,
+            ...(typeof succeeded === "string"
+                ? { message: succeeded }
+                : succeeded),
         });
         return result;
     } catch (error) {
@@ -594,6 +602,36 @@ const queueDisplayIssues = (
         number: issue.number,
         title: issue.title,
     }));
+
+/** The pi catalog and the effective default selection, for the model picker. */
+const runtimeCatalogDetails = (
+    runtime: PiAgentRuntime,
+    config: WorkflowConfiguration,
+): Readonly<Record<string, unknown>> => {
+    const model = config.model ?? runtime.defaultModel;
+    return {
+        models: runtime.catalog.map((entry) => ({
+            provider: entry.provider,
+            id: entry.id,
+            name: entry.name,
+            reasoning: entry.reasoning,
+            thinkingLevels: [...entry.thinkingLevels],
+        })),
+        ...(model === undefined
+            ? {}
+            : {
+                  selection: {
+                      model: {
+                          provider: model.providerID,
+                          id: model.modelID,
+                      },
+                      ...(config.modelVariant === undefined
+                          ? {}
+                          : { variant: config.modelVariant }),
+                  },
+              }),
+    };
+};
 
 const summaryMessage = (
     prefix: string,
@@ -949,6 +987,19 @@ export const workflow = async (
             discoveredIssues,
         } = await prepareWorkflow();
 
+        /** The CLI selection unless the picker chose a model for later issues. */
+        const effectiveSelection = (): AgentSelection => {
+            const override = control?.issueSelection?.();
+            if (override === undefined) return selection;
+            return {
+                agent: selection.agent,
+                model: override.model,
+                ...(override.variant === undefined
+                    ? {}
+                    : { variant: override.variant }),
+            };
+        };
+
         const restoreIssueCheckout =
             (issueBaseCheckout: WorkflowCheckout): (() => Promise<void>) =>
             async () => {
@@ -1070,7 +1121,7 @@ export const workflow = async (
                         runId: actualRunId,
                         runLayout: layout,
                         agent: server.client,
-                        agentSelection: selection,
+                        agentSelection: effectiveSelection(),
                         agentDiagnostics: diagnostics,
                         repositoryInvariant: invariantService,
                         verificationCommands: config.verificationCommands,
@@ -1386,7 +1437,10 @@ export const workflow = async (
                     validateRuntimeModelVariants(started, config);
                     return started;
                 },
-                "Pi agent runtime ready.",
+                (started) => ({
+                    message: "Pi agent runtime ready.",
+                    details: runtimeCatalogDetails(started, config),
+                }),
             );
             await processQueue(startedAgent);
         } finally {

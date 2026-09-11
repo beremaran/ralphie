@@ -35,7 +35,11 @@ import type {
 } from "../src/progress/ports.ts";
 import { makeTestProgressRecorder } from "./shared/progress-recorder.ts";
 import { countingIds, fixedClock, testLayout } from "./shared/test-values.ts";
-import { type RunControl, type RunEventLog } from "../src/run/ports.ts";
+import {
+    type RunControl,
+    type RunControlSelection,
+    type RunEventLog,
+} from "../src/run/ports.ts";
 import { type RunStateStoreService } from "../src/run/ports.ts";
 import { type RunState, RunStateStatus } from "../src/run/state.ts";
 import { type WorkspaceService } from "../src/workspace/ports.ts";
@@ -1664,6 +1668,110 @@ describe("workflow", () => {
         expect(calls).not.toContainEqual(
             expect.stringContaining("executeIssue:42"),
         );
+    });
+
+    test("publishes the pi catalog and run selection with the runtime event", async () => {
+        const calls: string[] = [];
+        const states: RunState[] = [];
+        const events: ProgressUpdate[] = [];
+        const catalog = [
+            {
+                provider: "openai",
+                id: "gpt-5",
+                name: "GPT-5",
+                reasoning: true,
+                thinkingLevels: ["low", "high"],
+            },
+        ];
+        await workflow(
+            {
+                ...baseOptions,
+                model: { providerID: "openai", modelID: "gpt-5" },
+                modelVariant: "high",
+            },
+            testRuntime(
+                calls,
+                states,
+                { issueLists: [[firstIssue]], piCatalog: catalog },
+                events,
+            ),
+        );
+
+        const runtimeReady = events.find(
+            ({ stage, status }) =>
+                stage === "agent-runtime" && status === "succeeded",
+        );
+        expect(runtimeReady?.details).toEqual({
+            models: catalog,
+            selection: {
+                model: { provider: "openai", id: "gpt-5" },
+                variant: "high",
+            },
+        });
+    });
+
+    test("applies a run-control model selection to issues started after the pick", async () => {
+        const calls: string[] = [];
+        const states: RunState[] = [];
+        const contexts: IssueExecutionContext[] = [];
+        const thirdIssue: GitHubIssue = {
+            ...firstIssue,
+            number: 44,
+            title: "Third test issue",
+        };
+        let override: RunControlSelection | undefined;
+        const summary = await workflow(
+            {
+                ...baseOptions,
+                model: { providerID: "openai", modelID: "gpt-5" },
+                modelVariant: "high",
+                control: {
+                    waitForQueue: async () => {},
+                    stopAfterCurrent: () => false,
+                    issueSelection: () => override,
+                },
+            },
+            testRuntime(calls, states, {
+                issueLists: [[firstIssue, secondIssue, thirdIssue]],
+                executionContexts: contexts,
+                executeGate: async (context) => {
+                    if (context.issue.number === 42) {
+                        override = {
+                            model: {
+                                providerID: "anthropic",
+                                modelID: "claude-sonnet-4",
+                            },
+                            variant: "low",
+                        };
+                    }
+                    if (context.issue.number === 43) {
+                        override = {
+                            model: {
+                                providerID: "openai",
+                                modelID: "gpt-4o",
+                            },
+                        };
+                    }
+                },
+            }),
+        );
+
+        expect(summary.outcomes).toHaveLength(3);
+        expect(contexts[0]?.agentSelection).toEqual({
+            agent: DEFAULT_AGENT,
+            model: { providerID: "openai", modelID: "gpt-5" },
+            variant: "high",
+        });
+        expect(contexts[1]?.agentSelection).toEqual({
+            agent: DEFAULT_AGENT,
+            model: { providerID: "anthropic", modelID: "claude-sonnet-4" },
+            variant: "low",
+        });
+        // A pick without a level drops the CLI variant for the model default.
+        expect(contexts[2]?.agentSelection).toEqual({
+            agent: DEFAULT_AGENT,
+            model: { providerID: "openai", modelID: "gpt-4o" },
+        });
     });
 
     test.each([

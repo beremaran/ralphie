@@ -34,6 +34,20 @@ export type DisplayQueueIssue = {
     readonly status: DisplayQueueStatus;
 };
 
+/** One model advertised by the pi runtime catalog. */
+export type DisplayModel = {
+    readonly provider: string;
+    readonly id: string;
+    readonly name: string;
+    readonly thinkingLevels: ReadonlyArray<string>;
+};
+
+export type DisplayModelSelection = {
+    readonly provider: string;
+    readonly id: string;
+    readonly variant?: string;
+};
+
 export type DisplayReviewAttempt = {
     readonly current: number;
     readonly total: number;
@@ -54,6 +68,10 @@ export type DisplayState = {
     readonly activityLabel: string;
     /** Every issue discovered in this run, in queue order, with its latest status. */
     readonly queue: ReadonlyArray<DisplayQueueIssue>;
+    /** Models advertised by the pi runtime, used by the model picker. */
+    readonly models: ReadonlyArray<DisplayModel>;
+    /** The model and thinking level the run started with. */
+    readonly model?: DisplayModelSelection;
     /** Epoch milliseconds at which the current stage became active. */
     readonly stageStartedAt?: number;
 };
@@ -117,6 +135,7 @@ const makeInitialDisplayState = (): DisplayState => ({
     activity: "waiting",
     activityLabel: DISPLAY_ACTIVITY_LABELS.waiting,
     queue: [],
+    models: [],
 });
 
 export const createDisplayState = (): DisplayState => makeInitialDisplayState();
@@ -369,6 +388,65 @@ const displayQueueFor = (
     );
 };
 
+const displayModelsFrom = (value: unknown): ReadonlyArray<DisplayModel> => {
+    if (!Array.isArray(value)) return [];
+    const models: Array<DisplayModel> = [];
+    for (const entry of value) {
+        const record = recordValue(entry);
+        const provider = stringValue(record.provider);
+        const id = stringValue(record.id);
+        const name = stringValue(record.name);
+        if (provider === undefined || id === undefined || name === undefined) {
+            continue;
+        }
+        const levels = Array.isArray(record.thinkingLevels)
+            ? record.thinkingLevels.flatMap((level) =>
+                  typeof level === "string" ? [displayText(level)] : [],
+              )
+            : [];
+        models.push({
+            provider: displayText(provider),
+            id: displayText(id),
+            name: displayText(name),
+            thinkingLevels: levels,
+        });
+    }
+    return models;
+};
+
+const displayModelSelectionFrom = (
+    value: unknown,
+): DisplayModelSelection | undefined => {
+    const record = recordValue(value);
+    const model = recordValue(record.model);
+    const provider = stringValue(model.provider);
+    const id = stringValue(model.id);
+    if (provider === undefined || id === undefined) return undefined;
+    const variant = stringValue(record.variant);
+    return {
+        provider: displayText(provider),
+        id: displayText(id),
+        ...(variant === undefined || variant.trim() === ""
+            ? {}
+            : { variant: displayText(variant) }),
+    };
+};
+
+const runtimeCatalogFor = (
+    state: DisplayState,
+    update: ProgressUpdate,
+): Pick<DisplayState, "models" | "model"> => {
+    if (update.stage !== "agent-runtime" || update.status !== "succeeded") {
+        return { models: state.models, model: state.model };
+    }
+    const details = recordValue(update.details);
+    const models = displayModelsFrom(details.models);
+    return {
+        models: models.length === 0 ? state.models : models,
+        model: displayModelSelectionFrom(details.selection) ?? state.model,
+    };
+};
+
 const reviewAttemptFor = (
     state: DisplayState,
     update: ProgressUpdate,
@@ -427,6 +505,7 @@ export const reduceProgressUpdate = (
     const repository = repositoryFor(state, update);
     const issue = issueFor(state, update);
     const queue = displayQueueFor(state, update);
+    const { models, model } = runtimeCatalogFor(state, update);
     const nestedIssueContext = nestedIssueContextFor(state, update);
     const reviewAttempt = isLeafCompletion(update)
         ? undefined
@@ -442,6 +521,8 @@ export const reduceProgressUpdate = (
         ...(repository === undefined ? {} : { repository }),
         ...(issue === undefined ? {} : { issue }),
         queue,
+        models,
+        ...(model === undefined ? {} : { model }),
         ...nestedIssueContext,
         ...(reviewAttempt === undefined ? {} : { reviewAttempt }),
         stage,

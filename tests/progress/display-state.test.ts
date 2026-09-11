@@ -45,6 +45,7 @@ describe("display state", () => {
             activity: "waiting",
             activityLabel: DISPLAY_ACTIVITY_LABELS.waiting,
             queue: [],
+            models: [],
         });
     });
 
@@ -109,6 +110,66 @@ describe("display state", () => {
             issue: { number: 99, title: "Tracking parent" },
         });
         expect(state.queue.map(({ number }) => number)).toEqual([13, 14, 15]);
+    });
+
+    test("tracks the runtime model catalog and the run's initial selection", () => {
+        const state = reduceProgressUpdate(undefined, {
+            stage: "agent-runtime",
+            status: "succeeded",
+            message: "Pi agent runtime ready.",
+            details: {
+                models: [
+                    {
+                        provider: "openai",
+                        id: "gpt-5",
+                        name: "GPT-5",
+                        reasoning: true,
+                        thinkingLevels: ["low", "high"],
+                    },
+                    {
+                        provider: "openai",
+                        id: "gpt-4o",
+                        name: "GPT-4o",
+                        reasoning: false,
+                        thinkingLevels: [],
+                    },
+                ],
+                selection: {
+                    model: { provider: "openai", id: "gpt-5" },
+                    variant: "high",
+                },
+            },
+        });
+
+        expect(state.models).toEqual([
+            {
+                provider: "openai",
+                id: "gpt-5",
+                name: "GPT-5",
+                thinkingLevels: ["low", "high"],
+            },
+            {
+                provider: "openai",
+                id: "gpt-4o",
+                name: "GPT-4o",
+                thinkingLevels: [],
+            },
+        ]);
+        expect(state.model).toEqual({
+            provider: "openai",
+            id: "gpt-5",
+            variant: "high",
+        });
+
+        // Later progress updates keep the catalog and selection.
+        const next = reduceProgressUpdate(state, {
+            stage: "issue-queue",
+            status: "info",
+            message: "Issue queue ready with 1 issue.",
+            details: { issues: [{ number: 5, title: "Next" }] },
+        });
+        expect(next.models).toEqual(state.models);
+        expect(next.model).toEqual(state.model);
     });
 
     test("appends refreshed issues to the queue without duplicates", () => {
