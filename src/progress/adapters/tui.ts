@@ -57,6 +57,21 @@ const styled = (
         ),
     );
 
+const THEME = {
+    accent: "#7aa2f7",
+    cyan: "#7dcfff",
+    dim: "#565f89",
+    green: "#9ece6a",
+    muted: "#a9b1d6",
+    purple: "#bb9af7",
+    red: "#f7768e",
+    text: "#c0caf5",
+    yellow: "#e0af68",
+    bar: "#16161e",
+    surface: "#2f334d",
+    divider: "#24283b",
+} as const;
+
 const MAX_TRANSCRIPT_LINES = 400;
 const MAX_STREAM_CHARACTERS = 20_000;
 const SPINNER_FRAMES = [
@@ -108,6 +123,7 @@ type TranscriptKey = number | undefined;
 
 type TranscriptLine = {
     content: StyledText | string;
+    indent?: number;
     node?: TextRenderable;
 };
 
@@ -123,13 +139,12 @@ type Transcript = {
 type Ui = {
     readonly mod: TuiModule;
     readonly renderer: CliRenderer;
-    readonly root: {
-        title: string | undefined;
-        readonly add: (child: unknown) => unknown;
-    };
     readonly header: TextRenderable;
+    readonly headerState: TextRenderable;
     readonly sidebar: ScrollBoxRenderable;
-    readonly sidebarRows: Map<TranscriptKey, TextRenderable>;
+    readonly sidebarRows: Map<TranscriptKey, BoxRenderable>;
+    readonly sidebarLabels: Map<TranscriptKey, TextRenderable>;
+    readonly sidebarCount: TextRenderable;
     readonly controlHint: TextRenderable;
     readonly transcript: ScrollBoxRenderable;
     readonly status: TextRenderable;
@@ -192,6 +207,11 @@ export const makeTuiProgressCoordinator = (
     const queued: Array<() => void> = [];
 
     const transcripts = new Map<TranscriptKey, Transcript>();
+    /** Tool calls seen at start, so the completion row can show target and duration. */
+    const pendingTools = new Map<
+        string,
+        { readonly label: string; readonly startedAt: number }
+    >();
     let selected: TranscriptKey = undefined;
     let activeIssue: TranscriptKey = undefined;
     let followActive = true;
@@ -239,6 +259,7 @@ export const makeTuiProgressCoordinator = (
             content: line.content,
             width: "100%",
             wrapMode: "word",
+            paddingLeft: line.indent ?? 0,
         });
         line.node = node;
         current.transcript.add(node);
@@ -248,13 +269,24 @@ export const makeTuiProgressCoordinator = (
         current: Ui,
         key: TranscriptKey,
         content: StyledText | string,
+        options: { readonly indent?: number } = {},
     ): TranscriptLine => {
         const transcript = transcriptFor(key);
-        const line: TranscriptLine = { content };
+        const line: TranscriptLine = {
+            content,
+            ...(options.indent === undefined ? {} : { indent: options.indent }),
+        };
         transcript.lines.push(line);
         if (key === selected) mountLine(current, line);
         trimTranscript(current, transcript);
         return line;
+    };
+
+    /** One blank row between agent turns, without leading ones. */
+    const appendTurnSeparator = (current: Ui, key: TranscriptKey): void => {
+        if (transcriptFor(key).lines.length > 0) {
+            appendLine(current, key, " ");
+        }
     };
 
     const mountTranscript = (current: Ui, key: TranscriptKey): void => {
@@ -278,19 +310,58 @@ export const makeTuiProgressCoordinator = (
         issue: DisplayQueueIssue | undefined,
     ): StyledText => {
         const mod = current.mod;
-        const marker = key === selected ? mod.fg("#7aa2f7")("▌ ") : "  ";
         if (issue === undefined) {
-            return styled(mod, marker, mod.fg("#7aa2f7")(mod.bold("Run")));
+            return styled(
+                mod,
+                mod.fg(THEME.accent)(
+                    key === selected ? mod.bold("Run") : "Run",
+                ),
+            );
         }
         const status = QUEUE_STATUS_STYLES[issue.status];
-        const title = key === selected ? mod.bold(issue.title) : issue.title;
+        const title =
+            key === selected
+                ? mod.bold(issue.title)
+                : mod.fg(THEME.muted)(issue.title);
         return styled(
             mod,
-            marker,
             mod.fg(status.color)(`${status.glyph} `),
-            mod.fg("#565f89")(`#${issue.number} `),
+            mod.fg(THEME.dim)(`#${issue.number} `),
             title,
         );
+    };
+
+    const ensureSidebarRow = (
+        current: Ui,
+        key: TranscriptKey,
+    ): { readonly row: BoxRenderable; readonly label: TextRenderable } => {
+        const existingRow = current.sidebarRows.get(key);
+        const existingLabel = current.sidebarLabels.get(key);
+        if (existingRow !== undefined && existingLabel !== undefined) {
+            return { row: existingRow, label: existingLabel };
+        }
+        const row = new current.mod.BoxRenderable(current.renderer, {
+            id: sidebarRowId(key),
+            flexDirection: "row",
+            width: "100%",
+            height: 1,
+            paddingLeft: 1,
+            paddingRight: 1,
+        });
+        const label = new current.mod.TextRenderable(current.renderer, {
+            content: "",
+            width: "100%",
+            height: 1,
+            wrapMode: "none",
+        });
+        row.add(label);
+        row.onMouseDown = () => {
+            if (ui !== undefined) selectTranscript(ui, key, true);
+        };
+        current.sidebar.add(row);
+        current.sidebarRows.set(key, row);
+        current.sidebarLabels.set(key, label);
+        return { row, label };
     };
 
     const paintSidebar = (current: Ui): void => {
@@ -300,25 +371,25 @@ export const makeTuiProgressCoordinator = (
         ];
         for (const issue of entries) {
             const key: TranscriptKey = issue?.number;
-            let row = current.sidebarRows.get(key);
-            if (row === undefined) {
-                row = new current.mod.TextRenderable(current.renderer, {
-                    id: sidebarRowId(key),
-                    content: "",
-                    width: "100%",
-                    height: 1,
-                    wrapMode: "none",
-                    paddingLeft: 1,
-                    paddingRight: 1,
-                });
-                row.onMouseDown = () => {
-                    if (ui !== undefined) selectTranscript(ui, key, true);
-                };
-                current.sidebar.add(row);
-                current.sidebarRows.set(key, row);
-            }
-            row.content = sidebarRowContent(current, key, issue);
+            const { row, label } = ensureSidebarRow(current, key);
+            row.backgroundColor = key === selected ? THEME.surface : undefined;
+            label.content = sidebarRowContent(current, key, issue);
         }
+        const processed = state.queue.filter(
+            ({ status }) =>
+                status === "completed" ||
+                status === "failed" ||
+                status === "needs-attention" ||
+                status === "skipped",
+        ).length;
+        current.sidebarCount.content = styled(
+            current.mod,
+            current.mod.fg(THEME.dim)(
+                state.queue.length === 0
+                    ? ""
+                    : `${processed}/${state.queue.length}`,
+            ),
+        );
         current.sidebar.scrollChildIntoView(sidebarRowId(selected));
     };
 
@@ -336,6 +407,7 @@ export const makeTuiProgressCoordinator = (
         selected = key;
         mountTranscript(current, key);
         paintSidebar(current);
+        renderStatus(current);
         current.renderer.requestRender();
     };
 
@@ -355,48 +427,39 @@ export const makeTuiProgressCoordinator = (
             ? "⏸"
             : (SPINNER_FRAMES[spinnerIndex % SPINNER_FRAMES.length] ?? "⠋");
 
-    const controlStatus = (
-        current: Ui,
-        separator: TextChunk,
-    ): ReadonlyArray<TextChunk | string> => {
-        const mod = current.mod;
-        if (stopRequested) {
-            return [separator, mod.fg("#f7768e")("stopping after this issue")];
-        }
-        if (!paused) return [];
-        return [
-            separator,
-            mod.fg("#e0af68")(
-                executingIssue() ? "pausing after this issue" : "paused",
-            ),
-        ];
-    };
+    const spinnerColor = (): string =>
+        stopRequested ? THEME.red : paused ? THEME.yellow : THEME.accent;
 
     const renderStatus = (current: Ui): void => {
         const mod = current.mod;
-        const frame = spinnerFrame();
-        const separator = mod.fg("#565f89")(" › ");
-        const parts: Array<TextChunk | string> = [mod.fg("#e0af68")(frame)];
-        if (state.issue !== undefined) {
+        const parts: Array<TextChunk | string> = [
+            mod.fg(spinnerColor())(spinnerFrame()),
+        ];
+        // While browsing another transcript, show what is running now.
+        if (state.issue !== undefined && selected !== state.issue.number) {
             parts.push(
-                mod.fg("#565f89")(
-                    ` [${state.issue.current}/${state.issue.total}]`,
-                ),
-                mod.fg("#7aa2f7")(` #${state.issue.number} `),
-                state.issue.title,
+                " ",
+                mod.fg(THEME.accent)(`#${state.issue.number} `),
+                mod.fg(THEME.muted)(state.issue.title),
+                mod.fg(THEME.dim)(" ›"),
             );
         }
         if (state.stage !== undefined) {
-            parts.push(separator, progressStageLabel(state.stage));
+            parts.push(
+                " ",
+                mod.fg(THEME.muted)(progressStageLabel(state.stage)),
+            );
         }
         if (state.activityLabel !== "") {
-            parts.push(separator, mod.fg("#9ece6a")(state.activityLabel));
+            parts.push(
+                mod.fg(THEME.dim)(" › "),
+                mod.fg(THEME.green)(state.activityLabel),
+            );
         }
         const elapsed = elapsedLabel(state.stageStartedAt, now().getTime());
         if (elapsed !== "") {
-            parts.push(mod.fg("#565f89")(` · ${elapsed}`));
+            parts.push(mod.fg(THEME.dim)(` · ${elapsed}`));
         }
-        parts.push(...controlStatus(current, separator));
         current.status.content = styled(mod, ...parts);
     };
 
@@ -407,26 +470,47 @@ export const makeTuiProgressCoordinator = (
         const variant = activeVariant();
         current.header.content = styled(
             mod,
-            mod.fg("#7aa2f7")(mod.bold("ralphie")),
-            mod.fg("#565f89")(" · "),
-            detail,
+            mod.fg(THEME.accent)(mod.bold("ralphie")),
+            mod.fg(THEME.dim)(" · "),
+            mod.fg(THEME.muted)(detail),
             ...(model === undefined
                 ? []
                 : [
-                      mod.fg("#565f89")(" · "),
-                      mod.fg("#bb9af7")(model),
+                      mod.fg(THEME.dim)(" · "),
+                      mod.fg(THEME.purple)(model),
                       ...(variant === undefined
                           ? []
-                          : [mod.fg("#565f89")(` · ${variant}`)]),
+                          : [mod.fg(THEME.dim)(` · ${variant}`)]),
                   ]),
         );
-        current.root.title = ` ralphie · ${detail} `;
+        current.headerState.content = headerStateContent(current);
+    };
+
+    const headerStateContent = (current: Ui): StyledText => {
+        const mod = current.mod;
+        if (stopRequested) {
+            return styled(
+                mod,
+                mod.fg(THEME.red)("⏹ stopping after this issue"),
+            );
+        }
+        if (paused) {
+            return styled(
+                mod,
+                mod.fg(THEME.yellow)(
+                    executingIssue()
+                        ? "⏸ pausing after this issue"
+                        : "⏸ paused",
+                ),
+            );
+        }
+        return styled(mod);
     };
 
     const renderControlHint = (current: Ui): void => {
         current.controlHint.content = styled(
             current.mod,
-            current.mod.fg("#565f89")(
+            current.mod.fg(THEME.dim)(
                 paused && !stopRequested ? RESUME_HINT : PAUSE_HINT,
             ),
         );
@@ -643,42 +727,56 @@ export const makeTuiProgressCoordinator = (
         navigateIssues(direction);
     };
 
-    const toolStartLine = (current: Ui, event: AgentSessionEvent): StyledText =>
-        styled(
-            current.mod,
-            current.mod.fg("#7dcfff")("│ "),
-            current.mod.fg("#7dcfff")(
-                toolTarget(
-                    (event as { toolName?: unknown }).toolName,
-                    (event as { args?: unknown }).args,
-                ),
-            ),
+    const durationLabel = (milliseconds: number): string => {
+        if (milliseconds < 1000) {
+            return `${Math.max(0, Math.round(milliseconds))}ms`;
+        }
+        const seconds = Math.floor(milliseconds / 1000);
+        const minutes = Math.floor(seconds / 60);
+        return minutes === 0
+            ? `${(milliseconds / 1000).toFixed(1)}s`
+            : `${minutes}m ${String(seconds % 60).padStart(2, "0")}s`;
+    };
+
+    const toolCallId = (event: AgentSessionEvent): string | undefined => {
+        const id = (event as { toolCallId?: unknown }).toolCallId;
+        return typeof id === "string" && id !== "" ? id : undefined;
+    };
+
+    const toolLabel = (event: AgentSessionEvent): string =>
+        toolTarget(
+            (event as { toolName?: unknown }).toolName,
+            (event as { args?: unknown }).args,
         );
 
-    const toolEndLine = (current: Ui, event: AgentSessionEvent): StyledText => {
+    const toolResultLine = (
+        current: Ui,
+        result: {
+            readonly label: string;
+            readonly duration?: number;
+            readonly detail?: string;
+        },
+    ): StyledText => {
         const mod = current.mod;
-        const name = String(
-            (event as { toolName?: unknown }).toolName ?? "tool",
-        );
-        if ((event as { isError?: unknown }).isError !== true) {
-            return styled(
-                mod,
-                mod.fg("#565f89")("│ "),
-                mod.fg("#9ece6a")("✓ "),
-                mod.fg("#565f89")(`${name} done`),
+        const failed =
+            result.detail !== undefined && result.detail.trim() !== "";
+        const parts: Array<TextChunk | string> = failed
+            ? [mod.fg(THEME.red)("✗ "), mod.fg(THEME.red)(result.label)]
+            : [mod.fg(THEME.green)("✓ "), mod.fg(THEME.cyan)(result.label)];
+        if (result.duration !== undefined) {
+            parts.push(
+                mod.fg(THEME.dim)(` · ${durationLabel(result.duration)}`),
             );
         }
-        const detail = contentText((event as { result?: unknown }).result);
-        const suffix =
-            detail === undefined || detail.trim() === ""
-                ? ""
-                : `: ${preview(oneLine(detail), 160)}`;
-        return styled(
-            mod,
-            mod.fg("#565f89")("│ "),
-            mod.fg("#f7768e")("✗ "),
-            mod.fg("#f7768e")(`${name} failed${suffix}`),
-        );
+        if (failed) {
+            parts.push(
+                mod.fg(THEME.dim)(" · "),
+                mod.fg(THEME.red)(
+                    `failed: ${preview(oneLine(result.detail ?? ""), 160)}`,
+                ),
+            );
+        }
+        return styled(mod, ...parts);
     };
 
     const streamContent = (
@@ -687,8 +785,8 @@ export const makeTuiProgressCoordinator = (
         buffer: string,
     ): StyledText | string =>
         kind === "thinking"
-            ? styled(mod, mod.fg("#e0af68")("✦ "), mod.fg("#565f89")(buffer))
-            : buffer;
+            ? styled(mod, mod.fg(THEME.yellow)("✻ "), mod.dim(buffer))
+            : styled(mod, mod.fg(THEME.text)(buffer));
 
     const streamDelta = (kind: "text" | "thinking", delta: string): void => {
         // Capture the issue now: callbacks may run after the renderer is
@@ -703,6 +801,7 @@ export const makeTuiProgressCoordinator = (
                     current,
                     key,
                     streamContent(current.mod, kind, buffer),
+                    { indent: 2 },
                 );
                 transcript.stream = { kind, buffer, line };
                 current.renderer.requestRender();
@@ -725,18 +824,44 @@ export const makeTuiProgressCoordinator = (
 
     const onToolStart = (event: AgentSessionEvent): void => {
         const key = activeIssue;
-        withUi((current) => {
-            endStreamFor(key);
-            appendLine(current, key, toolStartLine(current, event));
-        });
+        const id = toolCallId(event);
+        if (id !== undefined) {
+            pendingTools.set(id, {
+                label: toolLabel(event),
+                startedAt: now().getTime(),
+            });
+        }
+        withUi(() => endStreamFor(key));
         refreshStatus();
     };
 
     const onToolEnd = (event: AgentSessionEvent): void => {
         const key = activeIssue;
+        const id = toolCallId(event);
+        const pending = id === undefined ? undefined : pendingTools.get(id);
+        if (id !== undefined) pendingTools.delete(id);
+        const isError = (event as { isError?: unknown }).isError === true;
+        const detail = isError
+            ? contentText((event as { result?: unknown }).result)
+            : undefined;
+        const duration =
+            pending === undefined
+                ? undefined
+                : Math.max(0, now().getTime() - pending.startedAt);
         withUi((current) => {
             endStreamFor(key);
-            appendLine(current, key, toolEndLine(current, event));
+            appendLine(
+                current,
+                key,
+                toolResultLine(current, {
+                    label: pending?.label ?? toolLabel(event),
+                    ...(duration === undefined ? {} : { duration }),
+                    ...(detail === undefined || detail.trim() === ""
+                        ? {}
+                        : { detail }),
+                }),
+                { indent: 2 },
+            );
         });
         refreshStatus();
     };
@@ -745,13 +870,14 @@ export const makeTuiProgressCoordinator = (
         const key = activeIssue;
         withUi((current) => {
             endStreamFor(key);
+            appendTurnSeparator(current, key);
             appendLine(
                 current,
                 key,
                 styled(
                     current.mod,
-                    current.mod.fg("#7aa2f7")("╭─ "),
-                    current.mod.fg("#7aa2f7")(
+                    current.mod.fg(THEME.accent)("● "),
+                    current.mod.fg(THEME.accent)(
                         current.mod.bold(
                             `pi · ${context.title ?? context.sessionID}`,
                         ),
@@ -764,14 +890,7 @@ export const makeTuiProgressCoordinator = (
 
     const onAgentEnd = (): void => {
         const key = activeIssue;
-        withUi((current) => {
-            endStreamFor(key);
-            appendLine(
-                current,
-                key,
-                styled(current.mod, current.mod.fg("#565f89")("╰─ done")),
-            );
-        });
+        withUi(() => endStreamFor(key));
         refreshStatus();
     };
 
@@ -838,35 +957,37 @@ export const makeTuiProgressCoordinator = (
             case "succeeded":
                 return styled(
                     mod,
-                    mod.fg("#9ece6a")("✓"),
-                    mod.fg("#565f89")(label),
-                    ` ${update.message}`,
+                    mod.fg(THEME.green)("✓"),
+                    mod.fg(THEME.dim)(label),
+                    " ",
+                    mod.fg(THEME.muted)(update.message),
                 );
             case "failed":
                 return styled(
                     mod,
-                    mod.fg("#f7768e")("✗"),
-                    mod.fg("#565f89")(label),
+                    mod.fg(THEME.red)("✗"),
+                    mod.fg(THEME.dim)(label),
                     " ",
-                    mod.fg("#f7768e")(update.message),
+                    mod.fg(THEME.red)(update.message),
                 );
             case "skipped":
                 return styled(
                     mod,
-                    mod.fg("#565f89")(`−${label} ${update.message}`),
+                    mod.fg(THEME.dim)(`−${label} ${update.message}`),
                 );
             case "needs-attention":
                 return styled(
                     mod,
-                    mod.fg("#e0af68")("⚠"),
-                    mod.fg("#565f89")(label),
+                    mod.fg(THEME.yellow)("⚠"),
+                    mod.fg(THEME.dim)(label),
                     " ",
-                    mod.fg("#e0af68")(update.message),
+                    mod.fg(THEME.yellow)(update.message),
                 );
             case "info":
                 return styled(
                     mod,
-                    mod.fg("#565f89")(`•${label} ${update.message}`),
+                    mod.fg(THEME.dim)(`•${label} `),
+                    mod.fg(THEME.muted)(update.message),
                 );
         }
     };
@@ -926,19 +1047,30 @@ export const makeTuiProgressCoordinator = (
             flexDirection: "column",
             width: "100%",
             height: "100%",
-            borderStyle: "rounded",
-            borderColor: "#3b4261",
-            title: " ralphie ",
-            titleAlignment: "left",
+        });
+        const headerBar = new mod.BoxRenderable(renderer, {
+            id: "tui-header-bar",
+            flexDirection: "row",
+            width: "100%",
+            height: 1,
+            backgroundColor: THEME.bar,
+            paddingLeft: 1,
+            paddingRight: 1,
         });
         const header = new mod.TextRenderable(renderer, {
             id: "tui-header",
             content: "",
             height: 1,
-            width: "100%",
+            flexGrow: 1,
             wrapMode: "none",
-            paddingLeft: 1,
-            paddingRight: 1,
+        });
+        const headerState = new mod.TextRenderable(renderer, {
+            id: "tui-header-state",
+            content: "",
+            height: 1,
+            flexShrink: 0,
+            paddingLeft: 2,
+            wrapMode: "none",
         });
         const body = new mod.BoxRenderable(renderer, {
             id: "tui-body",
@@ -949,12 +1081,34 @@ export const makeTuiProgressCoordinator = (
         const sidebarPane = new mod.BoxRenderable(renderer, {
             id: "tui-sidebar-pane",
             flexDirection: "column",
-            width: 28,
-            minWidth: 18,
-            maxWidth: 36,
+            width: 30,
+            minWidth: 20,
+            maxWidth: 38,
             border: ["right"],
             borderStyle: "single",
-            borderColor: "#3b4261",
+            borderColor: THEME.divider,
+        });
+        const sidebarHeader = new mod.BoxRenderable(renderer, {
+            id: "tui-sidebar-header",
+            flexDirection: "row",
+            width: "100%",
+            height: 1,
+            paddingLeft: 1,
+            paddingRight: 1,
+        });
+        const sidebarTitle = new mod.TextRenderable(renderer, {
+            id: "tui-sidebar-title",
+            content: styled(mod, mod.fg(THEME.dim)(mod.bold("Issues"))),
+            height: 1,
+            flexGrow: 1,
+            wrapMode: "none",
+        });
+        const sidebarCount = new mod.TextRenderable(renderer, {
+            id: "tui-sidebar-count",
+            content: "",
+            height: 1,
+            flexShrink: 0,
+            wrapMode: "none",
         });
         const sidebar = new mod.ScrollBoxRenderable(renderer, {
             id: "tui-sidebar",
@@ -967,7 +1121,7 @@ export const makeTuiProgressCoordinator = (
             id: "tui-sidebar-control-hint",
             content: styled(
                 mod,
-                mod.fg("#565f89")(
+                mod.fg(THEME.dim)(
                     paused && !stopRequested ? RESUME_HINT : PAUSE_HINT,
                 ),
             ),
@@ -979,7 +1133,7 @@ export const makeTuiProgressCoordinator = (
         });
         const navigationHint = new mod.TextRenderable(renderer, {
             id: "tui-sidebar-navigation-hint",
-            content: styled(mod, mod.fg("#565f89")(NAVIGATION_HINT)),
+            content: styled(mod, mod.fg(THEME.dim)(NAVIGATION_HINT)),
             height: 1,
             width: "100%",
             wrapMode: "none",
@@ -991,9 +1145,18 @@ export const makeTuiProgressCoordinator = (
             flexGrow: 1,
             stickyScroll: true,
             stickyStart: "bottom",
+            paddingLeft: 2,
+            paddingRight: 2,
+            contentOptions: { minHeight: 0 },
+        });
+        const footerBar = new mod.BoxRenderable(renderer, {
+            id: "tui-footer-bar",
+            flexDirection: "row",
+            width: "100%",
+            height: 1,
+            backgroundColor: THEME.bar,
             paddingLeft: 1,
             paddingRight: 1,
-            contentOptions: { minHeight: 0 },
         });
         const status = new mod.TextRenderable(renderer, {
             id: "tui-status",
@@ -1001,8 +1164,6 @@ export const makeTuiProgressCoordinator = (
             height: 1,
             width: "100%",
             wrapMode: "none",
-            paddingLeft: 1,
-            paddingRight: 1,
         });
         const pickerOverlay = new mod.BoxRenderable(renderer, {
             id: "tui-model-picker-overlay",
@@ -1024,8 +1185,8 @@ export const makeTuiProgressCoordinator = (
             height: 15,
             maxHeight: "90%",
             borderStyle: "rounded",
-            borderColor: "#3b4261",
-            backgroundColor: "#16161e",
+            borderColor: THEME.divider,
+            backgroundColor: THEME.bar,
             title: " Select model ",
             titleAlignment: "left",
             paddingLeft: 1,
@@ -1098,25 +1259,33 @@ export const makeTuiProgressCoordinator = (
         levelColumn.add(levelList);
         pickerOverlay.add(pickerBox);
         renderer.root.add(root);
-        root.add(header);
+        root.add(headerBar);
+        headerBar.add(header);
+        headerBar.add(headerState);
         root.add(body);
         body.add(sidebarPane);
+        sidebarPane.add(sidebarHeader);
+        sidebarHeader.add(sidebarTitle);
+        sidebarHeader.add(sidebarCount);
         sidebarPane.add(sidebar);
         sidebarPane.add(controlHint);
         sidebarPane.add(navigationHint);
         body.add(transcript);
         body.add(pickerOverlay);
-        root.add(status);
+        root.add(footerBar);
+        footerBar.add(status);
         // Rows select on click; keep events from moving focus off the
         // transcript, which owns Up/Down/PgUp/PgDn scrolling.
         sidebar.focusable = false;
         ui = {
             mod,
             renderer,
-            root,
             header,
+            headerState,
             sidebar,
             sidebarRows: new Map(),
+            sidebarLabels: new Map(),
+            sidebarCount,
             controlHint,
             transcript,
             status,

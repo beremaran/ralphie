@@ -19,27 +19,29 @@ resolves to the full-screen TUI only when stdin and stderr are both TTYs and
 lines.
 
 - Interactive terminals get an OpenTUI application (the same rendering core
-  OpenCode 1.0 uses): a rounded frame with the repository header, an issue
-  sidebar, a scrollable transcript that streams assistant text as it arrives,
-  compact thinking and tool rows (`$ <command>`, `read <path>`,
-  `✓ <tool> done`, `✗ <tool> failed: <detail>`), and a one-line status bar
-  with queue position, issue, stage, activity, and elapsed time. The sidebar
-  lists every issue discovered in the run with its outcome (`○` queued,
-  `▶` active, `✓` completed, `✗` failed, `⚠` needs-attention, `−` skipped)
-  and follows the active issue until you navigate away with `[`/`]` or
-  Ctrl+Left/Right; each issue keeps its own transcript, so processed issues
-  stay browsable while the run continues. The queue starts paused so the
-  discovered plan can be inspected before work begins; `p` resumes or pauses it
-  between issues, `s` stops the queue after the active issue and drains the run
-  normally, and `q` (like Ctrl-C) cancels immediately. `m` opens the model
-  picker: the pi catalog with the selected model's thinking levels, `Tab`
-  switches panes, `Enter` applies the pick to every later issue (the session in
-  flight keeps its model), and `Esc` cancels. The header shows the active model
-  and level; the status bar and sidebar hints show the pending pause or stop.
-  Tool output, long commands, and deep paths stay inside the transcript panel;
-  resize is handled by the renderer; Ctrl-C is forwarded as SIGINT so
-  cancellation still restores the checkout and saves state; disposal destroys
-  the renderer and restores the terminal.
+  OpenCode 1.0 uses): a borderless layout with a background header line
+  (repository, active model, pause state), an issue sidebar, a scrollable
+  transcript that streams assistant text as it arrives, and a footer status
+  line (stage, activity, elapsed time). Transcript turns start with a colored
+  `● pi · <title>` role label and blank-line separation; assistant text is
+  indented and plain, thinking is dim, and each tool call is one row
+  (`✓ $ <command> · 1.2s`, `✓ read <path>`, `✗ <tool> <path> · failed:
+  <detail>`). The sidebar lists every issue discovered in the run with its
+  outcome (`○` queued, `▶` active, `✓` completed, `✗` failed, `⚠`
+  needs-attention, `−` skipped) and follows the active issue until you navigate
+  away with `[`/`]` or Ctrl+Left/Right; each issue keeps its own transcript, so
+  processed issues stay browsable while the run continues. The queue starts
+  paused so the discovered plan can be inspected before work begins; `p`
+  resumes or pauses it between issues, `s` stops the queue after the active
+  issue and drains the run normally, and `q` (like Ctrl-C) cancels immediately.
+  `m` opens the model picker: the pi catalog with the selected model's thinking
+  levels, `Tab` switches panes, `Enter` applies the pick to every later issue
+  (the session in flight keeps its model), and `Esc` cancels. The header shows
+  the active model and level; the footer and sidebar hints show the pending
+  pause or stop. Tool output, long commands, and deep paths stay inside the
+  transcript panel; resize is handled by the renderer; Ctrl-C is forwarded as
+  SIGINT so cancellation still restores the checkout and saves state; disposal
+  destroys the renderer and restores the terminal.
 - CI and redirected output are the deterministic noninteractive fallback:
   append-only, byte-identical across identical runs, with neither ANSI cursor
   controls (`ESC`) nor carriage-return bytes; `stripTerminalControls` is an

@@ -77,8 +77,11 @@ All notable changes to Ralphie are documented here. The project follows
 
 - Replace the hand-rolled interactive renderer with OpenTUI, the same
   terminal rendering core OpenCode 1.0 uses. Interactive runs now render a
-  full-screen frame with an issue sidebar, a streaming transcript per issue,
-  compact tool rows, and a status bar. The sidebar lists the discovered queue
+  borderless layout: a background header line with the repository, active
+  model, and pause state; an issue sidebar with outcome glyphs and a
+  processed count; a per-issue streaming transcript with role bullets,
+  indented assistant text, dim thinking, and one-row tool calls with elapsed
+  time; and a footer status line. The sidebar lists the discovered queue
   with each issue's outcome and follows the active issue until the user
   navigates; `[`/`]` (or Ctrl+Left/Right) switch between processed, active, and
   queued issues. Interactive runs start paused so the discovered plan can be

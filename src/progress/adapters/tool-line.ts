@@ -21,7 +21,9 @@ export const contentText = (value: unknown): string | undefined => {
     }
     if (typeof value === "object" && value !== null) {
         const text = (value as { text?: unknown }).text;
-        return typeof text === "string" ? text : undefined;
+        if (typeof text === "string") return text;
+        const content = (value as { content?: unknown }).content;
+        return content === undefined ? undefined : contentText(content);
     }
     return undefined;
 };

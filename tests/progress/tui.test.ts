@@ -96,7 +96,7 @@ describe("OpenTUI progress coordinator", () => {
         expect(frame).toContain("pi · Implement login");
         expect(frame).toContain("Working on the login flow.");
         expect(frame).toContain("$ bun test");
-        expect(frame).toContain("✓ bash done");
+        expect(frame).toContain("✓ $ bun test");
         expect(frame).toContain("#42");
         expect(frame).toContain("Implementing changes");
 
@@ -205,7 +205,7 @@ describe("OpenTUI progress coordinator", () => {
         await setup.renderOnce();
         let frame = setup.captureCharFrame();
         expect(frame).toContain("✓ #41 First task");
-        expect(frame).toContain("▌ ✓ #42 Second task");
+        expect(frame).toContain("✓ #42 Second task");
         expect(frame).toContain("○ #43 Third task");
         expect(frame).toContain("beta work");
         expect(frame).not.toContain("alpha work");
@@ -213,7 +213,7 @@ describe("OpenTUI progress coordinator", () => {
         setup.mockInput.pressArrow("left", { ctrl: true });
         await setup.renderOnce();
         frame = setup.captureCharFrame();
-        expect(frame).toContain("▌ ✓ #41");
+        expect(frame).toContain("✓ #41 First task");
         expect(frame).toContain("alpha work");
         expect(frame).not.toContain("beta work");
 
@@ -271,6 +271,8 @@ describe("OpenTUI progress coordinator", () => {
                 status: "started",
                 message: `Executing #${number}...`,
                 issue: { number, title },
+                current: number - 50,
+                total: 3,
             });
             coordinator.piListener({ type: "agent_start" }, context);
             coordinator.piListener(
@@ -299,7 +301,7 @@ describe("OpenTUI progress coordinator", () => {
         await coordinator.ready;
         await setup.renderOnce();
         let frame = setup.captureCharFrame();
-        expect(frame).toContain("▌ ✓ #52 Second task");
+        expect(frame).toContain("✓ #52 Second task");
         expect(frame).toContain("second work");
 
         setup.mockInput.pressKey("[");
@@ -313,13 +315,15 @@ describe("OpenTUI progress coordinator", () => {
         frame = setup.captureCharFrame();
         expect(frame).toContain("first work");
         expect(frame).not.toContain("third work");
+        // The footer keeps showing the live issue while browsing history.
+        expect(frame).toContain("#53 Third task ›");
 
         // Selecting the active issue re-engages the follow.
         setup.mockInput.pressKey("]");
         setup.mockInput.pressKey("]");
         await setup.renderOnce();
         frame = setup.captureCharFrame();
-        expect(frame).toContain("▌ ▶ #53 Third task");
+        expect(frame).toContain("▶ #53 Third task");
         expect(frame).toContain("third work");
 
         await coordinator.progress.emit({
@@ -339,7 +343,7 @@ describe("OpenTUI progress coordinator", () => {
         await execute(54, "Fourth task", "fourth work", false);
         await setup.renderOnce();
         frame = setup.captureCharFrame();
-        expect(frame).toContain("▌ ▶ #54 Fourth task");
+        expect(frame).toContain("▶ #54 Fourth task");
         expect(frame).toContain("fourth work");
 
         await coordinator.dispose();
@@ -378,7 +382,7 @@ describe("OpenTUI progress coordinator", () => {
         }
         await setup.renderOnce();
         frame = setup.captureCharFrame();
-        expect(frame).toContain("▌ ○ #129 Task 29");
+        expect(frame).toContain("○ #129 Task 29");
         expect(frame).not.toContain("#100");
 
         await coordinator.dispose();
