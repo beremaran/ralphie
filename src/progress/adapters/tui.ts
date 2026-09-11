@@ -65,7 +65,8 @@ const SPINNER_FRAMES = [
     "⠏",
 ] as const;
 const SPINNER_INTERVAL_MS = 120;
-const CONTROL_HINT = "p pause · s stop · q quit";
+const PAUSE_HINT = "p pause · s stop · q quit";
+const RESUME_HINT = "p resume · s stop · q quit";
 const NAVIGATION_HINT = "[ ] issue · ↑↓ scroll";
 
 const QUEUE_STATUS_STYLES: Readonly<
@@ -111,6 +112,7 @@ type Ui = {
     readonly header: TextRenderable;
     readonly sidebar: ScrollBoxRenderable;
     readonly sidebarRows: Map<TranscriptKey, TextRenderable>;
+    readonly controlHint: TextRenderable;
     readonly transcript: ScrollBoxRenderable;
     readonly status: TextRenderable;
 };
@@ -172,7 +174,8 @@ export const makeTuiProgressCoordinator = (
     let selected: TranscriptKey = undefined;
     let activeIssue: TranscriptKey = undefined;
     let followActive = true;
-    let paused = false;
+    // The queue starts held so the first issue never races the renderer.
+    let paused = true;
     let stopRequested = false;
     const resumeWaiters: Array<() => void> = [];
 
@@ -386,10 +389,20 @@ export const makeTuiProgressCoordinator = (
         current.root.title = ` ralphie · ${detail} `;
     };
 
+    const renderControlHint = (current: Ui): void => {
+        current.controlHint.content = styled(
+            current.mod,
+            current.mod.fg("#565f89")(
+                paused && !stopRequested ? RESUME_HINT : PAUSE_HINT,
+            ),
+        );
+    };
+
     const refreshStatus = (): void => {
         withUi((current) => {
             renderStatus(current);
             renderHeader(current);
+            renderControlHint(current);
             current.renderer.requestRender();
         });
     };
@@ -763,7 +776,12 @@ export const makeTuiProgressCoordinator = (
         });
         const controlHint = new mod.TextRenderable(renderer, {
             id: "tui-sidebar-control-hint",
-            content: styled(mod, mod.fg("#565f89")(CONTROL_HINT)),
+            content: styled(
+                mod,
+                mod.fg("#565f89")(
+                    paused && !stopRequested ? RESUME_HINT : PAUSE_HINT,
+                ),
+            ),
             height: 1,
             width: "100%",
             wrapMode: "none",
@@ -816,6 +834,7 @@ export const makeTuiProgressCoordinator = (
             header,
             sidebar,
             sidebarRows: new Map(),
+            controlHint,
             transcript,
             status,
         };
@@ -841,6 +860,7 @@ export const makeTuiProgressCoordinator = (
         });
         renderHeader(ui);
         renderStatus(ui);
+        renderControlHint(ui);
         paintSidebar(ui);
         renderer.requestRender();
         timer = setInterval(() => {

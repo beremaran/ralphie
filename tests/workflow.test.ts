@@ -1635,6 +1635,37 @@ describe("workflow", () => {
         ]);
     });
 
+    test("cancels a paused queue instead of waiting for the gate", async () => {
+        const calls: string[] = [];
+        const states: RunState[] = [];
+        const controller = new AbortController();
+        let gateCalls = 0;
+        const control: RunControl = {
+            waitForQueue: () => {
+                gateCalls += 1;
+                return new Promise<void>(() => {});
+            },
+            stopAfterCurrent: () => false,
+        };
+        const running = workflow(
+            { ...baseOptions, control, signal: controller.signal },
+            testRuntime(calls, states, {
+                issueLists: [[firstIssue, secondIssue]],
+            }),
+        );
+
+        for (let attempt = 0; attempt < 1000 && gateCalls === 0; attempt += 1) {
+            await Bun.sleep(0);
+        }
+        expect(gateCalls).toBeGreaterThan(0);
+
+        controller.abort();
+        await expect(running).rejects.toThrow("Run cancelled");
+        expect(calls).not.toContainEqual(
+            expect.stringContaining("executeIssue:42"),
+        );
+    });
+
     test.each([
         {
             name: "closed",

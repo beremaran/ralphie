@@ -61,6 +61,36 @@ const checkCancellation = (signal: AbortSignal | undefined): void => {
     }
 };
 
+/**
+ * Wait for the queue control without stranding a cancelled run: aborting the
+ * run releases a paused gate so the workflow can observe the cancellation.
+ */
+const waitForQueueControl = async (
+    control: RunControl | undefined,
+    signal: AbortSignal | undefined,
+): Promise<void> => {
+    const gate = control?.waitForQueue() ?? Promise.resolve();
+    if (signal === undefined) {
+        await gate;
+        return;
+    }
+    if (signal.aborted) {
+        checkCancellation(signal);
+    }
+    let onAbort: (() => void) | undefined;
+    const cancelled = new Promise<void>((resolve) => {
+        onAbort = resolve;
+        signal.addEventListener("abort", onAbort, { once: true });
+    });
+    try {
+        await Promise.race([gate, cancelled]);
+    } finally {
+        if (onAbort !== undefined) {
+            signal.removeEventListener("abort", onAbort);
+        }
+    }
+};
+
 const outcomeMessage = (
     issueNumber: number,
     outcome: IssueExecutionOutcome,
@@ -1334,7 +1364,8 @@ export const workflow = async (
 
         const processQueue = async (server: PiAgentRuntime): Promise<void> => {
             const step = async (): Promise<boolean> => {
-                await control?.waitForQueue();
+                await waitForQueueControl(control, signal);
+                checkCancellation(signal);
                 if (await stopQueueIfRequested()) return false;
                 return await processNextIssue(server);
             };

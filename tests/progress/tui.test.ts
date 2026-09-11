@@ -384,7 +384,7 @@ describe("OpenTUI progress coordinator", () => {
         await coordinator.dispose();
     });
 
-    test("pauses, stops, and quits from the keyboard", async () => {
+    test("starts paused and pauses, stops, and quits from the keyboard", async () => {
         const setup = await createTestRenderer({ width: 120, height: 16 });
         let quitCalls = 0;
         const coordinator = makeProgressCoordinator({
@@ -412,20 +412,39 @@ describe("OpenTUI progress coordinator", () => {
                 ],
             },
         });
+        await coordinator.ready;
+        await setup.renderOnce();
+        let frame = setup.captureCharFrame();
+        expect(frame).toContain("paused");
+        expect(frame).toContain("p resume · s stop · q quit");
+
+        // The queue is held until the first resume.
+        let resumed = false;
+        const startupWaiter = control.waitForQueue().then(() => {
+            resumed = true;
+        });
+        await Promise.resolve();
+        expect(resumed).toBe(false);
+
+        setup.mockInput.pressKey("p");
+        await startupWaiter;
+        expect(resumed).toBe(true);
+        await setup.renderOnce();
+        frame = setup.captureCharFrame();
+        expect(frame).toContain("p pause · s stop · q quit");
+        expect(frame).not.toContain("paused");
+
+        // With an active issue, pausing waits for it to finish.
         await coordinator.progress.emit({
             stage: "issue-execution",
             status: "started",
             message: "Executing #61...",
             issue: { number: 61, title: "First task" },
         });
-        await coordinator.ready;
-        await setup.renderOnce();
-
         setup.mockInput.pressKey("p");
         await setup.renderOnce();
-        let frame = setup.captureCharFrame();
+        frame = setup.captureCharFrame();
         expect(frame).toContain("pausing after this issue");
-        expect(frame).toContain("p pause · s stop · q quit");
 
         let released = false;
         const pauseWaiter = control.waitForQueue().then(() => {
