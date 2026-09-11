@@ -17,14 +17,20 @@ import {
 } from "../src/pi/adapters/client.ts";
 import type { AgentClient } from "../src/agent/ports.ts";
 
-const fencedJson = (value: unknown): string =>
-    `Done.\n\`\`\`json\n${JSON.stringify(value)}\n\`\`\``;
-
 const structuredFormat = {
-    type: "json_schema" as const,
-    schema: {},
+    type: "tool" as const,
+    tool: {
+        name: "submit_result",
+        description: "Submit the final result.",
+        schema: z.toJSONSchema(z.object({ ok: z.boolean() })),
+    },
+    validate: (value: unknown) => {
+        const parsed = z.object({ ok: z.boolean() }).safeParse(value);
+        return parsed.success
+            ? { success: true as const }
+            : { success: false as const, error: parsed.error.message };
+    },
     retryCount: 0,
-    validate: () => ({ success: true }) as const,
 };
 
 const makeClient = (options: {
@@ -66,9 +72,14 @@ const createSession = async (
 };
 
 describe("pi agent client", () => {
-    test("returns fenced structured output from a real agent turn", async () => {
+    test("captures structured output from a submission tool call", async () => {
         const { client } = makeClient({
-            responses: [fauxAssistantMessage(fencedJson({ ok: true }))],
+            responses: [
+                fauxAssistantMessage(
+                    [fauxToolCall("submit_result", { ok: true })],
+                    { stopReason: "toolUse" },
+                ),
+            ],
         });
         const sessionID = await createSession(client, "/repo");
 
@@ -81,14 +92,48 @@ describe("pi agent client", () => {
 
         expect(result.error).toBeUndefined();
         expect(result.data?.info.structured).toEqual({ ok: true });
-        expect(result.data?.info.text).toContain("Done.");
     });
 
-    test("retries with a contract violation until the result validates", async () => {
+    test("feeds validation errors back so the model can correct itself", async () => {
+        const { client } = makeClient({
+            responses: [
+                fauxAssistantMessage(
+                    [fauxToolCall("submit_result", { ok: "not-a-boolean" })],
+                    { stopReason: "toolUse" },
+                ),
+                fauxAssistantMessage(
+                    [fauxToolCall("submit_result", { ok: true })],
+                    { stopReason: "toolUse" },
+                ),
+            ],
+        });
+        const sessionID = await createSession(client, "/repo");
+
+        const result = await client.session.prompt({
+            sessionID,
+            directory: "/repo",
+            parts: [{ type: "text", text: "Do the work." }],
+            format: {
+                ...structuredFormat,
+                validate: (value) =>
+                    typeof (value as { ok?: unknown }).ok === "boolean"
+                        ? { success: true }
+                        : { success: false, error: "ok must be a boolean" },
+            },
+        });
+
+        expect(result.error).toBeUndefined();
+        expect(result.data?.info.structured).toEqual({ ok: true });
+    });
+
+    test("retries until the model calls the submission tool", async () => {
         const { client, faux } = makeClient({
             responses: [
-                fauxAssistantMessage("analysis without any json payload"),
-                fauxAssistantMessage(fencedJson({ ok: true })),
+                fauxAssistantMessage("analysis without any tool call"),
+                fauxAssistantMessage(
+                    [fauxToolCall("submit_result", { ok: true })],
+                    { stopReason: "toolUse" },
+                ),
             ],
         });
         const sessionID = await createSession(client, "/repo");
@@ -105,11 +150,9 @@ describe("pi agent client", () => {
         expect(faux.state.callCount).toBe(2);
     });
 
-    test("fails with a response preview after the retry budget is exhausted", async () => {
+    test("fails with the tool name after the retry budget is exhausted", async () => {
         const { client } = makeClient({
-            responses: [
-                fauxAssistantMessage("analysis without any json payload"),
-            ],
+            responses: [fauxAssistantMessage("analysis without any tool call")],
         });
         const sessionID = await createSession(client, "/repo");
 
@@ -123,15 +166,25 @@ describe("pi agent client", () => {
             .catch((error: unknown) => error);
 
         expect(String((failure as Error)?.message ?? failure)).toMatch(
-            /Last response preview/,
+            /without calling the `submit_result` tool/,
         );
     });
 
-    test("returns unstructured text and the needs-attention side channel", async () => {
-        const text =
-            'Blocked.\n```needs-attention\n{"reason":"missing_information","message":"Need the target version."}\n```';
+    test("returns unstructured text and the needs-attention tool channel", async () => {
+        const text = "Blocked.";
         const { client } = makeClient({
-            responses: [fauxAssistantMessage(text)],
+            responses: [
+                fauxAssistantMessage(
+                    [
+                        fauxToolCall("request_needs_attention", {
+                            reason: "missing_information",
+                            message: "Need the target version.",
+                        }),
+                    ],
+                    { stopReason: "toolUse" },
+                ),
+                fauxAssistantMessage(text),
+            ],
         });
         const sessionID = await createSession(client, "/repo");
 
@@ -139,6 +192,11 @@ describe("pi agent client", () => {
             sessionID,
             directory: "/repo",
             parts: [{ type: "text", text: "Do the work." }],
+            needsAttentionTool: {
+                name: "request_needs_attention",
+                description: "Request needs attention.",
+                schema: { type: "object" },
+            },
         });
 
         expect(result.error).toBeUndefined();
@@ -237,6 +295,26 @@ describe("pi agent client", () => {
 });
 
 describe("structured output through the pi client", () => {
+    test("returns a validated result from the submission tool end to end", async () => {
+        const { client } = makeClient({
+            responses: [
+                fauxAssistantMessage(
+                    [fauxToolCall("submit_result", { ok: true })],
+                    { stopReason: "toolUse" },
+                ),
+            ],
+        });
+
+        const result = await requestStructuredOutput(client, {
+            directory: "/repo",
+            title: "task",
+            prompt: "Do the work.",
+            schema: z.object({ ok: z.boolean() }),
+        });
+
+        expect(result.output).toEqual({ ok: true });
+    });
+
     test("surfaces the model text in a wrapper error when the result is invalid", async () => {
         const { client } = makeClient({
             responses: [fauxAssistantMessage("no json here")],
@@ -251,6 +329,6 @@ describe("structured output through the pi client", () => {
                 schema,
                 retryCount: 0,
             }),
-        ).rejects.toThrow(/Pi completed without a valid fenced json result/);
+        ).rejects.toThrow(/without calling the `submit_result` tool/);
     });
 });

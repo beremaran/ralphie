@@ -75,13 +75,14 @@ file writes; implementation sessions may edit the checkout. Every session
 enforces a shell denylist that rejects commits, pushes, branch/reset/clean
 operations, and `gh` commands before execution, and post-task verification
 fails the task when the checkout moved anyway. Structured decisions are
-returned as fenced JSON and re-validated at the Ralphie domain boundary; a
-repository-backed blocker is an optional fenced `needs-attention` block, not a
-mutation-capable tool. Ralphie stages, verifies, commits, pushes, and mutates
+returned by calling a `submit_result` tool whose parameters are the canonical
+Zod schema; invalid arguments come back to the model as tool errors so it can
+correct itself in the same turn, and the captured call is re-validated at the
+Ralphie domain boundary. A repository-backed blocker is a
+`request_needs_attention` tool call, not a mutation-capable tool. Ralphie
+stages, verifies, commits, pushes, and mutates
 GitHub through deterministic domain services. Invalid output or a pi failure
-becomes a failed issue outcome without proceeding to the next operation. The
-canonical Zod decision schemas are sent to pi as JSON Schema with validation
-retries, and the returned value is re-validated at the Ralphie domain boundary.
+becomes a failed issue outcome without proceeding to the next operation.
 A turn that produces no assistant message fails instead of producing a
 decision.
 

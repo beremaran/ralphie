@@ -6,6 +6,7 @@ import {
     type ProgressIssue,
     type ProgressReporterService,
 } from "../progress/ports.ts";
+import type { AgentToolDescriptor } from "./ports.ts";
 import { RalphieError } from "../shared/error.ts";
 import type { AgentModel, AgentSelection } from "./model.ts";
 
@@ -71,6 +72,27 @@ export const parseNeedsAttentionRequest = (
     const parsed = needsAttentionRequestSchema.safeParse(value);
     return parsed.success ? parsed.data : undefined;
 };
+
+/** Tool name the model calls to raise a needs-attention request. */
+export const NEEDS_ATTENTION_TOOL_NAME = "request_needs_attention";
+
+/**
+ * Descriptor for the needs-attention channel.
+ *
+ * Every prompt registers this tool so the model never has to encode a
+ * blocker in prose or unstructured text.
+ */
+export const needsAttentionToolDescriptor = (): AgentToolDescriptor => ({
+    name: NEEDS_ATTENTION_TOOL_NAME,
+    description:
+        "Record a repository-backed blocker that prevents safe progress " +
+        "(outdated premise, conflicting requirements, missing information, " +
+        "external dependency, or cannot reproduce). Call this once with the " +
+        "reason and a concise explanation, then continue with the task or " +
+        "final response contract. Do not use it for work that is merely hard, " +
+        "large, slow, or uncertain.",
+    schema: z.toJSONSchema(needsAttentionRequestSchema),
+});
 
 export type AgentTaskResult = {
     readonly session: AgentTaskSession;
@@ -350,6 +372,7 @@ export const taskSessionPromptParameters = (
     ...input,
     sessionID: session.sessionID,
     directory: session.directory,
+    needsAttentionTool: needsAttentionToolDescriptor(),
     agent: session.selection.agent,
     ...(session.selection.model === undefined
         ? {}

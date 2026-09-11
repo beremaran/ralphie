@@ -75,6 +75,13 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Changed
 
+- Replace fenced-JSON structured output with tool-call submission. Structured
+  sessions register a `submit_result` tool whose parameters are the decision
+  schema; invalid arguments are returned to the model as tool errors so it can
+  correct itself within the turn, and the captured call is the validated
+  result. The needs-attention channel is a `request_needs_attention` tool call
+  instead of a fenced block.
+
 - Give GitHub adapters an owned session. `connect()` authenticates once and
   the capability adapters read the client internally, so no port method,
   executor context, or workflow call carries an Octokit handle; the SDK is

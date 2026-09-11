@@ -193,16 +193,11 @@ const needsAttentionGuidance = `
 NEEDS-ATTENTION REQUEST CHANNEL:
 When a repository-backed blocker prevents safe progress (outdated_premise,
 conflicting_requirements, missing_information, external_dependency, or
-cannot_reproduce), include a fenced block:
-
-\`\`\`needs-attention
-{"reason": "<one of the values above>", "message": "<concise explanation>"}
-\`\`\`
-
-This is a request to the caller, not the final implementation or review
-decision. Do not use it for work that is merely hard, large, slow, or
-uncertain. For structured tasks, still return the required \`\`\`json result
-block alongside it.`;
+cannot_reproduce), call the \`request_needs_attention\` tool with the reason
+and a concise explanation. This is a request to the caller, not the final
+implementation or review decision. Do not use it for work that is merely
+hard, large, slow, or uncertain. For structured tasks, still call the
+required submission tool with the final result when the task is done.`;
 
 export const buildGroundingPrompt = ({
     issue,

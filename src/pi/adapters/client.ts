@@ -5,6 +5,8 @@ import type {
     TextContent,
 } from "@earendil-works/pi-ai";
 
+import type { AgentTool } from "@earendil-works/pi-agent-core";
+import type { TSchema } from "@earendil-works/pi-ai";
 import {
     AgentSessionProfile,
     type AgentAssistantMessage,
@@ -16,9 +18,9 @@ import {
     type AgentPart,
     type AgentPromptFormat,
     type AgentPromptInput,
+    type AgentToolDescriptor,
 } from "../../agent/ports.ts";
 import { RalphieError } from "../../shared/error.ts";
-import { extractNeedsAttentionJson, extractStructuredJson } from "./json.ts";
 import {
     thinkingLevelFor,
     type PiModelSelection,
@@ -67,56 +69,41 @@ const unattendedContract = `UNATTENDED EXECUTION CONTRACT:
 - You are running autonomously in a non-interactive agent session. No user or operator can answer during this turn.
 - Do not ask questions in prose, request confirmation, offer choices, pause for input, or wait for a reply.
 - Inspect the available repository context, make reasonable decisions, and complete as much of the task as is safely possible.
-- If a repository-backed blocker genuinely prevents safe progress, emit a fenced needs-attention block (see below) instead of asking a question. Then continue to satisfy the final response contract.`;
+- If a repository-backed blocker genuinely prevents safe progress, call the \`request_needs_attention\` tool instead of asking a question. Then continue with the task or the final response contract.`;
 
-const schemaBlock = (schema: unknown): string => {
-    try {
-        const text = JSON.stringify(schema);
-        return text.length > 8000 ? `${text.slice(0, 8000)}…` : text;
-    } catch {
-        return "[unserializable schema]";
-    }
-};
-
-const structuredContract = (
+const submissionContract = (
+    toolName: string,
     retry: boolean,
-    schema?: unknown,
     lastError?: string,
 ): string => {
-    const schemaSection =
-        schema === undefined
-            ? ""
-            : `\n\nJSON SCHEMA (your \`\`\`json block must validate against it):\n\`\`\`json\n${schemaBlock(schema)}\n\`\`\``;
     if (retry) {
         const errorSection =
             lastError === undefined || lastError === ""
                 ? ""
                 : `\n\nPREVIOUS VALIDATION ERROR (fix every item):\n${lastError.slice(0, 2000)}`;
-        return `RESPONSE CONTRACT VIOLATION: your previous response did not contain a valid fenced json result. Reply now with exactly one \`\`\`json block containing the complete schema-valid result and nothing else.${schemaSection}${errorSection}`;
+        return `RESPONSE CONTRACT VIOLATION: you did not call the required \`${toolName}\` tool. Call it now with the complete schema-valid result.${errorSection}`;
     }
     return `MANDATORY RESPONSE CONTRACT:
-- Complete the analysis before responding.
-- Your final response must contain exactly one \`\`\`json fenced block with the complete schema-valid result.
-- Do not return prose, Markdown outside the block, or a question as the final answer.
-- When a repository-backed blocker (outdated premise, conflicting requirements, missing information, external dependency, cannot reproduce) prevents safe progress, additionally include one \`\`\`needs-attention fenced block with {"reason": "<one of outdated_premise|conflicting_requirements|missing_information|external_dependency|cannot_reproduce>", "message": "<concise explanation>"}.
-- Do not use needs-attention for work that is merely hard, large, slow, or uncertain.${schemaSection}`;
+- Complete the task before responding.
+- When the task is done, call the \`${toolName}\` tool exactly once with the complete schema-valid result.
+- Do not write the result in prose; the tool call is the result.`;
 };
 
 export const buildPiAttemptPrompt = (
     prompt: string,
     structured: boolean,
     retry: boolean,
-    schema?: unknown,
+    toolName?: string,
     lastError?: string,
 ): string => {
-    if (retry) {
-        return `${unattendedContract}\n\n${structuredContract(true, schema, lastError)}\n\nOriginal task:\n${prompt}`;
+    if (retry && toolName !== undefined) {
+        return `${unattendedContract}\n\n${submissionContract(toolName, true, lastError)}\n\nOriginal task:\n${prompt}`;
     }
     const withContract = `${prompt}\n\n${unattendedContract}`;
-    if (!structured) {
-        return `${withContract}\n\nWhen blocked by a repository-backed reason above, include a \`\`\`needs-attention block with {"reason": "...", "message": "..."}. Otherwise just do the work and summarize briefly.`;
+    if (!structured || toolName === undefined) {
+        return withContract;
     }
-    return `${withContract}\n\n${structuredContract(false, schema)}`;
+    return `${withContract}\n\n${submissionContract(toolName, false)}`;
 };
 
 const promptTextForAttempt = (
@@ -129,25 +116,86 @@ const promptTextForAttempt = (
         base,
         input.format !== undefined,
         attempt !== 0,
-        input.format?.schema,
+        input.format?.tool.name,
         lastError,
     );
 };
 
-const normalizeStructuredCandidate = (candidate: unknown): unknown => {
-    if (
-        candidate === null ||
-        typeof candidate !== "object" ||
-        Array.isArray(candidate)
-    ) {
-        return candidate;
-    }
-    return Object.fromEntries(
-        Object.entries(candidate as Record<string, unknown>).filter(
-            ([, value]) => value !== null,
-        ),
-    );
+type ToolCapture = {
+    structured?: unknown;
+    validationError?: string;
+    needsAttention?: unknown;
 };
+
+const submissionTool = (
+    format: AgentPromptFormat,
+    capture: ToolCapture,
+): AgentTool => ({
+    name: format.tool.name,
+    label: "Submit result",
+    description: format.tool.description,
+    parameters: format.tool.schema as TSchema,
+    execute: async (_toolCallId, params) => {
+        if (format.validate !== undefined) {
+            const validation = format.validate(params);
+            if (!validation.success) {
+                capture.validationError =
+                    validation.error ?? "Schema validation failed.";
+                return {
+                    content: [
+                        {
+                            type: "text" as const,
+                            text: `VALIDATION ERROR: ${capture.validationError}`,
+                        },
+                    ],
+                    details: {},
+                    terminate: false,
+                };
+            }
+        }
+        capture.structured = params;
+        return {
+            content: [{ type: "text" as const, text: "Result accepted." }],
+            details: {},
+            terminate: true,
+        };
+    },
+});
+
+const needsAttentionTool = (
+    descriptor: AgentToolDescriptor,
+    capture: ToolCapture,
+): AgentTool => ({
+    name: descriptor.name,
+    label: "Request needs attention",
+    description: descriptor.description,
+    parameters: descriptor.schema as TSchema,
+    execute: async (_toolCallId, params) => {
+        capture.needsAttention = params;
+        return {
+            content: [
+                {
+                    type: "text" as const,
+                    text: "Needs-attention request recorded.",
+                },
+            ],
+            details: {},
+            terminate: false,
+        };
+    },
+});
+
+const dynamicToolsFor = (
+    input: AgentPromptInput,
+    capture: ToolCapture,
+): ReadonlyArray<AgentTool> => [
+    ...(input.format === undefined
+        ? []
+        : [submissionTool(input.format, capture)]),
+    ...(input.needsAttentionTool === undefined
+        ? []
+        : [needsAttentionTool(input.needsAttentionTool, capture)]),
+];
 
 const textParts = (text: string): ReadonlyArray<AgentPart> =>
     text === ""
@@ -194,28 +242,17 @@ const assistantErrorOf = (
     return undefined;
 };
 
-const validStructuredCandidate = (
-    format: AgentPromptFormat,
-    text: string,
-): { readonly value?: unknown; readonly error?: string } => {
-    const candidate = extractStructuredJson(text);
-    if (candidate === undefined) {
-        return { error: "No fenced json block was found in the response." };
-    }
-    const normalized = normalizeStructuredCandidate(candidate);
-    if (format.validate === undefined) return { value: normalized };
-    const validation = format.validate(normalized);
-    return validation.success
-        ? { value: normalized }
-        : { error: validation.error ?? "Schema validation failed." };
-};
-
 const runAgentTurn = async (input: {
     readonly session: PiSession;
     readonly text: string;
+    readonly tools: ReadonlyArray<AgentTool>;
     readonly signal?: AbortSignal;
 }): Promise<AttemptOutcome> => {
     input.signal?.throwIfAborted();
+    input.session.agent.state.tools = [
+        ...input.session.tools.tools,
+        ...input.tools,
+    ];
     const onAbort = (): void => input.session.agent.abort();
     input.signal?.addEventListener("abort", onAbort, { once: true });
     try {
@@ -233,25 +270,40 @@ const silentTurnError = (session: PiSession): RalphieError =>
         message: `Pi completed the turn without producing any assistant response (${session.modelReference}, session ${session.id}). The turn likely failed before execution; check the model and provider credentials.`,
     });
 
-const finishStructuredAttempt = (
+const assistantErrorResult = (
+    input: AgentPromptInput,
+    error: NonNullable<AgentAssistantMessage["error"]>,
+): PromptApiResult => ({
+    data: {
+        info: {
+            id: input.sessionID,
+            role: "assistant",
+            error,
+        },
+        parts: [],
+    },
+});
+
+const finishAttempt = (
     input: AgentPromptInput,
     outcome: AttemptOutcome,
-    structured: unknown,
-): PromptApiResult => {
-    const needsAttention = extractNeedsAttentionJson(outcome.text);
-    return {
-        data: {
-            info: {
-                id: input.sessionID,
-                role: "assistant",
-                structured,
-                text: outcome.text,
-            },
-            parts: textParts(outcome.text),
-            ...(needsAttention === undefined ? {} : { needsAttention }),
+    capture: ToolCapture,
+): PromptApiResult => ({
+    data: {
+        info: {
+            id: input.sessionID,
+            role: "assistant",
+            ...(capture.structured === undefined
+                ? {}
+                : { structured: capture.structured }),
+            text: outcome.text,
         },
-    };
-};
+        parts: textParts(outcome.text),
+        ...(capture.needsAttention === undefined
+            ? {}
+            : { needsAttention: capture.needsAttention }),
+    },
+});
 
 const runStructuredPrompt = async (
     input: AgentPromptInput & { readonly format: AgentPromptFormat },
@@ -263,51 +315,32 @@ const runStructuredPrompt = async (
     let lastError: string | undefined;
 
     for (let attempt = 0; attempt < maximumAttempts; attempt += 1) {
+        const capture: ToolCapture = {};
         last = await runAgentTurn({
             session,
             text: promptTextForAttempt(input, attempt, lastError),
+            tools: dynamicToolsFor(input, capture),
             signal,
         });
         if (last.assistant === undefined) throw silentTurnError(session);
-        const checked = validStructuredCandidate(input.format, last.text);
-        if (checked.value !== undefined) {
-            return finishStructuredAttempt(input, last, checked.value);
+        if (capture.structured !== undefined) {
+            return finishAttempt(input, last, capture);
         }
-        lastError = checked.error;
         const assistantError = assistantErrorOf(last.assistant);
         if (assistantError !== undefined) {
-            return {
-                data: {
-                    info: {
-                        id: input.sessionID,
-                        role: "assistant",
-                        error: assistantError,
-                    },
-                    parts: [],
-                },
-            };
+            return assistantErrorResult(input, assistantError);
         }
+        lastError =
+            capture.validationError ??
+            `The \`${input.format.tool.name}\` tool was not called.`;
     }
 
     const assistantError = assistantErrorOf(last.assistant);
     if (assistantError !== undefined) {
-        return {
-            data: {
-                info: {
-                    id: input.sessionID,
-                    role: "assistant",
-                    error: assistantError,
-                },
-                parts: [],
-            },
-        };
+        return assistantErrorResult(input, assistantError);
     }
-    const preview =
-        last.text.trim() === ""
-            ? ""
-            : ` Last response preview: ${JSON.stringify(last.text.slice(0, 160))}.`;
     throw new RalphieError({
-        message: `Pi completed without a valid fenced json result.${lastError === undefined ? "" : ` Last validation error: ${lastError.slice(0, 500)}`}${preview}`,
+        message: `Pi completed without calling the \`${input.format.tool.name}\` tool.${lastError === undefined ? "" : ` Last error: ${lastError.slice(0, 500)}`}`,
     });
 };
 
@@ -316,26 +349,17 @@ const runUnstructuredPrompt = async (
     session: PiSession,
     signal: AbortSignal | undefined,
 ): Promise<PromptApiResult> => {
+    const capture: ToolCapture = {};
     const outcome = await runAgentTurn({
         session,
         text: promptTextForAttempt(input, 0),
+        tools: dynamicToolsFor(input, capture),
         signal,
     });
     if (outcome.assistant === undefined) throw silentTurnError(session);
-    const needsAttention = extractNeedsAttentionJson(outcome.text);
     const error = assistantErrorOf(outcome.assistant);
-    return {
-        data: {
-            info: {
-                id: input.sessionID,
-                role: "assistant",
-                ...(error === undefined ? {} : { error }),
-                text: outcome.text,
-            },
-            parts: textParts(outcome.text),
-            ...(needsAttention === undefined ? {} : { needsAttention }),
-        },
-    };
+    if (error !== undefined) return assistantErrorResult(input, error);
+    return finishAttempt(input, outcome, capture);
 };
 
 const selectionOf = (input: {

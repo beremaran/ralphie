@@ -67,7 +67,7 @@ const verificationPrompt = (
 
 An earlier agent made this bounded needs-attention request:
 <needs-attention-request>${JSON.stringify(request)}</needs-attention-request>
-Independently verify the request. Return the grounding disposition as a fenced json block only.`;
+Independently verify the request and submit the grounding disposition with the required tool.`;
 
 const outcome = (
     decision: NeedsAttentionDecision,

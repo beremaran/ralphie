@@ -6,6 +6,7 @@ import type { AgentModel } from "./model.ts";
 import {
     type AgentRepositoryInvariant,
     type AgentSessionDiagnostics,
+    needsAttentionToolDescriptor,
     parseNeedsAttentionRequest,
     reportAgentFailure,
     toAgentAssistantError,
@@ -122,12 +123,20 @@ const promptInput = <Output>(
     ...(request.variant === undefined ? {} : { variant: request.variant }),
     ...(request.profile === undefined ? {} : { profile: request.profile }),
     format: {
-        type: "json_schema" as const,
-        schema: z.toJSONSchema(request.schema),
+        type: "tool" as const,
+        tool: {
+            name: "submit_result",
+            description:
+                "Submit the final structured result for this task. Call this " +
+                "exactly once with the complete, schema-valid result after " +
+                "finishing the requested work.",
+            schema: z.toJSONSchema(request.schema),
+        },
         retryCount: request.retryCount ?? 2,
         validate: (value: unknown) =>
             validateStructuredOutput(request.schema, value),
     },
+    needsAttentionTool: needsAttentionToolDescriptor(),
     parts: [{ type: "text" as const, text: request.prompt }],
 });
 

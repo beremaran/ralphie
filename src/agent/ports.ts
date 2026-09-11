@@ -71,9 +71,24 @@ export type AgentSessionCreateInput = {
     readonly profile?: AgentSessionProfile;
 };
 
-export type AgentPromptFormat = {
-    readonly type: "json_schema";
+/** Provider-neutral descriptor for a tool the model may call. */
+export type AgentToolDescriptor = {
+    readonly name: string;
+    readonly description: string;
+    /** JSON Schema describing the tool arguments. */
     readonly schema: unknown;
+};
+
+/**
+ * Ask the model to return its result by calling a tool.
+ *
+ * The adapter registers `tool` for the prompt and captures the validated
+ * arguments as the structured result. Validation failures are returned to the
+ * model as tool errors so it can correct itself inside the same turn.
+ */
+export type AgentPromptFormat = {
+    readonly type: "tool";
+    readonly tool: AgentToolDescriptor;
     readonly retryCount?: number;
     readonly validate?: (value: unknown) => {
         readonly success: boolean;
@@ -93,6 +108,8 @@ export type AgentPromptInput = {
         readonly text: string;
     }>;
     readonly format?: AgentPromptFormat;
+    /** Optional tool the model calls to raise a needs-attention request. */
+    readonly needsAttentionTool?: AgentToolDescriptor;
 };
 
 export type AgentApiResult<Result> = {
