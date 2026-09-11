@@ -18,6 +18,19 @@ export type RunEventLog = {
     /** Stop persisting; later appends are ignored. */
     readonly close: () => void;
 };
+/**
+ * Interactive queue control, consulted between issues.
+ *
+ * `waitForQueue` resolves immediately while the queue runs and stays pending
+ * while paused; resuming or stopping resolves it. `stopAfterCurrent` is only
+ * read between issues, so the active issue always runs to completion before
+ * the queue stops. Quitting the run remains the `AbortSignal`'s job.
+ */
+export type RunControl = {
+    readonly waitForQueue: () => Promise<void>;
+    readonly stopAfterCurrent: () => boolean;
+};
+
 /** Injectable wall clock; adapters use the system clock, tests a fixed one. */
 export type Clock = {
     readonly now: () => Date;

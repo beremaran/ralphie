@@ -20,6 +20,7 @@ import type { ProgressReporterService } from "../progress/ports.ts";
 import type {
     Clock,
     IdGenerator,
+    RunControl,
     RunEventLog,
     RunLayout,
     RunStateStoreService,
@@ -67,6 +68,8 @@ export type WorkflowOptions = {
     readonly implementationAttempts?: number;
     readonly workspace: string;
     readonly signal?: AbortSignal;
+    /** Interactive queue control; absent for non-interactive runs. */
+    readonly control?: RunControl;
     readonly runId: string;
     /** Publish needs-attention outcomes through the runtime notifier. */
     readonly notificationsEnabled?: boolean;

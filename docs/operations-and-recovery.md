@@ -28,8 +28,11 @@ lines.
   `▶` active, `✓` completed, `✗` failed, `⚠` needs-attention, `−` skipped)
   and follows the active issue until you navigate away with `[`/`]` or
   Ctrl+Left/Right; each issue keeps its own transcript, so processed issues
-  stay browsable while the run continues. Tool output, long commands, and deep
-  paths stay inside the transcript panel; resize is handled by the renderer;
+  stay browsable while the run continues. `p` pauses the queue between issues,
+  `s` stops the queue after the active issue and drains the run normally, and
+  `q` (like Ctrl-C) cancels immediately; the status bar shows the pending
+  pause or stop. Tool output, long commands, and deep paths stay inside the
+  transcript panel; resize is handled by the renderer;
   Ctrl-C is forwarded as SIGINT so cancellation still restores the checkout
   and saves state; disposal destroys the renderer and restores the terminal.
 - CI and redirected output are the deterministic noninteractive fallback:

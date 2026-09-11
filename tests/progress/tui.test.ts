@@ -384,6 +384,92 @@ describe("OpenTUI progress coordinator", () => {
         await coordinator.dispose();
     });
 
+    test("pauses, stops, and quits from the keyboard", async () => {
+        const setup = await createTestRenderer({ width: 120, height: 16 });
+        let quitCalls = 0;
+        const coordinator = makeProgressCoordinator({
+            mode: "interactive",
+            colors: false,
+            runId: "tui-run-control",
+            now: FIXED_NOW,
+            createRenderer: async () => setup.renderer,
+            quit: () => {
+                quitCalls += 1;
+            },
+        });
+        const control = coordinator.control;
+        expect(control).toBeDefined();
+        if (control === undefined) return;
+
+        await coordinator.progress.emit({
+            stage: "issue-queue",
+            status: "info",
+            message: "Issue queue ready with 2 issues.",
+            details: {
+                issues: [
+                    { number: 61, title: "First task" },
+                    { number: 62, title: "Second task" },
+                ],
+            },
+        });
+        await coordinator.progress.emit({
+            stage: "issue-execution",
+            status: "started",
+            message: "Executing #61...",
+            issue: { number: 61, title: "First task" },
+        });
+        await coordinator.ready;
+        await setup.renderOnce();
+
+        setup.mockInput.pressKey("p");
+        await setup.renderOnce();
+        let frame = setup.captureCharFrame();
+        expect(frame).toContain("pausing after this issue");
+        expect(frame).toContain("p pause · s stop · q quit");
+
+        let released = false;
+        const pauseWaiter = control.waitForQueue().then(() => {
+            released = true;
+        });
+        await Promise.resolve();
+        expect(released).toBe(false);
+
+        setup.mockInput.pressKey("p");
+        await pauseWaiter;
+        expect(released).toBe(true);
+
+        // Once the active issue finishes, the pause is unconditional.
+        await coordinator.progress.emit({
+            stage: "issue-execution",
+            status: "succeeded",
+            message: "Issue #61 completed.",
+            issue: { number: 61, title: "First task" },
+        });
+        setup.mockInput.pressKey("p");
+        await setup.renderOnce();
+        frame = setup.captureCharFrame();
+        expect(frame).toContain("paused");
+
+        // Stopping releases a pause so the workflow can observe the stop.
+        let stopReleased = false;
+        const stopWaiter = control.waitForQueue().then(() => {
+            stopReleased = true;
+        });
+        setup.mockInput.pressKey("s");
+        await stopWaiter;
+        expect(stopReleased).toBe(true);
+        expect(control.stopAfterCurrent()).toBe(true);
+        await setup.renderOnce();
+        frame = setup.captureCharFrame();
+        expect(frame).toContain("stopping after this issue");
+        expect(frame).not.toContain("paused");
+
+        setup.mockInput.pressKey("q");
+        expect(quitCalls).toBe(1);
+
+        await coordinator.dispose();
+    });
+
     test("renders progress outcomes and disposes without leaking timers", async () => {
         const setup = await createTestRenderer({ width: 80, height: 12 });
         const coordinator = makeProgressCoordinator({

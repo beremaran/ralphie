@@ -26,7 +26,7 @@ import { issueWorkflow } from "./workflow/workflow.ts";
 import type { IssueWorkflow } from "./workflow/ports.ts";
 import { BUILD_INFO } from "./build-info.ts";
 import { makeRunEventLog } from "./run/adapters/event-log.ts";
-import type { RunEventLog, RunLayout } from "./run/ports.ts";
+import type { RunControl, RunEventLog, RunLayout } from "./run/ports.ts";
 import { makeRunLayout } from "./run/adapters/layout.ts";
 
 const cliOptions = {
@@ -336,6 +336,7 @@ const workflowOptionsFor = (
     config: IssueRalphieConfig,
     input: RunCommandInput,
     runId: string,
+    control?: RunControl,
 ) => ({
     repo: config.repo,
     branch: config.branch,
@@ -352,6 +353,7 @@ const workflowOptionsFor = (
     agent: config.agent,
     workspace: config.workspace,
     signal: input.signal,
+    ...(control === undefined ? {} : { control }),
     runId,
     notificationsEnabled: config.notificationsEnabled,
     needsAttentionLabel: config.needsAttentionLabel,
@@ -434,7 +436,7 @@ export const runCommand = async (
             layout,
         });
         await factories.runWorkflow(
-            workflowOptionsFor(config, input, runId),
+            workflowOptionsFor(config, input, runId, coordinator.control),
             runtime,
         );
         process.exitCode = RalphieExitCode.Success;

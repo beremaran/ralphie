@@ -4,6 +4,7 @@ import type {
 } from "../../agent/ports.ts";
 import type { ProgressOutput, ProgressRenderMode } from "./progress.ts";
 import type { ProgressReporterService, ProgressUpdate } from "../ports.ts";
+import type { RunControl } from "../../run/ports.ts";
 import type { CliRenderer } from "@opentui/core";
 
 import {
@@ -25,6 +26,8 @@ import { makeTuiProgressCoordinator } from "./tui.ts";
 export type ProgressCoordinator = {
     readonly progress: ProgressReporterService;
     readonly piListener: AgentEventListener;
+    /** Interactive queue control; only the interactive adapter provides one. */
+    readonly control?: RunControl;
     /** Resolves after the presentation adapter is ready to render. */
     readonly ready: Promise<void>;
     readonly dispose: () => Promise<void>;
@@ -39,6 +42,8 @@ export type ProgressCoordinatorOptions = Omit<
     readonly output?: ProgressOutput;
     /** Test seam for the interactive renderer. */
     readonly createRenderer?: () => Promise<CliRenderer>;
+    /** Test seam: replace the signal raised by quit. */
+    readonly quit?: () => void;
 };
 
 const makePlainCoordinator = (

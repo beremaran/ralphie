@@ -11,7 +11,7 @@ import type {
     AgentSessionEvent,
     AgentEventListener,
 } from "../../agent/ports.ts";
-import type { RunEventLog } from "../../run/ports.ts";
+import type { RunControl, RunEventLog } from "../../run/ports.ts";
 import type {
     ProgressEvent,
     ProgressReporterService,
@@ -65,7 +65,8 @@ const SPINNER_FRAMES = [
     "⠏",
 ] as const;
 const SPINNER_INTERVAL_MS = 120;
-const SIDEBAR_HINT = "[ ] switch issue";
+const CONTROL_HINT = "p pause · s stop · q quit";
+const NAVIGATION_HINT = "[ ] issue · ↑↓ scroll";
 
 const QUEUE_STATUS_STYLES: Readonly<
     Record<
@@ -123,10 +124,7 @@ const elapsedLabel = (startedAt: number | undefined, now: number): string => {
         : `${minutes}m ${String(seconds % 60).padStart(2, "0")}s`;
 };
 
-export type TuiCoordinatorOptions = ProgressCoordinatorOptions & {
-    /** Test seam: build the renderer instead of creating a live one. */
-    readonly createRenderer?: () => Promise<CliRenderer>;
-};
+export type TuiCoordinatorOptions = ProgressCoordinatorOptions;
 
 /** `[`/`]` and Ctrl+Left/Right move through the issue list. */
 const issueNavigation = (key: {
@@ -174,6 +172,9 @@ export const makeTuiProgressCoordinator = (
     let selected: TranscriptKey = undefined;
     let activeIssue: TranscriptKey = undefined;
     let followActive = true;
+    let paused = false;
+    let stopRequested = false;
+    const resumeWaiters: Array<() => void> = [];
 
     const withUi = (run: (current: Ui) => void): void => {
         if (disposed) return;
@@ -316,10 +317,38 @@ export const makeTuiProgressCoordinator = (
         transcriptFor(key).stream = undefined;
     };
 
+    const executingIssue = (): boolean =>
+        activeIssue !== undefined &&
+        state.queue.some(
+            (entry) =>
+                entry.number === activeIssue && entry.status === "active",
+        );
+
+    const spinnerFrame = (): string =>
+        paused && !stopRequested
+            ? "⏸"
+            : (SPINNER_FRAMES[spinnerIndex % SPINNER_FRAMES.length] ?? "⠋");
+
+    const controlStatus = (
+        current: Ui,
+        separator: TextChunk,
+    ): ReadonlyArray<TextChunk | string> => {
+        const mod = current.mod;
+        if (stopRequested) {
+            return [separator, mod.fg("#f7768e")("stopping after this issue")];
+        }
+        if (!paused) return [];
+        return [
+            separator,
+            mod.fg("#e0af68")(
+                executingIssue() ? "pausing after this issue" : "paused",
+            ),
+        ];
+    };
+
     const renderStatus = (current: Ui): void => {
         const mod = current.mod;
-        const frame =
-            SPINNER_FRAMES[spinnerIndex % SPINNER_FRAMES.length] ?? "⠋";
+        const frame = spinnerFrame();
         const separator = mod.fg("#565f89")(" › ");
         const parts: Array<TextChunk | string> = [mod.fg("#e0af68")(frame)];
         if (state.issue !== undefined) {
@@ -341,6 +370,7 @@ export const makeTuiProgressCoordinator = (
         if (elapsed !== "") {
             parts.push(mod.fg("#565f89")(` · ${elapsed}`));
         }
+        parts.push(...controlStatus(current, separator));
         current.status.content = styled(mod, ...parts);
     };
 
@@ -362,6 +392,53 @@ export const makeTuiProgressCoordinator = (
             renderHeader(current);
             current.renderer.requestRender();
         });
+    };
+
+    const quit = options.quit ?? (() => process.kill(process.pid, "SIGINT"));
+
+    const releaseQueueWaiters = (): void => {
+        for (const resolve of resumeWaiters.splice(0)) resolve();
+    };
+
+    const togglePause = (): void => {
+        if (stopRequested) return;
+        paused = !paused;
+        if (!paused) releaseQueueWaiters();
+        refreshStatus();
+    };
+
+    const requestStop = (): void => {
+        stopRequested = true;
+        // A paused workflow is blocked on waitForQueue; release it so the
+        // stop request is observed and the run can drain.
+        releaseQueueWaiters();
+        refreshStatus();
+    };
+
+    const dispatchControlKey = (name: string | undefined): boolean => {
+        if (name === "q") {
+            quit();
+            return true;
+        }
+        if (name === "p") {
+            togglePause();
+            return true;
+        }
+        if (name === "s") {
+            requestStop();
+            return true;
+        }
+        return false;
+    };
+
+    const control: RunControl = {
+        waitForQueue: () => {
+            if (!paused || stopRequested) return Promise.resolve();
+            return new Promise((resolve) => {
+                resumeWaiters.push(resolve);
+            });
+        },
+        stopAfterCurrent: () => stopRequested,
     };
 
     const toolStartLine = (current: Ui, event: AgentSessionEvent): StyledText =>
@@ -684,9 +761,18 @@ export const makeTuiProgressCoordinator = (
             scrollY: true,
             contentOptions: { minHeight: 0 },
         });
-        const sidebarHint = new mod.TextRenderable(renderer, {
-            id: "tui-sidebar-hint",
-            content: styled(mod, mod.fg("#565f89")(SIDEBAR_HINT)),
+        const controlHint = new mod.TextRenderable(renderer, {
+            id: "tui-sidebar-control-hint",
+            content: styled(mod, mod.fg("#565f89")(CONTROL_HINT)),
+            height: 1,
+            width: "100%",
+            wrapMode: "none",
+            paddingLeft: 1,
+            paddingRight: 1,
+        });
+        const navigationHint = new mod.TextRenderable(renderer, {
+            id: "tui-sidebar-navigation-hint",
+            content: styled(mod, mod.fg("#565f89")(NAVIGATION_HINT)),
             height: 1,
             width: "100%",
             wrapMode: "none",
@@ -716,7 +802,8 @@ export const makeTuiProgressCoordinator = (
         root.add(body);
         body.add(sidebarPane);
         sidebarPane.add(sidebar);
-        sidebarPane.add(sidebarHint);
+        sidebarPane.add(controlHint);
+        sidebarPane.add(navigationHint);
         body.add(transcript);
         root.add(status);
         // Rows select on click; keep events from moving focus off the
@@ -740,7 +827,11 @@ export const makeTuiProgressCoordinator = (
                 readonly preventDefault?: () => void;
             };
             if (parsed.ctrl === true && parsed.name === "c") {
-                process.kill(process.pid, "SIGINT");
+                quit();
+                return;
+            }
+            if (parsed.ctrl !== true && dispatchControlKey(parsed.name)) {
+                parsed.preventDefault?.();
                 return;
             }
             const direction = issueNavigation(parsed);
@@ -777,6 +868,7 @@ export const makeTuiProgressCoordinator = (
     return {
         progress,
         piListener,
+        control,
         ready: readyPromise.catch(() => undefined),
         dispose: async () => {
             if (disposed) return;

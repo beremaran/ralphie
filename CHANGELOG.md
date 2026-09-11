@@ -81,8 +81,10 @@ All notable changes to Ralphie are documented here. The project follows
   compact tool rows, and a status bar. The sidebar lists the discovered queue
   with each issue's outcome and follows the active issue until the user
   navigates; `[`/`]` (or Ctrl+Left/Right) switch between processed, active, and
-  queued issues. The footer/breadcrumb/terminal-controller stack and its PTY
-  test suites are gone. Plain (piped/CI) and JSON output are unchanged in
+  queued issues. `p` pauses the queue between issues, `s` stops the queue after
+  the active issue and drains the run with a "Run stopped by request" summary,
+  and `q` cancels immediately. The footer/breadcrumb/terminal-controller stack
+  and its PTY test suites are gone. Plain (piped/CI) and JSON output are unchanged in
   shape, and the interactive renderer loads lazily so help, plain, and JSON
   paths never touch the native module.
 

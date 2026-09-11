@@ -29,7 +29,7 @@ import {
     type RunState,
     RunStateStatus,
 } from "../run/state.ts";
-import type { Clock } from "../run/ports.ts";
+import type { Clock, RunControl } from "../run/ports.ts";
 import { RalphieError } from "../shared/error.ts";
 import { DEFAULT_MAX_DECOMPOSITION_DEPTH } from "../issues/domain/decomposition-markdown.ts";
 import type {
@@ -501,6 +501,7 @@ type WorkflowConfiguration = {
     readonly implementationAttempts?: number;
     readonly workspace: string;
     readonly signal?: AbortSignal;
+    readonly control?: RunControl;
     readonly notificationsEnabled: boolean;
     readonly needsAttentionLabel?: string;
     readonly actualRunId: string;
@@ -530,6 +531,7 @@ const makeWorkflowConfiguration = (
         implementationAttempts,
         workspace,
         signal,
+        control,
         runId,
         notificationsEnabled = false,
         needsAttentionLabel,
@@ -546,6 +548,7 @@ const makeWorkflowConfiguration = (
         implementationAttempts,
         workspace,
         signal,
+        ...(control === undefined ? {} : { control }),
         notificationsEnabled,
         ...(needsAttentionLabel === undefined ? {} : { needsAttentionLabel }),
         actualRunId: runId,
@@ -605,11 +608,15 @@ const emitRunSucceeded = async (
     progress: ProgressReporterService,
     config: WorkflowConfiguration,
     summary: WorkflowSummary,
+    stoppedByRequest: boolean,
 ): Promise<void> => {
     await progress.emit({
         stage: "run",
         status: "succeeded",
-        message: summaryMessage("Run completed", summary.counts),
+        message: summaryMessage(
+            stoppedByRequest ? "Run stopped by request" : "Run completed",
+            summary.counts,
+        ),
         details: {
             runId: summary.runId,
             counts: summary.counts,
@@ -714,6 +721,7 @@ export const workflow = async (
         modelVariant,
         workspace,
         signal,
+        control,
         notificationsEnabled,
         needsAttentionLabel,
         actualRunId,
@@ -721,6 +729,7 @@ export const workflow = async (
     } = config;
     await emitRunStarted(progress, config);
 
+    let stoppedByRequest = false;
     let activeIssue: RunState["activeIssue"] | undefined;
     const activeQueueIssues = new Map<number, GitHubIssue>();
     let persistCancellationState: (() => Promise<void>) | undefined;
@@ -1311,13 +1320,27 @@ export const workflow = async (
             return true;
         };
 
+        const stopQueueIfRequested = async (): Promise<boolean> => {
+            if (control?.stopAfterCurrent() !== true) return false;
+            stoppedByRequest = true;
+            await progress.emit({
+                stage: "issue-queue",
+                status: "info",
+                message:
+                    "Stopping the queue after the current issue by request.",
+            });
+            return true;
+        };
+
         const processQueue = async (server: PiAgentRuntime): Promise<void> => {
-            const worker = async (): Promise<void> => {
-                while (queue.state() === IssueQueueState.Ready) {
-                    if (!(await processNextIssue(server))) break;
-                }
+            const step = async (): Promise<boolean> => {
+                await control?.waitForQueue();
+                if (await stopQueueIfRequested()) return false;
+                return await processNextIssue(server);
             };
-            await worker();
+            while (queue.state() === IssueQueueState.Ready) {
+                if (!(await step())) break;
+            }
         };
 
         let server: PiAgentRuntime | undefined;
@@ -1392,7 +1415,7 @@ export const workflow = async (
 
     try {
         const summary = await run();
-        await emitRunSucceeded(progress, config, summary);
+        await emitRunSucceeded(progress, config, summary, stoppedByRequest);
         return summary;
     } catch (error) {
         const finalError = await cancellationError(error, config, {

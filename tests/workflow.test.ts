@@ -35,7 +35,7 @@ import type {
 } from "../src/progress/ports.ts";
 import { makeTestProgressRecorder } from "./shared/progress-recorder.ts";
 import { countingIds, fixedClock, testLayout } from "./shared/test-values.ts";
-import { type RunEventLog } from "../src/run/ports.ts";
+import { type RunControl, type RunEventLog } from "../src/run/ports.ts";
 import { type RunStateStoreService } from "../src/run/ports.ts";
 import { type RunState, RunStateStatus } from "../src/run/state.ts";
 import { type WorkspaceService } from "../src/workspace/ports.ts";
@@ -1542,6 +1542,97 @@ describe("workflow", () => {
             message:
                 "Live reconciliation found that the issue is no longer open.",
         });
+    });
+
+    test("stops the queue after the active issue when the run control requests it", async () => {
+        const calls: string[] = [];
+        const states: RunState[] = [];
+        const events: ProgressUpdate[] = [];
+        let stopRequested = false;
+        const summary = await workflow(
+            {
+                ...baseOptions,
+                control: {
+                    waitForQueue: async () => {},
+                    stopAfterCurrent: () => stopRequested,
+                },
+            },
+            testRuntime(
+                calls,
+                states,
+                {
+                    issueLists: [[firstIssue, secondIssue]],
+                    executeGate: async (context) => {
+                        if (context.issue.number === 42) {
+                            stopRequested = true;
+                        }
+                    },
+                },
+                events,
+            ),
+        );
+
+        expect(calls).toContainEqual(
+            expect.stringContaining("executeIssue:42"),
+        );
+        expect(calls).not.toContainEqual(
+            expect.stringContaining("executeIssue:43"),
+        );
+        expect(summary.outcomes.map(({ issueNumber }) => issueNumber)).toEqual([
+            42,
+        ]);
+        expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
+        expect(events.at(-1)).toMatchObject({
+            stage: "run",
+            status: "succeeded",
+            message: expect.stringContaining("Run stopped by request"),
+        });
+    });
+
+    test("waits for the run control before starting the next issue", async () => {
+        const calls: string[] = [];
+        const states: RunState[] = [];
+        let paused = true;
+        const waiters: Array<() => void> = [];
+        const control: RunControl = {
+            waitForQueue: () =>
+                paused
+                    ? new Promise<void>((resolve) => {
+                          waiters.push(resolve);
+                      })
+                    : Promise.resolve(),
+            stopAfterCurrent: () => false,
+        };
+        const running = workflow(
+            { ...baseOptions, control },
+            testRuntime(calls, states, {
+                issueLists: [[firstIssue, secondIssue]],
+            }),
+        );
+
+        let reachedGate = false;
+        for (let attempt = 0; attempt < 1000 && !reachedGate; attempt += 1) {
+            reachedGate = waiters.length > 0;
+            if (!reachedGate) await Bun.sleep(0);
+        }
+        expect(reachedGate).toBe(true);
+        expect(calls).not.toContainEqual(
+            expect.stringContaining("executeIssue:42"),
+        );
+
+        paused = false;
+        for (const resolve of waiters.splice(0)) resolve();
+
+        const summary = await running;
+        expect(calls).toContainEqual(
+            expect.stringContaining("executeIssue:42"),
+        );
+        expect(calls).toContainEqual(
+            expect.stringContaining("executeIssue:43"),
+        );
+        expect(summary.outcomes.map(({ issueNumber }) => issueNumber)).toEqual([
+            42, 43,
+        ]);
     });
 
     test.each([
