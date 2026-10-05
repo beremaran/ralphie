@@ -10,6 +10,10 @@ import {
     type RalphieCliOptions,
     resolveRalphieConfig,
 } from "./options.ts";
+import { fileConfigDocumentWriter } from "./config/adapters/file-writer.ts";
+import { type InitDependencies, initializeConfig } from "./config/init.ts";
+import { defaultConfigPath } from "./config/load.ts";
+import type { ConfigDocumentWriter } from "./config/ports.ts";
 import { intakeOrdering } from "./config/settings.ts";
 import { yamlConfigDocumentReader } from "./config/adapters/yaml-file.ts";
 import { makeGitHubViewerService } from "./github/adapters/viewer.ts";
@@ -69,6 +73,7 @@ const REMOVED_FLAGS: Readonly<Record<string, string>> = {
 };
 
 type ParsedCli = {
+    readonly init: boolean;
     readonly help: boolean;
     readonly version: boolean;
     readonly options: RalphieCliOptions;
@@ -163,10 +168,15 @@ export const parseCliArgs = (args: ReadonlyArray<string>): ParsedCli => {
     }
 
     const values = parsed.values as Record<string, unknown>;
+    const init = parsed.positionals[0] === "init";
     return {
+        init,
         help: asBoolean(values, "help"),
         version: asBoolean(values, "version"),
-        options: parseCliOptions(values, parsed.positionals[0]),
+        options: parseCliOptions(
+            values,
+            init ? undefined : parsed.positionals[0],
+        ),
     };
 };
 
@@ -195,12 +205,14 @@ const resolveProgressMode = (
 };
 
 export const HELP_TEXT = `Usage: ralphie [owner/]repository [options]
+       ralphie init [--config <path>]
 
 Turn open GitHub issues into reviewed commits through coding-agent harnesses.
 
 The repository is owner/name or a GitHub HTTPS or SSH clone URL. A bare name
 takes its owner from defaultOwner in the config file, else the gh login.
-Every other setting comes from the config file.
+Every other setting comes from the config file. \`ralphie init\` finds the
+harnesses on PATH and writes a starter config file, never overwriting one.
 
 Options:
       --config <path>          Config file (default $XDG_CONFIG_HOME/ralphie/config.yaml,
@@ -239,6 +251,10 @@ export type CommandFactories = {
     readonly runWorkflow?: IssueWorkflow["run"];
     /** Checks the assigned harnesses before any work starts. */
     readonly checkHarnesses?: HarnessStartupChecker;
+    /** Detects installed harnesses for `ralphie init`. */
+    readonly harnessProbe?: InitDependencies["probe"];
+    /** Creates the config file for `ralphie init`. */
+    readonly configWriter?: ConfigDocumentWriter;
     /** The authenticated gh login, read only to complete a bare repository name. */
     readonly githubLogin?: () => Promise<string>;
 };
@@ -279,6 +295,13 @@ const resolveCommandFactories = (
                 adapters: makeHarnessAdapters(CommandRunnerLive),
             }),
         ),
+    harnessProbe:
+        factories.harnessProbe ??
+        makeHarnessProbe({
+            runner: CommandRunnerLive,
+            adapters: makeHarnessAdapters(CommandRunnerLive),
+        }),
+    configWriter: factories.configWriter ?? fileConfigDocumentWriter,
     githubLogin:
         factories.githubLogin ??
         makeGitHubViewerService(CommandRunnerLive).login,
@@ -457,6 +480,20 @@ export const runCommand = async (
     }
 
     const factories = resolveCommandFactories(input.factories);
+    if (parsed.init) {
+        const result = await initializeConfig(
+            { probe: factories.harnessProbe, writer: factories.configWriter },
+            parsed.options.configPath ??
+                defaultConfigPath(
+                    input.environment ?? process.env,
+                    input.homeDirectory ?? homedir(),
+                ),
+        );
+        output.stdout(
+            `Wrote ${result.path}\nHarnesses found: ${result.detected.join(", ")}\nEdit it, then run: ralphie owner/repository\n`,
+        );
+        return;
+    }
     const config = await resolveRalphieConfig(
         parsed.options,
         configSourcesFor(input, factories.githubLogin),

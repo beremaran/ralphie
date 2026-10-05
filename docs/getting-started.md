@@ -44,6 +44,15 @@ Permission needs depend on the run. The issue workflow needs
 read access to the target repository and its issues, permission to push to the
 selected branch, and permission to create, update, and close issues.
 
+## Create the config file
+
+Run `ralphie init` once. It looks for the supported harnesses (`claude`,
+`codex`, `pi`, `opencode`) on PATH and writes a commented config file at the
+default location (or at `--config <path>`), assigning the first harness it
+finds to every role. The defaults pass the startup checks for the harnesses it
+found. It refuses to overwrite an existing file and fails when no harness is
+installed. Running Ralphie without a config file points you back to `init`.
+
 ## Installation
 
 ### Published package

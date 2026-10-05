@@ -60,7 +60,7 @@ const missingConfiguration = (path: string, explicit: boolean): RalphieError =>
     new RalphieError({
         message: explicit
             ? `Configuration file not found: ${path}.`
-            : `No configuration file found at ${path}. Create one as described in docs/configuration.md, or pass --config <path>.`,
+            : `No configuration file found at ${path}. Run ralphie init to create one (see docs/configuration.md), or pass --config <path>.`,
     });
 
 const startsWith = (

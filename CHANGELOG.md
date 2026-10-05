@@ -7,6 +7,9 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Added
 
+- `ralphie init` detects the harnesses on PATH and writes a commented config
+  file at the default location (or `--config`), never overwriting an existing
+  one. A run without a config file now points at it.
 - `approval: safe | yolo` (top level, per repository, and per harness) sets how
   the editing roles run. Startup now verifies that every assigned harness is
   installed, that safe approval is available, and that pi and OpenCode editing

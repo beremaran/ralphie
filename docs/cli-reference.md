@@ -27,6 +27,17 @@ command schema.
 > repository you control, and read the [safety model](safety.md) before
 > running it.
 
+## `init`
+
+```text
+bunx @beremaran/ralphie init [--config <path>]
+```
+
+Detects the harnesses on PATH and writes a commented starter config at
+`--config` or the default location. It never overwrites an existing file and
+fails when no supported harness is found. See
+[Getting started](getting-started.md#create-the-config-file).
+
 ## Options
 
 All behavior settings live in the [configuration file](configuration.md).
