@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import {
     GroundingDisposition,
     groundingDecisionSchema,
+    preflightDecisionSchema,
 } from "../../src/issues/domain/decisions.ts";
 
 describe("grounding decision schema", () => {
@@ -35,5 +36,35 @@ describe("grounding decision schema", () => {
             questions: ["Complete the prerequisite, then retry."],
         });
         expect(parsed.success).toBe(false);
+    });
+});
+describe("pre-flight decision schema", () => {
+    test("requires fitsOneSession for an actionable result", () => {
+        expect(
+            preflightDecisionSchema.safeParse({
+                disposition: GroundingDisposition.Actionable,
+            }).success,
+        ).toBe(false);
+        expect(
+            preflightDecisionSchema.safeParse({
+                disposition: GroundingDisposition.Actionable,
+                fitsOneSession: false,
+            }).success,
+        ).toBe(true);
+    });
+
+    test("accepts a blocked result naming open issues and rejects an empty list", () => {
+        expect(
+            preflightDecisionSchema.safeParse({
+                disposition: GroundingDisposition.Blocked,
+                blockedBy: [12],
+            }).success,
+        ).toBe(true);
+        expect(
+            preflightDecisionSchema.safeParse({
+                disposition: GroundingDisposition.Blocked,
+                blockedBy: [],
+            }).success,
+        ).toBe(false);
     });
 });

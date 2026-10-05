@@ -30,10 +30,6 @@ import {
 } from "./issues/app/artifacts.ts";
 import { nodeIssueArtifactFileSystem } from "./issues/adapters/artifact-file-system.ts";
 import {
-    makeComplexityAssessmentService,
-    type ComplexityAssessmentService,
-} from "./issues/app/complexity.ts";
-import {
     makeDecompositionExecutorService,
     type DecompositionExecutorService,
 } from "./issues/app/decomposition-executor.ts";
@@ -56,9 +52,9 @@ import {
 } from "./issues/app/recovery.ts";
 import { nodeRecoveryFileSystem } from "./issues/adapters/recovery-file-system.ts";
 import {
-    makeGroundingAssessmentService,
-    type GroundingAssessmentService,
-} from "./issues/app/grounding.ts";
+    makePreflightAssessmentService,
+    type PreflightAssessmentService,
+} from "./issues/app/preflight.ts";
 import {
     makeNeedsAttentionRouterService,
     type NeedsAttentionRouterService,
@@ -116,8 +112,7 @@ export type RalphieRuntime = {
     readonly gitIssuePreparation: GitIssuePreparationService;
     readonly gitRemoteSafety: GitRemoteSafetyService;
     readonly issueArtifactStore: IssueArtifactStoreService;
-    readonly complexityAssessment: ComplexityAssessmentService;
-    readonly groundingAssessment: GroundingAssessmentService;
+    readonly preflightAssessment: PreflightAssessmentService;
     /** Shared fresh, read-only resolution verifier for issue routes. */
     readonly resolutionVerification: ResolutionVerificationService;
     readonly decompositionExecutor: DecompositionExecutorService;
@@ -240,8 +235,7 @@ export const makeLiveRuntime = ({
     );
     const needsAttentionRouter = makeNeedsAttentionRouterService(issueRecovery);
     const issueVerification = makeIssueVerificationService(commandRunner);
-    const complexityAssessment = makeComplexityAssessmentService(progress);
-    const groundingAssessment = makeGroundingAssessmentService(progress);
+    const preflightAssessment = makePreflightAssessmentService(progress);
     const resolutionVerification = makeResolutionVerificationService(progress);
     const decompositionExecutor = makeDecompositionExecutorService(
         githubIssueMutations,
@@ -262,10 +256,9 @@ export const makeLiveRuntime = ({
     );
     const issueExecutor = makeIssueExecutorService(
         issueArtifactStore,
-        complexityAssessment,
         implementationExecutor,
         decompositionExecutor,
-        groundingAssessment,
+        preflightAssessment,
         resolutionVerification,
         progress,
         needsAttentionRouter,
@@ -285,8 +278,7 @@ export const makeLiveRuntime = ({
         gitIssuePreparation: actualGitIssuePreparation,
         gitRemoteSafety,
         issueArtifactStore,
-        complexityAssessment,
-        groundingAssessment,
+        preflightAssessment,
         resolutionVerification,
         decompositionExecutor,
         implementationExecutor,

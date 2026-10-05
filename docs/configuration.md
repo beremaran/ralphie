@@ -142,8 +142,8 @@ harness defaults for that role.
 | `roles.standards-reviewer`, `roles.spec-reviewer` | `roles.reviewer`, else `roles.default` | Per-role assignment. |
 | `roles.fixer` | the resolved `implementer` | Per-role assignment. |
 
-Today's sessions map onto the roles as follows: complexity assessment is the
-`triager`, grounding and needs-attention confirmation are the `preflight`,
+Today's sessions map onto the roles as follows: the pre-flight session and
+needs-attention confirmation are the `preflight`,
 implementation is the `implementer`, repair sessions are the `fixer`, review
 is the `standards-reviewer`, issue-resolution checks are the
 `resolution-verifier`, decomposition is the `decomposer`, and commit-message
@@ -158,7 +158,7 @@ for editing roles and 15 minutes for read-only roles.
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `intake.requireLabels` | `[]` | An issue must carry every listed label to enter the queue (AND filter). Temporary: replaced when intake moves to agent-ready issues. |
+| `intake.requireLabels` | `[]` | An issue must carry every listed label to enter the queue (AND filter). Added to the mandatory `labels.ready-for-agent` label. |
 | `intake.sort` | `created:asc` | Queue order: `created`, `updated`, or `comments`, optionally suffixed `:asc` or `:desc`. Without a suffix the order is ascending. |
 
 ### `labels`

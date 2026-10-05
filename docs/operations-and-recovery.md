@@ -57,7 +57,7 @@ lines.
   preserved as supplied.
 
 JSON events use a stable operational vocabulary and include `runId`,
-`timestamp`, `stage`, `status`, and `message`. Grounding events identify
+`timestamp`, `stage`, `status`, and `message`. Grounding and pre-flight events identify
 whether agent work was skipped. Human-readable needs-attention decisions name
 the issue number and title and show the current/total queue position. JSON
 output retains the complete event payload, including the structured details
@@ -138,7 +138,7 @@ A normal issue execution obtains a durable per-issue artifact store at:
 ```
 
 The store prevents accidental overwrites and records readiness deferrals,
-complexity decisions, checkpoints, review attempts, commit messages, created
+pre-flight decisions, checkpoints, review attempts, commit messages, created
 commits, resolution proof, decomposition decisions, and created child-number
 mappings. Stale or legacy un-fingerprinted decisions are removed on load
 without disturbing the other artifacts for the issue.
@@ -276,7 +276,7 @@ There is no resume command. When a run fails or is interrupted:
 
 Because each run starts clean, recovery is a new run rather than a continuation:
 completed issues are already closed and no longer selected, while interrupted
-issues repeat grounding, implementation, and review. Inspect the retained
+issues repeat pre-flight, implementation, and review. Inspect the retained
 `state.json` and artifacts before deleting them if the failure needs
 investigation.
 

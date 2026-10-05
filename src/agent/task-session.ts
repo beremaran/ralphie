@@ -117,7 +117,8 @@ export const reportAgentFailure = async (
                 directory: request.directory,
                 title: request.title,
                 ...(cause === undefined ? {} : { cause }),
-                ...(request.progressStage === "grounding"
+                ...(request.progressStage === "grounding" ||
+                request.progressStage === "preflight"
                     ? { agentWorkSkipped: false }
                     : {}),
             },

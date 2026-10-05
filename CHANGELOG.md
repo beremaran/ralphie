@@ -15,6 +15,13 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Changed
 
+- Intake now reads only open issues carrying the `labels.ready-for-agent`
+  label (and every `intake.requireLabels` label). One read-only pre-flight
+  session per issue replaces the grounding session and the 0-5 complexity
+  assessment: it returns `actionable` with `fitsOneSession`, `already_resolved`,
+  `blocked` (skipped without a label change) or `needs_attention`. The
+  `complexity-decision` artifact is replaced by `preflight-decision` and
+  the `complexity-assessment` progress stage by `preflight`.
 - Every agent session now runs through a headless harness CLI (Claude Code, as
   the default and only adapter so far) instead of the in-process pi SDK. The
   new `harnesses` (per-harness `model` and `effort`) and `roles` (`default`,

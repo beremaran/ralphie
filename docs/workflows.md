@@ -13,20 +13,37 @@ references.
 
 ## Routing overview
 
-Before normal execution, every matching open issue is checked by a read-only,
-schema-validated grounding session. Actionable issues then receive a complexity
-score from 0 through 5. An issue whose prerequisite is still open, or which
-otherwise needs human attention, is left open and recorded with its reason
-while Ralphie continues with the next queue item, without closing or marking
-the issue complete. The grounding prompt pins the exact checked-out commit so
-evidence is never mistaken for a newer revision.
+### Intake
+
+Ralphie processes open issues that carry the label `labels.ready-for-agent`
+maps to (default `ready-for-agent`) and every label listed in
+`intake.requireLabels`. Issues without them are never read.
+
+### Pre-flight
+
+Each issue gets exactly one read-only, schema-validated `preflight` session.
+It returns one disposition:
+
+- `actionable` with `fitsOneSession`: `true` routes to implementation, `false`
+  routes to decomposition.
+- `already_resolved`: tentative; see below.
+- `blocked` with the numbers of the open issues it waits on: the issue is
+  skipped for this run with no label or other GitHub change, and is picked up
+  again on a later run once the blockers close.
+- `needs_attention` with a reason, evidence and questions: the issue is left
+  open and recorded while Ralphie continues with the next queue item.
+
+The prompt pins the exact checked-out commit so evidence is never mistaken for
+a newer revision. An actionable result is retained as an artifact, so a
+restart does not repeat the session.
 
 ```mermaid
 flowchart TD
-    A[Open GitHub issue] --> Z[Structured readiness check]
-    Z -->|Needs attention or open dependency| Y[Defer, leave open, continue queue]
-    Z -->|Actionable or apparently resolved| B[Structured complexity assessment]
-    B -->|0–3| C[Implementation session]
+    A[Open GitHub issue] --> Z[Pre-flight session]
+    Z -->|Needs attention| Y[Defer, leave open, continue queue]
+    Z -->|Blocked by open issue| W[Skip, no label change, continue queue]
+    Z -->|Actionable or apparently resolved| B{fitsOneSession}
+    B -->|true| C[Implementation session]
     C --> D[Deterministically stage changes]
     D -->|Changes present| V[Configured verification]
     V -->|Passed| E[Fresh review session]
@@ -39,7 +56,7 @@ flowchart TD
     E -->|Changes requested| G[Fresh review-fix session]
     G --> D
     E -->|Five reviews exhausted| H[Preserve diagnostics and restore checkout]
-    B -->|4–5| I[Structured decomposition]
+    B -->|false| I[Structured decomposition]
     H --> I
     I --> J[Create and cross-link child issues]
     J --> K[Rewrite original issue and keep it open]
@@ -48,7 +65,7 @@ flowchart TD
     M --> O
 ```
 
-## Implementation workflow: complexity 0–3
+## Implementation workflow
 
 1. Capture the exact clean branch and commit as an issue checkpoint.
 2. Ask a fresh `implementer` session to implement the issue and require a schema-valid
@@ -77,9 +94,9 @@ retry budget fails the issue. If the review budget is
 exhausted, Ralphie preserves the patch and review diagnostics, restores the
 clean checkpoint, and sends the issue through decomposition.
 
-Grounding's `already_resolved` disposition is tentative. A fresh verifier must
+Pre-flight's `already_resolved` disposition is tentative. A fresh verifier must
 confirm it before completion; an `unresolved` result corrects the route to
-actionable, proceeds through complexity assessment, and supplies its summary
+actionable, proceeds to implementation, and supplies its summary
 and evidence to the first implementation session. Invalid output or verifier
 infrastructure failure still fails closed.
 
@@ -137,7 +154,7 @@ sequenceDiagram
     end
 ```
 
-## Decomposition workflow: complexity 4–5
+## Decomposition workflow
 
 1. Ask a `decomposer` session to split the issue into the next set of independently actionable
    tasks and declare their dependencies.
@@ -175,7 +192,7 @@ breakdown is persisted before the first GitHub mutation.
 
 Each child receives a stable marker containing root, parent, key, and depth.
 The positive `limits.maxDecompositionDepth` setting (default `3`) bounds recursive
-splitting and is persisted in run state. If direct complexity routing or review
+splitting and is persisted in run state. If direct pre-flight routing or review
 exhaustion would exceed it, Ralphie does not attempt another breakdown: it
 leaves the issue open, records `decomposition_limit_reached` needs attention,
 and continues independent queued work. The issue is not marked complete, so
@@ -201,7 +218,7 @@ Ralphie records each blocked issue as a needs-attention outcome and leaves it
 pending instead of handing it to an agent, then drains later work and completes
 the run. Blocked issues remain open.
 
-A direct complexity 4–5 route returns `decomposed`. Review exhaustion returns an
+A pre-flight `fitsOneSession: false` route returns `decomposed`. Review exhaustion returns an
 `escalated` outcome containing the recovery diagnostic path and, after
 successful decomposition, the created child numbers. Both transitions refresh
 the queue.

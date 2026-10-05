@@ -133,9 +133,7 @@ describe("display state", () => {
         expect(PROGRESS_STAGE_LABELS.grounding).toBe(
             "Checking issue readiness",
         );
-        expect(PROGRESS_STAGE_LABELS["complexity-assessment"]).toBe(
-            "Assessing complexity",
-        );
+        expect(PROGRESS_STAGE_LABELS.preflight).toBe("Pre-flight check");
         expect(PROGRESS_STAGE_LABELS["resolution-verification"]).toBe(
             "Verifying resolution",
         );

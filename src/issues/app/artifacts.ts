@@ -10,13 +10,13 @@ import { RalphieError } from "../../shared/error.ts";
 import type { IdGenerator, RunLayout } from "../../run/ports.ts";
 import {
     commitMessageDecisionSchema,
-    complexityDecisionSchema,
+    sessionFitDecisionSchema,
     issueBreakdownDecisionSchema,
     issueResolutionDecisionSchema,
     needsAttentionDecisionSchema,
     reviewDecisionSchema,
     type CommitMessageDecision,
-    type ComplexityDecision,
+    type SessionFitDecision,
     type IssueBreakdownDecision,
     type IssueResolutionDecision,
     IssueResolutionStatus,
@@ -27,7 +27,7 @@ import { MAX_REVIEW_ROUNDS } from "../domain/stage.ts";
 import { verificationEvidenceSchema } from "./verification.ts";
 
 export enum IssueArtifactKind {
-    ComplexityDecision = "complexity-decision",
+    PreflightDecision = "preflight-decision",
     IssueCheckpoint = "issue-checkpoint",
     ReviewAttempts = "review-attempts",
     CommitMessageDecision = "commit-message-decision",
@@ -68,8 +68,8 @@ export type NeedsAttentionDecisionArtifact = {
     readonly fingerprint: IssueFreshnessFingerprint;
 };
 
-export type ComplexityDecisionArtifact = {
-    readonly decision: ComplexityDecision;
+export type PreflightDecisionArtifact = {
+    readonly decision: SessionFitDecision;
     readonly fingerprint: IssueFreshnessFingerprint;
 };
 
@@ -85,7 +85,7 @@ export type NeedsAttentionHandoffArtifact = {
 };
 
 export type IssueArtifactValues = {
-    readonly [IssueArtifactKind.ComplexityDecision]: ComplexityDecisionArtifact;
+    readonly [IssueArtifactKind.PreflightDecision]: PreflightDecisionArtifact;
     readonly [IssueArtifactKind.IssueCheckpoint]: IssueCheckpoint;
     readonly [IssueArtifactKind.ReviewAttempts]: ReadonlyArray<ReviewAttempt>;
     readonly [IssueArtifactKind.CommitMessageDecision]: CommitMessageDecision;
@@ -316,9 +316,9 @@ export const needsAttentionDecisionArtifactSchema = z
     })
     .strict();
 
-export const complexityDecisionArtifactSchema = z
+export const preflightDecisionArtifactSchema = z
     .object({
-        decision: complexityDecisionSchema,
+        decision: sessionFitDecisionSchema,
         fingerprint: issueFreshnessFingerprintSchema,
     })
     .strict();
@@ -342,8 +342,7 @@ const validatedArtifactSchemas: Partial<Record<IssueArtifactKind, z.ZodType>> =
     {
         [IssueArtifactKind.NeedsAttentionDecision]:
             needsAttentionDecisionArtifactSchema,
-        [IssueArtifactKind.ComplexityDecision]:
-            complexityDecisionArtifactSchema,
+        [IssueArtifactKind.PreflightDecision]: preflightDecisionArtifactSchema,
         [IssueArtifactKind.IssueResolutionDecision]:
             issueResolutionDecisionArtifactSchema,
         [IssueArtifactKind.NeedsAttentionHandoff]:
@@ -357,8 +356,8 @@ const createdCommitSchema = z.object({
 
 const persistedArtifactsV2BaseSchema = z
     .object({
-        [IssueArtifactKind.ComplexityDecision]:
-            complexityDecisionSchema.optional(),
+        [IssueArtifactKind.PreflightDecision]:
+            sessionFitDecisionSchema.optional(),
         [IssueArtifactKind.IssueCheckpoint]: issueCheckpointSchema.optional(),
         [IssueArtifactKind.ReviewAttempts]: z
             .array(reviewAttemptSchema)
@@ -384,12 +383,12 @@ const persistedArtifactsV2Schema = persistedArtifactsV2BaseSchema;
 
 const persistedArtifactsSchema = persistedArtifactsV2BaseSchema
     .omit({
-        [IssueArtifactKind.ComplexityDecision]: true,
+        [IssueArtifactKind.PreflightDecision]: true,
         [IssueArtifactKind.IssueResolutionDecision]: true,
     })
     .extend({
-        [IssueArtifactKind.ComplexityDecision]:
-            complexityDecisionArtifactSchema.optional(),
+        [IssueArtifactKind.PreflightDecision]:
+            preflightDecisionArtifactSchema.optional(),
         [IssueArtifactKind.IssueResolutionDecision]:
             issueResolutionDecisionArtifactSchema.optional(),
         [IssueArtifactKind.NeedsAttentionDecision]:
@@ -405,11 +404,11 @@ const persistedArtifactsSchema = persistedArtifactsV2BaseSchema
 // never be produced by this store.
 const persistedArtifactsLoadSchema = persistedArtifactsV2BaseSchema
     .omit({
-        [IssueArtifactKind.ComplexityDecision]: true,
+        [IssueArtifactKind.PreflightDecision]: true,
         [IssueArtifactKind.IssueResolutionDecision]: true,
     })
     .extend({
-        [IssueArtifactKind.ComplexityDecision]: z.unknown().optional(),
+        [IssueArtifactKind.PreflightDecision]: z.unknown().optional(),
         [IssueArtifactKind.IssueResolutionDecision]: z.unknown().optional(),
         [IssueArtifactKind.NeedsAttentionDecision]: z.unknown().optional(),
         [IssueArtifactKind.NeedsAttentionHandoff]: z.unknown().optional(),
@@ -565,8 +564,7 @@ type LoadedArtifactState = {
 const loadCurrentArtifactState = (value: unknown): LoadedArtifactState => {
     const loaded = persistedArtifactStateLoadSchema.parse(value);
     const schemas = {
-        [IssueArtifactKind.ComplexityDecision]:
-            complexityDecisionArtifactSchema,
+        [IssueArtifactKind.PreflightDecision]: preflightDecisionArtifactSchema,
         [IssueArtifactKind.IssueResolutionDecision]:
             issueResolutionDecisionArtifactSchema,
         [IssueArtifactKind.NeedsAttentionDecision]:
@@ -617,7 +615,7 @@ const migrateArtifactState = (
                 artifacts: Object.fromEntries(
                     Object.entries(legacy.artifacts).filter(
                         ([kind]) =>
-                            kind !== IssueArtifactKind.ComplexityDecision &&
+                            kind !== "complexity-decision" &&
                             kind !== IssueArtifactKind.IssueResolutionDecision,
                     ),
                 ),
@@ -854,7 +852,7 @@ const makeStore = (
         throwIfArtifactWriteAborted(signal, issueNumber);
         issueFreshnessFingerprintSchema.parse(fingerprint);
         const kinds = [
-            IssueArtifactKind.ComplexityDecision,
+            IssueArtifactKind.PreflightDecision,
             IssueArtifactKind.IssueResolutionDecision,
             IssueArtifactKind.NeedsAttentionDecision,
         ] as const;
