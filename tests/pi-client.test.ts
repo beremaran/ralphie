@@ -9,6 +9,8 @@ import {
     createModels,
     fauxAssistantMessage,
     fauxProvider,
+    fauxText,
+    fauxThinking,
     fauxToolCall,
 } from "@earendil-works/pi-ai";
 import {
@@ -17,6 +19,10 @@ import {
 } from "../src/pi/adapters/client.ts";
 import type { PiAgentSelection } from "../src/pi/ports.ts";
 import type { AgentClient } from "../src/agent/ports.ts";
+import type {
+    SessionEvent,
+    SessionEventContext,
+} from "../src/harness/ports.ts";
 
 const structuredFormat = {
     type: "tool" as const,
@@ -64,6 +70,23 @@ const makeClient = (options: {
             : { eventListener: options.eventListener }),
     });
     return { client, faux, model };
+};
+
+/** The assistant blocks of one kind, reassembled from their fragments. */
+const assistantText = (
+    events: ReadonlyArray<SessionEvent>,
+    kind: "text" | "thinking",
+): ReadonlyArray<string> => {
+    const blocks: string[] = [];
+    let open = "";
+    for (const event of events) {
+        if (event.type !== "assistant_text" || event.kind !== kind) continue;
+        open += event.text;
+        if (!event.done) continue;
+        blocks.push(open);
+        open = "";
+    }
+    return blocks;
 };
 
 const createSession = async (
@@ -288,9 +311,12 @@ describe("pi agent client", () => {
         });
     });
 
-    test("executes pi tools and streams tool events to the listener", async () => {
+    test("streams a tool-using turn to the listener as session events", async () => {
         const directory = await mkdtemp(join(tmpdir(), "ralphie-pi-tools-"));
-        const events: string[] = [];
+        const received: Array<{
+            readonly event: SessionEvent;
+            readonly context: SessionEventContext;
+        }> = [];
         try {
             await writeFile(join(directory, "hello.txt"), "hi there", "utf8");
             const { client } = makeClient({
@@ -301,8 +327,8 @@ describe("pi agent client", () => {
                     ),
                     fauxAssistantMessage("done"),
                 ],
-                eventListener: (event) => {
-                    events.push((event as { type: string }).type);
+                eventListener: (event, context) => {
+                    received.push({ event, context });
                 },
             });
             const sessionID = await createSession(client, directory);
@@ -314,12 +340,166 @@ describe("pi agent client", () => {
             });
 
             expect(result.data?.info.text).toBe("done");
-            expect(events).toContain("agent_start");
-            expect(events).toContain("tool_execution_start");
-            expect(events).toContain("tool_execution_end");
-            expect(events).toContain("agent_end");
+            expect(received[0]?.context).toEqual({
+                sessionID,
+                directory,
+                harness: "pi",
+                title: "test",
+            });
+            const events = received.map(({ event }) => event);
+            expect(events[0]).toEqual({ type: "session_started" });
+            expect(events.at(-1)).toEqual({ type: "session_finished" });
+
+            const call = events.find(
+                (
+                    event,
+                ): event is Extract<SessionEvent, { type: "tool_call" }> =>
+                    event.type === "tool_call",
+            );
+            expect(call).toMatchObject({
+                name: "read",
+                input: { path: "hello.txt" },
+            });
+            expect(
+                events.find((event) => event.type === "tool_result"),
+            ).toEqual({
+                type: "tool_result",
+                callId: call?.callId ?? "",
+                name: "read",
+                output: "hi there",
+                isError: false,
+            });
+            expect(assistantText(events, "text")).toEqual(["done"]);
         } finally {
             await rm(directory, { recursive: true, force: true });
+        }
+    });
+
+    test("reports a failed tool call with its error output", async () => {
+        const directory = await mkdtemp(join(tmpdir(), "ralphie-pi-tools-"));
+        const events: SessionEvent[] = [];
+        try {
+            const { client } = makeClient({
+                responses: [
+                    fauxAssistantMessage(
+                        [fauxToolCall("read", { path: "missing.txt" })],
+                        { stopReason: "toolUse" },
+                    ),
+                    fauxAssistantMessage("done"),
+                ],
+                eventListener: (event) => {
+                    events.push(event);
+                },
+            });
+            const sessionID = await createSession(client, directory);
+
+            await client.session.prompt({
+                sessionID,
+                directory,
+                parts: [{ type: "text", text: "Read the file." }],
+            });
+
+            const toolResult = events.find(
+                (
+                    event,
+                ): event is Extract<SessionEvent, { type: "tool_result" }> =>
+                    event.type === "tool_result",
+            );
+            expect(toolResult).toMatchObject({ name: "read", isError: true });
+            expect(toolResult?.output).toContain("missing.txt");
+        } finally {
+            await rm(directory, { recursive: true, force: true });
+        }
+    });
+
+    test("streams thinking as its own assistant blocks", async () => {
+        const events: SessionEvent[] = [];
+        const { client } = makeClient({
+            responses: [
+                fauxAssistantMessage([
+                    fauxThinking("weighing options"),
+                    fauxText("answer"),
+                ]),
+            ],
+            eventListener: (event) => {
+                events.push(event);
+            },
+        });
+        const sessionID = await createSession(client, "/repo");
+
+        await client.session.prompt({
+            sessionID,
+            directory: "/repo",
+            parts: [{ type: "text", text: "Think." }],
+        });
+
+        expect(assistantText(events, "thinking")).toEqual(["weighing options"]);
+        expect(assistantText(events, "text")).toEqual(["answer"]);
+    });
+
+    test("reports an assistant failure as an error event", async () => {
+        const events: SessionEvent[] = [];
+        const { client } = makeClient({
+            responses: [
+                fauxAssistantMessage("", {
+                    stopReason: "error",
+                    errorMessage: "provider exploded",
+                }),
+            ],
+            eventListener: (event) => {
+                events.push(event);
+            },
+        });
+        const sessionID = await createSession(client, "/repo");
+
+        await client.session.prompt({
+            sessionID,
+            directory: "/repo",
+            parts: [{ type: "text", text: "Do the work." }],
+        });
+
+        expect(events).toContainEqual({
+            type: "error",
+            message: "provider exploded",
+        });
+        expect(events.at(-1)).toEqual({ type: "session_finished" });
+    });
+
+    test("reports the usage of every assistant response", async () => {
+        const events: SessionEvent[] = [];
+        const { client } = makeClient({
+            responses: [
+                fauxAssistantMessage(
+                    [fauxToolCall("bash", { command: "true" })],
+                    {
+                        stopReason: "toolUse",
+                    },
+                ),
+                fauxAssistantMessage("done"),
+            ],
+            eventListener: (event) => {
+                events.push(event);
+            },
+        });
+        const sessionID = await createSession(client, "/repo");
+
+        await client.session.prompt({
+            sessionID,
+            directory: "/repo",
+            parts: [{ type: "text", text: "Do the work." }],
+        });
+
+        const usage = events.filter((event) => event.type === "usage");
+        expect(usage).toHaveLength(2);
+        for (const event of usage) {
+            expect(event).toEqual({
+                type: "usage",
+                inputTokens: expect.any(Number),
+                outputTokens: expect.any(Number),
+                cacheReadTokens: expect.any(Number),
+                cacheWriteTokens: expect.any(Number),
+                costUsd: 0,
+            });
         }
     });
 

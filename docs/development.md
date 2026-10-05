@@ -33,6 +33,7 @@ Useful individual commands:
 | `bun run package:check` | Pack, inspect, install, and run the local package in isolated temporary directories. |
 | `bun run package:inspect` | Inspect the local package-manager pack file list without installing it. |
 | `bun run source:audit` | Run the deterministic, offline source/module/export reachability audit as sorted JSON. |
+| `bun run skills:sync [ref]` | Replace the vendored copy of mattpocock/skills with the given upstream ref (default: the upstream default branch) and rewrite its lock file. Needs network access to GitHub; see [Vendored skills](#vendored-skills). |
 
 The package check builds an actual tarball, verifies its allowlist, installs it
 with `npm install --omit=dev` in a fresh project, and invokes the installed bin
@@ -100,6 +101,71 @@ The former distribution-channel and live network smoke suites (standalone
 installer, Docker image, Homebrew reconciliation, and release publication)
 were removed from the default gate; the package registry check remains an
 explicit opt-in using `--registry` with an exact `--package-spec`.
+
+## Vendored skills
+
+Ralphie runs Matt Pocock's skills from a pinned copy in this repository, not
+from whatever a user has installed ([ADR-0002](adr/0002-vendored-skills-with-overlays.md)).
+The copy lives in `vendor/mattpocock-skills/`:
+
+- one directory per skill (`triage`, `to-tickets`, `implement`, `tdd`,
+  `code-review`, `codebase-design`, `diagnosing-bugs`), flattened from
+  upstream's `skills/<bucket>/<name>/`, so the directory is itself a skills
+  directory and each skill keeps its references and `agents/` metadata;
+- `LICENSE`, the upstream MIT license; and
+- `lock.json`, which records the upstream repository, the full commit id, where
+  each skill lives upstream, and the git blob id of every vendored file.
+
+The copy is published: `package.json` `files` includes `vendor/mattpocock-skills`,
+and `bun run package:check` fails if a locked file is missing from the tarball
+or the installed package. The bundled `dist/ralphie.js` finds the copy at
+`../vendor/mattpocock-skills` relative to its own directory.
+
+**Never hand-edit anything under `vendor/mattpocock-skills/`.** Where Ralphie's
+contract departs from a skill's text, the difference belongs in a Ralphie skill
+overlay. `tests/skills-sync.test.ts` verifies that the checked-in files are
+exactly the blobs named in `lock.json`, so an edit, a stray file, or a hand-built
+lock fails `bun run test`. The directory is excluded from Biome, and
+`.gitattributes` marks it `-text` so line endings are never rewritten.
+
+### Syncing
+
+`bun run skills:sync [ref]` fetches `ref` (a branch, tag, or commit of
+`https://github.com/mattpocock/skills`; default `HEAD`) with a shallow, read-only
+`git fetch` into a scratch repository, rebuilds the copy beside the vendored
+directory, and swaps it in. Nothing in the output depends on the ref spelling, the
+clock, or the machine, so syncing the same commit twice produces byte-identical
+files, and the script prints the previous and new commit and the vendored files
+that changed. It fails without touching the existing copy when the ref does not
+resolve, upstream no longer has one of the driven skills (or has it in two
+places), the license is missing, or a driven skill contains something that is not a
+regular file. Adding a driven skill means adding its name to `VENDORED_SKILLS` in
+`scripts/skills-sync.ts` and syncing.
+
+To compare a lock with upstream by hand, `git ls-tree -r <commit>` in a clone of
+upstream lists the same blob ids as `lock.json`.
+
+### Scheduled sync and review
+
+`.github/workflows/skills-sync.yml` runs weekly and on demand (`workflow_dispatch`
+accepts an optional `ref`). It runs `bun run skills:sync`, and opens or updates
+one pull request on the `skills-sync` branch only when the vendored files or skill
+locations differ from the lock. An upstream commit that changes none of the driven
+skills does not open a pull request. The pull request body links the upstream
+compare view between the locked and new commits.
+The repository setting "Allow GitHub Actions to create and approve pull requests"
+must be enabled for the workflow to open the pull request.
+
+Reviewing a sync pull request:
+
+1. Read the upstream diff in the pull request (or its compare link) for each
+   driven skill, not only the vendored paths.
+2. Check whether the new skill text still fits Ralphie's contract: schema-validated
+   tool results, no agent commits or pushes, direct delivery. Where it does not,
+   change the Ralphie skill overlay in the same pull request, never the vendored
+   files.
+3. Pull requests opened with the workflow's token do not trigger CI. Close and
+   reopen the pull request, or run `bun run check` on its branch, before merging.
 
 ## Contribution expectations
 
