@@ -33,7 +33,7 @@ that binds concrete adapters into the runtime bundle.
 | --- | --- | --- |
 | `agent` | `src/agent/` | Agent session port, model/thinking types, prompts, structured output. |
 | `config` | `src/config/` | YAML configuration: the zod schema (`settings.ts`), layering and `--set` overrides (`load.ts`, `overrides.ts`), and the file-reader port with its Bun YAML adapter. |
-| `harness` | `src/harness/` | Provider-neutral harness port (session request, events, typed failures, structured results), the service that runs sessions and repairs invalid results, and one CLI adapter per harness (Claude Code and OpenCode so far). Not yet used by the workflow. |
+| `harness` | `src/harness/` | Provider-neutral harness port (session request, events, typed failures, structured results), the service that runs sessions and repairs invalid results, and one CLI adapter per harness (Claude Code, Codex and OpenCode so far). Not yet used by the workflow. |
 | `pi` | `src/pi/` | In-process pi SDK runtime: port for startup plus auth, client, tools, model catalog, and event translation adapters. |
 | `github` | `src/github/` | Issue value objects, repository slug parsing, and the Octokit/`gh` adapters. |
 | `git` | `src/git/` | Checkout preparation, checkpoints, issue operations, invariants, and remote-safety adapters. |
@@ -133,7 +133,7 @@ the normal check gate.
 | Implementation/review/delivery | `src/issues/app/implementation-executor.ts`, `src/issues/app/verification.ts`, `src/git/adapters/issue-operations.ts`, `src/git/adapters/remote-safety.ts` |
 | Decomposition and GitHub mutations | `src/issues/app/decomposition-executor.ts`, `src/github/adapters/issue-mutations.ts`, `src/github/adapters/issue-relationships.ts` |
 | Pi model catalog, credentials, tools, sessions, and structured results | `src/pi/`, `src/agent/` |
-| Harness sessions, structured results, and the Claude Code and OpenCode adapters | `src/harness/ports.ts`, `src/harness/app/`, `src/harness/adapters/` |
+| Harness sessions, structured results, and the Claude Code, Codex and OpenCode adapters | `src/harness/ports.ts`, `src/harness/app/`, `src/harness/adapters/` |
 | Git checkpoints, safety, and branches | `src/git/` |
 | Durable run state, artifacts, diagnostics, and event audit | `src/issues/app/artifacts.ts`, `src/issues/app/recovery.ts`, `src/run/`, `src/issues/adapters/` |
 | Driving port and runtime bundle | `src/workflow/ports.ts`, `src/runtime.ts` |
