@@ -65,6 +65,7 @@ import {
 } from "./issues/app/needs-attention.ts";
 import { type PiAgentService } from "./pi/ports.ts";
 import { makeClaudeCodeAdapter } from "./harness/adapters/claude-code.ts";
+import { makePiCliAdapter } from "./harness/adapters/pi-cli.ts";
 import { makeHarnessService } from "./harness/app/harness-service.ts";
 import {
     type HarnessService,
@@ -167,7 +168,10 @@ export const makeLiveRuntime = ({
     const githubNeedsAttentionNotification =
         makeGitHubNeedsAttentionNotificationService(githubConnection.session);
     const harness = makeHarnessService({
-        adapters: { claude: makeClaudeCodeAdapter({ runner: commandRunner }) },
+        adapters: {
+            claude: makeClaudeCodeAdapter({ runner: commandRunner }),
+            pi: makePiCliAdapter({ runner: commandRunner }),
+        },
         listener: sessionListener,
         ids,
     });
