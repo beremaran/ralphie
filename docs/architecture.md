@@ -33,7 +33,7 @@ that binds concrete adapters into the runtime bundle.
 | --- | --- | --- |
 | `agent` | `src/agent/` | Agent session port, model/thinking types, prompts, structured output. |
 | `config` | `src/config/` | YAML configuration: the zod schema (`settings.ts`), layering and `--set` overrides (`load.ts`, `overrides.ts`), and the file-reader port with its Bun YAML adapter. |
-| `harness` | `src/harness/` | Provider-neutral harness port (session request, events, typed failures, structured results), the service that runs sessions and repairs invalid results, and one CLI adapter per harness (Claude Code so far). Not yet used by the workflow. |
+| `harness` | `src/harness/` | Provider-neutral harness port (session request, events, typed failures, structured results), the service that runs sessions and repairs invalid results, and one CLI adapter per harness (Claude Code and OpenCode so far). Not yet used by the workflow. |
 | `pi` | `src/pi/` | In-process pi SDK runtime: port for startup plus auth, client, tools, model catalog, and event translation adapters. |
 | `github` | `src/github/` | Issue value objects, repository slug parsing, and the Octokit/`gh` adapters. |
 | `git` | `src/git/` | Checkout preparation, checkpoints, issue operations, invariants, and remote-safety adapters. |
@@ -73,6 +73,19 @@ import rules, the no-I/O rule for non-adapter code, the Octokit confinement
 isolation, and process-stream ownership. `tests/contracts/` holds the shared
 behavioral suites that both the in-memory fakes and the live adapters pass for
 `RunEventLog` and `IssueArtifactStore`.
+
+## OpenCode adapter findings
+
+Spike against OpenCode v2.0.22 (the published docs mostly describe v1). The recorded streams live in `tests/harness/fixtures/opencode/`.
+
+- **Invocation**: `opencode run --standalone --format json`, prompt on stdin (with no message it prints an `error` event, "You must provide a message"). `--standalone` starts a private server, so the invocation's working directory and environment apply; the background service is shared and is never used.
+- **Events**: one JSON object per line: `step_start`, `text` (whole block), `tool_use` (one event with input and output once the tool finished; `state.status` is `completed` or `error`, and a tool can report failure through `metadata.metadata.error` while `completed`), `step_finish` (`tokens` and `cost` per step) and `error` (`error.type` such as `provider.no-route` or `provider.quota`). There is no terminal result event, so a run succeeded when it exited 0, printed no `error` event and produced text. An error makes the process exit 1.
+- **Usage**: the adapter sums every `step_finish` into one usage event per turn. `cost` is 0 for the recorded runs, so `costUsd` is omitted then. There is no budget cap flag.
+- **Sessions**: `--session <id>` resumes, or creates the session when it does not exist. Session ids look like `ses_...`.
+- **Model and effort**: `--model provider/model#variant`; the variant plays the part of effort and is only applied together with a model.
+- **Access**: there is no sandbox. Read-only uses `--agent plan`, which denies edit tools but still allows shell commands, so it is not a hard guarantee. `--auto` approves every permission that is not denied and is the only editing mode; `safe` is refused with an `access` failure before anything runs. Without `--auto` a headless run cannot answer approval prompts.
+- **Structured output**: none native. The service falls back to the fenced JSON block protocol.
+- **Skills**: a skill under `.opencode/skills/<name>/` is loaded headlessly through the `skill` tool (recorded in `skill.jsonl`). Skills hidden from the model (user-only) were not tested; the vendored skills need a live check once the harness is selected for a role.
 
 ## Dependency and side-effect rules
 
@@ -120,7 +133,7 @@ the normal check gate.
 | Implementation/review/delivery | `src/issues/app/implementation-executor.ts`, `src/issues/app/verification.ts`, `src/git/adapters/issue-operations.ts`, `src/git/adapters/remote-safety.ts` |
 | Decomposition and GitHub mutations | `src/issues/app/decomposition-executor.ts`, `src/github/adapters/issue-mutations.ts`, `src/github/adapters/issue-relationships.ts` |
 | Pi model catalog, credentials, tools, sessions, and structured results | `src/pi/`, `src/agent/` |
-| Harness sessions, structured results, and the Claude Code adapter | `src/harness/ports.ts`, `src/harness/app/`, `src/harness/adapters/` |
+| Harness sessions, structured results, and the Claude Code and OpenCode adapters | `src/harness/ports.ts`, `src/harness/app/`, `src/harness/adapters/` |
 | Git checkpoints, safety, and branches | `src/git/` |
 | Durable run state, artifacts, diagnostics, and event audit | `src/issues/app/artifacts.ts`, `src/issues/app/recovery.ts`, `src/run/`, `src/issues/adapters/` |
 | Driving port and runtime bundle | `src/workflow/ports.ts`, `src/runtime.ts` |
