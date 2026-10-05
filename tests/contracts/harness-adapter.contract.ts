@@ -26,6 +26,11 @@ export type CommandLineCheck = {
     readonly absent?: readonly string[];
 };
 
+/** An access level the harness cannot offer; it must refuse without spawning. */
+export type RefusedAccess = {
+    readonly refuses: { readonly messageIncludes: string };
+};
+
 /** A recorded process run and what a conforming adapter makes of it. */
 export type RecordedStream = {
     readonly stdout: string;
@@ -43,7 +48,9 @@ export type HarnessAdapterFixtures = {
     /** Checks applied to every invocation, whatever the request. */
     readonly commandLine: {
         readonly always: CommandLineCheck;
-        readonly byAccess: Readonly<Record<SessionAccess, CommandLineCheck>>;
+        readonly byAccess: Readonly<
+            Record<SessionAccess, CommandLineCheck | RefusedAccess>
+        >;
         readonly model: (model: string) => CommandLineCheck;
         readonly effort: (effort: string) => CommandLineCheck;
         readonly budget: (usd: number) => CommandLineCheck;
@@ -62,6 +69,8 @@ export type HarnessAdapterFixtures = {
         };
         /** A reply that runs a tool first. */
         readonly toolUse: RecordedStream & {
+            /** Access level that runs tools; defaults to `safe`. */
+            readonly access?: SessionAccess;
             readonly expect: {
                 readonly text: string;
                 readonly events: readonly TurnEvent[];
@@ -156,6 +165,22 @@ export const harnessAdapterContract = (
         return { outcome, events, invocations };
     };
 
+    const expectRefusal = async (
+        access: SessionAccess,
+        check: RefusedAccess,
+    ): Promise<void> => {
+        const { outcome, invocations } = await run([], { access });
+        expect(invocations).toHaveLength(0);
+        expect(outcome).toMatchObject({
+            ok: false,
+            failure: { kind: "access" },
+        });
+        if (outcome.ok) return;
+        expect(outcome.failure.message).toContain(
+            check.refuses.messageIncludes,
+        );
+    };
+
     const stream = (recorded: RecordedStream): ProcessScript => recorded;
 
     describe(`${fixtures.name} harness adapter contract`, () => {
@@ -166,6 +191,11 @@ export const harnessAdapterContract = (
 
         for (const access of ["read-only", "safe", "yolo"] as const) {
             test(`builds the ${access} command line`, async () => {
+                const check = fixtures.commandLine.byAccess[access];
+                if ("refuses" in check) {
+                    await expectRefusal(access, check);
+                    return;
+                }
                 const { invocations } = await run(
                     [stream(fixtures.streams.reply)],
                     { access },
@@ -175,10 +205,7 @@ export const harnessAdapterContract = (
                 if (invocation === undefined) throw new Error("no invocation");
                 expect(invocation.command).toBe(fixtures.executable);
                 expectCommandLine(invocation, fixtures.commandLine.always);
-                expectCommandLine(
-                    invocation,
-                    fixtures.commandLine.byAccess[access],
-                );
+                expectCommandLine(invocation, check);
             });
         }
 
@@ -254,7 +281,7 @@ export const harnessAdapterContract = (
         test("pairs every tool result with the tool call that started it", async () => {
             const { outcome, events } = await run(
                 [stream(fixtures.streams.toolUse)],
-                { access: "safe" },
+                { access: fixtures.streams.toolUse.access ?? "safe" },
             );
             expect(outcome.ok).toBe(true);
             expect(events).toEqual([...fixtures.streams.toolUse.expect.events]);
@@ -271,7 +298,7 @@ export const harnessAdapterContract = (
 
         test("reports usage once per turn, as a delta", async () => {
             const { events } = await run([stream(fixtures.streams.toolUse)], {
-                access: "safe",
+                access: fixtures.streams.toolUse.access ?? "safe",
             });
             expect(
                 events.filter((event) => event.type === "usage"),

@@ -65,6 +65,7 @@ import {
 } from "./issues/app/needs-attention.ts";
 import { type PiAgentService } from "./pi/ports.ts";
 import { makeClaudeCodeAdapter } from "./harness/adapters/claude-code.ts";
+import { makeOpenCodeAdapter } from "./harness/adapters/opencode.ts";
 import { makeCodexAdapter } from "./harness/adapters/codex.ts";
 import { makeTemporarySchemaFileWriter } from "./harness/adapters/schema-file.ts";
 import { makePiCliAdapter } from "./harness/adapters/pi-cli.ts";
@@ -172,6 +173,7 @@ export const makeLiveRuntime = ({
     const harness = makeHarnessService({
         adapters: {
             claude: makeClaudeCodeAdapter({ runner: commandRunner }),
+            opencode: makeOpenCodeAdapter({ runner: commandRunner }),
             codex: makeCodexAdapter({
                 runner: commandRunner,
                 schemaFiles: makeTemporarySchemaFileWriter(),
