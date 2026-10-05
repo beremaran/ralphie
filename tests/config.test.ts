@@ -285,6 +285,59 @@ repos:
         }
     });
 
+    test("rejects unknown harness and role names at the exact path", async () => {
+        const { message } = await failureFor(`
+harnesses:
+  cursor:
+    model: x
+roles:
+  default: gemini
+  reviewr: claude
+  implementer:
+    harness: claude
+    effort: 3
+`);
+
+        for (const line of [
+            "  harnesses.cursor: unknown key",
+            "  roles.default: Invalid input",
+            "  roles.reviewr: unknown key",
+            "  roles.implementer: Invalid input",
+        ]) {
+            expect(message).toContain(line);
+        }
+    });
+
+    test("layers roles and harnesses per repository and per run", async () => {
+        const config = await writeTemporaryFile(`
+harnesses:
+  claude:
+    model: opus
+roles:
+  default: claude
+repos:
+  acme/api:
+    roles:
+      reviewer: codex
+`);
+
+        const options = await workflowOptionsFor([
+            "acme/api",
+            "--config",
+            config,
+            "--set",
+            "harnesses.claude.effort=low",
+        ]);
+
+        expect(options.roles.implementer).toEqual({
+            harness: "claude",
+            model: "opus",
+            effort: "low",
+        });
+        expect(options.roles["standards-reviewer"].harness).toBe("codex");
+        expect(options.roles["spec-reviewer"].harness).toBe("codex");
+    });
+
     test("rejects repository-only keys at the top level", async () => {
         const { message } = await failureFor(
             "branch: main\nverify: [bun test]\n",

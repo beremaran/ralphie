@@ -1,4 +1,3 @@
-import type { AgentModel } from "../agent/model.ts";
 import type { ProgressEvent } from "../progress/ports.ts";
 import type { RunState } from "./state.ts";
 
@@ -27,21 +26,9 @@ export type RunEventLog = {
  * read between issues, so the active issue always runs to completion before
  * the queue stops. Quitting the run remains the `AbortSignal`'s job.
  */
-export type RunControlSelection = {
-    readonly model: AgentModel;
-    readonly variant?: string;
-};
-
 export type RunControl = {
     readonly waitForQueue: () => Promise<void>;
     readonly stopAfterCurrent: () => boolean;
-    /**
-     * Model and thinking level the operator picked; `undefined` keeps the CLI
-     * selection. The workflow reads this live, so a pick reaches the running
-     * issue: its next agent session starts with the pick, and an in-flight pi
-     * turn switches at its next provider request.
-     */
-    readonly issueSelection?: () => RunControlSelection | undefined;
 };
 
 /** Injectable wall clock; adapters use the system clock, tests a fixed one. */

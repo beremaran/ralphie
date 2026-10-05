@@ -29,13 +29,9 @@ const build = async (): Promise<void> => {
         target: "bun",
         outdir: "./dist",
         naming: { entry: "ralphie.js" },
-        // Keep the pi provider catalog and its lazy provider SDKs out of the
-        // bundle; npm installs them from package.json dependencies.
-        external: [
-            "@earendil-works/pi-agent-core",
-            "@earendil-works/pi-ai",
-            "@opentui/core",
-        ],
+        // Keep the terminal UI out of the bundle; npm installs it from
+        // package.json dependencies.
+        external: ["@opentui/core"],
         define: {
             RALPHIE_BUILD_INFO: JSON.stringify(buildInfo),
         },

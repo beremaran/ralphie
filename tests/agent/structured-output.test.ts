@@ -2,7 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { z } from "zod";
 
 import { requestStructuredOutput } from "../../src/agent/structured-output.ts";
-import type { AgentClient } from "../../src/agent/ports.ts";
+import type { AgentSessions } from "../../src/agent/sessions.ts";
+import { sessionsFor } from "../shared/agent-sessions.ts";
+import { makeFakeHarness } from "../shared/fake-harness.ts";
 import { CommandAbortedError } from "../../src/process/ports.ts";
 import { makeGitRepositoryInvariantService } from "../../src/git/adapters/repository-invariant.ts";
 import { CommandRunnerLive } from "../../src/process/adapters/command-runner.ts";
@@ -10,21 +12,12 @@ import { makeGitFixture } from "../shared/git-fixture.ts";
 
 const schema = z.object({ ok: z.boolean() });
 
-const structuredClient = (structured: unknown): AgentClient => ({
-    session: {
-        create: async () => ({ data: { id: "session-1" } }),
-        prompt: async () => ({
-            data: {
-                info: {
-                    id: "message-1",
-                    role: "assistant",
-                    structured,
-                },
-                parts: [],
-            },
-        }),
-    },
-});
+const structuredClient = (structured: unknown): AgentSessions =>
+    sessionsFor(
+        makeFakeHarness({
+            roles: { triager: { value: { result: structured } } },
+        }).service,
+    );
 
 const invariant = { branch: "develop", head: "a".repeat(40) };
 
@@ -40,6 +33,7 @@ describe("structured-output post-run verification cancellation", () => {
             structuredClient({ ok: true }),
             {
                 directory: "/work/repository",
+                role: "triager",
                 title: "task",
                 prompt: "Do the work.",
                 schema,
@@ -67,6 +61,7 @@ describe("structured-output post-run verification cancellation", () => {
         const signals: Array<AbortSignal | undefined> = [];
         await requestStructuredOutput(structuredClient({ ok: true }), {
             directory: "/work/repository",
+            role: "triager",
             title: "task",
             prompt: "Do the work.",
             schema,
@@ -85,6 +80,7 @@ describe("structured-output post-run verification cancellation", () => {
             structuredClient({ ok: true }),
             {
                 directory: "/work/repository",
+                role: "triager",
                 title: "task",
                 prompt: "Do the work.",
                 schema,
@@ -114,6 +110,7 @@ describe("structured-output post-run verification cancellation", () => {
             await expect(
                 requestStructuredOutput(structuredClient({ ok: true }), {
                     directory: fixture.repositoryPath,
+                    role: "triager",
                     title: "task",
                     prompt: "Do the work.",
                     schema,
@@ -138,6 +135,7 @@ describe("structured-output post-run verification cancellation", () => {
         let verifications = 0;
         await requestStructuredOutput(structuredClient({ ok: true }), {
             directory: "/work/repository",
+            role: "triager",
             title: "task",
             prompt: "Do the work.",
             schema,

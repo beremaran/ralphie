@@ -182,11 +182,7 @@ export const makeDecompositionExecutorService = (
                 ),
             }),
             schema: issueBreakdownDecisionSchema,
-            agent: context.agentSelection.agent,
-            model: context.agentSelection.model,
-            variant: context.agentSelection.variant,
-            runId: context.runId,
-            diagnostics: context.agentDiagnostics,
+            role: "decomposer",
             verifyAfter: (signal) =>
                 context.repositoryInvariant.verify(
                     context.repositoryPath,

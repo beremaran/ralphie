@@ -1,5 +1,6 @@
 import type { GitHubConnectionService } from "../github/ports.ts";
-import type { AgentModel } from "../agent/model.ts";
+import type { RoleAssignments } from "../harness/app/roles.ts";
+import type { HarnessService } from "../harness/ports.ts";
 import type { IssueFilters } from "../github/domain.ts";
 import type {
     IssueExecutionOutcome,
@@ -15,7 +16,6 @@ import type {
     GitRepositoryInvariantService,
     GitRepositoryService,
 } from "../git/ports.ts";
-import type { PiAgentService } from "../pi/ports.ts";
 import type { ProgressReporterService } from "../progress/ports.ts";
 import type {
     Clock,
@@ -53,7 +53,7 @@ export type IssueWorkflowRuntime = {
     readonly gitIssueOperations: GitIssueOperationsService;
     readonly parentCompletion: ParentCompletionService;
     readonly issueExecutor: IssueExecutorService;
-    readonly agentRuntime: PiAgentService;
+    readonly harness: HarnessService;
 };
 
 export type WorkflowOptions = {
@@ -61,9 +61,8 @@ export type WorkflowOptions = {
     readonly branch?: string;
     readonly maxDecompositionDepth?: number;
     readonly issueFilters: IssueFilters;
-    readonly agent: string;
-    readonly model?: AgentModel;
-    readonly modelVariant?: string;
+    /** The harness, model and effort every role runs with. */
+    readonly roles: RoleAssignments;
     readonly verificationCommands?: ReadonlyArray<string>;
     readonly implementationAttempts?: number;
     /** Review rounds allowed before escalating to decomposition. */

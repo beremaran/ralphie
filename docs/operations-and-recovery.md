@@ -38,11 +38,7 @@ lines.
   paused so the discovered plan can be inspected before work begins; `p`
   resumes or pauses it between issues, `s` stops the queue after the active
   issue and drains the run normally, and `q` (like Ctrl-C) cancels immediately.
-  `m` opens the model picker: the pi catalog with the selected model's thinking
-  levels, `Tab` switches panes, `Enter` applies the pick to every later issue
-  (the session in flight keeps its model), and `Esc` cancels. The header shows
-  the active model and level; the footer and sidebar hints show the pending
-  pause or stop. Tool output, long commands, and deep paths stay inside the
+  The footer and sidebar hints show the pending pause or stop. Tool output, long commands, and deep paths stay inside the
   transcript panel; resize is handled by the renderer; Ctrl-C is forwarded as
   SIGINT so cancellation still restores the checkout and saves state; disposal
   destroys the renderer and restores the terminal.
@@ -118,9 +114,8 @@ on `harness` as well as `name`.
 ## State and artifacts
 
 The workspace's `.ralphie` directory contains only repository checkouts and
-Ralphie's run state, events, and recovery artifacts. Pi credentials and
-default-model settings live in `~/.pi/agent` (or `PI_CODING_AGENT_DIR`) and
-are never written under this path.
+Ralphie's run state, events, and recovery artifacts. Harness credentials and
+settings belong to each harness CLI and are never written under this path.
 
 Run artifacts live under:
 
@@ -148,7 +143,7 @@ commits, resolution proof, decomposition decisions, and created child-number
 mappings. Stale or legacy un-fingerprinted decisions are removed on load
 without disturbing the other artifacts for the issue.
 
-A successful or interrupted run uses this more detailed layout (pi
+A successful or interrupted run uses this more detailed layout (harness
 configuration is not stored in this tree):
 
 ```text
@@ -164,7 +159,8 @@ configuration is not stored in this tree):
 ```
 
 `state.json` is versioned, schema-validated, and atomically replaced. It
-contains the repository/branch, notification settings, pi model selection,
+contains the repository/branch, notification settings, the role assignments
+(harness, model, effort),
 pending and completed queue numbers, processed count, outcomes, active
 issue/stage, checkout invariant, and update time. State is saved before the
 queue starts, when an issue becomes active, after each issue outcome, after

@@ -13,12 +13,12 @@ makes tests straightforward without a framework-specific execution model.
 ```mermaid
 flowchart LR
     U[Operator] --> CLI["Inbound adapter<br/>command.ts / cli.ts / options.ts"]
-    CLI --> CTX["Bounded contexts<br/>agent · git · github · issues<br/>pi · process · progress · run · workflow · workspace"]
+    CLI --> CTX["Bounded contexts<br/>agent · config · git · github · harness · issues<br/>process · progress · run · workflow · workspace"]
     CTX --> PORTS["<context>/ports.ts + /domain"]
     PORTS -. implemented by .-> AD["<context>/adapters/"]
     AD --> GH[GitHub API]
     AD --> REPO[Workspace checkout]
-    AD --> LLM[Model providers]
+    AD --> LLM[Harness CLIs]
     AD --> DISK[State, artifacts, diagnostics]
     AD --> TERM[Terminal or JSON Lines]
 ```
@@ -31,10 +31,9 @@ that binds concrete adapters into the runtime bundle.
 
 | Context | Location | Responsibility |
 | --- | --- | --- |
-| `agent` | `src/agent/` | Agent session port, model/thinking types, prompts, structured output. |
+| `agent` | `src/agent/` | Prompts, structured-output and text-task helpers, and the role-to-session mapping (access mode, timeouts) over the harness port. |
 | `config` | `src/config/` | YAML configuration: the zod schema (`settings.ts`), layering and `--set` overrides (`load.ts`, `overrides.ts`), and the file-reader port with its Bun YAML adapter. |
-| `harness` | `src/harness/` | Provider-neutral harness port (session request, events, typed failures, structured results), the service that runs sessions and repairs invalid results, and one CLI adapter per harness (Claude Code so far). Not yet used by the workflow. |
-| `pi` | `src/pi/` | In-process pi SDK runtime: port for startup plus auth, client, tools, model catalog, and event translation adapters. |
+| `harness` | `src/harness/` | Provider-neutral harness port (session request, events, typed failures, structured results), the service that runs sessions and repairs invalid results, and one CLI adapter per harness (Claude Code so far). Every workflow session runs through it; `app/roles.ts` resolves the configured role assignments. |
 | `github` | `src/github/` | Issue value objects, repository slug parsing, and the Octokit/`gh` adapters. |
 | `git` | `src/git/` | Checkout preparation, checkpoints, issue operations, invariants, and remote-safety adapters. |
 | `issues` | `src/issues/` | Domain (`domain/`), executors and artifact/recovery logic (`app/`), filesystem adapters (`adapters/`). |
@@ -82,10 +81,9 @@ services under `src/git/adapters/` and `src/github/adapters/` perform those side
 effects and verify their invariants. The explicit runtime object makes these
 boundaries testable without a framework-specific execution model.
 
-Agent configuration is separate from persistent workspace state: the pi
-provider catalog is static and in-process, `--model provider/model` selects a
-model at runtime, and credentials resolve through `~/.pi/agent/auth.json`
-(overridable with `PI_CODING_AGENT_DIR`) plus provider environment variables.
+Agent configuration is separate from persistent workspace state: the
+`harnesses` and `roles` configuration keys choose the harness, model, and
+effort per role, and each harness CLI keeps its own login and credentials.
 Ralphie never stores agent configuration under the
 workspace; run state and recovery artifacts belong under the workspace's
 `.ralphie` directory.
@@ -119,7 +117,7 @@ the normal check gate.
 | Complexity routing | `src/issues/app/executor.ts`, `src/issues/app/complexity.ts` |
 | Implementation/review/delivery | `src/issues/app/implementation-executor.ts`, `src/issues/app/verification.ts`, `src/git/adapters/issue-operations.ts`, `src/git/adapters/remote-safety.ts` |
 | Decomposition and GitHub mutations | `src/issues/app/decomposition-executor.ts`, `src/github/adapters/issue-mutations.ts`, `src/github/adapters/issue-relationships.ts` |
-| Pi model catalog, credentials, tools, sessions, and structured results | `src/pi/`, `src/agent/` |
+| Role assignments, session requests, and structured results | `src/harness/app/roles.ts`, `src/agent/` |
 | Harness sessions, structured results, and the Claude Code adapter | `src/harness/ports.ts`, `src/harness/app/`, `src/harness/adapters/` |
 | Git checkpoints, safety, and branches | `src/git/` |
 | Durable run state, artifacts, diagnostics, and event audit | `src/issues/app/artifacts.ts`, `src/issues/app/recovery.ts`, `src/run/`, `src/issues/adapters/` |

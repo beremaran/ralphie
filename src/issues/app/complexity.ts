@@ -61,11 +61,7 @@ export const makeComplexityAssessmentService = (
                     targetBranch: context.targetBranch,
                 }),
                 schema: complexityDecisionSchema,
-                agent: context.agentSelection.agent,
-                model: context.agentSelection.model,
-                variant: context.agentSelection.variant,
-                runId: context.runId,
-                diagnostics: context.agentDiagnostics,
+                role: "triager",
                 verifyAfter: (signal) =>
                     context.repositoryInvariant.verify(
                         context.repositoryPath,

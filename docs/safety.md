@@ -51,10 +51,9 @@ Tracked modifications and untracked, non-ignored files inside that checkout are
 discarded. Keep unrelated work outside Ralphie's workspace.
 
 The workspace's `.ralphie` directory contains only repository checkouts and
-Ralphie's run state, events, and recovery artifacts. Pi credentials and
-default-model settings live in `~/.pi/agent` (or `PI_CODING_AGENT_DIR`) and are
-never written under this path; keep provider configuration outside the
-workspace.
+Ralphie's run state, events, and recovery artifacts. Harness credentials and
+settings belong to each harness CLI and are never written under this path;
+keep provider configuration outside the workspace.
 
 Ralphie removes the entire workspace recursively before preparing a run and
 again after a successful run, after protected-path checks. The retained
@@ -69,19 +68,18 @@ bunx @beremaran/ralphie owner/repository \
 
 ## Agent and mutation boundaries
 
-Agent sessions are rooted at the repository checkout. Review-profile sessions
-expose read-only tools (`read` and the non-mutating shell allowlist) and deny
-file writes; implementation sessions may edit the checkout. Every session
-enforces a shell denylist that rejects commits, pushes, branch/reset/clean
-operations, and `gh` commands before execution, and post-task verification
-fails the task when the checkout moved anyway. Structured decisions are
-returned by calling a `submit_result` tool whose parameters are the canonical
-Zod schema; invalid arguments come back to the model as tool errors so it can
-correct itself in the same turn, and the captured call is re-validated at the
-Ralphie domain boundary. A repository-backed blocker is a
-`request_needs_attention` tool call, not a mutation-capable tool. Ralphie
+Agent sessions run as headless harness CLI invocations rooted at the
+repository checkout. Read-only roles run in the harness's read-only mode
+(Claude Code plan mode with a read-only tool list); the `implementer` and
+`fixer` run in the harness's `safe` mode and may edit the checkout. Post-task
+verification fails the task when the checkout's branch or head moved anyway.
+Structured decisions are returned as a result validated against the canonical
+Zod schema (natively where the harness supports it, otherwise from a final
+JSON block, with a bounded number of corrections), and the validated value is
+what the domain boundary accepts. A repository-backed blocker is an optional
+`needsAttention` field in that result, not a mutation-capable tool. Ralphie
 stages, verifies, commits, pushes, and mutates
-GitHub through deterministic domain services. Invalid output or a pi failure
+GitHub through deterministic domain services. Invalid output or a harness failure
 becomes a failed issue outcome without proceeding to the next operation.
 A turn that produces no assistant message fails instead of producing a
 decision.

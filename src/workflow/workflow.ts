@@ -1,5 +1,4 @@
-import { makeAgentSessionDiagnostics } from "../agent/task-session.ts";
-import type { AgentModel, AgentSelection } from "../agent/model.ts";
+import type { RoleAssignments } from "../harness/app/roles.ts";
 import { type NeedsAttentionNotificationInput } from "../github/ports.ts";
 import {
     isIssueEligible,
@@ -17,8 +16,6 @@ import {
     IssueQueueState,
     toQueuedIssues,
 } from "../issues/domain/queue.ts";
-import { type PiAgentRuntime } from "../pi/ports.ts";
-import { validateModelVariants } from "../agent/variants.ts";
 import {
     type ProgressReporterService,
     type ProgressStage,
@@ -329,7 +326,7 @@ type PersistWorkflowStateInput = {
     readonly branch: string;
     readonly notificationsEnabled: boolean;
     readonly needsAttentionLabel?: string;
-    readonly selection: AgentSelection;
+    readonly roles: RoleAssignments;
     readonly maxDecompositionDepth: number;
     readonly outcomes: ReadonlyArray<WorkflowOutcomeEntry>;
     readonly clock: Clock;
@@ -386,7 +383,7 @@ const persistWorkflowState = async (
         ...(input.needsAttentionLabel === undefined
             ? {}
             : { needsAttentionLabel: input.needsAttentionLabel }),
-        selection: input.selection,
+        roles: input.roles,
         queue: {
             pending,
             completedIssueNumbers: [...snapshot.completedIssueNumbers],
@@ -532,9 +529,7 @@ type WorkflowConfiguration = {
     readonly requestedBranch?: string;
     readonly maxDecompositionDepth: number;
     readonly issueFilters: IssueFilters;
-    readonly agent: string;
-    readonly model?: AgentModel;
-    readonly modelVariant?: string;
+    readonly roles: RoleAssignments;
     readonly verificationCommands: ReadonlyArray<string>;
     readonly implementationAttempts?: number;
     readonly reviewRounds?: number;
@@ -564,9 +559,7 @@ const makeWorkflowConfiguration = (
         branch: requestedBranch,
         maxDecompositionDepth = DEFAULT_MAX_DECOMPOSITION_DEPTH,
         issueFilters,
-        agent,
-        model,
-        modelVariant,
+        roles,
         verificationCommands = [],
         implementationAttempts,
         reviewRounds,
@@ -583,9 +576,7 @@ const makeWorkflowConfiguration = (
         requestedBranch,
         maxDecompositionDepth,
         issueFilters,
-        agent,
-        model,
-        modelVariant,
+        roles,
         verificationCommands,
         implementationAttempts,
         reviewRounds,
@@ -608,36 +599,6 @@ const queueDisplayIssues = (
         number: issue.number,
         title: issue.title,
     }));
-
-/** The pi catalog and the effective default selection, for the model picker. */
-const runtimeCatalogDetails = (
-    runtime: PiAgentRuntime,
-    config: WorkflowConfiguration,
-): Readonly<Record<string, unknown>> => {
-    const model = config.model ?? runtime.defaultModel;
-    return {
-        models: runtime.catalog.map((entry) => ({
-            provider: entry.provider,
-            id: entry.id,
-            name: entry.name,
-            reasoning: entry.reasoning,
-            thinkingLevels: [...entry.thinkingLevels],
-        })),
-        ...(model === undefined
-            ? {}
-            : {
-                  selection: {
-                      model: {
-                          provider: model.providerID,
-                          id: model.modelID,
-                      },
-                      ...(config.modelVariant === undefined
-                          ? {}
-                          : { variant: config.modelVariant }),
-                  },
-              }),
-    };
-};
 
 const summaryMessage = (
     prefix: string,
@@ -663,11 +624,7 @@ const emitRunStarted = async (
                 ? {}
                 : { branch: config.requestedBranch }),
             workspace: config.workspace,
-            model: config.model
-                ? `${config.model.providerID}/${config.model.modelID}`
-                : "pi default",
-            variant: config.modelVariant ?? "pi default",
-            agent: config.agent,
+            roles: config.roles,
             maxDecompositionDepth: config.maxDecompositionDepth,
             runId: config.actualRunId,
             notificationsEnabled: config.notificationsEnabled,
@@ -745,22 +702,6 @@ const emitRunFailed = async (
     });
 };
 
-const validateRuntimeModelVariants = (
-    runtime: PiAgentRuntime,
-    config: WorkflowConfiguration,
-): void => {
-    validateModelVariants({
-        models: runtime.catalog,
-        ...(runtime.defaultModel === undefined
-            ? {}
-            : { defaultModel: runtime.defaultModel }),
-        ...(config.model === undefined ? {} : { primaryModel: config.model }),
-        ...(config.modelVariant === undefined
-            ? {}
-            : { variant: config.modelVariant }),
-    });
-};
-
 /** Run Ralphie using an explicit dependency object. */
 export const workflow = async (
     options: WorkflowOptions,
@@ -782,7 +723,7 @@ export const workflow = async (
         gitIssueCheckpoint: checkpoints,
         parentCompletion,
         issueExecutor: normalIssueExecutor,
-        agentRuntime,
+        harness,
     } = runtime;
     const config = makeWorkflowConfiguration(options, layout.statePath);
     const {
@@ -790,9 +731,7 @@ export const workflow = async (
         requestedBranch,
         maxDecompositionDepth,
         issueFilters,
-        agent,
-        model,
-        modelVariant,
+        roles,
         workspace,
         signal,
         control,
@@ -928,11 +867,6 @@ export const workflow = async (
                 await prepareRunState(preparedInput);
             const { prepared, branch } = preparedInput;
             const outcomes: Array<WorkflowOutcomeEntry> = [];
-            const selection: AgentSelection = {
-                agent,
-                model,
-                variant: modelVariant,
-            };
 
             const persistState = (
                 status: RunStateStatus,
@@ -949,7 +883,7 @@ export const workflow = async (
                         branch,
                         notificationsEnabled,
                         needsAttentionLabel,
-                        selection,
+                        roles,
                         maxDecompositionDepth,
                         outcomes,
                         clock,
@@ -963,7 +897,6 @@ export const workflow = async (
                 persistState(RunStateStatus.Active, activeIssue);
             await persistState(RunStateStatus.Active);
             const issueExecutor = normalIssueExecutor;
-            const diagnostics = makeAgentSessionDiagnostics();
             return {
                 prepared,
                 branch,
@@ -971,10 +904,8 @@ export const workflow = async (
                 captureCheckout,
                 queue,
                 outcomes,
-                selection,
                 persistState,
                 issueExecutor,
-                diagnostics,
                 discoveredIssues: preparedInput.discoveredIssues,
             };
         };
@@ -986,25 +917,10 @@ export const workflow = async (
             captureCheckout,
             queue,
             outcomes,
-            selection,
             persistState,
             issueExecutor,
-            diagnostics,
             discoveredIssues,
         } = await prepareWorkflow();
-
-        /** The CLI selection unless the picker chose a model for later issues. */
-        const effectiveSelection = (): AgentSelection => {
-            const override = control?.issueSelection?.();
-            if (override === undefined) return selection;
-            return {
-                agent: selection.agent,
-                model: override.model,
-                ...(override.variant === undefined
-                    ? {}
-                    : { variant: override.variant }),
-            };
-        };
 
         const restoreIssueCheckout =
             (issueBaseCheckout: WorkflowCheckout): (() => Promise<void>) =>
@@ -1111,7 +1027,6 @@ export const workflow = async (
 
         const executeIssue = async (
             issueContext: WorkflowIssueContext,
-            server: PiAgentRuntime,
         ): Promise<IssueExecutionOutcome> => {
             return await track(
                 progress,
@@ -1126,13 +1041,7 @@ export const workflow = async (
                         workspace,
                         runId: actualRunId,
                         runLayout: layout,
-                        agent: server.client,
-                        // Read live so a picker change also reaches the agent
-                        // sessions this issue starts from now on.
-                        get agentSelection() {
-                            return effectiveSelection();
-                        },
-                        agentDiagnostics: diagnostics,
+                        agent: { harness, roles },
                         repositoryInvariant: invariantService,
                         verificationCommands: config.verificationCommands,
                         implementationAttempts: config.implementationAttempts,
@@ -1376,9 +1285,7 @@ export const workflow = async (
             await refreshAfterDecomposition(outcome);
         };
 
-        const processNextIssue = async (
-            server: PiAgentRuntime,
-        ): Promise<boolean> => {
+        const processNextIssue = async (): Promise<boolean> => {
             checkCancellation(signal);
             const queuedIssue = queue.next();
             if (queuedIssue === undefined) return false;
@@ -1408,7 +1315,7 @@ export const workflow = async (
             }
             activeQueueIssues.set(issue.number, issue);
             const issueContext = await prepareIssue(issue);
-            const outcome = await executeIssue(issueContext, server);
+            const outcome = await executeIssue(issueContext);
             await finalizeIssue(issueContext, outcome);
             return true;
         };
@@ -1425,39 +1332,19 @@ export const workflow = async (
             return true;
         };
 
-        const processQueue = async (server: PiAgentRuntime): Promise<void> => {
+        const processQueue = async (): Promise<void> => {
             const step = async (): Promise<boolean> => {
                 await waitForQueueControl(control, signal);
                 checkCancellation(signal);
                 if (await stopQueueIfRequested()) return false;
-                return await processNextIssue(server);
+                return await processNextIssue();
             };
             while (queue.state() === IssueQueueState.Ready) {
                 if (!(await step())) break;
             }
         };
 
-        let server: PiAgentRuntime | undefined;
-        try {
-            const startedAgent = await track(
-                progress,
-                "agent-runtime",
-                "Starting pi agent runtime...",
-                async () => {
-                    const started = await agentRuntime.start();
-                    server = started;
-                    validateRuntimeModelVariants(started, config);
-                    return started;
-                },
-                (started) => ({
-                    message: "Pi agent runtime ready.",
-                    details: runtimeCatalogDetails(started, config),
-                }),
-            );
-            await processQueue(startedAgent);
-        } finally {
-            await server?.close();
-        }
+        await processQueue();
 
         if (queue.state() === IssueQueueState.DependencyBlocked) {
             await handleDependencyBlockedQueue({

@@ -1,12 +1,13 @@
 import { z } from "zod";
 
+import { HARNESS_ROLES } from "../harness/ports.ts";
 import { IssueExecutionOutcomeKind } from "../issues/app/execution.ts";
 import { DEFAULT_MAX_DECOMPOSITION_DEPTH } from "../issues/domain/decomposition-markdown.ts";
 import {
     NeedsAttentionReason,
     nonBlankStringSchema,
 } from "../issues/domain/decisions.ts";
-export const RUN_STATE_VERSION = 12 as const;
+export const RUN_STATE_VERSION = 13 as const;
 
 export enum RunStateStatus {
     Active = "active",
@@ -131,16 +132,15 @@ const runStateFields = {
     /** Whether needs-attention outcomes should be published to GitHub. */
     notificationsEnabled: z.boolean().optional(),
     needsAttentionLabel: z.string().trim().min(1).optional(),
-    selection: z.object({
-        agent: z.string().min(1),
-        model: z
-            .object({
-                providerID: z.string().min(1),
-                modelID: z.string().min(1),
-            })
-            .optional(),
-        variant: z.string().min(1).optional(),
-    }),
+    /** The harness assignment of every role for this run. */
+    roles: z.record(
+        z.enum(HARNESS_ROLES),
+        z.object({
+            harness: z.string().min(1),
+            model: z.string().min(1).optional(),
+            effort: z.string().min(1).optional(),
+        }),
+    ),
     maxDecompositionDepth: z
         .number()
         .int()

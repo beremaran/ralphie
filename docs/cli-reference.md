@@ -36,12 +36,11 @@ These options remain on the command line:
 | --- | --- | --- |
 | `--config <path>` | `$XDG_CONFIG_HOME/ralphie/config.yaml`, else `~/.config/ralphie/config.yaml` | Read configuration from this file. A missing file is an error. |
 | `--set <path=value>` | none | Override one configuration key for this run; repeatable. The path is dotted, a key containing a slash is double-quoted (`repos."owner/repo".branch=develop`), and the value is YAML. Applied after the file and the matching `repos` entry. |
-| `--model <provider/model>` | pi settings default | Override the pi model selection. Temporary: removed when harness configuration replaces it. |
-| `--thinking <level>` | `medium` | Thinking level for every session (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`); omit or pass `default` for `medium`. Temporary, like `--model`. |
 | `--output <mode>` | `default` | Output mode: `default` renders the full-screen TUI on a terminal and plain append-only lines when piped or in CI; `json` writes JSON Lines on stdout. |
 
 The short aliases are `-h` for `--help` and `-v` for `--version`. Former flags
-such as `--branch`, `--issue-label`, and `--verify-command` fail with an error
+such as `--branch`, `--issue-label`, `--verify-command`, `--model`, and
+`--thinking` fail with an error
 naming the configuration key that replaces them; the full mapping is in
 [Configuration](configuration.md#removed-flags).
 
@@ -56,8 +55,6 @@ Ralphie also reads these environment variables:
 | --- | --- |
 | `GH_TOKEN` | GitHub.com token for noninteractive `gh` authentication (preferred). |
 | `GITHUB_TOKEN` | Fallback GitHub.com token alias for `gh`. |
-| `PI_CODING_AGENT_DIR` | Pi config directory (default `~/.pi/agent`); contains `auth.json` and `settings.json`. |
-| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, … | Provider credentials for models without a stored pi credential. A stored `auth.json` credential wins over the environment. |
 
 For interactive `github.com` use, authenticate with `gh auth login` and verify
 with `gh auth status`. For unattended use, provide `GH_TOKEN` (preferred) or
@@ -89,12 +86,13 @@ bunx @beremaran/ralphie owner/repository \
   --set 'repos."owner/repository".branch=develop'
 ```
 
-Select a pi model and thinking level explicitly:
+Choose a model and effort for one run with `--set` (see
+[Configuration](configuration.md#harnesses-and-roles)):
 
 ```bash
 bunx @beremaran/ralphie owner/repository \
-  --model openai/gpt-5 \
-  --thinking high
+  --set harnesses.claude.model=opus \
+  --set harnesses.claude.effort=high
 ```
 
 Write machine-readable progress to stdout:

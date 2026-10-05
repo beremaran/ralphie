@@ -97,16 +97,24 @@ export type SessionEventListener = (
     context: SessionEventContext,
 ) => void;
 
-/** The part a session plays in the workflow. */
-export type HarnessRole =
-    | "triager"
-    | "preflight"
-    | "implementer"
-    | "fixer"
-    | "standards-reviewer"
-    | "spec-reviewer"
-    | "resolution-verifier"
-    | "decomposer";
+/** The parts a session plays in the workflow. */
+export const HARNESS_ROLES = [
+    "triager",
+    "preflight",
+    "implementer",
+    "fixer",
+    "standards-reviewer",
+    "spec-reviewer",
+    "resolution-verifier",
+    "decomposer",
+] as const;
+
+export type HarnessRole = (typeof HARNESS_ROLES)[number];
+
+/** Names of the harnesses a configuration may assign to a role. */
+export const HARNESS_NAMES = ["claude", "codex", "pi", "opencode"] as const;
+
+export type HarnessName = (typeof HARNESS_NAMES)[number];
 
 /**
  * What a session may do to the working tree.

@@ -71,6 +71,15 @@ contains spaces or brackets.
 ```yaml
 defaultOwner: acme
 workspace: ~/.ralphie
+harnesses:
+  claude:
+    model: opus
+    effort: high
+roles:
+  default: claude
+  reviewer:
+    harness: claude
+    model: sonnet
 intake:
   requireLabels: [bug]
   sort: created:asc
@@ -106,6 +115,45 @@ Every key is optional. The values above are the defaults, except
 | `defaultOwner` | none | Owner added to a bare `repo` argument. Top level only. |
 | `workspace` | `~/.ralphie` | Root directory for repository checkouts and run artifacts. Ralphie removes the workspace recursively before preparation and after a successful run, subject to protected-path checks; use a path dedicated to Ralphie (see [Safety](safety.md#workspace-risk)). Overridable per repository. |
 | `repos` | none | Per-repository overrides, keyed by `owner/repo`. Top level only. |
+
+### `harnesses` and `roles`
+
+Every agent session runs as a role on a harness. The harnesses are `claude`
+(Claude Code), `codex`, `pi`, and `opencode`; only `claude` has an adapter
+today, so assigning another name fails when its first session starts. Sessions run through the
+harness's own command-line program, which brings its own login and
+credentials; Ralphie stores none.
+
+`harnesses.<name>` sets the defaults for sessions on that harness:
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `harnesses.<name>.model` | harness default | Model passed to the harness. |
+| `harnesses.<name>.effort` | harness default | Reasoning effort passed to the harness. |
+
+`roles` assigns a harness to each role. A value is a harness name, or a
+mapping `{ harness, model, effort }` whose `model` and `effort` override the
+harness defaults for that role.
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `roles.default` | `claude` | Harness for every role without its own assignment. |
+| `roles.reviewer` | `roles.default` | Assignment both `standards-reviewer` and `spec-reviewer` inherit. |
+| `roles.triager`, `preflight`, `implementer`, `resolution-verifier`, `decomposer` | `roles.default` | Per-role assignment. |
+| `roles.standards-reviewer`, `roles.spec-reviewer` | `roles.reviewer`, else `roles.default` | Per-role assignment. |
+| `roles.fixer` | the resolved `implementer` | Per-role assignment. |
+
+Today's sessions map onto the roles as follows: complexity assessment is the
+`triager`, grounding and needs-attention confirmation are the `preflight`,
+implementation is the `implementer`, repair sessions are the `fixer`, review
+is the `standards-reviewer`, issue-resolution checks are the
+`resolution-verifier`, decomposition is the `decomposer`, and commit-message
+generation runs under the `implementer` assignment with read-only access. The
+`spec-reviewer` is assigned but not yet used.
+
+Editing roles (`implementer`, `fixer`) run in the harness's `safe` mode and
+the others read-only. Each invocation has a wall-clock limit of 60 minutes
+for editing roles and 15 minutes for read-only roles.
 
 ### `intake`
 
@@ -150,8 +198,8 @@ Temporary opt-in, kept until hand-offs replace it.
 
 ### Repository entries
 
-Each `repos."owner/repo"` entry accepts `workspace`, `intake`, `labels`,
-`limits`, and `notifications` (overriding the top level for that repository
+Each `repos."owner/repo"` entry accepts `workspace`, `harnesses`, `roles`,
+`intake`, `labels`, `limits`, and `notifications` (overriding the top level for that repository
 only) plus two keys that exist only here:
 
 | Key | Default | Description |
@@ -174,3 +222,5 @@ Each former flag now fails with an error naming its replacement.
 | `--workspace` | `workspace` |
 | `--notify-needs-attention` | `notifications.enabled` |
 | `--needs-attention-label` | `notifications.label` |
+| `--model` | `harnesses.<harness>.model` or `roles.<role>.model` |
+| `--thinking` | `harnesses.<harness>.effort` or `roles.<role>.effort` |

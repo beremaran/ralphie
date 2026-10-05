@@ -63,7 +63,6 @@ import {
     makeNeedsAttentionRouterService,
     type NeedsAttentionRouterService,
 } from "./issues/app/needs-attention.ts";
-import { type PiAgentService } from "./pi/ports.ts";
 import { makeClaudeCodeAdapter } from "./harness/adapters/claude-code.ts";
 import { makeHarnessService } from "./harness/app/harness-service.ts";
 import {
@@ -111,8 +110,7 @@ export type RalphieRuntime = {
     readonly issueExecutor: IssueExecutorService;
     readonly issueRecovery: IssueRecoveryService;
     readonly needsAttentionRouter: NeedsAttentionRouterService;
-    readonly agentRuntime: PiAgentService;
-    /** External-harness sessions; not yet used by the workflow. */
+    /** Runs every agent session through the configured harness CLIs. */
     readonly harness: HarnessService;
     readonly progress: ProgressReporterService;
     readonly runEventLog: RunEventLog;
@@ -124,7 +122,6 @@ export type RalphieRuntime = {
 };
 
 export type RuntimeOverrides = {
-    readonly agentRuntime: PiAgentService;
     readonly progress: ProgressReporterService;
     readonly runEventLog: RunEventLog;
     readonly layout: RunLayout;
@@ -140,7 +137,6 @@ export type RuntimeOverrides = {
 
 /** Assemble the small object graph for one run. */
 export const makeLiveRuntime = ({
-    agentRuntime,
     progress,
     runEventLog,
     layout,
@@ -252,7 +248,6 @@ export const makeLiveRuntime = ({
         issueExecutor,
         issueRecovery,
         needsAttentionRouter,
-        agentRuntime,
         harness,
         progress,
         runEventLog,

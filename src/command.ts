@@ -9,7 +9,6 @@ import {
     type RalphieCliOptions,
     resolveRalphieConfig,
 } from "./options.ts";
-import { agentModelSchema, agentModelVariantSchema } from "./agent/model.ts";
 import { intakeOrdering } from "./config/settings.ts";
 import { yamlConfigDocumentReader } from "./config/adapters/yaml-file.ts";
 import { makeGitHubViewerService } from "./github/adapters/viewer.ts";
@@ -20,9 +19,6 @@ import {
     type ProgressCoordinatorOptions,
 } from "./progress/adapters/coordinator.ts";
 import { type ProgressRenderMode } from "./progress/adapters/progress.ts";
-import { makePiAgentService } from "./pi/adapters/runtime.ts";
-import { type PiAgentService } from "./pi/ports.ts";
-import { type PiAgentConfig } from "./pi/ports.ts";
 import { makeLiveRuntime, type IssueWorkflowRuntime } from "./runtime.ts";
 import type { SessionEventListener } from "./harness/ports.ts";
 import { exitCodeForError, RalphieExitCode } from "./workflow/exit-code.ts";
@@ -37,8 +33,6 @@ import { RalphieError } from "./shared/error.ts";
 const cliOptions = {
     config: { type: "string" },
     set: { type: "string", multiple: true },
-    model: { type: "string" },
-    thinking: { type: "string" },
     output: { type: "string" },
     help: { type: "boolean", short: "h" },
     version: { type: "boolean", short: "v" },
@@ -58,6 +52,8 @@ const REMOVED_FLAGS: Readonly<Record<string, string>> = {
     workspace: "workspace",
     "notify-needs-attention": "notifications.enabled",
     "needs-attention-label": "notifications.label",
+    model: "harnesses.<harness>.model or roles.<role>.model",
+    thinking: "harnesses.<harness>.effort or roles.<role>.effort",
 };
 
 type ParsedCli = {
@@ -102,11 +98,6 @@ const asStrings = (
     );
 };
 
-const parseModel = (values: Record<string, unknown>, name: string) => {
-    const value = asNonEmptyString(values, name);
-    return value === undefined ? undefined : agentModelSchema.parse(value);
-};
-
 const outputModeSchema = z.enum(["default", "json"]);
 
 /** Fail on any former flag, naming the config key that replaces it. */
@@ -133,21 +124,15 @@ const parseCliOptions = (
     values: Record<string, unknown>,
     repo: string | undefined,
 ): RalphieCliOptions => {
-    const thinkingValue = asNonEmptyString(values, "thinking");
     const rawOutput = asNonEmptyString(values, "output");
     const outputValue =
         rawOutput === undefined ? undefined : outputModeSchema.parse(rawOutput);
     const configPath = asNonEmptyString(values, "config");
-    const model = parseModel(values, "model");
 
     return {
         ...(repo === undefined ? {} : { repo }),
         ...(configPath === undefined ? {} : { configPath }),
         overrides: asStrings(values, "set"),
-        ...(model === undefined ? {} : { model }),
-        ...(thinkingValue === undefined
-            ? {}
-            : { thinking: agentModelVariantSchema.parse(thinkingValue) }),
         json: outputValue === "json",
     };
 };
@@ -172,12 +157,6 @@ export const parseCliArgs = (args: ReadonlyArray<string>): ParsedCli => {
         options: parseCliOptions(values, parsed.positionals[0]),
     };
 };
-
-const resolvePiAgentConfig = (
-    config: ResolvedRalphieConfig,
-): PiAgentConfig => ({
-    ...(config.model === undefined ? {} : { model: config.model }),
-});
 
 export type CliTerminalInfo = {
     readonly isInteractive: boolean;
@@ -205,7 +184,7 @@ const resolveProgressMode = (
 
 export const HELP_TEXT = `Usage: ralphie [owner/]repository [options]
 
-Turn open GitHub issues into reviewed commits through pi.
+Turn open GitHub issues into reviewed commits through coding-agent harnesses.
 
 The repository is owner/name or a GitHub HTTPS or SSH clone URL. A bare name
 takes its owner from defaultOwner in the config file, else the gh login.
@@ -216,8 +195,6 @@ Options:
                                else ~/.config/ralphie/config.yaml)
       --set <path=value>       Override a config key for this run (repeatable), for example
                                --set limits.reviewRounds=3 or --set 'repos."owner/repo".branch=dev'
-      --model <provider/model> Pi model selection (defaults to pi settings)
-      --thinking <level>       Thinking level for every session: off, minimal, low, medium, high, xhigh, or max (default medium)
       --output <mode>          Output: default (TUI on a terminal, plain when piped) or json
   -h, --help                   Show this help
   -v, --version                Show version (use --output json for build metadata)
@@ -227,9 +204,9 @@ Environment:
   GH_TOKEN                     GitHub.com token for gh (preferred)
   GITHUB_TOKEN                 Fallback GitHub.com token alias for gh
                                Interactive \`gh auth login\` or a mounted GitHub CLI profile is not required
-  PI_CODING_AGENT_DIR          Pi config directory (default ~/.pi/agent)
-  ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, ...
-                               Provider credentials; a stored pi auth.json credential wins
+
+Sessions run through the harness CLIs named in the config file (claude by
+default), which bring their own login or credentials.
 `;
 
 export type CommandRuntime = IssueWorkflowRuntime & {
@@ -240,12 +217,7 @@ export type CommandFactories = {
     readonly makeCoordinator?: (
         options: ProgressCoordinatorOptions,
     ) => ProgressCoordinator;
-    readonly makeAgentRuntime?: (
-        config: PiAgentConfig,
-        listener: SessionEventListener,
-    ) => PiAgentService;
     readonly makeRuntime?: (input: {
-        readonly agentRuntime: PiAgentService;
         readonly progress: ProgressCoordinator["progress"];
         readonly runEventLog: RunEventLog;
         readonly layout: RunLayout;
@@ -282,7 +254,6 @@ const resolveCommandFactories = (
     factories: CommandFactories = {},
 ): Required<CommandFactories> => ({
     makeCoordinator: factories.makeCoordinator ?? makeProgressCoordinator,
-    makeAgentRuntime: factories.makeAgentRuntime ?? makePiAgentService,
     makeRuntime: factories.makeRuntime ?? makeLiveRuntime,
     runWorkflow: factories.runWorkflow ?? issueWorkflow.run,
     githubLogin:
@@ -335,15 +306,11 @@ const workflowOptionsFor = (
             labels: settings.intake.requireLabels,
             ...intakeOrdering(settings.intake.sort),
         },
-        ...(config.model === undefined ? {} : { model: config.model }),
-        ...(config.thinking === undefined
-            ? {}
-            : { modelVariant: config.thinking }),
         verificationCommands: settings.verify,
         implementationAttempts: settings.limits.implementationAttempts,
         reviewRounds: settings.limits.reviewRounds,
         verificationFixes: settings.limits.verificationFixes,
-        agent: config.agent,
+        roles: config.roles,
         workspace: settings.workspace,
         ...(input.signal === undefined ? {} : { signal: input.signal }),
         ...(control === undefined ? {} : { control }),
@@ -424,15 +391,7 @@ export const runCommand = async (
             output,
             runEventLog,
         );
-        const agentRuntime = factories.makeAgentRuntime(
-            {
-                ...resolvePiAgentConfig(config),
-                liveSelection: () => coordinator?.control?.issueSelection?.(),
-            },
-            coordinator.sessionListener,
-        );
         runtime = factories.makeRuntime({
-            agentRuntime,
             progress: coordinator.progress,
             runEventLog,
             layout,

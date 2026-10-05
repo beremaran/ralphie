@@ -14,7 +14,6 @@ import {
     buildVerificationFixPrompt,
 } from "../../agent/prompts.ts";
 import { requestStructuredOutput } from "../../agent/structured-output.ts";
-import { AgentSessionProfile } from "../../agent/ports.ts";
 import {
     runAgentTask,
     type NeedsAttentionRequest,
@@ -381,9 +380,7 @@ export const makeImplementationExecutorService = (
                 requestStructuredOutput(context.agent, {
                     directory: context.repositoryPath,
                     title: `Implement issue #${context.issue.number}`,
-                    agent: context.agentSelection.agent,
-                    model: context.agentSelection.model,
-                    variant: context.agentSelection.variant,
+                    role: "implementer",
 
                     schema: implementationResultSchema,
                     prompt: implementationPrompt(
@@ -391,8 +388,6 @@ export const makeImplementationExecutorService = (
                         attempt,
                         unresolvedSummary,
                     ),
-                    runId: context.runId,
-                    diagnostics: context.agentDiagnostics,
                     repositoryInvariant: invariant,
                     verifyRepositoryInvariant:
                         context.repositoryInvariant.verify,
@@ -471,15 +466,14 @@ export const makeImplementationExecutorService = (
     const repairVerificationFailure = async (
         input: WorkflowExecutorInput,
         invariant: { readonly branch: string; readonly head: string },
-        checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
         failure: VerificationCommandError,
         attempt: number,
-    ): Promise<WorkflowExecutorResult | undefined> => {
+    ): Promise<void> => {
         const { context } = input;
         const stagedDiff = await operations.readStagedBinaryDiff(
             context.repositoryPath,
         );
-        const result = await stage(
+        await stage(
             progress,
             input,
             "verification-fix",
@@ -488,7 +482,7 @@ export const makeImplementationExecutorService = (
                 runAgentTask(context.agent, {
                     directory: context.repositoryPath,
                     title: `Repair verification for issue #${context.issue.number} (attempt ${attempt})`,
-                    selection: context.agentSelection,
+                    role: "fixer",
                     prompt: buildVerificationFixPrompt({
                         issue: context.issue,
                         repositoryPath: context.repositoryPath,
@@ -496,8 +490,6 @@ export const makeImplementationExecutorService = (
                         stagedDiff,
                         failedVerification: failure.verification,
                     }),
-                    runId: context.runId,
-                    diagnostics: context.agentDiagnostics,
                     repositoryInvariant: invariant,
                     verifyRepositoryInvariant:
                         context.repositoryInvariant.verify,
@@ -510,12 +502,6 @@ export const makeImplementationExecutorService = (
             undefined,
             { attempt, maxAttempts: verificationFixBudget(context) },
         );
-        const routed = await routeSignal(
-            input,
-            result.needsAttention,
-            checkpoint,
-        );
-        if (routed !== undefined) return routed;
         checkSignal(context.signal);
         await stage(
             progress,
@@ -527,13 +513,11 @@ export const makeImplementationExecutorService = (
             undefined,
             { attempt, maxAttempts: verificationFixBudget(context) },
         );
-        return undefined;
     };
 
     const ensureVerificationPassing = async (
         input: WorkflowExecutorInput,
         invariant: { readonly branch: string; readonly head: string },
-        checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
     ): Promise<VerificationResult> => {
         const attemptVerification = async (): Promise<VerificationAttempt> => {
             try {
@@ -550,14 +534,12 @@ export const makeImplementationExecutorService = (
         for (let attempt = 1; attempt <= maxFixes; attempt += 1) {
             const verification = await attemptVerification();
             if (verification.status === "passed") return verification;
-            const routed = await repairVerificationFailure(
+            await repairVerificationFailure(
                 input,
                 invariant,
-                checkpoint,
                 verification.error,
                 attempt,
             );
-            if (routed !== undefined) return routed;
         }
         const finalVerification = await attemptVerification();
         return finalVerification.status === "passed"
@@ -600,12 +582,7 @@ export const makeImplementationExecutorService = (
                         ),
                     }),
                     schema: reviewDecisionSchema,
-                    profile: AgentSessionProfile.Review,
-                    agent: context.agentSelection.agent,
-                    model: context.agentSelection.model,
-                    variant: context.agentSelection.variant,
-                    runId: context.runId,
-                    diagnostics: context.agentDiagnostics,
+                    role: "standards-reviewer",
                     repositoryInvariant: invariant,
                     verifyRepositoryInvariant:
                         context.repositoryInvariant.verify,
@@ -672,11 +649,8 @@ export const makeImplementationExecutorService = (
                         verification: verificationEvidence,
                     }),
                     schema: commitMessageDecisionSchema,
-                    agent: context.agentSelection.agent,
-                    model: context.agentSelection.model,
-                    variant: context.agentSelection.variant,
-                    runId: context.runId,
-                    diagnostics: context.agentDiagnostics,
+                    role: "implementer",
+                    access: "read-only",
                     repositoryInvariant: invariant,
                     verifyRepositoryInvariant:
                         context.repositoryInvariant.verify,
@@ -761,7 +735,7 @@ export const makeImplementationExecutorService = (
         const currentDiff = await operations.readStagedBinaryDiff(
             context.repositoryPath,
         );
-        const result = await stage(
+        await stage(
             progress,
             input,
             "review-fix",
@@ -770,7 +744,7 @@ export const makeImplementationExecutorService = (
                 runAgentTask(context.agent, {
                     directory: context.repositoryPath,
                     title: `Address review for issue #${context.issue.number} (attempt ${attempt})`,
-                    selection: context.agentSelection,
+                    role: "fixer",
                     prompt: buildReviewFixPrompt({
                         issue: context.issue,
                         repositoryPath: context.repositoryPath,
@@ -779,8 +753,6 @@ export const makeImplementationExecutorService = (
                         review: review.decision,
                         verification: review.verification,
                     }),
-                    runId: context.runId,
-                    diagnostics: context.agentDiagnostics,
                     repositoryInvariant: invariant,
                     verifyRepositoryInvariant:
                         context.repositoryInvariant.verify,
@@ -793,11 +765,6 @@ export const makeImplementationExecutorService = (
             undefined,
             { attempt, maxAttempts: reviewBudget(context) },
         );
-        const routed = await routeSignal(input, result.needsAttention, {
-            branch: invariant.branch,
-            sha: invariant.head,
-        });
-        if (routed !== undefined) return routed;
         checkSignal(context.signal);
         await stage(
             progress,
@@ -890,7 +857,6 @@ export const makeImplementationExecutorService = (
         const finalVerification = await ensureVerificationPassing(
             input,
             invariant,
-            checkpoint,
         );
         if (!("status" in finalVerification)) return finalVerification;
         if (
@@ -964,7 +930,6 @@ export const makeImplementationExecutorService = (
             const verification = await ensureVerificationPassing(
                 input,
                 invariant,
-                checkpoint,
             );
             if (!("status" in verification)) return verification;
             const review = await runReviewAttempt(
