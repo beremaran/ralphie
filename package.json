@@ -23,7 +23,8 @@
     "docs/operations-and-recovery.md",
     "docs/README.md",
     "docs/safety.md",
-    "docs/workflows.md"
+    "docs/workflows.md",
+    "vendor/mattpocock-skills"
   ],
   "repository": {
     "type": "git",
@@ -78,6 +79,7 @@
     "package:inspect": "bun run scripts/package-smoke.ts --dry-run",
     "prepack": "bun run build:package",
     "source:audit": "bun run scripts/source-reachability.ts --json",
+    "skills:sync": "bun run scripts/skills-sync.ts",
     "test": "bun test tests",
     "typecheck": "bunx tsc --noEmit"
   }

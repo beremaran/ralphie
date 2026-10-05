@@ -2,10 +2,11 @@
 
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 
 import packageJson from "../package.json";
+import { LOCK_FILE, VENDOR_DIRECTORY } from "./skills-sync.ts";
 
 const repositoryRoot = resolve(import.meta.dir, "..");
 const packageName = "@beremaran/ralphie";
@@ -139,22 +140,50 @@ const normalizeEntry = (entry: string): string =>
         .replace(/^package\//, "")
         .replace(/\/$/, "");
 
+/** A `files` entry covers itself and, for a directory, everything inside. */
+const covers = (entry: string, path: string): boolean =>
+    path === entry || path.startsWith(`${entry}/`);
+
 const assertAllowlist = (files: ReadonlyArray<string>): void => {
-    const expected = new Set<string>([
+    const expected = [
         ...((packageJson as { files?: ReadonlyArray<string> }).files ?? []),
         "package.json",
-    ]);
-    const actual = new Set(
-        files.map(normalizeEntry).filter((entry) => entry.length > 0),
+    ];
+    const actual = files
+        .map(normalizeEntry)
+        .filter((entry) => entry.length > 0);
+    const missing = expected.filter(
+        (entry) => !actual.some((path) => covers(entry, path)),
     );
-    const missing = [...expected].filter((entry) => !actual.has(entry));
     if (missing.length > 0) {
         return fail(`package file list is missing ${missing.join(", ")}.`);
     }
-    const unexpected = [...actual].filter((entry) => !expected.has(entry));
+    const unexpected = actual.filter(
+        (path) => !expected.some((entry) => covers(entry, path)),
+    );
     if (unexpected.length > 0) {
         return fail(
             `package file list contains unexpected ${unexpected.join(", ")}.`,
+        );
+    }
+};
+
+/** Every file of the vendored skills copy, per its lock, must be packed. */
+const assertVendoredSkills = async (
+    files: ReadonlyArray<string>,
+): Promise<void> => {
+    const lock = JSON.parse(
+        await Bun.file(
+            join(repositoryRoot, VENDOR_DIRECTORY, LOCK_FILE),
+        ).text(),
+    ) as { readonly files: Readonly<Record<string, string>> };
+    const packed = new Set(files.map(normalizeEntry));
+    const missing = [LOCK_FILE, ...Object.keys(lock.files)]
+        .map((path) => `${VENDOR_DIRECTORY}/${path}`)
+        .filter((path) => !packed.has(path));
+    if (missing.length > 0) {
+        return fail(
+            `package file list is missing vendored skill files ${missing.join(", ")}.`,
         );
     }
 };
@@ -404,12 +433,20 @@ const installAndVerify = async (
             "installed package does not define the ralphie executable.",
         );
     }
-    assertVersionOutputs(
-        resolve(installedRoot, bin.ralphie),
-        layout.install,
-        expectedVersion,
-        env,
+    const executable = resolve(installedRoot, bin.ralphie);
+    assertVersionOutputs(executable, layout.install, expectedVersion, env);
+    // The bundle finds the vendored skills one level above its own directory.
+    const vendoredLock = resolve(
+        dirname(executable),
+        "..",
+        VENDOR_DIRECTORY,
+        LOCK_FILE,
     );
+    if (!(await Bun.file(vendoredLock).exists())) {
+        return fail(
+            `installed package has no vendored skills lock at ${vendoredLock}.`,
+        );
+    }
 };
 
 const main = async (): Promise<void> => {
@@ -430,7 +467,9 @@ const main = async (): Promise<void> => {
             );
         }
         const cwd = options.registry ? layout.root : repositoryRoot;
-        assertAllowlist(packFileList(options, layout, cwd));
+        const packedFiles = packFileList(options, layout, cwd);
+        assertAllowlist(packedFiles);
+        await assertVendoredSkills(packedFiles);
         if (options.dryRun) {
             console.log(
                 `Package dry run passed for ${options.packageSpec ?? "the local checkout"}.`,
