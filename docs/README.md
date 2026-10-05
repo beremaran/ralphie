@@ -54,7 +54,7 @@ buried in a landing page.
 | [CLI reference](cli-reference.md) | Record the command syntax, options, defaults, environment variables, and recipes. |
 | [Operations and recovery](operations-and-recovery.md) | Document progress, artifacts, state, cancellation, failure, and cleanup. |
 | [Architecture](architecture.md) | Map runtime, orchestrator, domain services, and source locations. |
-| [Development](development.md) | Explain local development, test commands, optional registry checks, and contribution rules. |
+| [Development](development.md) | Explain local development, test commands, optional registry checks, the vendored skills sync, and contribution rules. |
 
 ## Keeping documentation current
 

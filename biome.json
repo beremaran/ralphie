@@ -5,6 +5,7 @@
       "**",
       "!!dist",
       "!!coverage",
+      "!!vendor",
       "!!targets/posix-installer-targets.json"
     ]
   },
