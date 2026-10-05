@@ -31,20 +31,21 @@ export enum IssueResolutionStatus {
     Unresolved = "unresolved",
 }
 
-export enum NeedsAttentionReason {
+export enum HandOffReason {
     OutdatedPremise = "outdated_premise",
     ConflictingRequirements = "conflicting_requirements",
     MissingInformation = "missing_information",
     ExternalDependency = "external_dependency",
     CannotReproduce = "cannot_reproduce",
     DecompositionLimitReached = "decomposition_limit_reached",
+    ImplementationExhausted = "implementation_exhausted",
 }
 
 export enum GroundingDisposition {
     Actionable = "actionable",
     AlreadyResolved = "already_resolved",
     Blocked = "blocked",
-    NeedsAttention = "needs_attention",
+    HandOff = "hand_off",
 }
 
 export const reviewDecisionSchema = z
@@ -114,10 +115,10 @@ const groundingAlreadyResolvedDecisionSchema = z.object({
     disposition: z.literal(GroundingDisposition.AlreadyResolved),
 });
 
-export const needsAttentionDecisionSchema = z
+export const handOffDecisionSchema = z
     .object({
-        disposition: z.literal(GroundingDisposition.NeedsAttention),
-        reason: z.enum(NeedsAttentionReason),
+        disposition: z.literal(GroundingDisposition.HandOff),
+        reason: z.enum(HandOffReason),
         summary: nonBlankStringSchema,
         evidence: z.array(nonBlankStringSchema).min(1),
         questions: z.array(nonBlankStringSchema).min(1),
@@ -127,7 +128,7 @@ export const needsAttentionDecisionSchema = z
 export const groundingDecisionSchema = z.discriminatedUnion("disposition", [
     groundingActionableDecisionSchema,
     groundingAlreadyResolvedDecisionSchema,
-    needsAttentionDecisionSchema,
+    handOffDecisionSchema,
 ]);
 
 const preflightActionableDecisionSchema = z.object({
@@ -152,7 +153,7 @@ export const preflightDecisionSchema = z.discriminatedUnion("disposition", [
     preflightActionableDecisionSchema,
     groundingAlreadyResolvedDecisionSchema,
     preflightBlockedDecisionSchema,
-    needsAttentionDecisionSchema,
+    handOffDecisionSchema,
 ]);
 
 export type PreflightDecision = z.infer<typeof preflightDecisionSchema>;
@@ -165,8 +166,8 @@ export const sessionFitDecisionSchema = z.object({
 export type SessionFitDecision = z.infer<typeof sessionFitDecisionSchema>;
 
 export type GroundingDecision = z.infer<typeof groundingDecisionSchema>;
-export type NeedsAttentionDecision = Omit<
-    z.infer<typeof needsAttentionDecisionSchema>,
+export type HandOffDecision = Omit<
+    z.infer<typeof handOffDecisionSchema>,
     "evidence" | "questions"
 > & {
     readonly evidence: ReadonlyArray<string>;

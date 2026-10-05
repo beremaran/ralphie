@@ -1,5 +1,4 @@
 import { RalphieError } from "../shared/error.ts";
-import type { NeedsAttentionReason } from "../issues/domain/decisions.ts";
 import type {
     DecompositionChildrenQuery,
     GitHubDecompositionChild,
@@ -119,24 +118,27 @@ export type GitHubIssueRelationshipService = {
     ) => Promise<void>;
 };
 
-export type NeedsAttentionNotificationInput = {
-    readonly reason: NeedsAttentionReason;
-    readonly summary: string;
-    readonly evidence: ReadonlyArray<string>;
-    readonly questions: ReadonlyArray<string>;
-    readonly labelName?: string;
+export type GitHubHandOffInput = {
+    /** The full comment text; it already starts with the AI disclaimer. */
+    readonly body: string;
+    /** The triage state label the issue moves to. */
+    readonly label: string;
+    /** Every triage state label; all but `label` are removed from the issue. */
+    readonly replaceLabels: ReadonlyArray<string>;
 };
 
-export type NeedsAttentionNotificationResult = {
+export type GitHubHandOffResult = {
     readonly comment: "created" | "updated" | "unchanged";
-    readonly label: "applied" | "not-configured";
 };
 
-export type GitHubNeedsAttentionNotificationService = {
-    readonly notify: (
+export type GitHubHandOffService = {
+    /**
+     * Post the hand-off comment (once per issue, updated when it changed) and
+     * replace the issue's triage state label.
+     */
+    readonly handOff: (
         repository: string,
-        sourceIssueNumber: number,
-        input: NeedsAttentionNotificationInput,
-        labelName?: string,
-    ) => Promise<NeedsAttentionNotificationResult>;
+        issueNumber: number,
+        input: GitHubHandOffInput,
+    ) => Promise<GitHubHandOffResult>;
 };

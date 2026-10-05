@@ -106,12 +106,6 @@ const rolesSchema = z.strictObject({
     decomposer: roleAssignmentSchema.optional(),
 });
 
-/** Temporary needs-attention notification opt-in, until hand-offs replace it. */
-const notificationsSchema = z.strictObject({
-    enabled: z.boolean().default(false),
-    label: nonEmptyString.optional(),
-});
-
 /**
  * Keys allowed at the top level that a `repos:` entry may also override.
  * New repository-overridable settings belong here.
@@ -124,7 +118,6 @@ const overridableSettings = {
     labels: labelsSchema.prefault({}),
     skills: skillsSchema.prefault({}),
     limits: limitsSchema.prefault({}),
-    notifications: notificationsSchema.prefault({}),
 };
 
 /** Keys that only make sense for a single repository. */
@@ -192,16 +185,6 @@ const refineLabels = (
 export const repositorySettingsSchema = repositoryEntrySchema.superRefine(
     (settings, context) => {
         refineLabels(settings.labels, context);
-        if (
-            settings.notifications.label !== undefined &&
-            !settings.notifications.enabled
-        ) {
-            context.addIssue({
-                code: "custom",
-                path: ["notifications", "label"],
-                message: "requires notifications.enabled: true",
-            });
-        }
     },
 );
 

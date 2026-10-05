@@ -76,7 +76,7 @@ const request: SessionRequest = {
 };
 
 const resultSchema = z.object({
-    status: z.enum(["done", "needs_attention"]),
+    status: z.enum(["done", "hand_off"]),
     summary: z.string(),
 });
 
@@ -236,7 +236,7 @@ describe("fallback structured results", () => {
             ...options,
             turns: [
                 reply(
-                    `${fenced({ status: "needs_attention", summary: "draft" })}\nActually:\n${fenced({ status: "done", summary: "final" })}`,
+                    `${fenced({ status: "hand_off", summary: "draft" })}\nActually:\n${fenced({ status: "done", summary: "final" })}`,
                 ),
             ],
         });
@@ -248,7 +248,7 @@ describe("fallback structured results", () => {
         expect(requests[0]?.jsonSchema).toBeUndefined();
         expect(requests[0]?.prompt).toContain("Implement the issue");
         expect(requests[0]?.prompt).toContain("```json");
-        expect(requests[0]?.prompt).toContain("needs_attention");
+        expect(requests[0]?.prompt).toContain("hand_off");
     });
 
     test("resumes the same session with the validation error, then succeeds", async () => {

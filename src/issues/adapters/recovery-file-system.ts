@@ -2,7 +2,7 @@ import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 
 import type { RecoveryFileSystem } from "../app/recovery.ts";
 
-/** Node file-system adapter for review and needs-attention diagnostics. */
+/** Node file-system adapter for review and hand-off diagnostics. */
 export const nodeRecoveryFileSystem: RecoveryFileSystem = {
     mkdir: async (directory, options) => {
         await mkdir(directory, options);

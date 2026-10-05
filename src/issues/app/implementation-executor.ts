@@ -14,10 +14,7 @@ import {
     buildVerificationFixPrompt,
 } from "../../agent/prompts.ts";
 import { requestStructuredOutput } from "../../agent/structured-output.ts";
-import {
-    runAgentTask,
-    type NeedsAttentionRequest,
-} from "../../agent/task-session.ts";
+import { runAgentTask, type HandOffRequest } from "../../agent/task-session.ts";
 import { z } from "zod";
 import {
     type ProgressStage,
@@ -33,6 +30,9 @@ import {
 import { IssueArtifactKind, issueFreshnessFingerprint } from "./artifacts.ts";
 import {
     commitMessageDecisionSchema,
+    GroundingDisposition,
+    type HandOffDecision,
+    HandOffReason,
     type IssueResolutionDecision,
     IssueResolutionStatus,
     reviewDecisionSchema,
@@ -53,7 +53,7 @@ import {
     makeResolutionVerificationService,
     type ResolutionVerificationService,
 } from "./resolution-verification.ts";
-import type { NeedsAttentionRouterService } from "./needs-attention.ts";
+import type { HandOffRouterService } from "./hand-off.ts";
 
 /** The implementation workflow for issues with complexity 0 through 3. */
 export type ImplementationExecutorService = {
@@ -239,21 +239,21 @@ export const makeImplementationExecutorService = (
     resolutionVerification: ResolutionVerificationService = makeResolutionVerificationService(
         progress,
     ),
-    needsAttentionRouter?: NeedsAttentionRouterService,
+    handOffRouter?: HandOffRouterService,
 ): ImplementationExecutorService => {
     const routeSignal = async (
         input: WorkflowExecutorInput,
-        request: NeedsAttentionRequest | undefined,
+        request: HandOffRequest | undefined,
         checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
     ): Promise<WorkflowExecutorResult | undefined> => {
         if (request === undefined) return undefined;
-        if (needsAttentionRouter === undefined) {
+        if (handOffRouter === undefined) {
             throw new RalphieError({
                 message:
-                    "A needs-attention signal requires the verifier/router service.",
+                    "A hand-off signal requires the verifier/router service.",
             });
         }
-        return await needsAttentionRouter.route({
+        return await handOffRouter.route({
             ...input,
             request,
             checkpoint,
@@ -400,7 +400,7 @@ export const makeImplementationExecutorService = (
             undefined,
             { attempt, maxAttempts: implementationBudget(context) },
         );
-        return await routeSignal(input, result.needsAttention, checkpoint);
+        return await routeSignal(input, result.handOff, checkpoint);
     };
 
     const inspectNoChangeResolution = async (
@@ -412,11 +412,7 @@ export const makeImplementationExecutorService = (
     > => {
         const { context, artifacts } = input;
         const resolution = await resolutionVerification.verify(context);
-        const routed = await routeSignal(
-            input,
-            resolution.needsAttention,
-            checkpoint,
-        );
+        const routed = await routeSignal(input, resolution.handOff, checkpoint);
         if (routed !== undefined) return routed;
         const outcome = resolutionOutcome(resolution.decision);
         if (
@@ -437,6 +433,7 @@ export const makeImplementationExecutorService = (
             ? {
                   ...outcome,
                   message: `Issue remains unresolved after ${implementationBudget(context)} no-change implementation attempts: ${outcome.message}`,
+                  exhausted: true,
               }
             : outcome;
     };
@@ -547,6 +544,7 @@ export const makeImplementationExecutorService = (
             : {
                   kind: IssueExecutionOutcomeKind.Failed,
                   message: `Deterministic verification still failed after ${maxFixes} repair attempts: ${finalVerification.error.message}`,
+                  exhausted: true,
               };
     };
 
@@ -598,7 +596,7 @@ export const makeImplementationExecutorService = (
         );
         const routed = await routeSignal(
             input,
-            reviewResult.needsAttention,
+            reviewResult.handOff,
             checkpoint,
         );
         if (routed !== undefined) return routed;
@@ -663,7 +661,7 @@ export const makeImplementationExecutorService = (
         );
         const routed = await routeSignal(
             input,
-            commitMessage.needsAttention,
+            commitMessage.handOff,
             checkpoint,
         );
         if (routed !== undefined) return routed;
@@ -1004,6 +1002,47 @@ export const makeImplementationExecutorService = (
         });
     };
 
+    /**
+     * Out-of-attempts failures are a human's problem: preserve diagnostics,
+     * restore the clean checkout and hand the issue off as ready-for-human.
+     */
+    const handOffWhenExhausted = async (
+        input: WorkflowExecutorInput,
+        checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
+        result: WorkflowExecutorResult,
+    ): Promise<WorkflowExecutorResult> => {
+        if (result.kind !== IssueExecutionOutcomeKind.Failed) return result;
+        if (result.exhausted !== true) return result;
+        const { context } = input;
+        const decision: HandOffDecision = {
+            disposition: GroundingDisposition.HandOff,
+            reason: HandOffReason.ImplementationExhausted,
+            summary: `Ralphie could not finish issue #${context.issue.number}: ${result.message}`,
+            evidence: [result.message],
+            questions: [
+                "Review the preserved diagnostics, then finish the change by hand or rewrite the issue so an agent can complete it.",
+            ],
+        };
+        const { disposition: _disposition, ...details } = decision;
+        const recovered = await recovery.handleHandOff({
+            runId: context.runId,
+            repository: context.repository,
+            workspace: context.workspace,
+            repositoryPath: context.repositoryPath,
+            issue: context.issue,
+            checkpoint,
+            fingerprint: issueFreshnessFingerprint(context.issue),
+            decision,
+            repositoryInvariant: context.repositoryInvariant,
+            signal: context.signal,
+        });
+        return {
+            kind: IssueExecutionOutcomeKind.HandOff,
+            ...details,
+            diagnosticsPath: recovered.diagnosticsPath,
+        };
+    };
+
     const executeImplementation = async (
         input: WorkflowExecutorInput,
     ): Promise<WorkflowExecutorResult> => {
@@ -1023,7 +1062,11 @@ export const makeImplementationExecutorService = (
         if (recovered !== undefined) return recovered;
 
         const { checkpoint, invariant } = await prepareAttempt(input);
-        return await runImplementationAttempts(input, checkpoint, invariant);
+        return await handOffWhenExhausted(
+            input,
+            checkpoint,
+            await runImplementationAttempts(input, checkpoint, invariant),
+        );
     };
 
     return {

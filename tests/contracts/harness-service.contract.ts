@@ -44,7 +44,7 @@ const request: SessionRequest = {
 };
 
 const resultSchema = z.object({
-    status: z.enum(["done", "needs_attention"]),
+    status: z.enum(["done", "hand_off"]),
     summary: z.string(),
 });
 

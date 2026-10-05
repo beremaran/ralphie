@@ -1,5 +1,10 @@
 import type { RoleAssignments } from "../harness/app/roles.ts";
-import { type NeedsAttentionNotificationInput } from "../github/ports.ts";
+import {
+    CANONICAL_HAND_OFF_LABELS,
+    handOffTarget,
+    renderHandOffComment,
+    type HandOffLabels,
+} from "../issues/domain/hand-off.ts";
 import {
     isIssueEligible,
     type GitHubIssue,
@@ -10,7 +15,6 @@ import {
     IssueExecutionOutcomeKind,
     type IssueExecutionOutcome,
 } from "../issues/app/execution.ts";
-import { NeedsAttentionReason } from "../issues/domain/decisions.ts";
 import {
     createIssueQueue,
     IssueQueueState,
@@ -99,8 +103,8 @@ const outcomeMessage = (
                 : `Issue #${issueNumber} implemented and pushed.`;
         case IssueExecutionOutcomeKind.Decomposed:
             return `Issue #${issueNumber} decomposed into ${outcome.childIssueNumbers.length} child issues.`;
-        case IssueExecutionOutcomeKind.NeedsAttention:
-            return `Issue #${issueNumber} needs attention: ${outcome.summary}`;
+        case IssueExecutionOutcomeKind.HandOff:
+            return `Issue #${issueNumber} handed off to ${handOffTarget(outcome.reason)}: ${outcome.summary}`;
         case IssueExecutionOutcomeKind.Escalated:
             return `Issue #${issueNumber} escalated: ${outcome.reason}`;
         case IssueExecutionOutcomeKind.Failed:
@@ -111,14 +115,14 @@ const outcomeMessage = (
 };
 
 type RunStateOutcome = RunState["outcomes"][number]["outcome"];
-type RunStateNeedsAttentionOutcome = Extract<
+type RunStateHandOffOutcome = Extract<
     RunStateOutcome,
-    { readonly kind: IssueExecutionOutcomeKind.NeedsAttention }
+    { readonly kind: IssueExecutionOutcomeKind.HandOff }
 >;
 
-const copyNeedsAttentionOutcome = (
-    outcome: NeedsAttentionOutcome,
-): RunStateNeedsAttentionOutcome => {
+const copyHandOffOutcome = (
+    outcome: HandOffOutcome,
+): RunStateHandOffOutcome => {
     const details = {
         kind: outcome.kind,
         reason: outcome.reason,
@@ -133,10 +137,9 @@ const copyNeedsAttentionOutcome = (
     if (outcome.diagnosticsPath !== undefined) {
         return { ...details, diagnosticsPath: outcome.diagnosticsPath };
     }
-    if (outcome.route !== "needs-attention") {
+    if (outcome.route !== "hand-off") {
         throw new RalphieError({
-            message:
-                "Needs-attention outcome is missing its persisted location.",
+            message: "Hand-off outcome is missing its persisted location.",
         });
     }
     return { ...details, route: outcome.route };
@@ -175,8 +178,8 @@ const copyOutcome = (outcome: IssueExecutionOutcome): RunStateOutcome => {
                 kind: outcome.kind,
                 childIssueNumbers: [...outcome.childIssueNumbers],
             };
-        case IssueExecutionOutcomeKind.NeedsAttention:
-            return copyNeedsAttentionOutcome(outcome);
+        case IssueExecutionOutcomeKind.HandOff:
+            return copyHandOffOutcome(outcome);
         case IssueExecutionOutcomeKind.Escalated:
             return {
                 kind: outcome.kind,
@@ -197,26 +200,17 @@ const copyOutcome = (outcome: IssueExecutionOutcome): RunStateOutcome => {
     return unreachableOutcome(outcome);
 };
 
-type NeedsAttentionOutcome = Extract<
+type HandOffOutcome = Extract<
     IssueExecutionOutcome,
-    { readonly kind: IssueExecutionOutcomeKind.NeedsAttention }
+    { readonly kind: IssueExecutionOutcomeKind.HandOff }
 > & {
-    readonly route?: "needs-attention";
+    readonly route?: "hand-off";
     readonly artifactPath?: string;
     readonly diagnosticsPath?: string;
 };
 
-const needsAttentionNotificationInput = (
-    outcome: NeedsAttentionOutcome,
-): NeedsAttentionNotificationInput => ({
-    reason: outcome.reason,
-    summary: outcome.summary,
-    evidence: [...outcome.evidence],
-    questions: [...outcome.questions],
-});
-
-const needsAttentionArtifactDetails = (
-    outcome: NeedsAttentionOutcome,
+const handOffArtifactDetails = (
+    outcome: HandOffOutcome,
 ): Readonly<Record<string, unknown>> =>
     outcome.artifactPath === undefined
         ? outcome.diagnosticsPath === undefined
@@ -224,15 +218,15 @@ const needsAttentionArtifactDetails = (
             : { diagnosticsPath: outcome.diagnosticsPath }
         : { artifactPath: outcome.artifactPath };
 
-const needsAttentionProgressMessage = (
+const handOffProgressMessage = (
     issueNumber: number,
-    outcome: NeedsAttentionOutcome,
+    outcome: HandOffOutcome,
 ): string =>
-    `Issue #${issueNumber} needs attention ` +
+    `Issue #${issueNumber} handed off to ${handOffTarget(outcome.reason)} ` +
     `(${outcome.reason}): ${outcome.summary}`;
 
-const needsAttentionProgressDetails = (input: {
-    readonly outcome: NeedsAttentionOutcome;
+const handOffProgressDetails = (input: {
+    readonly outcome: HandOffOutcome;
     readonly current: number;
 }): Readonly<Record<string, unknown>> => ({
     reason: input.outcome.reason,
@@ -242,7 +236,7 @@ const needsAttentionProgressDetails = (input: {
     ...(input.outcome.route === undefined
         ? {}
         : { route: input.outcome.route }),
-    ...needsAttentionArtifactDetails(input.outcome),
+    ...handOffArtifactDetails(input.outcome),
     queuePosition: input.current,
 });
 
@@ -308,8 +302,8 @@ const routeSummary = (
     outcomes: WorkflowSummary["outcomes"],
 ): ReadonlyArray<{ readonly issueNumber: number; readonly route: string }> =>
     outcomes.flatMap(({ issueNumber, outcome }) =>
-        outcome.kind === IssueExecutionOutcomeKind.NeedsAttention
-            ? [{ issueNumber, route: "needs-attention" }]
+        outcome.kind === IssueExecutionOutcomeKind.HandOff
+            ? [{ issueNumber, route: "hand-off" }]
             : [],
     );
 
@@ -324,8 +318,6 @@ type PersistWorkflowStateInput = {
     readonly actualRunId: string;
     readonly repository: string;
     readonly branch: string;
-    readonly notificationsEnabled: boolean;
-    readonly needsAttentionLabel?: string;
     readonly roles: RoleAssignments;
     readonly maxDecompositionDepth: number;
     readonly outcomes: ReadonlyArray<WorkflowOutcomeEntry>;
@@ -379,10 +371,6 @@ const persistWorkflowState = async (
         repository: input.repository,
         branch: input.branch,
         maxDecompositionDepth: input.maxDecompositionDepth,
-        notificationsEnabled: input.notificationsEnabled,
-        ...(input.needsAttentionLabel === undefined
-            ? {}
-            : { needsAttentionLabel: input.needsAttentionLabel }),
         roles: input.roles,
         queue: {
             pending,
@@ -408,11 +396,10 @@ type WorkflowIssueContext = {
 
 /**
  * Dependency-blocked issues are never handed to the executor, so no agent
- * session can report them. Surface them explicitly as needs-attention
- * outcomes: evidence naming each open dependency instead of failing the run
- * with a bare "blocked by open dependencies" error. Blocked issues stay
- * pending in the persisted queue and become ready when their dependencies
- * complete.
+ * session can report them. Record them as skipped outcomes naming each open
+ * dependency instead of failing the run with a bare "blocked by open
+ * dependencies" error. Blocked issues stay pending in the persisted queue and
+ * become ready when their dependencies complete.
  */
 type DependencyBlockedHandlers = {
     readonly queue: ReturnType<typeof createIssueQueue>;
@@ -420,72 +407,52 @@ type DependencyBlockedHandlers = {
         issueNumber: number,
         outcome: IssueExecutionOutcome,
     ) => void;
-    readonly emitNeedsAttentionEvent: (
-        issueContext: Pick<WorkflowIssueContext, "issue" | "current" | "total">,
-        outcome: NeedsAttentionOutcome,
+    readonly emitBlockedSkip: (
+        issue: GitHubIssue,
+        reason: string,
     ) => Promise<void>;
     readonly persistState: (
         status: RunStateStatus,
         currentIssue?: RunState["activeIssue"],
     ) => Promise<void>;
-    readonly queueTotalFor: (current: number) => number;
 };
 
 const emitDependencyBlockedIssue = async (
     handlers: Pick<
         DependencyBlockedHandlers,
-        "recordIssueOutcome" | "emitNeedsAttentionEvent" | "persistState"
+        "recordIssueOutcome" | "emitBlockedSkip" | "persistState"
     > & {
         readonly issue: GitHubIssue;
         readonly openDependencies: ReadonlyArray<number>;
-        readonly current: number;
-        readonly total: number;
     },
 ): Promise<void> => {
     const {
         recordIssueOutcome,
-        emitNeedsAttentionEvent,
+        emitBlockedSkip,
         persistState,
         issue,
         openDependencies,
-        current,
-        total,
     } = handlers;
     const dependencyList = openDependencies
         .map((number) => `#${number}`)
         .join(", ");
-    const outcome: NeedsAttentionOutcome = {
-        kind: IssueExecutionOutcomeKind.NeedsAttention,
-        reason: NeedsAttentionReason.ExternalDependency,
-        summary: `Issue #${issue.number} cannot start: open ${openDependencies.length === 1 ? "dependency" : "dependencies"} ${dependencyList} must complete first.`,
-        evidence: openDependencies.map(
-            (dependency) =>
-                `Dependency #${dependency} is open and was not completed in this run.`,
-        ),
-        questions: [
-            `Complete ${dependencyList} before this issue can be queued, or confirm the dependencies should be treated as satisfied.`,
-        ],
-        route: "needs-attention",
-    };
-    recordIssueOutcome(issue.number, outcome);
-    await emitNeedsAttentionEvent({ issue, current, total }, outcome);
+    const reason = `Blocked by open ${openDependencies.length === 1 ? "issue" : "issues"} ${dependencyList}.`;
+    recordIssueOutcome(issue.number, {
+        kind: IssueExecutionOutcomeKind.Skipped,
+        reason,
+    });
+    await emitBlockedSkip(issue, reason);
     await persistState(RunStateStatus.Active, {
         issueNumber: issue.number,
-        stage: "grounding",
+        stage: "preflight",
     });
 };
 
 /**
- * Dependency-blocked issues are never handed to the executor, so no agent
- * session can report them. Surface them explicitly as needs-attention
- * outcomes with evidence naming each open dependency, instead of
- * failing the run with a bare "blocked by open dependencies" error. This
- * deterministic queue-order block never publishes a needs-attention
- * notification or label: an issue waiting on open queue items resolves by
- * queue completion, not by human attention, so the opt-in notifier is
- * reserved for agent-reported blockers. Blocked issues stay pending in the
- * persisted queue, and the fail-closed error is thrown only when the blocked
- * state is spurious (no pending entry has an unmet dependency).
+ * A deterministic queue-order block changes nothing on GitHub: an issue
+ * waiting on open queue items resolves by queue completion, not by a human.
+ * The fail-closed error is thrown only when the blocked state is spurious (no
+ * pending entry has an unmet dependency).
  */
 const handleDependencyBlockedQueue = async (
     handlers: DependencyBlockedHandlers,
@@ -501,14 +468,11 @@ const handleDependencyBlockedQueue = async (
             ),
         ];
         if (openDependencies.length === 0) continue;
-        const current = queue.processedCount() + recorded;
         recorded += 1;
         await emitDependencyBlockedIssue({
             ...handlers,
             issue,
             openDependencies,
-            current,
-            total: handlers.queueTotalFor(current),
         });
     }
     if (recorded === 0) {
@@ -537,8 +501,7 @@ type WorkflowConfiguration = {
     readonly workspace: string;
     readonly signal?: AbortSignal;
     readonly control?: RunControl;
-    readonly notificationsEnabled: boolean;
-    readonly needsAttentionLabel?: string;
+    readonly handOffLabels: HandOffLabels;
     readonly actualRunId: string;
     readonly statePath: string;
 };
@@ -568,8 +531,7 @@ const makeWorkflowConfiguration = (
         signal,
         control,
         runId,
-        notificationsEnabled = false,
-        needsAttentionLabel,
+        handOffLabels = CANONICAL_HAND_OFF_LABELS,
     } = options;
     return {
         repo,
@@ -584,8 +546,7 @@ const makeWorkflowConfiguration = (
         workspace,
         signal,
         ...(control === undefined ? {} : { control }),
-        notificationsEnabled,
-        ...(needsAttentionLabel === undefined ? {} : { needsAttentionLabel }),
+        handOffLabels,
         actualRunId: runId,
         statePath,
     };
@@ -607,7 +568,7 @@ const summaryMessage = (
     `${prefix}: ${counts.completed} completed, ` +
     `${counts.decomposed} decomposed, ` +
     `${counts.escalated} escalated, ` +
-    `${counts[IssueExecutionOutcomeKind.NeedsAttention]} needs-attention, ` +
+    `${counts[IssueExecutionOutcomeKind.HandOff]} hand-off, ` +
     `${counts.skipped} skipped, ${counts.failed} failed.`;
 
 const emitRunStarted = async (
@@ -627,10 +588,6 @@ const emitRunStarted = async (
             roles: config.roles,
             maxDecompositionDepth: config.maxDecompositionDepth,
             runId: config.actualRunId,
-            notificationsEnabled: config.notificationsEnabled,
-            ...(config.needsAttentionLabel === undefined
-                ? {}
-                : { needsAttentionLabel: config.needsAttentionLabel }),
         },
     });
 };
@@ -717,7 +674,7 @@ export const workflow = async (
         githubConnection,
         githubIssues,
         githubIssueMutations: issueMutations,
-        githubNeedsAttentionNotification: needsAttentionNotification,
+        githubHandOff: handOffService,
         gitRepository: repository,
         gitRepositoryInvariant: invariantService,
         gitIssueCheckpoint: checkpoints,
@@ -735,8 +692,7 @@ export const workflow = async (
         workspace,
         signal,
         control,
-        notificationsEnabled,
-        needsAttentionLabel,
+        handOffLabels,
         actualRunId,
         statePath,
     } = config;
@@ -881,8 +837,6 @@ export const workflow = async (
                         actualRunId,
                         repository: repo,
                         branch,
-                        notificationsEnabled,
-                        needsAttentionLabel,
                         roles,
                         maxDecompositionDepth,
                         outcomes,
@@ -993,7 +947,7 @@ export const workflow = async (
 
         await reconcileDiscoveredParents(discoveredIssues);
 
-        const captureNeedsAttentionCheckout = async (
+        const captureHandOffCheckout = async (
             issueContext: WorkflowIssueContext,
         ): Promise<WorkflowCheckout> => {
             void issueContext;
@@ -1002,6 +956,18 @@ export const workflow = async (
 
         const queueTotalFor = (current: number): number =>
             current + queue.pendingCount();
+
+        const emitBlockedSkip = async (
+            issue: GitHubIssue,
+            reason: string,
+        ): Promise<void> => {
+            await progress.emit({
+                stage: "issue-queue",
+                status: "skipped",
+                message: reason,
+                issue: { number: issue.number, title: issue.title },
+            });
+        };
 
         const prepareIssue = async (
             issue: GitHubIssue,
@@ -1118,12 +1084,12 @@ export const workflow = async (
             }
         };
 
-        const emitNeedsAttentionEvent = async (
+        const emitHandOffEvent = async (
             issueContext: Pick<
                 WorkflowIssueContext,
                 "issue" | "current" | "total"
             >,
-            outcome: NeedsAttentionOutcome,
+            outcome: HandOffOutcome,
         ): Promise<void> => {
             await progress.emit({
                 issue: {
@@ -1133,43 +1099,45 @@ export const workflow = async (
                 current: issueContext.current,
                 total: issueContext.total,
                 stage: "grounding",
-                status: "needs-attention",
-                message: needsAttentionProgressMessage(
+                status: "hand-off",
+                message: handOffProgressMessage(
                     issueContext.issue.number,
                     outcome,
                 ),
-                details: needsAttentionProgressDetails({
+                details: handOffProgressDetails({
                     outcome,
                     current: issueContext.current,
                 }),
             });
         };
 
-        const publishNeedsAttentionNotification = async (
+        const publishHandOff = async (
             issueNumber: number,
-            outcome: NeedsAttentionOutcome,
-            labelName: string | undefined,
+            outcome: HandOffOutcome,
         ): Promise<void> => {
-            if (!notificationsEnabled) return;
-            if (needsAttentionNotification === undefined) {
-                throw new RalphieError({
-                    message: `Needs-attention notifications are enabled, but no notification service is available for issue #${issueNumber}.`,
-                });
-            }
+            const target = handOffTarget(outcome.reason);
             await track(
                 progress,
-                "notification",
-                `Publishing needs-attention notification for issue #${issueNumber}...`,
+                "hand-off",
+                `Handing off issue #${issueNumber} to ${target}...`,
                 () =>
-                    needsAttentionNotification.notify(
-                        repo,
-                        issueNumber,
-                        needsAttentionNotificationInput(outcome),
-                        labelName,
-                    ),
+                    handOffService.handOff(repo, issueNumber, {
+                        body: renderHandOffComment({
+                            reason: outcome.reason,
+                            summary: outcome.summary,
+                            evidence: outcome.evidence,
+                            questions: outcome.questions,
+                            diagnosticsPath:
+                                outcome.diagnosticsPath ??
+                                outcome.artifactPath ??
+                                statePath,
+                        }),
+                        label: handOffLabels[target],
+                        replaceLabels: handOffLabels.replaces,
+                    }),
                 (result) =>
-                    `Needs-attention notification published for issue #${issueNumber} (${result.comment} comment, ${result.label} label).`,
-                { issue: { number: issueNumber, title: "Needs attention" } },
+                    `Issue #${issueNumber} handed off to ${target} (${result.comment} comment).`,
+                { issue: { number: issueNumber, title: "Hand-off" } },
             );
         };
 
@@ -1189,20 +1157,16 @@ export const workflow = async (
             await persistState(RunStateStatus.Active);
         };
 
-        const handleNeedsAttentionIssue = async (
+        const handleHandOffIssue = async (
             issueContext: WorkflowIssueContext,
             outcome: Extract<
                 IssueExecutionOutcome,
-                { readonly kind: IssueExecutionOutcomeKind.NeedsAttention }
+                { readonly kind: IssueExecutionOutcomeKind.HandOff }
             >,
         ): Promise<void> => {
-            checkout = await captureNeedsAttentionCheckout(issueContext);
-            await emitNeedsAttentionEvent(issueContext, outcome);
-            await publishNeedsAttentionNotification(
-                issueContext.issue.number,
-                outcome,
-                needsAttentionLabel,
-            );
+            checkout = await captureHandOffCheckout(issueContext);
+            await emitHandOffEvent(issueContext, outcome);
+            await publishHandOff(issueContext.issue.number, outcome);
             await persistState(RunStateStatus.Active, {
                 issueNumber: issueContext.issue.number,
                 stage: "grounding",
@@ -1274,8 +1238,8 @@ export const workflow = async (
                 await handleFailedIssue(issueContext);
                 return;
             }
-            if (outcome.kind === IssueExecutionOutcomeKind.NeedsAttention) {
-                await handleNeedsAttentionIssue(issueContext, outcome);
+            if (outcome.kind === IssueExecutionOutcomeKind.HandOff) {
+                await handleHandOffIssue(issueContext, outcome);
                 await finishSuccessfulIssue(issueContext);
                 return;
             }
@@ -1350,9 +1314,8 @@ export const workflow = async (
             await handleDependencyBlockedQueue({
                 queue,
                 recordIssueOutcome,
-                emitNeedsAttentionEvent,
+                emitBlockedSkip,
                 persistState,
-                queueTotalFor,
             });
         }
 

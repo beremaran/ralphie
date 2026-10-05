@@ -22,7 +22,7 @@ export type DisplayQueueStatus =
     | "active"
     | "completed"
     | "failed"
-    | "needs-attention"
+    | "hand-off"
     | "skipped";
 
 export type DisplayQueueIssue = {
@@ -97,7 +97,7 @@ export const PROGRESS_STAGE_LABELS: Readonly<Record<ProgressStage, string>> = {
     "issue-relationships": "Linking issues",
     "issue-closure": "Closing issue",
     "pr-gate": "Waiting for PR checks",
-    notification: "Publishing needs-attention notification",
+    "hand-off": "Handing off issue",
 };
 
 /** Stable labels for activities that do not carry a dynamic name. */
@@ -277,12 +277,12 @@ const displayIssuesFrom = (
 /**
  * Status transitions are driven only by terminal queue events, so mid-issue
  * stages (grounding, verification, review) never overwrite an outcome and a
- * later needs-attention decision can still supersede an execution success.
+ * later hand-off decision can still supersede an execution success.
  */
 const displayQueueStatusFor = (
     update: ProgressUpdate,
 ): DisplayQueueStatus | undefined => {
-    if (update.status === "needs-attention") return "needs-attention";
+    if (update.status === "hand-off") return "hand-off";
     if (update.stage === "issue-execution") {
         if (update.status === "started") return "active";
         if (update.status === "succeeded") return "completed";

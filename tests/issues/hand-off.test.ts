@@ -27,7 +27,7 @@ import { type GitHubIssueRelationshipService } from "../../src/github/ports.ts";
 import { type GitHubIssueMutationService } from "../../src/github/ports.ts";
 import { type GitHubIssuesService } from "../../src/github/ports.ts";
 import { requestStructuredOutput } from "../../src/agent/structured-output.ts";
-import { type NeedsAttentionRequest } from "../../src/agent/task-session.ts";
+import { type HandOffRequest } from "../../src/agent/task-session.ts";
 import {
     IssueArtifactKind,
     makeIssueArtifactStore,
@@ -43,7 +43,7 @@ import {
     ComplexityLevel,
     GroundingDisposition,
     IssueResolutionStatus,
-    NeedsAttentionReason,
+    HandOffReason,
     ReviewFindingSeverity,
     ReviewVerdict,
     groundingDecisionSchema,
@@ -61,14 +61,14 @@ import {
 } from "../../src/issues/app/execution.ts";
 import { makeIssueExecutorService } from "../../src/issues/app/executor.ts";
 import {
-    makeNeedsAttentionRouterService,
-    type NeedsAttentionRouterService,
-} from "../../src/issues/app/needs-attention.ts";
+    makeHandOffRouterService,
+    type HandOffRouterService,
+} from "../../src/issues/app/hand-off.ts";
 import { nodeRecoveryFileSystem } from "../../src/issues/adapters/recovery-file-system.ts";
 import {
     makeIssueRecoveryService,
     type IssueRecoveryService,
-    type NeedsAttentionRecoveryInput,
+    type HandOffRecoveryInput,
 } from "../../src/issues/app/recovery.ts";
 import { makeResolutionVerificationService } from "../../src/issues/app/resolution-verification.ts";
 import {
@@ -106,7 +106,7 @@ const INVARIANT: GitRepositoryInvariant = {
     head: CHECKPOINT.sha,
 };
 const TREE_SHA = "0".repeat(40);
-const VERIFIER_TITLE = "Verify needs-attention request for issue #42";
+const VERIFIER_TITLE = "Verify hand-off request for issue #42";
 
 const currentFingerprint: IssueFreshnessFingerprint = {
     updatedAt: "2026-08-28T00:00:00.000Z",
@@ -119,14 +119,14 @@ const changedFingerprint: IssueFreshnessFingerprint = {
     commentVersion: "2026-08-29T00:00:00.000Z",
 };
 
-const attentionRequest: NeedsAttentionRequest = {
+const attentionRequest: HandOffRequest = {
     reason: "missing_information",
     message: "The request is blocked on a prerequisite.",
 };
 
 const attentionDecision = {
-    disposition: GroundingDisposition.NeedsAttention as const,
-    reason: NeedsAttentionReason.MissingInformation as const,
+    disposition: GroundingDisposition.HandOff as const,
+    reason: HandOffReason.MissingInformation as const,
     summary: "A prerequisite is still open.",
     evidence: ["Issue body links the open prerequisite."],
     questions: ["Complete the prerequisite, then retry."],
@@ -153,7 +153,7 @@ const changesRequestedReview = (description: string) => ({
 
 type FakeStructuredResponse = {
     readonly structured?: unknown;
-    readonly needsAttention?: unknown;
+    readonly handOff?: unknown;
     readonly error?: boolean;
 };
 
@@ -222,9 +222,9 @@ const fakePi = (scripts: ReadonlyArray<FakeScript>) => {
         }
         const parsed = request.resultSchema?.safeParse({
             result: response.structured,
-            ...(response.needsAttention === undefined
+            ...(response.handOff === undefined
                 ? {}
-                : { needsAttention: response.needsAttention }),
+                : { handOff: response.handOff }),
         });
         if (parsed !== undefined && !parsed.success) {
             return {
@@ -278,14 +278,14 @@ const makeInvariant = (
 
 const makeFakeRecovery = (
     options: {
-        readonly failNeedsAttention?: boolean | (() => boolean);
+        readonly failHandOff?: boolean | (() => boolean);
         readonly trace?: string[];
     } = {},
 ): {
     readonly service: IssueRecoveryService;
-    readonly recoveryInputs: NeedsAttentionRecoveryInput[];
+    readonly recoveryInputs: HandOffRecoveryInput[];
 } => {
-    const recoveryInputs: NeedsAttentionRecoveryInput[] = [];
+    const recoveryInputs: HandOffRecoveryInput[] = [];
     return {
         service: {
             handleReviewExhaustion: async () => ({
@@ -294,19 +294,19 @@ const makeFakeRecovery = (
                 nextWorkflow: "decomposition",
                 resume: IssueQueueResumeStrategy,
             }),
-            handleNeedsAttention: async (input) => {
+            handleHandOff: async (input) => {
                 recoveryInputs.push(input);
-                options.trace?.push("recovery:needs-attention");
+                options.trace?.push("recovery:hand-off");
                 const failing =
-                    typeof options.failNeedsAttention === "function"
-                        ? options.failNeedsAttention()
-                        : options.failNeedsAttention === true;
+                    typeof options.failHandOff === "function"
+                        ? options.failHandOff()
+                        : options.failHandOff === true;
                 if (failing) {
                     throw new RalphieError({
-                        message: "needs-attention recovery failed",
+                        message: "hand-off recovery failed",
                     });
                 }
-                return { diagnosticsPath: "/diag/needs-attention" };
+                return { diagnosticsPath: "/diag/hand-off" };
             },
         },
         recoveryInputs,
@@ -316,13 +316,13 @@ const makeFakeRecovery = (
 const makeRealRouter = (
     _progress: ProgressReporterService,
 ): {
-    readonly router: NeedsAttentionRouterService;
+    readonly router: HandOffRouterService;
     readonly recovery: IssueRecoveryService;
-    readonly recoveryInputs: NeedsAttentionRecoveryInput[];
+    readonly recoveryInputs: HandOffRecoveryInput[];
 } => {
     const { service, recoveryInputs } = makeFakeRecovery();
     return {
-        router: makeNeedsAttentionRouterService(service),
+        router: makeHandOffRouterService(service),
         recovery: service,
         recoveryInputs,
     };
@@ -349,13 +349,13 @@ const makeTrackedStore = async (
             throwIfFailing("recordResolutionDecision");
             await store.recordResolutionDecision(value, signal);
         },
-        beginNeedsAttentionHandoff: async (value, signal) => {
-            throwIfFailing("beginNeedsAttentionHandoff");
-            await store.beginNeedsAttentionHandoff(value, signal);
+        beginPendingHandOff: async (value, signal) => {
+            throwIfFailing("beginPendingHandOff");
+            await store.beginPendingHandOff(value, signal);
         },
-        recordNeedsAttentionDecision: async (value, signal) => {
-            throwIfFailing("recordNeedsAttentionDecision");
-            await store.recordNeedsAttentionDecision(value, signal);
+        recordHandOffDecision: async (value, signal) => {
+            throwIfFailing("recordHandOffDecision");
+            await store.recordHandOffDecision(value, signal);
         },
         appendReview: async (review, signal) => {
             throwIfFailing("appendReview");
@@ -377,20 +377,17 @@ const makeTrackedStore = async (
             throwIfFailing("invalidateStaleIssueDecisions");
             return store.invalidateStaleIssueDecisions(fingerprint, signal);
         },
-        invalidateStaleNeedsAttentionDecision: async (fingerprint, signal) => {
-            throwIfFailing("invalidateStaleNeedsAttentionDecision");
-            return store.invalidateStaleNeedsAttentionDecision(
-                fingerprint,
-                signal,
-            );
+        invalidateStaleHandOffDecision: async (fingerprint, signal) => {
+            throwIfFailing("invalidateStaleHandOffDecision");
+            return store.invalidateStaleHandOffDecision(fingerprint, signal);
         },
-        invalidateNeedsAttentionDecision: async (fingerprint, signal) => {
-            throwIfFailing("invalidateNeedsAttentionDecision");
-            return store.invalidateNeedsAttentionDecision(fingerprint, signal);
+        invalidateHandOffDecision: async (fingerprint, signal) => {
+            throwIfFailing("invalidateHandOffDecision");
+            return store.invalidateHandOffDecision(fingerprint, signal);
         },
-        clearNeedsAttentionHandoff: async (signal) => {
-            throwIfFailing("clearNeedsAttentionHandoff");
-            await store.clearNeedsAttentionHandoff(signal);
+        clearPendingHandOff: async (signal) => {
+            throwIfFailing("clearPendingHandOff");
+            await store.clearPendingHandOff(signal);
         },
     };
 };
@@ -457,7 +454,7 @@ const makeExecutorHarness = async (options: ExecutorHarnessOptions = {}) => {
     const router =
         options.withRouter === false
             ? undefined
-            : makeNeedsAttentionRouterService(recovery);
+            : makeHandOffRouterService(recovery);
     const implementation =
         options.implementation ??
         ({
@@ -531,7 +528,7 @@ const makeImplementationHarness = async (
     const store = await makeTrackedStore();
     const recoveryTrace: string[] = [];
     const fakeRecovery = makeFakeRecovery({
-        failNeedsAttention: options.recoveryFailure,
+        failHandOff: options.recoveryFailure,
         trace: recoveryTrace,
     });
     const recovery = options.recovery ?? fakeRecovery.service;
@@ -539,7 +536,7 @@ const makeImplementationHarness = async (
     const router =
         options.withRouter === false
             ? undefined
-            : makeNeedsAttentionRouterService(recovery);
+            : makeHandOffRouterService(recovery);
     const verifyCalls: Array<{ branch: string; head: string }> = [];
     const context = {
         ...makeContext({
@@ -634,7 +631,7 @@ const makeDecompositionHarness = async (
     const router =
         options.withRouter === false
             ? undefined
-            : makeNeedsAttentionRouterService(recovery);
+            : makeHandOffRouterService(recovery);
     const verifyCalls: Array<{ branch: string; head: string }> = [];
     const context = makeContext({
         agent: client,
@@ -706,7 +703,7 @@ const makeDecompositionHarness = async (
     };
 };
 
-describe("structured-output needs-attention side channel", () => {
+describe("structured-output hand-off side channel", () => {
     test("surfaces a valid side-channel request from a grounding call", async () => {
         const { client } = fakePi([
             {
@@ -715,7 +712,7 @@ describe("structured-output needs-attention side channel", () => {
                     structured: {
                         disposition: GroundingDisposition.Actionable,
                     },
-                    needsAttention: attentionRequest,
+                    handOff: attentionRequest,
                 },
             },
         ]);
@@ -729,7 +726,7 @@ describe("structured-output needs-attention side channel", () => {
         expect(result.output).toEqual({
             disposition: GroundingDisposition.Actionable,
         });
-        expect(result.needsAttention).toEqual(attentionRequest);
+        expect(result.handOff).toEqual(attentionRequest);
     });
 
     test("parses the side channel like every structured call, including the pre-flight schema", async () => {
@@ -741,7 +738,7 @@ describe("structured-output needs-attention side channel", () => {
                         disposition: GroundingDisposition.Actionable,
                         fitsOneSession: false,
                     },
-                    needsAttention: attentionRequest,
+                    handOff: attentionRequest,
                 },
             },
         ]);
@@ -756,7 +753,7 @@ describe("structured-output needs-attention side channel", () => {
             disposition: GroundingDisposition.Actionable,
             fitsOneSession: false,
         });
-        expect(result.needsAttention).toEqual(attentionRequest);
+        expect(result.handOff).toEqual(attentionRequest);
     });
 
     test("rejects an invalid side-channel value", async () => {
@@ -767,7 +764,7 @@ describe("structured-output needs-attention side channel", () => {
                     structured: {
                         disposition: GroundingDisposition.Actionable,
                     },
-                    needsAttention: { reason: "not-a-reason" },
+                    handOff: { reason: "not-a-reason" },
                 },
             },
         ]);
@@ -801,7 +798,7 @@ describe("structured-output needs-attention side channel", () => {
     });
 });
 
-describe("needs-attention router", () => {
+describe("hand-off router", () => {
     test("returns undefined without a handoff or request and starts no verifier session", async () => {
         const events: ProgressUpdate[] = [];
         const progress = makeTestProgressRecorder(events);
@@ -847,12 +844,8 @@ describe("needs-attention router", () => {
                 checkpoint: CHECKPOINT,
             });
             expect(outcome).toBeUndefined();
-            expect(store.has(IssueArtifactKind.NeedsAttentionHandoff)).toBe(
-                false,
-            );
-            expect(store.has(IssueArtifactKind.NeedsAttentionDecision)).toBe(
-                false,
-            );
+            expect(store.has(IssueArtifactKind.PendingHandOff)).toBe(false);
+            expect(store.has(IssueArtifactKind.HandOffDecision)).toBe(false);
             expect(recoveryInputs).toHaveLength(0);
             expect(verifierPromptsOf(prompts)).toHaveLength(1);
         },
@@ -867,7 +860,7 @@ describe("needs-attention router", () => {
         ]);
         const store = await makeTrackedStore();
         const { service: recovery, recoveryInputs } = makeFakeRecovery();
-        const router = makeNeedsAttentionRouterService(recovery);
+        const router = makeHandOffRouterService(recovery);
         const verifyCalls: Array<{ branch: string; head: string }> = [];
         const context = makeContext({
             agent: client,
@@ -880,9 +873,9 @@ describe("needs-attention router", () => {
             checkpoint: CHECKPOINT,
         });
         expect(outcome).toMatchObject({
-            kind: IssueExecutionOutcomeKind.NeedsAttention,
-            diagnosticsPath: "/diag/needs-attention",
-            reason: NeedsAttentionReason.MissingInformation,
+            kind: IssueExecutionOutcomeKind.HandOff,
+            diagnosticsPath: "/diag/hand-off",
+            reason: HandOffReason.MissingInformation,
             summary: "A prerequisite is still open.",
             evidence: ["Issue body links the open prerequisite."],
             questions: ["Complete the prerequisite, then retry."],
@@ -901,8 +894,8 @@ describe("needs-attention router", () => {
             request: attentionRequest,
             decision: attentionDecision,
         });
-        expect(store.has(IssueArtifactKind.NeedsAttentionHandoff)).toBe(false);
-        expect(store.has(IssueArtifactKind.NeedsAttentionDecision)).toBe(true);
+        expect(store.has(IssueArtifactKind.PendingHandOff)).toBe(false);
+        expect(store.has(IssueArtifactKind.HandOffDecision)).toBe(true);
     });
 
     test("resumes a pending handoff with a fresh verifier session", async () => {
@@ -915,7 +908,7 @@ describe("needs-attention router", () => {
             },
         ]);
         const store = await makeTrackedStore();
-        await store.beginNeedsAttentionHandoff({
+        await store.beginPendingHandOff({
             request: attentionRequest,
             fingerprint: currentFingerprint,
             checkpoint: CHECKPOINT,
@@ -928,8 +921,8 @@ describe("needs-attention router", () => {
         });
         const outcome = await router.route({ context, artifacts: store });
         expect(outcome).toMatchObject({
-            kind: IssueExecutionOutcomeKind.NeedsAttention,
-            diagnosticsPath: "/diag/needs-attention",
+            kind: IssueExecutionOutcomeKind.HandOff,
+            diagnosticsPath: "/diag/hand-off",
         });
         expect(verifierPromptsOf(prompts)).toHaveLength(1);
         expect(recoveryInputs).toHaveLength(1);
@@ -940,12 +933,12 @@ describe("needs-attention router", () => {
         const progress = makeTestProgressRecorder(events);
         const { client, prompts } = fakePi([]);
         const store = await makeTrackedStore();
-        await store.beginNeedsAttentionHandoff({
+        await store.beginPendingHandOff({
             request: attentionRequest,
             fingerprint: currentFingerprint,
             checkpoint: CHECKPOINT,
         });
-        await store.recordNeedsAttentionDecision({
+        await store.recordHandOffDecision({
             decision: attentionDecision,
             fingerprint: currentFingerprint,
         });
@@ -957,8 +950,8 @@ describe("needs-attention router", () => {
         });
         const outcome = await router.route({ context, artifacts: store });
         expect(outcome).toMatchObject({
-            kind: IssueExecutionOutcomeKind.NeedsAttention,
-            diagnosticsPath: "/diag/needs-attention",
+            kind: IssueExecutionOutcomeKind.HandOff,
+            diagnosticsPath: "/diag/hand-off",
         });
         expect(verifierPromptsOf(prompts)).toHaveLength(0);
         expect(recoveryInputs).toHaveLength(1);
@@ -974,7 +967,7 @@ describe("needs-attention router", () => {
             },
         ]);
         const store = await makeTrackedStore();
-        await store.recordNeedsAttentionDecision({
+        await store.recordHandOffDecision({
             decision: attentionDecision,
             fingerprint: changedFingerprint,
         });
@@ -991,8 +984,8 @@ describe("needs-attention router", () => {
             checkpoint: CHECKPOINT,
         });
         expect(outcome).toMatchObject({
-            kind: IssueExecutionOutcomeKind.NeedsAttention,
-            diagnosticsPath: "/diag/needs-attention",
+            kind: IssueExecutionOutcomeKind.HandOff,
+            diagnosticsPath: "/diag/hand-off",
         });
         expect(verifierPromptsOf(prompts)).toHaveLength(1);
         expect(recoveryInputs).toHaveLength(1);
@@ -1021,11 +1014,11 @@ describe("needs-attention router", () => {
         ).rejects.toBeInstanceOf(RalphieError);
         expect(verifierPromptsOf(prompts)).toHaveLength(1);
         expect(recoveryInputs).toHaveLength(0);
-        expect(store.has(IssueArtifactKind.NeedsAttentionHandoff)).toBe(true);
+        expect(store.has(IssueArtifactKind.PendingHandOff)).toBe(true);
     });
 });
 
-describe("issue executor needs-attention routing", () => {
+describe("issue executor hand-off routing", () => {
     test("executes normally with zero verifier sessions when no signal is present", async () => {
         const harness = await makeExecutorHarness();
         const outcome = await harness.executor.execute(harness.context);
@@ -1049,15 +1042,15 @@ describe("issue executor needs-attention routing", () => {
                 assess: async () => ({
                     decision: attentionDecision,
                     sessionID: "grounding-1",
-                    needsAttention: attentionRequest,
+                    handOff: attentionRequest,
                 }),
             },
         });
         const outcome = await harness.executor.execute(harness.context);
         expect(outcome).toMatchObject({
-            kind: IssueExecutionOutcomeKind.NeedsAttention,
-            diagnosticsPath: "/diag/needs-attention",
-            reason: NeedsAttentionReason.MissingInformation,
+            kind: IssueExecutionOutcomeKind.HandOff,
+            diagnosticsPath: "/diag/hand-off",
+            reason: HandOffReason.MissingInformation,
             summary: "A prerequisite is still open.",
             evidence: ["Issue body links the open prerequisite."],
             questions: ["Complete the prerequisite, then retry."],
@@ -1078,7 +1071,7 @@ describe("issue executor needs-attention routing", () => {
         expect(harness.trace).not.toContain("implementation:42");
     });
 
-    test("does not treat a grounding needs_attention result as confirmation when its side-channel request is rejected", async () => {
+    test("does not treat a grounding hand_off result as confirmation when its side-channel request is rejected", async () => {
         const events: ProgressUpdate[] = [];
         const progress = makeTestProgressRecorder(events);
         const { client, prompts } = fakePi([
@@ -1093,7 +1086,7 @@ describe("issue executor needs-attention routing", () => {
         ]);
         const store = await makeTrackedStore();
         const { service: recovery, recoveryInputs } = makeFakeRecovery();
-        const router = makeNeedsAttentionRouterService(recovery);
+        const router = makeHandOffRouterService(recovery);
         const verifyCalls: Array<{ branch: string; head: string }> = [];
         const context = makeContext({
             agent: client,
@@ -1111,7 +1104,7 @@ describe("issue executor needs-attention routing", () => {
                 assess: async () => ({
                     decision: attentionDecision,
                     sessionID: "grounding-1",
-                    needsAttention: attentionRequest,
+                    handOff: attentionRequest,
                 }),
             },
             resolutionVerification,
@@ -1120,8 +1113,8 @@ describe("issue executor needs-attention routing", () => {
         );
         const outcome = await executor.execute(context);
         expect(outcome).toMatchObject({
-            kind: IssueExecutionOutcomeKind.NeedsAttention,
-            reason: NeedsAttentionReason.MissingInformation,
+            kind: IssueExecutionOutcomeKind.HandOff,
+            reason: HandOffReason.MissingInformation,
             artifactPath: context.runLayout.issueArtifactsPath(
                 context.issue.number,
             ),
@@ -1129,8 +1122,8 @@ describe("issue executor needs-attention routing", () => {
         expect(outcome).not.toHaveProperty("diagnosticsPath");
         expect(verifierPromptsOf(prompts)).toHaveLength(1);
         expect(recoveryInputs).toHaveLength(0);
-        expect(store.has(IssueArtifactKind.NeedsAttentionHandoff)).toBe(false);
-        expect(store.has(IssueArtifactKind.NeedsAttentionDecision)).toBe(true);
+        expect(store.has(IssueArtifactKind.PendingHandOff)).toBe(false);
+        expect(store.has(IssueArtifactKind.HandOffDecision)).toBe(true);
         expect(verifyCalls).toEqual([INVARIANT]);
     });
 
@@ -1214,7 +1207,7 @@ describe("issue executor needs-attention routing", () => {
         ]);
         const store = await makeTrackedStore();
         const { service: recovery, recoveryInputs } = makeFakeRecovery();
-        const router = makeNeedsAttentionRouterService(recovery);
+        const router = makeHandOffRouterService(recovery);
         const verifyCalls: Array<{ branch: string; head: string }> = [];
         const context = makeContext({
             agent: client,
@@ -1232,7 +1225,7 @@ describe("issue executor needs-attention routing", () => {
                 assess: async () => ({
                     decision: attentionDecision,
                     sessionID: "grounding-1",
-                    needsAttention: attentionRequest,
+                    handOff: attentionRequest,
                 }),
             },
             resolutionVerification,
@@ -1243,18 +1236,18 @@ describe("issue executor needs-attention routing", () => {
         expect(failed).toMatchObject({
             kind: IssueExecutionOutcomeKind.Failed,
         });
-        expect(store.has(IssueArtifactKind.NeedsAttentionHandoff)).toBe(true);
-        expect(store.has(IssueArtifactKind.NeedsAttentionDecision)).toBe(false);
+        expect(store.has(IssueArtifactKind.PendingHandOff)).toBe(true);
+        expect(store.has(IssueArtifactKind.HandOffDecision)).toBe(false);
 
         failVerifier = false;
         const resumed = await executor.execute(context);
         expect(resumed).toMatchObject({
-            kind: IssueExecutionOutcomeKind.NeedsAttention,
-            diagnosticsPath: "/diag/needs-attention",
+            kind: IssueExecutionOutcomeKind.HandOff,
+            diagnosticsPath: "/diag/hand-off",
         });
         expect(verifierPromptsOf(prompts)).toHaveLength(2);
         expect(recoveryInputs).toHaveLength(1);
-        expect(store.has(IssueArtifactKind.NeedsAttentionHandoff)).toBe(false);
+        expect(store.has(IssueArtifactKind.PendingHandOff)).toBe(false);
     });
 
     test("halts on decision persistence failure and resumes with a fresh verifier", async () => {
@@ -1268,11 +1261,10 @@ describe("issue executor needs-attention routing", () => {
             },
         ]);
         const store = await makeTrackedStore(
-            (method) =>
-                failPersistence && method === "recordNeedsAttentionDecision",
+            (method) => failPersistence && method === "recordHandOffDecision",
         );
         const { service: recovery, recoveryInputs } = makeFakeRecovery();
-        const router = makeNeedsAttentionRouterService(recovery);
+        const router = makeHandOffRouterService(recovery);
         const verifyCalls: Array<{ branch: string; head: string }> = [];
         const context = makeContext({
             agent: client,
@@ -1290,7 +1282,7 @@ describe("issue executor needs-attention routing", () => {
                 assess: async () => ({
                     decision: attentionDecision,
                     sessionID: "grounding-1",
-                    needsAttention: attentionRequest,
+                    handOff: attentionRequest,
                 }),
             },
             resolutionVerification,
@@ -1302,14 +1294,14 @@ describe("issue executor needs-attention routing", () => {
             kind: IssueExecutionOutcomeKind.Failed,
         });
         expect(recoveryInputs).toHaveLength(0);
-        expect(store.has(IssueArtifactKind.NeedsAttentionHandoff)).toBe(true);
-        expect(store.has(IssueArtifactKind.NeedsAttentionDecision)).toBe(false);
+        expect(store.has(IssueArtifactKind.PendingHandOff)).toBe(true);
+        expect(store.has(IssueArtifactKind.HandOffDecision)).toBe(false);
 
         failPersistence = false;
         const resumed = await executor.execute(context);
         expect(resumed).toMatchObject({
-            kind: IssueExecutionOutcomeKind.NeedsAttention,
-            diagnosticsPath: "/diag/needs-attention",
+            kind: IssueExecutionOutcomeKind.HandOff,
+            diagnosticsPath: "/diag/hand-off",
         });
         expect(verifierPromptsOf(prompts)).toHaveLength(2);
         expect(recoveryInputs).toHaveLength(1);
@@ -1327,9 +1319,9 @@ describe("issue executor needs-attention routing", () => {
         ]);
         const store = await makeTrackedStore();
         const { service: recovery, recoveryInputs } = makeFakeRecovery({
-            failNeedsAttention: () => failRecovery,
+            failHandOff: () => failRecovery,
         });
-        const router = makeNeedsAttentionRouterService(recovery);
+        const router = makeHandOffRouterService(recovery);
         const verifyCalls: Array<{ branch: string; head: string }> = [];
         const context = makeContext({
             agent: client,
@@ -1347,7 +1339,7 @@ describe("issue executor needs-attention routing", () => {
                 assess: async () => ({
                     decision: attentionDecision,
                     sessionID: "grounding-1",
-                    needsAttention: attentionRequest,
+                    handOff: attentionRequest,
                 }),
             },
             resolutionVerification,
@@ -1357,20 +1349,20 @@ describe("issue executor needs-attention routing", () => {
         const failed = await executor.execute(context);
         expect(failed).toMatchObject({
             kind: IssueExecutionOutcomeKind.Failed,
-            message: "needs-attention recovery failed",
+            message: "hand-off recovery failed",
         });
-        expect(store.has(IssueArtifactKind.NeedsAttentionDecision)).toBe(true);
-        expect(store.has(IssueArtifactKind.NeedsAttentionHandoff)).toBe(true);
+        expect(store.has(IssueArtifactKind.HandOffDecision)).toBe(true);
+        expect(store.has(IssueArtifactKind.PendingHandOff)).toBe(true);
 
         failRecovery = false;
         const resumed = await executor.execute(context);
         expect(resumed).toMatchObject({
-            kind: IssueExecutionOutcomeKind.NeedsAttention,
-            diagnosticsPath: "/diag/needs-attention",
+            kind: IssueExecutionOutcomeKind.HandOff,
+            diagnosticsPath: "/diag/hand-off",
         });
         expect(verifierPromptsOf(prompts)).toHaveLength(1);
         expect(recoveryInputs).toHaveLength(2);
-        expect(store.has(IssueArtifactKind.NeedsAttentionHandoff)).toBe(false);
+        expect(store.has(IssueArtifactKind.PendingHandOff)).toBe(false);
     });
 
     test("fails closed when a signal arrives without a router", async () => {
@@ -1380,7 +1372,7 @@ describe("issue executor needs-attention routing", () => {
                 assess: async () => ({
                     decision: attentionDecision,
                     sessionID: "grounding-1",
-                    needsAttention: attentionRequest,
+                    handOff: attentionRequest,
                 }),
             },
         });
@@ -1392,9 +1384,7 @@ describe("issue executor needs-attention routing", () => {
             expect(outcome.message).toContain("verifier/router service");
         }
         expect(verifierPromptsOf(harness.prompts)).toHaveLength(0);
-        expect(harness.store.has(IssueArtifactKind.NeedsAttentionHandoff)).toBe(
-            false,
-        );
+        expect(harness.store.has(IssueArtifactKind.PendingHandOff)).toBe(false);
     });
 
     test("review exhaustion still returns Escalated with its created children", async () => {
@@ -1417,7 +1407,7 @@ describe("issue executor needs-attention routing", () => {
     });
 });
 
-describe("implementation executor needs-attention routing", () => {
+describe("implementation executor hand-off routing", () => {
     test("completes the full implementation flow with zero verifier sessions when no signal is present", async () => {
         const harness = await makeImplementationHarness({
             scripts: [
@@ -1461,7 +1451,7 @@ describe("implementation executor needs-attention routing", () => {
                         titlePrefix: "Implement issue #42",
                         result: {
                             structured: implementationChanged,
-                            needsAttention: attentionRequest,
+                            handOff: attentionRequest,
                         },
                     },
                     {
@@ -1500,7 +1490,7 @@ describe("implementation executor needs-attention routing", () => {
                     titlePrefix: "Implement issue #42",
                     result: {
                         structured: implementationChanged,
-                        needsAttention: attentionRequest,
+                        handOff: attentionRequest,
                     },
                 },
                 {
@@ -1514,8 +1504,8 @@ describe("implementation executor needs-attention routing", () => {
             artifacts: harness.store,
         });
         expect(outcome).toMatchObject({
-            kind: IssueExecutionOutcomeKind.NeedsAttention,
-            diagnosticsPath: "/diag/needs-attention",
+            kind: IssueExecutionOutcomeKind.HandOff,
+            diagnosticsPath: "/diag/hand-off",
         });
         expect(verifierPromptsOf(harness.prompts)).toHaveLength(1);
         expect(harness.recoveryInputs).toHaveLength(1);
@@ -1536,7 +1526,7 @@ describe("implementation executor needs-attention routing", () => {
                     titlePrefix: "Review issue #42",
                     result: {
                         structured: approvedReview,
-                        needsAttention: attentionRequest,
+                        handOff: attentionRequest,
                     },
                 },
                 {
@@ -1550,8 +1540,8 @@ describe("implementation executor needs-attention routing", () => {
             artifacts: harness.store,
         });
         expect(outcome).toMatchObject({
-            kind: IssueExecutionOutcomeKind.NeedsAttention,
-            diagnosticsPath: "/diag/needs-attention",
+            kind: IssueExecutionOutcomeKind.HandOff,
+            diagnosticsPath: "/diag/hand-off",
         });
         expect(verifierPromptsOf(harness.prompts)).toHaveLength(1);
         expect(harness.recoveryInputs).toHaveLength(1);
@@ -1575,7 +1565,7 @@ describe("implementation executor needs-attention routing", () => {
                     titlePrefix: "Generate commit message for issue #42",
                     result: {
                         structured: commitMessage,
-                        needsAttention: attentionRequest,
+                        handOff: attentionRequest,
                     },
                 },
                 {
@@ -1589,8 +1579,8 @@ describe("implementation executor needs-attention routing", () => {
             artifacts: harness.store,
         });
         expect(outcome).toMatchObject({
-            kind: IssueExecutionOutcomeKind.NeedsAttention,
-            diagnosticsPath: "/diag/needs-attention",
+            kind: IssueExecutionOutcomeKind.HandOff,
+            diagnosticsPath: "/diag/hand-off",
         });
         expect(verifierPromptsOf(harness.prompts)).toHaveLength(1);
         expect(harness.recoveryInputs).toHaveLength(1);
@@ -1731,10 +1721,12 @@ describe("implementation executor needs-attention routing", () => {
         });
 
         expect(outcome).toMatchObject({
-            kind: IssueExecutionOutcomeKind.Failed,
-            message: expect.stringContaining(
+            kind: IssueExecutionOutcomeKind.HandOff,
+            reason: HandOffReason.ImplementationExhausted,
+            summary: expect.stringContaining(
                 "Deterministic verification still failed after 2 repair attempts:",
             ),
+            diagnosticsPath: "/diag/hand-off",
         });
         expect(
             harness.prompts.filter(({ title }) =>
@@ -1751,7 +1743,7 @@ describe("implementation executor needs-attention routing", () => {
                     titlePrefix: "Implement issue #42",
                     result: {
                         structured: implementationChanged,
-                        needsAttention: attentionRequest,
+                        handOff: attentionRequest,
                     },
                 },
             ],
@@ -1765,7 +1757,7 @@ describe("implementation executor needs-attention routing", () => {
     });
 });
 
-describe("decomposition executor needs-attention routing", () => {
+describe("decomposition executor hand-off routing", () => {
     test("routes a decomposition signal before any GitHub mutation", async () => {
         const harness = await makeDecompositionHarness({
             scripts: [
@@ -1791,7 +1783,7 @@ describe("decomposition executor needs-attention routing", () => {
                                 },
                             ],
                         },
-                        needsAttention: attentionRequest,
+                        handOff: attentionRequest,
                     },
                 },
                 {
@@ -1805,8 +1797,8 @@ describe("decomposition executor needs-attention routing", () => {
             artifacts: harness.store,
         });
         expect(outcome).toMatchObject({
-            kind: IssueExecutionOutcomeKind.NeedsAttention,
-            diagnosticsPath: "/diag/needs-attention",
+            kind: IssueExecutionOutcomeKind.HandOff,
+            diagnosticsPath: "/diag/hand-off",
         });
         expect(harness.githubCalls).toEqual([]);
         expect(verifierPromptsOf(harness.prompts)).toHaveLength(1);
@@ -1840,7 +1832,7 @@ describe("decomposition executor needs-attention routing", () => {
                                 },
                             ],
                         },
-                        needsAttention: attentionRequest,
+                        handOff: attentionRequest,
                     },
                 },
             ],
@@ -1855,69 +1847,63 @@ describe("decomposition executor needs-attention routing", () => {
     });
 });
 
-describe("needs-attention artifacts", () => {
-    test("beginNeedsAttentionHandoff discards a prior decision and records the request", async () => {
+describe("hand-off artifacts", () => {
+    test("beginPendingHandOff discards a prior decision and records the request", async () => {
         const store = await makeIssueArtifactStore(issue.number);
-        await store.recordNeedsAttentionDecision({
+        await store.recordHandOffDecision({
             decision: attentionDecision,
             fingerprint: currentFingerprint,
         });
-        await store.beginNeedsAttentionHandoff({
+        await store.beginPendingHandOff({
             request: attentionRequest,
             fingerprint: currentFingerprint,
             checkpoint: CHECKPOINT,
         });
-        expect(store.has(IssueArtifactKind.NeedsAttentionDecision)).toBe(false);
-        expect(store.has(IssueArtifactKind.NeedsAttentionHandoff)).toBe(true);
-        const handoff = await store.read(
-            IssueArtifactKind.NeedsAttentionHandoff,
-        );
+        expect(store.has(IssueArtifactKind.HandOffDecision)).toBe(false);
+        expect(store.has(IssueArtifactKind.PendingHandOff)).toBe(true);
+        const handoff = await store.read(IssueArtifactKind.PendingHandOff);
         expect(handoff.request).toEqual(attentionRequest);
         expect(handoff.checkpoint).toEqual(CHECKPOINT);
         expect(handoff.fingerprint).toEqual(currentFingerprint);
     });
 
-    test("clearNeedsAttentionHandoff keeps the confirmed decision", async () => {
+    test("clearPendingHandOff keeps the confirmed decision", async () => {
         const store = await makeIssueArtifactStore(issue.number);
-        await store.beginNeedsAttentionHandoff({
+        await store.beginPendingHandOff({
             request: attentionRequest,
             fingerprint: currentFingerprint,
             checkpoint: CHECKPOINT,
         });
-        await store.recordNeedsAttentionDecision({
+        await store.recordHandOffDecision({
             decision: attentionDecision,
             fingerprint: currentFingerprint,
         });
-        await store.clearNeedsAttentionHandoff();
-        expect(store.has(IssueArtifactKind.NeedsAttentionDecision)).toBe(true);
-        expect(store.has(IssueArtifactKind.NeedsAttentionHandoff)).toBe(false);
+        await store.clearPendingHandOff();
+        expect(store.has(IssueArtifactKind.HandOffDecision)).toBe(true);
+        expect(store.has(IssueArtifactKind.PendingHandOff)).toBe(false);
     });
 
-    test("invalidateStaleNeedsAttentionDecision drops mismatched state and keeps matching state", async () => {
+    test("invalidateStaleHandOffDecision drops mismatched state and keeps matching state", async () => {
         const store = await makeIssueArtifactStore(issue.number);
-        await store.beginNeedsAttentionHandoff({
+        await store.beginPendingHandOff({
             request: attentionRequest,
             fingerprint: currentFingerprint,
             checkpoint: CHECKPOINT,
         });
-        await store.recordNeedsAttentionDecision({
+        await store.recordHandOffDecision({
             decision: attentionDecision,
             fingerprint: currentFingerprint,
         });
         expect(
-            await store.invalidateStaleNeedsAttentionDecision(
-                currentFingerprint,
-            ),
+            await store.invalidateStaleHandOffDecision(currentFingerprint),
         ).toBe(false);
-        expect(store.has(IssueArtifactKind.NeedsAttentionDecision)).toBe(true);
-        expect(store.has(IssueArtifactKind.NeedsAttentionHandoff)).toBe(true);
+        expect(store.has(IssueArtifactKind.HandOffDecision)).toBe(true);
+        expect(store.has(IssueArtifactKind.PendingHandOff)).toBe(true);
         expect(
-            await store.invalidateStaleNeedsAttentionDecision(
-                changedFingerprint,
-            ),
+            await store.invalidateStaleHandOffDecision(changedFingerprint),
         ).toBe(true);
-        expect(store.has(IssueArtifactKind.NeedsAttentionDecision)).toBe(false);
-        expect(store.has(IssueArtifactKind.NeedsAttentionHandoff)).toBe(false);
+        expect(store.has(IssueArtifactKind.HandOffDecision)).toBe(false);
+        expect(store.has(IssueArtifactKind.PendingHandOff)).toBe(false);
     });
 
     test("invalidateStaleIssueDecisions clears stale decisions across kinds", async () => {
@@ -1926,7 +1912,7 @@ describe("needs-attention artifacts", () => {
             decision: { fitsOneSession: true },
             fingerprint: changedFingerprint,
         });
-        await store.write(IssueArtifactKind.NeedsAttentionDecision, {
+        await store.write(IssueArtifactKind.HandOffDecision, {
             decision: attentionDecision,
             fingerprint: changedFingerprint,
         });
@@ -1934,11 +1920,11 @@ describe("needs-attention artifacts", () => {
             await store.invalidateStaleIssueDecisions(currentFingerprint),
         ).toBe(true);
         expect(store.has(IssueArtifactKind.PreflightDecision)).toBe(false);
-        expect(store.has(IssueArtifactKind.NeedsAttentionDecision)).toBe(false);
+        expect(store.has(IssueArtifactKind.HandOffDecision)).toBe(false);
     });
 });
 
-describe("needs-attention recovery diagnostics", () => {
+describe("hand-off recovery diagnostics", () => {
     test("reuses a matching diagnostic and restores without creating a new patch", async () => {
         const workspace = mkdtempSync(join(tmpdir(), "ralphie-recovery-"));
         try {
@@ -1968,7 +1954,7 @@ describe("needs-attention recovery diagnostics", () => {
                 progress,
                 invariant,
             );
-            const input: NeedsAttentionRecoveryInput = {
+            const input: HandOffRecoveryInput = {
                 runId: "run-1",
                 repository: "owner/repo",
                 workspace,
@@ -1979,10 +1965,10 @@ describe("needs-attention recovery diagnostics", () => {
                 decision: attentionDecision,
                 request: attentionRequest,
             };
-            const first = await recovery.handleNeedsAttention(input);
-            const second = await recovery.handleNeedsAttention(input);
+            const first = await recovery.handleHandOff(input);
+            const second = await recovery.handleHandOff(input);
             expect(second.diagnosticsPath).toBe(first.diagnosticsPath);
-            expect(second.diagnosticsPath).toMatch(/needs-attention-/);
+            expect(second.diagnosticsPath).toMatch(/hand-off-/);
             expect(
                 trace.filter((entry) => entry === "createPatch"),
             ).toHaveLength(1);
@@ -2032,11 +2018,11 @@ describe("needs-attention recovery diagnostics", () => {
                 decision: attentionDecision,
                 request: attentionRequest,
             };
-            const current = await recovery.handleNeedsAttention({
+            const current = await recovery.handleHandOff({
                 ...base,
                 fingerprint: currentFingerprint,
             });
-            const changed = await recovery.handleNeedsAttention({
+            const changed = await recovery.handleHandOff({
                 ...base,
                 fingerprint: changedFingerprint,
             });
@@ -2076,7 +2062,7 @@ describe("needs-attention recovery diagnostics", () => {
                 progress,
                 makeInvariant([]),
             );
-            const input: NeedsAttentionRecoveryInput = {
+            const input: HandOffRecoveryInput = {
                 runId: "run-1",
                 repository: "owner/repo",
                 workspace,
@@ -2087,12 +2073,10 @@ describe("needs-attention recovery diagnostics", () => {
                 decision: attentionDecision,
                 request: attentionRequest,
             };
-            await expect(
-                recovery.handleNeedsAttention(input),
-            ).rejects.toMatchObject({
+            await expect(recovery.handleHandOff(input)).rejects.toMatchObject({
                 name: "RalphieError",
                 message: expect.stringContaining(
-                    "Failed to capture needs-attention diagnostics",
+                    "Failed to capture hand-off diagnostics",
                 ),
             });
             expect(trace).not.toContain("restore");
@@ -2127,7 +2111,7 @@ describe("needs-attention recovery diagnostics", () => {
                 progress,
                 makeInvariant(verifyCalls),
             );
-            const input: NeedsAttentionRecoveryInput = {
+            const input: HandOffRecoveryInput = {
                 runId: "run-1",
                 repository: "owner/repo",
                 workspace,
@@ -2138,9 +2122,7 @@ describe("needs-attention recovery diagnostics", () => {
                 decision: attentionDecision,
                 request: attentionRequest,
             };
-            await expect(
-                recovery.handleNeedsAttention(input),
-            ).rejects.toMatchObject({
+            await expect(recovery.handleHandOff(input)).rejects.toMatchObject({
                 name: "RalphieError",
                 message: expect.stringContaining(
                     "Failed to restore the clean checkout",
@@ -2189,7 +2171,7 @@ describe("needs-attention recovery diagnostics", () => {
                 progress,
                 invariant,
             );
-            const input: NeedsAttentionRecoveryInput = {
+            const input: HandOffRecoveryInput = {
                 runId: "run-1",
                 repository: "owner/repo",
                 workspace,
@@ -2200,9 +2182,7 @@ describe("needs-attention recovery diagnostics", () => {
                 decision: attentionDecision,
                 request: attentionRequest,
             };
-            await expect(
-                recovery.handleNeedsAttention(input),
-            ).rejects.toMatchObject({
+            await expect(recovery.handleHandOff(input)).rejects.toMatchObject({
                 name: "RalphieError",
                 message: expect.stringContaining("branch changed"),
             });

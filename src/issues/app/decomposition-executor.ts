@@ -33,7 +33,7 @@ import {
     type WorkflowExecutorResult,
 } from "./execution.ts";
 import type { ReviewAttempt } from "./recovery.ts";
-import type { NeedsAttentionRouterService } from "./needs-attention.ts";
+import type { HandOffRouterService } from "./hand-off.ts";
 import { DEFAULT_MAX_DECOMPOSITION_DEPTH } from "../domain/decomposition-markdown.ts";
 
 export type DecompositionExecutorService = {
@@ -61,7 +61,7 @@ export const makeDecompositionExecutorService = (
     issues: GitHubIssuesService,
     relationships: GitHubIssueRelationshipService,
     progress: ProgressReporterService,
-    needsAttentionRouter?: NeedsAttentionRouterService,
+    handOffRouter?: HandOffRouterService,
 ): DecompositionExecutorService => {
     const recoverableMutation = async <Output>(
         operation: string,
@@ -194,23 +194,23 @@ export const makeDecompositionExecutorService = (
             progressIssue: issueContext(input).issue,
             signal: context.signal,
         });
-        if (result.needsAttention !== undefined) {
-            if (needsAttentionRouter === undefined) {
+        if (result.handOff !== undefined) {
+            if (handOffRouter === undefined) {
                 throw new RalphieError({
                     message:
-                        "A needs-attention signal requires the verifier/router service.",
+                        "A hand-off signal requires the verifier/router service.",
                 });
             }
-            const routed = await needsAttentionRouter.route({
+            const routed = await handOffRouter.route({
                 context,
                 artifacts,
-                request: result.needsAttention,
+                request: result.handOff,
                 checkpoint: {
                     branch: invariant.branch,
                     sha: invariant.head,
                 },
             });
-            if (routed !== undefined) throw new RoutedNeedsAttention(routed);
+            if (routed !== undefined) throw new RoutedHandOff(routed);
         }
         await artifacts.write(
             IssueArtifactKind.IssueBreakdownDecision,
@@ -671,7 +671,7 @@ export const makeDecompositionExecutorService = (
             try {
                 return await executeDecomposition(input);
             } catch (error) {
-                if (error instanceof RoutedNeedsAttention) {
+                if (error instanceof RoutedHandOff) {
                     return error.outcome;
                 }
                 throw error;
@@ -680,8 +680,8 @@ export const makeDecompositionExecutorService = (
     };
 };
 
-class RoutedNeedsAttention extends Error {
+class RoutedHandOff extends Error {
     constructor(readonly outcome: WorkflowExecutorResult) {
-        super("Needs attention");
+        super("Hand-off");
     }
 }

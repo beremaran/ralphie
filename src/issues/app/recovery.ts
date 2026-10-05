@@ -6,13 +6,13 @@ import {
     type IssueCheckpoint,
 } from "../../git/ports.ts";
 import { type GitRepositoryInvariantService } from "../../git/ports.ts";
-import type { NeedsAttentionRequest } from "../../agent/task-session.ts";
+import type { HandOffRequest } from "../../agent/task-session.ts";
 import type { GitHubIssue } from "../../github/domain.ts";
 import { type ProgressReporterService } from "../../progress/ports.ts";
 import { RalphieError } from "../../shared/error.ts";
 import {
-    needsAttentionDecisionSchema,
-    type NeedsAttentionDecision,
+    handOffDecisionSchema,
+    type HandOffDecision,
     type ReviewDecision,
     ReviewVerdict,
 } from "../domain/decisions.ts";
@@ -71,7 +71,7 @@ export type ReviewExhaustionResult = {
     readonly resume: IssueQueueResumeStrategy;
 };
 
-export type NeedsAttentionRecoveryInput = {
+export type HandOffRecoveryInput = {
     readonly runId: string;
     readonly repository?: string;
     readonly workspace: string;
@@ -80,16 +80,16 @@ export type NeedsAttentionRecoveryInput = {
     readonly checkpoint: IssueCheckpoint;
     readonly fingerprint: IssueFreshnessFingerprint;
     /** The grounding decision that confirmed the agent's request. */
-    readonly decision: NeedsAttentionDecision;
-    /** The original bounded request from the mutating agent. */
-    readonly request: NeedsAttentionRequest;
+    readonly decision: HandOffDecision;
+    /** The original bounded request from the mutating agent, if any. */
+    readonly request?: HandOffRequest;
     /** May be supplied by callers when the service was assembled without one. */
     readonly repositoryInvariant?: GitRepositoryInvariantService;
     /** Caller cancellation observed by the invariant verification. */
     readonly signal?: AbortSignal;
 };
 
-export type NeedsAttentionRecoveryResult = {
+export type HandOffRecoveryResult = {
     readonly diagnosticsPath: string;
 };
 
@@ -100,9 +100,9 @@ export type IssueRecoveryService = {
     readonly handleReviewExhaustion: (
         input: ReviewExhaustionInput,
     ) => Promise<ReviewExhaustionResult>;
-    readonly handleNeedsAttention: (
-        input: NeedsAttentionRecoveryInput,
-    ) => Promise<NeedsAttentionRecoveryResult>;
+    readonly handleHandOff: (
+        input: HandOffRecoveryInput,
+    ) => Promise<HandOffRecoveryResult>;
 };
 
 const recoverableError = (message: string, cause: unknown): RalphieError =>
@@ -116,10 +116,10 @@ const diagnosticPath = (
     name: string,
 ): string => layout.diagnosticsPath(input.issue.number, name);
 
-const needsAttentionDiagnosticName = (
+const handOffDiagnosticName = (
     fingerprint: IssueFreshnessFingerprint,
 ): string =>
-    `needs-attention-${createHash("sha256")
+    `hand-off-${createHash("sha256")
         .update(JSON.stringify(fingerprint))
         .digest("hex")
         .slice(0, 16)}`;
@@ -178,8 +178,8 @@ const persistDiagnostic = async (
     }
 };
 
-const needsAttentionMetadata = (
-    input: NeedsAttentionRecoveryInput,
+const handOffMetadata = (
+    input: HandOffRecoveryInput,
     diagnosticsPath: string,
     clock: Clock,
 ): string => {
@@ -202,7 +202,7 @@ const needsAttentionMetadata = (
         )}\n`;
     } catch (cause) {
         throw recoverableError(
-            `Failed to preserve needs-attention diagnostics at ${diagnosticsPath}. Checkout was not restored.`,
+            `Failed to preserve hand-off diagnostics at ${diagnosticsPath}. Checkout was not restored.`,
             cause,
         );
     }
@@ -227,7 +227,7 @@ const matchingDiagnostic = async (
             JSON.stringify(existingBinding) !== JSON.stringify(expectedBinding)
         ) {
             throw new RalphieError({
-                message: `Needs-attention diagnostics at ${diagnosticsPath} do not match the confirmed decision.`,
+                message: `Hand-off diagnostics at ${diagnosticsPath} do not match the confirmed decision.`,
             });
         }
         return true;
@@ -235,7 +235,7 @@ const matchingDiagnostic = async (
         const code = (cause as NodeJS.ErrnoException).code;
         if (code === "ENOENT" || code === "ENOTDIR") return false;
         throw recoverableError(
-            `Failed to validate needs-attention diagnostics at ${diagnosticsPath}. Checkout was not restored.`,
+            `Failed to validate hand-off diagnostics at ${diagnosticsPath}. Checkout was not restored.`,
             cause,
         );
     }
@@ -343,8 +343,8 @@ export const makeIssueRecoveryService = (
         });
     };
 
-    const writeNeedsAttentionDiagnostics = async (
-        input: NeedsAttentionRecoveryInput,
+    const writeHandOffDiagnostics = async (
+        input: HandOffRecoveryInput,
         patch?: string,
     ): Promise<
         { readonly path: string; readonly reused: boolean } | undefined
@@ -352,9 +352,9 @@ export const makeIssueRecoveryService = (
         const diagnosticsPath = diagnosticPath(
             layout,
             input,
-            needsAttentionDiagnosticName(input.fingerprint),
+            handOffDiagnosticName(input.fingerprint),
         );
-        const metadata = needsAttentionMetadata(input, diagnosticsPath, clock);
+        const metadata = handOffMetadata(input, diagnosticsPath, clock);
         if (await matchingDiagnostic(fileSystem, diagnosticsPath, metadata)) {
             return { path: diagnosticsPath, reused: true };
         }
@@ -364,13 +364,13 @@ export const makeIssueRecoveryService = (
             diagnosticsPath,
             patch,
             metadata,
-            description: "Needs-attention diagnostics",
+            description: "Hand-off diagnostics",
         });
         return { path: diagnosticsPath, reused: false };
     };
 
-    const restoreNeedsAttentionCheckout = async (
-        input: NeedsAttentionRecoveryInput,
+    const restoreHandOffCheckout = async (
+        input: HandOffRecoveryInput,
         diagnosticsPath: string,
         invariant: GitRepositoryInvariantService,
     ): Promise<void> => {
@@ -402,11 +402,11 @@ export const makeIssueRecoveryService = (
                 ...issueContext,
                 stage: "checkout-restore",
                 status: "failed",
-                message: `Needs-attention checkout recovery failed: ${cause instanceof Error ? cause.message : String(cause)}`,
+                message: `Hand-off checkout recovery failed: ${cause instanceof Error ? cause.message : String(cause)}`,
                 details: { diagnosticsPath },
             });
             throw recoverableError(
-                `Failed to restore the clean checkout for needs-attention recovery at ${diagnosticsPath}.`,
+                `Failed to restore the clean checkout for hand-off recovery at ${diagnosticsPath}.`,
                 cause,
             );
         }
@@ -419,15 +419,13 @@ export const makeIssueRecoveryService = (
         });
     };
 
-    const validateNeedsAttention = (
-        input: NeedsAttentionRecoveryInput,
-    ): void => {
+    const validateHandOff = (input: HandOffRecoveryInput): void => {
         try {
-            needsAttentionDecisionSchema.parse(input.decision);
+            handOffDecisionSchema.parse(input.decision);
         } catch (cause) {
             throw new RalphieError({
                 message:
-                    "Needs-attention recovery requires a confirmed grounding decision.",
+                    "Hand-off recovery requires a confirmed grounding decision.",
                 cause,
             });
         }
@@ -463,23 +461,19 @@ export const makeIssueRecoveryService = (
             };
         },
 
-        handleNeedsAttention: async (input) => {
-            validateNeedsAttention(input);
+        handleHandOff: async (input) => {
+            validateHandOff(input);
             const invariant = input.repositoryInvariant ?? repositoryInvariant;
             if (invariant === undefined) {
                 throw new RalphieError({
                     message:
-                        "Needs-attention recovery requires a repository invariant service.",
+                        "Hand-off recovery requires a repository invariant service.",
                 });
             }
 
-            const existing = await writeNeedsAttentionDiagnostics(input);
+            const existing = await writeHandOffDiagnostics(input);
             if (existing !== undefined) {
-                await restoreNeedsAttentionCheckout(
-                    input,
-                    existing.path,
-                    invariant,
-                );
+                await restoreHandOffCheckout(input, existing.path, invariant);
                 return { diagnosticsPath: existing.path };
             }
 
@@ -488,24 +482,17 @@ export const makeIssueRecoveryService = (
                 patch = await git.createPatch(input.repositoryPath);
             } catch (cause) {
                 throw recoverableError(
-                    "Failed to capture needs-attention diagnostics. Checkout was not restored.",
+                    "Failed to capture hand-off diagnostics. Checkout was not restored.",
                     cause,
                 );
             }
-            const diagnostic = await writeNeedsAttentionDiagnostics(
-                input,
-                patch,
-            );
+            const diagnostic = await writeHandOffDiagnostics(input, patch);
             if (diagnostic === undefined) {
                 throw new RalphieError({
-                    message: "Needs-attention diagnostics were not persisted.",
+                    message: "Hand-off diagnostics were not persisted.",
                 });
             }
-            await restoreNeedsAttentionCheckout(
-                input,
-                diagnostic.path,
-                invariant,
-            );
+            await restoreHandOffCheckout(input, diagnostic.path, invariant);
             return { diagnosticsPath: diagnostic.path };
         },
     };

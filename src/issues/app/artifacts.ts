@@ -3,8 +3,8 @@ import { z } from "zod";
 import { type IssueCheckpoint } from "../../git/ports.ts";
 import type { GitHubIssue } from "../../github/domain.ts";
 import {
-    needsAttentionRequestSchema,
-    type NeedsAttentionRequest,
+    handOffRequestSchema,
+    type HandOffRequest,
 } from "../../agent/task-session.ts";
 import { RalphieError } from "../../shared/error.ts";
 import type { IdGenerator, RunLayout } from "../../run/ports.ts";
@@ -13,14 +13,14 @@ import {
     sessionFitDecisionSchema,
     issueBreakdownDecisionSchema,
     issueResolutionDecisionSchema,
-    needsAttentionDecisionSchema,
+    handOffDecisionSchema,
     reviewDecisionSchema,
     type CommitMessageDecision,
     type SessionFitDecision,
     type IssueBreakdownDecision,
     type IssueResolutionDecision,
     IssueResolutionStatus,
-    type NeedsAttentionDecision,
+    type HandOffDecision,
 } from "../domain/decisions.ts";
 import type { ReviewAttempt } from "./recovery.ts";
 import { MAX_REVIEW_ROUNDS } from "../domain/stage.ts";
@@ -33,8 +33,8 @@ export enum IssueArtifactKind {
     CommitMessageDecision = "commit-message-decision",
     CreatedCommit = "created-commit",
     IssueResolutionDecision = "issue-resolution-decision",
-    NeedsAttentionDecision = "needs-attention-decision",
-    NeedsAttentionHandoff = "needs-attention-handoff",
+    HandOffDecision = "hand-off-decision",
+    PendingHandOff = "pending-hand-off",
     IssueBreakdownDecision = "issue-breakdown-decision",
     CreatedIssueNumbers = "created-issue-numbers",
     CreatedIssueDependencies = "created-issue-dependencies",
@@ -63,8 +63,8 @@ export type IssueFreshnessFingerprint =
           readonly commentVersion: number | string;
       };
 
-export type NeedsAttentionDecisionArtifact = {
-    readonly decision: NeedsAttentionDecision;
+export type HandOffDecisionArtifact = {
+    readonly decision: HandOffDecision;
     readonly fingerprint: IssueFreshnessFingerprint;
 };
 
@@ -78,8 +78,8 @@ export type IssueResolutionDecisionArtifact = {
     readonly fingerprint: IssueFreshnessFingerprint;
 };
 
-export type NeedsAttentionHandoffArtifact = {
-    readonly request: NeedsAttentionRequest;
+export type PendingHandOffArtifact = {
+    readonly request: HandOffRequest;
     readonly fingerprint: IssueFreshnessFingerprint;
     readonly checkpoint: IssueCheckpoint;
 };
@@ -94,8 +94,8 @@ export type IssueArtifactValues = {
         readonly treeSha: string;
     };
     readonly [IssueArtifactKind.IssueResolutionDecision]: IssueResolutionDecisionArtifact;
-    readonly [IssueArtifactKind.NeedsAttentionDecision]: NeedsAttentionDecisionArtifact;
-    readonly [IssueArtifactKind.NeedsAttentionHandoff]: NeedsAttentionHandoffArtifact;
+    readonly [IssueArtifactKind.HandOffDecision]: HandOffDecisionArtifact;
+    readonly [IssueArtifactKind.PendingHandOff]: PendingHandOffArtifact;
     readonly [IssueArtifactKind.IssueBreakdownDecision]: IssueBreakdownDecision;
     readonly [IssueArtifactKind.CreatedIssueNumbers]: CreatedIssueNumberMapping;
     readonly [IssueArtifactKind.CreatedIssueDependencies]: CreatedIssueDependencyMapping;
@@ -118,13 +118,13 @@ export type IssueArtifactStore = {
         signal?: AbortSignal,
     ) => Promise<void>;
     /** Start verification of a newly detected request and discard an older confirmation. */
-    readonly beginNeedsAttentionHandoff: (
-        value: NeedsAttentionHandoffArtifact,
+    readonly beginPendingHandOff: (
+        value: PendingHandOffArtifact,
         signal?: AbortSignal,
     ) => Promise<void>;
     /** Persist the latest verifier confirmation before recovery begins. */
-    readonly recordNeedsAttentionDecision: (
-        value: NeedsAttentionDecisionArtifact,
+    readonly recordHandOffDecision: (
+        value: HandOffDecisionArtifact,
         signal?: AbortSignal,
     ) => Promise<void>;
     readonly appendReview: (
@@ -149,18 +149,16 @@ export type IssueArtifactStore = {
         fingerprint: IssueFreshnessFingerprint,
         signal?: AbortSignal,
     ) => Promise<boolean>;
-    /** Remove a needs-attention decision only when the issue has changed. */
-    readonly invalidateStaleNeedsAttentionDecision: (
+    /** Remove a hand-off decision only when the issue has changed. */
+    readonly invalidateStaleHandOffDecision: (
         fingerprint: IssueFreshnessFingerprint,
         signal?: AbortSignal,
     ) => Promise<boolean>;
-    readonly invalidateNeedsAttentionDecision: (
+    readonly invalidateHandOffDecision: (
         fingerprint: IssueFreshnessFingerprint,
         signal?: AbortSignal,
     ) => Promise<boolean>;
-    readonly clearNeedsAttentionHandoff: (
-        signal?: AbortSignal,
-    ) => Promise<void>;
+    readonly clearPendingHandOff: (signal?: AbortSignal) => Promise<void>;
 };
 
 export type IssueArtifactScope = {
@@ -309,9 +307,9 @@ export const issueFreshnessFingerprintSchema = z
         }
     });
 
-export const needsAttentionDecisionArtifactSchema = z
+export const handOffDecisionArtifactSchema = z
     .object({
-        decision: needsAttentionDecisionSchema,
+        decision: handOffDecisionSchema,
         fingerprint: issueFreshnessFingerprintSchema,
     })
     .strict();
@@ -330,9 +328,9 @@ export const issueResolutionDecisionArtifactSchema = z
     })
     .strict();
 
-export const needsAttentionHandoffArtifactSchema = z
+export const pendingHandOffArtifactSchema = z
     .object({
-        request: needsAttentionRequestSchema,
+        request: handOffRequestSchema,
         fingerprint: issueFreshnessFingerprintSchema,
         checkpoint: issueCheckpointSchema,
     })
@@ -340,13 +338,11 @@ export const needsAttentionHandoffArtifactSchema = z
 
 const validatedArtifactSchemas: Partial<Record<IssueArtifactKind, z.ZodType>> =
     {
-        [IssueArtifactKind.NeedsAttentionDecision]:
-            needsAttentionDecisionArtifactSchema,
+        [IssueArtifactKind.HandOffDecision]: handOffDecisionArtifactSchema,
         [IssueArtifactKind.PreflightDecision]: preflightDecisionArtifactSchema,
         [IssueArtifactKind.IssueResolutionDecision]:
             issueResolutionDecisionArtifactSchema,
-        [IssueArtifactKind.NeedsAttentionHandoff]:
-            needsAttentionHandoffArtifactSchema,
+        [IssueArtifactKind.PendingHandOff]: pendingHandOffArtifactSchema,
     };
 
 const createdCommitSchema = z.object({
@@ -391,14 +387,14 @@ const persistedArtifactsSchema = persistedArtifactsV2BaseSchema
             preflightDecisionArtifactSchema.optional(),
         [IssueArtifactKind.IssueResolutionDecision]:
             issueResolutionDecisionArtifactSchema.optional(),
-        [IssueArtifactKind.NeedsAttentionDecision]:
-            needsAttentionDecisionArtifactSchema.optional(),
-        [IssueArtifactKind.NeedsAttentionHandoff]:
-            needsAttentionHandoffArtifactSchema.optional(),
+        [IssueArtifactKind.HandOffDecision]:
+            handOffDecisionArtifactSchema.optional(),
+        [IssueArtifactKind.PendingHandOff]:
+            pendingHandOffArtifactSchema.optional(),
     })
     .strict();
 
-// Keep the needs-attention artifact unparsed while loading so a malformed
+// Keep the hand-off artifact unparsed while loading so a malformed
 // freshness record can be removed without discarding the other artifacts for
 // the issue. Writes still use persistedArtifactsSchema, so invalid values can
 // never be produced by this store.
@@ -410,8 +406,8 @@ const persistedArtifactsLoadSchema = persistedArtifactsV2BaseSchema
     .extend({
         [IssueArtifactKind.PreflightDecision]: z.unknown().optional(),
         [IssueArtifactKind.IssueResolutionDecision]: z.unknown().optional(),
-        [IssueArtifactKind.NeedsAttentionDecision]: z.unknown().optional(),
-        [IssueArtifactKind.NeedsAttentionHandoff]: z.unknown().optional(),
+        [IssueArtifactKind.HandOffDecision]: z.unknown().optional(),
+        [IssueArtifactKind.PendingHandOff]: z.unknown().optional(),
     })
     .strict();
 
@@ -567,10 +563,8 @@ const loadCurrentArtifactState = (value: unknown): LoadedArtifactState => {
         [IssueArtifactKind.PreflightDecision]: preflightDecisionArtifactSchema,
         [IssueArtifactKind.IssueResolutionDecision]:
             issueResolutionDecisionArtifactSchema,
-        [IssueArtifactKind.NeedsAttentionDecision]:
-            needsAttentionDecisionArtifactSchema,
-        [IssueArtifactKind.NeedsAttentionHandoff]:
-            needsAttentionHandoffArtifactSchema,
+        [IssueArtifactKind.HandOffDecision]: handOffDecisionArtifactSchema,
+        [IssueArtifactKind.PendingHandOff]: pendingHandOffArtifactSchema,
     } as const;
     const stale = Object.entries(schemas).filter(([kind, schema]) => {
         const artifact = loaded.artifacts[kind as keyof typeof schemas];
@@ -809,7 +803,7 @@ const makeStore = (
         replaceValues(values, nextValues);
     };
 
-    const invalidateStaleNeedsAttentionDecision = async (
+    const invalidateStaleHandOffDecision = async (
         fingerprint: IssueFreshnessFingerprint,
         signal?: AbortSignal,
     ): Promise<boolean> => {
@@ -822,14 +816,14 @@ const makeStore = (
                 cause,
             });
         }
-        const existing = values.get(IssueArtifactKind.NeedsAttentionDecision);
-        const handoff = values.get(IssueArtifactKind.NeedsAttentionHandoff) as
-            | NeedsAttentionHandoffArtifact
+        const existing = values.get(IssueArtifactKind.HandOffDecision);
+        const handoff = values.get(IssueArtifactKind.PendingHandOff) as
+            | PendingHandOffArtifact
             | undefined;
         const decisionMatches =
             existing === undefined ||
             sameIssueFreshnessFingerprint(
-                (existing as NeedsAttentionDecisionArtifact).fingerprint,
+                (existing as HandOffDecisionArtifact).fingerprint,
                 fingerprint,
             );
         const handoffMatches =
@@ -839,8 +833,8 @@ const makeStore = (
             return false;
         }
         const nextValues = new Map(values);
-        nextValues.delete(IssueArtifactKind.NeedsAttentionDecision);
-        nextValues.delete(IssueArtifactKind.NeedsAttentionHandoff);
+        nextValues.delete(IssueArtifactKind.HandOffDecision);
+        nextValues.delete(IssueArtifactKind.PendingHandOff);
         await save(nextValues, signal);
         return true;
     };
@@ -854,7 +848,7 @@ const makeStore = (
         const kinds = [
             IssueArtifactKind.PreflightDecision,
             IssueArtifactKind.IssueResolutionDecision,
-            IssueArtifactKind.NeedsAttentionDecision,
+            IssueArtifactKind.HandOffDecision,
         ] as const;
         const stale = kinds.filter((kind) => {
             const artifact = values.get(kind) as
@@ -932,28 +926,28 @@ const makeStore = (
             await save(nextValues, signal);
         },
 
-        beginNeedsAttentionHandoff: async (value, signal) => {
+        beginPendingHandOff: async (value, signal) => {
             throwIfArtifactWriteAborted(signal, issueNumber);
             validateArtifactValue(
                 issueNumber,
-                IssueArtifactKind.NeedsAttentionHandoff,
+                IssueArtifactKind.PendingHandOff,
                 value,
             );
             const nextValues = new Map(values);
-            nextValues.delete(IssueArtifactKind.NeedsAttentionDecision);
-            nextValues.set(IssueArtifactKind.NeedsAttentionHandoff, value);
+            nextValues.delete(IssueArtifactKind.HandOffDecision);
+            nextValues.set(IssueArtifactKind.PendingHandOff, value);
             await save(nextValues, signal);
         },
 
-        recordNeedsAttentionDecision: async (value, signal) => {
+        recordHandOffDecision: async (value, signal) => {
             throwIfArtifactWriteAborted(signal, issueNumber);
             validateArtifactValue(
                 issueNumber,
-                IssueArtifactKind.NeedsAttentionDecision,
+                IssueArtifactKind.HandOffDecision,
                 value,
             );
             const nextValues = new Map(values);
-            nextValues.set(IssueArtifactKind.NeedsAttentionDecision, value);
+            nextValues.set(IssueArtifactKind.HandOffDecision, value);
             await save(nextValues, signal);
         },
 
@@ -1037,13 +1031,13 @@ const makeStore = (
         },
 
         invalidateStaleIssueDecisions,
-        invalidateStaleNeedsAttentionDecision,
-        invalidateNeedsAttentionDecision: invalidateStaleNeedsAttentionDecision,
-        clearNeedsAttentionHandoff: async (signal) => {
+        invalidateStaleHandOffDecision,
+        invalidateHandOffDecision: invalidateStaleHandOffDecision,
+        clearPendingHandOff: async (signal) => {
             throwIfArtifactWriteAborted(signal, issueNumber);
-            if (!values.has(IssueArtifactKind.NeedsAttentionHandoff)) return;
+            if (!values.has(IssueArtifactKind.PendingHandOff)) return;
             const nextValues = new Map(values);
-            nextValues.delete(IssueArtifactKind.NeedsAttentionHandoff);
+            nextValues.delete(IssueArtifactKind.PendingHandOff);
             await save(nextValues, signal);
         },
     };

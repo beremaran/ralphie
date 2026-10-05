@@ -94,8 +94,6 @@ limits:
   reviewRounds: 5
   verificationFixes: 5
   maxDecompositionDepth: 3
-notifications:
-  enabled: false
 repos:
   acme/api:
     branch: develop
@@ -106,7 +104,7 @@ repos:
 ```
 
 Every key is optional. The values above are the defaults, except
-`defaultOwner`, `branch`, `verify`, and `notifications.label`, which have none.
+`defaultOwner`, `branch`, and `verify`, which have none.
 
 ### Top level
 
@@ -143,7 +141,7 @@ harness defaults for that role.
 | `roles.fixer` | the resolved `implementer` | Per-role assignment. |
 
 Today's sessions map onto the roles as follows: the pre-flight session and
-needs-attention confirmation are the `preflight`,
+hand-off confirmation are the `preflight`,
 implementation is the `implementer`, repair sessions are the `fixer`, review
 is the `standards-reviewer`, issue-resolution checks are the
 `resolution-verifier`, decomposition is the `decomposer`, and commit-message
@@ -201,21 +199,12 @@ All limits are positive integers.
 | `limits.implementationAttempts` | `3` | Implementation attempts allowed when sessions leave an unresolved empty diff. |
 | `limits.reviewRounds` | `5` | Review rounds before the issue escalates to decomposition. At most `20`. |
 | `limits.verificationFixes` | `5` | Repair attempts allowed after a failing `verify` command. |
-| `limits.maxDecompositionDepth` | `3` | Maximum generated-child lineage depth. Reaching it leaves the issue open, records needs attention, and continues independent work. |
-
-### `notifications`
-
-Temporary opt-in, kept until hand-offs replace it.
-
-| Key | Default | Description |
-| --- | --- | --- |
-| `notifications.enabled` | `false` | Publish needs-attention outcomes as an idempotent GitHub comment. |
-| `notifications.label` | none | Label added to those notifications; requires `notifications.enabled: true`. |
+| `limits.maxDecompositionDepth` | `3` | Maximum generated-child lineage depth. Reaching it hands the issue off as `ready-for-human` and continues independent work. |
 
 ### Repository entries
 
 Each `repos."owner/repo"` entry accepts `workspace`, `harnesses`, `roles`,
-`intake`, `labels`, `limits`, and `notifications` (overriding the top level for that repository
+`intake`, `labels`, and `limits` (overriding the top level for that repository
 only) plus two keys that exist only here:
 
 | Key | Default | Description |
@@ -236,7 +225,5 @@ Each former flag now fails with an error naming its replacement.
 | `--implementation-attempts` | `limits.implementationAttempts` |
 | `--max-decomposition-depth` | `limits.maxDecompositionDepth` |
 | `--workspace` | `workspace` |
-| `--notify-needs-attention` | `notifications.enabled` |
-| `--needs-attention-label` | `notifications.label` |
 | `--model` | `harnesses.<harness>.model` or `roles.<role>.model` |
 | `--thinking` | `harnesses.<harness>.effort` or `roles.<role>.effort` |

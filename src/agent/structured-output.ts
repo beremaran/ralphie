@@ -10,9 +10,9 @@ import {
 } from "./sessions.ts";
 import {
     type AgentRepositoryInvariant,
-    needsAttentionRequestSchema,
+    handOffRequestSchema,
     reportAgentFailure,
-    type NeedsAttentionRequest,
+    type HandOffRequest,
 } from "./task-session.ts";
 import {
     type ProgressStage,
@@ -43,7 +43,7 @@ export type StructuredOutputRequest<Output> = {
 export type StructuredOutputResult<Output> = {
     readonly sessionID: string;
     readonly output: Output;
-    readonly needsAttention?: NeedsAttentionRequest;
+    readonly handOff?: HandOffRequest;
 };
 
 /**
@@ -53,7 +53,7 @@ export type StructuredOutputResult<Output> = {
 const envelopeSchema = <Output>(schema: z.ZodType<Output>) =>
     z.object({
         result: schema,
-        needsAttention: needsAttentionRequestSchema.optional(),
+        handOff: handOffRequestSchema.optional(),
     });
 
 const verifyStructuredOutputRequest = async <Output>(
@@ -91,11 +91,11 @@ const runStructuredSession = async <Output>(
     });
     if (!outcome.ok) throw sessionFailure(request.role, outcome.failure);
     await verifyStructuredOutputRequest(request);
-    const { result, needsAttention } = outcome.value;
+    const { result, handOff } = outcome.value;
     return {
         sessionID: sessionIdFor(outcome.harnessSessionID),
         output: result,
-        ...(needsAttention === undefined ? {} : { needsAttention }),
+        ...(handOff === undefined ? {} : { handOff }),
     };
 };
 
