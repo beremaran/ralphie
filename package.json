@@ -77,6 +77,7 @@
     "package:inspect": "bun run scripts/package-smoke.ts --dry-run",
     "prepack": "bun run build:package",
     "source:audit": "bun run scripts/source-reachability.ts --json",
+    "smoke:live": "bun run scripts/live-smoke.ts",
     "skills:sync": "bun run scripts/skills-sync.ts",
     "test": "bun test tests",
     "typecheck": "bunx tsc --noEmit"

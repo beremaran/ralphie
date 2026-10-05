@@ -5,7 +5,6 @@ import {
 import { type GitIssuePreparationService } from "../ports.ts";
 import { type GitRemoteSafetyService } from "../../git/ports.ts";
 import {
-    buildCommitMessagePrompt,
     buildImplementationAfterResolutionCorrectionPrompt,
     buildImplementationPrompt,
     buildImplementationRetryPrompt,
@@ -14,8 +13,14 @@ import {
     buildVerificationFixPrompt,
 } from "../../agent/prompts.ts";
 import { requestStructuredOutput } from "../../agent/structured-output.ts";
-import { runAgentTask, type HandOffRequest } from "../../agent/task-session.ts";
+import {
+    HAND_OFF_MESSAGE_LIMIT,
+    HAND_OFF_REASONS,
+    runAgentTask,
+    type HandOffRequest,
+} from "../../agent/task-session.ts";
 import { z } from "zod";
+import { skillInvocation } from "../../harness/app/skill-injection.ts";
 import {
     type ProgressStage,
     type ProgressReporterService,
@@ -29,6 +34,7 @@ import {
 } from "./execution.ts";
 import { IssueArtifactKind, issueFreshnessFingerprint } from "./artifacts.ts";
 import {
+    type CommitMessageDecision,
     commitMessageDecisionSchema,
     GroundingDisposition,
     type HandOffDecision,
@@ -112,13 +118,73 @@ const checkSignal = (signal: AbortSignal | undefined): void => {
     }
 };
 
-const implementationResultSchema = z
+/**
+ * The result of the implementer's `/implement` session: `done` carries the
+ * commit message for the staged changes, `needs_attention` a hand-off request.
+ */
+export const implementationResultSchema = z
     .object({
-        status: z.enum(["changed", "already_resolved"]),
+        status: z.enum(["done", "needs_attention"]),
         summary: z.string().trim().min(1),
-        validation: z.array(z.string().trim().min(1)).max(20),
+        commitMessage: commitMessageDecisionSchema.optional(),
+        needsAttention: z
+            .object({
+                reason: z.enum(HAND_OFF_REASONS),
+                questions: z.array(z.string().trim().min(1)).min(1).max(10),
+            })
+            .strict()
+            .optional(),
     })
-    .strict();
+    .strict()
+    .superRefine((result, context) => {
+        if (result.status === "done" && result.commitMessage === undefined) {
+            context.addIssue({
+                code: "custom",
+                path: ["commitMessage"],
+                message: "A done result must include a commitMessage.",
+            });
+        }
+        if (
+            result.status === "needs_attention" &&
+            result.needsAttention === undefined
+        ) {
+            context.addIssue({
+                code: "custom",
+                path: ["needsAttention"],
+                message:
+                    "A needs_attention result must include needsAttention.",
+            });
+        }
+    });
+
+type ImplementationResult = z.infer<typeof implementationResultSchema>;
+
+/** Used when a rejected hand-off request lets the work continue without a message. */
+const fallbackCommitMessage = (issue: {
+    readonly number: number;
+}): CommitMessageDecision => ({ subject: `Address issue #${issue.number}` });
+
+const handoffRequest = (
+    result: ImplementationResult,
+): HandOffRequest | undefined =>
+    result.status !== "needs_attention" || result.needsAttention === undefined
+        ? undefined
+        : {
+              reason: result.needsAttention.reason,
+              message: [result.summary, ...result.needsAttention.questions]
+                  .join("\n")
+                  .slice(0, HAND_OFF_MESSAGE_LIMIT),
+          };
+
+const promptInput = (context: IssueExecutionContext) => ({
+    issue: context.issue,
+    repositoryPath: context.repositoryPath,
+    targetBranch: context.targetBranch,
+    implementInvocation: skillInvocation(
+        context.agent.roles.implementer.harness,
+        "implement",
+    ),
+});
 
 const implementationPrompt = (
     input: WorkflowExecutorInput,
@@ -128,27 +194,19 @@ const implementationPrompt = (
     const { context, unresolvedResolution } = input;
     if (attempt === 1 && unresolvedResolution !== undefined) {
         return buildImplementationAfterResolutionCorrectionPrompt({
-            issue: context.issue,
-            repositoryPath: context.repositoryPath,
-            targetBranch: context.targetBranch,
+            ...promptInput(context),
             unresolvedSummary: unresolvedResolution.summary,
             evidence: unresolvedResolution.evidence,
         });
     }
     if (unresolvedSummary !== undefined) {
         return buildImplementationRetryPrompt({
-            issue: context.issue,
-            repositoryPath: context.repositoryPath,
-            targetBranch: context.targetBranch,
+            ...promptInput(context),
             unresolvedSummary,
             attempt,
         });
     }
-    return buildImplementationPrompt({
-        issue: context.issue,
-        repositoryPath: context.repositoryPath,
-        targetBranch: context.targetBranch,
-    });
+    return buildImplementationPrompt(promptInput(context));
 };
 
 /** One attempt out of the budget its stage runs under. */
@@ -369,7 +427,7 @@ export const makeImplementationExecutorService = (
         checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
         attempt: number,
         unresolvedSummary?: string,
-    ): Promise<WorkflowExecutorResult | undefined> => {
+    ): Promise<WorkflowExecutorResult | CommitMessageDecision> => {
         const { context } = input;
         const result = await stage(
             progress,
@@ -400,7 +458,16 @@ export const makeImplementationExecutorService = (
             undefined,
             { attempt, maxAttempts: implementationBudget(context) },
         );
-        return await routeSignal(input, result.handOff, checkpoint);
+        const routed = await routeSignal(
+            input,
+            result.handOff ?? handoffRequest(result.output),
+            checkpoint,
+        );
+        return (
+            routed ??
+            result.output.commitMessage ??
+            fallbackCommitMessage(context.issue)
+        );
     };
 
     const inspectNoChangeResolution = async (
@@ -611,7 +678,6 @@ export const makeImplementationExecutorService = (
 
     const commitApprovedReview = async (
         input: WorkflowExecutorInput,
-        invariant: { readonly branch: string; readonly head: string },
         checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
         approvedReview: ReviewAttempt,
         verificationEvidence: VerificationEvidence,
@@ -627,56 +693,15 @@ export const makeImplementationExecutorService = (
                     "The staged tree changed after approval; refusing to commit without a matching review.",
             });
         }
-        const finalDiff = await operations.readStagedBinaryDiff(
-            context.repositoryPath,
-        );
-        const commitMessage = await stage(
-            progress,
-            input,
-            "commit-message",
-            "Generating a commit message...",
-            () =>
-                requestStructuredOutput(context.agent, {
-                    directory: context.repositoryPath,
-                    title: `Generate commit message for issue #${context.issue.number}`,
-                    prompt: buildCommitMessagePrompt({
-                        issue: context.issue,
-                        repositoryPath: context.repositoryPath,
-                        targetBranch: context.targetBranch,
-                        stagedDiff: finalDiff,
-                        verification: verificationEvidence,
-                    }),
-                    schema: commitMessageDecisionSchema,
-                    role: "implementer",
-                    access: "read-only",
-                    repositoryInvariant: invariant,
-                    verifyRepositoryInvariant:
-                        context.repositoryInvariant.verify,
-                    progress,
-                    progressStage: "commit-message",
-                    progressIssue: issueProgress(input).issue,
-                    signal: context.signal,
-                }),
-            "Commit message generated.",
-        );
-        const routed = await routeSignal(
-            input,
-            commitMessage.handOff,
-            checkpoint,
-        );
-        if (routed !== undefined) return routed;
-        await artifacts.write(
+        const commitMessage = await artifacts.read(
             IssueArtifactKind.CommitMessageDecision,
-            commitMessage.output,
-            context.signal,
         );
         const commit = await stage(
             progress,
             input,
             "commit",
             "Committing implementation changes...",
-            () =>
-                operations.commit(context.repositoryPath, commitMessage.output),
+            () => operations.commit(context.repositoryPath, commitMessage),
             "Implementation changes committed.",
         );
         await artifacts.write(
@@ -863,7 +888,6 @@ export const makeImplementationExecutorService = (
         ) {
             return await commitApprovedReview(
                 input,
-                invariant,
                 checkpoint,
                 review,
                 finalVerification.verification,
@@ -974,7 +998,7 @@ export const makeImplementationExecutorService = (
                 attempt,
                 unresolvedSummary,
             );
-            if (implementation !== undefined) return implementation;
+            if ("kind" in implementation) return implementation;
             checkSignal(context.signal);
             await stage(
                 progress,
@@ -987,6 +1011,11 @@ export const makeImplementationExecutorService = (
                 { attempt, maxAttempts: maximumAttempts },
             );
             if (await operations.hasStagedChanges(context.repositoryPath)) {
+                await input.artifacts.write(
+                    IssueArtifactKind.CommitMessageDecision,
+                    implementation,
+                    context.signal,
+                );
                 return await runReviewLoop(input, checkpoint, invariant);
             }
             const noChange = await inspectNoChangeResolution(

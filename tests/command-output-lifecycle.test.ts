@@ -91,6 +91,7 @@ const runNoninteractiveCase = async (
     const failure = new Error("un-aborted command failure");
 
     const factories: CommandFactories = {
+        checkHarnesses: async () => ({ errors: [], warnings: [] }),
         makeCoordinator: (options) => {
             const made = makeProgressCoordinator({
                 ...options,

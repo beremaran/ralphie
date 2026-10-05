@@ -54,6 +54,32 @@ with four-space indentation, double quotes, and semicolons. Keep functions
 small: the configured cognitive-complexity limit is the meaningful lint
 constraint.
 
+## Live smoke script
+
+`bun run smoke:live` (`scripts/live-smoke.ts`) runs the real CLI against a
+scratch GitHub repository with each installed harness (`claude`, `codex`,
+`pi`, `opencode`; missing executables are skipped). For each harness it files
+three issues labelled `ready-for-agent` and `smoke-<harness>` (an
+implementation task that goes through review, an ambiguous task that must end
+in a hand-off, and an oversized task that must be decomposed), runs Ralphie
+with every role on that harness in `yolo` approval, checks the outcomes, and
+closes the issues afterwards (`--keep-issues` leaves them).
+
+It is never run by `bun run test`, `bun run check`, or CI: it needs live
+harness logins, model spend, and GitHub credentials. Run it by hand before a
+release or after changing an adapter, prompt, or hand-off path:
+
+```bash
+RALPHIE_SMOKE_SCRATCH_REPO=you/ralphie-scratch \
+  bun run smoke:live -- --scratch-repo you/ralphie-scratch --harness claude,codex
+```
+
+The scratch repository must be named both by flag and by the
+`RALPHIE_SMOKE_SCRATCH_REPO` environment variable, and the project repository
+is refused. Use a throwaway repository: Ralphie commits and pushes to its
+default branch. Outcomes depend on model judgement, so one failed scenario is
+a prompt to inspect the run, not necessarily a regression.
+
 ## Source reachability boundary
 
 The supported runtime boundary is the bundled `dist/ralphie.js` CLI reached

@@ -1582,6 +1582,7 @@ describe("workflow", () => {
         expect(contexts[0]?.agent.roles).toEqual(roles);
         expect(contexts[0]?.agent.roles["spec-reviewer"]).toEqual({
             harness: "claude",
+            approval: "safe",
             model: "sonnet",
             effort: "high",
         });

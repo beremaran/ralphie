@@ -121,6 +121,7 @@ export const makePiCliAdapter = (deps: {
                     stdin: turn.prompt,
                     onStdoutLine: reader.feed,
                     trimStdout: false,
+                    processGroup: true,
                     ...(turn.signal === undefined
                         ? {}
                         : { signal: turn.signal }),

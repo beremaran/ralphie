@@ -10,6 +10,10 @@ import {
     type RalphieCliOptions,
     resolveRalphieConfig,
 } from "./options.ts";
+import { fileConfigDocumentWriter } from "./config/adapters/file-writer.ts";
+import { type InitDependencies, initializeConfig } from "./config/init.ts";
+import { defaultConfigPath } from "./config/load.ts";
+import type { ConfigDocumentWriter } from "./config/ports.ts";
 import { intakeOrdering } from "./config/settings.ts";
 import { handOffLabelsFrom } from "./issues/domain/hand-off.ts";
 import { yamlConfigDocumentReader } from "./config/adapters/yaml-file.ts";
@@ -22,11 +26,18 @@ import {
 } from "./progress/adapters/coordinator.ts";
 import { type ProgressRenderMode } from "./progress/adapters/progress.ts";
 import {
+    makeHarnessAdapters,
     makeLiveRuntime,
     type IssueWorkflowRuntime,
     type SkillInjectionSettings,
 } from "./runtime.ts";
 import type { SessionEventListener } from "./harness/ports.ts";
+import { makeHarnessProbe } from "./harness/adapters/probe.ts";
+import {
+    makeHarnessStartupChecker,
+    type HarnessStartupChecker,
+} from "./harness/app/startup-checks.ts";
+import type { ProgressReporterService } from "./progress/ports.ts";
 import { exitCodeForError, RalphieExitCode } from "./workflow/exit-code.ts";
 import { issueWorkflow } from "./workflow/workflow.ts";
 import type { IssueWorkflow, WorkflowOptions } from "./workflow/ports.ts";
@@ -61,6 +72,7 @@ const REMOVED_FLAGS: Readonly<Record<string, string>> = {
 };
 
 type ParsedCli = {
+    readonly init: boolean;
     readonly help: boolean;
     readonly version: boolean;
     readonly options: RalphieCliOptions;
@@ -155,10 +167,15 @@ export const parseCliArgs = (args: ReadonlyArray<string>): ParsedCli => {
     }
 
     const values = parsed.values as Record<string, unknown>;
+    const init = parsed.positionals[0] === "init";
     return {
+        init,
         help: asBoolean(values, "help"),
         version: asBoolean(values, "version"),
-        options: parseCliOptions(values, parsed.positionals[0]),
+        options: parseCliOptions(
+            values,
+            init ? undefined : parsed.positionals[0],
+        ),
     };
 };
 
@@ -187,12 +204,14 @@ const resolveProgressMode = (
 };
 
 export const HELP_TEXT = `Usage: ralphie [owner/]repository [options]
+       ralphie init [--config <path>]
 
 Turn open GitHub issues into reviewed commits through coding-agent harnesses.
 
 The repository is owner/name or a GitHub HTTPS or SSH clone URL. A bare name
 takes its owner from defaultOwner in the config file, else the gh login.
-Every other setting comes from the config file.
+Every other setting comes from the config file. \`ralphie init\` finds the
+harnesses on PATH and writes a starter config file, never overwriting one.
 
 Options:
       --config <path>          Config file (default $XDG_CONFIG_HOME/ralphie/config.yaml,
@@ -229,6 +248,12 @@ export type CommandFactories = {
         readonly skills: SkillInjectionSettings;
     }) => CommandRuntime;
     readonly runWorkflow?: IssueWorkflow["run"];
+    /** Checks the assigned harnesses before any work starts. */
+    readonly checkHarnesses?: HarnessStartupChecker;
+    /** Detects installed harnesses for `ralphie init`. */
+    readonly harnessProbe?: InitDependencies["probe"];
+    /** Creates the config file for `ralphie init`. */
+    readonly configWriter?: ConfigDocumentWriter;
     /** The authenticated gh login, read only to complete a bare repository name. */
     readonly githubLogin?: () => Promise<string>;
 };
@@ -261,6 +286,21 @@ const resolveCommandFactories = (
     makeCoordinator: factories.makeCoordinator ?? makeProgressCoordinator,
     makeRuntime: factories.makeRuntime ?? makeLiveRuntime,
     runWorkflow: factories.runWorkflow ?? issueWorkflow.run,
+    checkHarnesses:
+        factories.checkHarnesses ??
+        makeHarnessStartupChecker(
+            makeHarnessProbe({
+                runner: CommandRunnerLive,
+                adapters: makeHarnessAdapters(CommandRunnerLive),
+            }),
+        ),
+    harnessProbe:
+        factories.harnessProbe ??
+        makeHarnessProbe({
+            runner: CommandRunnerLive,
+            adapters: makeHarnessAdapters(CommandRunnerLive),
+        }),
+    configWriter: factories.configWriter ?? fileConfigDocumentWriter,
     githubLogin:
         factories.githubLogin ??
         makeGitHubViewerService(CommandRunnerLive).login,
@@ -347,12 +387,46 @@ const workflowOptionsFor = (
         reviewRounds: settings.limits.reviewRounds,
         verificationFixes: settings.limits.verificationFixes,
         roles: config.roles,
+        sessionLimits: {
+            editTimeoutMs: settings.limits.sessionTimeoutMinutes.edit * 60_000,
+            readOnlyTimeoutMs:
+                settings.limits.sessionTimeoutMinutes.readOnly * 60_000,
+            ...(settings.limits.maxBudgetUsd === undefined
+                ? {}
+                : { maxBudgetUsd: settings.limits.maxBudgetUsd }),
+        },
         workspace: settings.workspace,
         ...(input.signal === undefined ? {} : { signal: input.signal }),
         ...(control === undefined ? {} : { control }),
         runId,
         handOffLabels: handOffLabelsFrom(settings.labels),
     };
+};
+
+/** Fail fast, naming the fix, when the configured harnesses cannot run. */
+const runStartupChecks = async (
+    config: ResolvedRalphieConfig,
+    check: HarnessStartupChecker,
+    progress: ProgressReporterService,
+): Promise<void> => {
+    const report = await check({
+        roles: config.roles,
+        maxBudgetUsd: config.settings.limits.maxBudgetUsd,
+    });
+    for (const warning of report.warnings) {
+        await progress.emit({
+            stage: "agent-runtime",
+            status: "info",
+            message: `Warning: ${warning}`,
+        });
+    }
+    if (report.errors.length > 0) {
+        throw new RalphieError({
+            message: `Harness startup checks failed:\n${report.errors
+                .map((error) => `  - ${error}`)
+                .join("\n")}`,
+        });
+    }
 };
 
 const commandErrorFor = (error: unknown, signal: AbortSignal): Error => {
@@ -402,6 +476,20 @@ export const runCommand = async (
     }
 
     const factories = resolveCommandFactories(input.factories);
+    if (parsed.init) {
+        const result = await initializeConfig(
+            { probe: factories.harnessProbe, writer: factories.configWriter },
+            parsed.options.configPath ??
+                defaultConfigPath(
+                    input.environment ?? process.env,
+                    input.homeDirectory ?? homedir(),
+                ),
+        );
+        output.stdout(
+            `Wrote ${result.path}\nHarnesses found: ${result.detected.join(", ")}\nEdit it, then run: ralphie owner/repository\n`,
+        );
+        return;
+    }
     const config = await resolveRalphieConfig(
         parsed.options,
         configSourcesFor(input, factories.githubLogin),
@@ -423,6 +511,11 @@ export const runCommand = async (
             factories.makeCoordinator,
             output,
             runEventLog,
+        );
+        await runStartupChecks(
+            config,
+            factories.checkHarnesses,
+            coordinator.progress,
         );
         runtime = factories.makeRuntime({
             progress: coordinator.progress,

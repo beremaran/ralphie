@@ -69,8 +69,15 @@ flowchart TD
 ## Implementation workflow
 
 1. Capture the exact clean branch and commit as an issue checkpoint.
-2. Ask a fresh `implementer` session to implement the issue and require a schema-valid
-   completion result; prose or premature model termination is not completion.
+2. Ask a fresh `implementer` session to run the vendored `/implement` skill
+   (which drives `/tdd`) with an overlay: do not commit, leave changes in the
+   working tree, skip the closing code review. The session must return
+   `{status: done | needs_attention, summary, commitMessage, needsAttention?}`;
+   prose or premature model termination is not completion. A `needs_attention`
+   result is routed as a hand-off request. The latest issue comment that starts
+   with `## Agent Brief` is the contract: it is included in full and is exempt
+   from comment trimming, with the body and other comments as background.
+   Without a brief the issue body is the contract.
 3. Stage every change deterministically and capture the exact staged diff.
 4. Run the configured deterministic verification commands, when any. If a
    command exits non-zero, give its bounded output and the staged diff to a
@@ -81,8 +88,8 @@ flowchart TD
    staging and review.
 7. Stop after approval or `limits.reviewRounds` review attempts (default five). Reverify immediately before
    commit; if repair changes an approved tree, review the repaired tree again.
-8. Generate a validated commit message — the subject is non-empty and at most
-   72 characters, with an optional body — and commit the changes.
+8. Commit the changes with the implementer's commit message, validated when the
+   result is received (subject non-empty and at most 72 characters, optional body). No separate commit-message session runs.
 9. Recheck the remote and push the commit without force, then close the
    source issue after the push is verified.
 

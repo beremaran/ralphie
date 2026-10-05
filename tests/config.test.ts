@@ -336,6 +336,7 @@ repos:
 
         expect(options.roles.implementer).toEqual({
             harness: "claude",
+            approval: "safe",
             model: "opus",
             effort: "low",
         });
@@ -453,7 +454,7 @@ describe("configuration location", () => {
 
         expect(error.message).toBe(
             `No configuration file found at ${join(home, ".config", "ralphie", "config.yaml")}. ` +
-                "Create one as described in docs/configuration.md, or pass --config <path>.",
+                "Run ralphie init to create one (see docs/configuration.md), or pass --config <path>.",
         );
     });
 

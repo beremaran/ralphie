@@ -77,6 +77,7 @@ import {
 import { makeTemporaryScratchDirectories } from "./harness/adapters/scratch-directory.ts";
 import { makeGitWorkingTreeService } from "./git/adapters/working-tree.ts";
 import {
+    type HarnessAdapter,
     type HarnessService,
     type SessionEventListener,
 } from "./harness/ports.ts";
@@ -153,6 +154,19 @@ export type RuntimeOverrides = {
     readonly workspace?: WorkspaceService;
 };
 
+/** Every harness adapter, keyed by the name roles use to select it. */
+export const makeHarnessAdapters = (
+    commandRunner: CommandRunnerService,
+): Record<string, HarnessAdapter> => ({
+    claude: makeClaudeCodeAdapter({ runner: commandRunner }),
+    opencode: makeOpenCodeAdapter({ runner: commandRunner }),
+    codex: makeCodexAdapter({
+        runner: commandRunner,
+        schemaFiles: makeTemporarySchemaFileWriter(),
+    }),
+    pi: makePiCliAdapter({ runner: commandRunner }),
+});
+
 /** Assemble the small object graph for one run. */
 export const makeLiveRuntime = ({
     progress,
@@ -181,15 +195,7 @@ export const makeLiveRuntime = ({
     });
     const githubHandOff = makeGitHubHandOffService(githubConnection.session);
     const bareHarness = makeHarnessService({
-        adapters: {
-            claude: makeClaudeCodeAdapter({ runner: commandRunner }),
-            opencode: makeOpenCodeAdapter({ runner: commandRunner }),
-            codex: makeCodexAdapter({
-                runner: commandRunner,
-                schemaFiles: makeTemporarySchemaFileWriter(),
-            }),
-            pi: makePiCliAdapter({ runner: commandRunner }),
-        },
+        adapters: makeHarnessAdapters(commandRunner),
         listener: sessionListener,
         ids,
         ...(skills === undefined

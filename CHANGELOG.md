@@ -16,6 +16,18 @@ All notable changes to Ralphie are documented here. The project follows
   diagnostics location). Ralphie replaces the issue's single triage state
   label, so the next run's intake skips it, and every comment it posts starts
   with the AI disclaimer. See `docs/workflows.md`.
+- `ralphie init` detects the harnesses on PATH and writes a commented config
+  file at the default location (or `--config`), never overwriting an existing
+  one. A run without a config file now points at it.
+- `approval: safe | yolo` (top level, per repository, and per harness) sets how
+  the editing roles run. Startup now verifies that every assigned harness is
+  installed, that safe approval is available, and that pi and OpenCode editing
+  roles are set to `yolo`, failing within seconds with the config change that
+  fixes it.
+- `limits.sessionTimeoutMinutes` (`edit` 60, `readOnly` 15) bounds each session;
+  a timeout kills the session's process group. `limits.maxBudgetUsd` caps spend
+  per session on Claude Code, with a startup warning for harnesses that cannot
+  enforce it.
 - Sessions now see the bundled skills (or `skills.dir`) in the harness's project
   skills directory, with Ralphie's copy winning over a same-named repository
   skill. Injected files are excluded from Git and removed after the session, and

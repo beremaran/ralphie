@@ -145,11 +145,13 @@ roles:
 
         expect(options.roles.implementer).toEqual({
             harness: "claude",
+            approval: "safe",
             model: "opus",
             effort: "high",
         });
         expect(options.roles["standards-reviewer"]).toEqual({
             harness: "claude",
+            approval: "safe",
             model: "sonnet",
             effort: "high",
         });

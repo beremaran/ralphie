@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
     EDIT_SESSION_TIMEOUT_MS,
     READ_ONLY_SESSION_TIMEOUT_MS,
+    sessionRequest,
 } from "../../src/agent/sessions.ts";
 import { requestStructuredOutput } from "../../src/agent/structured-output.ts";
 import { runAgentTask } from "../../src/agent/task-session.ts";
@@ -136,5 +137,87 @@ describe("agent sessions over the harness", () => {
                 { ...base, role: "triager", schema },
             ),
         ).rejects.toThrow("invalid_result");
+    });
+});
+describe("session limits and approval", () => {
+    test("edit roles follow the configured approval mode", async () => {
+        const fake = makeFakeHarness({
+            roles: { implementer: { text: "done" } },
+        });
+        const roles = resolveRoleAssignments({
+            approval: "yolo",
+            harnesses: {},
+            roles: {},
+        });
+
+        await runAgentTask(
+            { harness: fake.service, roles },
+            { ...base, role: "implementer" },
+        );
+
+        expect(fake.requestsFor("implementer")[0]?.access).toBe("yolo");
+    });
+
+    test("a read-only override stays read-only under yolo", () => {
+        const fake = makeFakeHarness({});
+        const roles = resolveRoleAssignments({
+            approval: "yolo",
+            harnesses: {},
+            roles: {},
+        });
+
+        const request = sessionRequest(
+            { harness: fake.service, roles },
+            { ...base, role: "implementer", access: "read-only" },
+        );
+
+        expect(request.access).toBe("read-only");
+    });
+
+    test("pass the configured timeouts and budget cap", async () => {
+        const fake = makeFakeHarness({
+            roles: {
+                implementer: { text: "done" },
+                triager: { value: { result: { ok: true } } },
+            },
+        });
+        const sessions = {
+            harness: fake.service,
+            roles: defaultRoles(),
+            limits: {
+                editTimeoutMs: 1_000,
+                readOnlyTimeoutMs: 500,
+                maxBudgetUsd: 2.5,
+            },
+        };
+
+        await runAgentTask(sessions, { ...base, role: "implementer" });
+        await requestStructuredOutput(sessions, {
+            ...base,
+            role: "triager",
+            schema,
+        });
+
+        const edit = fake.requestsFor("implementer")[0];
+        const readOnly = fake.requestsFor("triager")[0];
+        expect([edit?.timeoutMs, edit?.maxBudgetUsd]).toEqual([1_000, 2.5]);
+        expect([readOnly?.timeoutMs, readOnly?.maxBudgetUsd]).toEqual([
+            500, 2.5,
+        ]);
+    });
+
+    test("leave the budget cap unset by default", async () => {
+        const fake = makeFakeHarness({
+            roles: { implementer: { text: "done" } },
+        });
+
+        await runAgentTask(
+            { harness: fake.service, roles: defaultRoles() },
+            { ...base, role: "implementer" },
+        );
+
+        expect(fake.requestsFor("implementer")[0]).not.toHaveProperty(
+            "maxBudgetUsd",
+        );
     });
 });

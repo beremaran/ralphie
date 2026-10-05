@@ -16,8 +16,9 @@ Ralphie loads the first of these that applies:
    absolute path.
 3. `~/.config/ralphie/config.yaml`.
 
-There is no built-in fallback: when no file exists, Ralphie stops at startup
-and names the path it looked for. An empty file is valid and means "all
+There is no built-in fallback: when no file exists, Ralphie stops at startup,
+names the path it looked for, and points at `ralphie init`, which writes a
+starter file. An empty file is valid and means "all
 defaults".
 
 The file is validated with a strict schema before anything else runs. Unknown
@@ -71,10 +72,12 @@ contains spaces or brackets.
 ```yaml
 defaultOwner: acme
 workspace: ~/.ralphie
+approval: safe
 harnesses:
   claude:
     model: opus
     effort: high
+    approval: safe
 roles:
   default: claude
   reviewer:
@@ -94,6 +97,10 @@ limits:
   reviewRounds: 5
   verificationFixes: 5
   maxDecompositionDepth: 3
+  sessionTimeoutMinutes:
+    edit: 60
+    readOnly: 15
+  maxBudgetUsd: 5
 repos:
   acme/api:
     branch: develop
@@ -104,13 +111,14 @@ repos:
 ```
 
 Every key is optional. The values above are the defaults, except
-`defaultOwner`, `branch`, and `verify`, which have none.
+`defaultOwner`, `branch`, `verify`, and `limits.maxBudgetUsd`, which have none.
 
 ### Top level
 
 | Key | Default | Description |
 | --- | --- | --- |
 | `defaultOwner` | none | Owner added to a bare `repo` argument. Top level only. |
+| `approval` | `safe` | Approval mode of the editing roles (`implementer`, `fixer`): `safe` or `yolo`. Overridable per repository and per harness. See [Approval modes](safety.md#approval-modes). |
 | `workspace` | `~/.ralphie` | Root directory for repository checkouts and run artifacts. Ralphie removes the workspace recursively before preparation and after a successful run, subject to protected-path checks; use a path dedicated to Ralphie (see [Safety](safety.md#workspace-risk)). Overridable per repository. |
 | `repos` | none | Per-repository overrides, keyed by `owner/repo`. Top level only. |
 
@@ -127,6 +135,7 @@ credentials; Ralphie stores none.
 | --- | --- | --- |
 | `harnesses.<name>.model` | harness default | Model passed to the harness. |
 | `harnesses.<name>.effort` | harness default | Reasoning effort passed to the harness. |
+| `harnesses.<name>.approval` | top-level `approval` | Approval mode for editing roles that run on this harness. |
 
 `roles` assigns a harness to each role. A value is a harness name, or a
 mapping `{ harness, model, effort }` whose `model` and `effort` override the
@@ -144,8 +153,7 @@ Today's sessions map onto the roles as follows: the pre-flight session and
 hand-off confirmation are the `preflight`,
 implementation is the `implementer`, repair sessions are the `fixer`, review
 is the `standards-reviewer`, issue-resolution checks are the
-`resolution-verifier`, decomposition is the `decomposer`, and commit-message
-generation runs under the `implementer` assignment with read-only access. The
+`resolution-verifier`, and decomposition is the `decomposer`. The
 `spec-reviewer` is assigned but not yet used.
 
 Editing roles (`implementer`, `fixer`) run in the harness's `safe` mode and
@@ -192,18 +200,21 @@ the prompt and sessions must not use `gh`. Committed versions always win.
 
 ### `limits`
 
-All limits are positive integers.
+All limits are positive; counts are integers.
 
 | Key | Default | Description |
 | --- | --- | --- |
 | `limits.implementationAttempts` | `3` | Implementation attempts allowed when sessions leave an unresolved empty diff. |
 | `limits.reviewRounds` | `5` | Review rounds before the issue escalates to decomposition. At most `20`. |
 | `limits.verificationFixes` | `5` | Repair attempts allowed after a failing `verify` command. |
+| `limits.sessionTimeoutMinutes.edit` | `60` | Wall-clock limit of one session in an editing role. Exceeding it kills the session's process group and counts as a failed attempt. |
+| `limits.sessionTimeoutMinutes.readOnly` | `15` | The same limit for read-only roles. |
+| `limits.maxBudgetUsd` | none | Spend cap in US dollars for each session, passed to harnesses that enforce one (Claude Code). Startup warns for every assigned harness that cannot enforce it. |
 | `limits.maxDecompositionDepth` | `3` | Maximum generated-child lineage depth. Reaching it hands the issue off as `ready-for-human` and continues independent work. |
 
 ### Repository entries
 
-Each `repos."owner/repo"` entry accepts `workspace`, `harnesses`, `roles`,
+Each `repos."owner/repo"` entry accepts `workspace`, `approval`, `harnesses`, `roles`,
 `intake`, `labels`, and `limits` (overriding the top level for that repository
 only) plus two keys that exist only here:
 

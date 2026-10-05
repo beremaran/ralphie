@@ -1,4 +1,5 @@
 import type { GitHubConnectionService } from "../github/ports.ts";
+import type { SessionLimits } from "../agent/sessions.ts";
 import type { RoleAssignments } from "../harness/app/roles.ts";
 import type { HarnessService } from "../harness/ports.ts";
 import type { IssueFilters } from "../github/domain.ts";
@@ -64,6 +65,8 @@ export type WorkflowOptions = {
     readonly issueFilters: IssueFilters;
     /** The harness, model and effort every role runs with. */
     readonly roles: RoleAssignments;
+    /** Session timeouts and spend cap; defaults apply when omitted. */
+    readonly sessionLimits?: SessionLimits;
     readonly verificationCommands?: ReadonlyArray<string>;
     readonly implementationAttempts?: number;
     /** Review rounds allowed before escalating to decomposition. */

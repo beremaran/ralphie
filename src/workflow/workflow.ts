@@ -1,3 +1,4 @@
+import type { SessionLimits } from "../agent/sessions.ts";
 import type { RoleAssignments } from "../harness/app/roles.ts";
 import {
     CANONICAL_HAND_OFF_LABELS,
@@ -494,6 +495,7 @@ type WorkflowConfiguration = {
     readonly maxDecompositionDepth: number;
     readonly issueFilters: IssueFilters;
     readonly roles: RoleAssignments;
+    readonly sessionLimits?: SessionLimits;
     readonly verificationCommands: ReadonlyArray<string>;
     readonly implementationAttempts?: number;
     readonly reviewRounds?: number;
@@ -523,6 +525,7 @@ const makeWorkflowConfiguration = (
         maxDecompositionDepth = DEFAULT_MAX_DECOMPOSITION_DEPTH,
         issueFilters,
         roles,
+        sessionLimits,
         verificationCommands = [],
         implementationAttempts,
         reviewRounds,
@@ -539,6 +542,7 @@ const makeWorkflowConfiguration = (
         maxDecompositionDepth,
         issueFilters,
         roles,
+        ...(sessionLimits === undefined ? {} : { sessionLimits }),
         verificationCommands,
         implementationAttempts,
         reviewRounds,
@@ -1007,7 +1011,13 @@ export const workflow = async (
                         workspace,
                         runId: actualRunId,
                         runLayout: layout,
-                        agent: { harness, roles },
+                        agent: {
+                            harness,
+                            roles,
+                            ...(config.sessionLimits === undefined
+                                ? {}
+                                : { limits: config.sessionLimits }),
+                        },
                         repositoryInvariant: invariantService,
                         verificationCommands: config.verificationCommands,
                         implementationAttempts: config.implementationAttempts,
