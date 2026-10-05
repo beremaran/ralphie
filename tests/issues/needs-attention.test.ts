@@ -71,7 +71,10 @@ import {
     IssueQueueResumeStrategy,
     REVIEW_ITERATION_LIMIT,
 } from "../../src/issues/domain/stage.ts";
-import type { IssueVerificationService } from "../../src/issues/app/verification.ts";
+import {
+    type IssueVerificationService,
+    VerificationCommandError,
+} from "../../src/issues/app/verification.ts";
 import type {
     ProgressReporterService,
     ProgressUpdate,
@@ -522,6 +525,12 @@ type ImplementationHarnessOptions = {
     readonly scripts?: ReadonlyArray<FakeScript>;
     readonly withRouter?: boolean;
     readonly recoveryFailure?: boolean;
+    readonly budgets?: Pick<
+        IssueExecutionContext,
+        "reviewRounds" | "verificationFixes"
+    >;
+    readonly verification?: IssueVerificationService;
+    readonly recovery?: IssueRecoveryService;
 };
 
 const makeImplementationHarness = async (
@@ -532,19 +541,24 @@ const makeImplementationHarness = async (
     const { client, creates, prompts } = fakePi(options.scripts ?? []);
     const store = await makeTrackedStore();
     const recoveryTrace: string[] = [];
-    const { service: recovery, recoveryInputs } = makeFakeRecovery({
+    const fakeRecovery = makeFakeRecovery({
         failNeedsAttention: options.recoveryFailure,
         trace: recoveryTrace,
     });
+    const recovery = options.recovery ?? fakeRecovery.service;
+    const { recoveryInputs } = fakeRecovery;
     const router =
         options.withRouter === false
             ? undefined
             : makeNeedsAttentionRouterService(recovery);
     const verifyCalls: Array<{ branch: string; head: string }> = [];
-    const context = makeContext({
-        agent: client,
-        invariant: makeInvariant(verifyCalls),
-    });
+    const context = {
+        ...makeContext({
+            agent: client,
+            invariant: makeInvariant(verifyCalls),
+        }),
+        ...options.budgets,
+    };
     const trace: string[] = [];
     const operations: GitIssueOperationsService = {
         stageAll: async () => {
@@ -582,7 +596,7 @@ const makeImplementationHarness = async (
             };
         },
     };
-    const verification: IssueVerificationService = {
+    const verification: IssueVerificationService = options.verification ?? {
         stagedTreeSha: async () => TREE_SHA,
         verify: async () => ({
             stagedTreeSha: TREE_SHA,
@@ -1686,6 +1700,114 @@ describe("implementation executor needs-attention routing", () => {
         expect(verifierPromptsOf(harness.prompts)).toHaveLength(0);
         expect(harness.trace).not.toContain("ops:commit");
         expect(harness.trace).not.toContain("ops:push");
+    });
+
+    test("review exhaustion follows the configured review rounds", async () => {
+        for (const reviewRounds of [2, REVIEW_ITERATION_LIMIT + 1]) {
+            const workspace = mkdtempSync(join(tmpdir(), "ralphie-rounds-"));
+            try {
+                const recovery = makeIssueRecoveryService(
+                    {
+                        fileSystem: nodeRecoveryFileSystem,
+                        layout: testLayout(workspace, "run-1"),
+                        clock: fixedClock(),
+                        ids: countingIds("recovery"),
+                    },
+                    {
+                        capture: async () => CHECKPOINT,
+                        createPatch: async () => "",
+                        restore: async () => {},
+                    },
+                    makeTestProgressRecorder([]),
+                    makeInvariant([]),
+                );
+                const harness = await makeImplementationHarness({
+                    budgets: { reviewRounds },
+                    recovery,
+                    scripts: [
+                        {
+                            titlePrefix: "Implement issue #42",
+                            result: { structured: implementationChanged },
+                        },
+                        {
+                            titlePrefix: "Review issue #42",
+                            result: (served) => ({
+                                structured: changesRequestedReview(
+                                    `Finding ${served}`,
+                                ),
+                            }),
+                        },
+                        {
+                            titlePrefix: "Address review for issue #42",
+                            result: {},
+                        },
+                    ],
+                });
+
+                const outcome = await harness.executor.execute({
+                    context: harness.context,
+                    artifacts: harness.store,
+                });
+
+                expect(outcome.kind).toBe(IssueExecutionOutcomeKind.Escalated);
+                expect(
+                    harness.prompts.filter(({ title }) =>
+                        title.startsWith("Review issue #42"),
+                    ),
+                ).toHaveLength(reviewRounds);
+            } finally {
+                rmSync(workspace, { recursive: true, force: true });
+            }
+        }
+    });
+
+    test("verification repair follows the configured verification fixes", async () => {
+        const harness = await makeImplementationHarness({
+            budgets: { verificationFixes: 2 },
+            verification: {
+                stagedTreeSha: async () => TREE_SHA,
+                verify: async () => {
+                    throw new VerificationCommandError({
+                        stagedTreeSha: TREE_SHA,
+                        commands: [
+                            {
+                                command: "bun test",
+                                exitCode: 1,
+                                stdout: "",
+                                stderr: "still red",
+                            },
+                        ],
+                    });
+                },
+            },
+            scripts: [
+                {
+                    titlePrefix: "Implement issue #42",
+                    result: { structured: implementationChanged },
+                },
+                {
+                    titlePrefix: "Repair verification for issue #42",
+                    result: {},
+                },
+            ],
+        });
+
+        const outcome = await harness.executor.execute({
+            context: harness.context,
+            artifacts: harness.store,
+        });
+
+        expect(outcome).toMatchObject({
+            kind: IssueExecutionOutcomeKind.Failed,
+            message: expect.stringContaining(
+                "Deterministic verification still failed after 2 repair attempts:",
+            ),
+        });
+        expect(
+            harness.prompts.filter(({ title }) =>
+                title.startsWith("Repair verification for issue #42"),
+            ),
+        ).toHaveLength(2);
     });
 
     test("fails closed when an implementation signal arrives without a router", async () => {

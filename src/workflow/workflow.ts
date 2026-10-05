@@ -537,6 +537,8 @@ type WorkflowConfiguration = {
     readonly modelVariant?: string;
     readonly verificationCommands: ReadonlyArray<string>;
     readonly implementationAttempts?: number;
+    readonly reviewRounds?: number;
+    readonly verificationFixes?: number;
     readonly workspace: string;
     readonly signal?: AbortSignal;
     readonly control?: RunControl;
@@ -567,6 +569,8 @@ const makeWorkflowConfiguration = (
         modelVariant,
         verificationCommands = [],
         implementationAttempts,
+        reviewRounds,
+        verificationFixes,
         workspace,
         signal,
         control,
@@ -584,6 +588,8 @@ const makeWorkflowConfiguration = (
         modelVariant,
         verificationCommands,
         implementationAttempts,
+        reviewRounds,
+        verificationFixes,
         workspace,
         signal,
         ...(control === undefined ? {} : { control }),
@@ -1130,6 +1136,8 @@ export const workflow = async (
                         repositoryInvariant: invariantService,
                         verificationCommands: config.verificationCommands,
                         implementationAttempts: config.implementationAttempts,
+                        reviewRounds: config.reviewRounds,
+                        verificationFixes: config.verificationFixes,
                         signal,
                         maxDecompositionDepth,
                     }),

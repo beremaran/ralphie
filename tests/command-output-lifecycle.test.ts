@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -145,10 +145,14 @@ const runNoninteractiveCase = async (
             return {} as never;
         },
     };
+    const config = join(workspace, "config.yaml");
+    await writeFile(config, "{}\n");
     const args = [
         "owner/repository",
-        "--workspace",
-        workspace,
+        "--config",
+        config,
+        "--set",
+        `workspace=${workspace}`,
         ...(mode === "plain" ? [] : ["--output", mode]),
     ];
     let error: unknown;

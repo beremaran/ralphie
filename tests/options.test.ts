@@ -1,105 +1,81 @@
 import { describe, expect, test } from "bun:test";
 
-import { IssueOrder, IssueSort } from "../src/github/domain.ts";
-import {
-    DEFAULT_WORKSPACE,
-    DEFAULT_MAX_DECOMPOSITION_DEPTH,
-    DEFAULT_IMPLEMENTATION_ATTEMPTS,
-    resolveRalphieConfig,
-} from "../src/options.ts";
+import { yamlConfigDocumentReader } from "../src/config/adapters/yaml-file.ts";
+import { type ConfigSources, resolveRalphieConfig } from "../src/options.ts";
+import { writeTemporaryFile } from "./shared/config-fixture.ts";
 
-describe("CLI configuration", () => {
-    test("requires a positional repository", () => {
-        expect(() => resolveRalphieConfig({})).toThrow(
-            "Missing repository: provide an owner/repository argument.",
+const sources: ConfigSources = {
+    reader: yamlConfigDocumentReader,
+    environment: {},
+    homeDirectory: "/nonexistent/ralphie-test-home",
+    githubLogin: async () => "octocat",
+};
+
+describe("run configuration", () => {
+    test("requires a positional repository", async () => {
+        await expect(resolveRalphieConfig({}, sources)).rejects.toThrow(
+            "Missing repository: provide an [owner/]repository argument.",
         );
     });
 
-    test("resolves defaults from CLI arguments only", () => {
-        expect(
-            resolveRalphieConfig({
-                repo: "owner/repo",
-            }),
-        ).toEqual({
-            repo: "owner/repo",
-            maxDecompositionDepth: DEFAULT_MAX_DECOMPOSITION_DEPTH,
-            implementationAttempts: DEFAULT_IMPLEMENTATION_ATTEMPTS,
-            notificationsEnabled: false,
-            issueLabels: [],
-            issueSort: IssueSort.Created,
-            issueOrder: IssueOrder.Ascending,
-            verificationCommands: [],
+    test("maps the canonical triage roles to identical labels by default", async () => {
+        const configPath = await writeTemporaryFile("{}");
+
+        const config = await resolveRalphieConfig(
+            { repo: "acme/api", configPath },
+            sources,
+        );
+
+        expect(config).toMatchObject({
+            repo: "acme/api",
+            configPath,
             agent: "build",
-            workspace: DEFAULT_WORKSPACE,
             json: false,
         });
-    });
-
-    test("normalizes clone URLs and applies every override", () => {
-        expect(
-            resolveRalphieConfig({
-                repo: "https://github.com/Owner/Repo.git",
-                branch: "develop",
-                maxDecompositionDepth: 6,
-                issueLabels: ["bug", "ready"],
-                issueSort: IssueSort.Updated,
-                issueOrder: IssueOrder.Descending,
-                model: {
-                    providerID: "openai",
-                    modelID: "gpt-5",
-                },
-                thinking: "high",
-                workspace: "/tmp/ralphie",
-                json: true,
-                notifyNeedsAttention: true,
-                needsAttentionLabel: "  needs-attention  ",
-            }),
-        ).toMatchObject({
-            repo: "Owner/Repo",
-            branch: "develop",
-            maxDecompositionDepth: 6,
-            issueLabels: ["bug", "ready"],
-            issueSort: IssueSort.Updated,
-            issueOrder: IssueOrder.Descending,
-            model: {
-                providerID: "openai",
-                modelID: "gpt-5",
-            },
-            thinking: "high",
-            workspace: "/tmp/ralphie",
-            json: true,
-            notificationsEnabled: true,
-            needsAttentionLabel: "needs-attention",
+        expect(config.settings.labels).toEqual({
+            "needs-triage": "needs-triage",
+            "needs-info": "needs-info",
+            "ready-for-agent": "ready-for-agent",
+            "ready-for-human": "ready-for-human",
+            wontfix: "wontfix",
         });
     });
 
-    test("rejects a notification label without explicit notification opt-in", () => {
-        expect(() =>
-            resolveRalphieConfig({
-                repo: "owner/repo",
-                needsAttentionLabel: "needs-attention",
-            }),
-        ).toThrow(
-            "Option --needs-attention-label requires --notify-needs-attention.",
+    test("renames triage labels per repository and per run", async () => {
+        const configPath = await writeTemporaryFile(`
+labels:
+  ready-for-agent: agent-ready
+repos:
+  acme/api:
+    labels:
+      needs-info: waiting
+`);
+
+        const config = await resolveRalphieConfig(
+            {
+                repo: "acme/api",
+                configPath,
+                overrides: ["labels.wontfix=declined"],
+            },
+            sources,
         );
+
+        expect(config.settings.labels).toEqual({
+            "needs-triage": "needs-triage",
+            "needs-info": "waiting",
+            "ready-for-agent": "agent-ready",
+            "ready-for-human": "ready-for-human",
+            wontfix: "declined",
+        });
     });
 
-    test("rejects non-positive integer options", () => {
-        expect(() =>
-            resolveRalphieConfig({
-                repo: "owner/repo",
-                implementationAttempts: 0,
-            }),
-        ).toThrow(
-            "Option --implementation-attempts requires a positive integer.",
+    test("rejects an unknown triage role", async () => {
+        const configPath = await writeTemporaryFile(
+            "labels:\n  ready-for-robots: robots\n",
         );
-        expect(() =>
-            resolveRalphieConfig({
-                repo: "owner/repo",
-                maxDecompositionDepth: -1,
-            }),
-        ).toThrow(
-            "Option --max-decomposition-depth requires a positive integer.",
-        );
+
+        await expect(
+            resolveRalphieConfig({ repo: "acme/api", configPath }, sources),
+        ).rejects.toThrow("  labels.ready-for-robots: unknown key");
     });
 });
