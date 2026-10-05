@@ -119,8 +119,7 @@ Every key is optional. The values above are the defaults, except
 ### `harnesses` and `roles`
 
 Every agent session runs as a role on a harness. The harnesses are `claude`
-(Claude Code), `codex`, `pi`, and `opencode`; only `claude` has an adapter
-today, so assigning another name fails when its first session starts. Sessions run through the
+(Claude Code), `codex`, `pi`, and `opencode`. Sessions run through the
 harness's own command-line program, which brings its own login and
 credentials; Ralphie stores none.
 

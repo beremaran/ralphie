@@ -1,0 +1,5 @@
+{"type":"thread.started","thread_id":"01a10d02-3083-7930-8df4-cc8920144eed"}
+{"type":"item.completed","item":{"id":"item_0","type":"error","message":"Under-development features enabled: local_thread_store_compression. Under-development features are incomplete and may behave unpredictably. To suppress this warning, set `suppress_unstable_features_warning = true` in /home/user/.codex/config.toml."}}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"{\"answer\":\"ok\"}"}}
+{"type":"turn.completed","usage":{"input_tokens":19554,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":15,"reasoning_output_tokens":0}}

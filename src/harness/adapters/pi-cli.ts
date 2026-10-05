@@ -1,0 +1,135 @@
+import {
+    CommandAbortedError,
+    CommandTimeoutError,
+    type CommandRunnerService,
+} from "../../process/ports.ts";
+import { RalphieError } from "../../shared/error.ts";
+import type {
+    HarnessAdapter,
+    HarnessFailure,
+    TurnOutcome,
+    TurnRequest,
+} from "../ports.ts";
+import { makePiStreamReader, type PiStreamSummary } from "./pi-cli-stream.ts";
+
+const EXECUTABLE = "pi";
+
+/**
+ * Tools a read-only session may use. Pi has no approval system and no plan
+ * mode, so withholding the editing and shell tools is the only restriction.
+ */
+const READ_ONLY_TOOLS = "read,grep,find,ls";
+
+const optionalFlag = (
+    flag: string,
+    value: string | undefined,
+): readonly string[] => (value === undefined ? [] : [flag, value]);
+
+/**
+ * Command line for one turn. The prompt travels on stdin. `safe` and `yolo`
+ * are the same session: pi never asks for approval, so there is no weaker
+ * editing mode to request.
+ */
+const buildArguments = (turn: TurnRequest): readonly string[] => [
+    "-p",
+    "--mode",
+    "json",
+    ...(turn.access === "read-only" ? ["--tools", READ_ONLY_TOOLS] : []),
+    ...optionalFlag("--model", turn.model),
+    ...optionalFlag("--thinking", turn.effort),
+    ...optionalFlag("--session", turn.resumeSessionID),
+];
+
+const failure = (
+    kind: HarnessFailure["kind"],
+    message: string,
+    harnessSessionID?: string,
+): TurnOutcome => ({
+    ok: false,
+    failure: {
+        kind,
+        message,
+        ...(harnessSessionID === undefined ? {} : { harnessSessionID }),
+    },
+});
+
+const classifyThrown = (error: unknown): TurnOutcome => {
+    if (error instanceof CommandTimeoutError) {
+        return failure("timeout", error.message);
+    }
+    if (error instanceof CommandAbortedError) {
+        return failure("aborted", error.message);
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    return failure(
+        error instanceof RalphieError ? "unavailable" : "harness",
+        message,
+    );
+};
+
+/**
+ * Settle a finished process. Pi exits 0 even when the response failed, so
+ * the last assistant message decides, not the exit code. Earlier errors that
+ * a retry recovered from do not count.
+ */
+const settle = (
+    summary: PiStreamSummary,
+    exit: { readonly exitCode: number; readonly stderr: string },
+): TurnOutcome => {
+    const { final, sessionID } = summary;
+    const detail = exit.stderr === "" ? "" : `: ${exit.stderr}`;
+    if (final === undefined) {
+        return exit.exitCode === 0
+            ? failure("harness", "pi ended without a response.", sessionID)
+            : failure(
+                  "exit",
+                  `pi exited with code ${exit.exitCode}${detail}`,
+                  sessionID,
+              );
+    }
+    if (final.failed) {
+        return failure("harness", final.errorMessage, sessionID);
+    }
+    if (exit.exitCode !== 0) {
+        return failure(
+            "exit",
+            `pi exited with code ${exit.exitCode} after responding${detail}`,
+            sessionID,
+        );
+    }
+    return { ok: true, harnessSessionID: sessionID, text: final.text };
+};
+
+/**
+ * The pi CLI in `--mode json`. Pi has no native schema output, so structured
+ * results use the service's JSON block fallback, and no spend cap.
+ */
+export const makePiCliAdapter = (deps: {
+    readonly runner: CommandRunnerService;
+}): HarnessAdapter => ({
+    name: "pi",
+    capabilities: { nativeSchema: false, budgetCap: false },
+    runTurn: async (turn) => {
+        const reader = makePiStreamReader({ onEvent: turn.onEvent });
+        try {
+            const exit = await deps.runner.run(
+                EXECUTABLE,
+                buildArguments(turn),
+                {
+                    cwd: turn.directory,
+                    timeoutMs: turn.timeoutMs,
+                    stdin: turn.prompt,
+                    onStdoutLine: reader.feed,
+                    trimStdout: false,
+                    ...(turn.signal === undefined
+                        ? {}
+                        : { signal: turn.signal }),
+                    ...(turn.env === undefined ? {} : { env: turn.env }),
+                },
+            );
+            return settle(reader.finish(), exit);
+        } catch (error) {
+            return classifyThrown(error);
+        }
+    },
+});
