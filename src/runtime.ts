@@ -70,6 +70,12 @@ import { makeTemporarySchemaFileWriter } from "./harness/adapters/schema-file.ts
 import { makePiCliAdapter } from "./harness/adapters/pi-cli.ts";
 import { makeHarnessService } from "./harness/app/harness-service.ts";
 import {
+    guardReadOnlySessions,
+    isolateSessions,
+} from "./harness/app/session-isolation.ts";
+import { makeTemporaryScratchDirectories } from "./harness/adapters/scratch-directory.ts";
+import { makeGitWorkingTreeService } from "./git/adapters/working-tree.ts";
+import {
     type HarnessService,
     type SessionEventListener,
 } from "./harness/ports.ts";
@@ -166,7 +172,7 @@ export const makeLiveRuntime = ({
     });
     const githubNeedsAttentionNotification =
         makeGitHubNeedsAttentionNotificationService(githubConnection.session);
-    const harness = makeHarnessService({
+    const bareHarness = makeHarnessService({
         adapters: {
             claude: makeClaudeCodeAdapter({ runner: commandRunner }),
             opencode: makeOpenCodeAdapter({ runner: commandRunner }),
@@ -179,6 +185,10 @@ export const makeLiveRuntime = ({
         listener: sessionListener,
         ids,
     });
+    const harness = guardReadOnlySessions(
+        isolateSessions(bareHarness, makeTemporaryScratchDirectories()),
+        makeGitWorkingTreeService(commandRunner).fingerprint,
+    );
     const gitRepository = makeGitRepositoryService(commandRunner);
     const gitRepositoryInvariant =
         makeGitRepositoryInvariantService(commandRunner);
