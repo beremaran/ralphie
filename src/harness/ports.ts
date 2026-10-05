@@ -279,3 +279,19 @@ export type HarnessProbe = {
     /** The harness grants its `safe` editing access mode. */
     readonly safeAccess: (name: string) => Promise<ProbeResult>;
 };
+
+/** An empty directory that lives for one session. */
+export type ScratchDirectory = {
+    readonly path: string;
+    readonly remove: () => Promise<void>;
+};
+
+export type ScratchDirectoryProvider = {
+    readonly create: () => Promise<ScratchDirectory>;
+};
+
+/** A digest of the tracked, staged and untracked state of a checkout. */
+export type WorkingTreeFingerprint = (
+    directory: string,
+    signal?: AbortSignal,
+) => Promise<string>;

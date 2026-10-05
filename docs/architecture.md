@@ -127,7 +127,7 @@ the normal check gate.
 | Public trigger and flags | `index.ts`, `src/cli.ts`, `src/command.ts`, `src/options.ts` |
 | Runtime dependency assembly | `src/runtime.ts` |
 | Run orchestration, queue, state transitions | `src/workflow/workflow.ts`, `src/issues/domain/queue.ts` |
-| Complexity routing | `src/issues/app/executor.ts`, `src/issues/app/complexity.ts` |
+| Pre-flight routing | `src/issues/app/executor.ts`, `src/issues/app/preflight.ts` |
 | Implementation/review/delivery | `src/issues/app/implementation-executor.ts`, `src/issues/app/verification.ts`, `src/git/adapters/issue-operations.ts`, `src/git/adapters/remote-safety.ts` |
 | Decomposition and GitHub mutations | `src/issues/app/decomposition-executor.ts`, `src/github/adapters/issue-mutations.ts`, `src/github/adapters/issue-relationships.ts` |
 | Role assignments, session requests, and structured results | `src/harness/app/roles.ts`, `src/agent/` |

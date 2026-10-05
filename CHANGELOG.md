@@ -16,9 +16,21 @@ All notable changes to Ralphie are documented here. The project follows
   a timeout kills the session's process group. `limits.maxBudgetUsd` caps spend
   per session on Claude Code, with a startup warning for harnesses that cannot
   enforce it.
+- Sessions now see the bundled skills (or `skills.dir`) in the harness's project
+  skills directory, with Ralphie's copy winning over a same-named repository
+  skill. Injected files are excluded from Git and removed after the session, and
+  `docs/agents` tracker and label docs are generated only when the repository
+  lacks them.
 
 ### Changed
 
+- Intake now reads only open issues carrying the `labels.ready-for-agent`
+  label (and every `intake.requireLabels` label). One read-only pre-flight
+  session per issue replaces the grounding session and the 0-5 complexity
+  assessment: it returns `actionable` with `fitsOneSession`, `already_resolved`,
+  `blocked` (skipped without a label change) or `needs_attention`. The
+  `complexity-decision` artifact is replaced by `preflight-decision` and
+  the `complexity-assessment` progress stage by `preflight`.
 - Every agent session now runs through a headless harness CLI (Claude Code, as
   the default and only adapter so far) instead of the in-process pi SDK. The
   new `harnesses` (per-harness `model` and `effort`) and `roles` (`default`,

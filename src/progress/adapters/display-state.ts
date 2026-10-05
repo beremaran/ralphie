@@ -79,7 +79,7 @@ export const PROGRESS_STAGE_LABELS: Readonly<Record<ProgressStage, string>> = {
     "issue-queue": "Updating issue queue",
     grounding: "Checking issue readiness",
     "issue-grounding": "Checking issue readiness",
-    "complexity-assessment": "Assessing complexity",
+    preflight: "Pre-flight check",
     implementation: "Implementing changes",
     "change-staging": "Staging changes",
     verification: "Running verification",

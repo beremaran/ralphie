@@ -30,10 +30,6 @@ import {
 } from "./issues/app/artifacts.ts";
 import { nodeIssueArtifactFileSystem } from "./issues/adapters/artifact-file-system.ts";
 import {
-    makeComplexityAssessmentService,
-    type ComplexityAssessmentService,
-} from "./issues/app/complexity.ts";
-import {
     makeDecompositionExecutorService,
     type DecompositionExecutorService,
 } from "./issues/app/decomposition-executor.ts";
@@ -56,9 +52,9 @@ import {
 } from "./issues/app/recovery.ts";
 import { nodeRecoveryFileSystem } from "./issues/adapters/recovery-file-system.ts";
 import {
-    makeGroundingAssessmentService,
-    type GroundingAssessmentService,
-} from "./issues/app/grounding.ts";
+    makePreflightAssessmentService,
+    type PreflightAssessmentService,
+} from "./issues/app/preflight.ts";
 import {
     makeNeedsAttentionRouterService,
     type NeedsAttentionRouterService,
@@ -69,6 +65,17 @@ import { makeCodexAdapter } from "./harness/adapters/codex.ts";
 import { makeTemporarySchemaFileWriter } from "./harness/adapters/schema-file.ts";
 import { makePiCliAdapter } from "./harness/adapters/pi-cli.ts";
 import { makeHarnessService } from "./harness/app/harness-service.ts";
+import { nodeSkillFileSystem } from "./harness/adapters/skill-file-system.ts";
+import {
+    makeSessionPreparation,
+    type TriageLabels,
+} from "./harness/app/skill-injection.ts";
+import {
+    guardReadOnlySessions,
+    isolateSessions,
+} from "./harness/app/session-isolation.ts";
+import { makeTemporaryScratchDirectories } from "./harness/adapters/scratch-directory.ts";
+import { makeGitWorkingTreeService } from "./git/adapters/working-tree.ts";
 import {
     type HarnessAdapter,
     type HarnessService,
@@ -106,8 +113,7 @@ export type RalphieRuntime = {
     readonly gitIssuePreparation: GitIssuePreparationService;
     readonly gitRemoteSafety: GitRemoteSafetyService;
     readonly issueArtifactStore: IssueArtifactStoreService;
-    readonly complexityAssessment: ComplexityAssessmentService;
-    readonly groundingAssessment: GroundingAssessmentService;
+    readonly preflightAssessment: PreflightAssessmentService;
     /** Shared fresh, read-only resolution verifier for issue routes. */
     readonly resolutionVerification: ResolutionVerificationService;
     readonly decompositionExecutor: DecompositionExecutorService;
@@ -126,12 +132,20 @@ export type RalphieRuntime = {
     readonly workspace: WorkspaceService;
 };
 
+export type SkillInjectionSettings = {
+    /** Directory whose subdirectories are the skills to inject. */
+    readonly directory: string;
+    readonly labels: TriageLabels;
+};
+
 export type RuntimeOverrides = {
     readonly progress: ProgressReporterService;
     readonly runEventLog: RunEventLog;
     readonly layout: RunLayout;
     /** Receives the events of harness sessions; defaults to discarding them. */
     readonly sessionListener?: SessionEventListener;
+    /** Skills and label vocabulary injected into every session; omitted means none. */
+    readonly skills?: SkillInjectionSettings;
     readonly clock?: Clock;
     readonly ids?: IdGenerator;
     /** Optional deterministic seam for the issue artifact store. */
@@ -159,6 +173,7 @@ export const makeLiveRuntime = ({
     runEventLog,
     layout,
     sessionListener = () => {},
+    skills,
     clock = systemClock,
     ids = makeIdGenerator(),
     commandRunner = CommandRunnerLive,
@@ -180,11 +195,24 @@ export const makeLiveRuntime = ({
     });
     const githubNeedsAttentionNotification =
         makeGitHubNeedsAttentionNotificationService(githubConnection.session);
-    const harness = makeHarnessService({
+    const bareHarness = makeHarnessService({
         adapters: makeHarnessAdapters(commandRunner),
         listener: sessionListener,
         ids,
+        ...(skills === undefined
+            ? {}
+            : {
+                  preparation: makeSessionPreparation({
+                      fileSystem: nodeSkillFileSystem,
+                      skillsDirectory: skills.directory,
+                      labels: skills.labels,
+                  }),
+              }),
     });
+    const harness = guardReadOnlySessions(
+        isolateSessions(bareHarness, makeTemporaryScratchDirectories()),
+        makeGitWorkingTreeService(commandRunner).fingerprint,
+    );
     const gitRepository = makeGitRepositoryService(commandRunner);
     const gitRepositoryInvariant =
         makeGitRepositoryInvariantService(commandRunner);
@@ -213,8 +241,7 @@ export const makeLiveRuntime = ({
     );
     const needsAttentionRouter = makeNeedsAttentionRouterService(issueRecovery);
     const issueVerification = makeIssueVerificationService(commandRunner);
-    const complexityAssessment = makeComplexityAssessmentService(progress);
-    const groundingAssessment = makeGroundingAssessmentService(progress);
+    const preflightAssessment = makePreflightAssessmentService(progress);
     const resolutionVerification = makeResolutionVerificationService(progress);
     const decompositionExecutor = makeDecompositionExecutorService(
         githubIssueMutations,
@@ -235,10 +262,9 @@ export const makeLiveRuntime = ({
     );
     const issueExecutor = makeIssueExecutorService(
         issueArtifactStore,
-        complexityAssessment,
         implementationExecutor,
         decompositionExecutor,
-        groundingAssessment,
+        preflightAssessment,
         resolutionVerification,
         progress,
         needsAttentionRouter,
@@ -258,8 +284,7 @@ export const makeLiveRuntime = ({
         gitIssuePreparation: actualGitIssuePreparation,
         gitRemoteSafety,
         issueArtifactStore,
-        complexityAssessment,
-        groundingAssessment,
+        preflightAssessment,
         resolutionVerification,
         decompositionExecutor,
         implementationExecutor,

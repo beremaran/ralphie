@@ -130,6 +130,25 @@ minutes for editing roles, 15 for read-only roles). Exceeding it kills the
 session's whole process group, so tools the harness started die with it, and
 counts as a failed attempt.
 
+## Session isolation
+
+Sessions never hold GitHub or push authority (ADR-0003); the session
+environment enforces it instead of the prompts.
+
+- **No credentials.** Every session starts without `GH_TOKEN`, `GITHUB_TOKEN`,
+  `GH_ENTERPRISE_TOKEN` and `GITHUB_ENTERPRISE_TOKEN`, and with `GH_CONFIG_DIR`
+  pointing at a fresh, empty temporary directory that is removed when the
+  session ends, so a stored `gh` login is not visible either. These entries
+  override anything a request sets.
+- **No push from the workspace.** After preparing the checkout Ralphie sets
+  origin's push URL to a disabled value, so `git push` inside the workspace
+  fails. Ralphie's own delivery push names the fetch URL explicitly, never
+  uses force, and is verified against the remote afterwards.
+- **Read-only means unchanged.** Before and after every read-only session
+  Ralphie fingerprints HEAD, the index, tracked changes and untracked file
+  contents. Any difference fails the session (kind `access`), which fails the
+  issue closed.
+
 ## Bounded command execution
 
 No command runs unbounded. Every process Ralphie spawns, and every shell

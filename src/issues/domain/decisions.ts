@@ -43,20 +43,9 @@ export enum NeedsAttentionReason {
 export enum GroundingDisposition {
     Actionable = "actionable",
     AlreadyResolved = "already_resolved",
+    Blocked = "blocked",
     NeedsAttention = "needs_attention",
 }
-
-export const complexityDecisionSchema = z.object({
-    complexity: z
-        .enum(ComplexityLevel)
-        .describe("Issue complexity from 0 (trivial) to 5 (very complex)."),
-    rationale: z
-        .string()
-        .min(1)
-        .describe("A concise explanation of the assigned complexity."),
-});
-
-export type ComplexityDecision = z.infer<typeof complexityDecisionSchema>;
 
 export const reviewDecisionSchema = z
     .object({
@@ -140,6 +129,40 @@ export const groundingDecisionSchema = z.discriminatedUnion("disposition", [
     groundingAlreadyResolvedDecisionSchema,
     needsAttentionDecisionSchema,
 ]);
+
+const preflightActionableDecisionSchema = z.object({
+    disposition: z.literal(GroundingDisposition.Actionable),
+    fitsOneSession: z
+        .boolean()
+        .describe(
+            "True when one implementation session can finish the whole issue; false when it must be decomposed into child issues.",
+        ),
+});
+
+const preflightBlockedDecisionSchema = z.object({
+    disposition: z.literal(GroundingDisposition.Blocked),
+    blockedBy: z
+        .array(z.number().int().positive())
+        .min(1)
+        .describe("Numbers of the open issues that must be finished first."),
+});
+
+/** The single read-only pre-flight session's disposition for one issue. */
+export const preflightDecisionSchema = z.discriminatedUnion("disposition", [
+    preflightActionableDecisionSchema,
+    groundingAlreadyResolvedDecisionSchema,
+    preflightBlockedDecisionSchema,
+    needsAttentionDecisionSchema,
+]);
+
+export type PreflightDecision = z.infer<typeof preflightDecisionSchema>;
+
+/** What is retained about an actionable pre-flight for restarts. */
+export const sessionFitDecisionSchema = z.object({
+    fitsOneSession: z.boolean(),
+});
+
+export type SessionFitDecision = z.infer<typeof sessionFitDecisionSchema>;
 
 export type GroundingDecision = z.infer<typeof groundingDecisionSchema>;
 export type NeedsAttentionDecision = Omit<

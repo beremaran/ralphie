@@ -40,7 +40,7 @@ repos:
             branch: "develop",
             workspace: "/tmp/ralphie-config-test",
             issueFilters: {
-                labels: ["backend", "ready"],
+                labels: ["ready-for-agent", "backend", "ready"],
                 sort: IssueSort.Updated,
                 order: IssueOrder.Descending,
             },
@@ -65,7 +65,7 @@ repos:
             repo: "acme/api",
             workspace: "~/.ralphie",
             issueFilters: {
-                labels: [],
+                labels: ["ready-for-agent"],
                 sort: IssueSort.Created,
                 order: IssueOrder.Ascending,
             },
@@ -105,12 +105,18 @@ repos:
 
         expect(api).toMatchObject({
             branch: "develop",
-            issueFilters: { labels: ["api"], sort: IssueSort.Updated },
+            issueFilters: {
+                labels: ["ready-for-agent", "api"],
+                sort: IssueSort.Updated,
+            },
             reviewRounds: 2,
             verificationFixes: 4,
         });
         expect(web).toMatchObject({
-            issueFilters: { labels: ["backend"], sort: IssueSort.Updated },
+            issueFilters: {
+                labels: ["ready-for-agent", "backend"],
+                sort: IssueSort.Updated,
+            },
             reviewRounds: 4,
             verificationFixes: 4,
         });
@@ -146,7 +152,7 @@ repos:
 
         expect(options).toMatchObject({
             reviewRounds: 7,
-            issueFilters: { labels: ["urgent", "backend"] },
+            issueFilters: { labels: ["ready-for-agent", "urgent", "backend"] },
             workspace: "/tmp/one-off",
         });
     });

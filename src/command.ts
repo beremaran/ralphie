@@ -1,4 +1,5 @@
 import { homedir } from "node:os";
+import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 
 import { z } from "zod";
@@ -23,6 +24,7 @@ import {
     makeHarnessAdapters,
     makeLiveRuntime,
     type IssueWorkflowRuntime,
+    type SkillInjectionSettings,
 } from "./runtime.ts";
 import type { SessionEventListener } from "./harness/ports.ts";
 import { makeHarnessProbe } from "./harness/adapters/probe.ts";
@@ -232,6 +234,7 @@ export type CommandFactories = {
         readonly runEventLog: RunEventLog;
         readonly layout: RunLayout;
         readonly sessionListener: SessionEventListener;
+        readonly skills: SkillInjectionSettings;
     }) => CommandRuntime;
     readonly runWorkflow?: IssueWorkflow["run"];
     /** Checks the assigned harnesses before any work starts. */
@@ -311,6 +314,37 @@ const makeCommandCoordinator = (
         eventLog,
     });
 
+/**
+ * The bundled skills sit beside the entry point's parent directory, both from
+ * source (`src/`) and from the bundle (`dist/`).
+ */
+const BUNDLED_SKILLS_DIRECTORY = resolve(
+    import.meta.dir,
+    "..",
+    "vendor",
+    "mattpocock-skills",
+);
+
+const skillSettingsFor = (
+    config: ResolvedRalphieConfig,
+): SkillInjectionSettings => ({
+    directory:
+        config.settings.skills.dir === undefined
+            ? BUNDLED_SKILLS_DIRECTORY
+            : resolve(config.settings.skills.dir),
+    labels: config.settings.labels,
+});
+
+/** The mapped agent-ready label plus every configured `intake.requireLabels`. */
+const agentReadyLabels = (
+    settings: ResolvedRalphieConfig["settings"],
+): ReadonlyArray<string> => [
+    ...new Set([
+        settings.labels["ready-for-agent"],
+        ...settings.intake.requireLabels,
+    ]),
+];
+
 const workflowOptionsFor = (
     config: ResolvedRalphieConfig,
     input: RunCommandInput,
@@ -323,7 +357,7 @@ const workflowOptionsFor = (
         ...(settings.branch === undefined ? {} : { branch: settings.branch }),
         maxDecompositionDepth: settings.limits.maxDecompositionDepth,
         issueFilters: {
-            labels: settings.intake.requireLabels,
+            labels: agentReadyLabels(settings),
             ...intakeOrdering(settings.intake.sort),
         },
         verificationCommands: settings.verify,
@@ -455,6 +489,7 @@ export const runCommand = async (
             runEventLog,
             layout,
             sessionListener: coordinator.sessionListener,
+            skills: skillSettingsFor(config),
         });
         await factories.runWorkflow(
             workflowOptionsFor(config, input, runId, coordinator.control),

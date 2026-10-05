@@ -151,8 +151,8 @@ harness defaults for that role.
 | `roles.standards-reviewer`, `roles.spec-reviewer` | `roles.reviewer`, else `roles.default` | Per-role assignment. |
 | `roles.fixer` | the resolved `implementer` | Per-role assignment. |
 
-Today's sessions map onto the roles as follows: complexity assessment is the
-`triager`, grounding and needs-attention confirmation are the `preflight`,
+Today's sessions map onto the roles as follows: the pre-flight session and
+needs-attention confirmation are the `preflight`,
 implementation is the `implementer`, repair sessions are the `fixer`, review
 is the `standards-reviewer`, issue-resolution checks are the
 `resolution-verifier`, decomposition is the `decomposer`, and commit-message
@@ -167,7 +167,7 @@ for editing roles and 15 minutes for read-only roles.
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `intake.requireLabels` | `[]` | An issue must carry every listed label to enter the queue (AND filter). Temporary: replaced when intake moves to agent-ready issues. |
+| `intake.requireLabels` | `[]` | An issue must carry every listed label to enter the queue (AND filter). Added to the mandatory `labels.ready-for-agent` label. |
 | `intake.sort` | `created:asc` | Queue order: `created`, `updated`, or `comments`, optionally suffixed `:asc` or `:desc`. Without a suffix the order is ascending. |
 
 ### `labels`
@@ -183,6 +183,23 @@ name. Two roles may not share one label (compared case-insensitively).
 | `labels.ready-for-agent` | `ready-for-agent` |
 | `labels.ready-for-human` | `ready-for-human` |
 | `labels.wontfix` | `wontfix` |
+
+### `skills`
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `skills.dir` | the skills bundled with Ralphie | Directory whose subdirectories are skills (each holds a `SKILL.md`). Relative paths resolve against the current directory. |
+
+Before each session Ralphie copies these skills into the harness's project
+skills directory (`.claude/skills`, `.agents/skills` for Codex, `.pi/skills`,
+`.opencode/skills`). A repository skill with the same name is set aside for the
+session and restored afterwards, so Ralphie's copy wins while other repository
+skills stay available. Everything injected is added to the checkout's
+`.git/info/exclude`, and is removed again when the session ends. If the
+repository has no `docs/agents/issue-tracker.md` or
+`docs/agents/triage-labels.md`, Ralphie generates them for the session: the
+label table comes from `labels`, and the tracker doc says issue content is in
+the prompt and sessions must not use `gh`. Committed versions always win.
 
 ### `limits`
 

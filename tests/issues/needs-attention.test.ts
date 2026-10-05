@@ -35,7 +35,6 @@ import {
     type IssueArtifactStoreService,
     type IssueFreshnessFingerprint,
 } from "../../src/issues/app/artifacts.ts";
-import type { ComplexityAssessmentService } from "../../src/issues/app/complexity.ts";
 import {
     makeDecompositionExecutorService,
     type DecompositionExecutorService,
@@ -47,15 +46,15 @@ import {
     NeedsAttentionReason,
     ReviewFindingSeverity,
     ReviewVerdict,
-    complexityDecisionSchema,
     groundingDecisionSchema,
+    preflightDecisionSchema,
     type GroundingDecision,
 } from "../../src/issues/domain/decisions.ts";
 import {
     makeImplementationExecutorService,
     type ImplementationExecutorService,
 } from "../../src/issues/app/implementation-executor.ts";
-import type { GroundingAssessmentService } from "../../src/issues/app/grounding.ts";
+import type { PreflightAssessmentService } from "../../src/issues/app/preflight.ts";
 import {
     type IssueExecutionContext,
     IssueExecutionOutcomeKind,
@@ -418,8 +417,7 @@ const defaultImplementation: ImplementationExecutorService = {
 
 type ExecutorHarnessOptions = {
     readonly trace?: string[];
-    readonly grounding?: GroundingAssessmentService;
-    readonly complexity?: ComplexityAssessmentService;
+    readonly grounding?: PreflightAssessmentService;
     readonly implementation?: ImplementationExecutorService;
     readonly decomposition?: DecompositionExecutorService;
     readonly withRouter?: boolean;
@@ -440,24 +438,15 @@ const makeExecutorHarness = async (options: ExecutorHarnessOptions = {}) => {
     const artifactStores: IssueArtifactStoreService = {
         forIssue: async () => store,
     };
-    const complexity: ComplexityAssessmentService = options.complexity ?? {
+    const grounding: PreflightAssessmentService = options.grounding ?? {
         assess: async (context) => {
-            trace.push(`complexity:${context.issue.number}`);
+            trace.push(`preflight:${context.issue.number}`);
             return {
                 decision: {
-                    complexity: ComplexityLevel.Level2,
-                    rationale: "The fixture is directly actionable.",
+                    disposition: GroundingDisposition.Actionable,
+                    fitsOneSession: true,
                 },
-                sessionID: "complexity-1",
-            };
-        },
-    };
-    const grounding: GroundingAssessmentService = options.grounding ?? {
-        assess: async (context) => {
-            trace.push(`grounding:${context.issue.number}`);
-            return {
-                decision: { disposition: GroundingDisposition.Actionable },
-                sessionID: "grounding-1",
+                sessionID: "preflight-1",
             };
         },
     };
@@ -499,7 +488,6 @@ const makeExecutorHarness = async (options: ExecutorHarnessOptions = {}) => {
     });
     const executor = makeIssueExecutorService(
         artifactStores,
-        complexity,
         implementation,
         decomposition,
         grounding,
@@ -519,7 +507,6 @@ const makeExecutorHarness = async (options: ExecutorHarnessOptions = {}) => {
         recoveryInputs,
         recoveryTrace,
         grounding,
-        complexity,
     };
 };
 
@@ -745,14 +732,14 @@ describe("structured-output needs-attention side channel", () => {
         expect(result.needsAttention).toEqual(attentionRequest);
     });
 
-    test("parses the side channel like every structured call, including complexity", async () => {
+    test("parses the side channel like every structured call, including the pre-flight schema", async () => {
         const { client } = fakePi([
             {
-                titlePrefix: "Assess issue #42",
+                titlePrefix: "Pre-flight issue #42",
                 result: {
                     structured: {
-                        complexity: ComplexityLevel.Level2,
-                        rationale: "Directly actionable.",
+                        disposition: GroundingDisposition.Actionable,
+                        fitsOneSession: false,
                     },
                     needsAttention: attentionRequest,
                 },
@@ -761,13 +748,13 @@ describe("structured-output needs-attention side channel", () => {
         const result = await requestStructuredOutput(client, {
             role: "preflight",
             directory: "/work/repository",
-            title: "Assess issue #42",
-            prompt: "assess the fixture issue",
-            schema: complexityDecisionSchema,
+            title: "Pre-flight issue #42",
+            prompt: "pre-flight the fixture issue",
+            schema: preflightDecisionSchema,
         });
         expect(result.output).toEqual({
-            complexity: ComplexityLevel.Level2,
-            rationale: "Directly actionable.",
+            disposition: GroundingDisposition.Actionable,
+            fitsOneSession: false,
         });
         expect(result.needsAttention).toEqual(attentionRequest);
     });
@@ -1049,7 +1036,7 @@ describe("issue executor needs-attention routing", () => {
             reviewCount: 1,
         });
         expect(verifierPromptsOf(harness.prompts)).toHaveLength(0);
-        expect(harness.trace).toContain("complexity:42");
+        expect(harness.trace).toContain("preflight:42");
         expect(harness.trace).toContain("implementation:42");
         expect(harness.recoveryInputs).toHaveLength(0);
     });
@@ -1114,15 +1101,6 @@ describe("issue executor needs-attention routing", () => {
         });
         const executor = makeIssueExecutorService(
             { forIssue: async () => store },
-            {
-                assess: async () => ({
-                    decision: {
-                        complexity: ComplexityLevel.Level2,
-                        rationale: "Directly actionable.",
-                    },
-                    sessionID: "complexity-1",
-                }),
-            },
             defaultImplementation,
             {
                 execute: async () => {
@@ -1156,41 +1134,59 @@ describe("issue executor needs-attention routing", () => {
         expect(verifyCalls).toEqual([INVARIANT]);
     });
 
-    test("ignores a complexity side-channel without confirmation or routing", async () => {
+    test("routes fitsOneSession false to decomposition without implementing", async () => {
+        const trace: string[] = [];
         const harness = await makeExecutorHarness({
-            complexity: {
+            trace,
+            grounding: {
                 assess: async () => ({
                     decision: {
-                        complexity: ComplexityLevel.Level2,
-                        rationale: "Directly actionable.",
+                        disposition: GroundingDisposition.Actionable,
+                        fitsOneSession: false,
                     },
-                    sessionID: "complexity-1",
-                    needsAttention: attentionRequest,
+                    sessionID: "preflight-1",
+                }),
+            },
+        });
+        const outcome = await harness.executor.execute(harness.context);
+        expect(outcome.kind).toBe(IssueExecutionOutcomeKind.Decomposed);
+        expect(trace).toContain("decomposition:42");
+        expect(trace).not.toContain("implementation:42");
+    });
+
+    test("skips an issue blocked by an open issue without implementing", async () => {
+        const trace: string[] = [];
+        const harness = await makeExecutorHarness({
+            trace,
+            grounding: {
+                assess: async () => ({
+                    decision: {
+                        disposition: GroundingDisposition.Blocked,
+                        blockedBy: [7, 9],
+                    },
+                    sessionID: "preflight-1",
                 }),
             },
         });
         const outcome = await harness.executor.execute(harness.context);
         expect(outcome).toEqual({
-            kind: IssueExecutionOutcomeKind.Completed,
-            completion: "pushed-commit",
-            commitSha: "abc123",
-            reviewCount: 1,
+            kind: IssueExecutionOutcomeKind.Skipped,
+            reason: "Blocked by open issues #7, #9.",
         });
-        expect(verifierPromptsOf(harness.prompts)).toHaveLength(0);
-        expect(harness.recoveryInputs).toHaveLength(0);
-        expect(harness.store.has(IssueArtifactKind.ComplexityDecision)).toBe(
-            true,
+        expect(trace).toEqual([]);
+        expect(harness.store.has(IssueArtifactKind.PreflightDecision)).toBe(
+            false,
         );
     });
 
-    test("reuses a cached complexity decision on restart", async () => {
+    test("reuses a cached pre-flight decision on restart", async () => {
         const trace: string[] = [];
         const harness = await makeExecutorHarness({ trace });
         const first = await harness.executor.execute(harness.context);
         const second = await harness.executor.execute(harness.context);
         expect(first.kind).toBe(IssueExecutionOutcomeKind.Completed);
         expect(second.kind).toBe(IssueExecutionOutcomeKind.Completed);
-        expect(trace.filter((entry) => entry === "complexity:42")).toHaveLength(
+        expect(trace.filter((entry) => entry === "preflight:42")).toHaveLength(
             1,
         );
         expect(
@@ -1226,15 +1222,6 @@ describe("issue executor needs-attention routing", () => {
         });
         const executor = makeIssueExecutorService(
             { forIssue: async () => store },
-            {
-                assess: async () => ({
-                    decision: {
-                        complexity: ComplexityLevel.Level2,
-                        rationale: "Directly actionable.",
-                    },
-                    sessionID: "complexity-1",
-                }),
-            },
             defaultImplementation,
             {
                 execute: async () => {
@@ -1293,15 +1280,6 @@ describe("issue executor needs-attention routing", () => {
         });
         const executor = makeIssueExecutorService(
             { forIssue: async () => store },
-            {
-                assess: async () => ({
-                    decision: {
-                        complexity: ComplexityLevel.Level2,
-                        rationale: "Directly actionable.",
-                    },
-                    sessionID: "complexity-1",
-                }),
-            },
             defaultImplementation,
             {
                 execute: async () => {
@@ -1359,15 +1337,6 @@ describe("issue executor needs-attention routing", () => {
         });
         const executor = makeIssueExecutorService(
             { forIssue: async () => store },
-            {
-                assess: async () => ({
-                    decision: {
-                        complexity: ComplexityLevel.Level2,
-                        rationale: "Directly actionable.",
-                    },
-                    sessionID: "complexity-1",
-                }),
-            },
             defaultImplementation,
             {
                 execute: async () => {
@@ -1953,11 +1922,8 @@ describe("needs-attention artifacts", () => {
 
     test("invalidateStaleIssueDecisions clears stale decisions across kinds", async () => {
         const store = await makeIssueArtifactStore(issue.number);
-        await store.write(IssueArtifactKind.ComplexityDecision, {
-            decision: {
-                complexity: ComplexityLevel.Level2,
-                rationale: "Directly actionable.",
-            },
+        await store.write(IssueArtifactKind.PreflightDecision, {
+            decision: { fitsOneSession: true },
             fingerprint: changedFingerprint,
         });
         await store.write(IssueArtifactKind.NeedsAttentionDecision, {
@@ -1967,7 +1933,7 @@ describe("needs-attention artifacts", () => {
         expect(
             await store.invalidateStaleIssueDecisions(currentFingerprint),
         ).toBe(true);
-        expect(store.has(IssueArtifactKind.ComplexityDecision)).toBe(false);
+        expect(store.has(IssueArtifactKind.PreflightDecision)).toBe(false);
         expect(store.has(IssueArtifactKind.NeedsAttentionDecision)).toBe(false);
     });
 });
