@@ -6,10 +6,9 @@ import {
     issueFreshnessFingerprint,
     type IssueArtifactStoreService,
 } from "./artifacts.ts";
-import type { ComplexityAssessmentService } from "./complexity.ts";
 import {
-    ComplexityLevel,
-    type ComplexityDecision,
+    type NeedsAttentionDecision,
+    type SessionFitDecision,
     GroundingDisposition,
     type IssueResolutionDecision,
     IssueResolutionStatus,
@@ -22,7 +21,7 @@ import type {
 import { IssueExecutionOutcomeKind } from "./execution.ts";
 import type { DecompositionExecutorService } from "./decomposition-executor.ts";
 import type { ImplementationExecutorService } from "./implementation-executor.ts";
-import type { GroundingAssessmentService } from "./grounding.ts";
+import type { PreflightAssessmentService } from "./preflight.ts";
 import type { ResolutionVerificationService } from "./resolution-verification.ts";
 import { type NeedsAttentionRouterService } from "./needs-attention.ts";
 import { decompositionLimitOutcome } from "../domain/decomposition-limit.ts";
@@ -42,13 +41,19 @@ const alreadyResolvedOutcome = (
     evidence: decision.evidence,
 });
 
+const blockedOutcome = (
+    blockedBy: ReadonlyArray<number>,
+): IssueExecutionOutcome => ({
+    kind: IssueExecutionOutcomeKind.Skipped,
+    reason: `Blocked by open ${blockedBy.length === 1 ? "issue" : "issues"} ${blockedBy.map((number) => `#${number}`).join(", ")}.`,
+});
+
 /** Assess one issue, retain the decision, then route it to its concrete workflow. */
 export const makeIssueExecutorService = (
     artifactStores: IssueArtifactStoreService,
-    complexityAssessment: ComplexityAssessmentService,
     implementationExecutor: ImplementationExecutorService,
     decompositionExecutor: DecompositionExecutorService,
-    groundingAssessment: GroundingAssessmentService,
+    preflightAssessment: PreflightAssessmentService,
     resolutionVerification: ResolutionVerificationService,
     progress?: ProgressReporterService,
     needsAttentionRouter?: NeedsAttentionRouterService,
@@ -111,7 +116,7 @@ export const makeIssueExecutorService = (
         artifacts: Awaited<ReturnType<IssueArtifactStoreService["forIssue"]>>,
         request: NonNullable<
             Awaited<
-                ReturnType<GroundingAssessmentService["assess"]>
+                ReturnType<PreflightAssessmentService["assess"]>
             >["needsAttention"]
         >,
     ) => {
@@ -129,50 +134,39 @@ export const makeIssueExecutorService = (
         });
     };
 
-    const assessGrounding = async (
+    const reuseNeedsAttention = async (
         context: IssueExecutionContext,
         artifacts: Awaited<ReturnType<IssueArtifactStoreService["forIssue"]>>,
-    ): Promise<IssueExecutionOutcome | undefined> => {
+    ): Promise<IssueExecutionOutcome> => {
+        await progress?.emit({
+            issue: {
+                number: context.issue.number,
+                title: context.issue.title,
+            },
+            stage: "grounding",
+            status: "skipped",
+            message: `Reusing the previous grounding decision for #${context.issue.number}; agent grounding was skipped.`,
+            details: { agentWorkSkipped: true },
+        });
+        const { decision } = await artifacts.read(
+            IssueArtifactKind.NeedsAttentionDecision,
+        );
+        const { disposition: _disposition, ...details } = decision;
+        return {
+            kind: IssueExecutionOutcomeKind.NeedsAttention,
+            ...details,
+            artifactPath: context.runLayout.issueArtifactsPath(
+                context.issue.number,
+            ),
+        };
+    };
+
+    const recordNeedsAttention = async (
+        context: IssueExecutionContext,
+        artifacts: Awaited<ReturnType<IssueArtifactStoreService["forIssue"]>>,
+        decision: NeedsAttentionDecision,
+    ): Promise<IssueExecutionOutcome> => {
         const fingerprint = issueFreshnessFingerprint(context.issue);
-        if (artifacts.has(IssueArtifactKind.NeedsAttentionDecision)) {
-            await progress?.emit({
-                issue: {
-                    number: context.issue.number,
-                    title: context.issue.title,
-                },
-                stage: "grounding",
-                status: "skipped",
-                message: `Reusing the previous grounding decision for #${context.issue.number}; agent grounding was skipped.`,
-                details: { agentWorkSkipped: true },
-            });
-            const { decision } = await artifacts.read(
-                IssueArtifactKind.NeedsAttentionDecision,
-            );
-            const { disposition: _disposition, ...details } = decision;
-            return {
-                kind: IssueExecutionOutcomeKind.NeedsAttention,
-                ...details,
-                artifactPath: context.runLayout.issueArtifactsPath(
-                    context.issue.number,
-                ),
-            };
-        }
-        const grounding = await groundingAssessment.assess(context);
-        const { decision } = grounding;
-        if (grounding.needsAttention !== undefined) {
-            const routed = await routeSignal(
-                context,
-                artifacts,
-                grounding.needsAttention,
-            );
-            if (routed !== undefined) return routed;
-        }
-        if (decision.disposition === GroundingDisposition.Actionable) {
-            return undefined;
-        }
-        if (decision.disposition === GroundingDisposition.AlreadyResolved) {
-            return await verifyAlreadyResolved(context, artifacts);
-        }
         await artifacts.write(
             IssueArtifactKind.NeedsAttentionDecision,
             {
@@ -191,25 +185,43 @@ export const makeIssueExecutorService = (
         };
     };
 
-    const assessOrReadDecision = async (
+    const runPreflight = async (
         context: IssueExecutionContext,
         artifacts: Awaited<ReturnType<IssueArtifactStoreService["forIssue"]>>,
-    ): Promise<ComplexityDecision> => {
-        if (artifacts.has(IssueArtifactKind.ComplexityDecision)) {
-            return (await artifacts.read(IssueArtifactKind.ComplexityDecision))
-                .decision;
+    ): Promise<IssueExecutionOutcome | undefined> => {
+        const fingerprint = issueFreshnessFingerprint(context.issue);
+        if (artifacts.has(IssueArtifactKind.NeedsAttentionDecision)) {
+            return await reuseNeedsAttention(context, artifacts);
         }
-        const assessed = await complexityAssessment.assess(context);
-        const { decision } = assessed;
-        await artifacts.write(
-            IssueArtifactKind.ComplexityDecision,
-            {
-                decision,
-                fingerprint: issueFreshnessFingerprint(context.issue),
-            },
-            context.signal,
-        );
-        return decision;
+        const preflight = await preflightAssessment.assess(context);
+        const { decision } = preflight;
+        const routed =
+            preflight.needsAttention === undefined
+                ? undefined
+                : await routeSignal(
+                      context,
+                      artifacts,
+                      preflight.needsAttention,
+                  );
+        if (routed !== undefined) return routed;
+        if (decision.disposition === GroundingDisposition.Actionable) {
+            await artifacts.write(
+                IssueArtifactKind.PreflightDecision,
+                {
+                    decision: { fitsOneSession: decision.fitsOneSession },
+                    fingerprint,
+                },
+                context.signal,
+            );
+            return undefined;
+        }
+        if (decision.disposition === GroundingDisposition.Blocked) {
+            return blockedOutcome(decision.blockedBy);
+        }
+        if (decision.disposition === GroundingDisposition.AlreadyResolved) {
+            return await verifyAlreadyResolved(context, artifacts);
+        }
+        return await recordNeedsAttention(context, artifacts, decision);
     };
 
     const resumeNeedsAttention = async (
@@ -238,19 +250,23 @@ export const makeIssueExecutorService = (
         );
         const resumed = await resumeNeedsAttention(context, artifacts);
         if (resumed !== undefined) return resumed;
-        const groundingOutcome = await assessGrounding(context, artifacts);
-        if (groundingOutcome !== undefined) return groundingOutcome;
-        const assessed = await assessOrReadDecision(context, artifacts);
-        return await executeAssessedIssue(context, artifacts, assessed);
+        if (!artifacts.has(IssueArtifactKind.PreflightDecision)) {
+            const preflightOutcome = await runPreflight(context, artifacts);
+            if (preflightOutcome !== undefined) return preflightOutcome;
+        }
+        const { decision } = await artifacts.read(
+            IssueArtifactKind.PreflightDecision,
+        );
+        return await executeAssessedIssue(context, artifacts, decision);
     };
 
     const executeAssessedIssue = async (
         context: IssueExecutionContext,
         artifacts: Awaited<ReturnType<IssueArtifactStoreService["forIssue"]>>,
-        decision: ComplexityDecision,
+        decision: SessionFitDecision,
     ): Promise<IssueExecutionOutcome> => {
         const input = { context, artifacts };
-        if (decision.complexity >= ComplexityLevel.Level4) {
+        if (!decision.fitsOneSession) {
             return await decompositionExecutor.execute(input);
         }
 

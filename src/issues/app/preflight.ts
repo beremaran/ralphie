@@ -1,32 +1,32 @@
-import { buildGroundingPrompt } from "../../agent/prompts.ts";
+import { buildPreflightPrompt } from "../../agent/prompts.ts";
 import { requestStructuredOutput } from "../../agent/structured-output.ts";
 import type { ProgressReporterService } from "../../progress/ports.ts";
 import { RalphieError } from "../../shared/error.ts";
 import {
-    type GroundingDecision,
-    groundingDecisionSchema,
+    type PreflightDecision,
+    preflightDecisionSchema,
 } from "../domain/decisions.ts";
 import type { IssueExecutionContext } from "./execution.ts";
 import type { NeedsAttentionRequest } from "../../agent/task-session.ts";
 
-export type GroundingAssessmentResult = {
-    readonly decision: GroundingDecision;
+export type PreflightAssessmentResult = {
+    readonly decision: PreflightDecision;
     readonly sessionID: string;
     readonly needsAttention?: NeedsAttentionRequest;
 };
 
-export type GroundingAssessmentService = {
+export type PreflightAssessmentService = {
     readonly assess: (
         context: IssueExecutionContext,
-    ) => Promise<GroundingAssessmentResult>;
+    ) => Promise<PreflightAssessmentResult>;
 };
 
 const messageOf = (error: unknown): string =>
     error instanceof Error ? error.message : String(error);
 
-export const makeGroundingAssessmentService = (
+export const makePreflightAssessmentService = (
     progress: ProgressReporterService,
-): GroundingAssessmentService => ({
+): PreflightAssessmentService => ({
     assess: async (context) => {
         const issue = {
             number: context.issue.number,
@@ -34,9 +34,9 @@ export const makeGroundingAssessmentService = (
         };
         await progress.emit({
             issue,
-            stage: "grounding",
+            stage: "preflight",
             status: "started",
-            message: `Checking whether #${context.issue.number} is actionable...`,
+            message: `Running pre-flight for #${context.issue.number}...`,
             details: { agentWorkSkipped: false },
         });
         try {
@@ -46,30 +46,30 @@ export const makeGroundingAssessmentService = (
             );
             if (checkpoint.branch !== context.targetBranch) {
                 throw new RalphieError({
-                    message: `Issue grounding requires branch ${context.targetBranch}, but checkout is on ${checkpoint.branch}.`,
+                    message: `Pre-flight requires branch ${context.targetBranch}, but checkout is on ${checkpoint.branch}.`,
                 });
             }
             const result = await requestStructuredOutput(context.agent, {
                 directory: context.repositoryPath,
-                title: `Check readiness of issue #${context.issue.number}`,
-                prompt: buildGroundingPrompt({
+                title: `Pre-flight issue #${context.issue.number}`,
+                prompt: buildPreflightPrompt({
                     issue: context.issue,
                     repositoryPath: context.repositoryPath,
                     targetBranch: context.targetBranch,
                     headSha: checkpoint.head,
                 }),
-                schema: groundingDecisionSchema,
+                schema: preflightDecisionSchema,
                 role: "preflight",
                 repositoryInvariant: checkpoint,
                 verifyRepositoryInvariant: context.repositoryInvariant.verify,
                 progress,
-                progressStage: "grounding",
+                progressStage: "preflight",
                 progressIssue: issue,
                 signal: context.signal,
             });
             await progress.emit({
                 issue,
-                stage: "grounding",
+                stage: "preflight",
                 status: "succeeded",
                 message: `Issue #${context.issue.number} is ${result.output.disposition.replaceAll("_", " ")}.`,
                 details: {
@@ -88,9 +88,9 @@ export const makeGroundingAssessmentService = (
         } catch (error) {
             await progress.emit({
                 issue,
-                stage: "grounding",
+                stage: "preflight",
                 status: "failed",
-                message: `Issue grounding failed: ${messageOf(error)}`,
+                message: `Pre-flight failed: ${messageOf(error)}`,
                 details: { agentWorkSkipped: false },
             });
             throw error;

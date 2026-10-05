@@ -291,6 +291,16 @@ const makeCommandCoordinator = (
         eventLog,
     });
 
+/** The mapped agent-ready label plus every configured `intake.requireLabels`. */
+const agentReadyLabels = (
+    settings: ResolvedRalphieConfig["settings"],
+): ReadonlyArray<string> => [
+    ...new Set([
+        settings.labels["ready-for-agent"],
+        ...settings.intake.requireLabels,
+    ]),
+];
+
 const workflowOptionsFor = (
     config: ResolvedRalphieConfig,
     input: RunCommandInput,
@@ -303,7 +313,7 @@ const workflowOptionsFor = (
         ...(settings.branch === undefined ? {} : { branch: settings.branch }),
         maxDecompositionDepth: settings.limits.maxDecompositionDepth,
         issueFilters: {
-            labels: settings.intake.requireLabels,
+            labels: agentReadyLabels(settings),
             ...intakeOrdering(settings.intake.sort),
         },
         verificationCommands: settings.verify,

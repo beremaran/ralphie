@@ -42,8 +42,7 @@ import { IssueOrder, IssueSort } from "../src/github/domain.ts";
 import type { IssueWorkflowRuntime } from "../src/runtime.ts";
 import { RalphieError } from "../src/shared/error.ts";
 import {
-    ComplexityLevel,
-    type GroundingDecision,
+    type PreflightDecision,
     GroundingDisposition,
     IssueResolutionStatus,
     NeedsAttentionReason,
@@ -324,11 +323,18 @@ type GroundedRoute =
     | "already-resolved"
     | "needs-attention";
 
-const groundingDecisionFor = (route: GroundedRoute): GroundingDecision => {
+const preflightDecisionFor = (route: GroundedRoute): PreflightDecision => {
     switch (route) {
         case "actionable":
+            return {
+                disposition: GroundingDisposition.Actionable,
+                fitsOneSession: true,
+            };
         case "decomposition":
-            return { disposition: GroundingDisposition.Actionable };
+            return {
+                disposition: GroundingDisposition.Actionable,
+                fitsOneSession: false,
+            };
         case "already-resolved":
             return { disposition: GroundingDisposition.AlreadyResolved };
         case "needs-attention":
@@ -372,18 +378,6 @@ const groundedRouteExecutor = (
     return makeIssueExecutorService(
         artifacts,
         {
-            assess: async (context) => {
-                calls.push(`complexity:${context.issue.number}`);
-                return {
-                    decision: {
-                        complexity: ComplexityLevel.Level2,
-                        rationale: "The fixture is directly actionable.",
-                    },
-                    sessionID: `complexity-${context.issue.number}`,
-                };
-            },
-        },
-        {
             execute: async ({ context }) => {
                 calls.push(`implementation:${context.issue.number}`);
                 calls.push(
@@ -404,12 +398,12 @@ const groundedRouteExecutor = (
         },
         {
             assess: async (context) => {
-                calls.push(`grounding:${context.issue.number}`);
+                calls.push(`preflight:${context.issue.number}`);
                 return {
-                    decision: groundingDecisionFor(
+                    decision: preflightDecisionFor(
                         routes[context.issue.number] ?? "actionable",
                     ),
-                    sessionID: `grounding-${context.issue.number}`,
+                    sessionID: `preflight-${context.issue.number}`,
                 };
             },
         },
@@ -979,7 +973,7 @@ describe("workflow", () => {
             1,
         );
         expect(summary.counts.completed).toBe(1);
-        expect(calls).toContain("grounding:43");
+        expect(calls).toContain("preflight:43");
         expect(calls).toContain("closeIssue:43");
         expect(calls).not.toContain("closeIssue:42");
         expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
