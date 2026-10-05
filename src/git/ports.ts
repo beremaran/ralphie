@@ -164,3 +164,13 @@ export type GitRepositoryService = {
         signal?: AbortSignal,
     ) => Promise<PreparedRepository>;
 };
+export type GitWorkingTreeService = {
+    /**
+     * A digest of HEAD, the index, tracked changes and untracked files. Equal
+     * digests mean a session left the checkout as it found it.
+     */
+    readonly fingerprint: (
+        repositoryPath: string,
+        signal?: AbortSignal,
+    ) => Promise<string>;
+};

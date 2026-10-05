@@ -99,16 +99,38 @@ export const makeGitIssueOperationsService = (
                 message: "Cannot push an issue commit to an empty branch name.",
             });
         }
+        // The workspace's push URL is disabled so sessions cannot push; the
+        // delivery push names the fetch URL explicitly instead.
+        const url = (
+            await requireSuccess(
+                runner,
+                "git",
+                ["-C", repositoryPath, "remote", "get-url", "origin"],
+                "Failed to read the repository origin",
+            )
+        ).stdout.trim();
         const result = await runner.run("git", [
             "-C",
             repositoryPath,
             "push",
             "--no-force",
-            "origin",
+            url,
             `HEAD:refs/heads/${branch}`,
         ]);
         assertPushSucceeded(branch, result);
         await verifyPushedCommit(repositoryPath, branch, expectedCommitSha);
+        await requireSuccess(
+            runner,
+            "git",
+            [
+                "-C",
+                repositoryPath,
+                "update-ref",
+                `refs/remotes/origin/${branch}`,
+                expectedCommitSha,
+            ],
+            `Failed to record the pushed commit as origin/${branch}`,
+        );
     };
 
     return {
