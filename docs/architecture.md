@@ -31,8 +31,9 @@ that binds concrete adapters into the runtime bundle.
 
 | Context | Location | Responsibility |
 | --- | --- | --- |
-| `agent` | `src/agent/` | Agent session port and events, model/thinking types, prompts, structured output. |
-| `pi` | `src/pi/` | In-process pi SDK runtime: port for startup plus auth, client, tools, model catalog adapters. |
+| `agent` | `src/agent/` | Agent session port, model/thinking types, prompts, structured output. |
+| `harness` | `src/harness/` | Provider-neutral session events that every harness emits and progress output consumes. |
+| `pi` | `src/pi/` | In-process pi SDK runtime: port for startup plus auth, client, tools, model catalog, and event translation adapters. |
 | `github` | `src/github/` | Issue value objects, repository slug parsing, and the Octokit/`gh` adapters. |
 | `git` | `src/git/` | Checkout preparation, checkpoints, issue operations, invariants, and remote-safety adapters. |
 | `issues` | `src/issues/` | Domain (`domain/`), executors and artifact/recovery logic (`app/`), filesystem adapters (`adapters/`). |

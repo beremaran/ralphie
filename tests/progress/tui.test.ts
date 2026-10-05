@@ -1,14 +1,25 @@
 import { describe, expect, test } from "bun:test";
 
-import type { AgentEventContext } from "../../src/agent/ports.ts";
+import type {
+    SessionEvent,
+    SessionEventContext,
+} from "../../src/harness/ports.ts";
 import { makeProgressCoordinator } from "../../src/progress/adapters/coordinator.ts";
 import { createTestRenderer } from "@opentui/core/testing";
 
-const context: AgentEventContext = {
+const context: SessionEventContext = {
     sessionID: "tui-session",
     directory: "/workspace/owner/repository",
+    harness: "pi",
     title: "Implement login",
 };
+
+const textFragment = (text: string, done = false): SessionEvent => ({
+    type: "assistant_text",
+    kind: "text",
+    text,
+    done,
+});
 
 const FIXED_NOW = () => new Date("2026-09-11T00:00:00.000Z");
 
@@ -37,51 +48,25 @@ describe("OpenTUI progress coordinator", () => {
             current: 1,
             total: 3,
         });
-        coordinator.piListener({ type: "agent_start" }, context);
-        coordinator.piListener(
+        coordinator.sessionListener({ type: "session_started" }, context);
+        coordinator.sessionListener(textFragment("Working on "), context);
+        coordinator.sessionListener(textFragment("the login flow."), context);
+        coordinator.sessionListener(textFragment("", true), context);
+        coordinator.sessionListener(
             {
-                type: "message_update",
-                assistantMessageEvent: {
-                    type: "text_delta",
-                    contentIndex: 0,
-                    delta: "Working on ",
-                },
+                type: "tool_call",
+                callId: "tool-1",
+                name: "bash",
+                input: { command: "bun test" },
             },
             context,
         );
-        coordinator.piListener(
+        coordinator.sessionListener(
             {
-                type: "message_update",
-                assistantMessageEvent: {
-                    type: "text_delta",
-                    contentIndex: 0,
-                    delta: "the login flow.",
-                },
-            },
-            context,
-        );
-        coordinator.piListener(
-            {
-                type: "message_update",
-                assistantMessageEvent: { type: "text_end", contentIndex: 0 },
-            },
-            context,
-        );
-        coordinator.piListener(
-            {
-                type: "tool_execution_start",
-                toolCallId: "tool-1",
-                toolName: "bash",
-                args: { command: "bun test" },
-            },
-            context,
-        );
-        coordinator.piListener(
-            {
-                type: "tool_execution_end",
-                toolCallId: "tool-1",
-                toolName: "bash",
-                result: { content: "ok" },
+                type: "tool_result",
+                callId: "tool-1",
+                name: "bash",
+                output: "ok",
                 isError: false,
             },
             context,
@@ -99,6 +84,52 @@ describe("OpenTUI progress coordinator", () => {
         expect(frame).toContain("✓ $ bun test");
         expect(frame).toContain("#42");
         expect(frame).toContain("Implementing changes");
+
+        await coordinator.dispose();
+    });
+
+    test("shows failed tool calls and session errors in the transcript", async () => {
+        const setup = await createTestRenderer({ width: 120, height: 20 });
+        const coordinator = makeProgressCoordinator({
+            mode: "interactive",
+            colors: false,
+            runId: "tui-run-errors",
+            now: FIXED_NOW,
+            createRenderer: async () => setup.renderer,
+        });
+
+        coordinator.sessionListener({ type: "session_started" }, context);
+        coordinator.sessionListener(
+            {
+                type: "tool_call",
+                callId: "tool-1",
+                name: "read",
+                input: { path: "missing.txt" },
+            },
+            context,
+        );
+        coordinator.sessionListener(
+            {
+                type: "tool_result",
+                callId: "tool-1",
+                name: "read",
+                output: "ENOENT: no such file",
+                isError: true,
+            },
+            context,
+        );
+        coordinator.sessionListener(
+            { type: "error", message: "provider exploded" },
+            context,
+        );
+
+        await coordinator.ready;
+        await setup.renderOnce();
+        const frame = setup.captureCharFrame();
+
+        expect(frame).toContain("✗ read missing.txt");
+        expect(frame).toContain("failed: ENOENT: no such file");
+        expect(frame).toContain("✗ provider exploded");
 
         await coordinator.dispose();
     });
@@ -178,18 +209,8 @@ describe("OpenTUI progress coordinator", () => {
                 current: 1,
                 total: 3,
             });
-            coordinator.piListener({ type: "agent_start" }, context);
-            coordinator.piListener(
-                {
-                    type: "message_update",
-                    assistantMessageEvent: {
-                        type: "text_delta",
-                        contentIndex: 0,
-                        delta: text,
-                    },
-                },
-                context,
-            );
+            coordinator.sessionListener({ type: "session_started" }, context);
+            coordinator.sessionListener(textFragment(text), context);
             await coordinator.progress.emit({
                 stage: "issue-execution",
                 status: "succeeded",
@@ -218,17 +239,7 @@ describe("OpenTUI progress coordinator", () => {
         expect(frame).not.toContain("beta work");
 
         // The hidden transcript keeps recording while the view is pinned.
-        coordinator.piListener(
-            {
-                type: "message_update",
-                assistantMessageEvent: {
-                    type: "text_delta",
-                    contentIndex: 0,
-                    delta: " extended",
-                },
-            },
-            context,
-        );
+        coordinator.sessionListener(textFragment(" extended"), context);
         setup.mockInput.pressKey("]");
         await setup.renderOnce();
         frame = setup.captureCharFrame();
@@ -274,18 +285,8 @@ describe("OpenTUI progress coordinator", () => {
                 current: number - 50,
                 total: 3,
             });
-            coordinator.piListener({ type: "agent_start" }, context);
-            coordinator.piListener(
-                {
-                    type: "message_update",
-                    assistantMessageEvent: {
-                        type: "text_delta",
-                        contentIndex: 0,
-                        delta: text,
-                    },
-                },
-                context,
-            );
+            coordinator.sessionListener({ type: "session_started" }, context);
+            coordinator.sessionListener(textFragment(text), context);
             if (!complete) return;
             await coordinator.progress.emit({
                 stage: "issue-execution",

@@ -43,20 +43,6 @@ export type AgentPart = {
     readonly [key: string]: unknown;
 };
 
-/** Native event payloads stay opaque to shared presentation code. */
-export type AgentSessionEvent = any;
-
-export type AgentEventContext = {
-    readonly sessionID: string;
-    readonly directory: string;
-    readonly title?: string;
-};
-
-export type AgentEventListener = (
-    event: AgentSessionEvent,
-    context: AgentEventContext,
-) => void;
-
 export type AgentSessionCreateInput = {
     readonly directory: string;
     readonly title?: string;

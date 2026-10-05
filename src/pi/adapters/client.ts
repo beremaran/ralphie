@@ -1,5 +1,8 @@
 import { Agent } from "@earendil-works/pi-agent-core";
-import type { AgentLoopTurnUpdate } from "@earendil-works/pi-agent-core";
+import type {
+    AgentEvent,
+    AgentLoopTurnUpdate,
+} from "@earendil-works/pi-agent-core";
 import type {
     AssistantMessage,
     Model,
@@ -14,8 +17,6 @@ import {
     type AgentAssistantMessage,
     type AgentApiResult,
     type AgentClient,
-    type AgentEventContext,
-    type AgentEventListener,
     type AgentModel,
     type AgentPart,
     type AgentPromptFormat,
@@ -23,12 +24,17 @@ import {
     type AgentSessionCreateInput,
     type AgentToolDescriptor,
 } from "../../agent/ports.ts";
+import type {
+    SessionEventContext,
+    SessionEventListener,
+} from "../../harness/ports.ts";
 import { RalphieError } from "../../shared/error.ts";
 import {
     thinkingLevelFor,
     type PiModelSelection,
 } from "../../agent/pi-models.ts";
 import { modelReference } from "../../agent/pi-models.ts";
+import { translatePiEvent } from "./events.ts";
 import { resolvePiModel } from "./models.ts";
 import { makePiTools, type PiToolSet } from "./tools.ts";
 import type { PiAgentSelection } from "../ports.ts";
@@ -41,7 +47,7 @@ export type PiAgentClientOptions = {
     readonly defaultModel?: AgentModel;
     /** Reads the operator's live pick; sessions switch at their next turn. */
     readonly liveSelection?: () => PiAgentSelection | undefined;
-    readonly eventListener?: AgentEventListener;
+    readonly eventListener?: SessionEventListener;
     readonly systemPrompt?: string;
 };
 
@@ -480,11 +486,15 @@ export const makePiAgentClient = (
 ): AgentClient => {
     const pending = new Map<string, PiSession>();
 
-    const emit = (event: unknown, context: AgentEventContext): void => {
-        try {
-            options.eventListener?.(event, context);
-        } catch {
-            // Listener failures must not fail the session.
+    const emit = (event: AgentEvent, context: SessionEventContext): void => {
+        const listener = options.eventListener;
+        if (listener === undefined) return;
+        for (const sessionEvent of translatePiEvent(event)) {
+            try {
+                listener(sessionEvent, context);
+            } catch {
+                // Listener failures must not fail the session.
+            }
         }
     };
 
@@ -518,9 +528,10 @@ export const makePiAgentClient = (
                     resolvedModel,
                     tools,
                 });
-                const context: AgentEventContext = {
+                const context: SessionEventContext = {
                     sessionID: id,
                     directory,
+                    harness: "pi",
                     ...(input.title === undefined
                         ? {}
                         : { title: input.title }),
