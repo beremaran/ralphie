@@ -11,6 +11,12 @@ import {
 
 export const DEFAULT_WORKSPACE = "~/.ralphie";
 
+/** Minutes one session may run in a role that edits the checkout. */
+export const DEFAULT_EDIT_SESSION_TIMEOUT_MINUTES = 60;
+
+/** Minutes one session may run in a read-only role. */
+export const DEFAULT_READ_ONLY_SESSION_TIMEOUT_MINUTES = 15;
+
 /** Matt Pocock's five canonical triage roles, in his documented order. */
 export const TRIAGE_ROLES = [
     "needs-triage",
@@ -50,12 +56,21 @@ const labelsSchema = z.strictObject({
     wontfix: nonEmptyString.default("wontfix"),
 });
 
+const sessionTimeoutSchema = z.strictObject({
+    edit: positiveInteger.default(DEFAULT_EDIT_SESSION_TIMEOUT_MINUTES),
+    readOnly: positiveInteger.default(
+        DEFAULT_READ_ONLY_SESSION_TIMEOUT_MINUTES,
+    ),
+});
+
 /** Where the skills injected into sessions come from. */
 const skillsSchema = z.strictObject({
     dir: nonEmptyString.optional(),
 });
 
 const limitsSchema = z.strictObject({
+    sessionTimeoutMinutes: sessionTimeoutSchema.prefault({}),
+    maxBudgetUsd: z.number().positive().optional(),
     implementationAttempts: positiveInteger.default(
         DEFAULT_IMPLEMENTATION_ATTEMPTS,
     ),
@@ -70,10 +85,14 @@ const limitsSchema = z.strictObject({
 
 const harnessNameSchema = z.enum(HARNESS_NAMES);
 
+/** `safe` runs editing roles under the harness's own approval or sandbox. */
+const approvalSchema = z.enum(["safe", "yolo"]);
+
 /** Model and reasoning effort for the sessions a harness runs. */
 const harnessSettingsSchema = z.strictObject({
     model: nonEmptyString.optional(),
     effort: nonEmptyString.optional(),
+    approval: approvalSchema.optional(),
 });
 
 const harnessesSchema = z.strictObject({
@@ -118,6 +137,7 @@ const notificationsSchema = z.strictObject({
  */
 const overridableSettings = {
     workspace: nonEmptyString.default(DEFAULT_WORKSPACE),
+    approval: approvalSchema.default("safe"),
     harnesses: harnessesSchema.prefault({}),
     roles: rolesSchema.prefault({}),
     intake: intakeSchema.prefault({}),

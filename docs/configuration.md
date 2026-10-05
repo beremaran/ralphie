@@ -71,10 +71,12 @@ contains spaces or brackets.
 ```yaml
 defaultOwner: acme
 workspace: ~/.ralphie
+approval: safe
 harnesses:
   claude:
     model: opus
     effort: high
+    approval: safe
 roles:
   default: claude
   reviewer:
@@ -94,6 +96,10 @@ limits:
   reviewRounds: 5
   verificationFixes: 5
   maxDecompositionDepth: 3
+  sessionTimeoutMinutes:
+    edit: 60
+    readOnly: 15
+  maxBudgetUsd: 5
 notifications:
   enabled: false
 repos:
@@ -106,13 +112,15 @@ repos:
 ```
 
 Every key is optional. The values above are the defaults, except
-`defaultOwner`, `branch`, `verify`, and `notifications.label`, which have none.
+`defaultOwner`, `branch`, `verify`, `limits.maxBudgetUsd`, and
+`notifications.label`, which have none.
 
 ### Top level
 
 | Key | Default | Description |
 | --- | --- | --- |
 | `defaultOwner` | none | Owner added to a bare `repo` argument. Top level only. |
+| `approval` | `safe` | Approval mode of the editing roles (`implementer`, `fixer`): `safe` or `yolo`. Overridable per repository and per harness. See [Approval modes](safety.md#approval-modes). |
 | `workspace` | `~/.ralphie` | Root directory for repository checkouts and run artifacts. Ralphie removes the workspace recursively before preparation and after a successful run, subject to protected-path checks; use a path dedicated to Ralphie (see [Safety](safety.md#workspace-risk)). Overridable per repository. |
 | `repos` | none | Per-repository overrides, keyed by `owner/repo`. Top level only. |
 
@@ -129,6 +137,7 @@ credentials; Ralphie stores none.
 | --- | --- | --- |
 | `harnesses.<name>.model` | harness default | Model passed to the harness. |
 | `harnesses.<name>.effort` | harness default | Reasoning effort passed to the harness. |
+| `harnesses.<name>.approval` | top-level `approval` | Approval mode for editing roles that run on this harness. |
 
 `roles` assigns a harness to each role. A value is a harness name, or a
 mapping `{ harness, model, effort }` whose `model` and `effort` override the
@@ -193,13 +202,16 @@ the prompt and sessions must not use `gh`. Committed versions always win.
 
 ### `limits`
 
-All limits are positive integers.
+All limits are positive; counts are integers.
 
 | Key | Default | Description |
 | --- | --- | --- |
 | `limits.implementationAttempts` | `3` | Implementation attempts allowed when sessions leave an unresolved empty diff. |
 | `limits.reviewRounds` | `5` | Review rounds before the issue escalates to decomposition. At most `20`. |
 | `limits.verificationFixes` | `5` | Repair attempts allowed after a failing `verify` command. |
+| `limits.sessionTimeoutMinutes.edit` | `60` | Wall-clock limit of one session in an editing role. Exceeding it kills the session's process group and counts as a failed attempt. |
+| `limits.sessionTimeoutMinutes.readOnly` | `15` | The same limit for read-only roles. |
+| `limits.maxBudgetUsd` | none | Spend cap in US dollars for each session, passed to harnesses that enforce one (Claude Code). Startup warns for every assigned harness that cannot enforce it. |
 | `limits.maxDecompositionDepth` | `3` | Maximum generated-child lineage depth. Reaching it leaves the issue open, records needs attention, and continues independent work. |
 
 ### `notifications`
@@ -213,7 +225,7 @@ Temporary opt-in, kept until hand-offs replace it.
 
 ### Repository entries
 
-Each `repos."owner/repo"` entry accepts `workspace`, `harnesses`, `roles`,
+Each `repos."owner/repo"` entry accepts `workspace`, `approval`, `harnesses`, `roles`,
 `intake`, `labels`, `limits`, and `notifications` (overriding the top level for that repository
 only) plus two keys that exist only here:
 

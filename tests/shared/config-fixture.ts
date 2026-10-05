@@ -48,6 +48,7 @@ export const recordingFactories = (
         ready: Promise.resolve(),
         dispose: async () => {},
     }),
+    checkHarnesses: async () => ({ errors: [], warnings: [] }),
     makeRuntime: () => ({}) as never,
     runWorkflow: async (options) => {
         record(options);

@@ -39,6 +39,12 @@ export type CommandRunOptions = {
      * when the stream ends. The full output is still returned in `stdout`.
      */
     readonly onStdoutLine?: (line: string) => void;
+    /**
+     * Run the command as the leader of its own process group, and send
+     * termination signals (timeout, abort) to the whole group so descendants
+     * the command started die with it.
+     */
+    readonly processGroup?: boolean;
 };
 
 /** Outbound port for spawning bounded external commands. */

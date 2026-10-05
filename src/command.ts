@@ -21,11 +21,18 @@ import {
 } from "./progress/adapters/coordinator.ts";
 import { type ProgressRenderMode } from "./progress/adapters/progress.ts";
 import {
+    makeHarnessAdapters,
     makeLiveRuntime,
     type IssueWorkflowRuntime,
     type SkillInjectionSettings,
 } from "./runtime.ts";
 import type { SessionEventListener } from "./harness/ports.ts";
+import { makeHarnessProbe } from "./harness/adapters/probe.ts";
+import {
+    makeHarnessStartupChecker,
+    type HarnessStartupChecker,
+} from "./harness/app/startup-checks.ts";
+import type { ProgressReporterService } from "./progress/ports.ts";
 import { exitCodeForError, RalphieExitCode } from "./workflow/exit-code.ts";
 import { issueWorkflow } from "./workflow/workflow.ts";
 import type { IssueWorkflow, WorkflowOptions } from "./workflow/ports.ts";
@@ -230,6 +237,8 @@ export type CommandFactories = {
         readonly skills: SkillInjectionSettings;
     }) => CommandRuntime;
     readonly runWorkflow?: IssueWorkflow["run"];
+    /** Checks the assigned harnesses before any work starts. */
+    readonly checkHarnesses?: HarnessStartupChecker;
     /** The authenticated gh login, read only to complete a bare repository name. */
     readonly githubLogin?: () => Promise<string>;
 };
@@ -262,6 +271,14 @@ const resolveCommandFactories = (
     makeCoordinator: factories.makeCoordinator ?? makeProgressCoordinator,
     makeRuntime: factories.makeRuntime ?? makeLiveRuntime,
     runWorkflow: factories.runWorkflow ?? issueWorkflow.run,
+    checkHarnesses:
+        factories.checkHarnesses ??
+        makeHarnessStartupChecker(
+            makeHarnessProbe({
+                runner: CommandRunnerLive,
+                adapters: makeHarnessAdapters(CommandRunnerLive),
+            }),
+        ),
     githubLogin:
         factories.githubLogin ??
         makeGitHubViewerService(CommandRunnerLive).login,
@@ -348,6 +365,14 @@ const workflowOptionsFor = (
         reviewRounds: settings.limits.reviewRounds,
         verificationFixes: settings.limits.verificationFixes,
         roles: config.roles,
+        sessionLimits: {
+            editTimeoutMs: settings.limits.sessionTimeoutMinutes.edit * 60_000,
+            readOnlyTimeoutMs:
+                settings.limits.sessionTimeoutMinutes.readOnly * 60_000,
+            ...(settings.limits.maxBudgetUsd === undefined
+                ? {}
+                : { maxBudgetUsd: settings.limits.maxBudgetUsd }),
+        },
         workspace: settings.workspace,
         ...(input.signal === undefined ? {} : { signal: input.signal }),
         ...(control === undefined ? {} : { control }),
@@ -357,6 +382,32 @@ const workflowOptionsFor = (
             ? {}
             : { needsAttentionLabel: settings.notifications.label }),
     };
+};
+
+/** Fail fast, naming the fix, when the configured harnesses cannot run. */
+const runStartupChecks = async (
+    config: ResolvedRalphieConfig,
+    check: HarnessStartupChecker,
+    progress: ProgressReporterService,
+): Promise<void> => {
+    const report = await check({
+        roles: config.roles,
+        maxBudgetUsd: config.settings.limits.maxBudgetUsd,
+    });
+    for (const warning of report.warnings) {
+        await progress.emit({
+            stage: "agent-runtime",
+            status: "info",
+            message: `Warning: ${warning}`,
+        });
+    }
+    if (report.errors.length > 0) {
+        throw new RalphieError({
+            message: `Harness startup checks failed:\n${report.errors
+                .map((error) => `  - ${error}`)
+                .join("\n")}`,
+        });
+    }
 };
 
 const commandErrorFor = (error: unknown, signal: AbortSignal): Error => {
@@ -427,6 +478,11 @@ export const runCommand = async (
             factories.makeCoordinator,
             output,
             runEventLog,
+        );
+        await runStartupChecks(
+            config,
+            factories.checkHarnesses,
+            coordinator.progress,
         );
         runtime = factories.makeRuntime({
             progress: coordinator.progress,
