@@ -6,6 +6,7 @@ import {
     CommandTimeoutError,
     DEFAULT_PROCESS_COMMAND_TIMEOUT_MS,
     type CommandResult,
+    type CommandRunOptions,
     type CommandRunnerService,
 } from "../ports.ts";
 
@@ -20,9 +21,12 @@ export const PROCESS_TERMINATION_ESCALATION_MS = 2_000;
 const terminateChild = (
     child: Subprocess,
     signal: "SIGTERM" | "SIGKILL",
+    processGroup: boolean,
 ): void => {
     try {
-        child.kill(signal);
+        // A negative pid addresses the group the detached child leads.
+        if (processGroup) process.kill(-child.pid, signal);
+        else child.kill(signal);
     } catch {
         // The child may already have exited.
     }
@@ -88,12 +92,41 @@ const settleRun = (input: {
     };
 };
 
+/** Start the child, reporting a missing executable as a RalphieError. */
+const spawnChild = (
+    command: string,
+    args: ReadonlyArray<string>,
+    options: CommandRunOptions | undefined,
+): Subprocess => {
+    try {
+        return Bun.spawn([command, ...args], {
+            cwd: options?.cwd,
+            env:
+                options?.env === undefined
+                    ? undefined
+                    : { ...process.env, ...options.env },
+            ...(options?.stdin === undefined
+                ? {}
+                : { stdin: new TextEncoder().encode(options.stdin) }),
+            stdout: "pipe",
+            stderr: "pipe",
+            ...(options?.processGroup === true ? { detached: true } : {}),
+        });
+    } catch (cause) {
+        throw new RalphieError({
+            message: `Could not execute ${command}. Is it installed and available on PATH?`,
+            cause,
+        });
+    }
+};
+
 export const CommandRunnerLive: CommandRunnerService = {
     run: async (command, args, options) => {
         const timeoutMs =
             options?.timeoutMs ?? DEFAULT_PROCESS_COMMAND_TIMEOUT_MS;
         const signal = options?.signal;
         const summary = [command, ...args].join(" ");
+        const processGroup = options?.processGroup === true;
 
         // Read through a function so TypeScript keeps the signal observable:
         // CFA would otherwise treat the readonly `aborted` flag as constant
@@ -108,33 +141,14 @@ export const CommandRunnerLive: CommandRunnerService = {
         };
         rejectIfAborted();
 
-        let child: Subprocess;
-        try {
-            child = Bun.spawn([command, ...args], {
-                cwd: options?.cwd,
-                env:
-                    options?.env === undefined
-                        ? undefined
-                        : { ...process.env, ...options.env },
-                ...(options?.stdin === undefined
-                    ? {}
-                    : { stdin: new TextEncoder().encode(options.stdin) }),
-                stdout: "pipe",
-                stderr: "pipe",
-            });
-        } catch (cause) {
-            throw new RalphieError({
-                message: `Could not execute ${command}. Is it installed and available on PATH?`,
-                cause,
-            });
-        }
+        const child = spawnChild(command, args, options);
 
         /** Why the runner terminated the child; wins over the actual exit. */
         let termination: "timeout" | "abort" | undefined;
         let escalationTimer: ReturnType<typeof setTimeout> | undefined;
-        const escalate = () => terminateChild(child, "SIGKILL");
+        const escalate = () => terminateChild(child, "SIGKILL", processGroup);
         const terminateAndEscalate = () => {
-            terminateChild(child, "SIGTERM");
+            terminateChild(child, "SIGTERM", processGroup);
             escalationTimer ??= setTimeout(
                 escalate,
                 PROCESS_TERMINATION_ESCALATION_MS,

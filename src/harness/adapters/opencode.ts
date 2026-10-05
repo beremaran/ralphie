@@ -147,6 +147,7 @@ export const makeOpenCodeAdapter = (deps: {
                     stdin: turn.prompt,
                     onStdoutLine: reader.feed,
                     trimStdout: false,
+                    processGroup: true,
                     ...(turn.signal === undefined
                         ? {}
                         : { signal: turn.signal }),

@@ -137,6 +137,7 @@ const runStateFields = {
         z.enum(HARNESS_ROLES),
         z.object({
             harness: z.string().min(1),
+            approval: z.enum(["safe", "yolo"]).optional(),
             model: z.string().min(1).optional(),
             effort: z.string().min(1).optional(),
         }),

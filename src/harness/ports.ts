@@ -111,6 +111,12 @@ export const HARNESS_ROLES = [
 
 export type HarnessRole = (typeof HARNESS_ROLES)[number];
 
+/** Roles whose sessions edit the checkout and so need an approval mode. */
+export const EDITING_ROLES: ReadonlyArray<HarnessRole> = [
+    "implementer",
+    "fixer",
+];
+
 /** Names of the harnesses a configuration may assign to a role. */
 export const HARNESS_NAMES = ["claude", "codex", "pi", "opencode"] as const;
 
@@ -254,6 +260,24 @@ export type HarnessService = {
         <T>(request: StructuredSessionRequest<T>): Promise<HarnessOutcome<T>>;
         (request: SessionRequest): Promise<HarnessOutcome<undefined>>;
     };
+};
+
+/** Outcome of one startup probe. */
+export type ProbeResult =
+    | { readonly ok: true }
+    | { readonly ok: false; readonly message: string };
+
+/**
+ * Outbound port for the checks Ralphie runs before any work starts. Probes
+ * are cheap and bounded: they never begin a model turn.
+ */
+export type HarnessProbe = {
+    /** What the named harness's adapter supports, if it is known. */
+    readonly capabilities: (name: string) => HarnessCapabilities | undefined;
+    /** The harness's executable starts. */
+    readonly installed: (name: string) => Promise<ProbeResult>;
+    /** The harness grants its `safe` editing access mode. */
+    readonly safeAccess: (name: string) => Promise<ProbeResult>;
 };
 
 /** An empty directory that lives for one session. */

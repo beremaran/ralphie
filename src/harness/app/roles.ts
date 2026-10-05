@@ -1,8 +1,13 @@
 import { HARNESS_ROLES, type HarnessName, type HarnessRole } from "../ports.ts";
 
+/** How editing roles are approved; read-only roles never need it. */
+export type SessionApproval = "safe" | "yolo";
+
 /** The harness, model and effort one role runs with. */
 export type RoleAssignment = {
     readonly harness: string;
+    /** Whether editing sessions run under the harness's approval system. */
+    readonly approval: SessionApproval;
     readonly model?: string;
     readonly effort?: string;
 };
@@ -20,10 +25,12 @@ type RoleSetting =
 type HarnessDefaults = {
     readonly model?: string | undefined;
     readonly effort?: string | undefined;
+    readonly approval?: SessionApproval | undefined;
 };
 
 /** The configured `harnesses` and `roles` keys, as the resolver reads them. */
 export type RoleConfiguration = {
+    readonly approval?: SessionApproval | undefined;
     readonly harnesses: Readonly<Record<string, HarnessDefaults | undefined>>;
     readonly roles: Readonly<Record<string, RoleSetting | undefined>>;
 };
@@ -47,6 +54,7 @@ const assign = (
     const effort = own?.effort ?? defaults?.effort;
     return {
         harness,
+        approval: defaults?.approval ?? configuration.approval ?? "safe",
         ...(model === undefined ? {} : { model }),
         ...(effort === undefined ? {} : { effort }),
     };

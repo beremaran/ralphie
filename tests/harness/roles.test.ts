@@ -13,7 +13,7 @@ describe("role assignments", () => {
         const roles = resolve({});
 
         for (const assignment of Object.values(roles)) {
-            expect(assignment).toEqual({ harness: "claude" });
+            expect(assignment).toEqual({ harness: "claude", approval: "safe" });
         }
         expect(Object.keys(roles).sort()).toEqual([
             "decomposer",
@@ -62,6 +62,7 @@ describe("role assignments", () => {
 
         expect(roles.implementer).toEqual({
             harness: "codex",
+            approval: "safe",
             model: "gpt-5",
             effort: "high",
         });
@@ -71,7 +72,7 @@ describe("role assignments", () => {
     test("make the fixer follow the default when the implementer is unset", () => {
         const roles = resolve({ roles: { default: "pi" } });
 
-        expect(roles.fixer).toEqual({ harness: "pi" });
+        expect(roles.fixer).toEqual({ harness: "pi", approval: "safe" });
     });
 
     test("let an explicit fixer assignment win over the implementer", () => {
@@ -94,18 +95,42 @@ describe("role assignments", () => {
 
         expect(roles.implementer).toEqual({
             harness: "claude",
+            approval: "safe",
             model: "opus",
             effort: "high",
         });
         expect(roles.triager).toEqual({
             harness: "claude",
+            approval: "safe",
             model: "haiku",
             effort: "high",
         });
         expect(roles.decomposer).toEqual({
             harness: "claude",
+            approval: "safe",
             model: "opus",
             effort: "low",
         });
+    });
+});
+describe("approval", () => {
+    test("applies the global approval to every role", () => {
+        const roles = resolve({ approval: "yolo" });
+
+        for (const assignment of Object.values(roles)) {
+            expect(assignment.approval).toBe("yolo");
+        }
+    });
+
+    test("lets a harness override the global approval", () => {
+        const roles = resolve({
+            approval: "safe",
+            harnesses: { pi: { approval: "yolo" } },
+            roles: { implementer: "pi" },
+        });
+
+        expect(roles.implementer.approval).toBe("yolo");
+        expect(roles.fixer.approval).toBe("yolo");
+        expect(roles.triager.approval).toBe("safe");
     });
 });
