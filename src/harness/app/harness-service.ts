@@ -14,6 +14,7 @@ import type {
     TurnOutcome,
     TurnRequest,
 } from "../ports.ts";
+import type { SessionPreparation } from "./skill-injection.ts";
 import {
     correctionPrompt,
     fallbackInstructions,
@@ -30,6 +31,8 @@ type Dependencies = {
     readonly listener: SessionEventListener;
     readonly ids: IdGenerator;
     readonly maxResultCorrections?: number;
+    /** Readies the checkout before a session and undoes it afterwards. */
+    readonly preparation?: SessionPreparation;
 };
 
 type AnyRequest = SessionRequest & { readonly resultSchema?: z.ZodType };
@@ -189,6 +192,33 @@ const runOnAdapter = async (
     });
 };
 
+/** Run a session between preparing the checkout and releasing it. */
+const runPrepared = async (
+    preparation: SessionPreparation | undefined,
+    request: AnyRequest,
+    run: () => Promise<HarnessOutcome<unknown>>,
+): Promise<HarnessOutcome<unknown>> => {
+    if (preparation === undefined) return await run();
+    let release: (() => Promise<void>) | undefined;
+    try {
+        release = await preparation({
+            directory: request.directory,
+            harness: request.harness,
+        });
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return failed(
+            "unavailable",
+            `Could not prepare the session: ${message}`,
+        );
+    }
+    try {
+        return await run();
+    } finally {
+        await release();
+    }
+};
+
 /**
  * Compose adapters into the harness service.
  *
@@ -221,7 +251,9 @@ export const makeHarnessService = (deps: Dependencies): HarnessService => {
                       "unavailable",
                       `No harness named "${request.harness}" is available.`,
                   )
-                : await runOnAdapter(adapter, request, emit, maxCorrections);
+                : await runPrepared(deps.preparation, request, () =>
+                      runOnAdapter(adapter, request, emit, maxCorrections),
+                  );
         if (!outcome.ok) {
             emit({ type: "error", message: outcome.failure.message });
         }

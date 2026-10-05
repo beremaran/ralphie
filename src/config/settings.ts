@@ -50,6 +50,11 @@ const labelsSchema = z.strictObject({
     wontfix: nonEmptyString.default("wontfix"),
 });
 
+/** Where the skills injected into sessions come from. */
+const skillsSchema = z.strictObject({
+    dir: nonEmptyString.optional(),
+});
+
 const limitsSchema = z.strictObject({
     implementationAttempts: positiveInteger.default(
         DEFAULT_IMPLEMENTATION_ATTEMPTS,
@@ -117,6 +122,7 @@ const overridableSettings = {
     roles: rolesSchema.prefault({}),
     intake: intakeSchema.prefault({}),
     labels: labelsSchema.prefault({}),
+    skills: skillsSchema.prefault({}),
     limits: limitsSchema.prefault({}),
     notifications: notificationsSchema.prefault({}),
 };

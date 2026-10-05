@@ -1,4 +1,5 @@
 import { homedir } from "node:os";
+import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 
 import { z } from "zod";
@@ -19,7 +20,11 @@ import {
     type ProgressCoordinatorOptions,
 } from "./progress/adapters/coordinator.ts";
 import { type ProgressRenderMode } from "./progress/adapters/progress.ts";
-import { makeLiveRuntime, type IssueWorkflowRuntime } from "./runtime.ts";
+import {
+    makeLiveRuntime,
+    type IssueWorkflowRuntime,
+    type SkillInjectionSettings,
+} from "./runtime.ts";
 import type { SessionEventListener } from "./harness/ports.ts";
 import { exitCodeForError, RalphieExitCode } from "./workflow/exit-code.ts";
 import { issueWorkflow } from "./workflow/workflow.ts";
@@ -222,6 +227,7 @@ export type CommandFactories = {
         readonly runEventLog: RunEventLog;
         readonly layout: RunLayout;
         readonly sessionListener: SessionEventListener;
+        readonly skills: SkillInjectionSettings;
     }) => CommandRuntime;
     readonly runWorkflow?: IssueWorkflow["run"];
     /** The authenticated gh login, read only to complete a bare repository name. */
@@ -290,6 +296,27 @@ const makeCommandCoordinator = (
         runId,
         eventLog,
     });
+
+/**
+ * The bundled skills sit beside the entry point's parent directory, both from
+ * source (`src/`) and from the bundle (`dist/`).
+ */
+const BUNDLED_SKILLS_DIRECTORY = resolve(
+    import.meta.dir,
+    "..",
+    "vendor",
+    "mattpocock-skills",
+);
+
+const skillSettingsFor = (
+    config: ResolvedRalphieConfig,
+): SkillInjectionSettings => ({
+    directory:
+        config.settings.skills.dir === undefined
+            ? BUNDLED_SKILLS_DIRECTORY
+            : resolve(config.settings.skills.dir),
+    labels: config.settings.labels,
+});
 
 const workflowOptionsFor = (
     config: ResolvedRalphieConfig,
@@ -396,6 +423,7 @@ export const runCommand = async (
             runEventLog,
             layout,
             sessionListener: coordinator.sessionListener,
+            skills: skillSettingsFor(config),
         });
         await factories.runWorkflow(
             workflowOptionsFor(config, input, runId, coordinator.control),

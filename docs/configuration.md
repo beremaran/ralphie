@@ -175,6 +175,23 @@ name. Two roles may not share one label (compared case-insensitively).
 | `labels.ready-for-human` | `ready-for-human` |
 | `labels.wontfix` | `wontfix` |
 
+### `skills`
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `skills.dir` | the skills bundled with Ralphie | Directory whose subdirectories are skills (each holds a `SKILL.md`). Relative paths resolve against the current directory. |
+
+Before each session Ralphie copies these skills into the harness's project
+skills directory (`.claude/skills`, `.agents/skills` for Codex, `.pi/skills`,
+`.opencode/skills`). A repository skill with the same name is set aside for the
+session and restored afterwards, so Ralphie's copy wins while other repository
+skills stay available. Everything injected is added to the checkout's
+`.git/info/exclude`, and is removed again when the session ends. If the
+repository has no `docs/agents/issue-tracker.md` or
+`docs/agents/triage-labels.md`, Ralphie generates them for the session: the
+label table comes from `labels`, and the tracker doc says issue content is in
+the prompt and sessions must not use `gh`. Committed versions always win.
+
 ### `limits`
 
 All limits are positive integers.
