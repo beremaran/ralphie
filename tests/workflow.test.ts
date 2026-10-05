@@ -1107,6 +1107,26 @@ describe("workflow", () => {
         expect(notified).toBeFalse();
     });
 
+    test("passes the configured attempt budgets to the issue executor", async () => {
+        const contexts: IssueExecutionContext[] = [];
+
+        await workflow(
+            {
+                ...baseOptions,
+                implementationAttempts: 4,
+                reviewRounds: 6,
+                verificationFixes: 2,
+            },
+            testRuntime([], [], { executionContexts: contexts }),
+        );
+
+        expect(contexts[0]).toMatchObject({
+            implementationAttempts: 4,
+            reviewRounds: 6,
+            verificationFixes: 2,
+        });
+    });
+
     test("refreshes the selected issue before execution", async () => {
         const calls: string[] = [];
         const refreshedIssue = {

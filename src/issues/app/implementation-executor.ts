@@ -26,6 +26,7 @@ import {
 } from "../../progress/ports.ts";
 import { RalphieError } from "../../shared/error.ts";
 import {
+    type IssueExecutionContext,
     IssueExecutionOutcomeKind,
     type WorkflowExecutorInput,
     type WorkflowExecutorResult,
@@ -39,7 +40,10 @@ import {
     ReviewVerdict,
 } from "../domain/decisions.ts";
 import { type IssueRecoveryService, type ReviewAttempt } from "./recovery.ts";
-import { REVIEW_ITERATION_LIMIT } from "../domain/stage.ts";
+import {
+    DEFAULT_IMPLEMENTATION_ATTEMPTS,
+    REVIEW_ITERATION_LIMIT,
+} from "../domain/stage.ts";
 import { assertProtectedDecisionsAuthorized } from "../domain/scope-policy.ts";
 import type {
     IssueVerificationService,
@@ -148,6 +152,21 @@ const implementationPrompt = (
     });
 };
 
+/** One attempt out of the budget its stage runs under. */
+type AttemptCounter = {
+    readonly attempt: number;
+    readonly maxAttempts: number;
+};
+
+const implementationBudget = (context: IssueExecutionContext): number =>
+    context.implementationAttempts ?? DEFAULT_IMPLEMENTATION_ATTEMPTS;
+
+const reviewBudget = (context: IssueExecutionContext): number =>
+    context.reviewRounds ?? REVIEW_ITERATION_LIMIT;
+
+const verificationFixBudget = (context: IssueExecutionContext): number =>
+    context.verificationFixes ?? REVIEW_ITERATION_LIMIT;
+
 const stage = async <A>(
     progress: ProgressReporterService,
     input: WorkflowExecutorInput,
@@ -156,14 +175,12 @@ const stage = async <A>(
     operation: () => Promise<A>,
     succeededMessage: string | ((value: A) => string),
     details?: Readonly<Record<string, unknown>>,
-    attempt?: number,
+    attempt?: AttemptCounter,
 ): Promise<A> => {
     const base = {
         ...issueProgress(input),
         stage: progressStage,
-        ...(attempt === undefined
-            ? {}
-            : { attempt, maxAttempts: REVIEW_ITERATION_LIMIT }),
+        ...attempt,
         ...(details === undefined ? {} : { details }),
     };
     await progress.emit({
@@ -386,7 +403,7 @@ export const makeImplementationExecutorService = (
                 }),
             "Implementation session submitted; inspecting repository changes.",
             undefined,
-            attempt,
+            { attempt, maxAttempts: implementationBudget(context) },
         );
         return await routeSignal(input, result.needsAttention, checkpoint);
     };
@@ -424,7 +441,7 @@ export const makeImplementationExecutorService = (
         return outcome.kind === IssueExecutionOutcomeKind.Failed
             ? {
                   ...outcome,
-                  message: `Issue remains unresolved after ${context.implementationAttempts ?? 3} no-change implementation attempts: ${outcome.message}`,
+                  message: `Issue remains unresolved after ${implementationBudget(context)} no-change implementation attempts: ${outcome.message}`,
               }
             : outcome;
     };
@@ -442,7 +459,7 @@ export const makeImplementationExecutorService = (
             input,
             "verification",
             commands.length === 0
-                ? "Skipping deterministic verification (no --verify-command configured)..."
+                ? "Skipping deterministic verification (no verify commands configured)..."
                 : "Running deterministic verification...",
             () => verification.verify(input.context.repositoryPath, commands),
             commands.length === 0
@@ -466,7 +483,7 @@ export const makeImplementationExecutorService = (
             progress,
             input,
             "verification-fix",
-            `Repairing deterministic verification (attempt ${attempt}/${REVIEW_ITERATION_LIMIT})...`,
+            `Repairing deterministic verification (attempt ${attempt}/${verificationFixBudget(context)})...`,
             () =>
                 runAgentTask(context.agent, {
                     directory: context.repositoryPath,
@@ -491,7 +508,7 @@ export const makeImplementationExecutorService = (
                 }),
             "Verification-fix agent finished; deterministic verification pending.",
             undefined,
-            attempt,
+            { attempt, maxAttempts: verificationFixBudget(context) },
         );
         const routed = await routeSignal(
             input,
@@ -508,7 +525,7 @@ export const makeImplementationExecutorService = (
             () => operations.stageAll(context.repositoryPath),
             "Verification-fix changes staged.",
             undefined,
-            attempt,
+            { attempt, maxAttempts: verificationFixBudget(context) },
         );
         return undefined;
     };
@@ -529,7 +546,8 @@ export const makeImplementationExecutorService = (
                 return { status: "repairable", error };
             }
         };
-        for (let attempt = 1; attempt <= REVIEW_ITERATION_LIMIT; attempt += 1) {
+        const maxFixes = verificationFixBudget(input.context);
+        for (let attempt = 1; attempt <= maxFixes; attempt += 1) {
             const verification = await attemptVerification();
             if (verification.status === "passed") return verification;
             const routed = await repairVerificationFailure(
@@ -546,7 +564,7 @@ export const makeImplementationExecutorService = (
             ? finalVerification
             : {
                   kind: IssueExecutionOutcomeKind.Failed,
-                  message: `Deterministic verification still failed after ${REVIEW_ITERATION_LIMIT} repair attempts: ${finalVerification.error.message}`,
+                  message: `Deterministic verification still failed after ${maxFixes} repair attempts: ${finalVerification.error.message}`,
               };
     };
 
@@ -566,7 +584,7 @@ export const makeImplementationExecutorService = (
             progress,
             input,
             "review",
-            `Reviewing staged changes (attempt ${attempt}/${REVIEW_ITERATION_LIMIT})...`,
+            `Reviewing staged changes (attempt ${attempt}/${reviewBudget(context)})...`,
             () =>
                 requestStructuredOutput(context.agent, {
                     directory: context.repositoryPath,
@@ -597,9 +615,9 @@ export const makeImplementationExecutorService = (
                     signal: context.signal,
                 }),
             ({ output }) =>
-                `Review ${attempt}/${REVIEW_ITERATION_LIMIT}: ${output.verdict}.`,
+                `Review ${attempt}/${reviewBudget(context)}: ${output.verdict}.`,
             undefined,
-            attempt,
+            { attempt, maxAttempts: reviewBudget(context) },
         );
         const routed = await routeSignal(
             input,
@@ -773,7 +791,7 @@ export const makeImplementationExecutorService = (
                 }),
             "Review-fix agent finished; deterministic verification pending.",
             undefined,
-            attempt,
+            { attempt, maxAttempts: reviewBudget(context) },
         );
         const routed = await routeSignal(input, result.needsAttention, {
             branch: invariant.branch,
@@ -789,7 +807,7 @@ export const makeImplementationExecutorService = (
             () => operations.stageAll(context.repositoryPath),
             "Review-fix changes staged.",
             undefined,
-            attempt,
+            { attempt, maxAttempts: reviewBudget(context) },
         );
         if (await operations.hasStagedChanges(context.repositoryPath)) {
             return {
@@ -802,7 +820,7 @@ export const makeImplementationExecutorService = (
             stage: "review-fix",
             status: "failed",
             attempt,
-            maxAttempts: REVIEW_ITERATION_LIMIT,
+            maxAttempts: reviewBudget(context),
             message: `Review fix attempt ${attempt} produced no changes.`,
         });
         return {
@@ -825,6 +843,7 @@ export const makeImplementationExecutorService = (
             issue: context.issue,
             checkpoint,
             reviews,
+            reviewRounds: reviewBudget(context),
         });
         return {
             kind: IssueExecutionOutcomeKind.Escalated,
@@ -849,7 +868,7 @@ export const makeImplementationExecutorService = (
                     "Review repeated the same blocking findings after a verified fix; stopping instead of looping.",
             };
         }
-        if (attempt === REVIEW_ITERATION_LIMIT) {
+        if (attempt === reviewBudget(input.context)) {
             return await exhaustReviews(input, checkpoint, reviews);
         }
         const fixOutcome = await applyReviewFix(
@@ -886,7 +905,7 @@ export const makeImplementationExecutorService = (
                 finalVerification.verification,
             );
         }
-        if (attempt === REVIEW_ITERATION_LIMIT) {
+        if (attempt === reviewBudget(input.context)) {
             return {
                 kind: IssueExecutionOutcomeKind.Failed,
                 message:
@@ -898,7 +917,7 @@ export const makeImplementationExecutorService = (
             stage: "review",
             status: "info",
             attempt,
-            maxAttempts: REVIEW_ITERATION_LIMIT,
+            maxAttempts: reviewBudget(input.context),
             message:
                 "Verification repair changed the approved staged tree; reviewing the repaired tree again.",
         });
@@ -939,7 +958,8 @@ export const makeImplementationExecutorService = (
     ): Promise<WorkflowExecutorResult> => {
         const { context, artifacts } = input;
         const reviews: ReviewAttempt[] = [];
-        for (let attempt = 1; attempt <= REVIEW_ITERATION_LIMIT; attempt += 1) {
+        const maxRounds = reviewBudget(context);
+        for (let attempt = 1; attempt <= maxRounds; attempt += 1) {
             checkSignal(context.signal);
             const verification = await ensureVerificationPassing(
                 input,
@@ -981,7 +1001,7 @@ export const makeImplementationExecutorService = (
         invariant: { readonly branch: string; readonly head: string },
     ): Promise<WorkflowExecutorResult> => {
         const { context } = input;
-        const maximumAttempts = context.implementationAttempts ?? 3;
+        const maximumAttempts = implementationBudget(context);
         let unresolvedSummary: string | undefined;
         for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
             const implementation = await runImplementation(
@@ -1001,7 +1021,7 @@ export const makeImplementationExecutorService = (
                 () => operations.stageAll(context.repositoryPath),
                 `Implementation attempt ${attempt} inspected.`,
                 undefined,
-                attempt,
+                { attempt, maxAttempts: maximumAttempts },
             );
             if (await operations.hasStagedChanges(context.repositoryPath)) {
                 return await runReviewLoop(input, checkpoint, invariant);

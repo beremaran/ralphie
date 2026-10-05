@@ -112,6 +112,10 @@ export type IssueExecutionContext = {
     /** Read at each agent request; the workflow resolves it live. */
     readonly agentSelection: AgentSelection;
     readonly implementationAttempts?: number;
+    /** Review attempts allowed before escalating; defaults to the stage limit. */
+    readonly reviewRounds?: number;
+    /** Verification repair attempts allowed; defaults to the stage limit. */
+    readonly verificationFixes?: number;
     readonly agentDiagnostics: AgentSessionDiagnostics;
     readonly repositoryInvariant: GitRepositoryInvariantService;
     readonly verificationCommands?: ReadonlyArray<string>;

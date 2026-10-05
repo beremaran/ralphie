@@ -17,10 +17,7 @@ import {
     ReviewVerdict,
 } from "../domain/decisions.ts";
 import type { Clock, IdGenerator, RunLayout } from "../../run/ports.ts";
-import {
-    IssueQueueResumeStrategy,
-    REVIEW_ITERATION_LIMIT,
-} from "../domain/stage.ts";
+import { IssueQueueResumeStrategy } from "../domain/stage.ts";
 import type { VerificationEvidence } from "./verification.ts";
 import type { IssueFreshnessFingerprint } from "./artifacts.ts";
 
@@ -61,6 +58,8 @@ export type ReviewExhaustionInput = {
     readonly issue: GitHubIssue;
     readonly checkpoint: IssueCheckpoint;
     readonly reviews: ReadonlyArray<ReviewAttempt>;
+    /** The review budget these attempts exhausted. */
+    readonly reviewRounds: number;
 };
 
 export type ReviewExhaustionOutcome = "escalated-to-decomposition";
@@ -261,12 +260,12 @@ export const makeIssueRecoveryService = (
         );
         const lastReview = input.reviews.at(-1);
         if (
-            input.reviews.length !== REVIEW_ITERATION_LIMIT ||
+            input.reviews.length !== input.reviewRounds ||
             !attemptsAreComplete ||
             lastReview?.decision.verdict !== ReviewVerdict.ChangesRequested
         ) {
             throw new RalphieError({
-                message: `Review exhaustion requires ${REVIEW_ITERATION_LIMIT} ordered attempts ending in changes requested.`,
+                message: `Review exhaustion requires ${input.reviewRounds} ordered attempts ending in changes requested.`,
             });
         }
     };
@@ -313,7 +312,7 @@ export const makeIssueRecoveryService = (
                 title: input.issue.title,
             },
             attempt: input.reviews.length,
-            maxAttempts: REVIEW_ITERATION_LIMIT,
+            maxAttempts: input.reviewRounds,
         };
 
         await progress.emit({
@@ -443,7 +442,7 @@ export const makeIssueRecoveryService = (
                     title: input.issue.title,
                 },
                 attempt: input.reviews.length,
-                maxAttempts: REVIEW_ITERATION_LIMIT,
+                maxAttempts: input.reviewRounds,
             };
             await progress.emit({
                 ...issueContext,

@@ -12,6 +12,11 @@ export type GitHubConnectionService = {
     readonly connect: () => Promise<void>;
 };
 
+/** Outbound port for the user that `gh` is authenticated as. */
+export type GitHubViewerService = {
+    readonly login: () => Promise<string>;
+};
+
 export type GitHubIssuesService = {
     readonly listOpen: (
         repository: string,

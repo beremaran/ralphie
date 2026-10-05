@@ -1,15 +1,19 @@
+import { homedir } from "node:os";
 import { parseArgs } from "node:util";
 
 import { z } from "zod";
 
 import {
+    type ConfigSources,
     type ResolvedRalphieConfig,
+    type RalphieCliOptions,
     resolveRalphieConfig,
-    type IssueRalphieConfig,
-    validateRalphieCliOptions,
 } from "./options.ts";
-import { IssueOrder, IssueSort } from "./github/domain.ts";
 import { agentModelSchema, agentModelVariantSchema } from "./agent/model.ts";
+import { intakeOrdering } from "./config/settings.ts";
+import { yamlConfigDocumentReader } from "./config/adapters/yaml-file.ts";
+import { makeGitHubViewerService } from "./github/adapters/viewer.ts";
+import { CommandRunnerLive } from "./process/adapters/command-runner.ts";
 import {
     makeProgressCoordinator,
     type ProgressCoordinator,
@@ -23,33 +27,43 @@ import { makeLiveRuntime, type IssueWorkflowRuntime } from "./runtime.ts";
 import type { SessionEventListener } from "./harness/ports.ts";
 import { exitCodeForError, RalphieExitCode } from "./workflow/exit-code.ts";
 import { issueWorkflow } from "./workflow/workflow.ts";
-import type { IssueWorkflow } from "./workflow/ports.ts";
+import type { IssueWorkflow, WorkflowOptions } from "./workflow/ports.ts";
 import { BUILD_INFO } from "./build-info.ts";
 import { makeRunEventLog } from "./run/adapters/event-log.ts";
 import type { RunControl, RunEventLog, RunLayout } from "./run/ports.ts";
 import { makeRunLayout } from "./run/adapters/layout.ts";
+import { RalphieError } from "./shared/error.ts";
 
 const cliOptions = {
-    branch: { type: "string", short: "b" },
-    "notify-needs-attention": { type: "boolean" },
-    "needs-attention-label": { type: "string" },
-    "max-decomposition-depth": { type: "string" },
-    "issue-label": { type: "string", multiple: true },
-    "issue-sort": { type: "string" },
-    "verify-command": { type: "string", multiple: true },
+    config: { type: "string" },
+    set: { type: "string", multiple: true },
     model: { type: "string" },
     thinking: { type: "string" },
-    "implementation-attempts": { type: "string" },
-    workspace: { type: "string" },
     output: { type: "string" },
     help: { type: "boolean", short: "h" },
     version: { type: "boolean", short: "v" },
 } as const;
 
+const REPOSITORY_KEY = 'repos."<owner/repo>"';
+
+/** Former flags and the config key that replaces each one. */
+const REMOVED_FLAGS: Readonly<Record<string, string>> = {
+    branch: `${REPOSITORY_KEY}.branch`,
+    b: `${REPOSITORY_KEY}.branch`,
+    "verify-command": `${REPOSITORY_KEY}.verify`,
+    "issue-label": "intake.requireLabels",
+    "issue-sort": "intake.sort",
+    "implementation-attempts": "limits.implementationAttempts",
+    "max-decomposition-depth": "limits.maxDecompositionDepth",
+    workspace: "workspace",
+    "notify-needs-attention": "notifications.enabled",
+    "needs-attention-label": "notifications.label",
+};
+
 type ParsedCli = {
     readonly help: boolean;
     readonly version: boolean;
-    readonly options: Parameters<typeof resolveRalphieConfig>[0];
+    readonly options: RalphieCliOptions;
 };
 
 const asString = (
@@ -74,18 +88,19 @@ const asNonEmptyString = (
         : z.string().trim().min(1).parse(value);
 };
 
-const asNumber = (
-    values: Record<string, unknown>,
-    name: string,
-): number | undefined => {
-    const value = asString(values, name);
-    return value === undefined
-        ? undefined
-        : z.coerce.number().int().positive().parse(value);
-};
-
 const asBoolean = (values: Record<string, unknown>, name: string): boolean =>
     values[name] === true;
+
+const asStrings = (
+    values: Record<string, unknown>,
+    name: string,
+): ReadonlyArray<string> => {
+    const value = values[name];
+    if (value === undefined) return [];
+    return (Array.isArray(value) ? value : [value]).map((item) =>
+        z.string().parse(item),
+    );
+};
 
 const parseModel = (values: Record<string, unknown>, name: string) => {
     const value = asNonEmptyString(values, name);
@@ -94,94 +109,52 @@ const parseModel = (values: Record<string, unknown>, name: string) => {
 
 const outputModeSchema = z.enum(["default", "json"]);
 
-const parseIssueSort = (
-    value: string,
-): {
-    readonly issueSort: IssueSort;
-    readonly issueOrder: IssueOrder;
-} => {
-    const parts = value.split(":");
-    if (parts.length > 2) {
-        throw new Error(
-            "Option --issue-sort requires <created|updated|comments> with an optional :asc or :desc.",
-        );
+/** Fail on any former flag, naming the config key that replaces it. */
+const rejectRemovedFlags = (args: ReadonlyArray<string>): void => {
+    const { tokens } = parseArgs({
+        args: [...args],
+        options: cliOptions,
+        allowPositionals: true,
+        strict: false,
+        tokens: true,
+    });
+    for (const token of tokens) {
+        if (token.kind !== "option") continue;
+        const key = REMOVED_FLAGS[token.name];
+        if (key !== undefined) {
+            throw new RalphieError({
+                message: `Option ${token.rawName} was removed. Set ${key} in the config file instead, or override it for one run with --set.`,
+            });
+        }
     }
-    const sort = z.enum(IssueSort).parse(parts[0] ?? "");
-    const order =
-        parts[1] === undefined
-            ? IssueOrder.Ascending
-            : z.enum(IssueOrder).parse(parts[1]);
-    return { issueSort: sort, issueOrder: order };
 };
-
-const parseIssueLabels = (
-    values: Record<string, unknown>,
-): ReadonlyArray<string> | undefined => {
-    const labels = values["issue-label"];
-    if (labels === undefined) return undefined;
-    if (!Array.isArray(labels) && typeof labels !== "string") {
-        throw new Error("Option --issue-label requires a value.");
-    }
-    return (Array.isArray(labels) ? labels : [labels]).map((label) =>
-        z.string().trim().min(1).parse(label),
-    );
-};
-
-const parseRepeatedStrings = (
-    values: Record<string, unknown>,
-    name: string,
-): ReadonlyArray<string> | undefined => {
-    const raw = values[name];
-    if (raw === undefined) return undefined;
-    if (!Array.isArray(raw) && typeof raw !== "string") {
-        throw new Error(`Option --${name} requires a value.`);
-    }
-    return (Array.isArray(raw) ? raw : [raw]).map((value) =>
-        z.string().trim().min(1).parse(value),
-    );
-};
-
-const parseNotificationOptions = (values: Record<string, unknown>) => ({
-    ...(values["notify-needs-attention"] === undefined
-        ? {}
-        : {
-              notifyNeedsAttention: asBoolean(values, "notify-needs-attention"),
-          }),
-    needsAttentionLabel: asNonEmptyString(values, "needs-attention-label"),
-});
 
 const parseCliOptions = (
     values: Record<string, unknown>,
     repo: string | undefined,
-): Parameters<typeof resolveRalphieConfig>[0] => {
-    const notificationOptions = parseNotificationOptions(values);
-    const issueSortValue = asNonEmptyString(values, "issue-sort");
+): RalphieCliOptions => {
     const thinkingValue = asNonEmptyString(values, "thinking");
     const rawOutput = asNonEmptyString(values, "output");
     const outputValue =
         rawOutput === undefined ? undefined : outputModeSchema.parse(rawOutput);
+    const configPath = asNonEmptyString(values, "config");
+    const model = parseModel(values, "model");
 
     return {
-        repo,
-        branch: asString(values, "branch"),
-        ...notificationOptions,
-        maxDecompositionDepth: asNumber(values, "max-decomposition-depth"),
-        issueLabels: parseIssueLabels(values),
-        verificationCommands: parseRepeatedStrings(values, "verify-command"),
-        ...(issueSortValue === undefined ? {} : parseIssueSort(issueSortValue)),
-        model: parseModel(values, "model"),
-        thinking:
-            thinkingValue === undefined
-                ? undefined
-                : agentModelVariantSchema.parse(thinkingValue),
-        implementationAttempts: asNumber(values, "implementation-attempts"),
-        workspace: asNonEmptyString(values, "workspace"),
+        ...(repo === undefined ? {} : { repo }),
+        ...(configPath === undefined ? {} : { configPath }),
+        overrides: asStrings(values, "set"),
+        ...(model === undefined ? {} : { model }),
+        ...(thinkingValue === undefined
+            ? {}
+            : { thinking: agentModelVariantSchema.parse(thinkingValue) }),
         json: outputValue === "json",
     };
 };
 
-/** Parse the public `ralphie <repository> [options]` command line. */
+/** Parse the public `ralphie [owner/]repository [options]` command line. */
 export const parseCliArgs = (args: ReadonlyArray<string>): ParsedCli => {
+    rejectRemovedFlags(args);
     const parsed = parseArgs({
         args: [...args],
         options: cliOptions,
@@ -193,12 +166,10 @@ export const parseCliArgs = (args: ReadonlyArray<string>): ParsedCli => {
     }
 
     const values = parsed.values as Record<string, unknown>;
-    const options = parseCliOptions(values, parsed.positionals[0]);
-    validateRalphieCliOptions(options);
     return {
         help: asBoolean(values, "help"),
         version: asBoolean(values, "version"),
-        options,
+        options: parseCliOptions(values, parsed.positionals[0]),
     };
 };
 
@@ -232,29 +203,27 @@ const resolveProgressMode = (
     return "plain";
 };
 
-export const HELP_TEXT = `Usage: ralphie <owner/repository> [options]
+export const HELP_TEXT = `Usage: ralphie [owner/]repository [options]
 
 Turn open GitHub issues into reviewed commits through pi.
 
+The repository is owner/name or a GitHub HTTPS or SSH clone URL. A bare name
+takes its owner from defaultOwner in the config file, else the gh login.
+Every other setting comes from the config file.
+
 Options:
-  -b, --branch <name>          Base branch to operate on
-      --notify-needs-attention Enable needs-attention GitHub notifications (default disabled)
-      --needs-attention-label <name>
-                               Add this label to notifications (requires the opt-in flag)
-      --max-decomposition-depth <n>
-                               Maximum recursive decomposition depth (default 3)
-      --issue-label <label>    Include only issues with this label (repeatable)
-      --issue-sort <sort>      created, updated, or comments, optionally :asc or :desc
-      --verify-command <cmd>   Optional deterministic gate (repeatable; skipped when omitted)
+      --config <path>          Config file (default $XDG_CONFIG_HOME/ralphie/config.yaml,
+                               else ~/.config/ralphie/config.yaml)
+      --set <path=value>       Override a config key for this run (repeatable), for example
+                               --set limits.reviewRounds=3 or --set 'repos."owner/repo".branch=dev'
       --model <provider/model> Pi model selection (defaults to pi settings)
       --thinking <level>       Thinking level for every session: off, minimal, low, medium, high, xhigh, or max (default medium)
-      --implementation-attempts <n> Empty implementation retries (default 3)
-      --workspace <path>       Workspace directory (removed at start and after success)
       --output <mode>          Output: default (TUI on a terminal, plain when piped) or json
   -h, --help                   Show this help
   -v, --version                Show version (use --output json for build metadata)
 
 Environment:
+  XDG_CONFIG_HOME              Base directory for the default config file (default ~/.config)
   GH_TOKEN                     GitHub.com token for gh (preferred)
   GITHUB_TOKEN                 Fallback GitHub.com token alias for gh
                                Interactive \`gh auth login\` or a mounted GitHub CLI profile is not required
@@ -282,6 +251,8 @@ export type CommandFactories = {
         readonly layout: RunLayout;
     }) => CommandRuntime;
     readonly runWorkflow?: IssueWorkflow["run"];
+    /** The authenticated gh login, read only to complete a bare repository name. */
+    readonly githubLogin?: () => Promise<string>;
 };
 
 export type CommandOutput = {
@@ -295,6 +266,9 @@ export type RunCommandInput = {
     /** Explicit test seams; production callers should use the defaults. */
     readonly factories?: CommandFactories;
     readonly output?: CommandOutput;
+    /** Environment consulted for the default config location. */
+    readonly environment?: Readonly<Record<string, string | undefined>>;
+    readonly homeDirectory?: string;
 };
 
 const commandOutput = (output?: CommandOutput): CommandOutput =>
@@ -310,6 +284,19 @@ const resolveCommandFactories = (
     makeAgentRuntime: factories.makeAgentRuntime ?? makePiAgentService,
     makeRuntime: factories.makeRuntime ?? makeLiveRuntime,
     runWorkflow: factories.runWorkflow ?? issueWorkflow.run,
+    githubLogin:
+        factories.githubLogin ??
+        makeGitHubViewerService(CommandRunnerLive).login,
+});
+
+const configSourcesFor = (
+    input: RunCommandInput,
+    githubLogin: () => Promise<string>,
+): ConfigSources => ({
+    reader: yamlConfigDocumentReader,
+    environment: input.environment ?? process.env,
+    homeDirectory: input.homeDirectory ?? homedir(),
+    githubLogin,
 });
 
 const eventLogFor = (layout: RunLayout): RunEventLog =>
@@ -333,31 +320,39 @@ const makeCommandCoordinator = (
     });
 
 const workflowOptionsFor = (
-    config: IssueRalphieConfig,
+    config: ResolvedRalphieConfig,
     input: RunCommandInput,
     runId: string,
     control?: RunControl,
-) => ({
-    repo: config.repo,
-    branch: config.branch,
-    maxDecompositionDepth: config.maxDecompositionDepth,
-    issueFilters: {
-        labels: config.issueLabels,
-        sort: config.issueSort,
-        order: config.issueOrder,
-    },
-    model: config.model,
-    modelVariant: config.thinking,
-    verificationCommands: config.verificationCommands,
-    implementationAttempts: config.implementationAttempts,
-    agent: config.agent,
-    workspace: config.workspace,
-    signal: input.signal,
-    ...(control === undefined ? {} : { control }),
-    runId,
-    notificationsEnabled: config.notificationsEnabled,
-    needsAttentionLabel: config.needsAttentionLabel,
-});
+): WorkflowOptions => {
+    const { settings } = config;
+    return {
+        repo: config.repo,
+        ...(settings.branch === undefined ? {} : { branch: settings.branch }),
+        maxDecompositionDepth: settings.limits.maxDecompositionDepth,
+        issueFilters: {
+            labels: settings.intake.requireLabels,
+            ...intakeOrdering(settings.intake.sort),
+        },
+        ...(config.model === undefined ? {} : { model: config.model }),
+        ...(config.thinking === undefined
+            ? {}
+            : { modelVariant: config.thinking }),
+        verificationCommands: settings.verify,
+        implementationAttempts: settings.limits.implementationAttempts,
+        reviewRounds: settings.limits.reviewRounds,
+        verificationFixes: settings.limits.verificationFixes,
+        agent: config.agent,
+        workspace: settings.workspace,
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
+        ...(control === undefined ? {} : { control }),
+        runId,
+        notificationsEnabled: settings.notifications.enabled,
+        ...(settings.notifications.label === undefined
+            ? {}
+            : { needsAttentionLabel: settings.notifications.label }),
+    };
+};
 
 const commandErrorFor = (error: unknown, signal: AbortSignal): Error => {
     const message = error instanceof Error ? error.message : String(error);
@@ -405,18 +400,21 @@ export const runCommand = async (
         return;
     }
 
-    const config = resolveRalphieConfig(parsed.options);
+    const factories = resolveCommandFactories(input.factories);
+    const config = await resolveRalphieConfig(
+        parsed.options,
+        configSourcesFor(input, factories.githubLogin),
+    );
 
     const terminal = input.terminal ?? terminalInfo();
     const runId = crypto.randomUUID();
-    const layout = makeRunLayout(config.workspace, runId);
+    const layout = makeRunLayout(config.settings.workspace, runId);
     const runEventLog = eventLogFor(layout);
     let coordinator: ProgressCoordinator | undefined;
     let runtime: CommandRuntime | undefined;
     let commandError: Error | undefined;
 
     try {
-        const factories = resolveCommandFactories(input.factories);
         coordinator = makeCommandCoordinator(
             config,
             terminal,
