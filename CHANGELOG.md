@@ -5,7 +5,21 @@ All notable changes to Ralphie are documented here. The project follows
 
 ## [Unreleased]
 
+### Changed
+
+- Ralphie reads its settings from `$XDG_CONFIG_HOME/ralphie/config.yaml`
+  (else `~/.config/ralphie/config.yaml`, or `--config <path>`) and is invoked
+  as `ralphie [owner/]repo`. The file is validated at startup, and a missing
+  file fails with a clear message. `--set path=value` overrides any key for one
+  run. Review rounds and verification fixes are now configurable under
+  `limits`. See `docs/configuration.md`.
+
 ### Removed
+
+- Remove `--branch`, `--verify-command`, `--issue-label`, `--issue-sort`,
+  `--implementation-attempts`, `--max-decomposition-depth`, `--workspace`,
+  `--notify-needs-attention`, and `--needs-attention-label`. Each fails with an
+  error naming the configuration key that replaces it.
 
 - Remove the `quiet` and `verbose` output modes. `--output` now accepts only
   `default` (live transcript and progress) and `json` (JSON Lines). The

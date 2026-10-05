@@ -23,7 +23,7 @@ import {
     type NeedsAttentionDecision,
 } from "../domain/decisions.ts";
 import type { ReviewAttempt } from "./recovery.ts";
-import { REVIEW_ITERATION_LIMIT } from "../domain/stage.ts";
+import { MAX_REVIEW_ROUNDS } from "../domain/stage.ts";
 import { verificationEvidenceSchema } from "./verification.ts";
 
 export enum IssueArtifactKind {
@@ -260,7 +260,7 @@ const validIssueNumber = (issueNumber: number): boolean =>
     Number.isInteger(issueNumber) && issueNumber > 0;
 
 const validReviewOrder = (reviews: ReadonlyArray<ReviewAttempt>): boolean =>
-    reviews.length <= REVIEW_ITERATION_LIMIT &&
+    reviews.length <= MAX_REVIEW_ROUNDS &&
     reviews.every((review, index) => review.attempt === index + 1);
 
 const validCreatedIssueNumberMapping = (
@@ -362,7 +362,7 @@ const persistedArtifactsV2BaseSchema = z
         [IssueArtifactKind.IssueCheckpoint]: issueCheckpointSchema.optional(),
         [IssueArtifactKind.ReviewAttempts]: z
             .array(reviewAttemptSchema)
-            .max(REVIEW_ITERATION_LIMIT)
+            .max(MAX_REVIEW_ROUNDS)
             .optional(),
         [IssueArtifactKind.CommitMessageDecision]:
             commitMessageDecisionSchema.optional(),
@@ -892,7 +892,7 @@ const makeStore = (
                 !validReviewOrder(value as ReadonlyArray<ReviewAttempt>)
             ) {
                 throw new RalphieError({
-                    message: `Review attempts for issue ${issueNumber} must be ordered from 1 through ${REVIEW_ITERATION_LIMIT}.`,
+                    message: `Review attempts for issue ${issueNumber} must be ordered from 1 and within ${MAX_REVIEW_ROUNDS} attempts.`,
                 });
             }
             if (
@@ -973,7 +973,7 @@ const makeStore = (
                     message: `Review attempts for issue ${issueNumber} must be appended in order; expected attempt ${existing.length + 1}.`,
                 });
             }
-            if (existing.length >= REVIEW_ITERATION_LIMIT) {
+            if (existing.length >= MAX_REVIEW_ROUNDS) {
                 throw new RalphieError({
                     message: `Review attempt budget exhausted for issue ${issueNumber}.`,
                 });

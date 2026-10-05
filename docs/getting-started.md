@@ -101,8 +101,9 @@ when no release SHA is supplied.
 
 ## Target-repository verification dependencies
 
-Deterministic verification is opt-in. Provide one or more
-`--verify-command` values to run the target's checks in the checkout through
+Deterministic verification is opt-in. List one or more
+commands under `repos."owner/repo".verify` in the
+[configuration file](configuration.md) to run the target's checks in the checkout through
 `/bin/sh` after changes are staged; when omitted, the gate is skipped and
 review proceeds on the staged diff alone. The tools used by a supplied command
 belong to the target repository's contract, not Ralphie's runtime: a command

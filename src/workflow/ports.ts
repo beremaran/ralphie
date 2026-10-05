@@ -66,6 +66,10 @@ export type WorkflowOptions = {
     readonly modelVariant?: string;
     readonly verificationCommands?: ReadonlyArray<string>;
     readonly implementationAttempts?: number;
+    /** Review rounds allowed before escalating to decomposition. */
+    readonly reviewRounds?: number;
+    /** Verification repair attempts allowed after a failing verify command. */
+    readonly verificationFixes?: number;
     readonly workspace: string;
     readonly signal?: AbortSignal;
     /** Interactive queue control; absent for non-interactive runs. */

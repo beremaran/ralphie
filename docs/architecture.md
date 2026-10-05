@@ -32,6 +32,7 @@ that binds concrete adapters into the runtime bundle.
 | Context | Location | Responsibility |
 | --- | --- | --- |
 | `agent` | `src/agent/` | Agent session port, model/thinking types, prompts, structured output. |
+| `config` | `src/config/` | YAML configuration: the zod schema (`settings.ts`), layering and `--set` overrides (`load.ts`, `overrides.ts`), and the file-reader port with its Bun YAML adapter. |
 | `harness` | `src/harness/` | Provider-neutral harness port (session request, events, typed failures, structured results), the service that runs sessions and repairs invalid results, and one CLI adapter per harness (Claude Code so far). Not yet used by the workflow. |
 | `pi` | `src/pi/` | In-process pi SDK runtime: port for startup plus auth, client, tools, model catalog, and event translation adapters. |
 | `github` | `src/github/` | Issue value objects, repository slug parsing, and the Octokit/`gh` adapters. |
@@ -111,6 +112,7 @@ the normal check gate.
 
 | Concern | Primary source |
 | --- | --- |
+| Configuration schema, layering, and file loading | `src/config/` |
 | Public trigger and flags | `index.ts`, `src/cli.ts`, `src/command.ts`, `src/options.ts` |
 | Runtime dependency assembly | `src/runtime.ts` |
 | Run orchestration, queue, state transitions | `src/workflow/workflow.ts`, `src/issues/domain/queue.ts` |

@@ -207,7 +207,7 @@ aggregate partial-failure summary.
 Needs-attention outcomes also continue the queue. A drained run completes with
 status `0`, and the deferred issue remains open. The deterministic
 `decomposition_limit_reached` boundary behaves the same way: raise the
-persisted `--max-decomposition-depth`, narrow the issue, or resolve its review
+persisted `limits.maxDecompositionDepth`, narrow the issue, or resolve its review
 findings manually before a later run. It never closes or marks the capped
 issue complete, so dependent work remains blocked.
 
@@ -217,7 +217,7 @@ A validated needs-attention decision is not an ordinary failure. Ralphie
 persists the summary, evidence, questions, and issue
 freshness metadata in the run artifacts, keeps the issue open, and continues
 with later work.
-Notifications are disabled unless `--notify-needs-attention` is supplied; a
+Notifications are disabled unless `notifications.enabled` is `true`; a
 label by itself is rejected. When opted in, Ralphie publishes through the
 GitHub notification service after recording the outcome and before moving to
 the next issue. Notification applies only to agent-reported
@@ -297,9 +297,9 @@ drained run exits `1` if any issue failed.
 A configured deterministic verification command returning non-zero is handled
 before it becomes an issue failure. Ralphie gives the bounded command output and
 staged diff to a fresh verification-fix session, restages its changes, and
-retries up to five times. Only repair exhaustion or a non-repairable
+retries up to `limits.verificationFixes` times. Only repair exhaustion or a non-repairable
 verification fault (for example a command changing the staged tree) reaches the
-ordinary failure boundary. When no `--verify-command` is configured, the gate
+ordinary failure boundary. When no `verify` commands are configured, the gate
 is skipped.
 
 ## Cleanup

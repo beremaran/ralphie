@@ -13,14 +13,15 @@ buried in a landing page.
    authentication, verification, and a safe first run.
 2. [Safety](safety.md) — understand what a mutation-enabled run can change.
 3. [Workflows](workflows.md) — see how issues are routed and delivered.
-4. [CLI reference](cli-reference.md) — choose options and adapt the recipes.
+4. [Configuration](configuration.md) — write the config file.
+5. [CLI reference](cli-reference.md) — choose options and adapt the recipes.
 
 ### Operator
 
 1. [Safety](safety.md) — review direct-push defaults, invariants, and workspace
    risks before operating on a real repository.
-2. [CLI reference](cli-reference.md) — invocation, filters, output, and
-   environment variables.
+2. [Configuration](configuration.md) and [CLI reference](cli-reference.md) —
+   settings, invocation, output, and environment variables.
 3. [Operations and recovery](operations-and-recovery.md) — interpret output,
    inspect artifacts, and understand what remains after interruption.
 4. [Workflows](workflows.md) — understand implementation, decomposition, and
@@ -51,14 +52,16 @@ buried in a landing page.
 | [Getting started](getting-started.md) | Install Ralphie, configure credentials, verify it, and run the first run. |
 | [Workflows](workflows.md) | Explain issue routing, implementation, decomposition, and direct-push delivery. |
 | [Safety](safety.md) | Define deterministic Git/GitHub safety checks and destructive workspace behavior. |
-| [CLI reference](cli-reference.md) | Record the command syntax, options, defaults, environment variables, and recipes. |
+| [Configuration](configuration.md) | Define the YAML config file, every key and default, repository overrides, and `--set`. |
+| [CLI reference](cli-reference.md) | Record the command syntax, remaining options, environment variables, and recipes. |
 | [Operations and recovery](operations-and-recovery.md) | Document progress, artifacts, state, cancellation, failure, and cleanup. |
 | [Architecture](architecture.md) | Map runtime, orchestrator, domain services, and source locations. |
 | [Development](development.md) | Explain local development, test commands, optional registry checks, the vendored skills sync, and contribution rules. |
 
 ## Keeping documentation current
 
-Keep each contract authoritative on one page. Put new CLI options in the [CLI
+Keep each contract authoritative on one page. Put new settings in
+[Configuration](configuration.md), new CLI options in the [CLI
 reference](cli-reference.md), workflow behavior in [Workflows](workflows.md),
 recovery behavior in [Operations and recovery](operations-and-recovery.md),
 component changes in [Architecture](architecture.md), and release changes in

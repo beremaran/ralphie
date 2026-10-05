@@ -8,7 +8,7 @@ reading map.
 
 > [!CAUTION]
 > Ralphie commits approved work and pushes directly to the branch selected by
-> `--branch`. Test against a disposable repository before enabling mutations.
+> `repos."owner/repo".branch` (default `main`, otherwise `master`). Test against a disposable repository before enabling mutations.
 
 ## Delivery guardrails
 
@@ -64,7 +64,7 @@ a path dedicated to Ralphie:
 
 ```bash
 bunx @beremaran/ralphie owner/repository \
-  --workspace /tmp/ralphie
+  --set workspace=/tmp/ralphie
 ```
 
 ## Agent and mutation boundaries
@@ -91,8 +91,8 @@ change that selects a project license fails closed unless that exact license
 is authorized by the issue text, deferring to a maintainer decision instead of
 silently establishing policy.
 
-Verification is opt-in: Ralphie runs only the commands supplied with
-`--verify-command`, and when none are supplied the gate is skipped and review
+Verification is opt-in: Ralphie runs only the commands listed under
+`repos."owner/repo".verify`, and when none are listed the gate is skipped and review
 proceeds on the staged diff. Configured commands run against the staged tree
 and their evidence is
 bound to that tree before review or commit. A non-zero command exit is treated
@@ -117,7 +117,7 @@ process fails loudly instead of stalling an issue run:
   agent may retry with an explicit `timeout` for genuinely slower commands.
 - **Ralphie-owned commands** (git and `gh` operations against the repository,
   workspace preparation, authentication checks) default to a 10-minute timeout.
-- **Verification commands** (`--verify-command`) run under a 30-minute timeout
+- **Verification commands** (`verify`) run under a 30-minute timeout
   because they execute the repository's full gate; they are the deliberate
   exception to the shorter defaults. When no command is configured, no
   verification process runs.

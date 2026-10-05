@@ -56,12 +56,12 @@ flowchart TD
 3. Stage every change deterministically and capture the exact staged diff.
 4. Run the configured deterministic verification commands, when any. If a
    command exits non-zero, give its bounded output and the staged diff to a
-   fresh fix session, then restage and retry up to five times.
+   fresh fix session, then restage and retry up to `limits.verificationFixes` times (default five).
 5. Ask a separate session for a schema-validated review after verification
-   passes or is skipped (no `--verify-command` configured).
+   passes or is skipped (no `verify` commands configured).
 6. If changes are requested, give the review to a fresh fix session and repeat
    staging and review.
-7. Stop after approval or five review attempts. Reverify immediately before
+7. Stop after approval or `limits.reviewRounds` review attempts (default five). Reverify immediately before
    commit; if repair changes an approved tree, review the repaired tree again.
 8. Generate a validated commit message — the subject is non-empty and at most
    72 characters, with an optional body — and commit the changes.
@@ -72,7 +72,7 @@ When implementation produces no changes, a fresh read-only session must prove
 that the current checkout already resolves the issue and return concrete
 evidence. A proven resolution is completed and closed. An unresolved result is
 fed back to a fresh implementation session for up to
-`--implementation-attempts` attempts. Only an exhausted
+`limits.implementationAttempts` attempts. Only an exhausted
 retry budget fails the issue. If the review budget is
 exhausted, Ralphie preserves the patch and review diagnostics, restores the
 clean checkpoint, and sends the issue through decomposition.
@@ -174,7 +174,7 @@ actionable 0–3 children, stable keys, and an acyclic dependency graph. The
 breakdown is persisted before the first GitHub mutation.
 
 Each child receives a stable marker containing root, parent, key, and depth.
-The positive `--max-decomposition-depth` setting (default `3`) bounds recursive
+The positive `limits.maxDecompositionDepth` setting (default `3`) bounds recursive
 splitting and is persisted in run state. If direct complexity routing or review
 exhaustion would exceed it, Ralphie does not attempt another breakdown: it
 leaves the issue open, records `decomposition_limit_reached` needs attention,
