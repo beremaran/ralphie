@@ -331,6 +331,7 @@ repos:
 
         expect(options.roles.implementer).toEqual({
             harness: "claude",
+            approval: "safe",
             model: "opus",
             effort: "low",
         });

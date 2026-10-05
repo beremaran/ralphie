@@ -1,17 +1,28 @@
-import type {
-    HarnessFailure,
-    HarnessRole,
-    HarnessService,
-    SessionAccess,
-    SessionRequest,
+import {
+    EDITING_ROLES,
+    type HarnessFailure,
+    type HarnessRole,
+    type HarnessService,
+    type SessionAccess,
+    type SessionRequest,
 } from "../harness/ports.ts";
-import type { RoleAssignments } from "../harness/app/roles.ts";
+import type { RoleAssignments, SessionApproval } from "../harness/app/roles.ts";
 import { RalphieError } from "../shared/error.ts";
 
 /** What the issue workflow needs to start sessions: a harness and the roles. */
 export type AgentSessions = {
     readonly harness: HarnessService;
     readonly roles: RoleAssignments;
+    /** Session limits; the defaults below apply when omitted. */
+    readonly limits?: SessionLimits;
+};
+
+/** Wall-clock and spend limits applied to every session. */
+export type SessionLimits = {
+    readonly editTimeoutMs: number;
+    readonly readOnlyTimeoutMs: number;
+    /** Spend cap in US dollars, passed to harnesses that can enforce it. */
+    readonly maxBudgetUsd?: number;
 };
 
 const MINUTE_MS = 60_000;
@@ -22,11 +33,17 @@ export const EDIT_SESSION_TIMEOUT_MS = 60 * MINUTE_MS;
 /** Wall-clock limit of one invocation in a read-only role. */
 export const READ_ONLY_SESSION_TIMEOUT_MS = 15 * MINUTE_MS;
 
-const EDITING_ROLES: ReadonlyArray<HarnessRole> = ["implementer", "fixer"];
+/** The limits of a configuration that sets none. */
+export const DEFAULT_SESSION_LIMITS: SessionLimits = {
+    editTimeoutMs: EDIT_SESSION_TIMEOUT_MS,
+    readOnlyTimeoutMs: READ_ONLY_SESSION_TIMEOUT_MS,
+};
 
 /** The access a role gets unless a request narrows it. */
-export const accessForRole = (role: HarnessRole): SessionAccess =>
-    EDITING_ROLES.includes(role) ? "safe" : "read-only";
+export const accessForRole = (
+    role: HarnessRole,
+    approval: SessionApproval,
+): SessionAccess => (EDITING_ROLES.includes(role) ? approval : "read-only");
 
 export type SessionInput = {
     readonly role: HarnessRole;
@@ -44,7 +61,9 @@ export const sessionRequest = (
     input: SessionInput,
 ): SessionRequest => {
     const assignment = sessions.roles[input.role];
-    const access = input.access ?? accessForRole(input.role);
+    const access =
+        input.access ?? accessForRole(input.role, assignment.approval);
+    const limits = sessions.limits ?? DEFAULT_SESSION_LIMITS;
     return {
         role: input.role,
         harness: assignment.harness,
@@ -53,9 +72,12 @@ export const sessionRequest = (
         access,
         timeoutMs:
             access === "read-only"
-                ? READ_ONLY_SESSION_TIMEOUT_MS
-                : EDIT_SESSION_TIMEOUT_MS,
+                ? limits.readOnlyTimeoutMs
+                : limits.editTimeoutMs,
         title: input.title,
+        ...(limits.maxBudgetUsd === undefined
+            ? {}
+            : { maxBudgetUsd: limits.maxBudgetUsd }),
         ...(assignment.model === undefined ? {} : { model: assignment.model }),
         ...(assignment.effort === undefined
             ? {}

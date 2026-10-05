@@ -5,6 +5,18 @@ All notable changes to Ralphie are documented here. The project follows
 
 ## [Unreleased]
 
+### Added
+
+- `approval: safe | yolo` (top level, per repository, and per harness) sets how
+  the editing roles run. Startup now verifies that every assigned harness is
+  installed, that safe approval is available, and that pi and OpenCode editing
+  roles are set to `yolo`, failing within seconds with the config change that
+  fixes it.
+- `limits.sessionTimeoutMinutes` (`edit` 60, `readOnly` 15) bounds each session;
+  a timeout kills the session's process group. `limits.maxBudgetUsd` caps spend
+  per session on Claude Code, with a startup warning for harnesses that cannot
+  enforce it.
+
 ### Changed
 
 - Every agent session now runs through a headless harness CLI (Claude Code, as

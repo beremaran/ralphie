@@ -102,6 +102,34 @@ hard safety stops. The direct-push path never uses force. See
 and [Operations and recovery](operations-and-recovery.md) for what remains
 available after a safety stop.
 
+## Approval modes
+
+Read-only roles never edit and ignore the approval mode. The editing roles
+(`implementer` and `fixer`) run under `approval`, set at the top level of the
+configuration and overridable per repository and per harness
+(`harnesses.<name>.approval`):
+
+- `safe` (default) uses the harness's own approval or sandbox: Claude Code
+  auto mode, or the Codex workspace-write sandbox.
+- `yolo` turns off every approval and sandbox check (Claude Code
+  `bypassPermissions`, Codex `--dangerously-bypass-approvals-and-sandbox`, and
+  the only mode pi and OpenCode have). Use it only in an environment that is
+  already isolated.
+
+Before any work starts, Ralphie checks that every assigned harness starts,
+that `safe` is actually granted where configured (Claude Code can silently
+fall back from auto mode), and that no editing role runs on pi or OpenCode
+without `yolo`, because neither has a sandbox or approval system. A failure
+stops the run within seconds and names the configuration change that fixes it,
+such as `harnesses.pi.approval: yolo` or moving the role with
+`roles.implementer`. If `limits.maxBudgetUsd` is set, startup also warns about
+each assigned harness that cannot enforce a spend cap; only Claude Code does.
+
+Each session also has a wall-clock limit (`limits.sessionTimeoutMinutes`: 60
+minutes for editing roles, 15 for read-only roles). Exceeding it kills the
+session's whole process group, so tools the harness started die with it, and
+counts as a failed attempt.
+
 ## Bounded command execution
 
 No command runs unbounded. Every process Ralphie spawns, and every shell

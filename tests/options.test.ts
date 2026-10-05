@@ -31,7 +31,10 @@ describe("run configuration", () => {
             configPath,
             json: false,
         });
-        expect(config.roles.implementer).toEqual({ harness: "claude" });
+        expect(config.roles.implementer).toEqual({
+            harness: "claude",
+            approval: "safe",
+        });
         expect(config.settings.labels).toEqual({
             "needs-triage": "needs-triage",
             "needs-info": "needs-info",
