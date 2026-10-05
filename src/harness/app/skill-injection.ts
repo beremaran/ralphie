@@ -1,4 +1,7 @@
-import { dirname, join } from "node:path";
+/** Checkout paths use forward slashes; keeps this module free of node:path. */
+const join = (...parts: readonly string[]): string => parts.join("/");
+
+const dirname = (path: string): string => path.slice(0, path.lastIndexOf("/"));
 
 /** The five triage roles the generated label table covers. */
 const LABEL_ROLES = [
@@ -161,6 +164,62 @@ const layoutFor = (directory: string, location: string): Layout => {
     };
 };
 
+type Undo = Array<() => Promise<void>>;
+
+type GeneratedDoc = { readonly name: string; readonly contents: string };
+
+/** Copy one skill in, setting a same-named repository skill aside first. */
+const injectSkill = async (
+    fileSystem: SkillFileSystem,
+    layout: Layout,
+    source: string,
+    name: string,
+    undo: Undo,
+): Promise<void> => {
+    const target = join(layout.skillsRoot, name);
+    if (await fileSystem.exists(target)) {
+        const shadowed = join(layout.shadowRoot, name);
+        await fileSystem.makeDirectory(layout.shadowRoot);
+        await fileSystem.move(target, shadowed);
+        undo.push(async () => {
+            await fileSystem.remove(target);
+            await fileSystem.move(shadowed, target);
+        });
+    } else {
+        undo.push(async () => await fileSystem.remove(target));
+    }
+    await fileSystem.copyTree(source, target);
+};
+
+/** The generated docs the repository does not already have. */
+const missingDocsIn = async (
+    fileSystem: SkillFileSystem,
+    docsRoot: string,
+    docs: readonly GeneratedDoc[],
+): Promise<readonly GeneratedDoc[]> => {
+    const missing: GeneratedDoc[] = [];
+    for (const doc of docs) {
+        if (!(await fileSystem.exists(join(docsRoot, doc.name)))) {
+            missing.push(doc);
+        }
+    }
+    return missing;
+};
+
+const writeDocs = async (
+    fileSystem: SkillFileSystem,
+    docsRoot: string,
+    docs: readonly GeneratedDoc[],
+    undo: Undo,
+): Promise<void> => {
+    for (const doc of docs) {
+        const file = join(docsRoot, doc.name);
+        await fileSystem.makeDirectory(docsRoot);
+        await fileSystem.writeText(file, doc.contents);
+        undo.push(async () => await fileSystem.remove(file));
+    }
+};
+
 /**
  * Make Ralphie's skills visible to a harness session.
  *
@@ -174,65 +233,47 @@ export const makeSessionPreparation = (
     deps: Dependencies,
 ): SessionPreparation => {
     const { fileSystem } = deps;
-    const generatedDocs = [
+    const generatedDocs: readonly GeneratedDoc[] = [
         { name: "issue-tracker.md", contents: TRACKER_DOC },
         { name: "triage-labels.md", contents: labelsDoc(deps.labels) },
     ];
+    const prepare = async (
+        directory: string,
+        location: string,
+        undo: Undo,
+    ): Promise<void> => {
+        const layout = layoutFor(directory, location);
+        await recoverShadowed(fileSystem, layout.shadowRoot, layout.skillsRoot);
+        const missingDocs = await missingDocsIn(
+            fileSystem,
+            layout.docsRoot,
+            generatedDocs,
+        );
+        await exclude(fileSystem, directory, [
+            ...layout.excludes,
+            ...missingDocs.map((doc) => `/docs/agents/${doc.name}`),
+        ]);
+        await fileSystem.makeDirectory(layout.skillsRoot);
+        for (const name of await skillNames(fileSystem, deps.skillsDirectory)) {
+            await injectSkill(
+                fileSystem,
+                layout,
+                join(deps.skillsDirectory, name),
+                name,
+                undo,
+            );
+        }
+        await writeDocs(fileSystem, layout.docsRoot, missingDocs, undo);
+    };
     return async ({ directory, harness }) => {
         const location = skillLocation(harness);
         if (location === undefined) return async () => {};
-        const layout = layoutFor(directory, location);
-        const undo: Array<() => Promise<void>> = [];
+        const undo: Undo = [];
         const release: Release = async () => {
-            const steps = undo.splice(0).reverse();
-            for (const step of steps) await step();
+            for (const step of undo.splice(0).reverse()) await step();
         };
         try {
-            await recoverShadowed(
-                fileSystem,
-                layout.shadowRoot,
-                layout.skillsRoot,
-            );
-            const missingDocs = [];
-            for (const doc of generatedDocs) {
-                if (
-                    !(await fileSystem.exists(join(layout.docsRoot, doc.name)))
-                ) {
-                    missingDocs.push(doc);
-                }
-            }
-            await exclude(fileSystem, directory, [
-                ...layout.excludes,
-                ...missingDocs.map((doc) => `/docs/agents/${doc.name}`),
-            ]);
-            await fileSystem.makeDirectory(layout.skillsRoot);
-            for (const name of await skillNames(
-                fileSystem,
-                deps.skillsDirectory,
-            )) {
-                const target = join(layout.skillsRoot, name);
-                if (await fileSystem.exists(target)) {
-                    const shadowed = join(layout.shadowRoot, name);
-                    await fileSystem.makeDirectory(layout.shadowRoot);
-                    await fileSystem.move(target, shadowed);
-                    undo.push(async () => {
-                        await fileSystem.remove(target);
-                        await fileSystem.move(shadowed, target);
-                    });
-                } else {
-                    undo.push(async () => await fileSystem.remove(target));
-                }
-                await fileSystem.copyTree(
-                    join(deps.skillsDirectory, name),
-                    target,
-                );
-            }
-            for (const doc of missingDocs) {
-                const file = join(layout.docsRoot, doc.name);
-                await fileSystem.makeDirectory(layout.docsRoot);
-                await fileSystem.writeText(file, doc.contents);
-                undo.push(async () => await fileSystem.remove(file));
-            }
+            await prepare(directory, location, undo);
             return release;
         } catch (error) {
             await release();
