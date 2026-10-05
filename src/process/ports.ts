@@ -30,6 +30,15 @@ export type CommandRunOptions = {
      * from a failed one.
      */
     readonly signal?: AbortSignal;
+    /** Text written to the child's standard input, which is then closed. */
+    readonly stdin?: string;
+    /**
+     * Called with each complete line the child writes to standard output as
+     * it arrives, without the line terminator. Lines split only on `\n`
+     * (never U+2028 or U+2029) and a final unterminated line is delivered
+     * when the stream ends. The full output is still returned in `stdout`.
+     */
+    readonly onStdoutLine?: (line: string) => void;
 };
 
 /** Outbound port for spawning bounded external commands. */
