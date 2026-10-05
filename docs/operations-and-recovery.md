@@ -8,10 +8,13 @@ paths.
 
 ## Progress output
 
-Ralphie receives the complete pi event stream while each task runs,
-including thinking deltas, assistant text, tool calls, and tool results. Tasks
-and issues are intentionally processed sequentially so this event stream remains
-ordered. JSON output exposes it losslessly for integrations.
+While each session runs, Ralphie translates its harness's native event stream
+into one harness-neutral set of session events: assistant text and thinking,
+tool calls, tool results, errors, and token usage. Every output mode renders
+only these events, so output looks the same whichever harness ran the session.
+Tasks and issues are intentionally processed sequentially so the event stream
+remains ordered. JSON output carries every session event for integrations; see
+[Session events](#session-events).
 
 Ralphie adapts its presentation to its environment. `--output default`
 resolves to the full-screen TUI only when stdin and stderr are both TTYs and
@@ -23,14 +26,15 @@ lines.
   (repository, active model, pause state), an issue sidebar, a scrollable
   transcript that streams assistant text as it arrives, and a footer status
   line (stage, activity, elapsed time). Transcript turns start with a colored
-  `● pi · <title>` role label and blank-line separation; assistant text is
-  indented and plain, thinking is dim, and each tool call is one row
+  `● <harness> · <title>` role label and blank-line separation; assistant text
+  is indented and plain, thinking is dim, each tool call is one row
   (`✓ $ <command> · 1.2s`, `✓ read <path>`, `✗ <tool> <path> · failed:
-  <detail>`). The sidebar lists every issue discovered in the run with its
-  outcome (`○` queued, `▶` active, `✓` completed, `✗` failed, `⚠`
-  needs-attention, `−` skipped) and follows the active issue until you navigate
-  away with `[`/`]` or Ctrl+Left/Right; each issue keeps its own transcript, so
-  processed issues stay browsable while the run continues. The queue starts
+  <detail>`), and a session error is a red `✗ <message>` row. The sidebar
+  lists every issue discovered in the run with its outcome (`○` queued, `▶`
+  active, `✓` completed, `✗` failed, `⚠` needs-attention, `−` skipped) and
+  follows the active issue until you navigate away with `[`/`]` or
+  Ctrl+Left/Right; each issue keeps its own transcript, so processed issues
+  stay browsable while the run continues. The queue starts
   paused so the discovered plan can be inspected before work begins; `p`
   resumes or pauses it between issues, `s` stops the queue after the active
   issue and drains the run normally, and `q` (like Ctrl-C) cancels immediately.
@@ -45,13 +49,16 @@ lines.
 - CI and redirected output are the deterministic noninteractive fallback:
   append-only, byte-identical across identical runs, with neither ANSI cursor
   controls (`ESC`) nor carriage-return bytes; `stripTerminalControls` is an
-  identity no-op on these streams. Assistant and thinking text are buffered per
-  part and printed as complete `│  ` lines; each tool completion gets one
-  summary line.
-- `--output json` writes progress and `agent_event` objects one per line to
-  stdout with stderr empty: every non-empty line parses as one complete JSON
-  record, human headers/glyphs never appear, and values are preserved as
-  supplied.
+  identity no-op on these streams. Each session is a block that opens with
+  `╭─ <harness> · <title>` and closes with `╰─ done`. Assistant and thinking
+  text are buffered per block and printed as complete `│  ` lines; each tool
+  call gets one line, each tool completion one summary line
+  (`│  ✓ <tool> done` or `│  ✗ <tool> failed: <output>`), and each session
+  error one `│  ✗ <message>` line. Usage is not printed.
+- `--output json` writes progress records and `session_event` records one per
+  line to stdout with stderr empty: every non-empty line parses as one
+  complete JSON record, human headers/glyphs never appear, and values are
+  preserved as supplied.
 
 JSON events use a stable operational vocabulary and include `runId`,
 `timestamp`, `stage`, `status`, and `message`. Grounding events identify
@@ -63,9 +70,50 @@ field; human-readable output never renders that field. A
 diagnostic or artifact path, and queue position.
 Depending on the event, it may also include the repository, review attempt,
 session ID, commit SHA, created issue numbers, or diagnostic paths. Supplied
-progress-event values are preserved as-is; pi transcripts are never
+progress-event values are preserved as-is; session transcripts are never
 redacted, and terminal control sequences are stripped at the
 reporting boundary.
+
+### Session events
+
+Each `session_event` record wraps one session event with the session it
+belongs to:
+
+```json
+{"type":"session_event","sessionID":"pi-7d3e2a1b","directory":"/work/owner/repo","harness":"pi","title":"Implement #42","event":{"type":"tool_call","callId":"call-1","name":"bash","input":{"command":"bun test"}}}
+```
+
+| Field       | Meaning                                                   |
+| ----------- | --------------------------------------------------------- |
+| `sessionID` | Ralphie's id for the session.                             |
+| `directory` | Working directory of the session.                         |
+| `harness`   | Name of the harness that ran the session, such as `pi`.   |
+| `title`     | Human-readable session label; omitted when there is none. |
+| `event`     | One of the event shapes below, discriminated by `type`.   |
+
+`event` is one of:
+
+- `{"type":"session_started"}`: the session began producing work.
+- `{"type":"assistant_text","kind":"text"|"thinking","text":…,"done":…}`: a
+  fragment of assistant output. Fragments of one `kind` concatenate into a
+  block until one arrives with `done: true`. `text` is only the fragment: a
+  closing fragment may be empty, and a whole block may arrive as a single
+  fragment with `done: true`.
+- `{"type":"tool_call","callId":…,"name":…,"input":{…}}`: the assistant
+  started a tool. `callId` pairs the call with its result.
+- `{"type":"tool_result","callId":…,"name":…,"output":…,"isError":…}`: the
+  tool finished. `output` is its text output, empty when it has none.
+- `{"type":"error","message":…}`: the harness or model reported a failure.
+- `{"type":"usage","inputTokens":…,"outputTokens":…}`, optionally with
+  `cacheReadTokens`, `cacheWriteTokens`, and `costUsd`: tokens, and cost where
+  the harness reports it, consumed since the session's previous `usage` event.
+  Sum the events for a session total.
+- `{"type":"session_finished"}`: the session stopped producing work. Failures
+  are reported by `error` events, not here.
+
+Tool names and `input` fields are the harness's own (for example pi's `bash`
+tool takes `command`), so consumers that need tool-specific detail should key
+on `harness` as well as `name`.
 
 ## State and artifacts
 

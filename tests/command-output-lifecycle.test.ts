@@ -4,9 +4,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import type {
-    AgentEventContext,
-    AgentEventListener,
-} from "../src/agent/ports.ts";
+    SessionEvent,
+    SessionEventContext,
+    SessionEventListener,
+} from "../src/harness/ports.ts";
 import {
     runCommand,
     type CliTerminalInfo,
@@ -19,9 +20,10 @@ import type { ProgressCoordinator } from "../src/progress/adapters/coordinator.t
 import { makeProgressCoordinator } from "../src/progress/adapters/coordinator.ts";
 import { RalphieExitCode } from "../src/workflow/exit-code.ts";
 
-const context: AgentEventContext = {
+const context: SessionEventContext = {
     sessionID: "command-lifecycle-session",
     directory: "/workspace/owner/repository",
+    harness: "pi",
     title: "Command lifecycle",
 };
 
@@ -56,13 +58,11 @@ const makeCapture = (): Capture => {
     };
 };
 
-const textEvent = (type: string, delta?: string) => ({
-    type: "message_update",
-    assistantMessageEvent: {
-        type,
-        contentIndex: 0,
-        ...(delta === undefined ? {} : { delta }),
-    },
+const textEvent = (text: string, done: boolean): SessionEvent => ({
+    type: "assistant_text",
+    kind: "text",
+    text,
+    done,
 });
 
 const runNoninteractiveCase = async (
@@ -84,7 +84,7 @@ const runNoninteractiveCase = async (
     const capture = makeCapture();
     const abortController = new AbortController();
     let coordinator: ProgressCoordinator | undefined;
-    let listener: AgentEventListener | undefined;
+    let listener: SessionEventListener | undefined;
     let runtimeDisposeCount = 0;
     let coordinatorDisposeCount = 0;
     const cleanupOrder: string[] = [];
@@ -126,9 +126,8 @@ const runNoninteractiveCase = async (
                 status: "started",
                 message: "command-started",
             });
-            listener?.({ type: "agent_start" }, context);
-            listener?.(textEvent("text_start"), context);
-            listener?.(textEvent("text_delta", "command-output"), context);
+            listener?.({ type: "session_started" }, context);
+            listener?.(textEvent("command-output", false), context);
 
             if (outcome === "abort") {
                 abortController.abort();
@@ -136,7 +135,7 @@ const runNoninteractiveCase = async (
             }
             if (outcome === "failure") throw failure;
 
-            listener?.(textEvent("text_end"), context);
+            listener?.(textEvent("", true), context);
             await runtime.progress.emit({
                 stage: "run",
                 status: "succeeded",

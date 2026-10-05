@@ -1,15 +1,14 @@
 import type {
-    AgentEventContext,
-    AgentEventListener,
-    AgentSessionEvent,
-} from "../../agent/ports.ts";
+    SessionEvent,
+    SessionEventContext,
+    SessionEventListener,
+} from "../../harness/ports.ts";
 import type { ProgressOutput } from "./progress.ts";
-import { contentText, toolTarget } from "./tool-line.ts";
+import { toolTarget } from "./tool-line.ts";
 
 type PlainTranscriptOptions = {
     readonly mode: "plain" | "json";
     readonly output: ProgressOutput;
-    readonly now?: () => Date;
 };
 
 const oneLine = (value: string): string => value.replace(/\s+/g, " ").trim();
@@ -20,109 +19,79 @@ const clip = (value: string, limit: number): string =>
 /**
  * Append-only transcript for non-interactive modes.
  *
- * JSON mode emits lossless `agent_event` records; plain mode emits compact
- * session blocks. Assistant and thinking text are buffered per part so a
- * token stream becomes complete lines instead of raw fragments.
+ * JSON mode emits one `session_event` record per session event; plain mode
+ * emits compact session blocks. Assistant and thinking text are buffered per
+ * block so a token stream becomes complete lines instead of raw fragments.
  */
 export const makePlainTranscript = (
     options: PlainTranscriptOptions,
-): AgentEventListener => {
-    let text = "";
-    let thinking = "";
+): SessionEventListener => {
+    const buffers = { text: "", thinking: "" };
     let open = false;
 
     const line = (value: string): void => {
         options.output.writeLine(value);
     };
 
-    const flushText = (): void => {
-        const value = text.trim();
-        text = "";
+    const flush = (kind: "text" | "thinking"): void => {
+        const value = buffers[kind].trim();
+        buffers[kind] = "";
+        const prefix = kind === "thinking" ? "│  ✦ " : "│  ";
         for (const part of value.split("\n")) {
-            if (part.trim() !== "") line(`│  ${part}`);
+            if (part.trim() !== "") line(`${prefix}${part}`);
         }
     };
 
-    const flushThinking = (): void => {
-        const value = thinking.trim();
-        thinking = "";
-        for (const part of value.split("\n")) {
-            if (part.trim() !== "") line(`│  ✦ ${part}`);
-        }
+    const flushAll = (): void => {
+        flush("text");
+        flush("thinking");
     };
 
-    const startSession = (context: AgentEventContext): void => {
-        flushText();
-        flushThinking();
+    const startSession = (context: SessionEventContext): void => {
+        flushAll();
         open = true;
         const title =
             context.title === undefined ? "" : ` · ${oneLine(context.title)}`;
-        line(`╭─ pi${title}`);
+        line(`╭─ ${oneLine(context.harness)}${title}`);
     };
 
     const endSession = (): void => {
-        flushText();
-        flushThinking();
+        flushAll();
         if (open) line("╰─ done");
         open = false;
     };
 
-    const toolStart = (event: AgentSessionEvent): void => {
-        flushText();
-        flushThinking();
-        const value = event as { toolName?: unknown; args?: unknown };
-        line(`│  ${toolTarget(value.toolName, value.args)}`);
-    };
-
-    const toolEnd = (event: AgentSessionEvent): void => {
-        const value = event as {
-            toolName?: unknown;
-            isError?: unknown;
-            result?: unknown;
-        };
-        const name = String(value.toolName ?? "tool");
-        if (value.isError !== true) {
-            line(`│  ✓ ${name} done`);
+    const toolResult = (
+        event: Extract<SessionEvent, { type: "tool_result" }>,
+    ): void => {
+        if (!event.isError) {
+            line(`│  ✓ ${event.name} done`);
             return;
         }
-        const detail = contentText(value.result);
         const suffix =
-            detail === undefined || detail.trim() === ""
+            event.output.trim() === ""
                 ? ""
-                : `: ${clip(oneLine(detail), 200)}`;
-        line(`│  ✗ ${name} failed${suffix}`);
+                : `: ${clip(oneLine(event.output), 200)}`;
+        line(`│  ✗ ${event.name} failed${suffix}`);
     };
 
-    const messageUpdate = (event: AgentSessionEvent): void => {
-        const update = (
-            event as {
-                assistantMessageEvent?: { type?: unknown; delta?: unknown };
-            }
-        ).assistantMessageEvent;
-        if (update?.type === "text_delta" && typeof update.delta === "string") {
-            text += update.delta;
-            return;
-        }
-        if (
-            update?.type === "thinking_delta" &&
-            typeof update.delta === "string"
-        ) {
-            thinking += update.delta;
-            return;
-        }
-        if (update?.type === "text_end") flushText();
-        if (update?.type === "thinking_end") flushThinking();
+    const assistantText = (
+        event: Extract<SessionEvent, { type: "assistant_text" }>,
+    ): void => {
+        buffers[event.kind] += event.text;
+        if (event.done) flush(event.kind);
     };
 
     const writeJson = (
-        event: AgentSessionEvent,
-        context: AgentEventContext,
+        event: SessionEvent,
+        context: SessionEventContext,
     ): void => {
         options.output.writeLine(
             JSON.stringify({
-                type: "agent_event",
+                type: "session_event",
                 sessionID: context.sessionID,
                 directory: context.directory,
+                harness: context.harness,
                 ...(context.title === undefined
                     ? {}
                     : { title: context.title }),
@@ -132,15 +101,27 @@ export const makePlainTranscript = (
     };
 
     const handlePlain = (
-        event: AgentSessionEvent,
-        context: AgentEventContext,
+        event: SessionEvent,
+        context: SessionEventContext,
     ): void => {
-        const type = (event as { type?: unknown }).type;
-        if (type === "agent_start") return startSession(context);
-        if (type === "agent_end") return endSession();
-        if (type === "tool_execution_start") return toolStart(event);
-        if (type === "tool_execution_end") return toolEnd(event);
-        if (type === "message_update") messageUpdate(event);
+        switch (event.type) {
+            case "session_started":
+                return startSession(context);
+            case "session_finished":
+                return endSession();
+            case "assistant_text":
+                return assistantText(event);
+            case "tool_call":
+                flushAll();
+                return line(`│  ${toolTarget(event.name, event.input)}`);
+            case "tool_result":
+                return toolResult(event);
+            case "error":
+                flushAll();
+                return line(`│  ✗ ${oneLine(event.message)}`);
+            case "usage":
+                return;
+        }
     };
 
     return (event, context) => {

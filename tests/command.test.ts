@@ -122,7 +122,7 @@ describe("native CLI parser", () => {
                 factories: {
                     makeCoordinator: () => ({
                         progress: makeTestProgressRecorder([]),
-                        piListener: () => {},
+                        sessionListener: () => {},
                         ready: Promise.resolve(),
                         dispose: async () => {},
                     }),
@@ -156,7 +156,7 @@ describe("native CLI parser", () => {
                 factories: {
                     makeCoordinator: () => ({
                         progress: makeTestProgressRecorder([]),
-                        piListener: () => {},
+                        sessionListener: () => {},
                         ready: Promise.resolve(),
                         dispose: async () => {},
                     }),

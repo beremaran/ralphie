@@ -10,10 +10,10 @@ import type {
 } from "@opentui/core";
 
 import type {
-    AgentEventContext,
-    AgentSessionEvent,
-    AgentEventListener,
-} from "../../agent/ports.ts";
+    SessionEvent,
+    SessionEventContext,
+    SessionEventListener,
+} from "../../harness/ports.ts";
 import type {
     RunControl,
     RunControlSelection,
@@ -27,14 +27,14 @@ import type {
 import {
     createDisplayState,
     progressStageLabel,
-    reduceAgentSessionEvent,
+    reduceSessionEvent,
     reduceProgressUpdate,
     type DisplayModel,
     type DisplayQueueIssue,
     type DisplayQueueStatus,
     type DisplayState,
 } from "./display-state.ts";
-import { contentText, toolTarget } from "./tool-line.ts";
+import { toolTarget } from "./tool-line.ts";
 import type {
     ProgressCoordinator,
     ProgressCoordinatorOptions,
@@ -788,17 +788,6 @@ export const makeTuiProgressCoordinator = (
             : `${minutes}m ${String(seconds % 60).padStart(2, "0")}s`;
     };
 
-    const toolCallId = (event: AgentSessionEvent): string | undefined => {
-        const id = (event as { toolCallId?: unknown }).toolCallId;
-        return typeof id === "string" && id !== "" ? id : undefined;
-    };
-
-    const toolLabel = (event: AgentSessionEvent): string =>
-        toolTarget(
-            (event as { toolName?: unknown }).toolName,
-            (event as { args?: unknown }).args,
-        );
-
     const toolResultLine = (
         current: Ui,
         result: {
@@ -872,12 +861,13 @@ export const makeTuiProgressCoordinator = (
         });
     };
 
-    const onToolStart = (event: AgentSessionEvent): void => {
+    const onToolCall = (
+        event: Extract<SessionEvent, { type: "tool_call" }>,
+    ): void => {
         const key = activeIssue;
-        const id = toolCallId(event);
-        if (id !== undefined) {
-            pendingTools.set(id, {
-                label: toolLabel(event),
+        if (event.callId !== "") {
+            pendingTools.set(event.callId, {
+                label: toolTarget(event.name, event.input),
                 startedAt: now().getTime(),
             });
         }
@@ -885,15 +875,13 @@ export const makeTuiProgressCoordinator = (
         refreshStatus();
     };
 
-    const onToolEnd = (event: AgentSessionEvent): void => {
+    const onToolResult = (
+        event: Extract<SessionEvent, { type: "tool_result" }>,
+    ): void => {
         const key = activeIssue;
-        const id = toolCallId(event);
-        const pending = id === undefined ? undefined : pendingTools.get(id);
-        if (id !== undefined) pendingTools.delete(id);
-        const isError = (event as { isError?: unknown }).isError === true;
-        const detail = isError
-            ? contentText((event as { result?: unknown }).result)
-            : undefined;
+        const pending = pendingTools.get(event.callId);
+        pendingTools.delete(event.callId);
+        const detail = event.isError ? event.output : undefined;
         const duration =
             pending === undefined
                 ? undefined
@@ -904,7 +892,7 @@ export const makeTuiProgressCoordinator = (
                 current,
                 key,
                 toolResultLine(current, {
-                    label: pending?.label ?? toolLabel(event),
+                    label: pending?.label ?? toolTarget(event.name, undefined),
                     ...(duration === undefined ? {} : { duration }),
                     ...(detail === undefined || detail.trim() === ""
                         ? {}
@@ -916,7 +904,7 @@ export const makeTuiProgressCoordinator = (
         refreshStatus();
     };
 
-    const onAgentStart = (context: AgentEventContext): void => {
+    const onSessionStarted = (context: SessionEventContext): void => {
         const key = activeIssue;
         withUi((current) => {
             endStreamFor(key);
@@ -929,7 +917,7 @@ export const makeTuiProgressCoordinator = (
                     current.mod.fg(THEME.accent)("● "),
                     current.mod.fg(THEME.accent)(
                         current.mod.bold(
-                            `pi · ${context.title ?? context.sessionID}`,
+                            `${context.harness} · ${context.title ?? context.sessionID}`,
                         ),
                     ),
                 ),
@@ -938,50 +926,58 @@ export const makeTuiProgressCoordinator = (
         refreshStatus();
     };
 
-    const onAgentEnd = (): void => {
+    const endStream = (): void => {
         const key = activeIssue;
         withUi(() => endStreamFor(key));
         refreshStatus();
     };
 
-    const onMessageUpdate = (event: AgentSessionEvent): void => {
-        const update = (
-            event as {
-                assistantMessageEvent?: {
-                    type?: unknown;
-                    delta?: unknown;
-                };
-            }
-        ).assistantMessageEvent;
-        if (update?.type === "text_delta" && typeof update.delta === "string") {
-            streamDelta("text", update.delta);
-            return;
-        }
-        if (
-            update?.type === "thinking_delta" &&
-            typeof update.delta === "string"
-        ) {
-            streamDelta("thinking", update.delta);
-            return;
-        }
-        if (update?.type === "text_end" || update?.type === "thinking_end") {
-            const key = activeIssue;
-            withUi(() => endStreamFor(key));
-            refreshStatus();
-        }
+    const onAssistantText = (
+        event: Extract<SessionEvent, { type: "assistant_text" }>,
+    ): void => {
+        if (event.text !== "") streamDelta(event.kind, event.text);
+        if (event.done) endStream();
     };
 
-    const handleAgentEvent = (
-        event: AgentSessionEvent,
-        context: AgentEventContext,
+    const onSessionError = (message: string): void => {
+        const key = activeIssue;
+        withUi((current) => {
+            endStreamFor(key);
+            appendLine(
+                current,
+                key,
+                styled(
+                    current.mod,
+                    current.mod.fg(THEME.red)("✗ "),
+                    current.mod.fg(THEME.red)(preview(oneLine(message), 160)),
+                ),
+                { indent: 2 },
+            );
+        });
+        refreshStatus();
+    };
+
+    const handleSessionEvent = (
+        event: SessionEvent,
+        context: SessionEventContext,
     ): void => {
-        const type = (event as { type?: unknown }).type;
-        state = reduceAgentSessionEvent(state, event, context, now);
-        if (type === "tool_execution_start") return onToolStart(event);
-        if (type === "tool_execution_end") return onToolEnd(event);
-        if (type === "agent_start") return onAgentStart(context);
-        if (type === "agent_end") return onAgentEnd();
-        if (type === "message_update") return onMessageUpdate(event);
+        state = reduceSessionEvent(state, event, now);
+        switch (event.type) {
+            case "session_started":
+                return onSessionStarted(context);
+            case "session_finished":
+                return endStream();
+            case "assistant_text":
+                return onAssistantText(event);
+            case "tool_call":
+                return onToolCall(event);
+            case "tool_result":
+                return onToolResult(event);
+            case "error":
+                return onSessionError(event.message);
+            case "usage":
+                return;
+        }
     };
 
     const persist = (update: ProgressUpdate): void => {
@@ -1403,14 +1399,14 @@ export const makeTuiProgressCoordinator = (
         },
     };
 
-    const piListener: AgentEventListener = (event, context) => {
+    const sessionListener: SessionEventListener = (event, context) => {
         if (disposed) return;
-        handleAgentEvent(event, context);
+        handleSessionEvent(event, context);
     };
 
     return {
         progress,
-        piListener,
+        sessionListener,
         control,
         ready: readyPromise.catch(() => undefined),
         dispose: async () => {

@@ -157,6 +157,18 @@ describe("hexagonal boundaries", () => {
         ).toEqual([]);
     });
 
+    test("progress output consumes session events, never a harness's native events", async () => {
+        expect(
+            await offenders(
+                (file) => relativePath(file).startsWith("progress/"),
+                ({ target }) =>
+                    target.startsWith("agent/") ||
+                    target.startsWith("pi/") ||
+                    target.startsWith("@earendil-works/"),
+            ),
+        ).toEqual([]);
+    });
+
     test("only inbound adapters and the progress adapter write to process streams", async () => {
         const allowed = (path: string): boolean =>
             path === "cli.ts" ||

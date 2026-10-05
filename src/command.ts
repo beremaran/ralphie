@@ -20,7 +20,7 @@ import { makePiAgentService } from "./pi/adapters/runtime.ts";
 import { type PiAgentService } from "./pi/ports.ts";
 import { type PiAgentConfig } from "./pi/ports.ts";
 import { makeLiveRuntime, type IssueWorkflowRuntime } from "./runtime.ts";
-import type { AgentEventListener } from "./agent/ports.ts";
+import type { SessionEventListener } from "./harness/ports.ts";
 import { exitCodeForError, RalphieExitCode } from "./workflow/exit-code.ts";
 import { issueWorkflow } from "./workflow/workflow.ts";
 import type { IssueWorkflow } from "./workflow/ports.ts";
@@ -273,7 +273,7 @@ export type CommandFactories = {
     ) => ProgressCoordinator;
     readonly makeAgentRuntime?: (
         config: PiAgentConfig,
-        listener: AgentEventListener,
+        listener: SessionEventListener,
     ) => PiAgentService;
     readonly makeRuntime?: (input: {
         readonly agentRuntime: PiAgentService;
@@ -430,7 +430,7 @@ export const runCommand = async (
                 ...resolvePiAgentConfig(config),
                 liveSelection: () => coordinator?.control?.issueSelection?.(),
             },
-            coordinator.piListener,
+            coordinator.sessionListener,
         );
         runtime = factories.makeRuntime({
             agentRuntime,
