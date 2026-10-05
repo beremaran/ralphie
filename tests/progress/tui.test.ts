@@ -37,51 +37,41 @@ describe("OpenTUI progress coordinator", () => {
             current: 1,
             total: 3,
         });
-        coordinator.piListener({ type: "agent_start" }, context);
-        coordinator.piListener(
+        coordinator.sessionListener(
+            { type: "session_started", harness: "pi" },
+            context,
+        );
+        coordinator.sessionListener(
+            { type: "text_delta", channel: "assistant", text: "Working on " },
+            context,
+        );
+        coordinator.sessionListener(
             {
-                type: "message_update",
-                assistantMessageEvent: {
-                    type: "text_delta",
-                    contentIndex: 0,
-                    delta: "Working on ",
-                },
+                type: "text_delta",
+                channel: "assistant",
+                text: "the login flow.",
             },
             context,
         );
-        coordinator.piListener(
-            {
-                type: "message_update",
-                assistantMessageEvent: {
-                    type: "text_delta",
-                    contentIndex: 0,
-                    delta: "the login flow.",
-                },
-            },
+        coordinator.sessionListener(
+            { type: "text_end", channel: "assistant" },
             context,
         );
-        coordinator.piListener(
+        coordinator.sessionListener(
             {
-                type: "message_update",
-                assistantMessageEvent: { type: "text_end", contentIndex: 0 },
-            },
-            context,
-        );
-        coordinator.piListener(
-            {
-                type: "tool_execution_start",
+                type: "tool_call",
                 toolCallId: "tool-1",
                 toolName: "bash",
                 args: { command: "bun test" },
             },
             context,
         );
-        coordinator.piListener(
+        coordinator.sessionListener(
             {
-                type: "tool_execution_end",
+                type: "tool_result",
                 toolCallId: "tool-1",
                 toolName: "bash",
-                result: { content: "ok" },
+                text: "ok",
                 isError: false,
             },
             context,
@@ -178,16 +168,12 @@ describe("OpenTUI progress coordinator", () => {
                 current: 1,
                 total: 3,
             });
-            coordinator.piListener({ type: "agent_start" }, context);
-            coordinator.piListener(
-                {
-                    type: "message_update",
-                    assistantMessageEvent: {
-                        type: "text_delta",
-                        contentIndex: 0,
-                        delta: text,
-                    },
-                },
+            coordinator.sessionListener(
+                { type: "session_started", harness: "pi" },
+                context,
+            );
+            coordinator.sessionListener(
+                { type: "text_delta", channel: "assistant", text: text },
                 context,
             );
             await coordinator.progress.emit({
@@ -218,15 +204,8 @@ describe("OpenTUI progress coordinator", () => {
         expect(frame).not.toContain("beta work");
 
         // The hidden transcript keeps recording while the view is pinned.
-        coordinator.piListener(
-            {
-                type: "message_update",
-                assistantMessageEvent: {
-                    type: "text_delta",
-                    contentIndex: 0,
-                    delta: " extended",
-                },
-            },
+        coordinator.sessionListener(
+            { type: "text_delta", channel: "assistant", text: " extended" },
             context,
         );
         setup.mockInput.pressKey("]");
@@ -274,16 +253,12 @@ describe("OpenTUI progress coordinator", () => {
                 current: number - 50,
                 total: 3,
             });
-            coordinator.piListener({ type: "agent_start" }, context);
-            coordinator.piListener(
-                {
-                    type: "message_update",
-                    assistantMessageEvent: {
-                        type: "text_delta",
-                        contentIndex: 0,
-                        delta: text,
-                    },
-                },
+            coordinator.sessionListener(
+                { type: "session_started", harness: "pi" },
+                context,
+            );
+            coordinator.sessionListener(
+                { type: "text_delta", channel: "assistant", text: text },
                 context,
             );
             if (!complete) return;

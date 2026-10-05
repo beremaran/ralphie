@@ -429,7 +429,7 @@ export const runCommand = async (
                 ...resolvePiAgentConfig(config),
                 liveSelection: () => coordinator?.control?.issueSelection?.(),
             },
-            coordinator.piListener,
+            coordinator.sessionListener,
         );
         runtime = factories.makeRuntime({
             agentRuntime,

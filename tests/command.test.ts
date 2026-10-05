@@ -158,7 +158,7 @@ describe("native CLI parser", () => {
                     githubLogin: fakeGitHubLogin(),
                     makeCoordinator: () => ({
                         progress: makeTestProgressRecorder([]),
-                        piListener: () => {},
+                        sessionListener: () => {},
                         ready: Promise.resolve(),
                         dispose: async () => {},
                     }),
@@ -194,7 +194,7 @@ describe("native CLI parser", () => {
                     githubLogin: fakeGitHubLogin(),
                     makeCoordinator: () => ({
                         progress: makeTestProgressRecorder([]),
-                        piListener: () => {},
+                        sessionListener: () => {},
                         ready: Promise.resolve(),
                         dispose: async () => {},
                     }),
@@ -309,7 +309,7 @@ describe("native CLI parser", () => {
                     githubLogin: fakeGitHubLogin("someone-else"),
                     makeCoordinator: () => ({
                         progress: makeTestProgressRecorder([]),
-                        piListener: () => {},
+                        sessionListener: () => {},
                         ready: Promise.resolve(),
                         dispose: async () => {},
                     }),

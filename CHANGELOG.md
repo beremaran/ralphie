@@ -7,6 +7,12 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Changed
 
+- **Breaking:** JSON Lines `agent_event` records now carry one normalized
+  session event (`session_started`, `session_finished`, `text_delta`,
+  `text_end`, `tool_call`, `tool_result`, `error`, `usage`) instead of raw pi
+  payloads. The shape is documented in
+  [Operations and recovery](docs/operations-and-recovery.md#session-events-in-json-lines).
+  The TUI and plain output also show session errors.
 - **Breaking:** Ralphie now reads its settings from
   `$XDG_CONFIG_HOME/ralphie/config.yaml` (default
   `~/.config/ralphie/config.yaml`), validated at startup, and refuses to run

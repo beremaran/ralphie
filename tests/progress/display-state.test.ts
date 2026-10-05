@@ -1,9 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import type {
-    AgentEventContext,
-    AgentSessionEvent,
-} from "../../src/agent/ports.ts";
+import type { AgentEventContext } from "../../src/agent/ports.ts";
 import {
     DISPLAY_ACTIVITY_LABELS,
     PROGRESS_STAGE_LABELS,
@@ -25,9 +22,6 @@ const at =
     (value: string): DisplayClock =>
     () =>
         value;
-
-const piEvent = (event: object): AgentSessionEvent =>
-    event as AgentSessionEvent;
 
 const baseProgress = {
     stage: "issue-execution" as const,
@@ -281,52 +275,60 @@ describe("display state", () => {
         });
     });
 
-    test("maps agent startup, thinking, response, tool, compaction, retry, and waiting activity", () => {
+    test("maps session startup, thinking, response, tool, and waiting activity", () => {
         let state = reduceProgressUpdate(undefined, baseProgress, at("now"));
         state = reduceAgentSessionEvent(
             state,
-            piEvent({ type: "agent_start" }),
+            { type: "session_started", harness: "pi" },
             context,
         );
         expect(state.activity).toBe("thinking");
 
         state = reduceAgentSessionEvent(
             state,
-            piEvent({
-                type: "message_update",
-                assistantMessageEvent: { type: "thinking_delta", delta: "..." },
-            }),
+            { type: "text_delta", channel: "thinking", text: "..." },
             context,
         );
         expect(state.activity).toBe("thinking");
 
         state = reduceAgentSessionEvent(
             state,
-            piEvent({
-                type: "message_update",
-                assistantMessageEvent: { type: "text_delta", delta: "answer" },
-            }),
+            { type: "text_delta", channel: "assistant", text: "answer" },
             context,
         );
         expect(state.activity).toBe("responding");
 
         state = reduceAgentSessionEvent(
             state,
-            piEvent({
-                type: "tool_execution_start",
-                toolCallId: "tool-1",
-                toolName: "bash",
-                args: {},
-            }),
+            { type: "tool_call", toolCallId: "tool-1", toolName: "bash" },
             context,
         );
         expect(state).toMatchObject({
             activity: "tool",
             activityLabel: "Using bash",
         });
+
+        state = reduceAgentSessionEvent(
+            state,
+            {
+                type: "tool_result",
+                toolCallId: "tool-1",
+                toolName: "bash",
+                isError: false,
+            },
+            context,
+        );
+        expect(state.activity).toBe("waiting");
+
+        state = reduceAgentSessionEvent(
+            state,
+            { type: "session_finished" },
+            context,
+        );
+        expect(state.activity).toBe("waiting");
     });
 
-    test("retains review attempt metadata through agent events", () => {
+    test("retains review attempt metadata through session events", () => {
         const state = reduceProgressUpdate(undefined, {
             ...baseProgress,
             attempt: 3,
@@ -334,7 +336,7 @@ describe("display state", () => {
         });
         const next = reduceAgentSessionEvent(
             state,
-            piEvent({ type: "turn_start" }),
+            { type: "session_started" },
             context,
         );
         expect(next.reviewAttempt).toEqual({ current: 3, total: 5 });
@@ -392,12 +394,11 @@ describe("display state", () => {
         });
         const next = reduceAgentSessionEvent(
             state,
-            piEvent({
-                type: "tool_execution_start",
+            {
+                type: "tool_call",
                 toolCallId: "tool-1",
                 toolName: "\u001b[31mBearer private-value\u001b[0m",
-                args: {},
-            }),
+            },
             context,
         );
 
@@ -436,12 +437,11 @@ describe("display state", () => {
         });
         const next = reduceAgentSessionEvent(
             state,
-            piEvent({
-                type: "tool_execution_start",
+            {
+                type: "tool_call",
                 toolCallId: "tool-1",
                 toolName: "read\u001b[2J\nforged",
-                args: {},
-            }),
+            },
             context,
         );
 

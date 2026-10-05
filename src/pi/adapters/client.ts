@@ -29,6 +29,7 @@ import {
     type PiModelSelection,
 } from "../../agent/pi-models.ts";
 import { modelReference } from "../../agent/pi-models.ts";
+import { translatePiEvent } from "./events.ts";
 import { resolvePiModel } from "./models.ts";
 import { makePiTools, type PiToolSet } from "./tools.ts";
 import type { PiAgentSelection } from "../ports.ts";
@@ -481,10 +482,12 @@ export const makePiAgentClient = (
     const pending = new Map<string, PiSession>();
 
     const emit = (event: unknown, context: AgentEventContext): void => {
-        try {
-            options.eventListener?.(event, context);
-        } catch {
-            // Listener failures must not fail the session.
+        for (const sessionEvent of translatePiEvent(event)) {
+            try {
+                options.eventListener?.(sessionEvent, context);
+            } catch {
+                // Listener failures must not fail the session.
+            }
         }
     };
 

@@ -53,6 +53,31 @@ lines.
   record, human headers/glyphs never appear, and values are preserved as
   supplied.
 
+### Session events in JSON Lines
+
+Every agent session reports through one normalized event shape, whichever
+harness runs it. Each `agent_event` record wraps one event:
+
+```json
+{"type":"agent_event","sessionID":"…","directory":"/workspace/o/r","title":"Implement #42","event":{"type":"tool_call","toolName":"bash","args":{"command":"bun test"}}}
+```
+
+`sessionID`, `directory` and the optional `title` identify the session; `event`
+is one of the following (`type` is the discriminator):
+
+| `event.type` | Fields | Meaning |
+| --- | --- | --- |
+| `session_started` | `harness?` | A session began. `harness` names the harness that runs it, such as `pi`. |
+| `session_finished` | none | The session ended. |
+| `text_delta` | `channel`, `text` | A streamed fragment. `channel` is `assistant` or `thinking`. |
+| `text_end` | `channel` | The streamed part on that channel is complete. |
+| `tool_call` | `toolCallId?`, `toolName`, `args?` | The session started a tool call. |
+| `tool_result` | `toolCallId?`, `toolName`, `isError`, `text?` | A tool call finished; `text` is the plain-text result when it has one. |
+| `error` | `message` | The session reported a failure. |
+| `usage` | `usage` | Token and cost accounting for one assistant message: any of `inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheWriteTokens`, `totalTokens` and `costUsd`. |
+
+Fields marked `?` are omitted when the harness does not report them.
+
 JSON events use a stable operational vocabulary and include `runId`,
 `timestamp`, `stage`, `status`, and `message`. Grounding events identify
 whether agent work was skipped. Human-readable needs-attention decisions name

@@ -5,7 +5,10 @@
  * under `src/pi/` owns model resolution, tool policy, and event translation.
  */
 
+import type { SessionEvent } from "./events.ts";
 import type { AgentModel } from "./model.ts";
+
+export type * from "./events.ts";
 
 export type { AgentModel, AgentSelection } from "./model.ts";
 
@@ -43,8 +46,8 @@ export type AgentPart = {
     readonly [key: string]: unknown;
 };
 
-/** Native event payloads stay opaque to shared presentation code. */
-export type AgentSessionEvent = any;
+/** Every harness reports through the one normalized event shape. */
+export type AgentSessionEvent = SessionEvent;
 
 export type AgentEventContext = {
     readonly sessionID: string;

@@ -314,10 +314,10 @@ describe("pi agent client", () => {
             });
 
             expect(result.data?.info.text).toBe("done");
-            expect(events).toContain("agent_start");
-            expect(events).toContain("tool_execution_start");
-            expect(events).toContain("tool_execution_end");
-            expect(events).toContain("agent_end");
+            expect(events).toContain("session_started");
+            expect(events).toContain("tool_call");
+            expect(events).toContain("tool_result");
+            expect(events).toContain("session_finished");
         } finally {
             await rm(directory, { recursive: true, force: true });
         }

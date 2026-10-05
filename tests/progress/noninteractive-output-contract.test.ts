@@ -23,29 +23,19 @@ const asEvent = (value: unknown): AgentSessionEvent =>
     value as AgentSessionEvent;
 
 const agentEvents = (): readonly AgentSessionEvent[] => [
-    asEvent({ type: "agent_start" }),
+    asEvent({ type: "session_started", harness: "pi" }),
     asEvent({
-        type: "message_update",
-        assistantMessageEvent: { type: "text_start", contentIndex: 0 },
+        type: "text_delta",
+        channel: "assistant",
+        text: `Bearer ${ASSISTANT_TOKEN.slice(0, 18)}`,
     }),
     asEvent({
-        type: "message_update",
-        assistantMessageEvent: {
-            type: "text_delta",
-            contentIndex: 0,
-            delta: `Bearer ${ASSISTANT_TOKEN.slice(0, 18)}`,
-        },
+        type: "text_delta",
+        channel: "assistant",
+        text: ASSISTANT_TOKEN.slice(18),
     }),
     asEvent({
-        type: "message_update",
-        assistantMessageEvent: {
-            type: "text_delta",
-            contentIndex: 0,
-            delta: ASSISTANT_TOKEN.slice(18),
-        },
-    }),
-    asEvent({
-        type: "tool_execution_start",
+        type: "tool_call",
         toolCallId: "tool-1",
         toolName: "contract-tool",
         args: {
@@ -58,24 +48,14 @@ const agentEvents = (): readonly AgentSessionEvent[] => [
         },
     }),
     asEvent({
-        type: "tool_execution_end",
+        type: "tool_result",
         toolCallId: "tool-1",
         toolName: "contract-tool",
-        result: {
-            content: "tool result",
-            zero: 0,
-            flag: false,
-            empty: "",
-            array: [],
-            object: {},
-        },
         isError: false,
+        text: "tool result",
     }),
-    asEvent({
-        type: "message_update",
-        assistantMessageEvent: { type: "text_end", contentIndex: 0 },
-    }),
-    asEvent({ type: "agent_end" }),
+    asEvent({ type: "text_end", channel: "assistant" }),
+    asEvent({ type: "session_finished" }),
 ];
 
 const richDetails: Readonly<Record<string, unknown>> = {
@@ -140,15 +120,9 @@ const play = async (mode: ProgressRenderMode): Promise<Capture> => {
         width: () => 80,
     });
 
-    const events = agentEvents();
-    coordinator.piListener(events[0] as AgentSessionEvent, context);
-    coordinator.piListener(events[1] as AgentSessionEvent, context);
-    coordinator.piListener(events[2] as AgentSessionEvent, context);
-    coordinator.piListener(events[3] as AgentSessionEvent, context);
-    coordinator.piListener(events[4] as AgentSessionEvent, context);
-    coordinator.piListener(events[5] as AgentSessionEvent, context);
-    coordinator.piListener(events[6] as AgentSessionEvent, context);
-    coordinator.piListener(events[7] as AgentSessionEvent, context);
+    for (const event of agentEvents()) {
+        coordinator.sessionListener(event, context);
+    }
 
     for (const update of progressUpdates()) {
         await coordinator.progress.emit(update);
@@ -267,12 +241,11 @@ describe("deterministic noninteractive output contracts", () => {
 
         const assistantDeltas = eventRecords
             .map((record) => record.event as AgentSessionEvent)
-            .filter(
-                (event) =>
-                    event.type === "message_update" &&
-                    event.assistantMessageEvent.type === "text_delta",
+            .flatMap((event) =>
+                event.type === "text_delta" && event.channel === "assistant"
+                    ? [event.text]
+                    : [],
             )
-            .map((event) => event.assistantMessageEvent.delta)
             .join("");
         expect(assistantDeltas).toBe(`Bearer ${ASSISTANT_TOKEN}`);
         for (const glyph of humanGlyphs) {

@@ -34,7 +34,7 @@ import {
     type DisplayQueueStatus,
     type DisplayState,
 } from "./display-state.ts";
-import { contentText, toolTarget } from "./tool-line.ts";
+import { toolTarget } from "./tool-line.ts";
 import type {
     ProgressCoordinator,
     ProgressCoordinatorOptions,
@@ -788,16 +788,18 @@ export const makeTuiProgressCoordinator = (
             : `${minutes}m ${String(seconds % 60).padStart(2, "0")}s`;
     };
 
-    const toolCallId = (event: AgentSessionEvent): string | undefined => {
-        const id = (event as { toolCallId?: unknown }).toolCallId;
-        return typeof id === "string" && id !== "" ? id : undefined;
-    };
+    type ToolCallEvent = Extract<AgentSessionEvent, { type: "tool_call" }>;
+    type ToolResultEvent = Extract<AgentSessionEvent, { type: "tool_result" }>;
 
-    const toolLabel = (event: AgentSessionEvent): string =>
-        toolTarget(
-            (event as { toolName?: unknown }).toolName,
-            (event as { args?: unknown }).args,
-        );
+    const toolCallId = (
+        event: ToolCallEvent | ToolResultEvent,
+    ): string | undefined =>
+        event.toolCallId === undefined || event.toolCallId === ""
+            ? undefined
+            : event.toolCallId;
+
+    const toolLabel = (event: ToolCallEvent | ToolResultEvent): string =>
+        toolTarget(event.toolName, "args" in event ? event.args : undefined);
 
     const toolResultLine = (
         current: Ui,
@@ -872,7 +874,7 @@ export const makeTuiProgressCoordinator = (
         });
     };
 
-    const onToolStart = (event: AgentSessionEvent): void => {
+    const onToolStart = (event: ToolCallEvent): void => {
         const key = activeIssue;
         const id = toolCallId(event);
         if (id !== undefined) {
@@ -885,15 +887,12 @@ export const makeTuiProgressCoordinator = (
         refreshStatus();
     };
 
-    const onToolEnd = (event: AgentSessionEvent): void => {
+    const onToolEnd = (event: ToolResultEvent): void => {
         const key = activeIssue;
         const id = toolCallId(event);
         const pending = id === undefined ? undefined : pendingTools.get(id);
         if (id !== undefined) pendingTools.delete(id);
-        const isError = (event as { isError?: unknown }).isError === true;
-        const detail = isError
-            ? contentText((event as { result?: unknown }).result)
-            : undefined;
+        const detail = event.isError ? event.text : undefined;
         const duration =
             pending === undefined
                 ? undefined
@@ -916,7 +915,10 @@ export const makeTuiProgressCoordinator = (
         refreshStatus();
     };
 
-    const onAgentStart = (context: AgentEventContext): void => {
+    const onSessionStart = (
+        event: Extract<AgentSessionEvent, { type: "session_started" }>,
+        context: AgentEventContext,
+    ): void => {
         const key = activeIssue;
         withUi((current) => {
             endStreamFor(key);
@@ -929,7 +931,7 @@ export const makeTuiProgressCoordinator = (
                     current.mod.fg(THEME.accent)("● "),
                     current.mod.fg(THEME.accent)(
                         current.mod.bold(
-                            `pi · ${context.title ?? context.sessionID}`,
+                            `${event.harness ?? "agent"} · ${context.title ?? context.sessionID}`,
                         ),
                     ),
                 ),
@@ -938,50 +940,71 @@ export const makeTuiProgressCoordinator = (
         refreshStatus();
     };
 
-    const onAgentEnd = (): void => {
+    const onSessionEnd = (): void => {
         const key = activeIssue;
         withUi(() => endStreamFor(key));
         refreshStatus();
     };
 
-    const onMessageUpdate = (event: AgentSessionEvent): void => {
-        const update = (
-            event as {
-                assistantMessageEvent?: {
-                    type?: unknown;
-                    delta?: unknown;
-                };
-            }
-        ).assistantMessageEvent;
-        if (update?.type === "text_delta" && typeof update.delta === "string") {
-            streamDelta("text", update.delta);
-            return;
-        }
-        if (
-            update?.type === "thinking_delta" &&
-            typeof update.delta === "string"
-        ) {
-            streamDelta("thinking", update.delta);
-            return;
-        }
-        if (update?.type === "text_end" || update?.type === "thinking_end") {
-            const key = activeIssue;
-            withUi(() => endStreamFor(key));
-            refreshStatus();
-        }
+    const onTextDelta = (
+        event: Extract<AgentSessionEvent, { type: "text_delta" }>,
+    ): void =>
+        streamDelta(
+            event.channel === "thinking" ? "thinking" : "text",
+            event.text,
+        );
+
+    const onTextEnd = (): void => {
+        const key = activeIssue;
+        withUi(() => endStreamFor(key));
+        refreshStatus();
+    };
+
+    const onSessionError = (
+        event: Extract<AgentSessionEvent, { type: "error" }>,
+    ): void => {
+        const key = activeIssue;
+        withUi((current) => {
+            endStreamFor(key);
+            appendLine(
+                current,
+                key,
+                styled(
+                    current.mod,
+                    current.mod.fg(THEME.red)("✗ "),
+                    current.mod.fg(THEME.red)(
+                        `error: ${preview(oneLine(event.message), 160)}`,
+                    ),
+                ),
+                { indent: 2 },
+            );
+        });
+        refreshStatus();
     };
 
     const handleAgentEvent = (
         event: AgentSessionEvent,
         context: AgentEventContext,
     ): void => {
-        const type = (event as { type?: unknown }).type;
         state = reduceAgentSessionEvent(state, event, context, now);
-        if (type === "tool_execution_start") return onToolStart(event);
-        if (type === "tool_execution_end") return onToolEnd(event);
-        if (type === "agent_start") return onAgentStart(context);
-        if (type === "agent_end") return onAgentEnd();
-        if (type === "message_update") return onMessageUpdate(event);
+        switch (event.type) {
+            case "tool_call":
+                return onToolStart(event);
+            case "tool_result":
+                return onToolEnd(event);
+            case "session_started":
+                return onSessionStart(event, context);
+            case "session_finished":
+                return onSessionEnd();
+            case "text_delta":
+                return onTextDelta(event);
+            case "text_end":
+                return onTextEnd();
+            case "error":
+                return onSessionError(event);
+            case "usage":
+                return;
+        }
     };
 
     const persist = (update: ProgressUpdate): void => {
@@ -1403,14 +1426,14 @@ export const makeTuiProgressCoordinator = (
         },
     };
 
-    const piListener: AgentEventListener = (event, context) => {
+    const sessionListener: AgentEventListener = (event, context) => {
         if (disposed) return;
         handleAgentEvent(event, context);
     };
 
     return {
         progress,
-        piListener,
+        sessionListener,
         control,
         ready: readyPromise.catch(() => undefined),
         dispose: async () => {

@@ -216,42 +216,6 @@ const normalizedState = (state: DisplayState): DisplayState => ({
     ),
 });
 
-const nestedTimestamp = (value: unknown): number | undefined => {
-    const direct = timestampValue(value);
-    if (direct !== undefined) return direct;
-    const record = recordValue(value);
-    const timestamp = timestampValue(record.timestamp);
-    if (timestamp !== undefined) return timestamp;
-    const created = timestampValue(record.created);
-    if (created !== undefined) return created;
-    return record.time === undefined ? undefined : nestedTimestamp(record.time);
-};
-
-const timestampFromPi = (
-    event: AgentSessionEvent,
-    context: AgentEventContext,
-    clock: DisplayClock,
-): number => {
-    const eventRecord = recordValue(event);
-    const message = eventRecord.message;
-    const partial = recordValue(eventRecord.assistantMessageEvent).partial;
-    const result = eventRecord.result;
-    const contextTimestamp = (recordValue(context) as { timestamp?: unknown })
-        .timestamp;
-    for (const candidate of [
-        eventRecord.timestamp,
-        eventRecord.time,
-        message,
-        partial,
-        result,
-        contextTimestamp,
-    ]) {
-        const timestamp = nestedTimestamp(candidate);
-        if (timestamp !== undefined) return timestamp;
-    }
-    return clockValue(clock);
-};
-
 const repositoryFor = (
     state: DisplayState,
     update: ProgressUpdate,
@@ -543,84 +507,32 @@ const change = (activity: DisplayActivity, label?: string): ActivityChange => ({
     ...(label === undefined ? {} : { label }),
 });
 
-const messageToolName = (
-    event: Extract<AgentSessionEvent, { type: "message_update" }>,
-): string | undefined =>
-    stringValue(
-        recordValue(recordValue(event.assistantMessageEvent).toolCall).name,
-    );
-
-const messageActivity = (
-    event: Extract<AgentSessionEvent, { type: "message_update" }>,
-): ActivityChange | undefined => {
-    const kind = event.assistantMessageEvent.type;
-    if (
-        kind === "thinking_start" ||
-        kind === "thinking_delta" ||
-        kind === "thinking_end"
-    ) {
-        return change("thinking");
-    }
-    if (kind === "text_start" || kind === "text_delta" || kind === "text_end") {
-        return change("responding");
-    }
-    if (
-        kind === "toolcall_start" ||
-        kind === "toolcall_delta" ||
-        kind === "toolcall_end"
-    ) {
-        const toolName = messageToolName(event);
-        return toolName === undefined
-            ? change("tool")
-            : change("tool", activityLabelFor("tool", toolName));
-    }
-    if (kind === "start") return change("thinking");
-    if (kind === "done") return change("waiting");
-    if (kind === "error") return change("waiting");
-    return undefined;
-};
-
-const lifecycleActivity = (
-    event: AgentSessionEvent,
-): ActivityChange | undefined => {
-    switch (event.type) {
-        case "agent_start":
-        case "turn_start":
-            return change("thinking");
-        case "turn_end":
-        case "agent_end":
-            return change("waiting");
-        default:
-            return undefined;
-    }
-};
-
 const agentActivity = (
     event: AgentSessionEvent,
 ): ActivityChange | undefined => {
-    if (event.type === "message_update") return messageActivity(event);
-    if (event.type === "tool_execution_start") {
-        return change("tool", activityLabelFor("tool", event.toolName));
+    switch (event.type) {
+        case "session_started":
+            return change("thinking");
+        case "text_delta":
+        case "text_end":
+            return change(
+                event.channel === "thinking" ? "thinking" : "responding",
+            );
+        case "tool_call":
+            return change("tool", activityLabelFor("tool", event.toolName));
+        case "tool_result":
+        case "session_finished":
+        case "error":
+            return change("waiting");
+        case "usage":
+            return undefined;
     }
-    if (event.type === "tool_execution_update") {
-        return change("tool", activityLabelFor("tool", event.toolName));
-    }
-    if (event.type === "tool_execution_end") {
-        return change("waiting");
-    }
-    if (event.type === "message_start") {
-        return recordValue(event.message).role === "assistant"
-            ? change("responding")
-            : change("waiting");
-    }
-    if (event.type === "message_end") return change("waiting");
-    return lifecycleActivity(event);
 };
 
 export const reduceAgentSessionEvent = (
     currentState: DisplayState | undefined,
     event: AgentSessionEvent,
-    context: AgentEventContext = { sessionID: "", directory: "" },
+    _context: AgentEventContext = { sessionID: "", directory: "" },
     now?: DisplayClock | DisplayStateOptions,
 ): DisplayState => {
     const state = normalizedState(currentState ?? makeInitialDisplayState());
@@ -629,7 +541,7 @@ export const reduceAgentSessionEvent = (
     const timestamp =
         state.stage === undefined || state.stageStartedAt !== undefined
             ? undefined
-            : timestampFromPi(event, context, clockFrom(now));
+            : clockValue(clockFrom(now));
     return {
         ...state,
         ...(timestamp === undefined ? {} : { stageStartedAt: timestamp }),

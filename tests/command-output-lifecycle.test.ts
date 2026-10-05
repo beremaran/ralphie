@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import type {
     AgentEventContext,
     AgentEventListener,
+    AgentSessionEvent,
 } from "../src/agent/ports.ts";
 import {
     runCommand,
@@ -57,13 +58,10 @@ const makeCapture = (): Capture => {
     };
 };
 
-const textEvent = (type: string, delta?: string) => ({
-    type: "message_update",
-    assistantMessageEvent: {
-        type,
-        contentIndex: 0,
-        ...(delta === undefined ? {} : { delta }),
-    },
+const textDelta = (text: string): AgentSessionEvent => ({
+    type: "text_delta",
+    channel: "assistant",
+    text,
 });
 
 const runNoninteractiveCase = async (
@@ -129,9 +127,8 @@ const runNoninteractiveCase = async (
                 status: "started",
                 message: "command-started",
             });
-            listener?.({ type: "agent_start" }, context);
-            listener?.(textEvent("text_start"), context);
-            listener?.(textEvent("text_delta", "command-output"), context);
+            listener?.({ type: "session_started", harness: "pi" }, context);
+            listener?.(textDelta("command-output"), context);
 
             if (outcome === "abort") {
                 abortController.abort();
@@ -139,7 +136,7 @@ const runNoninteractiveCase = async (
             }
             if (outcome === "failure") throw failure;
 
-            listener?.(textEvent("text_end"), context);
+            listener?.({ type: "text_end", channel: "assistant" }, context);
             await runtime.progress.emit({
                 stage: "run",
                 status: "succeeded",

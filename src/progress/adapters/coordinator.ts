@@ -1,6 +1,7 @@
 import type {
     AgentEventListener,
     AgentEventContext,
+    AgentSessionEvent,
 } from "../../agent/ports.ts";
 import type { ProgressOutput, ProgressRenderMode } from "./progress.ts";
 import type { ProgressReporterService, ProgressUpdate } from "../ports.ts";
@@ -25,7 +26,7 @@ import { makeTuiProgressCoordinator } from "./tui.ts";
  */
 export type ProgressCoordinator = {
     readonly progress: ProgressReporterService;
-    readonly piListener: AgentEventListener;
+    readonly sessionListener: AgentEventListener;
     /** Interactive queue control; only the interactive adapter provides one. */
     readonly control?: RunControl;
     /** Resolves after the presentation adapter is ready to render. */
@@ -71,13 +72,16 @@ const makePlainCoordinator = (
         },
     };
 
-    const piListener = (event: unknown, context: AgentEventContext): void => {
+    const sessionListener = (
+        event: AgentSessionEvent,
+        context: AgentEventContext,
+    ): void => {
         transcript(event, context);
     };
 
     return {
         progress,
-        piListener,
+        sessionListener,
         ready: Promise.resolve(),
         dispose: async () => {
             output.dispose();
