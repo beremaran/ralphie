@@ -64,6 +64,12 @@ import {
     type NeedsAttentionRouterService,
 } from "./issues/app/needs-attention.ts";
 import { type PiAgentService } from "./pi/ports.ts";
+import { makeClaudeCodeAdapter } from "./harness/adapters/claude-code.ts";
+import { makeHarnessService } from "./harness/app/harness-service.ts";
+import {
+    type HarnessService,
+    type SessionEventListener,
+} from "./harness/ports.ts";
 import { type ProgressReporterService } from "./progress/ports.ts";
 import {
     type Clock,
@@ -106,6 +112,8 @@ export type RalphieRuntime = {
     readonly issueRecovery: IssueRecoveryService;
     readonly needsAttentionRouter: NeedsAttentionRouterService;
     readonly agentRuntime: PiAgentService;
+    /** External-harness sessions; not yet used by the workflow. */
+    readonly harness: HarnessService;
     readonly progress: ProgressReporterService;
     readonly runEventLog: RunEventLog;
     readonly runStateStore: RunStateStoreService;
@@ -120,6 +128,8 @@ export type RuntimeOverrides = {
     readonly progress: ProgressReporterService;
     readonly runEventLog: RunEventLog;
     readonly layout: RunLayout;
+    /** Receives the events of harness sessions; defaults to discarding them. */
+    readonly sessionListener?: SessionEventListener;
     readonly clock?: Clock;
     readonly ids?: IdGenerator;
     /** Optional deterministic seam for the issue artifact store. */
@@ -134,6 +144,7 @@ export const makeLiveRuntime = ({
     progress,
     runEventLog,
     layout,
+    sessionListener = () => {},
     clock = systemClock,
     ids = makeIdGenerator(),
     commandRunner = CommandRunnerLive,
@@ -155,6 +166,11 @@ export const makeLiveRuntime = ({
     });
     const githubNeedsAttentionNotification =
         makeGitHubNeedsAttentionNotificationService(githubConnection.session);
+    const harness = makeHarnessService({
+        adapters: { claude: makeClaudeCodeAdapter({ runner: commandRunner }) },
+        listener: sessionListener,
+        ids,
+    });
     const gitRepository = makeGitRepositoryService(commandRunner);
     const gitRepositoryInvariant =
         makeGitRepositoryInvariantService(commandRunner);
@@ -237,6 +253,7 @@ export const makeLiveRuntime = ({
         issueRecovery,
         needsAttentionRouter,
         agentRuntime,
+        harness,
         progress,
         runEventLog,
         runStateStore,

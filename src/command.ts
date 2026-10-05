@@ -280,6 +280,7 @@ export type CommandFactories = {
         readonly progress: ProgressCoordinator["progress"];
         readonly runEventLog: RunEventLog;
         readonly layout: RunLayout;
+        readonly sessionListener: SessionEventListener;
     }) => CommandRuntime;
     readonly runWorkflow?: IssueWorkflow["run"];
 };
@@ -437,6 +438,7 @@ export const runCommand = async (
             progress: coordinator.progress,
             runEventLog,
             layout,
+            sessionListener: coordinator.sessionListener,
         });
         await factories.runWorkflow(
             workflowOptionsFor(config, input, runId, coordinator.control),

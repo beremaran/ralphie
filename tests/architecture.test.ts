@@ -169,6 +169,24 @@ describe("hexagonal boundaries", () => {
         ).toEqual([]);
     });
 
+    test("harness code outside its adapters is free of process and vendor imports", async () => {
+        expect(
+            await offenders(
+                (file) => {
+                    const path = relativePath(file);
+                    return (
+                        path.startsWith("harness/") &&
+                        !path.startsWith("harness/adapters/")
+                    );
+                },
+                ({ target }) =>
+                    target.startsWith("process/") ||
+                    target.startsWith("@") ||
+                    target.startsWith("node:"),
+            ),
+        ).toEqual([]);
+    });
+
     test("only inbound adapters and the progress adapter write to process streams", async () => {
         const allowed = (path: string): boolean =>
             path === "cli.ts" ||

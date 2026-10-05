@@ -34,4 +34,32 @@ describe("runtime factory", () => {
         expect(runtime.workspace).toBeDefined();
         expect(runtime.workspace.prepare).toBeFunction();
     });
+
+    test("composes the Claude Code harness over the process port", async () => {
+        const spawned: string[] = [];
+        const runtime = makeLiveRuntime({
+            agentRuntime: { start: async () => ({}) as never },
+            progress: makeTestProgressRecorder([]),
+            runEventLog: { append: () => {}, close: () => {} },
+            layout: testLayout(),
+            commandRunner: {
+                run: async (command) => {
+                    spawned.push(command);
+                    return { exitCode: 1, stdout: "", stderr: "stub" };
+                },
+            },
+        });
+
+        const outcome = await runtime.harness.run({
+            role: "implementer",
+            harness: "claude",
+            prompt: "p",
+            directory: "/work/repo",
+            access: "safe",
+            timeoutMs: 1_000,
+        });
+
+        expect(spawned).toEqual(["claude"]);
+        expect(outcome).toMatchObject({ ok: false, failure: { kind: "exit" } });
+    });
 });

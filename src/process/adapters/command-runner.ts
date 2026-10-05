@@ -28,9 +28,34 @@ const terminateChild = (
     }
 };
 
-const readCaptured = async (stream: unknown): Promise<string> => {
+/** Read a child stream to its end, reporting each `\n`-terminated line. */
+const readCaptured = async (
+    stream: unknown,
+    onLine?: (line: string) => void,
+): Promise<string> => {
     if (typeof stream !== "object" || stream === null) return "";
-    return await new Response(stream as ReadableStream<Uint8Array>).text();
+    if (onLine === undefined) {
+        return await new Response(stream as ReadableStream<Uint8Array>).text();
+    }
+    const decoder = new TextDecoder();
+    let captured = "";
+    let pending = "";
+    const consume = (text: string): void => {
+        captured += text;
+        pending += text;
+        let newline = pending.indexOf("\n");
+        while (newline !== -1) {
+            onLine(pending.slice(0, newline));
+            pending = pending.slice(newline + 1);
+            newline = pending.indexOf("\n");
+        }
+    };
+    for await (const chunk of stream as ReadableStream<Uint8Array>) {
+        consume(decoder.decode(chunk, { stream: true }));
+    }
+    consume(decoder.decode());
+    if (pending !== "") onLine(pending);
+    return captured;
 };
 
 /** Decide the outcome after the child has exited, honoring any termination. */
@@ -91,6 +116,9 @@ export const CommandRunnerLive: CommandRunnerService = {
                     options?.env === undefined
                         ? undefined
                         : { ...process.env, ...options.env },
+                ...(options?.stdin === undefined
+                    ? {}
+                    : { stdin: new TextEncoder().encode(options.stdin) }),
                 stdout: "pipe",
                 stderr: "pipe",
             });
@@ -126,10 +154,17 @@ export const CommandRunnerLive: CommandRunnerService = {
             terminateAndEscalate();
         }, timeoutMs);
 
+        // Drain both pipes while the child runs so a chatty child never
+        // blocks on a full pipe and line callbacks see output live.
+        const capturedStdout = readCaptured(
+            child.stdout,
+            options?.onStdoutLine,
+        );
+        const capturedStderr = readCaptured(child.stderr);
         try {
             const exitCode = await child.exited;
-            const stdout = await readCaptured(child.stdout);
-            const stderr = await readCaptured(child.stderr);
+            const stdout = await capturedStdout;
+            const stderr = await capturedStderr;
             return settleRun({
                 termination,
                 summary,
