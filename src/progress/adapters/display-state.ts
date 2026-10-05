@@ -89,7 +89,6 @@ export const PROGRESS_STAGE_LABELS: Readonly<Record<ProgressStage, string>> = {
     "review-fix": "Addressing review findings",
     "review-exhaustion": "Handling review exhaustion",
     "checkout-restore": "Restoring checkout",
-    "commit-message": "Generating commit message",
     commit: "Creating commit",
     push: "Pushing changes",
     decomposition: "Decomposing issue",
