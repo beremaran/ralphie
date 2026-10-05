@@ -5,6 +5,15 @@ All notable changes to Ralphie are documented here. The project follows
 
 ## [Unreleased]
 
+### Added
+
+- Vendor a pinned copy of mattpocock/skills (`triage`, `to-tickets`,
+  `implement`, `tdd`, `code-review`, `codebase-design`, `diagnosing-bugs`) under
+  `vendor/mattpocock-skills/` with its MIT license and an `UPSTREAM.lock.json`,
+  shipped in the npm package. `bun run skills:sync [ref]` updates it and a
+  scheduled workflow opens a pull request when upstream moves. Nothing uses the
+  skills yet. See [Development](docs/development.md#vendored-skills).
+
 ### Changed
 
 - **Breaking:** JSON Lines `agent_event` records now carry one normalized

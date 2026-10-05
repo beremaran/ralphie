@@ -1,0 +1,15 @@
+{
+  "repository": "https://github.com/mattpocock/skills",
+  "ref": "HEAD",
+  "commit": "4588b32ecab9ecc9fc8cc6b6c5e7d675b6004b0d",
+  "skills": {
+    "triage": "skills/engineering/triage",
+    "to-tickets": "skills/engineering/to-tickets",
+    "implement": "skills/engineering/implement",
+    "tdd": "skills/engineering/tdd",
+    "code-review": "skills/engineering/code-review",
+    "codebase-design": "skills/engineering/codebase-design",
+    "diagnosing-bugs": "skills/engineering/diagnosing-bugs"
+  },
+  "digest": "70dbf72b7f88739fbd87fb8f5a86935015fd31afa5e06906c7f3d6b22cfe4a61"
+}

@@ -32,6 +32,8 @@ Useful individual commands:
 | `bun run build:package` | Same as `bun run build`; the package bundle at `dist/ralphie.js`. |
 | `bun run package:check` | Pack, inspect, install, and run the local package in isolated temporary directories. |
 | `bun run package:inspect` | Inspect the local package-manager pack file list without installing it. |
+| `bun run skills:sync [ref]` | Replace the vendored copy of mattpocock/skills with upstream at `ref` (default: the upstream default branch) and rewrite the lock file. Needs network access. |
+| `bun run skills:check` | Verify, offline, that the vendored skills still match the lock file. `bun run test` runs the same check. |
 | `bun run source:audit` | Run the deterministic, offline source/module/export reachability audit as sorted JSON. |
 
 The package check builds an actual tarball, verifies its allowlist, installs it
@@ -82,6 +84,38 @@ Keep these roots and exceptions synchronized with the audit when changing the
 source map or build metadata relationship. A source-only helper should not be
 made part of the package boundary merely to satisfy a test import; add focused
 verification at the canonical production seam instead.
+
+## Vendored skills
+
+Ralphie runs a pinned copy of [mattpocock/skills](https://github.com/mattpocock/skills)
+(`triage`, `to-tickets`, `implement`, `tdd`, `code-review`, `codebase-design`
+and `diagnosing-bugs`), as [ADR-0002](adr/0002-vendored-skills-with-overlays.md)
+records. The copy lives in `vendor/mattpocock-skills/`:
+
+| Path | Contents |
+| --- | --- |
+| `skills/<name>/` | Each vendored skill, copied whole from upstream. |
+| `LICENSE` | Upstream's MIT license, kept for redistribution. |
+| `UPSTREAM.lock.json` | The upstream repository, the requested ref, the exact `commit` the files came from, where each skill lives upstream, and a SHA-256 `digest` of every vendored file. |
+
+The directory ships in the npm package. **Never edit vendored files by hand.**
+A departure from a skill's text belongs in a skill overlay in Ralphie's own
+prompts, so syncing never conflicts. `skills:check` and the test suite fail when
+a vendored file no longer matches the lock.
+
+To update, run `bun run skills:sync [ref]`. It clones upstream, checks out the
+ref, replaces `vendor/mattpocock-skills/` and rewrites the lock; the same ref
+always yields the same files. Skills are found by name anywhere under upstream's
+`skills/` tree, and the sync fails, leaving the copy untouched, if one is missing
+or ambiguous. Review the diff and commit it.
+
+The scheduled `Sync vendored skills` workflow runs the same script daily and, only
+when the result differs from the committed lock, pushes a `skills-sync/<commit>`
+branch and opens a pull request whose diff is the upstream change. Review it as
+you would any dependency update, checking in particular whether an overlay still
+matches the skill text it adjusts. Pull requests opened with the default
+`GITHUB_TOKEN` do not trigger CI; set the optional `SKILLS_SYNC_TOKEN` secret to
+a personal access token if you want the checks to run on them.
 
 ## Publishing
 

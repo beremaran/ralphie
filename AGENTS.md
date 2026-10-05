@@ -16,6 +16,8 @@ bun run format                     # Biome, 4-space indent, double quotes, semic
 bun run source:audit               # offline reachability audit from index.ts / scripts/build.ts
 bun run build                      # bundles dist/ralphie.js
 bun run start -- owner/repo        # run from source
+bun run skills:sync [ref]          # update vendor/mattpocock-skills (never edit those files by hand)
+bun run skills:check               # offline: vendored skills still match their lock
 ```
 
 CI runs `format:check`, `lint`, `typecheck`, `test`, and `build`, but not `source:audit`. That audit only runs in `bun run check`, so run it locally.

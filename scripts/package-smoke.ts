@@ -147,11 +147,18 @@ const assertAllowlist = (files: ReadonlyArray<string>): void => {
     const actual = new Set(
         files.map(normalizeEntry).filter((entry) => entry.length > 0),
     );
-    const missing = [...expected].filter((entry) => !actual.has(entry));
+    // A directory entry in `files` stands for every file packed beneath it.
+    const covers = (entry: string, file: string): boolean =>
+        file === entry || file.startsWith(`${entry}/`);
+    const missing = [...expected].filter(
+        (entry) => ![...actual].some((file) => covers(entry, file)),
+    );
     if (missing.length > 0) {
         return fail(`package file list is missing ${missing.join(", ")}.`);
     }
-    const unexpected = [...actual].filter((entry) => !expected.has(entry));
+    const unexpected = [...actual].filter(
+        (file) => ![...expected].some((entry) => covers(entry, file)),
+    );
     if (unexpected.length > 0) {
         return fail(
             `package file list contains unexpected ${unexpected.join(", ")}.`,
