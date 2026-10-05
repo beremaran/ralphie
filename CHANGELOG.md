@@ -5,6 +5,30 @@ All notable changes to Ralphie are documented here. The project follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** Ralphie now reads its settings from
+  `$XDG_CONFIG_HOME/ralphie/config.yaml` (default
+  `~/.config/ralphie/config.yaml`), validated at startup, and refuses to run
+  without it. The command line is `ralphie <[owner/]repo | URL>` plus
+  `--config <path>`, repeatable `--set path=value`, `--output`, `--help` and
+  `--version`. A bare `repo` gets `defaultOwner`, else the authenticated `gh`
+  login; the repository is never inferred from the current directory. Settings
+  resolve in the order defaults, top-level file, matching `repos:` entry, then
+  `--set`. See [Configuration](docs/configuration.md).
+- **Breaking:** `--branch`/`-b`, `--issue-label`, `--issue-sort`,
+  `--verify-command`, `--implementation-attempts`,
+  `--max-decomposition-depth` and `--workspace` are removed and fail with an
+  error naming the replacing key (`repos.<owner/repo>.branch`,
+  `intake.requireLabels`, `intake.sort`, `repos.<owner/repo>.verify`,
+  `limits.implementationAttempts`, `limits.maxDecompositionDepth` and
+  `workspace`). `--model`, `--thinking`, `--notify-needs-attention` and
+  `--needs-attention-label` remain temporarily until the harness and hand-off
+  work replaces them.
+- Add the `labels` map (Matt Pocock's five canonical triage roles) and the
+  `limits.reviewRounds` and `limits.verificationFixes` keys. They are
+  validated and resolved but not consumed yet.
+
 ### Removed
 
 - Remove the `quiet` and `verbose` output modes. `--output` now accepts only

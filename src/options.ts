@@ -1,32 +1,34 @@
-import { IssueOrder, IssueSort } from "./github/domain.ts";
-import { DEFAULT_MAX_DECOMPOSITION_DEPTH } from "./issues/domain/decomposition-markdown.ts";
+import type { IssueOrder, IssueSort } from "./github/domain.ts";
 export { DEFAULT_MAX_DECOMPOSITION_DEPTH } from "./issues/domain/decomposition-markdown.ts";
-import { parseRepositorySlug } from "./github/repository.ts";
+export {
+    DEFAULT_IMPLEMENTATION_ATTEMPTS,
+    DEFAULT_WORKSPACE,
+} from "./config/domain.ts";
 import { DEFAULT_AGENT, type AgentModel } from "./agent/model.ts";
+import type { TriageRole } from "./config/domain.ts";
+import type { ConfigFile } from "./config/ports.ts";
+import {
+    resolveRepository,
+    resolveSettings,
+    validateConfiguration,
+    type SetOverride,
+} from "./config/resolve.ts";
 import { RalphieError } from "./shared/error.ts";
-
-export const DEFAULT_WORKSPACE = "~/.ralphie";
-
-export const DEFAULT_IMPLEMENTATION_ATTEMPTS = 3;
 
 export type RalphieCliOptions = {
     readonly repo?: string;
+    readonly configPath?: string;
+    readonly overrides?: ReadonlyArray<SetOverride>;
+    /** Temporary until the harness switch-over replaces them with config keys. */
     readonly notifyNeedsAttention?: boolean;
     readonly needsAttentionLabel?: string;
-    readonly branch?: string;
-    readonly maxDecompositionDepth?: number;
-    readonly issueLabels?: ReadonlyArray<string>;
-    readonly issueSort?: IssueSort;
-    readonly issueOrder?: IssueOrder;
-    readonly verificationCommands?: ReadonlyArray<string>;
     readonly model?: AgentModel;
     readonly thinking?: string;
-    readonly implementationAttempts?: number;
-    readonly workspace?: string;
     readonly json?: boolean;
 };
 
-type SharedRalphieConfig = {
+/** The resolved configuration for the issue workflow. */
+export type ResolvedRalphieConfig = {
     readonly repo: string;
     readonly branch?: string;
     readonly model?: AgentModel;
@@ -34,25 +36,20 @@ type SharedRalphieConfig = {
     readonly agent: string;
     readonly workspace: string;
     readonly json: boolean;
-};
-
-type SharedIssueSelection = {
     readonly issueLabels: ReadonlyArray<string>;
     readonly issueSort: IssueSort;
     readonly issueOrder: IssueOrder;
+    readonly labels: Readonly<Record<TriageRole, string>>;
+    readonly implementationAttempts: number;
+    readonly reviewRounds: number;
+    readonly verificationFixes: number;
+    readonly maxDecompositionDepth: number;
+    readonly verificationCommands: ReadonlyArray<string>;
+    readonly notificationsEnabled: boolean;
+    readonly needsAttentionLabel?: string;
 };
 
-export type IssueRalphieConfig = SharedRalphieConfig &
-    SharedIssueSelection & {
-        readonly notificationsEnabled: boolean;
-        readonly needsAttentionLabel?: string;
-        readonly implementationAttempts: number;
-        readonly verificationCommands?: ReadonlyArray<string>;
-        readonly maxDecompositionDepth: number;
-    };
-
-/** The resolved configuration for the issue workflow. */
-export type ResolvedRalphieConfig = IssueRalphieConfig;
+export type IssueRalphieConfig = ResolvedRalphieConfig;
 
 const optionalProperty = <Key extends string, Value>(
     key: Key,
@@ -61,29 +58,6 @@ const optionalProperty = <Key extends string, Value>(
     value === undefined
         ? {}
         : ({ [key]: value } as { [Property in Key]: Value });
-
-const validatePositiveIntegers = (options: RalphieCliOptions): void => {
-    if (
-        options.implementationAttempts !== undefined &&
-        (!Number.isSafeInteger(options.implementationAttempts) ||
-            options.implementationAttempts <= 0)
-    ) {
-        throw new RalphieError({
-            message:
-                "Option --implementation-attempts requires a positive integer.",
-        });
-    }
-    if (
-        options.maxDecompositionDepth !== undefined &&
-        (!Number.isSafeInteger(options.maxDecompositionDepth) ||
-            options.maxDecompositionDepth <= 0)
-    ) {
-        throw new RalphieError({
-            message:
-                "Option --max-decomposition-depth requires a positive integer.",
-        });
-    }
-};
 
 export const validateRalphieCliOptions = (options: RalphieCliOptions): void => {
     const needsAttentionLabel = options.needsAttentionLabel?.trim();
@@ -105,57 +79,52 @@ export const validateRalphieCliOptions = (options: RalphieCliOptions): void => {
                 "Option --needs-attention-label requires --notify-needs-attention.",
         });
     }
-    validatePositiveIntegers(options);
 };
 
-const commonResolvedConfig = (
-    options: RalphieCliOptions,
-    json: boolean,
-): SharedRalphieConfig => ({
-    repo: parseRepositorySlug(options.repo!).slug,
-    ...optionalProperty("branch", options.branch),
-    ...optionalProperty("model", options.model),
-    ...optionalProperty("thinking", options.thinking),
-    agent: DEFAULT_AGENT,
-    workspace: options.workspace ?? DEFAULT_WORKSPACE,
-    json,
-});
+export type ResolveConfigInput = {
+    readonly options: RalphieCliOptions;
+    readonly file: ConfigFile;
+    /** Login of the authenticated GitHub user; only called for a bare repo. */
+    readonly login: () => Promise<string>;
+};
 
-const issueSelectionConfig = (
-    options: RalphieCliOptions,
-): SharedIssueSelection => ({
-    issueLabels: [...(options.issueLabels ?? [])],
-    issueSort: options.issueSort ?? IssueSort.Created,
-    issueOrder: options.issueOrder ?? IssueOrder.Ascending,
-});
-
-/** Resolve the complete issue-workflow configuration from CLI arguments only. */
-export const resolveRalphieConfig = (
-    options: RalphieCliOptions,
-): ResolvedRalphieConfig => {
-    if (options.repo === undefined) {
-        throw new RalphieError({
-            message:
-                "Missing repository: provide an owner/repository argument.",
-        });
-    }
-
-    const json = options.json ?? false;
-
+/** Resolve the complete issue-workflow configuration. */
+export const resolveRalphieConfig = async ({
+    options,
+    file,
+    login,
+}: ResolveConfigInput): Promise<ResolvedRalphieConfig> => {
     validateRalphieCliOptions(options);
+    const overrides = options.overrides ?? [];
+    const { document } = validateConfiguration(file, overrides);
+    const repository = await resolveRepository(
+        options.repo,
+        document.defaultOwner,
+        login,
+    );
+    const settings = resolveSettings(file, overrides, repository.slug);
 
     return {
-        ...commonResolvedConfig(options, json),
-        ...issueSelectionConfig(options),
+        repo: repository.slug,
+        ...optionalProperty("branch", settings.branch),
+        ...optionalProperty("model", options.model),
+        ...optionalProperty("thinking", options.thinking),
+        agent: DEFAULT_AGENT,
+        workspace: settings.workspace,
+        json: options.json ?? false,
+        issueLabels: settings.intake.requireLabels,
+        issueSort: settings.intake.sort,
+        issueOrder: settings.intake.order,
+        labels: settings.labels,
+        implementationAttempts: settings.limits.implementationAttempts,
+        reviewRounds: settings.limits.reviewRounds,
+        verificationFixes: settings.limits.verificationFixes,
+        maxDecompositionDepth: settings.limits.maxDecompositionDepth,
+        verificationCommands: settings.verify,
         notificationsEnabled: options.notifyNeedsAttention ?? false,
         ...optionalProperty(
             "needsAttentionLabel",
             options.needsAttentionLabel?.trim(),
         ),
-        implementationAttempts:
-            options.implementationAttempts ?? DEFAULT_IMPLEMENTATION_ATTEMPTS,
-        verificationCommands: [...(options.verificationCommands ?? [])],
-        maxDecompositionDepth:
-            options.maxDecompositionDepth ?? DEFAULT_MAX_DECOMPOSITION_DEPTH,
     };
 };

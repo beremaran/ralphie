@@ -58,7 +58,7 @@ flowchart TD
    command exits non-zero, give its bounded output and the staged diff to a
    fresh fix session, then restage and retry up to five times.
 5. Ask a separate session for a schema-validated review after verification
-   passes or is skipped (no `--verify-command` configured).
+   passes or is skipped (no `verify` command configured).
 6. If changes are requested, give the review to a fresh fix session and repeat
    staging and review.
 7. Stop after approval or five review attempts. Reverify immediately before
@@ -72,7 +72,7 @@ When implementation produces no changes, a fresh read-only session must prove
 that the current checkout already resolves the issue and return concrete
 evidence. A proven resolution is completed and closed. An unresolved result is
 fed back to a fresh implementation session for up to
-`--implementation-attempts` attempts. Only an exhausted
+`limits.implementationAttempts` attempts. Only an exhausted
 retry budget fails the issue. If the review budget is
 exhausted, Ralphie preserves the patch and review diagnostics, restores the
 clean checkpoint, and sends the issue through decomposition.
@@ -174,7 +174,7 @@ actionable 0–3 children, stable keys, and an acyclic dependency graph. The
 breakdown is persisted before the first GitHub mutation.
 
 Each child receives a stable marker containing root, parent, key, and depth.
-The positive `--max-decomposition-depth` setting (default `3`) bounds recursive
+The positive `limits.maxDecompositionDepth` setting (default `3`) bounds recursive
 splitting and is persisted in run state. If direct complexity routing or review
 exhaustion would exceed it, Ralphie does not attempt another breakdown: it
 leaves the issue open, records `decomposition_limit_reached` needs attention,

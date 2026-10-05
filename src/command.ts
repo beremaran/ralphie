@@ -3,12 +3,21 @@ import { parseArgs } from "node:util";
 import { z } from "zod";
 
 import {
+    type RalphieCliOptions,
     type ResolvedRalphieConfig,
     resolveRalphieConfig,
     type IssueRalphieConfig,
     validateRalphieCliOptions,
 } from "./options.ts";
-import { IssueOrder, IssueSort } from "./github/domain.ts";
+import { parseSetOverride, type SetOverride } from "./config/resolve.ts";
+import type {
+    ConfigSourceService,
+    GitHubLoginService,
+} from "./config/ports.ts";
+import { makeFileConfigSource } from "./config/adapters/file-source.ts";
+import { makeGitHubLoginService } from "./github/adapters/login.ts";
+import { CommandRunnerLive } from "./process/adapters/command-runner.ts";
+import { RalphieError } from "./shared/error.ts";
 import { agentModelSchema, agentModelVariantSchema } from "./agent/model.ts";
 import {
     makeProgressCoordinator,
@@ -30,26 +39,50 @@ import type { RunControl, RunEventLog, RunLayout } from "./run/ports.ts";
 import { makeRunLayout } from "./run/adapters/layout.ts";
 
 const cliOptions = {
-    branch: { type: "string", short: "b" },
+    config: { type: "string" },
+    set: { type: "string", multiple: true },
     "notify-needs-attention": { type: "boolean" },
     "needs-attention-label": { type: "string" },
+    model: { type: "string" },
+    thinking: { type: "string" },
+    output: { type: "string" },
+    help: { type: "boolean", short: "h" },
+    version: { type: "boolean", short: "v" },
+    // Removed flags stay declared only so they can name their replacement.
+    branch: { type: "string", short: "b" },
     "max-decomposition-depth": { type: "string" },
     "issue-label": { type: "string", multiple: true },
     "issue-sort": { type: "string" },
     "verify-command": { type: "string", multiple: true },
-    model: { type: "string" },
-    thinking: { type: "string" },
     "implementation-attempts": { type: "string" },
     workspace: { type: "string" },
-    output: { type: "string" },
-    help: { type: "boolean", short: "h" },
-    version: { type: "boolean", short: "v" },
 } as const;
+
+/** Each removed flag and the configuration key that replaces it. */
+const REMOVED_FLAGS: Readonly<Record<string, string>> = {
+    branch: 'repos."owner/repo".branch',
+    "max-decomposition-depth": "limits.maxDecompositionDepth",
+    "issue-label": "intake.requireLabels",
+    "issue-sort": "intake.sort",
+    "verify-command": 'repos."owner/repo".verify',
+    "implementation-attempts": "limits.implementationAttempts",
+    workspace: "workspace",
+};
 
 type ParsedCli = {
     readonly help: boolean;
     readonly version: boolean;
-    readonly options: Parameters<typeof resolveRalphieConfig>[0];
+    readonly options: RalphieCliOptions;
+};
+
+const rejectRemovedFlags = (values: Record<string, unknown>): void => {
+    for (const [flag, key] of Object.entries(REMOVED_FLAGS)) {
+        if (values[flag] !== undefined) {
+            throw new RalphieError({
+                message: `Option --${flag} was removed. Set ${key} in the configuration file, or pass --set ${key}=<value> for one run.`,
+            });
+        }
+    }
 };
 
 const asString = (
@@ -74,16 +107,6 @@ const asNonEmptyString = (
         : z.string().trim().min(1).parse(value);
 };
 
-const asNumber = (
-    values: Record<string, unknown>,
-    name: string,
-): number | undefined => {
-    const value = asString(values, name);
-    return value === undefined
-        ? undefined
-        : z.coerce.number().int().positive().parse(value);
-};
-
 const asBoolean = (values: Record<string, unknown>, name: string): boolean =>
     values[name] === true;
 
@@ -94,50 +117,13 @@ const parseModel = (values: Record<string, unknown>, name: string) => {
 
 const outputModeSchema = z.enum(["default", "json"]);
 
-const parseIssueSort = (
-    value: string,
-): {
-    readonly issueSort: IssueSort;
-    readonly issueOrder: IssueOrder;
-} => {
-    const parts = value.split(":");
-    if (parts.length > 2) {
-        throw new Error(
-            "Option --issue-sort requires <created|updated|comments> with an optional :asc or :desc.",
-        );
-    }
-    const sort = z.enum(IssueSort).parse(parts[0] ?? "");
-    const order =
-        parts[1] === undefined
-            ? IssueOrder.Ascending
-            : z.enum(IssueOrder).parse(parts[1]);
-    return { issueSort: sort, issueOrder: order };
-};
-
-const parseIssueLabels = (
+const parseOverrides = (
     values: Record<string, unknown>,
-): ReadonlyArray<string> | undefined => {
-    const labels = values["issue-label"];
-    if (labels === undefined) return undefined;
-    if (!Array.isArray(labels) && typeof labels !== "string") {
-        throw new Error("Option --issue-label requires a value.");
-    }
-    return (Array.isArray(labels) ? labels : [labels]).map((label) =>
-        z.string().trim().min(1).parse(label),
-    );
-};
-
-const parseRepeatedStrings = (
-    values: Record<string, unknown>,
-    name: string,
-): ReadonlyArray<string> | undefined => {
-    const raw = values[name];
-    if (raw === undefined) return undefined;
-    if (!Array.isArray(raw) && typeof raw !== "string") {
-        throw new Error(`Option --${name} requires a value.`);
-    }
-    return (Array.isArray(raw) ? raw : [raw]).map((value) =>
-        z.string().trim().min(1).parse(value),
+): ReadonlyArray<SetOverride> => {
+    const raw = values.set;
+    if (raw === undefined) return [];
+    return (Array.isArray(raw) ? raw : [raw]).map((entry) =>
+        parseSetOverride(String(entry)),
     );
 };
 
@@ -153,9 +139,7 @@ const parseNotificationOptions = (values: Record<string, unknown>) => ({
 const parseCliOptions = (
     values: Record<string, unknown>,
     repo: string | undefined,
-): Parameters<typeof resolveRalphieConfig>[0] => {
-    const notificationOptions = parseNotificationOptions(values);
-    const issueSortValue = asNonEmptyString(values, "issue-sort");
+): RalphieCliOptions => {
     const thinkingValue = asNonEmptyString(values, "thinking");
     const rawOutput = asNonEmptyString(values, "output");
     const outputValue =
@@ -163,19 +147,14 @@ const parseCliOptions = (
 
     return {
         repo,
-        branch: asString(values, "branch"),
-        ...notificationOptions,
-        maxDecompositionDepth: asNumber(values, "max-decomposition-depth"),
-        issueLabels: parseIssueLabels(values),
-        verificationCommands: parseRepeatedStrings(values, "verify-command"),
-        ...(issueSortValue === undefined ? {} : parseIssueSort(issueSortValue)),
+        configPath: asNonEmptyString(values, "config"),
+        overrides: parseOverrides(values),
+        ...parseNotificationOptions(values),
         model: parseModel(values, "model"),
         thinking:
             thinkingValue === undefined
                 ? undefined
                 : agentModelVariantSchema.parse(thinkingValue),
-        implementationAttempts: asNumber(values, "implementation-attempts"),
-        workspace: asNonEmptyString(values, "workspace"),
         json: outputValue === "json",
     };
 };
@@ -192,7 +171,15 @@ export const parseCliArgs = (args: ReadonlyArray<string>): ParsedCli => {
         throw new Error(`Unexpected argument: ${parsed.positionals[1]}`);
     }
 
+    if (parsed.positionals[0] === "init") {
+        throw new RalphieError({
+            message:
+                "`ralphie init` is not available yet. To target a repository named init, pass owner/init.",
+        });
+    }
+
     const values = parsed.values as Record<string, unknown>;
+    rejectRemovedFlags(values);
     const options = parseCliOptions(values, parsed.positionals[0]);
     validateRalphieCliOptions(options);
     return {
@@ -232,27 +219,29 @@ const resolveProgressMode = (
     return "plain";
 };
 
-export const HELP_TEXT = `Usage: ralphie <owner/repository> [options]
+export const HELP_TEXT = `Usage: ralphie <[owner/]repository | clone-url> [options]
 
 Turn open GitHub issues into reviewed commits through pi.
 
+All settings live in $XDG_CONFIG_HOME/ralphie/config.yaml (default
+~/.config/ralphie/config.yaml); see docs/configuration.md.
+
 Options:
-  -b, --branch <name>          Base branch to operate on
+      --config <path>          Load this configuration file instead of the default
+      --set <path=value>       Override a configuration key for this run (repeatable),
+                               e.g. --set limits.reviewRounds=3
+                               or   --set 'repos."owner/repo".branch=develop'
       --notify-needs-attention Enable needs-attention GitHub notifications (default disabled)
       --needs-attention-label <name>
                                Add this label to notifications (requires the opt-in flag)
-      --max-decomposition-depth <n>
-                               Maximum recursive decomposition depth (default 3)
-      --issue-label <label>    Include only issues with this label (repeatable)
-      --issue-sort <sort>      created, updated, or comments, optionally :asc or :desc
-      --verify-command <cmd>   Optional deterministic gate (repeatable; skipped when omitted)
       --model <provider/model> Pi model selection (defaults to pi settings)
       --thinking <level>       Thinking level for every session: off, minimal, low, medium, high, xhigh, or max (default medium)
-      --implementation-attempts <n> Empty implementation retries (default 3)
-      --workspace <path>       Workspace directory (removed at start and after success)
       --output <mode>          Output: default (TUI on a terminal, plain when piped) or json
   -h, --help                   Show this help
   -v, --version                Show version (use --output json for build metadata)
+
+A bare repository name gets defaultOwner from the configuration, else the
+authenticated gh user. The repository is never inferred from the current directory.
 
 Environment:
   GH_TOKEN                     GitHub.com token for gh (preferred)
@@ -268,6 +257,8 @@ export type CommandRuntime = IssueWorkflowRuntime & {
 };
 
 export type CommandFactories = {
+    readonly configSource?: ConfigSourceService;
+    readonly githubLogin?: GitHubLoginService;
     readonly makeCoordinator?: (
         options: ProgressCoordinatorOptions,
     ) => ProgressCoordinator;
@@ -306,6 +297,9 @@ const commandOutput = (output?: CommandOutput): CommandOutput =>
 const resolveCommandFactories = (
     factories: CommandFactories = {},
 ): Required<CommandFactories> => ({
+    configSource: factories.configSource ?? makeFileConfigSource(),
+    githubLogin:
+        factories.githubLogin ?? makeGitHubLoginService(CommandRunnerLive),
     makeCoordinator: factories.makeCoordinator ?? makeProgressCoordinator,
     makeAgentRuntime: factories.makeAgentRuntime ?? makePiAgentService,
     makeRuntime: factories.makeRuntime ?? makeLiveRuntime,
@@ -405,7 +399,13 @@ export const runCommand = async (
         return;
     }
 
-    const config = resolveRalphieConfig(parsed.options);
+    const factories = resolveCommandFactories(input.factories);
+    const file = await factories.configSource.load(parsed.options.configPath);
+    const config = await resolveRalphieConfig({
+        options: parsed.options,
+        file,
+        login: factories.githubLogin.currentLogin,
+    });
 
     const terminal = input.terminal ?? terminalInfo();
     const runId = crypto.randomUUID();
@@ -416,7 +416,6 @@ export const runCommand = async (
     let commandError: Error | undefined;
 
     try {
-        const factories = resolveCommandFactories(input.factories);
         coordinator = makeCommandCoordinator(
             config,
             terminal,

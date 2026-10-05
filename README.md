@@ -11,8 +11,9 @@ decomposition. Agents handle reasoning and code changes; Ralphie keeps Git,
 GitHub, run state, diagnostics, and safety checks deterministic.
 
 > [!CAUTION]
-> Ralphie works directly on the branch selected by `--branch`, commits approved
-> work, and pushes directly to that branch. Ralphie is pre-1.0. Validate against
+> Ralphie works directly on the branch selected by `branch` in the
+> [configuration](docs/configuration.md), commits approved work, and pushes
+> directly to that branch. Ralphie is pre-1.0. Validate against
 > a repository you control before enabling mutations.
 
 ## Quick start
@@ -23,7 +24,8 @@ Run the latest release without installing globally:
 bunx @beremaran/ralphie --version
 ```
 
-Run the issue queue:
+Create `~/.config/ralphie/config.yaml` (an empty file is a valid start; see
+[Configuration](./docs/configuration.md)), then run the issue queue:
 
 ```bash
 bunx @beremaran/ralphie owner/repository

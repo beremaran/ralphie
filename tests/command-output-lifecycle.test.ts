@@ -18,6 +18,7 @@ import {
 import type { ProgressCoordinator } from "../src/progress/adapters/coordinator.ts";
 import { makeProgressCoordinator } from "../src/progress/adapters/coordinator.ts";
 import { RalphieExitCode } from "../src/workflow/exit-code.ts";
+import { fakeConfigSource, fakeGitHubLogin } from "./shared/config-source.ts";
 
 const context: AgentEventContext = {
     sessionID: "command-lifecycle-session",
@@ -91,6 +92,8 @@ const runNoninteractiveCase = async (
     const failure = new Error("un-aborted command failure");
 
     const factories: CommandFactories = {
+        configSource: fakeConfigSource({ workspace }),
+        githubLogin: fakeGitHubLogin(),
         makeCoordinator: (options) => {
             const made = makeProgressCoordinator({
                 ...options,
@@ -147,8 +150,6 @@ const runNoninteractiveCase = async (
     };
     const args = [
         "owner/repository",
-        "--workspace",
-        workspace,
         ...(mode === "plain" ? [] : ["--output", mode]),
     ];
     let error: unknown;

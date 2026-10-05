@@ -101,13 +101,32 @@ when no release SHA is supplied.
 
 ## Target-repository verification dependencies
 
-Deterministic verification is opt-in. Provide one or more
-`--verify-command` values to run the target's checks in the checkout through
+Deterministic verification is opt-in. List one or more `verify` commands for
+the repository in the [configuration](configuration.md) to run the target's checks in the checkout through
 `/bin/sh` after changes are staged; when omitted, the gate is skipped and
 review proceeds on the staged diff alone. The tools used by a supplied command
 belong to the target repository's contract, not Ralphie's runtime: a command
 that uses Bun, Node.js, or a project compiler needs those tools present in the
 environment you run Ralphie in.
+
+## Configuration
+
+Ralphie reads every setting from `$XDG_CONFIG_HOME/ralphie/config.yaml`
+(`~/.config/ralphie/config.yaml` when `XDG_CONFIG_HOME` is unset) and refuses to
+run without it, so the first run of a tool that pushes to your branch is
+deliberate. An empty file is valid; add settings as you need them. Every key is
+documented in [Configuration](configuration.md).
+
+```bash
+mkdir -p ~/.config/ralphie
+cat > ~/.config/ralphie/config.yaml <<'YAML'
+defaultOwner: your-login
+repos:
+  your-login/your-repo:
+    verify:
+      - bun run check
+YAML
+```
 
 ## First run
 
@@ -115,6 +134,7 @@ Run against one issue in a repository you control:
 
 ```bash
 bunx @beremaran/ralphie owner/repository
+bunx @beremaran/ralphie your-repo   # owner from defaultOwner, else your gh login
 ```
 
 When running from source, use the source entry point instead:

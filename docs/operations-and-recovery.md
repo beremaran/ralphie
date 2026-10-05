@@ -159,7 +159,7 @@ aggregate partial-failure summary.
 Needs-attention outcomes also continue the queue. A drained run completes with
 status `0`, and the deferred issue remains open. The deterministic
 `decomposition_limit_reached` boundary behaves the same way: raise the
-persisted `--max-decomposition-depth`, narrow the issue, or resolve its review
+persisted `limits.maxDecompositionDepth`, narrow the issue, or resolve its review
 findings manually before a later run. It never closes or marks the capped
 issue complete, so dependent work remains blocked.
 
@@ -251,7 +251,7 @@ before it becomes an issue failure. Ralphie gives the bounded command output and
 staged diff to a fresh verification-fix session, restages its changes, and
 retries up to five times. Only repair exhaustion or a non-repairable
 verification fault (for example a command changing the staged tree) reaches the
-ordinary failure boundary. When no `--verify-command` is configured, the gate
+ordinary failure boundary. When no `verify` command is configured, the gate
 is skipped.
 
 ## Cleanup

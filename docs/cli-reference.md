@@ -1,54 +1,77 @@
 # CLI reference
 
 This page is for operators automating or tuning Ralphie. It is the authoritative
-reference for invocation syntax, option defaults, environment variables, and
-common recipes. Return to the [documentation index](README.md) for suggested
+reference for invocation syntax, repository resolution, command-line options,
+environment variables, and common recipes. Settings are documented in
+[Configuration](configuration.md). Return to the [documentation index](README.md) for suggested
 reading paths.
 
 > [!CAUTION]
-> The default `lgtm` workflow commits and pushes directly to the selected
-> branch. Test against a repository you control, and read the
-> [safety model](safety.md) before using mutation-enabled recipes.
+> Ralphie commits and pushes directly to the configured branch. Test against a
+> repository you control, and read the [safety model](safety.md) before using
+> mutation-enabled recipes.
 
 ## Invocation
 
 ```text
-bunx @beremaran/ralphie <repository> [options]
+bunx @beremaran/ralphie <[owner/]repository | clone-url> [options]
 ```
 
-`<repository>` is required and accepts an `owner/name` slug or a GitHub
-HTTPS/SSH clone URL. Extra positional arguments are rejected. When running from a source checkout, replace the package
-runner with `bun run index.ts`.
+When running from a source checkout, replace the package runner with
+`bun run index.ts`. Run `bunx @beremaran/ralphie --help` for the help generated
+from the current command schema.
 
-Run `bunx @beremaran/ralphie --help` for the help generated from the current
-command schema.
+Every setting lives in the [configuration file](configuration.md); the command
+line only selects the repository and a few per-run controls. Ralphie fails with
+a message naming the expected path when no configuration file exists.
+
+### Repository resolution
+
+- `owner/repo` and GitHub HTTPS/SSH clone URLs are used as given.
+- A bare `repo` gets the owner from `defaultOwner` in the configuration, and
+  otherwise from the authenticated `gh` user.
+- Ralphie never infers the repository from the current directory.
+
+Extra positional arguments are rejected. The bare word `init` is reserved; use
+`owner/init` to target a repository with that name.
 
 ## Options
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `--notify-needs-attention` | off | Opt in to publishing needs-attention outcomes as an idempotent GitHub comment and optional label. Notifications are never enabled implicitly. |
-| `--needs-attention-label <name>` | none | Add a trimmed, non-empty label to needs-attention notifications; requires `--notify-needs-attention`. |
-| `-b, --branch <name>` | `main`, otherwise `master` | Base branch pushed directly after verified delivery. |
-| `--max-decomposition-depth <count>` | `3` | Positive maximum generated-child lineage depth. Reaching the ceiling leaves the issue open, records needs attention, and continues independent work. |
-| `--issue-label <label>` | none | Require a label; repeat the flag to require multiple labels. |
-| `--issue-sort <sort>` | `created` | Sort by `created`, `updated`, or `comments`, optionally `:asc` or `:desc`. |
-| `--model <provider/model>` | pi settings default | Override the pi model selection. |
-| `--thinking <level>` | `medium` | Thinking level for every session (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`); omit or pass `default` for `medium`. |
-| `--implementation-attempts <count>` | `3` | Positive number of implementation attempts allowed when sessions leave an unresolved empty diff. |
-| `--verify-command <command>` | none | Run this deterministic gate after changes are staged; repeat to run multiple commands in order. When omitted, the gate is skipped. Each command runs under a 30-minute deadline. |
-| `--workspace <path>` | `~/.ralphie` | Root directory for repository checkouts and run artifacts. The workspace is removed before preparation and after a successful run. |
+| `--config <path>` | `$XDG_CONFIG_HOME/ralphie/config.yaml` | Load this configuration file instead of the default. |
+| `--set <path=value>` | none | Override one configuration key for this run, using the file's dotted paths; repeatable. See [Configuration](configuration.md#overriding-for-one-run-with---set). |
 | `--output <mode>` | `default` | Output mode: `default` renders the full-screen TUI on a terminal and plain append-only lines when piped or in CI; `json` writes JSON Lines on stdout. |
+| `-h, --help` | | Show help. |
+| `-v, --version` | | Show the version (use `--output json` for build metadata). |
 
-The short aliases are `-b` for `--branch`, `-h` for `--help`, and `-v` for
-`--version`. `--issue-label` and `--verify-command` are repeatable. There is no
-configuration file: the repository and every setting are supplied explicitly
-as an option or environment variable.
+Temporary options remain until the harness and hand-off work replaces them with
+configuration keys:
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--notify-needs-attention` | off | Opt in to publishing needs-attention outcomes as an idempotent GitHub comment and optional label. |
+| `--needs-attention-label <name>` | none | Add a trimmed, non-empty label to needs-attention notifications; requires `--notify-needs-attention`. |
+| `--model <provider/model>` | pi settings default | Override the pi model selection. |
+| `--thinking <level>` | `medium` | Thinking level for every session (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`). |
+
+### Removed options
+
+Each removed flag fails with an error naming its replacement:
+
+| Removed flag | Configuration key |
+| --- | --- |
+| `-b`, `--branch` | `repos."owner/repo".branch` |
+| `--issue-label` | `intake.requireLabels` |
+| `--issue-sort` | `intake.sort` |
+| `--verify-command` | `repos."owner/repo".verify` |
+| `--implementation-attempts` | `limits.implementationAttempts` |
+| `--max-decomposition-depth` | `limits.maxDecompositionDepth` |
+| `--workspace` | `workspace` |
 
 Every run processes the entire matching open-issue queue. With the default
 `created:asc` sort, issues are processed oldest-first; all issue work is
-sequential. When no branch is configured, Ralphie uses `main` when it exists
-and otherwise `master`.
+sequential.
 
 ## Environment variables
 
@@ -71,49 +94,25 @@ container setup.
 
 ## Common recipes
 
-### Configure a run with CLI flags
+Run the issue queue for a repository you own:
 
 ```bash
-bunx @beremaran/ralphie owner/repository \
-  --branch main \
-  --issue-label bug
+bunx @beremaran/ralphie your-repository
 ```
 
-Process bugs from oldest to newest on a non-default branch:
+Process only bugs, newest-updated first, for one run:
 
 ```bash
 bunx @beremaran/ralphie owner/repository \
-  --branch develop \
-  --issue-label bug \
-  --issue-sort created:asc
-```
-
-Require multiple labels and let pi choose its configured default model:
-
-```bash
-bunx @beremaran/ralphie owner/repository \
-  --issue-label bug \
-  --issue-label backend
+  --set 'intake.requireLabels=["bug"]' \
+  --set intake.sort=updated:desc
 ```
 
 Select a pi model and thinking level explicitly:
 
 ```bash
-bunx @beremaran/ralphie owner/repository \
-  --model openai/gpt-5 \
-  --thinking high
+bunx @beremaran/ralphie owner/repository --model openai/gpt-5 --thinking high
 ```
-
-Override the deterministic project gate when needed:
-
-```bash
-bunx @beremaran/ralphie owner/repository \
-  --thinking high \
-  --verify-command "bun run check"
-```
-
-`--verify-command` is repeatable. Without it, the deterministic gate is
-skipped and review proceeds on the staged diff alone.
 
 Write machine-readable progress to stdout:
 
@@ -124,8 +123,7 @@ bunx @beremaran/ralphie owner/repository --output json > ralphie.jsonl
 Run from a dedicated disposable workspace:
 
 ```bash
-bunx @beremaran/ralphie owner/repository \
-  --workspace /tmp/ralphie
+bunx @beremaran/ralphie owner/repository --set workspace=/tmp/ralphie
 ```
 
 > [!WARNING]
@@ -133,19 +131,10 @@ bunx @beremaran/ralphie owner/repository \
 > after a successful run, subject to protected-path checks. Use a path dedicated
 > to Ralphie.
 
-### Run the issue queue
-
-```bash
-bunx @beremaran/ralphie owner/repository
-```
-
 The workflow commits and pushes directly to the selected branch. It is not a
 wait-for-human-review mode: approved work is committed, the remote head is
 revalidated, and the commit is pushed without force before the source issue is
-closed.
-
-Read [Workflows](workflows.md) and [Safety](safety.md) before running these
-mutation-enabled examples.
+closed. Read [Workflows](workflows.md) and [Safety](safety.md) first.
 
 ## Version and help
 

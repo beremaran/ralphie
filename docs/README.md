@@ -13,7 +13,8 @@ buried in a landing page.
    authentication, verification, and a safe first run.
 2. [Safety](safety.md) — understand what a mutation-enabled run can change.
 3. [Workflows](workflows.md) — see how issues are routed and delivered.
-4. [CLI reference](cli-reference.md) — choose options and adapt the recipes.
+4. [Configuration](configuration.md) and [CLI reference](cli-reference.md) —
+   choose settings and adapt the recipes.
 
 ### Operator
 
@@ -51,7 +52,8 @@ buried in a landing page.
 | [Getting started](getting-started.md) | Install Ralphie, configure credentials, verify it, and run the first run. |
 | [Workflows](workflows.md) | Explain issue routing, implementation, decomposition, and direct-push delivery. |
 | [Safety](safety.md) | Define deterministic Git/GitHub safety checks and destructive workspace behavior. |
-| [CLI reference](cli-reference.md) | Record the command syntax, options, defaults, environment variables, and recipes. |
+| [Configuration](configuration.md) | Authoritative reference for every key in `config.yaml`, precedence, and `--set`. |
+| [CLI reference](cli-reference.md) | Record the command syntax, repository resolution, options, environment variables, and recipes. |
 | [Operations and recovery](operations-and-recovery.md) | Document progress, artifacts, state, cancellation, failure, and cleanup. |
 | [Architecture](architecture.md) | Map runtime, orchestrator, domain services, and source locations. |
 | [Development](development.md) | Explain local development, test commands, optional registry checks, and contribution rules. |

@@ -1,20 +1,35 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { runCli } from "../src/cli.ts";
 import { HELP_TEXT, parseCliArgs, runCommand } from "../src/command.ts";
 import { RalphieExitCode } from "../src/workflow/exit-code.ts";
 import { RalphieError } from "../src/shared/error.ts";
-import { IssueOrder, IssueSort } from "../src/github/domain.ts";
 import { makeTestProgressRecorder } from "./shared/progress-recorder.ts";
+import { fakeConfigSource, fakeGitHubLogin } from "./shared/config-source.ts";
 
 describe("native CLI parser", () => {
-    test("documents the issue workflow in help", () => {
-        expect(HELP_TEXT).toContain("--thinking <level>");
-        expect(HELP_TEXT).toContain("--implementation-attempts <n>");
-        expect(HELP_TEXT).toContain("--max-decomposition-depth <n>");
-        expect(HELP_TEXT).toContain("--notify-needs-attention");
-        expect(HELP_TEXT).toContain("--needs-attention-label <name>");
+    test("documents the config-driven command surface in help", () => {
+        for (const documented of [
+            "--config <path>",
+            "--set <path=value>",
+            "--output <mode>",
+            "--thinking <level>",
+            "--notify-needs-attention",
+            "--needs-attention-label <name>",
+        ]) {
+            expect(HELP_TEXT).toContain(documented);
+        }
         for (const removed of [
+            "--branch",
+            "--issue-label",
+            "--issue-sort",
+            "--verify-command",
+            "--workspace",
+            "--implementation-attempts",
+            "--max-decomposition-depth",
             "maintain-issues",
             "get-pipelines-green",
             "--max-issues",
@@ -27,20 +42,65 @@ describe("native CLI parser", () => {
         }
     });
 
-    test("parses positional repository, repeatable labels, flags, and values", () => {
+    test("parses the positional repository, --config and repeatable --set", () => {
         const parsed = parseCliArgs([
             "owner/repository",
-            "--issue-label",
-            "bug",
-            "--issue-label=ready",
+            "--config",
+            "/tmp/ralphie.yaml",
+            "--set",
+            "limits.reviewRounds=3",
+            '--set=intake.requireLabels=["bug","ready"]',
         ]);
 
         expect(parsed.help).toBe(false);
         expect(parsed.version).toBe(false);
         expect(parsed.options).toMatchObject({
             repo: "owner/repository",
-            issueLabels: ["bug", "ready"],
+            configPath: "/tmp/ralphie.yaml",
+            overrides: [
+                { path: ["limits", "reviewRounds"], value: 3 },
+                {
+                    path: ["intake", "requireLabels"],
+                    value: ["bug", "ready"],
+                },
+            ],
         });
+    });
+
+    test("names the replacing config key for every removed flag", () => {
+        const removed: ReadonlyArray<[ReadonlyArray<string>, string]> = [
+            [["--branch", "main"], 'repos."owner/repo".branch'],
+            [["-b", "main"], 'repos."owner/repo".branch'],
+            [
+                ["--max-decomposition-depth", "4"],
+                "limits.maxDecompositionDepth",
+            ],
+            [["--issue-label", "bug"], "intake.requireLabels"],
+            [["--issue-sort", "created"], "intake.sort"],
+            [["--verify-command", "bun test"], 'repos."owner/repo".verify'],
+            [
+                ["--implementation-attempts", "2"],
+                "limits.implementationAttempts",
+            ],
+            [["--workspace", "/tmp/w"], "workspace"],
+        ];
+        for (const [flag, key] of removed) {
+            expect(() => parseCliArgs(["owner/repository", ...flag])).toThrow(
+                key,
+            );
+        }
+    });
+
+    test("rejects malformed --set values", () => {
+        for (const bad of ["limits.reviewRounds", "=3", "a..b=1"]) {
+            expect(() =>
+                parseCliArgs(["owner/repository", "--set", bad]),
+            ).toThrow("--set");
+        }
+    });
+
+    test("reserves the bare init argument", () => {
+        expect(() => parseCliArgs(["init"])).toThrow("ralphie init");
     });
 
     test("rejects the removed halt policy flags", () => {
@@ -52,37 +112,11 @@ describe("native CLI parser", () => {
         }
     });
 
-    test("parses the single thinking level and implementation controls", () => {
-        const options = parseCliArgs([
-            "owner/repository",
-            "--thinking",
-            "high",
-            "--implementation-attempts",
-            "4",
-        ]).options;
-        expect(options.thinking).toBe("high");
-        expect(options.implementationAttempts).toBe(4);
-        expect(() =>
-            parseCliArgs([
-                "owner/repository",
-                "--implementation-attempts",
-                "0",
-            ]),
-        ).toThrow();
-    });
-
-    test("parses and validates the maximum decomposition depth", () => {
+    test("parses the temporary thinking level", () => {
         expect(
-            parseCliArgs(["owner/repository", "--max-decomposition-depth", "6"])
-                .options.maxDecompositionDepth,
-        ).toBe(6);
-        expect(() =>
-            parseCliArgs([
-                "owner/repository",
-                "--max-decomposition-depth",
-                "0",
-            ]),
-        ).toThrow();
+            parseCliArgs(["owner/repository", "--thinking", "high"]).options
+                .thinking,
+        ).toBe("high");
     });
 
     test("parses the opt-in notification flag and trims its label", () => {
@@ -120,6 +154,8 @@ describe("native CLI parser", () => {
             ],
             {
                 factories: {
+                    configSource: fakeConfigSource(),
+                    githubLogin: fakeGitHubLogin(),
                     makeCoordinator: () => ({
                         progress: makeTestProgressRecorder([]),
                         piListener: () => {},
@@ -154,6 +190,8 @@ describe("native CLI parser", () => {
             });
             const error = await runCommand(["owner/repository"], {
                 factories: {
+                    configSource: fakeConfigSource(),
+                    githubLogin: fakeGitHubLogin(),
                     makeCoordinator: () => ({
                         progress: makeTestProgressRecorder([]),
                         piListener: () => {},
@@ -193,7 +231,15 @@ describe("native CLI parser", () => {
                 return true;
             }) as typeof process.stderr.write;
             process.exitCode = 0;
-            await runCli(["not-a-slug Bearer private-value"]);
+            const dir = await mkdtemp(join(tmpdir(), "ralphie-cli-"));
+            const config = join(dir, "config.yaml");
+            await writeFile(config, "{}\n");
+            await runCli([
+                "not-a-slug Bearer private-value",
+                "--config",
+                config,
+            ]);
+            await rm(dir, { recursive: true, force: true });
             const output = written.join("");
             expect(output).toContain("Bearer private-value");
             expect(process.exitCode).toBe(RalphieExitCode.Failure);
@@ -219,35 +265,6 @@ describe("native CLI parser", () => {
         }
     });
 
-    test("parses compound issue sort and validates enums", () => {
-        expect(
-            parseCliArgs(["owner/repository", "--issue-sort", "updated:desc"])
-                .options,
-        ).toMatchObject({
-            issueSort: IssueSort.Updated,
-            issueOrder: IssueOrder.Descending,
-        });
-        expect(
-            parseCliArgs(["owner/repository", "--issue-sort", "created"])
-                .options,
-        ).toMatchObject({
-            issueSort: IssueSort.Created,
-            issueOrder: IssueOrder.Ascending,
-        });
-        expect(() =>
-            parseCliArgs(["owner/repository", "--issue-sort", "invalid"]),
-        ).toThrow();
-        expect(() =>
-            parseCliArgs([
-                "owner/repository",
-                "--issue-sort",
-                "created:sideways",
-            ]),
-        ).toThrow();
-        expect(String(IssueSort.Created)).toBe("created");
-        expect(String(IssueOrder.Ascending)).toBe("asc");
-    });
-
     test("parses every supported output mode", () => {
         expect(parseCliArgs(["owner/repository"]).options).toMatchObject({
             json: false,
@@ -263,5 +280,92 @@ describe("native CLI parser", () => {
                 parseCliArgs(["owner/repository", "--output", removed]),
             ).toThrow();
         }
+    });
+
+    test("resolves a run from the config file, repos entry and --set", async () => {
+        let workflowOptions: Record<string, unknown> | undefined;
+        const configSource = fakeConfigSource({
+            defaultOwner: "acme",
+            intake: { requireLabels: ["bug"], sort: "updated:desc" },
+            repos: {
+                "acme/widgets": {
+                    branch: "develop",
+                    verify: ["bun run check"],
+                    limits: { implementationAttempts: 2 },
+                },
+            },
+        });
+        await runCommand(
+            [
+                "widgets",
+                "--config",
+                "/etc/ralphie.yaml",
+                "--set",
+                "limits.implementationAttempts=4",
+            ],
+            {
+                factories: {
+                    configSource,
+                    githubLogin: fakeGitHubLogin("someone-else"),
+                    makeCoordinator: () => ({
+                        progress: makeTestProgressRecorder([]),
+                        piListener: () => {},
+                        ready: Promise.resolve(),
+                        dispose: async () => {},
+                    }),
+                    makeAgentRuntime: () => ({
+                        start: async () => undefined as never,
+                    }),
+                    makeRuntime: () => ({}) as never,
+                    runWorkflow: async (options) => {
+                        workflowOptions = options as Record<string, unknown>;
+                        return undefined as never;
+                    },
+                },
+            },
+        );
+
+        expect(configSource.requested).toEqual(["/etc/ralphie.yaml"]);
+        expect(workflowOptions).toMatchObject({
+            repo: "acme/widgets",
+            branch: "develop",
+            verificationCommands: ["bun run check"],
+            implementationAttempts: 4,
+            issueFilters: { labels: ["bug"], sort: "updated", order: "desc" },
+        });
+    });
+
+    test("fails before running when the config is invalid", async () => {
+        let ran = false;
+        const error = await runCommand(["owner/repository"], {
+            factories: {
+                configSource: fakeConfigSource({ limits: { reviewRoundz: 2 } }),
+                githubLogin: fakeGitHubLogin(),
+                runWorkflow: async () => {
+                    ran = true;
+                    return undefined as never;
+                },
+            },
+        }).then(
+            () => undefined,
+            (caught: unknown) => caught as Error,
+        );
+        process.exitCode = 0;
+        expect(error?.message).toContain("limits.reviewRoundz: unknown key");
+        expect(ran).toBe(false);
+    });
+
+    test("prints help and version without reading any configuration", async () => {
+        const configSource = fakeConfigSource();
+        const written: string[] = [];
+        const output = {
+            stdout: (text: string) => void written.push(text),
+            stderr: () => {},
+        };
+        const factories = { configSource, githubLogin: fakeGitHubLogin() };
+        await runCommand(["--help"], { factories, output });
+        await runCommand(["--version"], { factories, output });
+        expect(configSource.requested).toEqual([]);
+        expect(written.join("")).toContain("Usage: ralphie");
     });
 });

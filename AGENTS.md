@@ -20,7 +20,7 @@ bun run start -- owner/repo        # run from source
 
 CI runs `format:check`, `lint`, `typecheck`, `test`, and `build`, but not `source:audit`. That audit only runs in `bun run check`, so run it locally.
 
-Never point the mutating CLI at a repository you don't control. It commits and pushes directly to `--branch`, and it recursively deletes the selected workspace before and after a successful run.
+Never point the mutating CLI at a repository you don't control. It commits and pushes directly to the configured `branch`, and it recursively deletes the selected workspace before and after a successful run.
 
 ## Architecture
 
@@ -50,7 +50,7 @@ Run state and recovery artifacts live under the workspace's `.ralphie/` director
 
 ## Documentation ownership
 
-Each fact belongs on one page under `docs/`. Don't add contracts to the root README. The pages are: CLI options (`cli-reference.md`), routing and delivery (`workflows.md`), mutation boundaries (`safety.md`), output, state, and recovery (`operations-and-recovery.md`), components (`architecture.md`), and publishing (`development.md`). Update `CHANGELOG.md` when the command surface or the recovery contract changes.
+Each fact belongs on one page under `docs/`. Don't add contracts to the root README. The pages are: configuration keys (`configuration.md`), CLI options (`cli-reference.md`), routing and delivery (`workflows.md`), mutation boundaries (`safety.md`), output, state, and recovery (`operations-and-recovery.md`), components (`architecture.md`), and publishing (`development.md`). Update `CHANGELOG.md` when the command surface or the recovery contract changes.
 
 Releases: bump `package.json` `version` and `CHANGELOG.md`, then push a `v<x.y.z>` tag. The publish workflow handles the rest.
 
