@@ -69,6 +69,11 @@ import { makeCodexAdapter } from "./harness/adapters/codex.ts";
 import { makeTemporarySchemaFileWriter } from "./harness/adapters/schema-file.ts";
 import { makePiCliAdapter } from "./harness/adapters/pi-cli.ts";
 import { makeHarnessService } from "./harness/app/harness-service.ts";
+import { nodeSkillFileSystem } from "./harness/adapters/skill-file-system.ts";
+import {
+    makeSessionPreparation,
+    type TriageLabels,
+} from "./harness/app/skill-injection.ts";
 import {
     type HarnessService,
     type SessionEventListener,
@@ -125,12 +130,20 @@ export type RalphieRuntime = {
     readonly workspace: WorkspaceService;
 };
 
+export type SkillInjectionSettings = {
+    /** Directory whose subdirectories are the skills to inject. */
+    readonly directory: string;
+    readonly labels: TriageLabels;
+};
+
 export type RuntimeOverrides = {
     readonly progress: ProgressReporterService;
     readonly runEventLog: RunEventLog;
     readonly layout: RunLayout;
     /** Receives the events of harness sessions; defaults to discarding them. */
     readonly sessionListener?: SessionEventListener;
+    /** Skills and label vocabulary injected into every session; omitted means none. */
+    readonly skills?: SkillInjectionSettings;
     readonly clock?: Clock;
     readonly ids?: IdGenerator;
     /** Optional deterministic seam for the issue artifact store. */
@@ -145,6 +158,7 @@ export const makeLiveRuntime = ({
     runEventLog,
     layout,
     sessionListener = () => {},
+    skills,
     clock = systemClock,
     ids = makeIdGenerator(),
     commandRunner = CommandRunnerLive,
@@ -178,6 +192,15 @@ export const makeLiveRuntime = ({
         },
         listener: sessionListener,
         ids,
+        ...(skills === undefined
+            ? {}
+            : {
+                  preparation: makeSessionPreparation({
+                      fileSystem: nodeSkillFileSystem,
+                      skillsDirectory: skills.directory,
+                      labels: skills.labels,
+                  }),
+              }),
     });
     const gitRepository = makeGitRepositoryService(commandRunner);
     const gitRepositoryInvariant =

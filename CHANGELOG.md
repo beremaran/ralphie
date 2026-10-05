@@ -5,6 +5,14 @@ All notable changes to Ralphie are documented here. The project follows
 
 ## [Unreleased]
 
+### Added
+
+- Sessions now see the bundled skills (or `skills.dir`) in the harness's project
+  skills directory, with Ralphie's copy winning over a same-named repository
+  skill. Injected files are excluded from Git and removed after the session, and
+  `docs/agents` tracker and label docs are generated only when the repository
+  lacks them.
+
 ### Changed
 
 - Every agent session now runs through a headless harness CLI (Claude Code, as
