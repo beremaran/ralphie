@@ -29,9 +29,9 @@ describe("run configuration", () => {
         expect(config).toMatchObject({
             repo: "acme/api",
             configPath,
-            agent: "build",
             json: false,
         });
+        expect(config.roles.implementer).toEqual({ harness: "claude" });
         expect(config.settings.labels).toEqual({
             "needs-triage": "needs-triage",
             "needs-info": "needs-info",

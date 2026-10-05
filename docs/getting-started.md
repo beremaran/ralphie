@@ -18,25 +18,20 @@ Ralphie is distributed as a single npm package. Running it needs:
 - [Git](https://git-scm.com/) and the
   [GitHub CLI](https://cli.github.com/) (`gh`);
 - a POSIX shell;
-- model credentials for [pi](https://pi.dev/docs/latest).
+- the [Claude Code](https://code.claude.com/docs) command-line program
+  (`claude`), signed in.
 
-The pi agent runtime runs in-process; there is no server to start. Credentials
-resolve through the same `~/.pi/agent/auth.json` that the `pi` CLI uses
-(override the directory with `PI_CODING_AGENT_DIR`). If you already signed in
-with `pi /login`, Ralphie reuses that credential. Otherwise export a provider
-API key such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY`; a
-stored pi credential takes priority over the environment.
+Agent sessions run through that program, headless, in the repository
+checkout. It brings its own login, so Ralphie asks for no model credentials
+and stores none. Pick a model and effort with the `harnesses` and `roles`
+keys in the [configuration file](configuration.md#harnesses-and-roles);
+without them Claude Code uses its own defaults.
 
-Without `--model`, Ralphie uses the default model saved in pi's
-`~/.pi/agent/settings.json` (`defaultProvider` plus `defaultModel`). Select one
-explicitly with `--model provider/model`; the pi provider catalog is built in
-and available offline.
-
-Ralphie constrains every agent session to the repository checkout. Built-in
-`read`/`write`/`edit` tools are rooted at the checkout, `bash` commands that
-mutate delivery state (`git commit/push/branch/checkout/switch/worktree/reset/clean`
-and `gh *`) are denied before execution, and post-task verification fails the
-task when the checkout was mutated anyway.
+Ralphie constrains every agent session to the repository checkout. Sessions
+run in the harness's own permission mode (read-only roles may only read the
+checkout), and post-task verification fails the task when the checkout's branch
+or head moved anyway. Sessions never commit, push, or mutate GitHub; Ralphie's
+deterministic services do.
 
 For interactive GitHub authentication, run `gh auth login` and verify the
 selected account with `gh auth status`. For unattended runs, set `GH_TOKEN`
@@ -125,7 +120,7 @@ bun run index.ts owner/repository
 ```
 
 This performs authentication and Git preflight, prepares a clean checkout,
-discovers issues, and asks pi to ground, implement, verify, and commit the
+discovers issues, and asks the configured harness to ground, implement, verify, and commit the
 work. Successful delivery pushes directly to the selected branch and closes the
 issue. See [Workflows](workflows.md) for what the selected route means and
 [Operations and recovery](operations-and-recovery.md)

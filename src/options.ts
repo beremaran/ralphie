@@ -1,5 +1,8 @@
 import { parseRepositoryArgument } from "./github/repository.ts";
-import { DEFAULT_AGENT, type AgentModel } from "./agent/model.ts";
+import {
+    resolveRoleAssignments,
+    type RoleAssignments,
+} from "./harness/app/roles.ts";
 import { loadSettings, type LoadSettingsInput } from "./config/load.ts";
 import type { RepositorySettings } from "./config/settings.ts";
 import { RalphieError } from "./shared/error.ts";
@@ -9,10 +12,6 @@ export type RalphieCliOptions = {
     readonly repo?: string;
     readonly configPath?: string;
     readonly overrides?: ReadonlyArray<string>;
-    /** Temporary until the harness switch-over replaces it with config. */
-    readonly model?: AgentModel;
-    /** Temporary until the harness switch-over replaces it with config. */
-    readonly thinking?: string;
     readonly json?: boolean;
 };
 
@@ -28,9 +27,8 @@ export type ResolvedRalphieConfig = {
     readonly configPath: string;
     /** Effective settings for `repo`, with every default applied. */
     readonly settings: RepositorySettings;
-    readonly model?: AgentModel;
-    readonly thinking?: string;
-    readonly agent: string;
+    /** The harness, model and effort of every role. */
+    readonly roles: RoleAssignments;
     readonly json: boolean;
 };
 
@@ -57,11 +55,7 @@ export const resolveRalphieConfig = async (
         repo: loaded.repository,
         configPath: loaded.configPath,
         settings: loaded.settings,
-        ...(options.model === undefined ? {} : { model: options.model }),
-        ...(options.thinking === undefined
-            ? {}
-            : { thinking: options.thinking }),
-        agent: DEFAULT_AGENT,
+        roles: resolveRoleAssignments(loaded.settings),
         json: options.json ?? false,
     };
 };

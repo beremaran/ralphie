@@ -193,11 +193,11 @@ const needsAttentionGuidance = `
 NEEDS-ATTENTION REQUEST CHANNEL:
 When a repository-backed blocker prevents safe progress (outdated_premise,
 conflicting_requirements, missing_information, external_dependency, or
-cannot_reproduce), call the \`request_needs_attention\` tool with the reason
-and a concise explanation. This is a request to the caller, not the final
-implementation or review decision. Do not use it for work that is merely
-hard, large, slow, or uncertain. For structured tasks, still call the
-required submission tool with the final result when the task is done.`;
+cannot_reproduce), set the optional \`needsAttention\` field of your final
+result to the reason and a concise explanation. This is a request to the
+caller, not the final implementation or review decision. Do not use it for
+work that is merely hard, large, slow, or uncertain. Always still fill in
+\`result\` with the final result when the task is done.`;
 
 export const buildGroundingPrompt = ({
     issue,
@@ -398,7 +398,6 @@ for the caller to stage and review again.
 You may edit files in the checkout, but you must not create commits, push,
 switch branches, create worktrees, or modify GitHub issues. Do not discard
 unrelated existing work.
-${needsAttentionGuidance}
 
 ${checkoutContext({ repositoryPath, targetBranch })}
 ${issueBlock(issue)}
@@ -431,7 +430,6 @@ caller to stage and verify again.
 You may edit files in the checkout, but you must not create commits, push,
 switch branches, create worktrees, or modify GitHub issues. Do not discard
 unrelated existing work.
-${needsAttentionGuidance}
 
 ${checkoutContext({ repositoryPath, targetBranch })}
 ${issueBlock(issue)}

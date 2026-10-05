@@ -5,15 +5,8 @@ import { makeLiveRuntime } from "../src/runtime.ts";
 import { testLayout } from "./shared/test-values.ts";
 
 describe("runtime factory", () => {
-    test("assembles the issue-mode services without starting the agent", () => {
+    test("assembles the issue-mode services without starting a session", () => {
         const runtime = makeLiveRuntime({
-            agentRuntime: {
-                start: async () => {
-                    throw new Error(
-                        "The agent must not start while assembling runtime",
-                    );
-                },
-            },
             progress: makeTestProgressRecorder([]),
             runEventLog: { append: () => {}, close: () => {} },
             layout: testLayout(),
@@ -38,7 +31,6 @@ describe("runtime factory", () => {
     test("composes the Claude Code harness over the process port", async () => {
         const spawned: string[] = [];
         const runtime = makeLiveRuntime({
-            agentRuntime: { start: async () => ({}) as never },
             progress: makeTestProgressRecorder([]),
             runEventLog: { append: () => {}, close: () => {} },
             layout: testLayout(),

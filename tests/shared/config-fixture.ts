@@ -48,9 +48,6 @@ export const recordingFactories = (
         ready: Promise.resolve(),
         dispose: async () => {},
     }),
-    makeAgentRuntime: () => ({
-        start: async () => undefined as never,
-    }),
     makeRuntime: () => ({}) as never,
     runWorkflow: async (options) => {
         record(options);

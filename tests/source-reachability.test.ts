@@ -58,15 +58,9 @@ describe("source reachability audit", () => {
 
         const command = moduleFor(report, "src/command.ts");
         expect(command.imports).toContainEqual({
-            to: "src/pi/ports.ts",
+            to: "src/harness/ports.ts",
             kind: "type",
-            names: ["PiAgentConfig"],
-            reexport: false,
-        });
-        expect(command.imports).toContainEqual({
-            to: "src/agent/model.ts",
-            kind: "value",
-            names: ["agentModelSchema", "agentModelVariantSchema"],
+            names: ["SessionEventListener"],
             reexport: false,
         });
         expect(

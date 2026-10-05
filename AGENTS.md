@@ -1,6 +1,6 @@
 # Ralphie
 
-Ralphie is a Bun + TypeScript CLI (published to npm as `@beremaran/ralphie`) that reads open GitHub issues, asks the in-process pi agent SDK for schema-validated decisions, and routes each issue to implementation (complexity 0–3) or decomposition into child issues (4–5). Agents do reasoning and edits; Ralphie's deterministic services own Git, GitHub, run state, and safety checks.
+Ralphie is a Bun + TypeScript CLI (published to npm as `@beremaran/ralphie`) that reads open GitHub issues, asks a headless harness CLI (Claude Code first) for schema-validated decisions, and routes each issue to implementation (complexity 0–3) or decomposition into child issues (4–5). Agents do reasoning and edits; Ralphie's deterministic services own Git, GitHub, run state, and safety checks.
 
 ## Commands
 
@@ -26,7 +26,7 @@ Never point the mutating CLI at a repository you don't control. It commits and p
 
 Flow: `index.ts` → `src/cli.ts` / `src/command.ts` / `src/options.ts` (inbound adapter, terminal decision, top-level error boundary) → `src/runtime.ts` (composition root) → `src/workflow/workflow.ts` (orchestration via the `IssueWorkflow` port in `workflow/ports.ts`).
 
-`src/` is split into bounded contexts (`agent`, `pi`, `github`, `git`, `issues`, `progress`, `run`, `process`, `workspace`, `workflow`) plus `shared/`. Each context has a `ports.ts` contract and an `adapters/` folder. The `issues` context also has `domain/` and `app/`; the routing, implementation, decomposition, verification, artifacts, and recovery logic is in `issues/app/`.
+`src/` is split into bounded contexts (`agent`, `config`, `harness`, `github`, `git`, `issues`, `progress`, `run`, `process`, `workspace`, `workflow`) plus `shared/`. Each context has a `ports.ts` contract and an `adapters/` folder. The `issues` context also has `domain/` and `app/`; the routing, implementation, decomposition, verification, artifacts, and recovery logic is in `issues/app/`.
 
 `tests/architecture.test.ts` enforces these rules, so violations fail the suite:
 
@@ -39,9 +39,9 @@ Agents never commit, push, or mutate issues. Those side effects belong to `src/g
 
 Agent output is structured: results come back as schema-validated tool calls (zod), not prose. Prose or premature termination does not count as completion.
 
-The progress UI (`src/progress/adapters/`) has an OpenTUI interactive adapter (`tui.ts`, with an issue sidebar, transcripts, pause/stop controls, and a model picker) plus plain and JSON Lines adapters behind `progress/ports.ts`.
+The progress UI (`src/progress/adapters/`) has an OpenTUI interactive adapter (`tui.ts`, with an issue sidebar, transcripts, pause/stop controls) plus plain and JSON Lines adapters behind `progress/ports.ts`.
 
-Run state and recovery artifacts live under the workspace's `.ralphie/` directory. Agent config and credentials are never stored there; they come from `~/.pi/agent/auth.json` (override with `PI_CODING_AGENT_DIR`) and provider environment variables.
+Run state and recovery artifacts live under the workspace's `.ralphie/` directory. Agent config and credentials are never stored there; each harness CLI keeps its own login and credentials, and the `harnesses`/`roles` config keys choose the harness, model and effort per role.
 
 ## Testing conventions
 

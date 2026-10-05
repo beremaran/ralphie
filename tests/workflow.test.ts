@@ -1,6 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import type { AgentClient } from "../src/agent/ports.ts";
-import { type PiModelInfo } from "../src/agent/pi-models.ts";
 
 import { type GitRepositoryService } from "../src/git/ports.ts";
 import { type GitRepositoryInvariantService } from "../src/git/ports.ts";
@@ -26,20 +24,16 @@ import {
     type IssueArtifactStoreService,
     makeIssueArtifactStore,
 } from "../src/issues/app/artifacts.ts";
-import { DEFAULT_AGENT } from "../src/agent/model.ts";
-import type { AgentModel, AgentSelection } from "../src/agent/model.ts";
-import { type PiAgentService } from "../src/pi/ports.ts";
+import { defaultRoles } from "./shared/agent-sessions.ts";
+import { makeFakeHarness } from "./shared/fake-harness.ts";
+import { resolveRoleAssignments } from "../src/harness/app/roles.ts";
 import type {
     ProgressReporterService,
     ProgressUpdate,
 } from "../src/progress/ports.ts";
 import { makeTestProgressRecorder } from "./shared/progress-recorder.ts";
 import { countingIds, fixedClock, testLayout } from "./shared/test-values.ts";
-import {
-    type RunControl,
-    type RunControlSelection,
-    type RunEventLog,
-} from "../src/run/ports.ts";
+import { type RunControl, type RunEventLog } from "../src/run/ports.ts";
 import { type RunStateStoreService } from "../src/run/ports.ts";
 import { type RunState, RunStateStatus } from "../src/run/state.ts";
 import { type WorkspaceService } from "../src/workspace/ports.ts";
@@ -81,14 +75,12 @@ type TestRuntimeOptions = {
     readonly refreshFailure?: RalphieError;
     readonly githubFailure?: RalphieError;
     readonly gitFailure?: RalphieError;
-    readonly startFailure?: RalphieError;
     readonly removeFailure?: RalphieError;
     readonly closeFailure?: RalphieError;
     readonly abortOnExecute?: AbortController;
     readonly abortAt?: "github" | "repository" | "issues" | "agent" | "between";
     readonly abortController?: AbortController;
     readonly captureStart?: number;
-    readonly failPiReadyProgress?: boolean;
     readonly executionContexts?: IssueExecutionContext[];
     readonly executeGate?: (context: IssueExecutionContext) => Promise<void>;
     readonly issueExecutor?: IssueExecutorService;
@@ -99,10 +91,6 @@ type TestRuntimeOptions = {
     readonly eventLog?: RunEventLog;
     /** Native sub-issues reported for every parent during reconciliation. */
     readonly parentSubIssues?: ReadonlyArray<GitHubIssue>;
-    /** Model catalog exposed by the mock pi runtime for thinking validation. */
-    readonly piCatalog?: ReadonlyArray<PiModelInfo>;
-    /** Default model exposed by the mock pi runtime. */
-    readonly piDefaultModel?: AgentModel;
 };
 
 const testRuntime = (
@@ -225,13 +213,11 @@ const testRuntime = (
     };
     const issueExecutor: IssueExecutorService = options.issueExecutor ?? {
         execute: async (context) => {
-            // Snapshot: agentSelection resolves live, so reading the captured
-            // context later would report a newer pick.
             options.executionContexts?.push({ ...context });
             if (options.executeGate !== undefined)
                 await options.executeGate(context);
             calls.push(
-                `executeIssue:${context.issue.number}:${context.repositoryPath}:${context.targetBranch}:${context.agentSelection.agent}`,
+                `executeIssue:${context.issue.number}:${context.repositoryPath}:${context.targetBranch}:${context.agent.roles.implementer.harness}`,
             );
             if (options.abortOnExecute !== undefined) {
                 options.abortOnExecute.abort();
@@ -243,23 +229,6 @@ const testRuntime = (
             if (result === undefined) throw new Error("Missing test outcome");
             if (options.abortAt === "between") options.abortController?.abort();
             return result;
-        },
-    };
-    const agentRuntime: PiAgentService = {
-        start: async () => {
-            if (options.startFailure) throw options.startFailure;
-            calls.push("startServer");
-            if (options.abortAt === "agent") options.abortController?.abort();
-            return {
-                client: {} as AgentClient,
-                catalog: options.piCatalog ?? [],
-                ...(options.piDefaultModel === undefined
-                    ? {}
-                    : { defaultModel: options.piDefaultModel }),
-                close: async () => {
-                    calls.push("closeRuntime");
-                },
-            };
         },
     };
     const eventLog: RunEventLog = options.eventLog ?? {
@@ -285,20 +254,7 @@ const testRuntime = (
         },
     };
     const progressRecorder = makeTestProgressRecorder(progressEvents);
-    const progress: ProgressReporterService = options.failPiReadyProgress
-        ? {
-              ...progressRecorder,
-              emit: async (update) => {
-                  if (
-                      update.stage === "agent-runtime" &&
-                      update.status === "succeeded"
-                  ) {
-                      throw new Error("Agent ready progress emission failed");
-                  }
-                  await progressRecorder.emit(update);
-              },
-          }
-        : progressRecorder;
+    const progress: ProgressReporterService = progressRecorder;
     const relationships = {
         listSubIssues: async () => options.parentSubIssues ?? [],
         parentOf: async () => undefined,
@@ -326,7 +282,7 @@ const testRuntime = (
         gitIssueCheckpoint: checkpoint,
         gitIssueOperations: operations,
         issueExecutor,
-        agentRuntime,
+        harness: makeFakeHarness().service,
         progress,
         runEventLog: eventLog,
         runStateStore: stateStore,
@@ -481,7 +437,7 @@ const baseOptions = {
         sort: IssueSort.Created,
         order: IssueOrder.Ascending,
     },
-    agent: DEFAULT_AGENT,
+    roles: defaultRoles(),
     workspace: "/tmp/ralphie",
     runId: "test-run",
 } as const;
@@ -494,9 +450,10 @@ describe("workflow", () => {
         const summary = await workflow(
             {
                 ...baseOptions,
-                model: { providerID: "openai", modelID: "gpt-5" },
-                modelVariant: "high",
-                agent: "reviewer",
+                roles: resolveRoleAssignments({
+                    harnesses: { codex: { model: "gpt-5", effort: "high" } },
+                    roles: { default: "codex" },
+                }),
                 maxDecompositionDepth: 6,
             },
             testRuntime(calls, states, {}, events),
@@ -512,64 +469,15 @@ describe("workflow", () => {
             "verifyGitInstalled",
             "prepareRepository:owner/repo:develop:/tmp/ralphie",
             "listIssues:owner/repo:bug:created:asc",
-            "startServer",
             "refreshIssue:42",
-            "executeIssue:42:/tmp/ralphie/repo:develop:reviewer",
+            "executeIssue:42:/tmp/ralphie/repo:develop:codex",
             "closeIssue:42",
-            "closeRuntime",
             "removeWorkspace:/tmp/ralphie",
             "closeEventLog",
         ]);
         expect(events.some(({ stage }) => stage === "issue-execution")).toBe(
             true,
         );
-    });
-
-    test("fails fast before any issue work when the thinking level is unsupported", async () => {
-        const calls: string[] = [];
-        const states: RunState[] = [];
-        await expect(
-            workflow(
-                {
-                    ...baseOptions,
-                    model: {
-                        providerID: "opencode-go",
-                        modelID: "deepseek-v4-flash",
-                    },
-                    modelVariant: "medium",
-                },
-                testRuntime(calls, states, {
-                    piCatalog: [
-                        {
-                            provider: "opencode-go",
-                            id: "deepseek-v4-flash",
-                            name: "DeepSeek V4 Flash",
-                            reasoning: true,
-                            thinkingLevels: ["off", "low", "high", "max"],
-                        },
-                    ],
-                }),
-            ),
-        ).rejects.toThrow(/--thinking/);
-        expectNoIssueWork(calls);
-        expect(calls).toContain("closeRuntime");
-    });
-
-    test("skips thinking validation when the runtime exposes no model catalog", async () => {
-        const calls: string[] = [];
-        const states: RunState[] = [];
-        const summary = await workflow(
-            {
-                ...baseOptions,
-                model: {
-                    providerID: "opencode-go",
-                    modelID: "deepseek-v4-flash",
-                },
-                modelVariant: "medium",
-            },
-            testRuntime(calls, states, {}),
-        );
-        expect(summary.counts.completed).toBe(1);
     });
 
     test("keeps completed issue closure unchanged when notifications are enabled", async () => {
@@ -1066,7 +974,6 @@ describe("workflow", () => {
         expectCallOrder(calls, [
             `artifact:42:${IssueArtifactKind.NeedsAttentionDecision}`,
             "save:needs-attention",
-            "closeRuntime",
         ]);
         expect(summary.counts[IssueExecutionOutcomeKind.NeedsAttention]).toBe(
             1,
@@ -1226,7 +1133,6 @@ describe("workflow", () => {
             issueNumber: 42,
             outcome: { kind: IssueExecutionOutcomeKind.Failed },
         });
-        expect(calls.at(-1)).toBe("closeRuntime");
     });
 
     test("continues independent issues after failure and reports partial failure after draining", async () => {
@@ -1258,20 +1164,6 @@ describe("workflow", () => {
         ).toHaveLength(2);
         expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
         expect(calls).toContain("restoreCheckout");
-    });
-
-    test("closes the agent if ready progress reporting fails after startup", async () => {
-        const calls: string[] = [];
-        const states: RunState[] = [];
-        await expect(
-            workflow(
-                baseOptions,
-                testRuntime(calls, states, {
-                    failPiReadyProgress: true,
-                }),
-            ),
-        ).rejects.toThrow("Agent ready progress emission failed");
-        expect(calls).toContain("closeRuntime");
     });
 
     test("persists a recoverable closure stage when GitHub closure fails", async () => {
@@ -1406,37 +1298,12 @@ describe("workflow", () => {
                 "removeWorkspace:/tmp/ralphie",
                 ...expectedCalls,
             ]);
-            expect(calls).not.toContain("startServer");
             expect(
                 calls.filter((call) => call === "removeWorkspace:/tmp/ralphie"),
             ).toHaveLength(1);
             expect(states).toHaveLength(0);
         },
     );
-
-    test("cancels after the agent starts, closes the server, and saves active state", async () => {
-        const calls: string[] = [];
-        const states: RunState[] = [];
-        const controller = new AbortController();
-        await expect(
-            workflow(
-                { ...baseOptions, signal: controller.signal },
-                testRuntime(calls, states, {
-                    abortAt: "agent",
-                    abortController: controller,
-                }),
-            ),
-        ).rejects.toThrow("Run cancelled");
-        expect(calls).toContain("startServer");
-        expect(calls).toContain("closeRuntime");
-        expect(calls).not.toContain(
-            "executeIssue:42:/tmp/ralphie/repo:develop:build",
-        );
-        expect(
-            calls.filter((call) => call === "removeWorkspace:/tmp/ralphie"),
-        ).toHaveLength(1);
-        expect(states.at(-1)?.status).toBe(RunStateStatus.Active);
-    });
 
     test("cancels between issues, closes the server, saves state, and does not start the next issue", async () => {
         const calls: string[] = [];
@@ -1458,10 +1325,9 @@ describe("workflow", () => {
         ).rejects.toThrow("Run cancelled");
         expect(
             calls.filter((call) => call.startsWith("executeIssue:")),
-        ).toEqual(["executeIssue:42:/tmp/ralphie/repo:develop:build"]);
-        expect(calls).toContain("closeRuntime");
+        ).toEqual(["executeIssue:42:/tmp/ralphie/repo:develop:claude"]);
         expect(calls).not.toContain(
-            "executeIssue:51:/tmp/ralphie/repo:develop:build",
+            "executeIssue:51:/tmp/ralphie/repo:develop:claude",
         );
         expect(states.at(-1)?.status).toBe(RunStateStatus.Active);
         expect(
@@ -1692,158 +1558,41 @@ describe("workflow", () => {
         );
     });
 
-    test("publishes the pi catalog and run selection with the runtime event", async () => {
-        const calls: string[] = [];
-        const states: RunState[] = [];
-        const events: ProgressUpdate[] = [];
-        const catalog = [
-            {
-                provider: "openai",
-                id: "gpt-5",
-                name: "GPT-5",
-                reasoning: true,
-                thinkingLevels: ["low", "high"],
-            },
-        ];
-        await workflow(
-            {
-                ...baseOptions,
-                model: { providerID: "openai", modelID: "gpt-5" },
-                modelVariant: "high",
-            },
-            testRuntime(
-                calls,
-                states,
-                { issueLists: [[firstIssue]], piCatalog: catalog },
-                events,
-            ),
-        );
-
-        const runtimeReady = events.find(
-            ({ stage, status }) =>
-                stage === "agent-runtime" && status === "succeeded",
-        );
-        expect(runtimeReady?.details).toEqual({
-            models: catalog,
-            selection: {
-                model: { provider: "openai", id: "gpt-5" },
-                variant: "high",
-            },
-        });
-    });
-
-    test("applies a run-control model selection to issues started after the pick", async () => {
+    test("hands the harness and the resolved role assignments to the executor and the run state", async () => {
         const calls: string[] = [];
         const states: RunState[] = [];
         const contexts: IssueExecutionContext[] = [];
-        const thirdIssue: GitHubIssue = {
-            ...firstIssue,
-            number: 44,
-            title: "Third test issue",
-        };
-        let override: RunControlSelection | undefined;
-        const summary = await workflow(
-            {
-                ...baseOptions,
-                model: { providerID: "openai", modelID: "gpt-5" },
-                modelVariant: "high",
-                control: {
-                    waitForQueue: async () => {},
-                    stopAfterCurrent: () => false,
-                    issueSelection: () => override,
-                },
+        const roles = resolveRoleAssignments({
+            harnesses: { claude: { model: "opus", effort: "high" } },
+            roles: {
+                reviewer: { harness: "claude", model: "sonnet" },
             },
-            testRuntime(calls, states, {
-                issueLists: [[firstIssue, secondIssue, thirdIssue]],
-                executionContexts: contexts,
-                executeGate: async (context) => {
-                    if (context.issue.number === 42) {
-                        override = {
-                            model: {
-                                providerID: "anthropic",
-                                modelID: "claude-sonnet-4",
-                            },
-                            variant: "low",
-                        };
-                    }
-                    if (context.issue.number === 43) {
-                        override = {
-                            model: {
-                                providerID: "openai",
-                                modelID: "gpt-4o",
-                            },
-                        };
-                    }
-                },
-            }),
+        });
+        await workflow(
+            { ...baseOptions, roles },
+            testRuntime(calls, states, { executionContexts: contexts }),
         );
 
-        expect(summary.outcomes).toHaveLength(3);
-        expect(contexts[0]?.agentSelection).toEqual({
-            agent: DEFAULT_AGENT,
-            model: { providerID: "openai", modelID: "gpt-5" },
-            variant: "high",
+        expect(contexts).toHaveLength(1);
+        expect(contexts[0]?.agent.roles).toEqual(roles);
+        expect(contexts[0]?.agent.roles["spec-reviewer"]).toEqual({
+            harness: "claude",
+            model: "sonnet",
+            effort: "high",
         });
-        expect(contexts[1]?.agentSelection).toEqual({
-            agent: DEFAULT_AGENT,
-            model: { providerID: "anthropic", modelID: "claude-sonnet-4" },
-            variant: "low",
-        });
-        // A pick without a level drops the CLI variant for the model default.
-        expect(contexts[2]?.agentSelection).toEqual({
-            agent: DEFAULT_AGENT,
-            model: { providerID: "openai", modelID: "gpt-4o" },
-        });
+        expect(states.at(-1)?.roles).toEqual(roles);
     });
 
-    test("applies a pick made during an issue to that running issue", async () => {
+    test("reports the role assignments when the run starts", async () => {
         const calls: string[] = [];
         const states: RunState[] = [];
-        const selections: Array<AgentSelection> = [];
-        let override: RunControlSelection | undefined;
-        await workflow(
-            {
-                ...baseOptions,
-                model: { providerID: "openai", modelID: "gpt-5" },
-                control: {
-                    waitForQueue: async () => {},
-                    stopAfterCurrent: () => false,
-                    issueSelection: () => override,
-                },
-            },
-            testRuntime(calls, states, {
-                issueExecutor: {
-                    execute: async (context) => {
-                        selections.push(context.agentSelection);
-                        override = {
-                            model: {
-                                providerID: "anthropic",
-                                modelID: "claude-sonnet-4",
-                            },
-                            variant: "low",
-                        };
-                        selections.push(context.agentSelection);
-                        return {
-                            kind: IssueExecutionOutcomeKind.Completed,
-                            completion: "pushed-commit",
-                            commitSha: "abc123",
-                        };
-                    },
-                },
-            }),
-        );
+        const events: ProgressUpdate[] = [];
+        await workflow(baseOptions, testRuntime(calls, states, {}, events));
 
-        expect(selections).toEqual([
-            {
-                agent: DEFAULT_AGENT,
-                model: { providerID: "openai", modelID: "gpt-5" },
-            },
-            {
-                agent: DEFAULT_AGENT,
-                model: { providerID: "anthropic", modelID: "claude-sonnet-4" },
-                variant: "low",
-            },
-        ]);
+        const started = events.find(
+            ({ stage, status }) => stage === "run" && status === "info",
+        );
+        expect(started?.details?.roles).toEqual(baseOptions.roles);
     });
 
     test.each([

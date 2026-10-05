@@ -1,7 +1,7 @@
 {
   "name": "@beremaran/ralphie",
   "version": "0.1.2",
-  "description": "Turn a GitHub issue queue into reviewed commits with pi.",
+  "description": "Turn a GitHub issue queue into reviewed commits with coding-agent harnesses.",
   "module": "./dist/ralphie.js",
   "main": "./dist/ralphie.js",
   "type": "module",
@@ -42,7 +42,7 @@
     "github-issues",
     "automation",
     "ai",
-    "pi",
+    "claude-code",
     "agent",
     "npm"
   ],
@@ -59,8 +59,6 @@
     "typescript": "^5"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "^0.85.1",
-    "@earendil-works/pi-ai": "^0.85.1",
     "@opentui/core": "^0.5.11",
     "octokit": "^5.0.5",
     "proper-lockfile": "^4.1.2",

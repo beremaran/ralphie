@@ -3,7 +3,16 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { AgentClient } from "../../src/agent/ports.ts";
+import { z } from "zod";
+
+import type { AgentSessions } from "../../src/agent/sessions.ts";
+import type {
+    HarnessOutcome,
+    HarnessRole,
+    HarnessService,
+    SessionRequest,
+} from "../../src/harness/ports.ts";
+import { sessionsFor } from "../shared/agent-sessions.ts";
 import { type GitHubIssue } from "../../src/github/domain.ts";
 import { type GitIssueCheckpointService } from "../../src/git/ports.ts";
 import { type IssueCheckpoint } from "../../src/git/ports.ts";
@@ -17,12 +26,8 @@ import {
 import { type GitHubIssueRelationshipService } from "../../src/github/ports.ts";
 import { type GitHubIssueMutationService } from "../../src/github/ports.ts";
 import { type GitHubIssuesService } from "../../src/github/ports.ts";
-import { DEFAULT_AGENT } from "../../src/agent/model.ts";
 import { requestStructuredOutput } from "../../src/agent/structured-output.ts";
-import {
-    makeAgentSessionDiagnostics,
-    type NeedsAttentionRequest,
-} from "../../src/agent/task-session.ts";
+import { type NeedsAttentionRequest } from "../../src/agent/task-session.ts";
 import {
     IssueArtifactKind,
     makeIssueArtifactStore,
@@ -164,7 +169,7 @@ type FakeScript = {
 type RecordedCreate = {
     readonly sessionID: string;
     readonly title?: string;
-    readonly agent?: string;
+    readonly role: HarnessRole;
 };
 
 type RecordedPrompt = {
@@ -173,75 +178,74 @@ type RecordedPrompt = {
 };
 
 /**
- * Deterministic agent client. Each structured call creates one session and then
- * prompts it, so responses are matched by the session title captured at
- * create time. A script is served up to `count` times in order; the first
- * matching script with remaining budget wins.
+ * Deterministic harness. Each structured call is one session, so responses are
+ * matched by the session title. A script is served up to `count` times in
+ * order; the first matching script with remaining budget wins. Scripted
+ * values go through the request's result schema like the real service does.
  */
 const fakePi = (scripts: ReadonlyArray<FakeScript>) => {
     const creates: RecordedCreate[] = [];
     const prompts: RecordedPrompt[] = [];
-    const sessionTitles = new Map<string, string>();
     const served = new Map<string, number>();
-    const client: AgentClient = {
-        session: {
-            create: async (input) => {
-                const sessionID = `session-${creates.length + 1}`;
-                sessionTitles.set(sessionID, input.title ?? "");
-                creates.push({
-                    sessionID,
-                    title: input.title,
-                    agent: (input as { readonly agent?: string }).agent,
-                });
-                return { data: { id: sessionID } };
-            },
-            prompt: async (input) => {
-                const title = sessionTitles.get(input.sessionID) ?? "";
-                const index = scripts.findIndex((script) => {
-                    const remaining =
-                        (script.count ?? Number.POSITIVE_INFINITY) -
-                        (served.get(script.titlePrefix) ?? 0);
-                    return (
-                        title.startsWith(script.titlePrefix) && remaining > 0
-                    );
-                });
-                if (index === -1) {
-                    throw new Error(`Fake agent has no response for ${title}`);
-                }
-                const script = scripts[index]!;
-                const servedCount = (served.get(script.titlePrefix) ?? 0) + 1;
-                served.set(script.titlePrefix, servedCount);
-                const response =
-                    typeof script.result === "function"
-                        ? script.result(servedCount)
-                        : script.result;
-                prompts.push({ sessionID: input.sessionID, title });
-                if (response.error === true) {
-                    return {
-                        error: {
-                            name: "PiError",
-                            data: {
-                                message: `fake prompt failure for ${title}`,
-                            },
-                        },
-                    };
-                }
-                return {
-                    data: {
-                        info: {
-                            id: `message-${prompts.length}`,
-                            role: "assistant",
-                            structured: response.structured,
-                        },
-                        parts: [],
-                        ...(response.needsAttention === undefined
-                            ? {}
-                            : { needsAttention: response.needsAttention }),
-                    },
-                };
-            },
-        },
+    const nextResponse = (title: string): FakeStructuredResponse => {
+        const index = scripts.findIndex((script) => {
+            const remaining =
+                (script.count ?? Number.POSITIVE_INFINITY) -
+                (served.get(script.titlePrefix) ?? 0);
+            return title.startsWith(script.titlePrefix) && remaining > 0;
+        });
+        const script = scripts[index];
+        if (script === undefined) {
+            throw new Error(`Fake agent has no response for ${title}`);
+        }
+        const servedCount = (served.get(script.titlePrefix) ?? 0) + 1;
+        served.set(script.titlePrefix, servedCount);
+        return typeof script.result === "function"
+            ? script.result(servedCount)
+            : script.result;
     };
+    const run = async (
+        request: SessionRequest & { readonly resultSchema?: z.ZodType },
+    ): Promise<HarnessOutcome<unknown>> => {
+        const title = request.title ?? "";
+        const sessionID = `session-${creates.length + 1}`;
+        creates.push({ sessionID, title, role: request.role });
+        const response = nextResponse(title);
+        prompts.push({ sessionID, title });
+        if (response.error === true) {
+            return {
+                ok: false,
+                failure: {
+                    kind: "harness",
+                    message: `fake prompt failure for ${title}`,
+                },
+            };
+        }
+        const parsed = request.resultSchema?.safeParse({
+            result: response.structured,
+            ...(response.needsAttention === undefined
+                ? {}
+                : { needsAttention: response.needsAttention }),
+        });
+        if (parsed !== undefined && !parsed.success) {
+            return {
+                ok: false,
+                failure: {
+                    kind: "invalid_result",
+                    message: z.prettifyError(parsed.error),
+                },
+            };
+        }
+        return {
+            ok: true,
+            harnessSessionID: sessionID,
+            text: "",
+            value: parsed?.data,
+        };
+    };
+    const client: AgentSessions = sessionsFor({
+        run: run as HarnessService["run"],
+    });
     return { client, creates, prompts };
 };
 
@@ -249,7 +253,7 @@ const verifierPromptsOf = (prompts: ReadonlyArray<RecordedPrompt>) =>
     prompts.filter(({ title }) => title.startsWith(VERIFIER_TITLE));
 
 const makeContext = (options: {
-    readonly agent: AgentClient;
+    readonly agent: AgentSessions;
     readonly invariant: GitRepositoryInvariantService;
     readonly issueOverride?: GitHubIssue;
 }): IssueExecutionContext => ({
@@ -261,8 +265,6 @@ const makeContext = (options: {
     runId: "test-run",
     runLayout: testLayout("/work/workspace", "test-run"),
     agent: options.agent,
-    agentSelection: { agent: DEFAULT_AGENT },
-    agentDiagnostics: makeAgentSessionDiagnostics(),
     repositoryInvariant: options.invariant,
 });
 
@@ -731,6 +733,7 @@ describe("structured-output needs-attention side channel", () => {
             },
         ]);
         const result = await requestStructuredOutput(client, {
+            role: "preflight",
             directory: "/work/repository",
             title: "Check readiness of issue #42",
             prompt: "ground the fixture issue",
@@ -756,6 +759,7 @@ describe("structured-output needs-attention side channel", () => {
             },
         ]);
         const result = await requestStructuredOutput(client, {
+            role: "preflight",
             directory: "/work/repository",
             title: "Assess issue #42",
             prompt: "assess the fixture issue",
@@ -768,7 +772,7 @@ describe("structured-output needs-attention side channel", () => {
         expect(result.needsAttention).toEqual(attentionRequest);
     });
 
-    test("ignores an invalid side-channel value", async () => {
+    test("rejects an invalid side-channel value", async () => {
         const { client } = fakePi([
             {
                 titlePrefix: "Check readiness of issue #42",
@@ -780,13 +784,15 @@ describe("structured-output needs-attention side channel", () => {
                 },
             },
         ]);
-        const result = await requestStructuredOutput(client, {
-            directory: "/work/repository",
-            title: "Check readiness of issue #42",
-            prompt: "ground the fixture issue",
-            schema: groundingDecisionSchema,
-        });
-        expect(result.needsAttention).toBeUndefined();
+        await expect(
+            requestStructuredOutput(client, {
+                role: "preflight",
+                directory: "/work/repository",
+                title: "Check readiness of issue #42",
+                prompt: "ground the fixture issue",
+                schema: groundingDecisionSchema,
+            }),
+        ).rejects.toBeInstanceOf(RalphieError);
     });
 
     test("rejects structured output that fails the schema", async () => {
@@ -798,6 +804,7 @@ describe("structured-output needs-attention side channel", () => {
         ]);
         await expect(
             requestStructuredOutput(client, {
+                role: "preflight",
                 directory: "/work/repository",
                 title: "Check readiness of issue #42",
                 prompt: "ground the fixture issue",
@@ -1580,49 +1587,6 @@ describe("implementation executor needs-attention routing", () => {
         expect(verifierPromptsOf(harness.prompts)).toHaveLength(1);
         expect(harness.recoveryInputs).toHaveLength(1);
         expect(harness.prompts).toHaveLength(3);
-        expect(harness.trace).not.toContain("ops:commit");
-        expect(harness.trace).not.toContain("ops:push");
-    });
-
-    test("routes a signal from a review-fix attempt and confirms before any further review", async () => {
-        const harness = await makeImplementationHarness({
-            scripts: [
-                {
-                    titlePrefix: "Implement issue #42",
-                    result: { structured: implementationChanged },
-                },
-                {
-                    titlePrefix: "Review issue #42",
-                    result: {
-                        structured: changesRequestedReview("Finding one"),
-                    },
-                },
-                {
-                    titlePrefix: "Address review for issue #42",
-                    result: {
-                        needsAttention: attentionRequest,
-                    },
-                },
-                {
-                    titlePrefix: VERIFIER_TITLE,
-                    result: { structured: confirmedVerifierOutput },
-                },
-            ],
-        });
-        const outcome = await harness.executor.execute({
-            context: harness.context,
-            artifacts: harness.store,
-        });
-        expect(outcome).toMatchObject({
-            kind: IssueExecutionOutcomeKind.NeedsAttention,
-            diagnosticsPath: "/diag/needs-attention",
-        });
-        expect(verifierPromptsOf(harness.prompts)).toHaveLength(1);
-        expect(harness.recoveryInputs).toHaveLength(1);
-        const reviewFixPrompts = harness.prompts.filter(({ title }) =>
-            title.startsWith("Address review for issue #42"),
-        );
-        expect(reviewFixPrompts).toHaveLength(1);
         expect(harness.trace).not.toContain("ops:commit");
         expect(harness.trace).not.toContain("ops:push");
     });

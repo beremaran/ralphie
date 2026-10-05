@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { IssueOrder, IssueSort } from "../github/domain.ts";
+import { HARNESS_NAMES } from "../harness/ports.ts";
 import { DEFAULT_MAX_DECOMPOSITION_DEPTH } from "../issues/domain/decomposition-markdown.ts";
 import {
     DEFAULT_IMPLEMENTATION_ATTEMPTS,
@@ -62,6 +63,44 @@ const limitsSchema = z.strictObject({
     ),
 });
 
+const harnessNameSchema = z.enum(HARNESS_NAMES);
+
+/** Model and reasoning effort for the sessions a harness runs. */
+const harnessSettingsSchema = z.strictObject({
+    model: nonEmptyString.optional(),
+    effort: nonEmptyString.optional(),
+});
+
+const harnessesSchema = z.strictObject({
+    claude: harnessSettingsSchema.optional(),
+    codex: harnessSettingsSchema.optional(),
+    pi: harnessSettingsSchema.optional(),
+    opencode: harnessSettingsSchema.optional(),
+});
+
+/** A role runs on a harness, optionally with its own model and effort. */
+const roleAssignmentSchema = z.union([
+    harnessNameSchema,
+    z.strictObject({
+        harness: harnessNameSchema,
+        model: nonEmptyString.optional(),
+        effort: nonEmptyString.optional(),
+    }),
+]);
+
+const rolesSchema = z.strictObject({
+    default: roleAssignmentSchema.optional(),
+    reviewer: roleAssignmentSchema.optional(),
+    triager: roleAssignmentSchema.optional(),
+    preflight: roleAssignmentSchema.optional(),
+    implementer: roleAssignmentSchema.optional(),
+    fixer: roleAssignmentSchema.optional(),
+    "standards-reviewer": roleAssignmentSchema.optional(),
+    "spec-reviewer": roleAssignmentSchema.optional(),
+    "resolution-verifier": roleAssignmentSchema.optional(),
+    decomposer: roleAssignmentSchema.optional(),
+});
+
 /** Temporary needs-attention notification opt-in, until hand-offs replace it. */
 const notificationsSchema = z.strictObject({
     enabled: z.boolean().default(false),
@@ -74,6 +113,8 @@ const notificationsSchema = z.strictObject({
  */
 const overridableSettings = {
     workspace: nonEmptyString.default(DEFAULT_WORKSPACE),
+    harnesses: harnessesSchema.prefault({}),
+    roles: rolesSchema.prefault({}),
     intake: intakeSchema.prefault({}),
     labels: labelsSchema.prefault({}),
     limits: limitsSchema.prefault({}),

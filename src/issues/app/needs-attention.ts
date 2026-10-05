@@ -124,11 +124,7 @@ const verifyHandoff = async (
         title: `Verify needs-attention request for issue #${context.issue.number}`,
         prompt: verificationPrompt(context, handoff.request),
         schema: groundingDecisionSchema,
-        agent: context.agentSelection.agent,
-        model: context.agentSelection.model,
-        variant: context.agentSelection.variant,
-        runId: context.runId,
-        diagnostics: context.agentDiagnostics,
+        role: "preflight",
         repositoryInvariant: {
             branch: handoff.checkpoint.branch,
             head: handoff.checkpoint.sha,

@@ -17,13 +17,13 @@ describe("native CLI parser", () => {
         for (const option of [
             "--config <path>",
             "--set <path=value>",
-            "--model <provider/model>",
-            "--thinking <level>",
             "--output <mode>",
         ]) {
             expect(HELP_TEXT).toContain(option);
         }
         for (const removed of [
+            "--model",
+            "--thinking",
             "--branch",
             "--issue-label",
             "--issue-sort",
@@ -104,26 +104,55 @@ describe("native CLI parser", () => {
         }
     });
 
-    test("keeps --model and --thinking as temporary flags", async () => {
-        const config = await writeTemporaryFile("{}");
+    test.each([
+        ["--model", "harnesses.<harness>.model"],
+        ["--thinking", "harnesses.<harness>.effort"],
+    ])(
+        "rejects %s and names the config keys that replace it",
+        async (flag, key) => {
+            const config = await writeTemporaryFile("{}");
+
+            const error = await workflowErrorFor([
+                "owner/repository",
+                "--config",
+                config,
+                flag,
+                "high",
+            ]);
+
+            expect(error.message).toContain(`Option ${flag} was removed`);
+            expect(error.message).toContain(key);
+        },
+    );
+
+    test("resolves the role assignments from harnesses and roles", async () => {
+        const config = await writeTemporaryFile(`
+harnesses:
+  claude:
+    model: opus
+    effort: high
+roles:
+  reviewer:
+    harness: claude
+    model: sonnet
+`);
 
         const options = await workflowOptionsFor([
             "owner/repository",
             "--config",
             config,
-            "--model",
-            "openai/gpt-5",
-            "--thinking",
-            "high",
         ]);
 
-        expect(options).toMatchObject({
-            model: { providerID: "openai", modelID: "gpt-5" },
-            modelVariant: "high",
+        expect(options.roles.implementer).toEqual({
+            harness: "claude",
+            model: "opus",
+            effort: "high",
         });
-        expect(() =>
-            parseCliArgs(["owner/repository", "--model", "gpt-5"]),
-        ).toThrow();
+        expect(options.roles["standards-reviewer"]).toEqual({
+            harness: "claude",
+            model: "sonnet",
+            effort: "high",
+        });
     });
 
     test("passes the notification settings to the workflow", async () => {

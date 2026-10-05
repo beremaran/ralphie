@@ -7,6 +7,18 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Changed
 
+- Every agent session now runs through a headless harness CLI (Claude Code, as
+  the default and only adapter so far) instead of the in-process pi SDK. The
+  new `harnesses` (per-harness `model` and `effort`) and `roles` (`default`,
+  `reviewer`, and each role; a harness name or `{ harness, model, effort }`)
+  configuration keys choose the harness, model, and effort; every role falls
+  back to `default`, both reviewers to `reviewer`, and the fixer to the
+  implementer. See `docs/configuration.md`.
+- Structured results carry the optional needs-attention request as a field of
+  the result instead of a separate tool call; repair sessions can no longer
+  raise one.
+- Run state version 13 replaces `selection` with the per-role assignments.
+  Older state is not migrated.
 - Ralphie reads its settings from `$XDG_CONFIG_HOME/ralphie/config.yaml`
   (else `~/.config/ralphie/config.yaml`, or `--config <path>`) and is invoked
   as `ralphie [owner/]repo`. The file is validated at startup, and a missing
@@ -15,6 +27,13 @@ All notable changes to Ralphie are documented here. The project follows
   `limits`. See `docs/configuration.md`.
 
 ### Removed
+
+- Remove the in-process pi SDK runtime, its credential store and model
+  catalog, the TUI model picker (`m`), and the `@earendil-works/pi-agent-core`
+  and `@earendil-works/pi-ai` dependencies. Pause, stop and quit still work.
+  `--model` and `--thinking` now fail with an error naming the
+  `harnesses.<harness>.model`/`effort` and `roles.<role>` keys that replace
+  them.
 
 - Remove `--branch`, `--verify-command`, `--issue-label`, `--issue-sort`,
   `--implementation-attempts`, `--max-decomposition-depth`, `--workspace`,

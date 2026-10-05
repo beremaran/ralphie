@@ -107,19 +107,16 @@ const runNoninteractiveCase = async (
             };
             return coordinator;
         },
-        makeAgentRuntime: (_config, eventListener) => {
-            listener = eventListener;
-            return { start: async () => undefined as never };
-        },
-        makeRuntime: ({ agentRuntime, progress }) =>
-            ({
-                agentRuntime,
+        makeRuntime: ({ progress, sessionListener }) => {
+            listener = sessionListener;
+            return {
                 progress,
                 dispose: async () => {
                     runtimeDisposeCount += 1;
                     cleanupOrder.push("runtime");
                 },
-            }) as unknown as CommandRuntime,
+            } as unknown as CommandRuntime;
+        },
         runWorkflow: async (_options, runtime) => {
             await runtime.progress.emit({
                 stage: "run",

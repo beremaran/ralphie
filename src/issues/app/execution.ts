@@ -1,4 +1,4 @@
-import type { AgentClient } from "../../agent/ports.ts";
+import type { AgentSessions } from "../../agent/sessions.ts";
 
 import { type GitHubIssue } from "../../github/domain.ts";
 import type { IssueArtifactStore } from "./artifacts.ts";
@@ -6,8 +6,6 @@ import type {
     IssueResolutionDecision,
     NeedsAttentionReason,
 } from "../domain/decisions.ts";
-import type { AgentSelection } from "../../agent/model.ts";
-import type { AgentSessionDiagnostics } from "../../agent/task-session.ts";
 import { type GitRepositoryInvariantService } from "../../git/ports.ts";
 import type { RunLayout } from "../../run/ports.ts";
 
@@ -108,15 +106,13 @@ export type IssueExecutionContext = {
     readonly runId: string;
     /** Run filesystem layout resolved by the composition root. */
     readonly runLayout: RunLayout;
-    readonly agent: AgentClient;
-    /** Read at each agent request; the workflow resolves it live. */
-    readonly agentSelection: AgentSelection;
+    /** The harness and the role assignments every agent session uses. */
+    readonly agent: AgentSessions;
     readonly implementationAttempts?: number;
     /** Review attempts allowed before escalating; defaults to the stage limit. */
     readonly reviewRounds?: number;
     /** Verification repair attempts allowed; defaults to the stage limit. */
     readonly verificationFixes?: number;
-    readonly agentDiagnostics: AgentSessionDiagnostics;
     readonly repositoryInvariant: GitRepositoryInvariantService;
     readonly verificationCommands?: ReadonlyArray<string>;
     readonly signal?: AbortSignal;
