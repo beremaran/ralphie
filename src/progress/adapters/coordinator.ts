@@ -1,7 +1,4 @@
-import type {
-    AgentEventListener,
-    AgentEventContext,
-} from "../../agent/ports.ts";
+import type { SessionEventListener } from "../../harness/ports.ts";
 import type { ProgressOutput, ProgressRenderMode } from "./progress.ts";
 import type { ProgressReporterService, ProgressUpdate } from "../ports.ts";
 import type { RunControl } from "../../run/ports.ts";
@@ -20,12 +17,12 @@ import { makeTuiProgressCoordinator } from "./tui.ts";
  *
  * `mode` selects the adapter: `interactive` renders an OpenTUI application,
  * `plain` writes append-only lines, and `json` writes JSON Lines. The
- * workflow only ever sees `progress.emit`; agent events arrive through the
- * listener handed to the pi service.
+ * workflow only ever sees `progress.emit`; session events arrive through the
+ * listener handed to the harness.
  */
 export type ProgressCoordinator = {
     readonly progress: ProgressReporterService;
-    readonly piListener: AgentEventListener;
+    readonly sessionListener: SessionEventListener;
     /** Interactive queue control; only the interactive adapter provides one. */
     readonly control?: RunControl;
     /** Resolves after the presentation adapter is ready to render. */
@@ -33,7 +30,7 @@ export type ProgressCoordinator = {
     readonly dispose: () => Promise<void>;
 };
 
-/** Options for the shared progress/agent output coordinator. */
+/** Options for the shared progress and session output coordinator. */
 export type ProgressCoordinatorOptions = Omit<
     ProgressRendererOptions,
     "output"
@@ -59,10 +56,9 @@ const makePlainCoordinator = (
         ...options,
         output,
     });
-    const transcript = makePlainTranscript({
+    const sessionListener = makePlainTranscript({
         mode: options.mode === "json" ? "json" : "plain",
         output,
-        now: options.now,
     });
 
     const progress: ProgressReporterService = {
@@ -71,13 +67,9 @@ const makePlainCoordinator = (
         },
     };
 
-    const piListener = (event: unknown, context: AgentEventContext): void => {
-        transcript(event, context);
-    };
-
     return {
         progress,
-        piListener,
+        sessionListener,
         ready: Promise.resolve(),
         dispose: async () => {
             output.dispose();
@@ -85,7 +77,7 @@ const makePlainCoordinator = (
     };
 };
 
-/** Construct the ordered progress and agent presentation services for a run. */
+/** Construct the ordered progress and session presentation services for a run. */
 export const makeProgressCoordinator = (
     options: ProgressCoordinatorOptions,
 ): ProgressCoordinator =>

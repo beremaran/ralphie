@@ -1,4 +1,4 @@
-import type { AgentEventListener } from "../../agent/ports.ts";
+import type { SessionEventListener } from "../../harness/ports.ts";
 import type { PiAgentService } from "../ports.ts";
 import { FileCredentialStore } from "./auth.ts";
 import { makePiAgentClient } from "./client.ts";
@@ -17,7 +17,7 @@ import { makePiModels, piModelCatalog, readPiDefaultModel } from "./models.ts";
  */
 export const makePiAgentService = (
     config: PiAgentConfig = {},
-    eventListener?: AgentEventListener,
+    eventListener?: SessionEventListener,
 ): PiAgentService => ({
     start: async () => {
         const agentDir = config.agentDir ?? resolvePiAgentDir();

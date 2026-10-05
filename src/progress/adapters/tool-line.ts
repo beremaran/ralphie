@@ -3,31 +3,6 @@ const oneLine = (value: string): string => value.replace(/\s+/g, " ").trim();
 const preview = (value: string, limit = 120): string =>
     value.length <= limit ? value : `${value.slice(0, limit - 1)}…`;
 
-/** Extract plain text from a tool result, message part, or string value. */
-export const contentText = (value: unknown): string | undefined => {
-    if (typeof value === "string") return value;
-    if (Array.isArray(value)) {
-        const parts = value.flatMap((part) => {
-            if (
-                typeof part === "object" &&
-                part !== null &&
-                typeof (part as { text?: unknown }).text === "string"
-            ) {
-                return [(part as { text: string }).text];
-            }
-            return [];
-        });
-        return parts.length === 0 ? undefined : parts.join("\n");
-    }
-    if (typeof value === "object" && value !== null) {
-        const text = (value as { text?: unknown }).text;
-        if (typeof text === "string") return text;
-        const content = (value as { content?: unknown }).content;
-        return content === undefined ? undefined : contentText(content);
-    }
-    return undefined;
-};
-
 const argumentsRecord = (args: unknown): Record<string, unknown> =>
     (args ?? {}) as Record<string, unknown>;
 

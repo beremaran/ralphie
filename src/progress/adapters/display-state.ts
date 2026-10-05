@@ -1,7 +1,4 @@
-import type {
-    AgentEventContext,
-    AgentSessionEvent,
-} from "../../agent/ports.ts";
+import type { SessionEvent } from "../../harness/ports.ts";
 import { stripTerminalControls } from "../../shared/terminal.ts";
 import type {
     ProgressEvent,
@@ -215,42 +212,6 @@ const normalizedState = (state: DisplayState): DisplayState => ({
         DISPLAY_ACTIVITY_LABELS[state.activity],
     ),
 });
-
-const nestedTimestamp = (value: unknown): number | undefined => {
-    const direct = timestampValue(value);
-    if (direct !== undefined) return direct;
-    const record = recordValue(value);
-    const timestamp = timestampValue(record.timestamp);
-    if (timestamp !== undefined) return timestamp;
-    const created = timestampValue(record.created);
-    if (created !== undefined) return created;
-    return record.time === undefined ? undefined : nestedTimestamp(record.time);
-};
-
-const timestampFromPi = (
-    event: AgentSessionEvent,
-    context: AgentEventContext,
-    clock: DisplayClock,
-): number => {
-    const eventRecord = recordValue(event);
-    const message = eventRecord.message;
-    const partial = recordValue(eventRecord.assistantMessageEvent).partial;
-    const result = eventRecord.result;
-    const contextTimestamp = (recordValue(context) as { timestamp?: unknown })
-        .timestamp;
-    for (const candidate of [
-        eventRecord.timestamp,
-        eventRecord.time,
-        message,
-        partial,
-        result,
-        contextTimestamp,
-    ]) {
-        const timestamp = nestedTimestamp(candidate);
-        if (timestamp !== undefined) return timestamp;
-    }
-    return clockValue(clock);
-};
 
 const repositoryFor = (
     state: DisplayState,
@@ -543,93 +504,39 @@ const change = (activity: DisplayActivity, label?: string): ActivityChange => ({
     ...(label === undefined ? {} : { label }),
 });
 
-const messageToolName = (
-    event: Extract<AgentSessionEvent, { type: "message_update" }>,
-): string | undefined =>
-    stringValue(
-        recordValue(recordValue(event.assistantMessageEvent).toolCall).name,
-    );
-
-const messageActivity = (
-    event: Extract<AgentSessionEvent, { type: "message_update" }>,
-): ActivityChange | undefined => {
-    const kind = event.assistantMessageEvent.type;
-    if (
-        kind === "thinking_start" ||
-        kind === "thinking_delta" ||
-        kind === "thinking_end"
-    ) {
-        return change("thinking");
-    }
-    if (kind === "text_start" || kind === "text_delta" || kind === "text_end") {
-        return change("responding");
-    }
-    if (
-        kind === "toolcall_start" ||
-        kind === "toolcall_delta" ||
-        kind === "toolcall_end"
-    ) {
-        const toolName = messageToolName(event);
-        return toolName === undefined
-            ? change("tool")
-            : change("tool", activityLabelFor("tool", toolName));
-    }
-    if (kind === "start") return change("thinking");
-    if (kind === "done") return change("waiting");
-    if (kind === "error") return change("waiting");
-    return undefined;
-};
-
-const lifecycleActivity = (
-    event: AgentSessionEvent,
-): ActivityChange | undefined => {
+const sessionActivity = (event: SessionEvent): ActivityChange | undefined => {
     switch (event.type) {
-        case "agent_start":
-        case "turn_start":
+        case "session_started":
             return change("thinking");
-        case "turn_end":
-        case "agent_end":
+        case "assistant_text":
+            return change(
+                event.kind === "thinking" ? "thinking" : "responding",
+            );
+        case "tool_call":
+            return change("tool", activityLabelFor("tool", event.name));
+        case "tool_result":
+            // The harness hands the tool output back to the model.
+            return change("thinking");
+        case "error":
+        case "session_finished":
             return change("waiting");
-        default:
+        case "usage":
             return undefined;
     }
 };
 
-const agentActivity = (
-    event: AgentSessionEvent,
-): ActivityChange | undefined => {
-    if (event.type === "message_update") return messageActivity(event);
-    if (event.type === "tool_execution_start") {
-        return change("tool", activityLabelFor("tool", event.toolName));
-    }
-    if (event.type === "tool_execution_update") {
-        return change("tool", activityLabelFor("tool", event.toolName));
-    }
-    if (event.type === "tool_execution_end") {
-        return change("waiting");
-    }
-    if (event.type === "message_start") {
-        return recordValue(event.message).role === "assistant"
-            ? change("responding")
-            : change("waiting");
-    }
-    if (event.type === "message_end") return change("waiting");
-    return lifecycleActivity(event);
-};
-
-export const reduceAgentSessionEvent = (
+export const reduceSessionEvent = (
     currentState: DisplayState | undefined,
-    event: AgentSessionEvent,
-    context: AgentEventContext = { sessionID: "", directory: "" },
+    event: SessionEvent,
     now?: DisplayClock | DisplayStateOptions,
 ): DisplayState => {
     const state = normalizedState(currentState ?? makeInitialDisplayState());
-    const activity = agentActivity(event);
+    const activity = sessionActivity(event);
     if (activity === undefined) return state;
     const timestamp =
         state.stage === undefined || state.stageStartedAt !== undefined
             ? undefined
-            : timestampFromPi(event, context, clockFrom(now));
+            : clockValue(clockFrom(now));
     return {
         ...state,
         ...(timestamp === undefined ? {} : { stageStartedAt: timestamp }),
@@ -640,47 +547,3 @@ export const reduceAgentSessionEvent = (
         ),
     };
 };
-
-export function updateDisplayState(
-    state: DisplayState | undefined,
-    update: ProgressUpdate | ProgressEvent,
-    now?: DisplayClock | DisplayStateOptions,
-): DisplayState;
-export function updateDisplayState(
-    state: DisplayState | undefined,
-    event: AgentSessionEvent,
-    context: AgentEventContext,
-    now?: DisplayClock | DisplayStateOptions,
-): DisplayState;
-export function updateDisplayState(
-    state: DisplayState | undefined,
-    event: AgentSessionEvent,
-    now?: DisplayClock | DisplayStateOptions,
-): DisplayState;
-export function updateDisplayState(
-    state: DisplayState | undefined,
-    input: ProgressUpdate | ProgressEvent | AgentSessionEvent,
-    contextOrNow?: AgentEventContext | DisplayClock | DisplayStateOptions,
-    now?: DisplayClock | DisplayStateOptions,
-): DisplayState {
-    if ("type" in input) {
-        const hasContext =
-            typeof contextOrNow === "object" &&
-            contextOrNow !== null &&
-            "sessionID" in contextOrNow &&
-            "directory" in contextOrNow;
-        const context = hasContext
-            ? (contextOrNow as AgentEventContext)
-            : undefined;
-        const clock = hasContext
-            ? now
-            : (contextOrNow as DisplayClock | DisplayStateOptions | undefined);
-        return reduceAgentSessionEvent(
-            state,
-            input,
-            context ?? { sessionID: "", directory: "" },
-            clock,
-        );
-    }
-    return reduceProgressUpdate(state, input, contextOrNow as DisplayClock);
-}
