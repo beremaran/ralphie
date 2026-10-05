@@ -24,8 +24,9 @@ Run the latest release without installing globally:
 bunx @beremaran/ralphie --version
 ```
 
-Create `~/.config/ralphie/config.yaml` (an empty file is valid; see
-[Configuration](./docs/configuration.md)), then run the issue queue:
+Write a starter config with `bunx @beremaran/ralphie init` (it detects the
+harnesses on PATH; see [Configuration](./docs/configuration.md)), then run the
+issue queue:
 
 ```bash
 bunx @beremaran/ralphie owner/repository
