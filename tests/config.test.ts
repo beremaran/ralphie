@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { IssueOrder, IssueSort } from "../src/github/domain.ts";
 import {
     temporaryDirectory,
+    workflowErrorFor,
     workflowOptionsFor,
     writeTemporaryFile,
 } from "./shared/config-fixture.ts";
@@ -235,9 +236,7 @@ repos:
     });
 
     test("rejects an invalid repository before reading config", async () => {
-        const error = await workflowOptionsFor(["not a repo"]).catch(
-            (caught: unknown) => caught as Error,
-        );
+        const error = await workflowErrorFor(["not a repo"]);
 
         expect(error.message).toBe(
             "Invalid GitHub repository: not a repo. Expected owner/repository.",
@@ -250,12 +249,12 @@ const failureFor = async (
     extraArgs: ReadonlyArray<string> = [],
 ): Promise<{ readonly config: string; readonly message: string }> => {
     const config = await writeTemporaryFile(yaml);
-    const error = await workflowOptionsFor([
+    const error = await workflowErrorFor([
         "acme/api",
         "--config",
         config,
         ...extraArgs,
-    ]).catch((caught: unknown) => caught as Error);
+    ]);
     return { config, message: error.message };
 };
 
@@ -296,7 +295,9 @@ repos:
     });
 
     test("rejects repos keys that are not owner/repo", async () => {
-        const { message } = await failureFor("repos:\n  api:\n    branch: main\n");
+        const { message } = await failureFor(
+            "repos:\n  api:\n    branch: main\n",
+        );
 
         expect(message).toContain("  repos.api: expected an owner/repo key");
     });
@@ -388,9 +389,9 @@ describe("configuration location", () => {
     test("fails clearly when there is no config file", async () => {
         const home = await temporaryDirectory();
 
-        const error = await workflowOptionsFor(["acme/api"], {
+        const error = await workflowErrorFor(["acme/api"], {
             homeDirectory: home,
-        }).catch((caught: unknown) => caught as Error);
+        });
 
         expect(error.message).toBe(
             `No configuration file found at ${join(home, ".config", "ralphie", "config.yaml")}. ` +
@@ -401,11 +402,7 @@ describe("configuration location", () => {
     test("fails when the --config file does not exist", async () => {
         const missing = join(await temporaryDirectory(), "missing.yaml");
 
-        const error = await workflowOptionsFor([
-            "acme/api",
-            "--config",
-            missing,
-        ]).catch((caught: unknown) => caught as Error);
+        const error = await workflowErrorFor(["acme/api", "--config", missing]);
 
         expect(error.message).toBe(`Configuration file not found: ${missing}.`);
     });

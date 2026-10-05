@@ -4,6 +4,7 @@ import { IssueOrder, IssueSort } from "../github/domain.ts";
 import { DEFAULT_MAX_DECOMPOSITION_DEPTH } from "../issues/domain/decomposition-markdown.ts";
 import {
     DEFAULT_IMPLEMENTATION_ATTEMPTS,
+    MAX_REVIEW_ROUNDS,
     REVIEW_ITERATION_LIMIT,
 } from "../issues/domain/stage.ts";
 
@@ -52,7 +53,9 @@ const limitsSchema = z.strictObject({
     implementationAttempts: positiveInteger.default(
         DEFAULT_IMPLEMENTATION_ATTEMPTS,
     ),
-    reviewRounds: positiveInteger.default(REVIEW_ITERATION_LIMIT),
+    reviewRounds: positiveInteger
+        .max(MAX_REVIEW_ROUNDS)
+        .default(REVIEW_ITERATION_LIMIT),
     verificationFixes: positiveInteger.default(REVIEW_ITERATION_LIMIT),
     maxDecompositionDepth: positiveInteger.default(
         DEFAULT_MAX_DECOMPOSITION_DEPTH,

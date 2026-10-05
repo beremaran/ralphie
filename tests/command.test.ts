@@ -6,6 +6,7 @@ import { RalphieExitCode } from "../src/workflow/exit-code.ts";
 import { RalphieError } from "../src/shared/error.ts";
 import {
     recordingFactories,
+    workflowErrorFor,
     workflowOptionsFor,
     writeTemporaryFile,
 } from "./shared/config-fixture.ts";
@@ -147,11 +148,11 @@ describe("native CLI parser", () => {
             "notifications:\n  label: needs-attention\n",
         );
 
-        const error = await workflowOptionsFor([
+        const error = await workflowErrorFor([
             "owner/repository",
             "--config",
             config,
-        ]).catch((caught: unknown) => caught as Error);
+        ]);
 
         expect(error.message).toContain(
             "  notifications.label: requires notifications.enabled: true",

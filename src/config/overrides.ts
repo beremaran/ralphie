@@ -13,9 +13,7 @@ export const isMapping = (value: unknown): value is ConfigMapping =>
     typeof value === "object" && value !== null && !Array.isArray(value);
 
 /** Render a config path the way `--set` accepts it, quoting keys that need it. */
-export const formatConfigPath = (
-    path: ReadonlyArray<PropertyKey>,
-): string => {
+export const formatConfigPath = (path: ReadonlyArray<PropertyKey>): string => {
     if (path.length === 0) return "(top level)";
     return path
         .map((segment, index) => {
@@ -57,7 +55,10 @@ const parsePath = (path: string, text: string): ReadonlyArray<string> => {
         const match = segment.exec(path);
         const key = match?.[1] ?? match?.[2];
         if (key === undefined) {
-            throw invalidSet(text, `cannot read a key at "${path.slice(index)}"`);
+            throw invalidSet(
+                text,
+                `cannot read a key at "${path.slice(index)}"`,
+            );
         }
         segments.push(key);
         index = segment.lastIndex;

@@ -115,10 +115,7 @@ const resolveRepository = async (
     return parseRepositorySlug(`${owner}/${argument.name}`).slug;
 };
 
-const repositoryEntry = (
-    repos: unknown,
-    repository: string,
-): ConfigMapping => {
+const repositoryEntry = (repos: unknown, repository: string): ConfigMapping => {
     if (!isMapping(repos)) return {};
     const wanted = repository.toLowerCase();
     const match = Object.entries(repos).find(

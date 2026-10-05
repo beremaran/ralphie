@@ -34,7 +34,12 @@ describe("GitHub viewer", () => {
 
             const error = await makeGitHubViewerService(runner)
                 .login()
-                .catch((caught: unknown) => caught as Error);
+                .then(
+                    () => {
+                        throw new Error("expected login to reject");
+                    },
+                    (caught: unknown) => caught as Error,
+                );
 
             expect(error).toBeInstanceOf(Error);
             expect(error.message).toContain("defaultOwner");

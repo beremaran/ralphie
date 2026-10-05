@@ -44,7 +44,7 @@ export const recordingFactories = (
 ): CommandFactories => ({
     makeCoordinator: () => ({
         progress: makeTestProgressRecorder([]),
-        piListener: () => {},
+        sessionListener: () => {},
         ready: Promise.resolve(),
         dispose: async () => {},
     }),
@@ -88,3 +88,15 @@ export const workflowOptionsFor = async (
     if (captured === undefined) throw new Error("workflow did not run");
     return captured;
 };
+
+/** Run the command and return the error it rejects with. */
+export const workflowErrorFor = async (
+    args: ReadonlyArray<string>,
+    input: Parameters<typeof workflowOptionsFor>[1] = {},
+): Promise<Error> =>
+    await workflowOptionsFor(args, input).then(
+        () => {
+            throw new Error("expected the command to reject");
+        },
+        (caught: unknown) => caught as Error,
+    );
