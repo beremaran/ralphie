@@ -156,8 +156,7 @@ Today's sessions map onto the roles as follows: the pre-flight session and
 needs-attention confirmation are the `preflight`,
 implementation is the `implementer`, repair sessions are the `fixer`, review
 is the `standards-reviewer`, issue-resolution checks are the
-`resolution-verifier`, decomposition is the `decomposer`, and commit-message
-generation runs under the `implementer` assignment with read-only access. The
+`resolution-verifier`, and decomposition is the `decomposer`. The
 `spec-reviewer` is assigned but not yet used.
 
 Editing roles (`implementer`, `fixer`) run in the harness's `safe` mode and

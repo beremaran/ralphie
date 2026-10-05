@@ -33,7 +33,6 @@ export type ProgressStage =
     | "review-fix"
     | "review-exhaustion"
     | "checkout-restore"
-    | "commit-message"
     | "commit"
     | "push"
     | "decomposition"
