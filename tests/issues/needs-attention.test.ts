@@ -51,6 +51,7 @@ import {
     type GroundingDecision,
 } from "../../src/issues/domain/decisions.ts";
 import {
+    implementationResultSchema,
     makeImplementationExecutorService,
     type ImplementationExecutorService,
 } from "../../src/issues/app/implementation-executor.ts";
@@ -134,12 +135,20 @@ const attentionDecision = {
 
 const confirmedVerifierOutput: GroundingDecision = attentionDecision;
 
-const implementationChanged = {
-    status: "changed",
-    summary: "Implemented the requested behavior.",
-    validation: ["The focused regression test passes."],
-};
 const commitMessage = { subject: "Implement the requested behavior" };
+const implementationChanged = {
+    status: "done",
+    summary: "Implemented the requested behavior.",
+    commitMessage,
+};
+const implementationHandoff = {
+    status: "needs_attention",
+    summary: "The premise is outdated.",
+    needsAttention: {
+        reason: "outdated_premise",
+        questions: ["Is the old API still wanted?"],
+    },
+};
 const approvedReview = {
     verdict: ReviewVerdict.Approved,
     summary: "The staged changes address the issue.",
@@ -549,6 +558,7 @@ const makeImplementationHarness = async (
         ...options.budgets,
     };
     const trace: string[] = [];
+    const commitMessages: unknown[] = [];
     const operations: GitIssueOperationsService = {
         stageAll: async () => {
             trace.push("ops:stageAll");
@@ -561,7 +571,8 @@ const makeImplementationHarness = async (
             trace.push("ops:hasStaged");
             return true;
         },
-        commit: async () => {
+        commit: async (_path, message) => {
+            commitMessages.push(message);
             trace.push("ops:commit");
             return { sha: "c".repeat(40), treeSha: "t".repeat(40) };
         },
@@ -615,6 +626,7 @@ const makeImplementationHarness = async (
         verifyCalls,
         recoveryInputs,
         recoveryTrace,
+        commitMessages,
     };
 };
 
@@ -1429,10 +1441,6 @@ describe("implementation executor needs-attention routing", () => {
                     titlePrefix: "Review issue #42",
                     result: { structured: approvedReview },
                 },
-                {
-                    titlePrefix: "Generate commit message for issue #42",
-                    result: { structured: commitMessage },
-                },
             ],
         });
         const outcome = await harness.executor.execute({
@@ -1471,10 +1479,6 @@ describe("implementation executor needs-attention routing", () => {
                     {
                         titlePrefix: "Review issue #42",
                         result: { structured: approvedReview },
-                    },
-                    {
-                        titlePrefix: "Generate commit message for issue #42",
-                        result: { structured: commitMessage },
                     },
                 ],
             });
@@ -1560,23 +1564,12 @@ describe("implementation executor needs-attention routing", () => {
         expect(harness.trace).not.toContain("ops:push");
     });
 
-    test("confirms a commit-message signal before commit and push but never decomposes", async () => {
+    test("routes a needs_attention implementer result to a hand-off before any stage or commit", async () => {
         const harness = await makeImplementationHarness({
             scripts: [
                 {
                     titlePrefix: "Implement issue #42",
-                    result: { structured: implementationChanged },
-                },
-                {
-                    titlePrefix: "Review issue #42",
-                    result: { structured: approvedReview },
-                },
-                {
-                    titlePrefix: "Generate commit message for issue #42",
-                    result: {
-                        structured: commitMessage,
-                        needsAttention: attentionRequest,
-                    },
+                    result: { structured: implementationHandoff },
                 },
                 {
                     titlePrefix: VERIFIER_TITLE,
@@ -1592,11 +1585,53 @@ describe("implementation executor needs-attention routing", () => {
             kind: IssueExecutionOutcomeKind.NeedsAttention,
             diagnosticsPath: "/diag/needs-attention",
         });
-        expect(verifierPromptsOf(harness.prompts)).toHaveLength(1);
         expect(harness.recoveryInputs).toHaveLength(1);
+        expect(harness.recoveryInputs[0]?.request.reason).toBe(
+            "outdated_premise",
+        );
+        expect(harness.trace).not.toContain("ops:stageAll");
         expect(harness.trace).not.toContain("ops:commit");
-        expect(harness.trace).not.toContain("ops:push");
-        expect(harness.trace).toContain("ops:stageAll");
+    });
+
+    test("commits with the implementer's message and runs no commit-message session", async () => {
+        const harness = await makeImplementationHarness({
+            scripts: [
+                {
+                    titlePrefix: "Implement issue #42",
+                    result: { structured: implementationChanged },
+                },
+                {
+                    titlePrefix: "Review issue #42",
+                    result: { structured: approvedReview },
+                },
+            ],
+        });
+        await harness.executor.execute({
+            context: harness.context,
+            artifacts: harness.store,
+        });
+        expect(harness.commitMessages).toEqual([commitMessage]);
+        expect(
+            harness.prompts.some(({ title }) =>
+                title.startsWith("Generate commit message"),
+            ),
+        ).toBe(false);
+    });
+
+    test("rejects a done result without a commit message or an over-long subject", () => {
+        expect(
+            implementationResultSchema.safeParse({
+                status: "done",
+                summary: "x",
+            }).success,
+        ).toBe(false);
+        expect(
+            implementationResultSchema.safeParse({
+                status: "done",
+                summary: "x",
+                commitMessage: { subject: "a".repeat(73) },
+            }).success,
+        ).toBe(false);
     });
 
     test("review exhaustion returns Escalated after the full iteration budget", async () => {
