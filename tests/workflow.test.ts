@@ -206,6 +206,12 @@ const testRuntime = (
         readStagedBinaryDiff: async () => "",
         hasStagedChanges: async () => false,
         commit: async () => ({ sha: "a".repeat(40), treeSha: "b".repeat(40) }),
+        commitCandidate: async () => ({
+            sha: "c".repeat(40),
+            treeSha: "b".repeat(40),
+        }),
+        readRangeDiff: async () => "",
+        squashCandidates: async () => {},
         push: async (_path, branch) => {
             calls.push(`pushBranch:${branch}`);
         },

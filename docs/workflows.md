@@ -81,15 +81,32 @@ flowchart TD
 4. Run the configured deterministic verification commands, when any. If a
    command exits non-zero, give its bounded output and the staged diff to a
    fresh fix session, then restage and retry up to `limits.verificationFixes` times (default five).
-5. Ask a separate session for a schema-validated review after verification
-   passes or is skipped (no `verify` commands configured).
-6. If changes are requested, give the review to a fresh fix session and repeat
-   staging and review.
-7. Stop after approval or `limits.reviewRounds` review attempts (default five). Reverify immediately before
-   commit; if repair changes an approved tree, review the repaired tree again.
-8. Commit the changes with the implementer's commit message, validated when the
-   result is received (subject non-empty and at most 72 characters, optional body). No separate commit-message session runs.
-9. Recheck the remote and push the commit without force, then close the
+5. After verification passes or is skipped (no `verify` commands configured),
+   create a local candidate commit on top of the checkpoint. Candidate commits
+   are never pushed.
+6. Run the review gate: a standards reviewer and a spec reviewer start in
+   parallel as read-only sessions on the checkpoint-to-candidate range, using
+   the vendored `/code-review` axes. Read-only Claude sessions have no shell,
+   so Ralphie puts the fixed point, commit list and range diff in each prompt;
+   the reviewers read other files with their file tools. The standards reviewer
+   gets the repository's standards sources (`AGENTS.md`, `CLAUDE.md`,
+   `CONTRIBUTING.md`, `CODING_STANDARDS.md`, `GLOSSARY.md`, `docs/adr`,
+   `docs/agents`) and the smell baseline; the spec reviewer gets the Agent
+   Brief, or the issue body when there is none. Each returns structured
+   findings and Ralphie computes the verdict. A hard documented-standard
+   violation and any missing, partial, wrong or scope-creep spec finding
+   block. Smells never block.
+7. If the gate blocks, give the findings to a fresh fix session, restage,
+   reverify and add another candidate commit, then review again.
+8. Stop after approval or `limits.reviewRounds` review attempts (default five).
+   On approval, squash all candidate commits (soft reset to the checkpoint)
+   and reverify the final tree. If repair changes the approved tree, review the
+   repaired tree again.
+9. Create the single issue commit with the implementer's commit message,
+   validated when the result is received (subject non-empty and at most 72
+   characters, optional body). No separate commit-message session runs. Exactly
+   one created commit is delivered per issue.
+10. Recheck the remote and push the commit without force, then close the
    source issue after the push is verified.
 
 When implementation produces no changes, a fresh read-only session must prove

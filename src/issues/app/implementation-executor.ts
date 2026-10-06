@@ -9,7 +9,8 @@ import {
     buildImplementationPrompt,
     buildImplementationRetryPrompt,
     buildReviewFixPrompt,
-    buildReviewPrompt,
+    buildSpecReviewPrompt,
+    buildStandardsReviewPrompt,
     buildVerificationFixPrompt,
 } from "../../agent/prompts.ts";
 import { requestStructuredOutput } from "../../agent/structured-output.ts";
@@ -20,7 +21,10 @@ import {
     type NeedsAttentionRequest,
 } from "../../agent/task-session.ts";
 import { z } from "zod";
-import { skillInvocation } from "../../harness/app/skill-injection.ts";
+import {
+    skillInvocation,
+    skillLocation,
+} from "../../harness/app/skill-injection.ts";
 import {
     type ProgressStage,
     type ProgressReporterService,
@@ -38,9 +42,13 @@ import {
     commitMessageDecisionSchema,
     type IssueResolutionDecision,
     IssueResolutionStatus,
-    reviewDecisionSchema,
     ReviewVerdict,
 } from "../domain/decisions.ts";
+import {
+    combineReviews,
+    specReviewSchema,
+    standardsReviewSchema,
+} from "../domain/review-gate.ts";
 import { type IssueRecoveryService, type ReviewAttempt } from "./recovery.ts";
 import {
     DEFAULT_IMPLEMENTATION_ATTEMPTS,
@@ -80,6 +88,17 @@ type VerificationAttempt =
           readonly status: "repairable";
           readonly error: VerificationCommandError;
       };
+
+/**
+ * The mutable view of the review loop's checkout: where HEAD is (the
+ * checkpoint, or the newest local candidate commit), the invariant sessions
+ * must leave intact, and the candidate subjects so far.
+ */
+type ReviewState = {
+    head: string;
+    invariant: { readonly branch: string; readonly head: string };
+    readonly candidateSubjects: string[];
+};
 
 const sameBlockingFindings = (
     previous: ReviewAttempt | undefined,
@@ -614,67 +633,190 @@ export const makeImplementationExecutorService = (
               };
     };
 
+    const candidateMessage = async (
+        input: WorkflowExecutorInput,
+        state: ReviewState,
+        attempt: number,
+    ): Promise<CommitMessageDecision> =>
+        state.candidateSubjects.length === 0
+            ? await input.artifacts.read(
+                  IssueArtifactKind.CommitMessageDecision,
+              )
+            : { subject: `Address review findings (round ${attempt})` };
+
+    /** Commit the verified staged tree as a local candidate; never pushed. */
+    const commitCandidate = async (
+        input: WorkflowExecutorInput,
+        checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
+        state: ReviewState,
+        attempt: number,
+    ): Promise<void> => {
+        const { context } = input;
+        const message = await candidateMessage(input, state, attempt);
+        const candidate = await stage(
+            progress,
+            input,
+            "commit",
+            `Creating candidate commit (attempt ${attempt}/${reviewBudget(context)})...`,
+            () => operations.commitCandidate(context.repositoryPath, message),
+            "Candidate commit created locally.",
+            undefined,
+            { attempt, maxAttempts: reviewBudget(context) },
+        );
+        state.head = candidate.sha;
+        state.invariant = { branch: checkpoint.branch, head: candidate.sha };
+        state.candidateSubjects.push(message.subject);
+    };
+
+    /**
+     * Fold every candidate commit back into the index so the checkout is the
+     * checkpoint plus staged changes again (the shape recovery and the final
+     * commit expect). A no-op when no candidate exists.
+     */
+    const foldCandidates = async (
+        input: WorkflowExecutorInput,
+        checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
+        state: ReviewState,
+    ): Promise<void> => {
+        if (state.candidateSubjects.length === 0) return;
+        await operations.squashCandidates(
+            input.context.repositoryPath,
+            checkpoint.sha,
+        );
+        state.head = checkpoint.sha;
+        state.invariant = { branch: checkpoint.branch, head: checkpoint.sha };
+        state.candidateSubjects.length = 0;
+    };
+
+    const requestReview = <Output>(
+        input: WorkflowExecutorInput,
+        state: ReviewState,
+        request: {
+            readonly role: "standards-reviewer" | "spec-reviewer";
+            readonly title: string;
+            readonly prompt: string;
+            readonly schema: z.ZodType<Output>;
+        },
+    ) => {
+        const { context } = input;
+        return requestStructuredOutput(context.agent, {
+            directory: context.repositoryPath,
+            ...request,
+            repositoryInvariant: state.invariant,
+            verifyRepositoryInvariant: context.repositoryInvariant.verify,
+            progress,
+            progressStage: "review",
+            progressIssue: issueProgress(input).issue,
+            signal: context.signal,
+        });
+    };
+
+    /** Both axes run in parallel; a failure waits for its sibling before it propagates. */
+    const runBothReviews = async (
+        input: WorkflowExecutorInput,
+        checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
+        state: ReviewState,
+        attempt: number,
+        verificationEvidence: VerificationEvidence,
+        previousReviews: ReadonlyArray<ReviewAttempt>,
+    ) => {
+        const { context } = input;
+        const rangeDiff = await operations.readRangeDiff(
+            context.repositoryPath,
+            checkpoint.sha,
+            state.head,
+        );
+        const prompt = {
+            issue: context.issue,
+            repositoryPath: context.repositoryPath,
+            targetBranch: context.targetBranch,
+            fixedPoint: checkpoint.sha,
+            candidateSha: state.head,
+            rangeDiff,
+            commitSubjects: state.candidateSubjects,
+            verification: verificationEvidence,
+            previousReviews: previousReviews.map(({ decision }) => decision),
+            skillsDirectory: skillLocation(
+                context.agent.roles["standards-reviewer"].harness,
+            ),
+        };
+        const [standards, spec] = await Promise.allSettled([
+            requestReview(input, state, {
+                role: "standards-reviewer",
+                title: `Review standards for issue #${context.issue.number} (attempt ${attempt})`,
+                prompt: buildStandardsReviewPrompt(prompt),
+                schema: standardsReviewSchema,
+            }),
+            requestReview(input, state, {
+                role: "spec-reviewer",
+                title: `Review spec for issue #${context.issue.number} (attempt ${attempt})`,
+                prompt: buildSpecReviewPrompt({
+                    ...prompt,
+                    skillsDirectory: skillLocation(
+                        context.agent.roles["spec-reviewer"].harness,
+                    ),
+                }),
+                schema: specReviewSchema,
+            }),
+        ]);
+        if (standards.status === "rejected") throw standards.reason;
+        if (spec.status === "rejected") throw spec.reason;
+        return { standards: standards.value, spec: spec.value };
+    };
+
     const runReviewAttempt = async (
         input: WorkflowExecutorInput,
-        invariant: { readonly branch: string; readonly head: string },
+        state: ReviewState,
         attempt: number,
         verificationEvidence: VerificationEvidence,
         previousReviews: ReadonlyArray<ReviewAttempt>,
         checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
     ): Promise<ReviewAttempt | WorkflowExecutorResult> => {
         const { context } = input;
-        const stagedDiff = await operations.readStagedBinaryDiff(
-            context.repositoryPath,
-        );
-        const reviewResult = await stage(
+        await commitCandidate(input, checkpoint, state, attempt);
+        const reviews = await stage(
             progress,
             input,
             "review",
-            `Reviewing staged changes (attempt ${attempt}/${reviewBudget(context)})...`,
+            `Reviewing candidate commits on both axes (attempt ${attempt}/${reviewBudget(context)})...`,
             () =>
-                requestStructuredOutput(context.agent, {
-                    directory: context.repositoryPath,
-                    title: `Review issue #${context.issue.number} (attempt ${attempt})`,
-                    prompt: buildReviewPrompt({
-                        issue: context.issue,
-                        repositoryPath: context.repositoryPath,
-                        targetBranch: context.targetBranch,
-                        stagedDiff,
-                        verification: verificationEvidence,
-                        previousReviews: previousReviews.map(
-                            ({ decision }) => decision,
-                        ),
-                    }),
-                    schema: reviewDecisionSchema,
-                    role: "standards-reviewer",
-                    repositoryInvariant: invariant,
-                    verifyRepositoryInvariant:
-                        context.repositoryInvariant.verify,
-                    progress,
-                    progressStage: "review",
-                    progressIssue: issueProgress(input).issue,
-                    signal: context.signal,
-                }),
-            ({ output }) =>
-                `Review ${attempt}/${reviewBudget(context)}: ${output.verdict}.`,
+                runBothReviews(
+                    input,
+                    checkpoint,
+                    state,
+                    attempt,
+                    verificationEvidence,
+                    previousReviews,
+                ),
+            ({ standards, spec }) =>
+                `Review ${attempt}/${reviewBudget(context)}: ${
+                    combineReviews(standards.output, spec.output).verdict
+                }.`,
             undefined,
             { attempt, maxAttempts: reviewBudget(context) },
         );
-        const routed = await routeSignal(
-            input,
-            reviewResult.needsAttention,
-            checkpoint,
-        );
+        const signal =
+            reviews.standards.needsAttention ?? reviews.spec.needsAttention;
+        if (signal !== undefined)
+            await foldCandidates(input, checkpoint, state);
+        const routed = await routeSignal(input, signal, checkpoint);
         if (routed !== undefined) return routed;
         return {
             attempt,
-            sessionID: reviewResult.sessionID,
+            sessionID: `${reviews.standards.sessionID}+${reviews.spec.sessionID}`,
             stagedTreeSha: verificationEvidence.stagedTreeSha,
             verification: verificationEvidence,
-            decision: reviewResult.output,
+            decision: combineReviews(
+                reviews.standards.output,
+                reviews.spec.output,
+            ),
         };
     };
 
+    /**
+     * Deliver the approved work as exactly one created commit: the candidates
+     * were already folded away, so the staged tree is the approved tree.
+     */
     const commitApprovedReview = async (
         input: WorkflowExecutorInput,
         checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
@@ -749,13 +891,16 @@ export const makeImplementationExecutorService = (
 
     const applyReviewFix = async (
         input: WorkflowExecutorInput,
-        invariant: { readonly branch: string; readonly head: string },
+        checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
+        state: ReviewState,
         review: ReviewAttempt,
         attempt: number,
     ): Promise<WorkflowExecutorResult | ReviewFixOutcome> => {
         const { context } = input;
-        const currentDiff = await operations.readStagedBinaryDiff(
+        const currentDiff = await operations.readRangeDiff(
             context.repositoryPath,
+            checkpoint.sha,
+            state.head,
         );
         await stage(
             progress,
@@ -775,7 +920,7 @@ export const makeImplementationExecutorService = (
                         review: review.decision,
                         verification: review.verification,
                     }),
-                    repositoryInvariant: invariant,
+                    repositoryInvariant: state.invariant,
                     verifyRepositoryInvariant:
                         context.repositoryInvariant.verify,
                     progress,
@@ -821,9 +966,11 @@ export const makeImplementationExecutorService = (
     const exhaustReviews = async (
         input: WorkflowExecutorInput,
         checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
+        state: ReviewState,
         reviews: ReadonlyArray<ReviewAttempt>,
     ): Promise<WorkflowExecutorResult> => {
         const { context } = input;
+        await foldCandidates(input, checkpoint, state);
         const exhausted = await recovery.handleReviewExhaustion({
             runId: context.runId,
             repository: context.repository,
@@ -844,7 +991,7 @@ export const makeImplementationExecutorService = (
     const handleReviewDecision = async (
         input: WorkflowExecutorInput,
         checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
-        invariant: { readonly branch: string; readonly head: string },
+        state: ReviewState,
         review: ReviewAttempt,
         reviews: ReadonlyArray<ReviewAttempt>,
         attempt: number,
@@ -858,27 +1005,34 @@ export const makeImplementationExecutorService = (
             };
         }
         if (attempt === reviewBudget(input.context)) {
-            return await exhaustReviews(input, checkpoint, reviews);
+            return await exhaustReviews(input, checkpoint, state, reviews);
         }
         const fixOutcome = await applyReviewFix(
             input,
-            invariant,
+            checkpoint,
+            state,
             review,
             attempt,
         );
         return "kind" in fixOutcome ? fixOutcome : undefined;
     };
 
+    /**
+     * Approval folds the candidates into one staged tree, reverifies it, and
+     * only then creates the single commit. A verification repair that changes
+     * the approved tree sends the loop back for another review.
+     */
     const handleApprovedReview = async (
         input: WorkflowExecutorInput,
         checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
-        invariant: { readonly branch: string; readonly head: string },
+        state: ReviewState,
         review: ReviewAttempt,
         attempt: number,
     ): Promise<WorkflowExecutorResult | undefined> => {
+        await foldCandidates(input, checkpoint, state);
         const finalVerification = await ensureVerificationPassing(
             input,
-            invariant,
+            state.invariant,
         );
         if (!("status" in finalVerification)) return finalVerification;
         if (
@@ -914,7 +1068,7 @@ export const makeImplementationExecutorService = (
     const finishReviewAttempt = async (
         input: WorkflowExecutorInput,
         checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
-        invariant: { readonly branch: string; readonly head: string },
+        state: ReviewState,
         review: ReviewAttempt,
         reviews: ReadonlyArray<ReviewAttempt>,
         attempt: number,
@@ -924,14 +1078,14 @@ export const makeImplementationExecutorService = (
             ? await handleApprovedReview(
                   input,
                   checkpoint,
-                  invariant,
+                  state,
                   review,
                   attempt,
               )
             : await handleReviewDecision(
                   input,
                   checkpoint,
-                  invariant,
+                  state,
                   review,
                   reviews,
                   attempt,
@@ -945,17 +1099,22 @@ export const makeImplementationExecutorService = (
     ): Promise<WorkflowExecutorResult> => {
         const { context, artifacts } = input;
         const reviews: ReviewAttempt[] = [];
+        const state: ReviewState = {
+            head: checkpoint.sha,
+            invariant,
+            candidateSubjects: [],
+        };
         const maxRounds = reviewBudget(context);
         for (let attempt = 1; attempt <= maxRounds; attempt += 1) {
             checkSignal(context.signal);
             const verification = await ensureVerificationPassing(
                 input,
-                invariant,
+                state.invariant,
             );
             if (!("status" in verification)) return verification;
             const review = await runReviewAttempt(
                 input,
-                invariant,
+                state,
                 attempt,
                 verification.verification,
                 reviews,
@@ -968,7 +1127,7 @@ export const makeImplementationExecutorService = (
             const outcome = await finishReviewAttempt(
                 input,
                 checkpoint,
-                invariant,
+                state,
                 review,
                 reviews,
                 attempt,
