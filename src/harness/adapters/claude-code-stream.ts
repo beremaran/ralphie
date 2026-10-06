@@ -6,6 +6,12 @@ import {
     type JsonRecord,
     parseLine,
 } from "./json-record.ts";
+import {
+    blockEvent,
+    contentBlocks,
+    renderToolOutput,
+    type ToolUseShape,
+} from "./stream-blocks.ts";
 
 /** What Claude Code reported when the session ended. */
 export type ClaudeResult = {
@@ -29,21 +35,7 @@ export type ClaudeStreamSummary = {
     readonly result: ClaudeResult | undefined;
 };
 
-const contentBlocks = (message: unknown): readonly JsonRecord[] => {
-    const content = asRecord(message)?.content;
-    if (!Array.isArray(content)) return [];
-    return content.flatMap((block) => {
-        const record = asRecord(block);
-        return record === undefined ? [] : [record];
-    });
-};
-
-/** Text rendering of a tool result's content, which is a string or blocks. */
-const renderToolOutput = (content: unknown): string => {
-    if (typeof content === "string") return content;
-    if (!Array.isArray(content)) return "";
-    return content.map((part) => asString(asRecord(part)?.text) ?? "").join("");
-};
+const CLAUDE_TOOL_USE: ToolUseShape = { type: "tool_use", inputField: "input" };
 
 const usageEvent = (record: JsonRecord): TurnEvent | undefined => {
     const usage = asRecord(record.usage);
@@ -104,43 +96,14 @@ export const makeClaudeStreamReader = (input: {
     let assistantError: string | undefined;
     let result: ClaudeResult | undefined;
 
-    const blockEvent = (block: JsonRecord): TurnEvent | undefined => {
-        const text = asString(block.text) ?? "";
-        const thinking = asString(block.thinking) ?? "";
-        const id = asString(block.id);
-        const name = asString(block.name);
-        if (block.type === "text" && text !== "") {
-            return { type: "assistant_text", kind: "text", text, done: true };
-        }
-        if (block.type === "thinking" && thinking !== "") {
-            return {
-                type: "assistant_text",
-                kind: "thinking",
-                text: thinking,
-                done: true,
-            };
-        }
-        if (
-            block.type === "tool_use" &&
-            id !== undefined &&
-            name !== undefined
-        ) {
-            toolNames.set(id, name);
-            return {
-                type: "tool_call",
-                callId: id,
-                name,
-                input: asRecord(block.input) ?? {},
-            };
-        }
-        return undefined;
-    };
-
     const assistant = (record: JsonRecord): void => {
         assistantError = asString(record.error) ?? assistantError;
         for (const block of contentBlocks(record.message)) {
-            const event = blockEvent(block);
-            if (event !== undefined) input.onEvent(event);
+            const event = blockEvent(block, CLAUDE_TOOL_USE);
+            if (event === undefined) continue;
+            if (event.type === "tool_call")
+                toolNames.set(event.callId, event.name);
+            input.onEvent(event);
         }
     };
 

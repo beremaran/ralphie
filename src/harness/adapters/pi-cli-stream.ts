@@ -6,6 +6,12 @@ import {
     type JsonRecord,
     parseLine,
 } from "./json-record.ts";
+import {
+    blockEvent,
+    contentBlocks,
+    renderToolOutput,
+    type ToolUseShape,
+} from "./stream-blocks.ts";
 
 /** How the last assistant message of a pi run ended. */
 export type PiFinalMessage =
@@ -18,45 +24,9 @@ export type PiStreamSummary = {
     readonly final: PiFinalMessage | undefined;
 };
 
-const contentBlocks = (message: JsonRecord): readonly JsonRecord[] => {
-    const content = message.content;
-    if (!Array.isArray(content)) return [];
-    return content.flatMap((block) => {
-        const record = asRecord(block);
-        return record === undefined ? [] : [record];
-    });
-};
-
-const renderToolOutput = (result: unknown): string =>
-    contentBlocks(asRecord(result) ?? {})
-        .map((part) => asString(part.text) ?? "")
-        .join("");
-
-const blockEvent = (block: JsonRecord): TurnEvent | undefined => {
-    const text = asString(block.text) ?? "";
-    const thinking = asString(block.thinking) ?? "";
-    const id = asString(block.id);
-    const name = asString(block.name);
-    if (block.type === "text" && text !== "") {
-        return { type: "assistant_text", kind: "text", text, done: true };
-    }
-    if (block.type === "thinking" && thinking !== "") {
-        return {
-            type: "assistant_text",
-            kind: "thinking",
-            text: thinking,
-            done: true,
-        };
-    }
-    if (block.type === "toolCall" && id !== undefined && name !== undefined) {
-        return {
-            type: "tool_call",
-            callId: id,
-            name,
-            input: asRecord(block.arguments) ?? {},
-        };
-    }
-    return undefined;
+const PI_TOOL_CALL: ToolUseShape = {
+    type: "toolCall",
+    inputField: "arguments",
 };
 
 type Usage = {
@@ -101,7 +71,7 @@ export const makePiStreamReader = (input: {
 
     const assistantEnd = (message: JsonRecord): void => {
         for (const block of contentBlocks(message)) {
-            const event = blockEvent(block);
+            const event = blockEvent(block, PI_TOOL_CALL);
             if (event !== undefined) input.onEvent(event);
         }
         addUsage(message.usage);
@@ -131,7 +101,7 @@ export const makePiStreamReader = (input: {
             type: "tool_result",
             callId,
             name: asString(record.toolName) ?? "unknown",
-            output: renderToolOutput(record.result),
+            output: renderToolOutput(asRecord(record.result)?.content),
             isError: record.isError === true,
         });
     };
