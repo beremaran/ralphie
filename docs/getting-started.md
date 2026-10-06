@@ -32,11 +32,9 @@ mutate GitHub; Ralphie's deterministic services do (see the
 [safety model](safety.md#agent-and-mutation-boundaries)).
 
 For interactive GitHub authentication, run `gh auth login` and verify the
-selected account with `gh auth status`. For unattended runs, set `GH_TOKEN`
-(preferred) or `GITHUB_TOKEN` (fallback) in the process environment. The
-credential is supplied as an input and does not need to be printed or exposed;
-a mounted GitHub CLI profile is not required when an environment token is
-provided. This contract covers `github.com` only.
+selected account with `gh auth status`. For unattended runs, supply a token
+through the environment as described under
+[Environment variables](cli-reference.md#environment-variables).
 
 Ralphie only works on open issues labelled `ready-for-agent` (the label name
 is configurable). Label at least one issue before the first run, or enable
@@ -98,12 +96,8 @@ For a source checkout, use the source entry point instead (Bun required):
 bun run index.ts --version
 ```
 
-`ralphie --version` prints only the release version. For automation,
-`ralphie --version --output json` prints a stable object containing `version`
-and `commitSha`. Both forms work without a repository, GitHub credentials, or
-model configuration. Release builds embed the immutable commit SHA supplied by
-the build entry point; local builds use the documented `local` commit sentinel
-when no release SHA is supplied.
+The output forms are described under
+[Version and help](cli-reference.md#version-and-help).
 
 ## Target-repository verification dependencies
 

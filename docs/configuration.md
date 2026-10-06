@@ -94,6 +94,8 @@ labels:
   ready-for-agent: ready-for-agent
   ready-for-human: ready-for-human
   wontfix: wontfix
+skills:
+  dir: ./my-skills
 limits:
   implementationAttempts: 3
   reviewRounds: 5
@@ -113,7 +115,7 @@ repos:
 ```
 
 Every key is optional. The values above are the defaults, except
-`defaultOwner`, `branch`, `verify`, and `limits.maxBudgetUsd`, which have none.
+`defaultOwner`, `branch`, `verify`, `skills.dir`, and `limits.maxBudgetUsd`, which have none.
 
 ### Top level
 
@@ -121,7 +123,7 @@ Every key is optional. The values above are the defaults, except
 | --- | --- | --- |
 | `defaultOwner` | none | Owner added to a bare `repo` argument. Top level only. |
 | `approval` | `safe` | Approval mode of the editing roles (`implementer`, `fixer`): `safe` or `yolo`. Overridable per repository and per harness. See [Approval modes](safety.md#approval-modes). |
-| `workspace` | `~/.ralphie` | Root directory for repository checkouts and run artifacts. Ralphie removes the workspace recursively before preparation and after a successful run, subject to protected-path checks; use a path dedicated to Ralphie (see [Safety](safety.md#workspace-risk)). Overridable per repository. |
+| `workspace` | `~/.ralphie` | Root directory for repository checkouts and run artifacts. Ralphie deletes this directory; use a path dedicated to Ralphie (see [Workspace risk](safety.md#workspace-risk)). Overridable per repository. |
 | `repos` | none | Per-repository overrides, keyed by `owner/repo`. Top level only. |
 
 ### `harnesses` and `roles`
@@ -239,7 +241,7 @@ All limits are positive; counts are integers.
 ### Repository entries
 
 Each `repos."owner/repo"` entry accepts `workspace`, `approval`, `harnesses`, `roles`,
-`intake`, `triage`, `labels`, and `limits` (overriding the top level for that repository
+`intake`, `triage`, `labels`, `skills`, and `limits` (overriding the top level for that repository
 only) plus two keys that exist only here:
 
 | Key | Default | Description |

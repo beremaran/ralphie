@@ -76,8 +76,11 @@ verification fails the task when the checkout's branch or head moved anyway.
 Structured decisions are returned as a result validated against the canonical
 Zod schema (natively where the harness supports it, otherwise from a final
 JSON block, with a bounded number of corrections), and the validated value is
-what the domain boundary accepts. A repository-backed blocker is an optional
-`handOff` field in that result, not a mutation-capable tool. Ralphie
+what the domain boundary accepts. A repository-backed blocker is the
+implementer's `needs_attention` status with a `needsAttention` object (`reason`
+and `questions`) in that result, or a pre-flight `hand_off` disposition; neither
+is a mutation-capable tool, and Ralphie verifies the request before handing
+off. Ralphie
 stages, verifies, commits, pushes, and mutates
 GitHub through deterministic domain services. Invalid output or a harness failure
 becomes a failed issue outcome without proceeding to the next operation.
@@ -125,10 +128,9 @@ such as `harnesses.pi.approval: yolo` or moving the role with
 `roles.implementer`. Spend caps (`limits.maxBudgetUsd`) are covered in
 [Configuration](configuration.md#limits).
 
-Each session also has a wall-clock limit (`limits.sessionTimeoutMinutes`: 60
-minutes for editing roles, 15 for read-only roles). Exceeding it kills the
-session's whole process group, so tools the harness started die with it, and
-counts as a failed attempt.
+Each session also has a wall-clock limit
+([`limits.sessionTimeoutMinutes`](configuration.md#limits)); exceeding it kills
+the session's whole process group, so tools the harness started die with it.
 
 ## Session isolation
 

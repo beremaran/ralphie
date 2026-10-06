@@ -50,10 +50,8 @@ These options remain on the command line:
 | `--output <mode>` | `default` | Output mode: `default` renders the full-screen TUI on a terminal and plain append-only lines when piped or in CI; `json` writes JSON Lines on stdout. |
 
 The short aliases are `-h` for `--help` and `-v` for `--version`. Former flags
-such as `--branch`, `--issue-label`, `--verify-command`, `--model`, and
-`--thinking` fail with an error
-naming the configuration key that replaces them; the full mapping is in
-[Configuration](configuration.md#removed-flags).
+fail with an error naming the configuration key that replaces them; the
+mapping is in [Configuration](configuration.md#removed-flags).
 
 Every run processes the entire matching open-issue queue, sequentially, in the
 order set by `intake.sort`.
@@ -72,8 +70,7 @@ with `gh auth status`. For unattended use, provide `GH_TOKEN` (preferred) or
 `GITHUB_TOKEN` as an environment input; it does not need to be printed or
 exposed. A mounted GitHub CLI profile is not required when an environment token
 is provided. This authentication contract covers `github.com` only. See
-[Getting started](getting-started.md) for the complete credential and
-container setup.
+[Getting started](getting-started.md) for the first-run setup.
 
 ## Common recipes
 
@@ -116,8 +113,8 @@ The workflow commits and pushes directly to the selected branch. It is not a
 wait-for-human-review mode: approved work is committed, the remote head is
 revalidated, and the commit is pushed without force before the source issue is
 closed. Read [Workflows](workflows.md) and [Safety](safety.md) before running
-it, and keep `workspace` pointed at a path dedicated to Ralphie, because the
-workspace is deleted recursively before preparation and after a successful run.
+it; the workspace is deleted, so read [Workspace risk](safety.md#workspace-risk)
+first.
 
 ## Version and help
 

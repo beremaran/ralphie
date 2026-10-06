@@ -110,7 +110,9 @@ flowchart TD
    command exits non-zero, resume the implementer's session with
    `/diagnosing-bugs` and the bounded output, then restage and retry up to
    `limits.verificationFixes` times (default five). See
-   [Fix sessions](#fix-sessions).
+   [Fix sessions](#fix-sessions). If the commands still fail after the last
+   repair, the issue is not retried: it ends in a `ready-for-human` hand-off
+   with reason `implementation_exhausted` (see [Hand-offs](#hand-offs)).
 5. After verification passes or is skipped (no `verify` commands configured),
    create a local candidate commit on top of the checkpoint. Candidate commits
    are never pushed.
@@ -178,8 +180,10 @@ limit"), an overloaded or unavailable provider (429, 5xx), a network error,
 exhausted credits, or an expired login says nothing about the issue, and every
 further session would fail the same way. Ralphie restores the checkout,
 leaves the issue's labels and comments untouched, records a `deferred`
-outcome, stops the rest of the queue and exits `75` with a message naming the
-failure and, when the harness reports it, the reset time. Rerun once the limit
+outcome and stops the rest of the queue (exit status in
+[Operations and recovery](operations-and-recovery.md#failure-cancellation-and-exit-status)),
+with a message naming the failure and, when the harness reports it, the reset
+time. Rerun once the limit
 clears or the login is renewed. Definite failures (an invalid or never
 validating result, an unknown model, refused access, a session timeout, real
 work that did not succeed) still hand off.
@@ -200,7 +204,9 @@ starts from the issue, the current diff and the findings instead when:
 
 The session that did the last fix is the one the next fix continues. The
 `limits.verificationFixes` and `limits.reviewRounds` budgets count fixes the
-same way in both modes, and exhaustion escalates as before.
+same way in both modes. Exhausting `limits.verificationFixes` ends in the
+`implementation_exhausted` hand-off; exhausting `limits.reviewRounds` sends the
+issue through decomposition.
 
 The boundary between agent work and deterministic operations stays explicit
 throughout the loop:
