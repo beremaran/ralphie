@@ -14,7 +14,7 @@ import {
 import {
     type HandOffDecision,
     type SessionFitDecision,
-    GroundingDisposition,
+    PreflightDisposition,
     type IssueResolutionDecision,
     IssueResolutionStatus,
     resolutionVerificationDecisionSchema,
@@ -206,7 +206,7 @@ export const makeIssueExecutorService = (
                 ? undefined
                 : await routeSignal(context, artifacts, preflight.handOff);
         if (routed !== undefined) return routed;
-        if (decision.disposition === GroundingDisposition.Actionable) {
+        if (decision.disposition === PreflightDisposition.Actionable) {
             await artifacts.write(
                 IssueArtifactKind.PreflightDecision,
                 {
@@ -217,10 +217,10 @@ export const makeIssueExecutorService = (
             );
             return undefined;
         }
-        if (decision.disposition === GroundingDisposition.Blocked) {
+        if (decision.disposition === PreflightDisposition.Blocked) {
             return blockedOutcome(decision.blockedBy);
         }
-        if (decision.disposition === GroundingDisposition.AlreadyResolved) {
+        if (decision.disposition === PreflightDisposition.AlreadyResolved) {
             return await verifyAlreadyResolved(context, artifacts);
         }
         return await recordHandOff(context, artifacts, decision);

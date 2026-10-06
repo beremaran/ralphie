@@ -10,7 +10,7 @@ import { toJsonSchema } from "../../src/harness/app/structured-result.ts";
 import { implementationResultSchema } from "../../src/issues/app/implementation-executor.ts";
 import {
     commitMessageDecisionSchema,
-    groundingDecisionSchema,
+    handOffVerificationSchema,
     issueBreakdownDecisionSchema,
     preflightDecisionSchema,
     resolutionVerificationDecisionSchema,
@@ -30,7 +30,7 @@ export const roleSchemas: ReadonlyArray<readonly [string, z.ZodType]> = [
     ["spec review", specReviewSchema],
     ["decomposition breakdown", issueBreakdownDecisionSchema],
     ["triage", triageDecisionSchema],
-    ["hand-off grounding", groundingDecisionSchema],
+    ["hand-off verification", handOffVerificationSchema],
     ["resolution verification", resolutionVerificationDecisionSchema],
     ["review decision", reviewDecisionSchema],
     ["commit message", commitMessageDecisionSchema],

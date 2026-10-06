@@ -82,6 +82,8 @@ import {
 } from "./harness/app/session-isolation.ts";
 import { makeTemporaryScratchDirectories } from "./harness/adapters/scratch-directory.ts";
 import { makeGitWorkingTreeService } from "./git/adapters/working-tree.ts";
+import { makeGitRepositoryFactsService } from "./git/adapters/repository-facts.ts";
+import { provideRepositoryFacts } from "./agent/repository-facts.ts";
 import {
     type HarnessAdapter,
     type HarnessService,
@@ -219,9 +221,12 @@ export const makeLiveRuntime = ({
                   }),
               }),
     });
-    const harness = guardReadOnlySessions(
-        isolateSessions(bareHarness, makeTemporaryScratchDirectories()),
-        makeGitWorkingTreeService(commandRunner).fingerprint,
+    const harness = provideRepositoryFacts(
+        guardReadOnlySessions(
+            isolateSessions(bareHarness, makeTemporaryScratchDirectories()),
+            makeGitWorkingTreeService(commandRunner).fingerprint,
+        ),
+        makeGitRepositoryFactsService(commandRunner).read,
     );
     const gitRepository = makeGitRepositoryService(commandRunner);
     const gitRepositoryInvariant =

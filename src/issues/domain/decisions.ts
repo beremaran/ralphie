@@ -27,7 +27,7 @@ export enum HandOffReason {
     NeedsHumanJudgment = "needs_human_judgment",
 }
 
-export enum GroundingDisposition {
+export enum PreflightDisposition {
     Actionable = "actionable",
     AlreadyResolved = "already_resolved",
     Blocked = "blocked",
@@ -93,17 +93,17 @@ export type IssueResolutionDecision = z.infer<
 >;
 export type ResolutionVerificationDecision = IssueResolutionDecision;
 
-const groundingActionableDecisionSchema = z.object({
-    disposition: z.literal(GroundingDisposition.Actionable),
+const preflightBareActionableSchema = z.object({
+    disposition: z.literal(PreflightDisposition.Actionable),
 });
 
-const groundingAlreadyResolvedDecisionSchema = z.object({
-    disposition: z.literal(GroundingDisposition.AlreadyResolved),
+const alreadyResolvedDecisionSchema = z.object({
+    disposition: z.literal(PreflightDisposition.AlreadyResolved),
 });
 
 export const handOffDecisionSchema = z
     .object({
-        disposition: z.literal(GroundingDisposition.HandOff),
+        disposition: z.literal(PreflightDisposition.HandOff),
         reason: z.enum(HandOffReason),
         summary: nonBlankStringSchema,
         evidence: z.array(nonBlankStringSchema).min(1),
@@ -111,14 +111,14 @@ export const handOffDecisionSchema = z
     })
     .strict();
 
-export const groundingDecisionSchema = z.discriminatedUnion("disposition", [
-    groundingActionableDecisionSchema,
-    groundingAlreadyResolvedDecisionSchema,
+export const handOffVerificationSchema = z.discriminatedUnion("disposition", [
+    preflightBareActionableSchema,
+    alreadyResolvedDecisionSchema,
     handOffDecisionSchema,
 ]);
 
 const preflightActionableDecisionSchema = z.object({
-    disposition: z.literal(GroundingDisposition.Actionable),
+    disposition: z.literal(PreflightDisposition.Actionable),
     fitsOneSession: z
         .boolean()
         .describe(
@@ -127,7 +127,7 @@ const preflightActionableDecisionSchema = z.object({
 });
 
 const preflightBlockedDecisionSchema = z.object({
-    disposition: z.literal(GroundingDisposition.Blocked),
+    disposition: z.literal(PreflightDisposition.Blocked),
     blockedBy: z
         .array(z.number().int().positive())
         .min(1)
@@ -137,7 +137,7 @@ const preflightBlockedDecisionSchema = z.object({
 /** The single read-only pre-flight session's disposition for one issue. */
 export const preflightDecisionSchema = z.discriminatedUnion("disposition", [
     preflightActionableDecisionSchema,
-    groundingAlreadyResolvedDecisionSchema,
+    alreadyResolvedDecisionSchema,
     preflightBlockedDecisionSchema,
     handOffDecisionSchema,
 ]);
@@ -151,7 +151,7 @@ export const sessionFitDecisionSchema = z.object({
 
 export type SessionFitDecision = z.infer<typeof sessionFitDecisionSchema>;
 
-export type GroundingDecision = z.infer<typeof groundingDecisionSchema>;
+export type HandOffVerification = z.infer<typeof handOffVerificationSchema>;
 export type HandOffDecision = Omit<
     z.infer<typeof handOffDecisionSchema>,
     "evidence" | "questions"

@@ -54,7 +54,7 @@ import type { IssueWorkflowRuntime } from "../src/runtime.ts";
 import { RalphieError } from "../src/shared/error.ts";
 import {
     type PreflightDecision,
-    GroundingDisposition,
+    PreflightDisposition,
     IssueResolutionStatus,
     HandOffReason,
 } from "../src/issues/domain/decisions.ts";
@@ -355,19 +355,19 @@ const preflightDecisionFor = (route: GroundedRoute): PreflightDecision => {
     switch (route) {
         case "actionable":
             return {
-                disposition: GroundingDisposition.Actionable,
+                disposition: PreflightDisposition.Actionable,
                 fitsOneSession: true,
             };
         case "decomposition":
             return {
-                disposition: GroundingDisposition.Actionable,
+                disposition: PreflightDisposition.Actionable,
                 fitsOneSession: false,
             };
         case "already-resolved":
-            return { disposition: GroundingDisposition.AlreadyResolved };
+            return { disposition: PreflightDisposition.AlreadyResolved };
         case "hand-off":
             return {
-                disposition: GroundingDisposition.HandOff,
+                disposition: PreflightDisposition.HandOff,
                 reason: HandOffReason.ExternalDependency,
                 summary: "A prerequisite is still open.",
                 evidence: ["Issue body links the open prerequisite."],

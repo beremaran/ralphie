@@ -186,6 +186,17 @@ export type GitRepositoryService = {
         signal?: AbortSignal,
     ) => Promise<PreparedRepository>;
 };
+export type GitRepositoryFactsService = {
+    /**
+     * Plain-text facts (HEAD, branch, status, recent log, tracked files) for
+     * sessions that have no shell to ask Git themselves.
+     */
+    readonly read: (
+        repositoryPath: string,
+        signal?: AbortSignal,
+    ) => Promise<string>;
+};
+
 export type GitWorkingTreeService = {
     /**
      * A digest of HEAD, the index, tracked changes and untracked files. Equal
