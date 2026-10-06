@@ -31,6 +31,7 @@ export type GitHubIssueRecord = {
     readonly title: string;
     readonly html_url: string;
     readonly body?: string | null;
+    readonly user?: { readonly login?: string | null } | null;
     readonly state?: string;
     readonly updated_at?: string;
     readonly comments?: number;
@@ -47,8 +48,13 @@ export type GitHubIssueRecord = {
 type GitHubIssueCommentRecord = {
     readonly id: number;
     readonly body?: string | null;
+    readonly user?: { readonly login?: string | null } | null;
     readonly updated_at: string;
 };
+
+const loginOf = (
+    user: { readonly login?: string | null } | null | undefined,
+): { readonly author?: string } => (user?.login ? { author: user.login } : {});
 
 const issueState = (state: string | undefined): GitHubIssueState => {
     if (state === "open" || state === "closed") return state;
@@ -112,6 +118,7 @@ const mapIssueComments = (
         .slice(-MAX_ISSUE_COMMENTS)
         .map((comment) => ({
             id: comment.id,
+            ...loginOf(comment.user),
             body: truncateCommentBody(comment.body ?? ""),
             updatedAt: issueUpdatedAt(comment.updated_at),
         }));
@@ -131,6 +138,7 @@ export const mapGitHubIssue = (
         number: issue.number,
         title: issue.title,
         url: issue.html_url,
+        ...loginOf(issue.user),
         body: issue.body ?? null,
         labels: issueLabels(issue.labels),
         state: issueState(issue.state),

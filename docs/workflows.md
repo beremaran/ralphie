@@ -19,6 +19,32 @@ Ralphie processes open issues that carry the label `labels.ready-for-agent`
 maps to (default `ready-for-agent`) and every label listed in
 `intake.requireLabels`. Issues without them are never read.
 
+### AFK triage
+
+Off unless `triage.enabled` is `true`. Before the queue starts, Ralphie runs one
+read-only `triager` session per issue that is not agent-ready yet, in three
+buckets only: issues with no triage state label, issues labelled
+`labels.needs-triage`, and `labels.needs-info` issues whose reporter commented
+after the last `## Triage Notes` comment. Issues with several state labels are
+left to a human, and `intake.requireLabels` still narrows the set.
+
+The session runs the vendored `/triage` skill under an overlay that skips the
+maintainer steps and grilling. It returns one outcome, and Ralphie applies it:
+
+- `promote`: Ralphie posts the Agent Brief (after the AI disclaimer), moves
+  the issue to `labels.ready-for-agent`, and the issue is implemented later in
+  the same run like any agent-ready issue.
+- `needs_info`: handed off to `labels.needs-info` with the Triage Notes
+  template (see [Hand-offs](#hand-offs)).
+- `ready_for_human`: handed off to `labels.ready-for-human`.
+- `already_implemented`: a fresh resolution verifier must prove it. Only then
+  does Ralphie comment where the behavior lives and close the issue as
+  completed. If the verifier disagrees or fails, the issue is handed off to
+  `labels.ready-for-human` instead.
+
+Triage never rejects a request: it cannot apply `wontfix` and never writes
+`.out-of-scope/`. A triage session that fails marks only that issue failed.
+
 ### Pre-flight
 
 Each issue gets exactly one read-only, schema-validated `preflight` session.

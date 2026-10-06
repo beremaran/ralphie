@@ -181,6 +181,27 @@ roles:
         });
     });
 
+    test("triage is off by default and opt-in per repository", async () => {
+        const config = await writeTemporaryFile(
+            "intake:\n  requireLabels: [backend]\nlabels:\n  ready-for-agent: afk\nrepos:\n  owner/triaged:\n    triage:\n      enabled: true\n",
+        );
+
+        const off = await workflowOptionsFor([
+            "owner/repository",
+            "--config",
+            config,
+        ]);
+        const on = await workflowOptionsFor([
+            "owner/triaged",
+            "--config",
+            config,
+        ]);
+
+        expect(off.triage).toBeUndefined();
+        expect(on.triage?.requireLabels).toEqual(["backend"]);
+        expect(on.triage?.labels["ready-for-agent"]).toBe("afk");
+    });
+
     test("rejects the former notifications section", async () => {
         const config = await writeTemporaryFile(
             "notifications:\n  enabled: true\n",

@@ -19,7 +19,7 @@ export const handOffMarker = (issueNumber: number): string =>
 export const renderHandOffBody = (issueNumber: number, body: string): string =>
     `${body.trimEnd()}\n\n${handOffMarker(issueNumber)}`;
 
-const repositoryParameters = (repository: string) => {
+export const repositoryParameters = (repository: string) => {
     const { owner, name } = parseRepositorySlug(repository);
     return { owner, repo: name };
 };
@@ -91,7 +91,7 @@ const isNotFound = (error: unknown): boolean =>
     (error as { readonly status?: unknown }).status === 404;
 
 /** Leave the issue with exactly one triage state label: the target. */
-const replaceStateLabel = async (
+export const replaceStateLabel = async (
     client: Octokit,
     repository: string,
     issueNumber: number,

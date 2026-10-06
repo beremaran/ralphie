@@ -86,6 +86,8 @@ roles:
 intake:
   requireLabels: [bug]
   sort: created:asc
+triage:
+  enabled: false
 labels:
   needs-triage: needs-triage
   needs-info: needs-info
@@ -167,6 +169,12 @@ for editing roles and 15 minutes for read-only roles.
 | `intake.requireLabels` | `[]` | An issue must carry every listed label to enter the queue (AND filter). Added to the mandatory `labels.ready-for-agent` label. |
 | `intake.sort` | `created:asc` | Queue order: `created`, `updated`, or `comments`, optionally suffixed `:asc` or `:desc`. Without a suffix the order is ascending. |
 
+### `triage`
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `triage.enabled` | `false` | Run AFK triage before the queue. See [AFK triage](workflows.md#afk-triage). |
+
 ### `labels`
 
 Maps Matt Pocock's five canonical triage roles to the label names used in the
@@ -215,7 +223,7 @@ All limits are positive; counts are integers.
 ### Repository entries
 
 Each `repos."owner/repo"` entry accepts `workspace`, `approval`, `harnesses`, `roles`,
-`intake`, `labels`, and `limits` (overriding the top level for that repository
+`intake`, `triage`, `labels`, and `limits` (overriding the top level for that repository
 only) plus two keys that exist only here:
 
 | Key | Default | Description |

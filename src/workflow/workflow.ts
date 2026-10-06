@@ -14,6 +14,7 @@ import {
 import { isDecomposedParent } from "../issues/domain/decomposition-markdown.ts";
 import {
     IssueExecutionOutcomeKind,
+    type IssueExecutionContext,
     type IssueExecutionOutcome,
 } from "../issues/app/execution.ts";
 import {
@@ -39,7 +40,9 @@ import type {
     IssueWorkflowRuntime,
     WorkflowOptions,
     WorkflowSummary,
+    WorkflowTriageOptions,
 } from "./ports.ts";
+import { runTriagePhase } from "./triage-phase.ts";
 
 export type { WorkflowOptions, WorkflowSummary } from "./ports.ts";
 
@@ -504,6 +507,7 @@ type WorkflowConfiguration = {
     readonly signal?: AbortSignal;
     readonly control?: RunControl;
     readonly handOffLabels: HandOffLabels;
+    readonly triage?: WorkflowTriageOptions;
     readonly actualRunId: string;
     readonly statePath: string;
 };
@@ -535,6 +539,7 @@ const makeWorkflowConfiguration = (
         control,
         runId,
         handOffLabels = CANONICAL_HAND_OFF_LABELS,
+        triage,
     } = options;
     return {
         repo,
@@ -551,6 +556,7 @@ const makeWorkflowConfiguration = (
         signal,
         ...(control === undefined ? {} : { control }),
         handOffLabels,
+        ...(triage === undefined ? {} : { triage }),
         actualRunId: runId,
         statePath,
     };
@@ -679,6 +685,8 @@ export const workflow = async (
         githubIssues,
         githubIssueMutations: issueMutations,
         githubHandOff: handOffService,
+        githubTriage,
+        triage: triageService,
         gitRepository: repository,
         gitRepositoryInvariant: invariantService,
         gitIssueCheckpoint: checkpoints,
@@ -697,6 +705,7 @@ export const workflow = async (
         signal,
         control,
         handOffLabels,
+        triage: triageOptions,
         actualRunId,
         statePath,
     } = config;
@@ -995,6 +1004,32 @@ export const workflow = async (
             };
         };
 
+        const executionContextFor = (
+            issue: GitHubIssue,
+        ): IssueExecutionContext => ({
+            issue,
+            repository: repo,
+            repositoryPath: prepared.path,
+            targetBranch: branch,
+            workspace,
+            runId: actualRunId,
+            runLayout: layout,
+            agent: {
+                harness,
+                roles,
+                ...(config.sessionLimits === undefined
+                    ? {}
+                    : { limits: config.sessionLimits }),
+            },
+            repositoryInvariant: invariantService,
+            verificationCommands: config.verificationCommands,
+            implementationAttempts: config.implementationAttempts,
+            reviewRounds: config.reviewRounds,
+            verificationFixes: config.verificationFixes,
+            signal,
+            maxDecompositionDepth,
+        });
+
         const executeIssue = async (
             issueContext: WorkflowIssueContext,
         ): Promise<IssueExecutionOutcome> => {
@@ -1003,29 +1038,9 @@ export const workflow = async (
                 "issue-execution",
                 `Executing #${issueContext.issue.number} ${issueContext.issue.title}...`,
                 () =>
-                    issueExecutor.execute({
-                        issue: issueContext.issue,
-                        repository: repo,
-                        repositoryPath: prepared.path,
-                        targetBranch: branch,
-                        workspace,
-                        runId: actualRunId,
-                        runLayout: layout,
-                        agent: {
-                            harness,
-                            roles,
-                            ...(config.sessionLimits === undefined
-                                ? {}
-                                : { limits: config.sessionLimits }),
-                        },
-                        repositoryInvariant: invariantService,
-                        verificationCommands: config.verificationCommands,
-                        implementationAttempts: config.implementationAttempts,
-                        reviewRounds: config.reviewRounds,
-                        verificationFixes: config.verificationFixes,
-                        signal,
-                        maxDecompositionDepth,
-                    }),
+                    issueExecutor.execute(
+                        executionContextFor(issueContext.issue),
+                    ),
                 (result) => outcomeMessage(issueContext.issue.number, result),
                 {
                     issue: {
@@ -1193,15 +1208,7 @@ export const workflow = async (
             await persistState(RunStateStatus.Active);
         };
 
-        const refreshAfterDecomposition = async (
-            outcome: IssueExecutionOutcome,
-        ): Promise<void> => {
-            if (
-                outcome.kind !== IssueExecutionOutcomeKind.Decomposed &&
-                outcome.kind !== IssueExecutionOutcomeKind.Escalated
-            ) {
-                return;
-            }
+        const refreshQueue = async (): Promise<void> => {
             const refreshed = await track(
                 progress,
                 "issue-discovery",
@@ -1222,6 +1229,17 @@ export const workflow = async (
             });
             await reconcileDiscoveredParents(refreshed);
             await persistState(RunStateStatus.Active);
+        };
+
+        const refreshAfterDecomposition = async (
+            outcome: IssueExecutionOutcome,
+        ): Promise<void> => {
+            if (
+                outcome.kind === IssueExecutionOutcomeKind.Decomposed ||
+                outcome.kind === IssueExecutionOutcomeKind.Escalated
+            ) {
+                await refreshQueue();
+            }
         };
 
         const recordIssueOutcome = (
@@ -1257,6 +1275,35 @@ export const workflow = async (
             completeQueueItem(issueContext.issue.number, outcome);
             await finishSuccessfulIssue(issueContext);
             await refreshAfterDecomposition(outcome);
+        };
+
+        /** Opt-in AFK triage; promoted issues join the queue before it runs. */
+        const triageBeforeQueue = async (): Promise<void> => {
+            if (triageOptions === undefined) return;
+            const { promoted } = await runTriagePhase({
+                repo,
+                labels: triageOptions.labels,
+                requireLabels: triageOptions.requireLabels,
+                issueFilters,
+                signal,
+                progress,
+                githubIssues,
+                githubIssueMutations: issueMutations,
+                githubTriage,
+                triage: triageService,
+                contextFor: executionContextFor,
+                handOff: async (issue, outcome) => {
+                    const current = queue.processedCount();
+                    await emitHandOffEvent(
+                        { issue, current, total: queueTotalFor(current) },
+                        outcome,
+                    );
+                    await publishHandOff(issue.number, outcome);
+                },
+                record: recordIssueOutcome,
+                persist: () => persistState(RunStateStatus.Active),
+            });
+            if (promoted.length > 0) await refreshQueue();
         };
 
         const processNextIssue = async (): Promise<boolean> => {
@@ -1318,6 +1365,7 @@ export const workflow = async (
             }
         };
 
+        await triageBeforeQueue();
         await processQueue();
 
         if (queue.state() === IssueQueueState.DependencyBlocked) {

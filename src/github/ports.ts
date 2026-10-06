@@ -150,3 +150,31 @@ export type GitHubHandOffService = {
         input: GitHubHandOffInput,
     ) => Promise<GitHubHandOffResult>;
 };
+
+export type GitHubTriageCommentResult = {
+    readonly comment: "created" | "unchanged";
+};
+
+/** Posts the comments and label moves AFK triage decides on. */
+export type GitHubTriageService = {
+    /**
+     * Post the Agent Brief as a new comment (a repeat of the same text is a
+     * no-op, so a restart never duplicates it) and move the issue to the
+     * ready-for-agent state label. `input.body` already starts with the AI
+     * disclaimer.
+     */
+    readonly promote: (
+        repository: string,
+        issueNumber: number,
+        input: GitHubHandOffInput,
+    ) => Promise<GitHubTriageCommentResult>;
+    /**
+     * Post the comment that points to where a request already lives, once.
+     * The caller closes the issue afterwards.
+     */
+    readonly explainImplemented: (
+        repository: string,
+        issueNumber: number,
+        body: string,
+    ) => Promise<GitHubTriageCommentResult>;
+};

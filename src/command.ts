@@ -400,6 +400,14 @@ const workflowOptionsFor = (
         ...(control === undefined ? {} : { control }),
         runId,
         handOffLabels: handOffLabelsFrom(settings.labels),
+        ...(settings.triage.enabled
+            ? {
+                  triage: {
+                      labels: settings.labels,
+                      requireLabels: settings.intake.requireLabels,
+                  },
+              }
+            : {}),
     };
 };
 
