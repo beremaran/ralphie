@@ -9,40 +9,40 @@ buried in a landing page.
 
 ### New user
 
-1. [Getting started](getting-started.md) — prerequisites, installation,
+1. [Getting started](getting-started.md): prerequisites, installation,
    authentication, verification, and a safe first run.
-2. [Safety](safety.md) — understand what a mutation-enabled run can change.
-3. [Workflows](workflows.md) — see how issues are routed and delivered.
-4. [Configuration](configuration.md) — write the config file.
-5. [CLI reference](cli-reference.md) — choose options and adapt the recipes.
+2. [Safety](safety.md): understand what a mutation-enabled run can change.
+3. [Workflows](workflows.md): see how issues are routed and delivered.
+4. [Configuration](configuration.md): write the config file.
+5. [CLI reference](cli-reference.md): choose options and adapt the recipes.
 
 ### Operator
 
-1. [Safety](safety.md) — review direct-push defaults, invariants, and workspace
+1. [Safety](safety.md): review direct-push defaults, invariants, and workspace
    risks before operating on a real repository.
-2. [Configuration](configuration.md) and [CLI reference](cli-reference.md) —
+2. [Configuration](configuration.md) and [CLI reference](cli-reference.md) -
    settings, invocation, output, and environment variables.
-3. [Operations and recovery](operations-and-recovery.md) — interpret output,
+3. [Operations and recovery](operations-and-recovery.md): interpret output,
    inspect artifacts, and understand what remains after interruption.
-4. [Workflows](workflows.md) — understand implementation, decomposition, and
+4. [Workflows](workflows.md): understand implementation, decomposition, and
    direct-push delivery.
 
 ### Contributor
 
-1. [Development](development.md) — local setup, checks, tests, and contribution
+1. [Development](development.md): local setup, checks, tests, and contribution
    expectations.
-2. [Architecture](architecture.md) — runtime assembly and domain boundaries.
-3. [Workflows](workflows.md) — behavior and mutation boundaries to preserve.
-4. [Operations and recovery](operations-and-recovery.md) — state and recovery
+2. [Architecture](architecture.md): runtime assembly and domain boundaries.
+3. [Workflows](workflows.md): behavior and mutation boundaries to preserve.
+4. [Operations and recovery](operations-and-recovery.md): state and recovery
    contracts that changes must not break.
 
 ### Release maintainer
 
-1. [Getting started](getting-started.md) — the installation contract
+1. [Getting started](getting-started.md): the installation contract
    (`bunx @beremaran/ralphie`) and first run.
-2. [Development](development.md) — build, package smoke, and the tag-triggered
+2. [Development](development.md): build, package smoke, and the tag-triggered
    npm publish flow.
-3. [Operations and recovery](operations-and-recovery.md) — operational state and
+3. [Operations and recovery](operations-and-recovery.md): operational state and
    cleanup behavior.
 
 ## Page map

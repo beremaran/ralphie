@@ -35,12 +35,10 @@ force-pushed over. Cancellation is checked at every mutation boundary, the push
 is attempted at most once, and failures and cancellations leave a clean,
 recoverable checkout.
 
-Implementation agents may use normal shell composition, pipes, redirection,
-and language runtimes. Ralphie's shell hook rejects explicit agent requests for
-orchestration-owned Git/GitHub mutations such as commits, pushes, branch
-changes, resets, cleans, and `gh` calls. This hook is a guardrail, not a
-security sandbox: deterministic repository invariants and the isolated
-delivery services remain authoritative.
+Implementation agents may use whatever shell their harness grants. Ralphie does
+not filter their commands: the guardrails are the session environment (see
+[Session isolation](#session-isolation)) and the deterministic repository
+invariants and delivery services, which remain authoritative.
 
 ## Workspace risk
 
@@ -70,8 +68,10 @@ bunx @beremaran/ralphie owner/repository \
 
 Agent sessions run as headless harness CLI invocations rooted at the
 repository checkout. Read-only roles run in the harness's read-only mode
-(Claude Code plan mode with a read-only tool list); the `implementer` and
-`fixer` run in the harness's `safe` mode and may edit the checkout. Post-task
+(Claude Code plan mode limited to the Read, Glob and Grep tools, so there is
+no shell: reviewers cannot run `git diff`, and Ralphie puts the diff in their
+prompt instead); the `implementer` and `fixer` run under their
+[approval mode](#approval-modes) and may edit the checkout. Post-task
 verification fails the task when the checkout's branch or head moved anyway.
 Structured decisions are returned as a result validated against the canonical
 Zod schema (natively where the harness supports it, otherwise from a final
@@ -95,7 +95,7 @@ proceeds on the staged diff. Configured commands run against the staged tree
 and their evidence is
 bound to that tree before review or commit. A non-zero command exit is treated
 as actionable implementation feedback: the fix session (the implementer's, resumed) receives bounded
-failure evidence, and Ralphie restages and retries up to five times.
+failure evidence, and Ralphie restages and retries up to `limits.verificationFixes` times.
 Staged-tree mutation and exhausted repair remain
 hard safety stops. The direct-push path never uses force. See
 [Workflows](workflows.md) for the complete implementation and delivery sequence,
@@ -122,8 +122,8 @@ fall back from auto mode), and that no editing role runs on pi or OpenCode
 without `yolo`, because neither has a sandbox or approval system. A failure
 stops the run within seconds and names the configuration change that fixes it,
 such as `harnesses.pi.approval: yolo` or moving the role with
-`roles.implementer`. If `limits.maxBudgetUsd` is set, startup also warns about
-each assigned harness that cannot enforce a spend cap; only Claude Code does.
+`roles.implementer`. Spend caps (`limits.maxBudgetUsd`) are covered in
+[Configuration](configuration.md#limits).
 
 Each session also has a wall-clock limit (`limits.sessionTimeoutMinutes`: 60
 minutes for editing roles, 15 for read-only roles). Exceeding it kills the
@@ -151,15 +151,10 @@ environment enforces it instead of the prompts.
 
 ## Bounded command execution
 
-No command runs unbounded. Every process Ralphie spawns, and every shell
-command its implementation agent runs, carries a hard deadline so a hung
-process fails loudly instead of stalling an issue run:
+No command runs unbounded. Every process Ralphie spawns carries a hard
+deadline so a hung process fails loudly instead of stalling an issue run:
 
-- **Agent shell commands** default to a 120-second timeout with a 600-second
-  maximum. An omitted `timeout` gets the default; a larger declared timeout is
-  clamped to the ceiling so the model cannot disable the guardrail. A timed-out
-  command returns to the agent as a tool error with its partial output, and the
-  agent may retry with an explicit `timeout` for genuinely slower commands.
+- **Sessions** are bounded by `limits.sessionTimeoutMinutes`, described above.
 - **Ralphie-owned commands** (git and `gh` operations against the repository,
   workspace preparation, authentication checks) default to a 10-minute timeout.
 - **Verification commands** (`verify`) run under a 30-minute timeout

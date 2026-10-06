@@ -23,7 +23,7 @@ lines.
 
 - Interactive terminals get an OpenTUI application (the same rendering core
   OpenCode 1.0 uses): a borderless layout with a background header line
-  (repository, active model, pause state), an issue sidebar, a scrollable
+  (repository, pause state), an issue sidebar, a scrollable
   transcript that streams assistant text as it arrives, and a footer status
   line (stage, activity, elapsed time). Transcript turns start with a colored
   `● <harness> · <title>` role label and blank-line separation; assistant text
@@ -76,14 +76,14 @@ Each `session_event` record wraps one session event with the session it
 belongs to:
 
 ```json
-{"type":"session_event","sessionID":"pi-7d3e2a1b","directory":"/work/owner/repo","harness":"pi","title":"Implement #42","event":{"type":"tool_call","callId":"call-1","name":"bash","input":{"command":"bun test"}}}
+{"type":"session_event","sessionID":"claude-7d3e2a1b","directory":"/work/owner/repo","harness":"claude","title":"Implement #42","event":{"type":"tool_call","callId":"call-1","name":"Bash","input":{"command":"bun test"}}}
 ```
 
 | Field       | Meaning                                                   |
 | ----------- | --------------------------------------------------------- |
 | `sessionID` | Ralphie's id for the session.                             |
 | `directory` | Working directory of the session.                         |
-| `harness`   | Name of the harness that ran the session, such as `pi`.   |
+| `harness`   | Name of the harness that ran the session, such as `claude`. |
 | `title`     | Human-readable session label; omitted when there is none. |
 | `event`     | One of the event shapes below, discriminated by `type`.   |
 
@@ -107,8 +107,8 @@ belongs to:
 - `{"type":"session_finished"}`: the session stopped producing work. Failures
   are reported by `error` events, not here.
 
-Tool names and `input` fields are the harness's own (for example pi's `bash`
-tool takes `command`), so consumers that need tool-specific detail should key
+Tool names and `input` fields are the harness's own (for example Claude Code's
+`Bash` tool takes `command`), so consumers that need tool-specific detail should key
 on `harness` as well as `name`.
 
 ## State and artifacts
@@ -184,9 +184,8 @@ stateDiagram-v2
 
 - One issue failure restores its checkout, persists the failed outcome, retains
   artifacts, and continues to later issues.
-- The agent runtime is closed on success, failure, cancellation, and scoped defects. Ordinary
-  failures set process exit code `1`.
-- Cancellation is checked before long-running boundaries and passed into the agent runtime.
+- Ordinary failures set process exit code `1`.
+- Cancellation is checked before long-running boundaries and passed to the running session, which is killed.
   Ralphie attempts to restore the clean issue checkpoint, saves state with the
   active issue, skips cleanup, and exits `130`.
 - Successful completion persists `complete`, then removes the entire workspace
@@ -273,14 +272,21 @@ published atomically before the exact checkpoint is restored and verified.
 
 There is no resume command. When a run fails or is interrupted:
 
-1. the agent runtime is closed and the process exits `1` (or `130` on
-   cancellation);
+1. the process exits `1` (or `130` on cancellation);
 2. the workspace retains `state.json`, `events.jsonl`, and per-issue artifacts
    for diagnosis;
 3. issues that were not closed remain open and are selected again on the next
    run; and
 4. the next run removes the workspace, prepares a fresh checkout, and
    re-evaluates every matching open issue from scratch.
+
+A hard crash (a killed process, a power loss) in the middle of the review gate
+is the one case that leaves the retained checkout unclean: Ralphie creates
+local candidate commits while review is in progress, so HEAD may sit at a
+candidate commit. Candidate commits are never pushed, and the next run
+discards the whole workspace; inspect the retained checkout before starting
+it if you need the work. Ordinary failures and cancellation restore the
+checkpoint first.
 
 Because each run starts clean, recovery is a new run rather than a continuation:
 completed issues are already closed and no longer selected, while interrupted
