@@ -31,8 +31,8 @@ describe("native CLI parser", () => {
             "--implementation-attempts",
             "--max-decomposition-depth",
             "--workspace",
-            "--notify-needs-attention",
-            "--needs-attention-label",
+            "--notify-hand-off",
+            "--hand-off-label",
             "maintain-issues",
             "--max-issues",
             "--dry-run",
@@ -76,8 +76,6 @@ describe("native CLI parser", () => {
                 "limits.maxDecompositionDepth",
             ],
             [["--workspace", "/tmp/w"], "workspace"],
-            [["--notify-needs-attention"], "notifications.enabled"],
-            [["--needs-attention-label", "blocked"], "notifications.label"],
         ] as const) {
             const flag = (args[0] ?? "").split("=")[0];
             expect(() => parseCliArgs(["owner/repository", ...args])).toThrow(
@@ -88,7 +86,9 @@ describe("native CLI parser", () => {
 
     test("still rejects flags removed by earlier releases", () => {
         for (const args of [
-            ["owner/repository", "--on-needs-attention", "halt"],
+            ["owner/repository", "--on-hand-off", "halt"],
+            ["owner/repository", "--notify-hand-off"],
+            ["owner/repository", "--hand-off-label", "blocked"],
             ["owner/repository", "--on-issue-failure", "continue"],
             ["owner/repository", "--mode", "issues"],
             ["owner/repository", "--max-attempts", "2"],
@@ -157,9 +157,9 @@ roles:
         });
     });
 
-    test("passes the notification settings to the workflow", async () => {
+    test("passes the mapped triage labels to the workflow for hand-offs", async () => {
         const config = await writeTemporaryFile(
-            "notifications:\n  enabled: true\n  label: needs-attention\n",
+            "labels:\n  needs-info: waiting-on-reporter\n  ready-for-human: human-turn\n",
         );
 
         const options = await workflowOptionsFor([
@@ -168,15 +168,22 @@ roles:
             config,
         ]);
 
-        expect(options).toMatchObject({
-            notificationsEnabled: true,
-            needsAttentionLabel: "needs-attention",
+        expect(options.handOffLabels).toEqual({
+            "needs-info": "waiting-on-reporter",
+            "ready-for-human": "human-turn",
+            replaces: [
+                "needs-triage",
+                "waiting-on-reporter",
+                "ready-for-agent",
+                "human-turn",
+                "wontfix",
+            ],
         });
     });
 
-    test("rejects a notification label without notifications enabled", async () => {
+    test("rejects the former notifications section", async () => {
         const config = await writeTemporaryFile(
-            "notifications:\n  label: needs-attention\n",
+            "notifications:\n  enabled: true\n",
         );
 
         const error = await workflowErrorFor([
@@ -185,9 +192,7 @@ roles:
             config,
         ]);
 
-        expect(error.message).toContain(
-            "  notifications.label: requires notifications.enabled: true",
-        );
+        expect(error.message).toContain("notifications");
     });
 
     test("keeps sensitive values verbatim in wrapped command errors", async () => {

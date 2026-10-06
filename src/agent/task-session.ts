@@ -39,7 +39,7 @@ export type AgentTaskRequest = {
     readonly progressIssue?: ProgressIssue;
 };
 
-export const NEEDS_ATTENTION_REASONS = [
+export const HAND_OFF_REASONS = [
     "outdated_premise",
     "conflicting_requirements",
     "missing_information",
@@ -47,19 +47,18 @@ export const NEEDS_ATTENTION_REASONS = [
     "cannot_reproduce",
 ] as const;
 
-export type NeedsAttentionReasonValue =
-    (typeof NEEDS_ATTENTION_REASONS)[number];
+export type HandOffReasonValue = (typeof HAND_OFF_REASONS)[number];
 
-export const NEEDS_ATTENTION_MESSAGE_LIMIT = 2_000;
+export const HAND_OFF_MESSAGE_LIMIT = 2_000;
 
 /** A bounded request to defer work; this is not a final workflow decision. */
-export const needsAttentionRequestSchema = z
+export const handOffRequestSchema = z
     .object({
-        reason: z.enum(NEEDS_ATTENTION_REASONS),
+        reason: z.enum(HAND_OFF_REASONS),
         message: z
             .string()
             .min(1)
-            .max(NEEDS_ATTENTION_MESSAGE_LIMIT)
+            .max(HAND_OFF_MESSAGE_LIMIT)
             .refine((value) => value.trim().length > 0, {
                 message: "Expected a non-blank message.",
             })
@@ -67,7 +66,7 @@ export const needsAttentionRequestSchema = z
     })
     .strict();
 
-export type NeedsAttentionRequest = z.infer<typeof needsAttentionRequestSchema>;
+export type HandOffRequest = z.infer<typeof handOffRequestSchema>;
 
 export type AgentTaskResult = {
     readonly sessionID: string;

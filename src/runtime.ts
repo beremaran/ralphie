@@ -22,8 +22,8 @@ import { makeParentCompletionService } from "./issues/app/parent-completion.ts";
 import { type ParentCompletionService } from "./issues/ports.ts";
 import { makeGitHubIssuesService } from "./github/adapters/issues.ts";
 import { type GitHubIssuesService } from "./github/ports.ts";
-import { makeGitHubNeedsAttentionNotificationService } from "./github/adapters/needs-attention.ts";
-import { type GitHubNeedsAttentionNotificationService } from "./github/ports.ts";
+import { makeGitHubHandOffService } from "./github/adapters/hand-off.ts";
+import { type GitHubHandOffService } from "./github/ports.ts";
 import {
     makeIssueArtifactStoreService,
     type IssueArtifactStoreService,
@@ -56,9 +56,9 @@ import {
     type PreflightAssessmentService,
 } from "./issues/app/preflight.ts";
 import {
-    makeNeedsAttentionRouterService,
-    type NeedsAttentionRouterService,
-} from "./issues/app/needs-attention.ts";
+    makeHandOffRouterService,
+    type HandOffRouterService,
+} from "./issues/app/hand-off.ts";
 import { makeClaudeCodeAdapter } from "./harness/adapters/claude-code.ts";
 import { makeOpenCodeAdapter } from "./harness/adapters/opencode.ts";
 import { makeCodexAdapter } from "./harness/adapters/codex.ts";
@@ -104,8 +104,8 @@ export type RalphieRuntime = {
     readonly githubIssueMutations: GitHubIssueMutationService;
     readonly githubIssueRelationships: GitHubIssueRelationshipService;
     readonly parentCompletion: ParentCompletionService;
-    /** Publishes structured needs-attention outcomes outside issue execution. */
-    readonly githubNeedsAttentionNotification: GitHubNeedsAttentionNotificationService;
+    /** Posts hand-off comments and swaps triage labels. */
+    readonly githubHandOff: GitHubHandOffService;
     readonly gitRepository: GitRepositoryService;
     readonly gitRepositoryInvariant: GitRepositoryInvariantService;
     readonly gitIssueCheckpoint: GitIssueCheckpointService;
@@ -120,7 +120,7 @@ export type RalphieRuntime = {
     readonly implementationExecutor: ImplementationExecutorService;
     readonly issueExecutor: IssueExecutorService;
     readonly issueRecovery: IssueRecoveryService;
-    readonly needsAttentionRouter: NeedsAttentionRouterService;
+    readonly handOffRouter: HandOffRouterService;
     /** Runs every agent session through the configured harness CLIs. */
     readonly harness: HarnessService;
     readonly progress: ProgressReporterService;
@@ -193,8 +193,7 @@ export const makeLiveRuntime = ({
         relationships: githubIssueRelationships,
         mutations: githubIssueMutations,
     });
-    const githubNeedsAttentionNotification =
-        makeGitHubNeedsAttentionNotificationService(githubConnection.session);
+    const githubHandOff = makeGitHubHandOffService(githubConnection.session);
     const bareHarness = makeHarnessService({
         adapters: makeHarnessAdapters(commandRunner),
         listener: sessionListener,
@@ -239,7 +238,7 @@ export const makeLiveRuntime = ({
         progress,
         gitRepositoryInvariant,
     );
-    const needsAttentionRouter = makeNeedsAttentionRouterService(issueRecovery);
+    const handOffRouter = makeHandOffRouterService(issueRecovery);
     const issueVerification = makeIssueVerificationService(commandRunner);
     const preflightAssessment = makePreflightAssessmentService(progress);
     const resolutionVerification = makeResolutionVerificationService(progress);
@@ -248,7 +247,7 @@ export const makeLiveRuntime = ({
         githubIssues,
         githubIssueRelationships,
         progress,
-        needsAttentionRouter,
+        handOffRouter,
     );
     const implementationExecutor = makeImplementationExecutorService(
         actualGitIssuePreparation,
@@ -258,7 +257,7 @@ export const makeLiveRuntime = ({
         progress,
         issueVerification,
         resolutionVerification,
-        needsAttentionRouter,
+        handOffRouter,
     );
     const issueExecutor = makeIssueExecutorService(
         issueArtifactStore,
@@ -267,7 +266,7 @@ export const makeLiveRuntime = ({
         preflightAssessment,
         resolutionVerification,
         progress,
-        needsAttentionRouter,
+        handOffRouter,
     );
     return {
         commandRunner,
@@ -276,7 +275,7 @@ export const makeLiveRuntime = ({
         githubIssueMutations,
         githubIssueRelationships,
         parentCompletion,
-        githubNeedsAttentionNotification,
+        githubHandOff,
         gitRepository,
         gitRepositoryInvariant,
         gitIssueCheckpoint,
@@ -290,7 +289,7 @@ export const makeLiveRuntime = ({
         implementationExecutor,
         issueExecutor,
         issueRecovery,
-        needsAttentionRouter,
+        handOffRouter,
         harness,
         progress,
         runEventLog,

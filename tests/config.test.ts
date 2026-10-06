@@ -74,7 +74,6 @@ repos:
             verificationFixes: 5,
             maxDecompositionDepth: 3,
             verificationCommands: [],
-            notificationsEnabled: false,
         });
         expect(options.branch).toBeUndefined();
     });

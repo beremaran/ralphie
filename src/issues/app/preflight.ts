@@ -7,12 +7,12 @@ import {
     preflightDecisionSchema,
 } from "../domain/decisions.ts";
 import type { IssueExecutionContext } from "./execution.ts";
-import type { NeedsAttentionRequest } from "../../agent/task-session.ts";
+import type { HandOffRequest } from "../../agent/task-session.ts";
 
 export type PreflightAssessmentResult = {
     readonly decision: PreflightDecision;
     readonly sessionID: string;
-    readonly needsAttention?: NeedsAttentionRequest;
+    readonly handOff?: HandOffRequest;
 };
 
 export type PreflightAssessmentService = {
@@ -81,9 +81,9 @@ export const makePreflightAssessmentService = (
             return {
                 decision: result.output,
                 sessionID: result.sessionID,
-                ...(result.needsAttention === undefined
+                ...(result.handOff === undefined
                     ? {}
-                    : { needsAttention: result.needsAttention }),
+                    : { handOff: result.handOff }),
             };
         } catch (error) {
             await progress.emit({

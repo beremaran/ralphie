@@ -8,12 +8,12 @@ import {
     IssueResolutionStatus,
 } from "../domain/decisions.ts";
 import type { IssueExecutionContext } from "./execution.ts";
-import type { NeedsAttentionRequest } from "../../agent/task-session.ts";
+import type { HandOffRequest } from "../../agent/task-session.ts";
 
 export type ResolutionVerificationResult = {
     readonly decision: ResolutionVerificationDecision;
     readonly sessionID: string;
-    readonly needsAttention?: NeedsAttentionRequest;
+    readonly handOff?: HandOffRequest;
 };
 
 export type ResolutionVerificationService = {
@@ -89,9 +89,9 @@ export const makeResolutionVerificationService = (
             return {
                 decision: result.output,
                 sessionID: result.sessionID,
-                ...(result.needsAttention === undefined
+                ...(result.handOff === undefined
                     ? {}
-                    : { needsAttention: result.needsAttention }),
+                    : { handOff: result.handOff }),
             };
         } catch (error) {
             await progress.emit({

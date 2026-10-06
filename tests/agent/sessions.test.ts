@@ -53,13 +53,13 @@ describe("agent sessions over the harness", () => {
         expect(request?.prompt).toContain("Do the work.");
     });
 
-    test("surface the needs-attention side channel from the result", async () => {
+    test("surface the hand-off side channel from the result", async () => {
         const fake = makeFakeHarness({
             roles: {
                 preflight: {
                     value: {
                         result: { ok: true },
-                        needsAttention: { reason: "missing_information" },
+                        handOff: { reason: "missing_information" },
                     },
                 },
             },
@@ -70,7 +70,7 @@ describe("agent sessions over the harness", () => {
             { ...base, role: "preflight", schema },
         );
 
-        expect(result.needsAttention).toEqual({
+        expect(result.handOff).toEqual({
             reason: "missing_information",
         });
     });

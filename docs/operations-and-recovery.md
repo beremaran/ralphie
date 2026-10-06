@@ -31,7 +31,7 @@ lines.
   (`✓ $ <command> · 1.2s`, `✓ read <path>`, `✗ <tool> <path> · failed:
   <detail>`), and a session error is a red `✗ <message>` row. The sidebar
   lists every issue discovered in the run with its outcome (`○` queued, `▶`
-  active, `✓` completed, `✗` failed, `⚠` needs-attention, `−` skipped) and
+  active, `✓` completed, `✗` failed, `⚠` hand-off, `−` skipped) and
   follows the active issue until you navigate away with `[`/`]` or
   Ctrl+Left/Right; each issue keeps its own transcript, so processed issues
   stay browsable while the run continues. The queue starts
@@ -58,11 +58,11 @@ lines.
 
 JSON events use a stable operational vocabulary and include `runId`,
 `timestamp`, `stage`, `status`, and `message`. Grounding and pre-flight events identify
-whether agent work was skipped. Human-readable needs-attention decisions name
+whether agent work was skipped. Human-readable hand-off decisions name
 the issue number and title and show the current/total queue position. JSON
 output retains the complete event payload, including the structured details
 field; human-readable output never renders that field. A
-`needs-attention` event includes its reason, summary, evidence, questions,
+`hand-off` event includes its reason, summary, evidence, questions,
 diagnostic or artifact path, and queue position.
 Depending on the event, it may also include the repository, review attempt,
 session ID, commit SHA, created issue numbers, or diagnostic paths. Supplied
@@ -159,7 +159,7 @@ configuration is not stored in this tree):
 ```
 
 `state.json` is versioned, schema-validated, and atomically replaced. It
-contains the repository/branch, notification settings, the role assignments
+contains the repository/branch, the role assignments
 (harness, model, effort),
 pending and completed queue numbers, processed count, outcomes, active
 issue/stage, checkout invariant, and update time. State is saved before the
@@ -200,39 +200,47 @@ prerequisites are not marked complete, so dependent issues remain blocked.
 After draining all reachable work, the run exits with status `1` and an
 aggregate partial-failure summary.
 
-Needs-attention outcomes also continue the queue. A drained run completes with
-status `0`, and the deferred issue remains open. The deterministic
+Hand-off outcomes also continue the queue. A drained run completes with
+status `0`, and the handed-off issue remains open but leaves the intake queue
+because it no longer carries the agent-ready label. The deterministic
 `decomposition_limit_reached` boundary behaves the same way: raise the
 persisted `limits.maxDecompositionDepth`, narrow the issue, or resolve its review
-findings manually before a later run. It never closes or marks the capped
-issue complete, so dependent work remains blocked.
+findings manually, then relabel the issue `ready-for-agent` for a later run.
+It never closes or marks the capped issue complete, so dependent work remains
+blocked.
 
-## Needs-attention handling
+## Hand-off handling
 
-A validated needs-attention decision is not an ordinary failure. Ralphie
+A validated hand-off decision is not an ordinary failure. Ralphie
 persists the summary, evidence, questions, and issue
 freshness metadata in the run artifacts, keeps the issue open, and continues
 with later work.
-Notifications are disabled unless `notifications.enabled` is `true`; a
-label by itself is rejected. When opted in, Ralphie publishes through the
-GitHub notification service after recording the outcome and before moving to
-the next issue. Notification applies only to agent-reported
-needs-attention blockers: issues held back by open queue dependencies are
-recorded as needs-attention outcomes but never notified or labeled, because
-their blocker resolves by queue completion rather than by a human decision.
-A notification failure fails the run; the issue remains open and a later run
-re-evaluates it from scratch.
 
-When any executor session requests needs attention, Ralphie first persists the
+Hand-offs are always on. After recording the outcome and before moving to the
+next issue, Ralphie replaces the issue's triage state label (it ends with
+exactly one) and posts one comment that starts with the AI disclaimer. The
+comment carries a hidden `ralphie:hand-off` marker, so a retry updates it
+instead of posting another. `needs-info` hand-offs (missing information,
+conflicting requirements, cannot reproduce, outdated premise) use the Triage
+Notes template; `ready-for-human` hand-offs (exhausted implementation
+attempts, the decomposition depth limit, an external dependency) use an
+Agent-Brief-style write-up under a `## Hand-off` heading, listing what was
+tried and the local path of the diagnostics. The label names follow the
+`labels` mapping in the configuration file. Issues held back by open
+blockers, whether reported by pre-flight or by queue order, are recorded as
+skipped and change nothing on GitHub. A hand-off publishing failure fails the
+run; the issue keeps its labels and a later run re-evaluates it from scratch.
+
+When an executor session or pre-flight asks for a hand-off, Ralphie first persists the
 bounded request, clean checkpoint, and issue freshness fingerprint. Exactly one
 fresh read-only grounding session verifies that request before the next artifact,
-Git, or GitHub mutation. Only a `needs_attention` verifier disposition confirms
+Git, or GitHub mutation. Only a `hand_off` verifier disposition confirms
 it; actionable and already-resolved dispositions continue the original flow.
 The confirmed decision is persisted before recovery writes a bounded binary-safe
 patch and decision diagnostic, then restores and verifies the exact clean
-checkpoint. A verifier or recovery interruption retains the handoff so a later
+checkpoint. A verifier or recovery interruption retains the pending hand-off so a later
 attempt can retry verification or recovery without rerunning completed agent
-work. The saved decision and handoff are reused only when live `updatedAt` and
+work. The saved decision and pending hand-off are reused only when live `updatedAt` and
 comment freshness metadata exactly match; a changed or invalid fingerprint
 removes both atomically before routing continues.
 
@@ -254,9 +262,9 @@ stateDiagram-v2
     Cleaned --> [*]
 ```
 
-Needs-attention recovery diagnostics use the same issue directory and contain
+Hand-off recovery diagnostics use the same issue directory and contain
 `changes.patch` plus `metadata.json` under a fingerprint-bound
-`needs-attention-<id>/` directory. The patch includes tracked staged and unstaged
+`hand-off-<id>/` directory. The patch includes tracked staged and unstaged
 changes as well as untracked files. Matching diagnostics are reused within the
 run; a fresh fingerprint receives a distinct directory. Diagnostics are
 published atomically before the exact checkpoint is restored and verified.

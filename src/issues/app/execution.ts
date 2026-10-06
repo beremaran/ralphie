@@ -4,7 +4,7 @@ import { type GitHubIssue } from "../../github/domain.ts";
 import type { IssueArtifactStore } from "./artifacts.ts";
 import type {
     IssueResolutionDecision,
-    NeedsAttentionReason,
+    HandOffReason,
 } from "../domain/decisions.ts";
 import { type GitRepositoryInvariantService } from "../../git/ports.ts";
 import type { RunLayout } from "../../run/ports.ts";
@@ -18,7 +18,7 @@ import type { RunLayout } from "../../run/ports.ts";
 export enum IssueExecutionOutcomeKind {
     Completed = "completed",
     Decomposed = "decomposed",
-    NeedsAttention = "needs-attention",
+    HandOff = "hand-off",
     Escalated = "escalated",
     Skipped = "skipped",
     Failed = "failed",
@@ -45,27 +45,27 @@ export type IssueExecutionOutcome =
           readonly childIssueNumbers: ReadonlyArray<number>;
       }
     | ({
-          readonly kind: IssueExecutionOutcomeKind.NeedsAttention;
-          readonly reason: NeedsAttentionReason;
+          readonly kind: IssueExecutionOutcomeKind.HandOff;
+          readonly reason: HandOffReason;
           readonly summary: string;
           readonly evidence: ReadonlyArray<string>;
           readonly questions: ReadonlyArray<string>;
       } & (
           | {
-                /** Where the validated needs-attention artifact was written. */
+                /** Where the validated hand-off artifact was written. */
                 readonly artifactPath: string;
                 readonly diagnosticsPath?: never;
-                readonly route?: "needs-attention";
+                readonly route?: "hand-off";
             }
           | {
                 /** Alternate name used when the local record is diagnostic output. */
                 readonly artifactPath?: never;
                 readonly diagnosticsPath: string;
-                readonly route?: "needs-attention";
+                readonly route?: "hand-off";
             }
           | {
                 /** Controlled route with no per-issue recovery artifact. */
-                readonly route: "needs-attention";
+                readonly route: "hand-off";
                 readonly artifactPath?: never;
                 readonly diagnosticsPath?: never;
             }
@@ -85,6 +85,11 @@ export type IssueExecutionOutcome =
     | {
           readonly kind: IssueExecutionOutcomeKind.Failed;
           readonly message: string;
+          /**
+           * Set when implementation attempts ran out. The implementation
+           * executor turns these into hand-offs before they leave it.
+           */
+          readonly exhausted?: true;
       };
 
 /**

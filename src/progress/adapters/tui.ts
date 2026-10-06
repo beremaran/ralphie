@@ -94,7 +94,7 @@ const QUEUE_STATUS_STYLES: Readonly<
     active: { glyph: "▶", color: "#7aa2f7" },
     completed: { glyph: "✓", color: "#9ece6a" },
     failed: { glyph: "✗", color: "#f7768e" },
-    "needs-attention": { glyph: "⚠", color: "#e0af68" },
+    "hand-off": { glyph: "⚠", color: "#e0af68" },
     skipped: { glyph: "−", color: "#565f89" },
 };
 
@@ -356,7 +356,7 @@ export const makeTuiProgressCoordinator = (
             ({ status }) =>
                 status === "completed" ||
                 status === "failed" ||
-                status === "needs-attention" ||
+                status === "hand-off" ||
                 status === "skipped",
         ).length;
         current.sidebarCount.content = styled(
@@ -802,7 +802,7 @@ export const makeTuiProgressCoordinator = (
                     mod,
                     mod.fg(THEME.dim)(`−${label} ${update.message}`),
                 );
-            case "needs-attention":
+            case "hand-off":
                 return styled(
                     mod,
                     mod.fg(THEME.yellow)("⚠"),
@@ -831,7 +831,7 @@ export const makeTuiProgressCoordinator = (
         state = reduceProgressUpdate(state, update, now);
         const key = transcriptKeyFor(update);
         // Only an issue that starts executing becomes the followed issue;
-        // skipped or needs-attention events keep the current view.
+        // skipped or hand-off events keep the current view.
         if (
             key !== undefined &&
             update.stage === "issue-execution" &&

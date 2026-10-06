@@ -7,7 +7,10 @@ import { type GitIssueOperationsService } from "../src/git/ports.ts";
 import { type GitHubConnectionService } from "../src/github/ports.ts";
 import { type GitHubIssueMutationService } from "../src/github/ports.ts";
 import { makeParentCompletionService } from "../src/issues/app/parent-completion.ts";
-import { type GitHubNeedsAttentionNotificationService } from "../src/github/ports.ts";
+import {
+    type GitHubHandOffInput,
+    type GitHubHandOffService,
+} from "../src/github/ports.ts";
 import { type GitHubIssuesService } from "../src/github/ports.ts";
 import { type GitHubIssue } from "../src/github/domain.ts";
 import {
@@ -45,7 +48,7 @@ import {
     type PreflightDecision,
     GroundingDisposition,
     IssueResolutionStatus,
-    NeedsAttentionReason,
+    HandOffReason,
 } from "../src/issues/domain/decisions.ts";
 
 const firstIssue: GitHubIssue = {
@@ -85,7 +88,7 @@ type TestRuntimeOptions = {
     readonly issueExecutor?: IssueExecutorService;
     readonly artifactStore?: IssueArtifactStoreService;
     readonly refreshedIssues?: Readonly<Record<number, GitHubIssue>>;
-    readonly needsAttentionNotification?: GitHubNeedsAttentionNotificationService;
+    readonly handOffService?: GitHubHandOffService;
     readonly onStateSave?: (state: RunState) => void;
     readonly eventLog?: RunEventLog;
     /** Native sub-issues reported for every parent during reconciliation. */
@@ -270,12 +273,9 @@ const testRuntime = (
             relationships,
             mutations,
         }),
-        githubNeedsAttentionNotification:
-            options.needsAttentionNotification ?? {
-                notify: async () => {
-                    throw new Error("unused");
-                },
-            },
+        githubHandOff: options.handOffService ?? {
+            handOff: async () => ({ comment: "created" }),
+        },
         gitRepository: repository,
         gitRepositoryInvariant: invariant,
         gitIssueCheckpoint: checkpoint,
@@ -321,7 +321,7 @@ type GroundedRoute =
     | "actionable"
     | "decomposition"
     | "already-resolved"
-    | "needs-attention";
+    | "hand-off";
 
 const preflightDecisionFor = (route: GroundedRoute): PreflightDecision => {
     switch (route) {
@@ -337,10 +337,10 @@ const preflightDecisionFor = (route: GroundedRoute): PreflightDecision => {
             };
         case "already-resolved":
             return { disposition: GroundingDisposition.AlreadyResolved };
-        case "needs-attention":
+        case "hand-off":
             return {
-                disposition: GroundingDisposition.NeedsAttention,
-                reason: NeedsAttentionReason.ExternalDependency,
+                disposition: GroundingDisposition.HandOff,
+                reason: HandOffReason.ExternalDependency,
                 summary: "A prerequisite is still open.",
                 evidence: ["Issue body links the open prerequisite."],
                 questions: ["Complete the prerequisite, then retry."],
@@ -474,26 +474,23 @@ describe("workflow", () => {
         );
     });
 
-    test("keeps completed issue closure unchanged when notifications are enabled", async () => {
+    test("completed issues are closed without any hand-off", async () => {
         const calls: string[] = [];
-        let notified = false;
+        let handedOff = false;
         const summary = await workflow(
-            {
-                ...baseOptions,
-                notificationsEnabled: true,
-            },
+            baseOptions,
             testRuntime(calls, [], {
-                needsAttentionNotification: {
-                    notify: async () => {
-                        notified = true;
-                        return { comment: "created", label: "applied" };
+                handOffService: {
+                    handOff: async () => {
+                        handedOff = true;
+                        return { comment: "created" };
                     },
                 },
             }),
         );
 
         expect(summary.counts.completed).toBe(1);
-        expect(notified).toBeFalse();
+        expect(handedOff).toBeFalse();
         expect(calls).toContain("closeIssue:42");
     });
 
@@ -510,14 +507,14 @@ describe("workflow", () => {
                     issueLists: [[firstIssue, secondIssue]],
                     outcomes: [
                         {
-                            kind: IssueExecutionOutcomeKind.NeedsAttention,
-                            reason: NeedsAttentionReason.ExternalDependency,
+                            kind: IssueExecutionOutcomeKind.HandOff,
+                            reason: HandOffReason.ExternalDependency,
                             summary: "A prerequisite is still open.",
                             evidence: ["Issue body links the prerequisite."],
                             questions: [
                                 "Complete the prerequisite, then retry.",
                             ],
-                            artifactPath: "/tmp/needs-attention.json",
+                            artifactPath: "/tmp/hand-off.json",
                         },
                         {
                             kind: IssueExecutionOutcomeKind.Completed,
@@ -533,36 +530,32 @@ describe("workflow", () => {
         expect(summary.outcomes.map(({ issueNumber }) => issueNumber)).toEqual([
             42, 43,
         ]);
-        const needsAttention = events.find(
-            ({ status }) => status === "needs-attention",
-        );
-        expect(needsAttention).toMatchObject({
+        const handOff = events.find(({ status }) => status === "hand-off");
+        expect(handOff).toMatchObject({
             stage: "grounding",
             current: 1,
             total: 2,
             details: {
-                reason: NeedsAttentionReason.ExternalDependency,
+                reason: HandOffReason.ExternalDependency,
                 summary: "A prerequisite is still open.",
                 evidence: ["Issue body links the prerequisite."],
                 questions: ["Complete the prerequisite, then retry."],
-                artifactPath: "/tmp/needs-attention.json",
+                artifactPath: "/tmp/hand-off.json",
                 queuePosition: 1,
             },
         });
-        expect(summary.counts[IssueExecutionOutcomeKind.NeedsAttention]).toBe(
-            1,
-        );
+        expect(summary.counts[IssueExecutionOutcomeKind.HandOff]).toBe(1);
         expect(states.at(-1)?.queue.completedIssueNumbers).toEqual([43]);
         expect(calls).not.toContain("closeIssue:42");
         expect(calls).toContain("closeIssue:43");
     });
 
-    test("keeps a confirmed needs-attention recovery outcome open with its diagnostics path and no Git or GitHub mutations", async () => {
+    test("keeps a confirmed hand-off recovery outcome open with its diagnostics path and no Git or GitHub mutations", async () => {
         const calls: string[] = [];
         const states: RunState[] = [];
         const events: ProgressUpdate[] = [];
         const diagnosticsPath =
-            "/tmp/.ralphie/runs/run-1/issues/42/needs-attention-abc/changes.patch";
+            "/tmp/.ralphie/runs/run-1/issues/42/hand-off-abc/changes.patch";
         const summary = await workflow(
             { ...baseOptions },
             testRuntime(
@@ -572,8 +565,8 @@ describe("workflow", () => {
                     issueLists: [[firstIssue, secondIssue]],
                     outcomes: [
                         {
-                            kind: IssueExecutionOutcomeKind.NeedsAttention,
-                            reason: NeedsAttentionReason.MissingInformation,
+                            kind: IssueExecutionOutcomeKind.HandOff,
+                            reason: HandOffReason.MissingInformation,
                             summary: "A prerequisite is still open.",
                             evidence: [
                                 "Issue body links the open prerequisite.",
@@ -595,19 +588,17 @@ describe("workflow", () => {
         );
 
         expect(summary.outcomes[0]?.outcome).toMatchObject({
-            kind: IssueExecutionOutcomeKind.NeedsAttention,
-            reason: NeedsAttentionReason.MissingInformation,
+            kind: IssueExecutionOutcomeKind.HandOff,
+            reason: HandOffReason.MissingInformation,
             summary: "A prerequisite is still open.",
             evidence: ["Issue body links the open prerequisite."],
             questions: ["Complete the prerequisite, then retry."],
             diagnosticsPath,
         });
-        const needsAttention = events.find(
-            ({ status }) => status === "needs-attention",
-        );
-        expect(needsAttention).toMatchObject({
+        const handOff = events.find(({ status }) => status === "hand-off");
+        expect(handOff).toMatchObject({
             details: {
-                reason: NeedsAttentionReason.MissingInformation,
+                reason: HandOffReason.MissingInformation,
                 summary: "A prerequisite is still open.",
                 evidence: ["Issue body links the open prerequisite."],
                 questions: ["Complete the prerequisite, then retry."],
@@ -618,7 +609,7 @@ describe("workflow", () => {
             expect.objectContaining({
                 issueNumber: 42,
                 outcome: expect.objectContaining({
-                    kind: IssueExecutionOutcomeKind.NeedsAttention,
+                    kind: IssueExecutionOutcomeKind.HandOff,
                     diagnosticsPath,
                 }),
             }),
@@ -641,8 +632,8 @@ describe("workflow", () => {
                 issueLists: [[firstIssue, secondIssue]],
                 outcomes: [
                     {
-                        kind: IssueExecutionOutcomeKind.NeedsAttention,
-                        reason: NeedsAttentionReason.DecompositionLimitReached,
+                        kind: IssueExecutionOutcomeKind.HandOff,
+                        reason: HandOffReason.DecompositionLimitReached,
                         summary: "Maximum decomposition depth reached.",
                         evidence: [
                             "The next depth exceeds the configured maximum.",
@@ -650,7 +641,7 @@ describe("workflow", () => {
                         questions: [
                             "Increase the maximum or narrow the issue.",
                         ],
-                        route: "needs-attention",
+                        route: "hand-off",
                     },
                     {
                         kind: IssueExecutionOutcomeKind.Completed,
@@ -664,14 +655,12 @@ describe("workflow", () => {
         expect(summary.outcomes.map(({ issueNumber }) => issueNumber)).toEqual([
             42, 43,
         ]);
-        expect(summary.counts[IssueExecutionOutcomeKind.NeedsAttention]).toBe(
-            1,
-        );
+        expect(summary.counts[IssueExecutionOutcomeKind.HandOff]).toBe(1);
         expect(calls).toContain("closeIssue:43");
         expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
     });
 
-    test("records a needs-attention outcome and continues without reporting an ordinary failure", async () => {
+    test("records a hand-off outcome and continues without reporting an ordinary failure", async () => {
         const calls: string[] = [];
         const states: RunState[] = [];
         const events: ProgressUpdate[] = [];
@@ -685,43 +674,39 @@ describe("workflow", () => {
                 {
                     outcomes: [
                         {
-                            kind: IssueExecutionOutcomeKind.NeedsAttention,
-                            reason: NeedsAttentionReason.ExternalDependency,
+                            kind: IssueExecutionOutcomeKind.HandOff,
+                            reason: HandOffReason.ExternalDependency,
                             summary: "A prerequisite is still open.",
                             evidence: ["The prerequisite is unresolved."],
                             questions: ["When will it be available?"],
-                            artifactPath: "/tmp/needs-attention.json",
+                            artifactPath: "/tmp/hand-off.json",
                         },
                     ],
                 },
                 events,
             ),
         );
-        expect(summary.counts[IssueExecutionOutcomeKind.NeedsAttention]).toBe(
-            1,
-        );
+        expect(summary.counts[IssueExecutionOutcomeKind.HandOff]).toBe(1);
         expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
         expect(events.some(({ status }) => status === "failed")).toBe(false);
         expect(events).toContainEqual(
             expect.objectContaining({
                 stage: "grounding",
-                status: "needs-attention",
+                status: "hand-off",
                 details: expect.objectContaining({
-                    reason: NeedsAttentionReason.ExternalDependency,
+                    reason: HandOffReason.ExternalDependency,
                     summary: "A prerequisite is still open.",
                     evidence: ["The prerequisite is unresolved."],
                     questions: ["When will it be available?"],
-                    artifactPath: "/tmp/needs-attention.json",
+                    artifactPath: "/tmp/hand-off.json",
                 }),
             }),
         );
-        expect(events.some(({ status }) => status === "needs-attention")).toBe(
-            true,
-        );
+        expect(events.some(({ status }) => status === "hand-off")).toBe(true);
         expect(calls).not.toContain("closeIssue:42");
     });
 
-    test("surfaces dependency-blocked issues as needs-attention outcomes and continues", async () => {
+    test("skips dependency-blocked issues without a hand-off and continues", async () => {
         const calls: string[] = [];
         const states: RunState[] = [];
         const events: ProgressUpdate[] = [];
@@ -741,12 +726,12 @@ describe("workflow", () => {
                     issueLists: [[firstIssue, blockedIssue]],
                     outcomes: [
                         {
-                            kind: IssueExecutionOutcomeKind.NeedsAttention,
-                            reason: NeedsAttentionReason.MissingInformation,
+                            kind: IssueExecutionOutcomeKind.HandOff,
+                            reason: HandOffReason.MissingInformation,
                             summary: "The prerequisite needs an answer.",
                             evidence: ["The prerequisite is unanswered."],
                             questions: ["What is the answer?"],
-                            route: "needs-attention",
+                            route: "hand-off",
                         },
                     ],
                 },
@@ -755,38 +740,28 @@ describe("workflow", () => {
         );
 
         // The dependency never completed, so the blocked issue was never
-        // handed to the executor, never closed, and never notified unless the
-        // blocked path itself reports it.
-        expect(summary.counts[IssueExecutionOutcomeKind.NeedsAttention]).toBe(
-            2,
-        );
+        // handed to the executor or closed, and nothing changed on GitHub.
+        expect(summary.counts[IssueExecutionOutcomeKind.HandOff]).toBe(1);
+        expect(summary.counts[IssueExecutionOutcomeKind.Skipped]).toBe(1);
         expect(calls).not.toContain("executeIssue:44");
         expect(calls).not.toContain("closeIssue:42");
         expect(calls).not.toContain("closeIssue:44");
         expect(events.some(({ status }) => status === "failed")).toBe(false);
         expect(events).toContainEqual(
             expect.objectContaining({
-                stage: "grounding",
-                status: "needs-attention",
+                stage: "issue-queue",
+                status: "skipped",
                 issue: { number: 44, title: firstIssue.title },
-                details: expect.objectContaining({
-                    reason: NeedsAttentionReason.ExternalDependency,
-                    summary: expect.stringContaining("#42"),
-                }),
+                message: expect.stringContaining("#42"),
             }),
         );
         const blockedOutcome = states
             .at(-1)
             ?.outcomes.find((entry) => entry.issueNumber === 44)?.outcome;
-        if (blockedOutcome?.kind !== IssueExecutionOutcomeKind.NeedsAttention) {
-            throw new Error("Expected a needs-attention outcome for #44.");
+        if (blockedOutcome?.kind !== IssueExecutionOutcomeKind.Skipped) {
+            throw new Error("Expected a skipped outcome for #44.");
         }
-        expect(blockedOutcome.reason).toBe(
-            NeedsAttentionReason.ExternalDependency,
-        );
-        expect(
-            blockedOutcome.evidence.some((item) => item.includes("#42")),
-        ).toBe(true);
+        expect(blockedOutcome.reason).toContain("#42");
         expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
         expect(
             states.at(-1)?.queue.pending.map(({ number }) => number),
@@ -809,21 +784,20 @@ describe("workflow", () => {
                 issueLists: [[firstIssue, blockedIssue]],
                 outcomes: [
                     {
-                        kind: IssueExecutionOutcomeKind.NeedsAttention,
-                        reason: NeedsAttentionReason.MissingInformation,
+                        kind: IssueExecutionOutcomeKind.HandOff,
+                        reason: HandOffReason.MissingInformation,
                         summary: "The prerequisite needs an answer.",
                         evidence: ["The prerequisite is unanswered."],
                         questions: ["What is the answer?"],
-                        route: "needs-attention",
+                        route: "hand-off",
                     },
                 ],
             }),
         );
 
         expect(summary.counts[IssueExecutionOutcomeKind.Completed]).toBe(0);
-        expect(summary.counts[IssueExecutionOutcomeKind.NeedsAttention]).toBe(
-            2,
-        );
+        expect(summary.counts[IssueExecutionOutcomeKind.HandOff]).toBe(1);
+        expect(summary.counts[IssueExecutionOutcomeKind.Skipped]).toBe(1);
         expect(summary.outcomes.map(({ issueNumber }) => issueNumber)).toEqual([
             42, 44,
         ]);
@@ -835,7 +809,7 @@ describe("workflow", () => {
         ).toContain(44);
     });
 
-    test("does not notify dependency-blocked issues; notifies genuine needs-attention outcomes", async () => {
+    test("hands off genuine outcomes but leaves dependency-blocked issues untouched", async () => {
         const calls: string[] = [];
         const states: RunState[] = [];
         const blockedIssue: GitHubIssue = {
@@ -843,59 +817,126 @@ describe("workflow", () => {
             number: 44,
             body: '<!-- ralphie:decomposition root=7 parent=35 key="blocked" depth=2 -->\n\nBlocked work.\n\n## Dependencies\n\n- #42 (prerequisite)',
         };
+        const handOffs: Array<{
+            readonly issueNumber: number;
+            readonly input: GitHubHandOffInput;
+        }> = [];
         const summary = await workflow(
-            {
-                ...baseOptions,
-                notificationsEnabled: true,
-                needsAttentionLabel: "needs-attention",
-            },
+            baseOptions,
             testRuntime(calls, states, {
                 issueLists: [[firstIssue, blockedIssue]],
                 outcomes: [
                     {
-                        kind: IssueExecutionOutcomeKind.NeedsAttention,
-                        reason: NeedsAttentionReason.MissingInformation,
+                        kind: IssueExecutionOutcomeKind.HandOff,
+                        reason: HandOffReason.MissingInformation,
                         summary: "The prerequisite needs an answer.",
                         evidence: ["The prerequisite is unanswered."],
                         questions: ["What is the answer?"],
-                        route: "needs-attention",
+                        route: "hand-off",
                     },
                 ],
-                needsAttentionNotification: {
-                    notify: async (_repo, issueNumber, input, label) => {
-                        calls.push(`notifyNeedsAttention:${issueNumber}`);
-                        expect(issueNumber).toBe(firstIssue.number);
-                        expect(input.reason).toBe(
-                            NeedsAttentionReason.MissingInformation,
-                        );
-                        expect(label).toBe("needs-attention");
-                        return {
-                            comment: "created" as const,
-                            label: "applied" as const,
-                        };
+                handOffService: {
+                    handOff: async (_repo, issueNumber, input) => {
+                        handOffs.push({ issueNumber, input });
+                        return { comment: "created" };
                     },
                 },
             }),
         );
 
-        expect(summary.counts[IssueExecutionOutcomeKind.NeedsAttention]).toBe(
-            2,
-        );
-        // The dependency-blocked issue (#44) is recorded but never notified:
-        // open queue dependencies resolve by queue completion, not by human
-        // attention. Only the agent-reported blocker (#firstIssue) notifies.
-        expect(
-            calls.filter((call) => call.startsWith("notifyNeedsAttention:")),
-        ).toEqual([`notifyNeedsAttention:${firstIssue.number}`]);
+        expect(summary.counts[IssueExecutionOutcomeKind.HandOff]).toBe(1);
+        expect(summary.counts[IssueExecutionOutcomeKind.Skipped]).toBe(1);
+        expect(handOffs.map(({ issueNumber }) => issueNumber)).toEqual([
+            firstIssue.number,
+        ]);
         expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
     });
 
-    test("persists the needs-attention outcome before continuing to the next issue", async () => {
+    test.each([
+        [HandOffReason.MissingInformation, "needs-info", "## Triage Notes"],
+        [
+            HandOffReason.ConflictingRequirements,
+            "needs-info",
+            "## Triage Notes",
+        ],
+        [HandOffReason.CannotReproduce, "needs-info", "## Triage Notes"],
+        [HandOffReason.OutdatedPremise, "needs-info", "## Triage Notes"],
+        [HandOffReason.ExternalDependency, "ready-for-human", "## Hand-off"],
+        [
+            HandOffReason.ImplementationExhausted,
+            "ready-for-human",
+            "## Hand-off",
+        ],
+        [
+            HandOffReason.DecompositionLimitReached,
+            "ready-for-human",
+            "## Hand-off",
+        ],
+    ] as const)(
+        "hands off %s to %s with the AI disclaimer first",
+        async (reason, label, heading) => {
+            const calls: string[] = [];
+            const handOffs: GitHubHandOffInput[] = [];
+            await workflow(
+                {
+                    ...baseOptions,
+                    handOffLabels: {
+                        "needs-info": "needs-info",
+                        "ready-for-human": "ready-for-human",
+                        replaces: [
+                            "ready-for-agent",
+                            "needs-info",
+                            "ready-for-human",
+                        ],
+                    },
+                },
+                testRuntime(calls, [], {
+                    outcomes: [
+                        {
+                            kind: IssueExecutionOutcomeKind.HandOff,
+                            reason,
+                            summary: "Why the issue was handed off.",
+                            evidence: ["What was established."],
+                            questions: ["What happens next?"],
+                            diagnosticsPath: "/tmp/diagnostics/issue-42",
+                        },
+                    ],
+                    handOffService: {
+                        handOff: async (_repo, _issueNumber, input) => {
+                            handOffs.push(input);
+                            return { comment: "created" };
+                        },
+                    },
+                }),
+            );
+
+            expect(handOffs).toHaveLength(1);
+            const [handOff] = handOffs;
+            expect(handOff?.label).toBe(label);
+            expect(handOff?.replaceLabels).toEqual([
+                "ready-for-agent",
+                "needs-info",
+                "ready-for-human",
+            ]);
+            expect(
+                handOff?.body.startsWith(
+                    "> *This was generated by AI during triage.*",
+                ),
+            ).toBe(true);
+            expect(handOff?.body).toContain(heading);
+            expect(handOff?.body).toContain("What happens next?");
+            if (label === "ready-for-human") {
+                expect(handOff?.body).toContain("/tmp/diagnostics/issue-42");
+            }
+        },
+    );
+
+    test("persists the hand-off outcome before continuing to the next issue", async () => {
         const calls: string[] = [];
         const states: RunState[] = [];
         const events: ProgressUpdate[] = [];
         const executor = groundedRouteExecutor(calls, {
-            42: "needs-attention",
+            42: "hand-off",
             43: "actionable",
         });
         let savedOutcome = false;
@@ -922,11 +963,11 @@ describe("workflow", () => {
                                 ({ issueNumber, outcome }) =>
                                     issueNumber === 42 &&
                                     outcome.kind ===
-                                        IssueExecutionOutcomeKind.NeedsAttention,
+                                        IssueExecutionOutcomeKind.HandOff,
                             )
                         ) {
                             savedOutcome = true;
-                            calls.push("save:needs-attention");
+                            calls.push("save:hand-off");
                         }
                     },
                 },
@@ -940,7 +981,7 @@ describe("workflow", () => {
                 state.outcomes.some(({ issueNumber }) => issueNumber === 42),
         );
         if (pendingState === undefined) {
-            throw new Error("Missing persisted needs-attention state");
+            throw new Error("Missing persisted hand-off state");
         }
         expect(pendingState).toMatchObject({
             status: RunStateStatus.Active,
@@ -959,53 +1000,23 @@ describe("workflow", () => {
         const outcome42 = pendingState.outcomes.find(
             ({ issueNumber }) => issueNumber === 42,
         )?.outcome;
-        if (outcome42?.kind !== IssueExecutionOutcomeKind.NeedsAttention) {
-            throw new Error("Expected a needs-attention outcome for #42.");
+        if (outcome42?.kind !== IssueExecutionOutcomeKind.HandOff) {
+            throw new Error("Expected a hand-off outcome for #42.");
         }
         expect(
             "artifactPath" in outcome42 && outcome42.artifactPath,
         ).toBeString();
         expectCallOrder(calls, [
-            `artifact:42:${IssueArtifactKind.NeedsAttentionDecision}`,
-            "save:needs-attention",
+            `artifact:42:${IssueArtifactKind.HandOffDecision}`,
+            "save:hand-off",
         ]);
-        expect(summary.counts[IssueExecutionOutcomeKind.NeedsAttention]).toBe(
-            1,
-        );
+        expect(summary.counts[IssueExecutionOutcomeKind.HandOff]).toBe(1);
         expect(summary.counts.completed).toBe(1);
         expect(calls).toContain("preflight:43");
         expect(calls).toContain("closeIssue:43");
         expect(calls).not.toContain("closeIssue:42");
         expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
         expect(events.some(({ status }) => status === "failed")).toBeFalse();
-    });
-
-    test("does not notify when needs-attention notifications are disabled", async () => {
-        const states: RunState[] = [];
-        let notified = false;
-        const notification: GitHubNeedsAttentionNotificationService = {
-            notify: async () => {
-                notified = true;
-                return { comment: "created", label: "not-configured" };
-            },
-        };
-        await workflow(
-            { ...baseOptions, notificationsEnabled: false },
-            testRuntime([], states, {
-                needsAttentionNotification: notification,
-                outcomes: [
-                    {
-                        kind: IssueExecutionOutcomeKind.NeedsAttention,
-                        reason: NeedsAttentionReason.ExternalDependency,
-                        summary: "A prerequisite is still open.",
-                        evidence: ["The prerequisite is unresolved."],
-                        questions: ["When will it be available?"],
-                        artifactPath: "/tmp/needs-attention.json",
-                    },
-                ],
-            }),
-        );
-        expect(notified).toBeFalse();
     });
 
     test("passes the configured attempt budgets to the issue executor", async () => {

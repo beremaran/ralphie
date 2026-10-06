@@ -47,7 +47,7 @@ const statusSymbol = (status: ProgressStatus, colors: boolean): string => {
                 return "−";
             case "started":
                 return "◐";
-            case "needs-attention":
+            case "hand-off":
                 return "⚠";
             case "info":
                 return "•";
@@ -62,7 +62,7 @@ const statusSymbol = (status: ProgressStatus, colors: boolean): string => {
             return dim("−");
         case "started":
             return yellow("◐");
-        case "needs-attention":
+        case "hand-off":
             return yellow("⚠");
         case "info":
             return cyan("•");
@@ -74,7 +74,7 @@ type ProgressStyle = (render: (text: string) => string, text: string) => string;
 const formatIssue = (event: ProgressEvent, style: ProgressStyle): string => {
     if (event.issue === undefined) return "";
     const number = style(cyan, `#${event.issue.number}`);
-    if (event.status !== "needs-attention") return ` ${number}`;
+    if (event.status !== "hand-off") return ` ${number}`;
     return ` ${number} ${style(dim, humanText(event.issue.title))} —`;
 };
 
@@ -271,12 +271,12 @@ export const makeProgressReporter = ({
             event.stage === "run" &&
             (event.status === "succeeded" ||
                 event.status === "failed" ||
-                event.status === "needs-attention");
+                event.status === "hand-off");
         const settled =
             event.status === "succeeded" ||
             event.status === "failed" ||
             event.status === "skipped" ||
-            event.status === "needs-attention";
+            event.status === "hand-off";
         const active = settled
             ? removeActive(progressIdentity(event))
             : undefined;

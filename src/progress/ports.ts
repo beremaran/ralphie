@@ -40,14 +40,14 @@ export type ProgressStage =
     | "issue-relationships"
     | "issue-closure"
     | "pr-gate"
-    | "notification";
+    | "hand-off";
 
 export type ProgressStatus =
     | "started"
     | "succeeded"
     | "failed"
     | "skipped"
-    | "needs-attention"
+    | "hand-off"
     | "info";
 
 export type ProgressIssue = {

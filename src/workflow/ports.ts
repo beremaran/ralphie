@@ -9,7 +9,8 @@ import type {
 } from "../issues/app/execution.ts";
 import type { GitHubIssuesService } from "../github/ports.ts";
 import type { GitHubIssueMutationService } from "../github/ports.ts";
-import type { GitHubNeedsAttentionNotificationService } from "../github/ports.ts";
+import type { GitHubHandOffService } from "../github/ports.ts";
+import type { HandOffLabels } from "../issues/domain/hand-off.ts";
 import type { ParentCompletionService } from "../issues/ports.ts";
 import type {
     GitIssueCheckpointService,
@@ -47,7 +48,7 @@ export type IssueWorkflowRuntime = {
     readonly githubConnection: GitHubConnectionService;
     readonly githubIssues: GitHubIssuesService;
     readonly githubIssueMutations: GitHubIssueMutationService;
-    readonly githubNeedsAttentionNotification: GitHubNeedsAttentionNotificationService;
+    readonly githubHandOff: GitHubHandOffService;
     readonly gitRepository: GitRepositoryService;
     readonly gitRepositoryInvariant: GitRepositoryInvariantService;
     readonly gitIssueCheckpoint: GitIssueCheckpointService;
@@ -77,10 +78,8 @@ export type WorkflowOptions = {
     /** Interactive queue control; absent for non-interactive runs. */
     readonly control?: RunControl;
     readonly runId: string;
-    /** Publish needs-attention outcomes through the runtime notifier. */
-    readonly notificationsEnabled?: boolean;
-    /** Optional additive label applied with a needs-attention notification. */
-    readonly needsAttentionLabel?: string;
+    /** The triage state labels hand-offs apply; canonical names by default. */
+    readonly handOffLabels?: HandOffLabels;
 };
 
 export type WorkflowSummary = {
