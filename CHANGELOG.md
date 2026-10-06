@@ -173,7 +173,18 @@ Changed sections before upgrading.
   the configuration key that replaces it (`docs/configuration.md`).
 - Breaking: `--notify-needs-attention`, `--needs-attention-label` and the
   `notifications` configuration section. Hand-offs are always on, so there is
-  nothing left to opt into; the flags fail as unknown options.
+  nothing left to opt into; each flag fails with a tailored error (see
+  Changed).
+
+## Before the harness release
+
+Everything below predates the harness release. It was kept under a single
+Unreleased heading, so it mixes what shipped in v0.1.0 to v0.1.2 with changes
+merged afterwards and is not attributed to a version. Mentions of removed
+surfaces (OpenCode, the pi SDK, `--on-needs-attention`, `lgtm`, and so on)
+describe history, not the current tool.
+
+### Removed
 
 - Remove the `quiet` and `verbose` output modes. `--output` now accepts only
   `default` (live transcript and progress) and `json` (JSON Lines). The

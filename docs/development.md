@@ -14,9 +14,10 @@ bun install --frozen-lockfile
 bun run check
 ```
 
-`bun run check` runs the same gate as CI, in this order:
-`format:check`, `lint`, `typecheck`, the source-reachability audit, `test`, and
-`build`.
+`bun run check` runs, in this order: `format:check`, `lint`, `typecheck`, the
+source-reachability audit, `test`, and `build`. CI runs the same steps except
+the source-reachability audit, which only `bun run check` runs, so run it
+locally.
 
 Useful individual commands:
 
@@ -89,9 +90,11 @@ The scratch repository must be named both by flag and by the
 `RALPHIE_SMOKE_SCRATCH_REPO` environment variable, and the project repository
 is refused. Use a throwaway repository: Ralphie commits and pushes to its
 default branch. Outcomes depend on model judgement, so one failed scenario is
-a prompt to inspect the run, not necessarily a regression. The script has
-never been run live: it was written and unit-tested for its guard and argument
-parsing only, so expect to fix the first real run.
+a prompt to inspect the run, not necessarily a regression. The script was
+run live on 2026-10-06 against `claude`, `codex` and `pi`. Those runs found and
+fixed real defects (the Codex output schema, a parallel skill-preparation race,
+and the exit status of a halted run), and not every scenario passed on every
+harness, so expect to inspect a run rather than trust a single result.
 
 ## Source reachability boundary
 
@@ -218,27 +221,28 @@ Before submitting a change:
 2. Run `bun run check`.
 3. Keep Git and GitHub mutations inside their deterministic domain services.
 4. Update the authoritative page under [`docs/`](README.md) when documentation
-   changes. Update [`CHANGELOG.md`](../CHANGELOG.md) when the command surface or
-   recovery contract changes.
+   changes. Update [`CHANGELOG.md`](../CHANGELOG.md) when the command surface, the
+   output shape, the run-state version, or the recovery contract changes.
 
 Add in-memory unit tests for new behavior, following the patterns in the
 remaining files under `tests/`. Do not
 run the mutating CLI against an uncontrolled repository while developing; use a
-repository you control when a command-level check is needed. Ralphie removes the
-selected workspace recursively before and after successful runs, so keep it
-dedicated and disposable; see [Safety](safety.md).
+repository you control when a command-level check is needed. The workspace is deleted by the CLI; see
+[Workspace risk](safety.md#workspace-risk).
 
 ## Where future documentation belongs
 
 Do not append detailed contracts to the root README. Keep the root page as the
 landing page, and place changes in the page that owns the fact:
 
+- configuration keys and removed flags: [Configuration](configuration.md);
 - CLI options and recipes: [CLI reference](cli-reference.md);
 - routing and delivery behavior: [Workflows](workflows.md);
 - mutation boundaries: [Safety](safety.md);
 - output, state, and recovery: [Operations and recovery](operations-and-recovery.md);
 - components and source locations: [Architecture](architecture.md); and
-- versioning and publishing: [Development](development.md#publishing).
+- versioning, publishing, the live smoke script and vendored-skill syncing:
+  [Development](development.md#publishing).
 
 Update the [documentation index](README.md)
 when pages or reading paths change.

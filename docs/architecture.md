@@ -70,8 +70,10 @@ removing the workspace). `tests/architecture.test.ts` enforces the adapter
 import rules, the no-I/O rule for non-adapter code, the Octokit confinement
 (the `github` context is the only place the SDK appears), composition-root
 isolation, and process-stream ownership. `tests/contracts/` holds the shared
-behavioral suites that both the in-memory fakes and the live adapters pass for
-`RunEventLog` and `IssueArtifactStore`.
+behavioral suites that both the in-memory fakes and the live adapters pass: the
+`RunEventLog` and `IssueArtifactStore` suites, the harness adapter suite that
+every `HarnessAdapter` must pass (`harness-adapter.contract.ts`), and the
+harness service suite (`harness-service.contract.ts`).
 
 ## OpenCode adapter findings
 

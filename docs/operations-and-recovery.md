@@ -153,7 +153,10 @@ configuration is not stored in this tree):
 └── issues/
     └── <issue-number>/
         ├── artifacts.json
-        └── review-exhaustion/
+        ├── review-exhaustion/
+        │   ├── changes.patch
+        │   └── metadata.json
+        └── hand-off-<id>/
             ├── changes.patch
             └── metadata.json
 ```
@@ -221,17 +224,11 @@ persists the summary, evidence, questions, and issue
 freshness metadata in the run artifacts, keeps the issue open, and continues
 with later work.
 
-Hand-offs are always on. After recording the outcome and before moving to the
-next issue, Ralphie replaces the issue's triage state label (it ends with
-exactly one) and posts one comment that starts with the AI disclaimer. The
-comment carries a hidden `ralphie:hand-off` marker, so a retry updates it
-instead of posting another. `needs-info` hand-offs (missing information,
-conflicting requirements, cannot reproduce, outdated premise) use the Triage
-Notes template; `ready-for-human` hand-offs (exhausted implementation
-attempts, the decomposition depth limit, an external dependency) use an
-Agent-Brief-style write-up under a `## Hand-off` heading, listing what was
-tried and the local path of the diagnostics. The label names follow the
-`labels` mapping in the configuration file. Issues held back by open
+The labels and comments a hand-off publishes are described under
+[Hand-offs](workflows.md#hand-offs). They are published after recording the
+outcome and before moving to the next issue. The comment carries a hidden
+`ralphie:hand-off` marker, so a retry updates it instead of posting another.
+Issues held back by open
 blockers, whether reported by pre-flight or by queue order, are recorded as
 skipped and change nothing on GitHub. A hand-off publishing failure fails the
 run; the issue keeps its labels and a later run re-evaluates it from scratch.
@@ -278,7 +275,8 @@ published atomically before the exact checkpoint is restored and verified.
 
 There is no resume command. When a run fails or is interrupted:
 
-1. the process exits `1` (`75` after a limit or outage, `130` on cancellation);
+1. the process exits non-zero (see
+   [exit status](#failure-cancellation-and-exit-status));
 2. the workspace retains `state.json`, `events.jsonl`, and per-issue artifacts
    for diagnosis;
 3. issues that were not closed remain open and are selected again on the next
