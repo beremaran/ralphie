@@ -77,7 +77,7 @@ Structured decisions are returned as a result validated against the canonical
 Zod schema (natively where the harness supports it, otherwise from a final
 JSON block, with a bounded number of corrections), and the validated value is
 what the domain boundary accepts. A repository-backed blocker is an optional
-`needsAttention` field in that result, not a mutation-capable tool. Ralphie
+`handOff` field in that result, not a mutation-capable tool. Ralphie
 stages, verifies, commits, pushes, and mutates
 GitHub through deterministic domain services. Invalid output or a harness failure
 becomes a failed issue outcome without proceeding to the next operation.

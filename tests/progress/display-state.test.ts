@@ -71,14 +71,14 @@ describe("display state", () => {
         });
         expect(state.queue[0]?.status).toBe("completed");
 
-        // A later needs-attention decision supersedes the execution success.
+        // A later hand-off decision supersedes the execution success.
         state = reduceProgressUpdate(state, {
             stage: "grounding",
-            status: "needs-attention",
-            message: "Issue #13 needs attention.",
+            status: "hand-off",
+            message: "Issue #13 handed off.",
             issue: { number: 13, title: "Display state" },
         });
-        expect(state.queue[0]?.status).toBe("needs-attention");
+        expect(state.queue[0]?.status).toBe("hand-off");
 
         state = reduceProgressUpdate(state, {
             stage: "issue-queue",
@@ -140,11 +140,11 @@ describe("display state", () => {
         expect(PROGRESS_STAGE_LABELS["pr-gate"]).toBe("Waiting for PR checks");
     });
 
-    test("reduces the grounding needs-attention stage to waiting activity", () => {
+    test("reduces the grounding hand-off stage to waiting activity", () => {
         const state = reduceProgressUpdate(undefined, {
             stage: "grounding",
-            status: "needs-attention",
-            message: "Issue needs attention.",
+            status: "hand-off",
+            message: "Issue handed off.",
             issue: { number: 13, title: "Display state" },
             current: 1,
             total: 3,

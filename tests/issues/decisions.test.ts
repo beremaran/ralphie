@@ -27,9 +27,9 @@ describe("grounding decision schema", () => {
         });
     });
 
-    test("still enforces needs-attention branch requirements", () => {
+    test("still enforces hand-off branch requirements", () => {
         const parsed = groundingDecisionSchema.safeParse({
-            disposition: GroundingDisposition.NeedsAttention,
+            disposition: GroundingDisposition.HandOff,
             reason: "missing_information",
             summary: "A prerequisite is still open.",
             evidence: [],

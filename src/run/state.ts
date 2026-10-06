@@ -4,10 +4,10 @@ import { HARNESS_ROLES } from "../harness/ports.ts";
 import { IssueExecutionOutcomeKind } from "../issues/app/execution.ts";
 import { DEFAULT_MAX_DECOMPOSITION_DEPTH } from "../issues/domain/decomposition-markdown.ts";
 import {
-    NeedsAttentionReason,
+    HandOffReason,
     nonBlankStringSchema,
 } from "../issues/domain/decisions.ts";
-export const RUN_STATE_VERSION = 13 as const;
+export const RUN_STATE_VERSION = 14 as const;
 
 export enum RunStateStatus {
     Active = "active",
@@ -36,37 +36,37 @@ const issueSchema = z.object({
     commentVersion: z.string().min(1).optional(),
 });
 
-const needsAttentionOutcomeSchema = z.union([
+const handOffOutcomeSchema = z.union([
     z
         .object({
-            kind: z.literal(IssueExecutionOutcomeKind.NeedsAttention),
-            reason: z.enum(NeedsAttentionReason),
+            kind: z.literal(IssueExecutionOutcomeKind.HandOff),
+            reason: z.enum(HandOffReason),
             summary: nonBlankStringSchema,
             evidence: z.array(nonBlankStringSchema).min(1),
             questions: z.array(nonBlankStringSchema).min(1),
             artifactPath: z.string().min(1),
-            route: z.literal("needs-attention").optional(),
+            route: z.literal("hand-off").optional(),
         })
         .strict(),
     z
         .object({
-            kind: z.literal(IssueExecutionOutcomeKind.NeedsAttention),
-            reason: z.enum(NeedsAttentionReason),
+            kind: z.literal(IssueExecutionOutcomeKind.HandOff),
+            reason: z.enum(HandOffReason),
             summary: nonBlankStringSchema,
             evidence: z.array(nonBlankStringSchema).min(1),
             questions: z.array(nonBlankStringSchema).min(1),
             diagnosticsPath: z.string().min(1),
-            route: z.literal("needs-attention").optional(),
+            route: z.literal("hand-off").optional(),
         })
         .strict(),
     z
         .object({
-            kind: z.literal(IssueExecutionOutcomeKind.NeedsAttention),
-            reason: z.enum(NeedsAttentionReason),
+            kind: z.literal(IssueExecutionOutcomeKind.HandOff),
+            reason: z.enum(HandOffReason),
             summary: nonBlankStringSchema,
             evidence: z.array(nonBlankStringSchema).min(1),
             questions: z.array(nonBlankStringSchema).min(1),
-            route: z.literal("needs-attention"),
+            route: z.literal("hand-off"),
         })
         .strict(),
 ]);
@@ -94,7 +94,7 @@ const currentOutcomeSchema = z.union([
         reason: z.string().min(1),
         childIssueNumbers: z.array(z.number().int().positive()).optional(),
     }),
-    needsAttentionOutcomeSchema,
+    handOffOutcomeSchema,
     z
         .object({
             kind: z.literal(IssueExecutionOutcomeKind.Skipped),
@@ -129,9 +129,6 @@ const runStateFields = {
     runId: z.string().min(1),
     repository: z.string().min(1),
     branch: z.string().min(1),
-    /** Whether needs-attention outcomes should be published to GitHub. */
-    notificationsEnabled: z.boolean().optional(),
-    needsAttentionLabel: z.string().trim().min(1).optional(),
     /** The harness assignment of every role for this run. */
     roles: z.record(
         z.enum(HARNESS_ROLES),

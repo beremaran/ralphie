@@ -7,7 +7,7 @@ import {
     type IssueArtifactStoreService,
 } from "./artifacts.ts";
 import {
-    type NeedsAttentionDecision,
+    type HandOffDecision,
     type SessionFitDecision,
     GroundingDisposition,
     type IssueResolutionDecision,
@@ -23,7 +23,7 @@ import type { DecompositionExecutorService } from "./decomposition-executor.ts";
 import type { ImplementationExecutorService } from "./implementation-executor.ts";
 import type { PreflightAssessmentService } from "./preflight.ts";
 import type { ResolutionVerificationService } from "./resolution-verification.ts";
-import { type NeedsAttentionRouterService } from "./needs-attention.ts";
+import { type HandOffRouterService } from "./hand-off.ts";
 import { decompositionLimitOutcome } from "../domain/decomposition-limit.ts";
 
 export type IssueExecutorService = {
@@ -56,7 +56,7 @@ export const makeIssueExecutorService = (
     preflightAssessment: PreflightAssessmentService,
     resolutionVerification: ResolutionVerificationService,
     progress?: ProgressReporterService,
-    needsAttentionRouter?: NeedsAttentionRouterService,
+    handOffRouter?: HandOffRouterService,
 ): IssueExecutorService => {
     const routeResolutionDecision = async (
         context: IssueExecutionContext,
@@ -84,7 +84,7 @@ export const makeIssueExecutorService = (
     ): Promise<IssueExecutionOutcome> => {
         try {
             const result = await resolutionVerification.verify(context);
-            if (result.needsAttention !== undefined) {
+            if (result.handOff !== undefined) {
                 return {
                     kind: IssueExecutionOutcomeKind.Failed,
                     message:
@@ -115,18 +115,16 @@ export const makeIssueExecutorService = (
         context: IssueExecutionContext,
         artifacts: Awaited<ReturnType<IssueArtifactStoreService["forIssue"]>>,
         request: NonNullable<
-            Awaited<
-                ReturnType<PreflightAssessmentService["assess"]>
-            >["needsAttention"]
+            Awaited<ReturnType<PreflightAssessmentService["assess"]>>["handOff"]
         >,
     ) => {
-        if (needsAttentionRouter === undefined) {
+        if (handOffRouter === undefined) {
             throw new RalphieError({
                 message:
-                    "A needs-attention signal requires the verifier/router service.",
+                    "A hand-off signal requires the verifier/router service.",
             });
         }
-        return await needsAttentionRouter.route({
+        return await handOffRouter.route({
             context,
             artifacts,
             request,
@@ -134,7 +132,7 @@ export const makeIssueExecutorService = (
         });
     };
 
-    const reuseNeedsAttention = async (
+    const reuseHandOff = async (
         context: IssueExecutionContext,
         artifacts: Awaited<ReturnType<IssueArtifactStoreService["forIssue"]>>,
     ): Promise<IssueExecutionOutcome> => {
@@ -149,11 +147,11 @@ export const makeIssueExecutorService = (
             details: { agentWorkSkipped: true },
         });
         const { decision } = await artifacts.read(
-            IssueArtifactKind.NeedsAttentionDecision,
+            IssueArtifactKind.HandOffDecision,
         );
         const { disposition: _disposition, ...details } = decision;
         return {
-            kind: IssueExecutionOutcomeKind.NeedsAttention,
+            kind: IssueExecutionOutcomeKind.HandOff,
             ...details,
             artifactPath: context.runLayout.issueArtifactsPath(
                 context.issue.number,
@@ -161,14 +159,14 @@ export const makeIssueExecutorService = (
         };
     };
 
-    const recordNeedsAttention = async (
+    const recordHandOff = async (
         context: IssueExecutionContext,
         artifacts: Awaited<ReturnType<IssueArtifactStoreService["forIssue"]>>,
-        decision: NeedsAttentionDecision,
+        decision: HandOffDecision,
     ): Promise<IssueExecutionOutcome> => {
         const fingerprint = issueFreshnessFingerprint(context.issue);
         await artifacts.write(
-            IssueArtifactKind.NeedsAttentionDecision,
+            IssueArtifactKind.HandOffDecision,
             {
                 decision,
                 fingerprint,
@@ -177,7 +175,7 @@ export const makeIssueExecutorService = (
         );
         const { disposition: _disposition, ...details } = decision;
         return {
-            kind: IssueExecutionOutcomeKind.NeedsAttention,
+            kind: IssueExecutionOutcomeKind.HandOff,
             ...details,
             artifactPath: context.runLayout.issueArtifactsPath(
                 context.issue.number,
@@ -190,19 +188,15 @@ export const makeIssueExecutorService = (
         artifacts: Awaited<ReturnType<IssueArtifactStoreService["forIssue"]>>,
     ): Promise<IssueExecutionOutcome | undefined> => {
         const fingerprint = issueFreshnessFingerprint(context.issue);
-        if (artifacts.has(IssueArtifactKind.NeedsAttentionDecision)) {
-            return await reuseNeedsAttention(context, artifacts);
+        if (artifacts.has(IssueArtifactKind.HandOffDecision)) {
+            return await reuseHandOff(context, artifacts);
         }
         const preflight = await preflightAssessment.assess(context);
         const { decision } = preflight;
         const routed =
-            preflight.needsAttention === undefined
+            preflight.handOff === undefined
                 ? undefined
-                : await routeSignal(
-                      context,
-                      artifacts,
-                      preflight.needsAttention,
-                  );
+                : await routeSignal(context, artifacts, preflight.handOff);
         if (routed !== undefined) return routed;
         if (decision.disposition === GroundingDisposition.Actionable) {
             await artifacts.write(
@@ -221,23 +215,23 @@ export const makeIssueExecutorService = (
         if (decision.disposition === GroundingDisposition.AlreadyResolved) {
             return await verifyAlreadyResolved(context, artifacts);
         }
-        return await recordNeedsAttention(context, artifacts, decision);
+        return await recordHandOff(context, artifacts, decision);
     };
 
-    const resumeNeedsAttention = async (
+    const resumeHandOff = async (
         context: IssueExecutionContext,
         artifacts: Awaited<ReturnType<IssueArtifactStoreService["forIssue"]>>,
     ): Promise<IssueExecutionOutcome | undefined> => {
-        if (!artifacts.has(IssueArtifactKind.NeedsAttentionHandoff)) {
+        if (!artifacts.has(IssueArtifactKind.PendingHandOff)) {
             return undefined;
         }
-        if (needsAttentionRouter === undefined) {
+        if (handOffRouter === undefined) {
             throw new RalphieError({
                 message:
-                    "A pending needs-attention handoff requires the verifier/router service.",
+                    "A pending hand-off requires the verifier/router service.",
             });
         }
-        return await needsAttentionRouter.route({ context, artifacts });
+        return await handOffRouter.route({ context, artifacts });
     };
 
     const executeIssue = async (
@@ -248,7 +242,7 @@ export const makeIssueExecutorService = (
             issueFreshnessFingerprint(context.issue),
             context.signal,
         );
-        const resumed = await resumeNeedsAttention(context, artifacts);
+        const resumed = await resumeHandOff(context, artifacts);
         if (resumed !== undefined) return resumed;
         if (!artifacts.has(IssueArtifactKind.PreflightDecision)) {
             const preflightOutcome = await runPreflight(context, artifacts);
@@ -276,7 +270,7 @@ export const makeIssueExecutorService = (
         }
 
         const decomposition = await decompositionExecutor.execute(input);
-        if (decomposition.kind === IssueExecutionOutcomeKind.NeedsAttention) {
+        if (decomposition.kind === IssueExecutionOutcomeKind.HandOff) {
             return decomposition;
         }
         if (decomposition.kind !== IssueExecutionOutcomeKind.Decomposed) {

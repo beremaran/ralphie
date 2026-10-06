@@ -512,8 +512,8 @@ describe("OpenTUI progress coordinator", () => {
         });
         await coordinator.progress.emit({
             stage: "grounding",
-            status: "needs-attention",
-            message: "needs-attention-marker",
+            status: "hand-off",
+            message: "hand-off-marker",
             issue: { number: 8, title: "Needs a decision" },
         });
 
@@ -521,7 +521,7 @@ describe("OpenTUI progress coordinator", () => {
         await setup.renderOnce();
         const frame = setup.captureCharFrame();
         expect(frame).toContain("verification-failed-marker");
-        expect(frame).toContain("needs-attention-marker");
+        expect(frame).toContain("hand-off-marker");
 
         await coordinator.dispose();
         // A second dispose is harmless and emits nothing.

@@ -15,6 +15,7 @@ import { type InitDependencies, initializeConfig } from "./config/init.ts";
 import { defaultConfigPath } from "./config/load.ts";
 import type { ConfigDocumentWriter } from "./config/ports.ts";
 import { intakeOrdering } from "./config/settings.ts";
+import { handOffLabelsFrom } from "./issues/domain/hand-off.ts";
 import { yamlConfigDocumentReader } from "./config/adapters/yaml-file.ts";
 import { makeGitHubViewerService } from "./github/adapters/viewer.ts";
 import { CommandRunnerLive } from "./process/adapters/command-runner.ts";
@@ -66,8 +67,6 @@ const REMOVED_FLAGS: Readonly<Record<string, string>> = {
     "implementation-attempts": "limits.implementationAttempts",
     "max-decomposition-depth": "limits.maxDecompositionDepth",
     workspace: "workspace",
-    "notify-needs-attention": "notifications.enabled",
-    "needs-attention-label": "notifications.label",
     model: "harnesses.<harness>.model or roles.<role>.model",
     thinking: "harnesses.<harness>.effort or roles.<role>.effort",
 };
@@ -400,10 +399,7 @@ const workflowOptionsFor = (
         ...(input.signal === undefined ? {} : { signal: input.signal }),
         ...(control === undefined ? {} : { control }),
         runId,
-        notificationsEnabled: settings.notifications.enabled,
-        ...(settings.notifications.label === undefined
-            ? {}
-            : { needsAttentionLabel: settings.notifications.label }),
+        handOffLabels: handOffLabelsFrom(settings.labels),
     };
 };
 

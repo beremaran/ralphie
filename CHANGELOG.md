@@ -7,6 +7,15 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Added
 
+- Hand-offs are always on and replace needs-attention outcomes and the opt-in
+  notification flags. Anything that needs a human moves the issue to
+  `needs-info` (missing information, conflicting requirements, cannot
+  reproduce, outdated premise; Triage Notes comment) or `ready-for-human`
+  (exhausted implementation attempts or verification repairs, the
+  decomposition depth limit, an external dependency; write-up with the
+  diagnostics location). Ralphie replaces the issue's single triage state
+  label, so the next run's intake skips it, and every comment it posts starts
+  with the AI disclaimer. See `docs/workflows.md`.
 - `ralphie init` detects the harnesses on PATH and writes a commented config
   file at the default location (or `--config`), never overwriting an existing
   one. A run without a config file now points at it.
@@ -27,11 +36,18 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Changed
 
+- Run state version 14: "needs attention" is renamed to hand-off throughout
+  (outcome kind `hand-off`, `hand_off` result field and disposition, the
+  `hand-off` progress stage and status, `hand-off-decision` and
+  `pending-hand-off` artifacts). Open-blocker skips from queue order are now
+  `skipped` outcomes instead of attention outcomes and change nothing on
+  GitHub.
+
 - Intake now reads only open issues carrying the `labels.ready-for-agent`
   label (and every `intake.requireLabels` label). One read-only pre-flight
   session per issue replaces the grounding session and the 0-5 complexity
   assessment: it returns `actionable` with `fitsOneSession`, `already_resolved`,
-  `blocked` (skipped without a label change) or `needs_attention`. The
+  `blocked` (skipped without a label change) or `hand_off`. The
   `complexity-decision` artifact is replaced by `preflight-decision` and
   the `complexity-assessment` progress stage by `preflight`.
 - Every agent session now runs through a headless harness CLI (Claude Code, as
@@ -41,9 +57,9 @@ All notable changes to Ralphie are documented here. The project follows
   configuration keys choose the harness, model, and effort; every role falls
   back to `default`, both reviewers to `reviewer`, and the fixer to the
   implementer. See `docs/configuration.md`.
-- Structured results carry the optional needs-attention request as a field of
-  the result instead of a separate tool call; repair sessions can no longer
-  raise one.
+- Structured results carry the optional hand-off request as a field of the
+  result instead of a separate tool call; repair sessions can no longer raise
+  one.
 - Run state version 13 replaces `selection` with the per-role assignments.
   Older state is not migrated.
 - Ralphie reads its settings from `$XDG_CONFIG_HOME/ralphie/config.yaml`
@@ -63,9 +79,13 @@ All notable changes to Ralphie are documented here. The project follows
   them.
 
 - Remove `--branch`, `--verify-command`, `--issue-label`, `--issue-sort`,
-  `--implementation-attempts`, `--max-decomposition-depth`, `--workspace`,
-  `--notify-needs-attention`, and `--needs-attention-label`. Each fails with an
-  error naming the configuration key that replaces it.
+  `--implementation-attempts`, `--max-decomposition-depth`, and `--workspace`.
+  Each fails with an error naming the configuration key that replaces it.
+
+- Remove `--notify-needs-attention`, `--needs-attention-label` and the
+  `notifications` configuration section. Hand-offs are always on, so there is
+  nothing left to opt into; the flags now fail as unknown options and the
+  section is rejected as an unknown key.
 
 - Remove the `quiet` and `verbose` output modes. `--output` now accepts only
   `default` (live transcript and progress) and `json` (JSON Lines). The
