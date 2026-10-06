@@ -5,7 +5,10 @@ import { join } from "node:path";
 
 import { z } from "zod";
 
-import type { AgentSessions } from "../../src/agent/sessions.ts";
+import {
+    sessionFailure,
+    type AgentSessions,
+} from "../../src/agent/sessions.ts";
 import type {
     HarnessOutcome,
     HarnessRole,
@@ -1192,6 +1195,90 @@ describe("issue executor hand-off routing", () => {
         expect(store.has(IssueArtifactKind.PendingHandOff)).toBe(false);
         expect(store.has(IssueArtifactKind.HandOffDecision)).toBe(true);
         expect(verifyCalls).toEqual([INVARIANT]);
+    });
+
+    describe("session failures before attempts", () => {
+        const preflightFailing = (error: RalphieError) => ({
+            assess: async (): Promise<never> => {
+                throw error;
+            },
+        });
+        const timeout = sessionFailure("preflight", {
+            kind: "timeout",
+            message: "took too long",
+        });
+
+        test("a pre-flight session failure becomes a ready-for-human hand-off", async () => {
+            const harness = await makeExecutorHarness({
+                grounding: preflightFailing(timeout),
+            });
+            const outcome = await harness.executor.execute(harness.context);
+            expect(outcome).toMatchObject({
+                kind: IssueExecutionOutcomeKind.HandOff,
+                reason: HandOffReason.NeedsHumanJudgment,
+                diagnosticsPath: "/diag/hand-off",
+            });
+            expect(harness.recoveryInputs).toHaveLength(1);
+        });
+
+        test("a decomposer session failure becomes a hand-off", async () => {
+            const harness = await makeExecutorHarness({
+                grounding: {
+                    assess: async () => ({
+                        decision: {
+                            disposition: GroundingDisposition.Actionable,
+                            fitsOneSession: false,
+                        },
+                        sessionID: "preflight-1",
+                    }),
+                },
+                decomposition: {
+                    execute: async () => {
+                        throw sessionFailure("decomposer", {
+                            kind: "invalid_result",
+                            message: "schema never validated",
+                        });
+                    },
+                },
+            });
+            const outcome = await harness.executor.execute(harness.context);
+            expect(outcome.kind).toBe(IssueExecutionOutcomeKind.HandOff);
+        });
+
+        test("checkout and GitHub errors keep failing so the next run retries", async () => {
+            const harness = await makeExecutorHarness({
+                grounding: preflightFailing(
+                    new RalphieError({ message: "checkout failed" }),
+                ),
+            });
+            const outcome = await harness.executor.execute(harness.context);
+            expect(outcome).toEqual({
+                kind: IssueExecutionOutcomeKind.Failed,
+                message: "checkout failed",
+            });
+            expect(harness.recoveryInputs).toHaveLength(0);
+        });
+
+        test("a user stop never hands off", async () => {
+            const harness = await makeExecutorHarness({
+                grounding: preflightFailing(
+                    sessionFailure("preflight", {
+                        kind: "aborted",
+                        message: "stopped",
+                    }),
+                ),
+            });
+            const controller = new AbortController();
+            controller.abort();
+            const stopped = await harness.executor.execute({
+                ...harness.context,
+                signal: controller.signal,
+            });
+            expect(stopped.kind).toBe(IssueExecutionOutcomeKind.Failed);
+            const cancelled = await harness.executor.execute(harness.context);
+            expect(cancelled.kind).toBe(IssueExecutionOutcomeKind.Failed);
+            expect(harness.recoveryInputs).toHaveLength(0);
+        });
     });
 
     test("routes fitsOneSession false to decomposition without implementing", async () => {

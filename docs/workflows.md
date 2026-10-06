@@ -156,8 +156,16 @@ clean checkpoint, and sends the issue through decomposition.
 Pre-flight's `already_resolved` disposition is tentative. A fresh verifier must
 confirm it before completion; an `unresolved` result corrects the route to
 actionable, proceeds to implementation, and supplies its summary
-and evidence to the first implementation session. Invalid output or verifier
-infrastructure failure still fails closed.
+and evidence to the first implementation session.
+
+Agent session failures (a harness error, timeout, or result that never
+validates) in pre-flight, the resolution verifier, hand-off verification or
+decomposition are handled like implementation failures: the issue becomes a
+`ready-for-human` hand-off (reason `needs_human_judgment`) with preserved
+diagnostics, so it does not re-enter the queue unchanged. Checkout, repository
+invariant and GitHub errors are not session failures; they fail the issue and
+the next run retries it, as does any failure after a stop request. A hand-off
+whose verifier session failed stays pending and is resumed by the next run.
 
 ### Fix sessions
 
