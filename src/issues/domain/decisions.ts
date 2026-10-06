@@ -1,21 +1,5 @@
 import { z } from "zod";
 
-export enum ComplexityLevel {
-    Level0 = 0,
-    Level1 = 1,
-    Level2 = 2,
-    Level3 = 3,
-    Level4 = 4,
-    Level5 = 5,
-}
-
-export enum ImplementationComplexityLevel {
-    Level0 = ComplexityLevel.Level0,
-    Level1 = ComplexityLevel.Level1,
-    Level2 = ComplexityLevel.Level2,
-    Level3 = ComplexityLevel.Level3,
-}
-
 export enum ReviewVerdict {
     Approved = "approved",
     ChangesRequested = "changes_requested",
@@ -194,9 +178,19 @@ export const issueBreakdownDecisionSchema = z
                             "A stable identifier used by dependency references.",
                         ),
                     title: z.string().min(1).max(256),
-                    body: z.string().min(1),
-                    estimatedComplexity: z.enum(ImplementationComplexityLevel),
-                    dependsOn: z.array(z.string().min(1)),
+                    whatToBuild: z
+                        .string()
+                        .min(1)
+                        .describe(
+                            "The end-to-end behaviour this ticket delivers, without file paths or code snippets.",
+                        ),
+                    acceptanceCriteria: z
+                        .array(z.string().min(1))
+                        .min(1)
+                        .describe("One verifiable criterion per entry."),
+                    dependsOn: z
+                        .array(z.string().min(1))
+                        .describe("Keys of the tickets that block this one."),
                 }),
             )
             .min(2),

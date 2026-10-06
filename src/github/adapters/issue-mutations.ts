@@ -82,6 +82,9 @@ export const makeGitHubIssueMutationsService = (
                     ...repositoryParameters(repository),
                     title: input.title,
                     body: input.body,
+                    ...(input.labels === undefined || input.labels.length === 0
+                        ? {}
+                        : { labels: [...input.labels] }),
                 });
                 return mapGitHubIssue(response.data);
             } catch (cause) {
@@ -130,6 +133,22 @@ export const makeGitHubIssueMutationsService = (
             } catch (cause) {
                 throw mutationError(
                     `Failed to close issue #${issueNumber} in ${repository}.`,
+                    cause,
+                );
+            }
+        },
+
+        comment: async (repository, issueNumber, body) => {
+            const client = api();
+            try {
+                await client.rest.issues.createComment({
+                    ...repositoryParameters(repository),
+                    issue_number: issueNumber,
+                    body,
+                });
+            } catch (cause) {
+                throw mutationError(
+                    `Failed to comment on issue #${issueNumber} in ${repository}.`,
                     cause,
                 );
             }

@@ -194,6 +194,9 @@ const testRuntime = (
         update: async () => {
             throw new RalphieError({ message: "unused" });
         },
+        comment: async (_repository, issueNumber) => {
+            calls.push(`commentIssue:${issueNumber}`);
+        },
         close: async (_repository, issueNumber) => {
             calls.push(`closeIssue:${issueNumber}`);
             if (options.closeFailure) throw options.closeFailure;
@@ -1756,6 +1759,10 @@ describe("workflow", () => {
         );
         expect(summary.outcomes).toEqual([]);
         expect(calls).toContain("closeIssue:43");
+        expect(calls.indexOf("commentIssue:43")).toBeGreaterThan(-1);
+        expect(calls.indexOf("commentIssue:43")).toBeLessThan(
+            calls.indexOf("closeIssue:43"),
+        );
         expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
     });
 

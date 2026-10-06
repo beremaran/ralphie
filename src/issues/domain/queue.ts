@@ -131,6 +131,11 @@ export const toQueuedIssues = (
                 issue.body ?? "",
             );
         if (lineage?.[1] === undefined || lineage[2] === undefined) continue;
+        // A parent body is never rewritten, so an open child's marker also
+        // identifies its open parent as a tracking issue.
+        if (openIssueNumbers.has(Number(lineage[2]))) {
+            openDecomposedParents.add(Number(lineage[2]));
+        }
         for (const ancestor of new Set([
             Number(lineage[1]),
             Number(lineage[2]),
@@ -166,7 +171,7 @@ export const toQueuedIssues = (
     };
 
     return issues
-        .filter((issue) => !isDecomposedParent(issue))
+        .filter((issue) => !openDecomposedParents.has(issue.number))
         .map((issue) => ({
             issue,
             dependsOn: [
