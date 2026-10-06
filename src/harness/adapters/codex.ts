@@ -7,6 +7,7 @@ import { RalphieError } from "../../shared/error.ts";
 import type {
     HarnessAdapter,
     HarnessFailure,
+    JsonSchema,
     SessionAccess,
     TurnOutcome,
     TurnRequest,
@@ -15,6 +16,7 @@ import {
     makeCodexStreamReader,
     type CodexStreamSummary,
 } from "./codex-stream.ts";
+import { stripNullOptionals, toStrictJsonSchema } from "./codex-schema.ts";
 import type { SchemaFile, SchemaFileWriter } from "./schema-file.ts";
 
 const EXECUTABLE = "codex";
@@ -95,9 +97,9 @@ const classifyThrown = (error: unknown): TurnOutcome => {
 
 const MODEL_REJECTION = /model.*(not supported|not found|does not exist)/i;
 
-const parseStructured = (text: string): unknown => {
+const parseStructured = (text: string, schema: JsonSchema): unknown => {
     try {
-        return JSON.parse(text);
+        return stripNullOptionals(schema, JSON.parse(text));
     } catch {
         // Not JSON: the service asks the session to correct itself.
         return undefined;
@@ -126,7 +128,7 @@ const unfinished = (
 const settle = (
     summary: CodexStreamSummary,
     exit: { readonly exitCode: number; readonly stderr: string },
-    wantsSchema: boolean,
+    schema: JsonSchema | undefined,
 ): TurnOutcome => {
     const { threadID, failureMessage } = summary;
     if (failureMessage !== undefined) {
@@ -145,7 +147,8 @@ const settle = (
         );
     }
     const text = summary.finalText ?? "";
-    const structured = wantsSchema ? parseStructured(text) : undefined;
+    const structured =
+        schema === undefined ? undefined : parseStructured(text, schema);
     return {
         ok: true,
         harnessSessionID: threadID,
@@ -168,7 +171,7 @@ export const makeCodexAdapter = (deps: {
                 turn.jsonSchema === undefined
                     ? undefined
                     : await deps.schemaFiles.write(
-                          JSON.stringify(turn.jsonSchema),
+                          JSON.stringify(toStrictJsonSchema(turn.jsonSchema)),
                       );
             const reader = makeCodexStreamReader({ onEvent: turn.onEvent });
             const exit = await deps.runner.run(
@@ -187,7 +190,7 @@ export const makeCodexAdapter = (deps: {
                     ...(turn.env === undefined ? {} : { env: turn.env }),
                 },
             );
-            return settle(reader.summary(), exit, schemaFile !== undefined);
+            return settle(reader.summary(), exit, turn.jsonSchema);
         } catch (error) {
             return classifyThrown(error);
         } finally {

@@ -50,7 +50,7 @@ export type StructuredOutputResult<Output> = {
  * The result contract every structured session returns: the task's own result
  * plus an optional bounded request to defer the work.
  */
-const envelopeSchema = <Output>(schema: z.ZodType<Output>) =>
+export const envelopeSchema = <Output>(schema: z.ZodType<Output>) =>
     z.object({
         result: schema,
         handOff: handOffRequestSchema.optional(),
