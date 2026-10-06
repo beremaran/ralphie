@@ -135,7 +135,7 @@ const setup = async (
                 text: "",
                 value: { result: breakdown },
             };
-        }) as HarnessService["run"],
+        }) as unknown as HarnessService["run"],
     };
     const agent: AgentSessions = sessionsFor(harness);
     const repositoryInvariant: GitRepositoryInvariantService = {

@@ -69,12 +69,19 @@ describe("decomposition issue model", () => {
                 number: 7,
                 title: "T",
                 html_url: "u",
+                updated_at: "2026-08-28T00:00:00.000Z",
+                state: "open",
                 sub_issues_summary: { total: 3 },
             }).subIssueCount,
         ).toBe(3);
         expect(
-            mapGitHubIssue({ number: 7, title: "T", html_url: "u" })
-                .subIssueCount,
+            mapGitHubIssue({
+                number: 7,
+                title: "T",
+                html_url: "u",
+                updated_at: "2026-08-28T00:00:00.000Z",
+                state: "open",
+            }).subIssueCount,
         ).toBeUndefined();
     });
 
@@ -86,7 +93,13 @@ describe("decomposition issue model", () => {
                     create: async (parameters: Record<string, unknown>) => {
                         requests.push({ create: parameters });
                         return {
-                            data: { number: 5, title: "T", html_url: "u" },
+                            data: {
+                                number: 5,
+                                title: "T",
+                                html_url: "u",
+                                updated_at: "2026-08-28T00:00:00.000Z",
+                                state: "open",
+                            },
                         };
                     },
                     createComment: async (

@@ -60,7 +60,7 @@ flowchart TD
     B -->|false| I[Structured decomposition]
     H --> I
     I --> J[Create and cross-link child issues]
-    J --> K[Rewrite original issue and keep it open]
+    J --> K[Leave original issue untouched and open]
     K --> L[Refresh issue queue]
     F --> M[Commit and non-force push]
     M --> O
@@ -204,15 +204,20 @@ marks the contract an implementer works from. The recovery details are in
 
 ## Decomposition workflow
 
-1. Ask a `decomposer` session to split the issue into the next set of independently actionable
-   tasks and declare their dependencies.
-2. Create child issues in deterministic order with their stable markers.
+1. Ask a `decomposer` session to run the vendored `/to-tickets` skill with an
+   overlay: the quiz is skipped and the breakdown comes back as structured
+   output instead of being published.
+2. Create child issues, blockers first, in the to-tickets issue template
+   (`## Parent`, `## What to build`, `## Acceptance criteria`, `## Blocked by`)
+   behind Ralphie's hidden stable marker, each with the agent-ready label
+   (`labels.ready-for-agent`).
 3. Attach each created or recovered child to the original issue as a **native
    GitHub sub-issue**, reconciling against GitHub's reported hierarchy.
 4. Represent each declared `dependsOn` edge as a **native GitHub
    `blocked_by` dependency** and persist the dependency mapping artifact.
-5. Rewrite the original issue as the tracking parent and **keep it open**;
-   it is never closed as a duplicate merely because it was decomposed.
+5. Leave the original issue **open and its body untouched**. It is the
+   tracking parent; it is never closed as a duplicate merely because it was
+   decomposed.
 
 Stable markers and persisted child mappings make the workflow retry-safe: a
 retry discovers previously created children instead of duplicating them,
@@ -229,14 +234,15 @@ flowchart LR
     D --> F[Reconcile native sub-issues]
     E --> F
     F --> G[Create native blocked_by dependencies]
-    G --> H[Rewrite parent and keep it open]
+    G --> H[Keep parent open and untouched]
     H --> I[Refresh open-issue queue]
 ```
 
 The decomposition session is read-only and returns an
-`issueBreakdownDecisionSchema` result containing at least two independently
-actionable 0–3 children, stable keys, and an acyclic dependency graph. The
-breakdown is persisted before the first GitHub mutation.
+`issueBreakdownDecisionSchema` result containing at least two children, each
+with a stable key, a title, what to build, acceptance criteria, and its
+blockers. Each child must fit one session, and the blocking graph must be
+acyclic. The breakdown is persisted before the first GitHub mutation.
 
 Each child receives a stable marker containing root, parent, key, and depth.
 The positive `limits.maxDecompositionDepth` setting (default `3`) bounds recursive
@@ -248,15 +254,17 @@ issue is not marked complete, so its dependents remain blocked.
 Ralphie discovers those markers and reconciles them with any persisted mapping
 before creating anything. Thus a lost create response or a partial linking
 failure does not blindly duplicate children. Creation,
-number recording, linking, native sub-issue attachment, dependency creation,
-and the parent rewrite are separate mutations; a child already
+number recording, native sub-issue attachment, and dependency creation
+are separate mutations; a child already
 attached to the wrong parent, or a native relationship that disagrees with a
 child's marker, halts with a recovery diagnostic instead of silently
 reparenting or duplicating issues.
 
 The decomposed parent remains open as the native tracking issue and exposes
-GitHub's completion progress for its sub-issues. It is not queued again, and it
-is closed as `completed` only when its child work is finished: completing the
+GitHub's completion progress for its sub-issues. Ralphie never edits its body;
+it recognises the parent by its native sub-issues (and by open children whose
+marker names it), so it is not queued again. It is closed as `completed`,
+with one explanatory comment, only when its child work is finished: completing the
 final child reconciles its parent immediately, and every run also
 reconciles decomposed parents it discovers or refreshes, so a parent whose
 final child closed in a previous run is completed on a later run. The open-issue
