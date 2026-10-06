@@ -48,13 +48,13 @@ flowchart TD
     C --> D[Deterministically stage changes]
     D -->|Changes present| V[Configured verification]
     V -->|Passed| E[Fresh review session]
-    V -->|Command failed| R[Fresh verification-fix session]
+    V -->|Command failed| R[Resume implementer with /diagnosing-bugs]
     R --> D
     D -->|No changes| N[Fresh structured resolution verification]
     N -->|Resolved with evidence| O[Close issue as completed]
     N -->|Unresolved or uncertain| P[Fail and leave issue open]
     E -->|Approved and reverified| F[Structured commit message]
-    E -->|Changes requested| G[Fresh review-fix session]
+    E -->|Changes requested| G[Resume implementer with /implement]
     G --> D
     E -->|Five reviews exhausted| H[Preserve diagnostics and restore checkout]
     B -->|false| I[Structured decomposition]
@@ -80,8 +80,10 @@ flowchart TD
    Without a brief the issue body is the contract.
 3. Stage every change deterministically and capture the exact staged diff.
 4. Run the configured deterministic verification commands, when any. If a
-   command exits non-zero, give its bounded output and the staged diff to a
-   fresh fix session, then restage and retry up to `limits.verificationFixes` times (default five).
+   command exits non-zero, resume the implementer's session with
+   `/diagnosing-bugs` and the bounded output, then restage and retry up to
+   `limits.verificationFixes` times (default five). See
+   [Fix sessions](#fix-sessions).
 5. After verification passes or is skipped (no `verify` commands configured),
    create a local candidate commit on top of the checkpoint. Candidate commits
    are never pushed.
@@ -97,8 +99,9 @@ flowchart TD
    findings and Ralphie computes the verdict. A hard documented-standard
    violation and any missing, partial, wrong or scope-creep spec finding
    block. Smells never block.
-7. If the gate blocks, give the findings to a fresh fix session, restage,
-   reverify and add another candidate commit, then review again.
+7. If the gate blocks, resume the implementer's session through `/implement`
+   with the findings, restage, reverify and add another candidate commit, then
+   review again.
 8. Stop after approval or `limits.reviewRounds` review attempts (default five).
    On approval, squash all candidate commits (soft reset to the checkpoint)
    and reverify the final tree. If repair changes the approved tree, review the
@@ -125,6 +128,24 @@ actionable, proceeds to implementation, and supplies its summary
 and evidence to the first implementation session. Invalid output or verifier
 infrastructure failure still fails closed.
 
+### Fix sessions
+
+Fixes continue the implementer's own session, so the agent keeps the context it
+built. The `fixer` role resumes it on the same harness. A fresh `fixer` session
+starts from the issue, the current diff and the findings instead when:
+
+- resuming fails (the harness error is reported as an info event, not a failed
+  stage);
+- the implementer reported no session id;
+- the `fixer` role runs on a different harness than the implementer;
+- the session is near its context limit. Harnesses do not report context use,
+  so Ralphie estimates it from the prompt and reply sizes and switches at about
+  400,000 characters.
+
+The session that did the last fix is the one the next fix continues. The
+`limits.verificationFixes` and `limits.reviewRounds` budgets count fixes the
+same way in both modes, and exhaustion escalates as before.
+
 The boundary between agent work and deterministic operations stays explicit
 throughout the loop:
 
@@ -145,14 +166,14 @@ sequenceDiagram
         loop Until approved or five reviews
             R->>G: Run configured verification commands (when any)
             opt Verification command fails and repair budget remains
-                R->>P: Start fresh verification-fix session
+                R->>P: Resume implementer with /diagnosing-bugs
                 P-->>R: Update the checkout
                 R->>G: Restage and rerun verification
             end
             R->>P: Start fresh structured-review session
             P-->>R: Return approved or changes requested
             opt Changes requested and budget remains
-                R->>P: Start fresh review-fix session
+                R->>P: Resume implementer with /implement
                 P-->>R: Update the checkout
                 R->>G: Restage changes and read exact diff
             end

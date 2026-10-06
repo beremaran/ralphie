@@ -300,7 +300,8 @@ drained run exits `1` if any issue failed.
 
 A configured deterministic verification command returning non-zero is handled
 before it becomes an issue failure. Ralphie gives the bounded command output and
-staged diff to a fresh verification-fix session, restages its changes, and
+staged diff to the implementer's session (resumed with `/diagnosing-bugs`, or a
+fresh fixer session when it cannot be resumed), restages its changes, and
 retries up to `limits.verificationFixes` times. Only repair exhaustion or a non-repairable
 verification fault (for example a command changing the staged tree) reaches the
 ordinary failure boundary. When no `verify` commands are configured, the gate

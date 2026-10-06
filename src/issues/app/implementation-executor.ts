@@ -9,15 +9,22 @@ import {
     buildImplementationPrompt,
     buildImplementationRetryPrompt,
     buildReviewFixPrompt,
+    buildReviewResumePrompt,
     buildSpecReviewPrompt,
     buildStandardsReviewPrompt,
     buildVerificationFixPrompt,
+    buildVerificationResumePrompt,
 } from "../../agent/prompts.ts";
+import {
+    type FixSession,
+    newFixSession,
+    recordFixTurn,
+    runFix,
+} from "./fix-session.ts";
 import { requestStructuredOutput } from "../../agent/structured-output.ts";
 import {
     HAND_OFF_MESSAGE_LIMIT,
     HAND_OFF_REASONS,
-    runAgentTask,
     type HandOffRequest,
 } from "../../agent/task-session.ts";
 import { z } from "zod";
@@ -101,6 +108,8 @@ type ReviewState = {
     head: string;
     invariant: { readonly branch: string; readonly head: string };
     readonly candidateSubjects: string[];
+    /** The implementer's session, which fixes continue. */
+    readonly fix: FixSession;
 };
 
 const sameBlockingFindings = (
@@ -445,9 +454,11 @@ export const makeImplementationExecutorService = (
         invariant: { readonly branch: string; readonly head: string },
         checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
         attempt: number,
+        fix: FixSession,
         unresolvedSummary?: string,
     ): Promise<WorkflowExecutorResult | CommitMessageDecision> => {
         const { context } = input;
+        const prompt = implementationPrompt(input, attempt, unresolvedSummary);
         const result = await stage(
             progress,
             input,
@@ -460,11 +471,7 @@ export const makeImplementationExecutorService = (
                     role: "implementer",
 
                     schema: implementationResultSchema,
-                    prompt: implementationPrompt(
-                        input,
-                        attempt,
-                        unresolvedSummary,
-                    ),
+                    prompt,
                     repositoryInvariant: invariant,
                     verifyRepositoryInvariant:
                         context.repositoryInvariant.verify,
@@ -477,6 +484,11 @@ export const makeImplementationExecutorService = (
             undefined,
             { attempt, maxAttempts: implementationBudget(context) },
         );
+        recordFixTurn(fix, {
+            sessionID: result.sessionID,
+            consumedChars: prompt.length + result.output.summary.length,
+            resumed: false,
+        });
         const routed = await routeSignal(
             input,
             result.handOff ?? handoffRequest(result.output),
@@ -546,9 +558,19 @@ export const makeImplementationExecutorService = (
         );
     };
 
+    const reportFreshFixer =
+        (input: WorkflowExecutorInput, progressStage: ProgressStage) =>
+        (reason: string) =>
+            progress.emit({
+                ...issueProgress(input),
+                stage: progressStage,
+                status: "info",
+                message: `Starting a fresh fixer session: ${reason}.`,
+            });
+
     const repairVerificationFailure = async (
         input: WorkflowExecutorInput,
-        invariant: { readonly branch: string; readonly head: string },
+        state: Pick<ReviewState, "invariant" | "fix">,
         failure: VerificationCommandError,
         attempt: number,
     ): Promise<void> => {
@@ -562,18 +584,25 @@ export const makeImplementationExecutorService = (
             "verification-fix",
             `Repairing deterministic verification (attempt ${attempt}/${verificationFixBudget(context)})...`,
             () =>
-                runAgentTask(context.agent, {
+                runFix(context.agent, state.fix, {
                     directory: context.repositoryPath,
                     title: `Repair verification for issue #${context.issue.number} (attempt ${attempt})`,
-                    role: "fixer",
-                    prompt: buildVerificationFixPrompt({
+                    resumePrompt: buildVerificationResumePrompt({
+                        diagnoseInvocation: skillInvocation(
+                            state.fix.harness,
+                            "diagnosing-bugs",
+                        ),
+                        failedVerification: failure.verification,
+                    }),
+                    freshPrompt: buildVerificationFixPrompt({
                         issue: context.issue,
                         repositoryPath: context.repositoryPath,
                         targetBranch: context.targetBranch,
                         stagedDiff,
                         failedVerification: failure.verification,
                     }),
-                    repositoryInvariant: invariant,
+                    onFreshSession: reportFreshFixer(input, "verification-fix"),
+                    repositoryInvariant: state.invariant,
                     verifyRepositoryInvariant:
                         context.repositoryInvariant.verify,
                     progress,
@@ -600,7 +629,7 @@ export const makeImplementationExecutorService = (
 
     const ensureVerificationPassing = async (
         input: WorkflowExecutorInput,
-        invariant: { readonly branch: string; readonly head: string },
+        state: Pick<ReviewState, "invariant" | "fix">,
     ): Promise<VerificationResult> => {
         const attemptVerification = async (): Promise<VerificationAttempt> => {
             try {
@@ -619,7 +648,7 @@ export const makeImplementationExecutorService = (
             if (verification.status === "passed") return verification;
             await repairVerificationFailure(
                 input,
-                invariant,
+                state,
                 verification.error,
                 attempt,
             );
@@ -908,11 +937,18 @@ export const makeImplementationExecutorService = (
             "review-fix",
             `Addressing review findings (attempt ${attempt})...`,
             () =>
-                runAgentTask(context.agent, {
+                runFix(context.agent, state.fix, {
                     directory: context.repositoryPath,
                     title: `Address review for issue #${context.issue.number} (attempt ${attempt})`,
-                    role: "fixer",
-                    prompt: buildReviewFixPrompt({
+                    resumePrompt: buildReviewResumePrompt({
+                        implementInvocation: skillInvocation(
+                            state.fix.harness,
+                            "implement",
+                        ),
+                        review: review.decision,
+                    }),
+                    onFreshSession: reportFreshFixer(input, "review-fix"),
+                    freshPrompt: buildReviewFixPrompt({
                         issue: context.issue,
                         repositoryPath: context.repositoryPath,
                         targetBranch: context.targetBranch,
@@ -1030,10 +1066,7 @@ export const makeImplementationExecutorService = (
         attempt: number,
     ): Promise<WorkflowExecutorResult | undefined> => {
         await foldCandidates(input, checkpoint, state);
-        const finalVerification = await ensureVerificationPassing(
-            input,
-            state.invariant,
-        );
+        const finalVerification = await ensureVerificationPassing(input, state);
         if (!("status" in finalVerification)) return finalVerification;
         if (
             finalVerification.verification.stagedTreeSha.toLowerCase() ===
@@ -1096,6 +1129,7 @@ export const makeImplementationExecutorService = (
         input: WorkflowExecutorInput,
         checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
         invariant: { readonly branch: string; readonly head: string },
+        fix: FixSession,
     ): Promise<WorkflowExecutorResult> => {
         const { context, artifacts } = input;
         const reviews: ReviewAttempt[] = [];
@@ -1103,14 +1137,12 @@ export const makeImplementationExecutorService = (
             head: checkpoint.sha,
             invariant,
             candidateSubjects: [],
+            fix,
         };
         const maxRounds = reviewBudget(context);
         for (let attempt = 1; attempt <= maxRounds; attempt += 1) {
             checkSignal(context.signal);
-            const verification = await ensureVerificationPassing(
-                input,
-                state.invariant,
-            );
+            const verification = await ensureVerificationPassing(input, state);
             if (!("status" in verification)) return verification;
             const review = await runReviewAttempt(
                 input,
@@ -1147,6 +1179,7 @@ export const makeImplementationExecutorService = (
     ): Promise<WorkflowExecutorResult> => {
         const { context } = input;
         const maximumAttempts = implementationBudget(context);
+        const fix = newFixSession(context.agent.roles.implementer.harness);
         let unresolvedSummary: string | undefined;
         for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
             const implementation = await runImplementation(
@@ -1154,6 +1187,7 @@ export const makeImplementationExecutorService = (
                 invariant,
                 checkpoint,
                 attempt,
+                fix,
                 unresolvedSummary,
             );
             if ("kind" in implementation) return implementation;
@@ -1174,7 +1208,7 @@ export const makeImplementationExecutorService = (
                     implementation,
                     context.signal,
                 );
-                return await runReviewLoop(input, checkpoint, invariant);
+                return await runReviewLoop(input, checkpoint, invariant, fix);
             }
             const noChange = await inspectNoChangeResolution(
                 input,

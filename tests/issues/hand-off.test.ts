@@ -185,7 +185,7 @@ type FakeScript = {
     readonly count?: number;
     readonly result:
         | FakeStructuredResponse
-        | ((served: number) => FakeStructuredResponse);
+        | ((served: number, request: SessionRequest) => FakeStructuredResponse);
 };
 
 type RecordedCreate = {
@@ -213,7 +213,11 @@ const fakePi = (
     const prompts: RecordedPrompt[] = [];
     const fullPrompts: Array<{ title: string; prompt: string }> = [];
     const served = new Map<string, number>();
-    const nextResponse = (title: string): FakeStructuredResponse => {
+    const requests: SessionRequest[] = [];
+    const nextResponse = (
+        title: string,
+        request: SessionRequest,
+    ): FakeStructuredResponse => {
         const index = scripts.findIndex((script) => {
             const remaining =
                 (script.count ?? Number.POSITIVE_INFINITY) -
@@ -227,7 +231,7 @@ const fakePi = (
         const servedCount = (served.get(script.titlePrefix) ?? 0) + 1;
         served.set(script.titlePrefix, servedCount);
         return typeof script.result === "function"
-            ? script.result(servedCount)
+            ? script.result(servedCount, request)
             : script.result;
     };
     const run = async (
@@ -238,7 +242,8 @@ const fakePi = (
         const title = request.title ?? "";
         const sessionID = `session-${creates.length + 1}`;
         creates.push({ sessionID, title, role: request.role });
-        const response = nextResponse(title);
+        requests.push(request);
+        const response = nextResponse(title, request);
         prompts.push({ sessionID, title });
         fullPrompts.push({ title, prompt: request.prompt });
         if (response.error === true) {
@@ -275,7 +280,7 @@ const fakePi = (
     const client: AgentSessions = sessionsFor({
         run: run as HarnessService["run"],
     });
-    return { client, creates, prompts, fullPrompts };
+    return { client, creates, prompts, fullPrompts, requests };
 };
 
 const verifierPromptsOf = (prompts: ReadonlyArray<RecordedPrompt>) =>
@@ -555,7 +560,7 @@ const makeImplementationHarness = async (
 ) => {
     const events: ProgressUpdate[] = [];
     const progress = makeTestProgressRecorder(events);
-    const { client, creates, prompts, fullPrompts } = fakePi(
+    const { client, creates, prompts, fullPrompts, requests } = fakePi(
         options.scripts ?? [],
         options.beforeRun,
     );
@@ -670,6 +675,7 @@ const makeImplementationHarness = async (
         rangeDiffs,
         pushedShas,
         fullPrompts,
+        requests,
     };
 };
 
@@ -2489,6 +2495,202 @@ describe("two-axis review gate", () => {
         ).toHaveLength(2);
         expect(
             harness.trace.filter((entry) => entry === "ops:commitCandidate"),
+        ).toHaveLength(2);
+    });
+});
+describe("fixes resume the implementer session", () => {
+    const implement: FakeScript = {
+        titlePrefix: "Implement issue #42",
+        result: { structured: implementationChanged },
+    };
+    const redOnce = (): IssueVerificationService => {
+        let calls = 0;
+        return {
+            stagedTreeSha: async () => TREE_SHA,
+            verify: async () => {
+                calls += 1;
+                if (calls === 1) {
+                    throw new VerificationCommandError({
+                        stagedTreeSha: TREE_SHA,
+                        commands: [
+                            {
+                                command: "bun test",
+                                exitCode: 1,
+                                stdout: "",
+                                stderr: "boom in parser",
+                            },
+                        ],
+                    });
+                }
+                return {
+                    stagedTreeSha: TREE_SHA,
+                    commands: [
+                        {
+                            command: "test",
+                            exitCode: 0,
+                            stdout: "",
+                            stderr: "",
+                        },
+                    ],
+                };
+            },
+        };
+    };
+    const execute = (harness: {
+        readonly executor: ImplementationExecutorService;
+        readonly context: IssueExecutionContext;
+        readonly store: IssueArtifactStore;
+    }) =>
+        harness.executor.execute({
+            context: harness.context,
+            artifacts: harness.store,
+        });
+    const fixRequests = (
+        requests: ReadonlyArray<SessionRequest>,
+        titlePrefix: string,
+    ) => requests.filter(({ title }) => title?.startsWith(titlePrefix));
+    const blockThenApprove = (served: number, blocked = 1) => ({
+        structured:
+            served <= blocked
+                ? changesRequestedReview(`Finding ${served}`)
+                : approvedReview,
+    });
+
+    test("a verification failure resumes the implementer with /diagnosing-bugs", async () => {
+        const harness = await makeImplementationHarness({
+            verification: redOnce(),
+            scripts: [
+                implement,
+                ...reviewScripts({ structured: approvedReview }),
+                {
+                    titlePrefix: "Repair verification for issue #42",
+                    result: {},
+                },
+            ],
+        });
+        const outcome = await execute(harness);
+        expect(outcome).toMatchObject({ completion: "pushed-commit" });
+        const [repair] = fixRequests(
+            harness.requests,
+            "Repair verification for issue #42",
+        );
+        expect(repair?.role).toBe("fixer");
+        expect(repair?.resumeSessionID).toBe("session-1");
+        expect(repair?.prompt).toContain("/diagnosing-bugs");
+        expect(repair?.prompt).toContain("boom in parser");
+    });
+
+    test("a review failure resumes the implementer with /implement and the findings", async () => {
+        const harness = await makeImplementationHarness({
+            scripts: [
+                implement,
+                ...reviewScripts((served) => blockThenApprove(served)),
+                { titlePrefix: "Address review for issue #42", result: {} },
+            ],
+        });
+        const outcome = await execute(harness);
+        expect(outcome).toMatchObject({ completion: "pushed-commit" });
+        const [fix] = fixRequests(
+            harness.requests,
+            "Address review for issue #42",
+        );
+        expect(fix?.resumeSessionID).toBe("session-1");
+        expect(fix?.prompt).toContain("/implement");
+        expect(fix?.prompt).toContain("Finding 1");
+    });
+
+    test("the next fix continues the session that did the last fix", async () => {
+        const harness = await makeImplementationHarness({
+            scripts: [
+                implement,
+                ...reviewScripts((served) => blockThenApprove(served, 2)),
+                { titlePrefix: "Address review for issue #42", result: {} },
+            ],
+        });
+        await execute(harness);
+        const fixes = fixRequests(
+            harness.requests,
+            "Address review for issue #42",
+        );
+        expect(fixes).toHaveLength(2);
+        const firstFix = harness.creates.find(({ title }) =>
+            title?.startsWith("Address review for issue #42 (attempt 1)"),
+        );
+        expect(fixes[1]?.resumeSessionID).toBe(firstFix?.sessionID);
+    });
+
+    test("a failed resume falls back to a fresh fixer session", async () => {
+        const harness = await makeImplementationHarness({
+            scripts: [
+                implement,
+                ...reviewScripts((served) => blockThenApprove(served)),
+                {
+                    titlePrefix: "Address review for issue #42",
+                    result: (_served, request) =>
+                        request.resumeSessionID === undefined
+                            ? {}
+                            : { error: true },
+                },
+            ],
+        });
+        const outcome = await execute(harness);
+        expect(outcome).toMatchObject({ completion: "pushed-commit" });
+        const fixes = fixRequests(
+            harness.requests,
+            "Address review for issue #42",
+        );
+        expect(fixes).toHaveLength(2);
+        expect(fixes[0]?.resumeSessionID).toBe("session-1");
+        expect(fixes[1]?.resumeSessionID).toBeUndefined();
+        expect(fixes[1]?.role).toBe("fixer");
+        expect(fixes[1]?.prompt).toContain("fresh context");
+        expect(fixes[1]?.prompt).toContain("Finding 1");
+        expect(
+            harness.events.some(
+                (event) =>
+                    event.status === "info" &&
+                    event.message.includes("fresh fixer session"),
+            ),
+        ).toBe(true);
+        expect(
+            harness.events.some(
+                (event) =>
+                    event.stage === "review-fix" && event.status === "failed",
+            ),
+        ).toBe(false);
+    });
+
+    test("verification fixes still stop at their budget while resuming", async () => {
+        const harness = await makeImplementationHarness({
+            budgets: { verificationFixes: 2 },
+            verification: {
+                stagedTreeSha: async () => TREE_SHA,
+                verify: async () => {
+                    throw new VerificationCommandError({
+                        stagedTreeSha: TREE_SHA,
+                        commands: [
+                            {
+                                command: "bun test",
+                                exitCode: 1,
+                                stdout: "",
+                                stderr: "still red",
+                            },
+                        ],
+                    });
+                },
+            },
+            scripts: [
+                implement,
+                {
+                    titlePrefix: "Repair verification for issue #42",
+                    result: {},
+                },
+            ],
+        });
+        const outcome = await execute(harness);
+        expect(outcome.kind).toBe(IssueExecutionOutcomeKind.HandOff);
+        expect(
+            fixRequests(harness.requests, "Repair verification for issue #42"),
         ).toHaveLength(2);
     });
 });

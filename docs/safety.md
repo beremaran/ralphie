@@ -94,7 +94,7 @@ Verification is opt-in: Ralphie runs only the commands listed under
 proceeds on the staged diff. Configured commands run against the staged tree
 and their evidence is
 bound to that tree before review or commit. A non-zero command exit is treated
-as actionable implementation feedback: a fresh fix session receives bounded
+as actionable implementation feedback: the fix session (the implementer's, resumed) receives bounded
 failure evidence, and Ralphie restages and retries up to five times.
 Staged-tree mutation and exhausted repair remain
 hard safety stops. The direct-push path never uses force. See
