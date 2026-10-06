@@ -14,6 +14,7 @@ import {
     buildStandardsReviewPrompt,
     buildVerificationFixPrompt,
     buildVerificationResumePrompt,
+    PROMPT_DIFF_LIMIT,
 } from "../../agent/prompts.ts";
 import {
     type FixSession,
@@ -75,6 +76,7 @@ import {
     type ResolutionVerificationService,
 } from "./resolution-verification.ts";
 import type { HandOffRouterService } from "./hand-off.ts";
+import type { ReviewEvidenceFiles } from "./review-evidence.ts";
 
 /** The implementation workflow for issues with complexity 0 through 3. */
 export type ImplementationExecutorService = {
@@ -326,6 +328,7 @@ export const makeImplementationExecutorService = (
         progress,
     ),
     handOffRouter?: HandOffRouterService,
+    reviewEvidence?: ReviewEvidenceFiles,
 ): ImplementationExecutorService => {
     const routeSignal = async (
         input: WorkflowExecutorInput,
@@ -741,6 +744,40 @@ export const makeImplementationExecutorService = (
         });
     };
 
+    /**
+     * When the range diff is too large for the prompt, write the commit log
+     * and the whole diff to a git-excluded file the reviewers must read, and
+     * remove it once both reviews end.
+     */
+    const withReviewEvidence = async <Result>(
+        input: WorkflowExecutorInput,
+        state: ReviewState,
+        rangeDiff: string,
+        run: (evidencePath: string | undefined) => Promise<Result>,
+    ): Promise<Result> => {
+        if (
+            reviewEvidence === undefined ||
+            rangeDiff.length <= PROMPT_DIFF_LIMIT
+        ) {
+            return await run(undefined);
+        }
+        const file = await reviewEvidence.publish({
+            repositoryPath: input.context.repositoryPath,
+            name: "candidate-diff.txt",
+            contents: [
+                "Commits, oldest first:",
+                ...state.candidateSubjects.map((subject) => `- ${subject}`),
+                "",
+                rangeDiff,
+            ].join("\n"),
+        });
+        try {
+            return await run(file.path);
+        } finally {
+            await file.remove().catch(() => {});
+        }
+    };
+
     /** Both axes run in parallel; a failure waits for its sibling before it propagates. */
     const runBothReviews = async (
         input: WorkflowExecutorInput,
@@ -756,7 +793,7 @@ export const makeImplementationExecutorService = (
             checkpoint.sha,
             state.head,
         );
-        const prompt = {
+        const prompt = (evidencePath: string | undefined) => ({
             issue: context.issue,
             repositoryPath: context.repositoryPath,
             targetBranch: context.targetBranch,
@@ -769,26 +806,35 @@ export const makeImplementationExecutorService = (
             skillsDirectory: skillLocation(
                 context.agent.roles["standards-reviewer"].harness,
             ),
-        };
-        const [standards, spec] = await Promise.allSettled([
-            requestReview(input, state, {
-                role: "standards-reviewer",
-                title: `Review standards for issue #${context.issue.number} (attempt ${attempt})`,
-                prompt: buildStandardsReviewPrompt(prompt),
-                schema: standardsReviewSchema,
-            }),
-            requestReview(input, state, {
-                role: "spec-reviewer",
-                title: `Review spec for issue #${context.issue.number} (attempt ${attempt})`,
-                prompt: buildSpecReviewPrompt({
-                    ...prompt,
-                    skillsDirectory: skillLocation(
-                        context.agent.roles["spec-reviewer"].harness,
-                    ),
-                }),
-                schema: specReviewSchema,
-            }),
-        ]);
+            ...(evidencePath === undefined ? {} : { evidencePath }),
+        });
+        const [standards, spec] = await withReviewEvidence(
+            input,
+            state,
+            rangeDiff,
+            async (evidencePath) =>
+                await Promise.allSettled([
+                    requestReview(input, state, {
+                        role: "standards-reviewer",
+                        title: `Review standards for issue #${context.issue.number} (attempt ${attempt})`,
+                        prompt: buildStandardsReviewPrompt(
+                            prompt(evidencePath),
+                        ),
+                        schema: standardsReviewSchema,
+                    }),
+                    requestReview(input, state, {
+                        role: "spec-reviewer",
+                        title: `Review spec for issue #${context.issue.number} (attempt ${attempt})`,
+                        prompt: buildSpecReviewPrompt({
+                            ...prompt(evidencePath),
+                            skillsDirectory: skillLocation(
+                                context.agent.roles["spec-reviewer"].harness,
+                            ),
+                        }),
+                        schema: specReviewSchema,
+                    }),
+                ]),
+        );
         if (standards.status === "rejected") throw standards.reason;
         if (spec.status === "rejected") throw spec.reason;
         return { standards: standards.value, spec: spec.value };

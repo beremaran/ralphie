@@ -1028,6 +1028,7 @@ export const workflow = async (
             verificationFixes: config.verificationFixes,
             signal,
             maxDecompositionDepth,
+            intakeLabels: issueFilters.labels,
         });
 
         const executeIssue = async (

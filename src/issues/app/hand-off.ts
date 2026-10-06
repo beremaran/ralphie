@@ -13,6 +13,7 @@ import {
 import {
     GroundingDisposition,
     groundingDecisionSchema,
+    HandOffReason,
     type HandOffDecision,
 } from "../domain/decisions.ts";
 import {
@@ -33,6 +34,14 @@ export type HandOffRouterService = {
     readonly route: (
         input: HandOffRouteInput,
     ) => Promise<IssueExecutionOutcome | undefined>;
+    /**
+     * Hand the issue off after an agent session failed before any hand-off
+     * could be requested, preserving diagnostics at the current checkout.
+     */
+    readonly handOffSessionFailure: (input: {
+        readonly context: IssueExecutionContext;
+        readonly message: string;
+    }) => Promise<IssueExecutionOutcome>;
 };
 
 export const issueFreshnessFingerprint = (
@@ -170,6 +179,34 @@ const recoverHandoff = async (
 export const makeHandOffRouterService = (
     recovery: IssueRecoveryService,
 ): HandOffRouterService => ({
+    handOffSessionFailure: async ({ context, message }) => {
+        const captured = await context.repositoryInvariant.capture(
+            context.repositoryPath,
+            context.signal,
+        );
+        const decision: HandOffDecision = {
+            disposition: GroundingDisposition.HandOff,
+            reason: HandOffReason.NeedsHumanJudgment,
+            summary: `An agent session failed while Ralphie was working on issue #${context.issue.number}: ${message}`,
+            evidence: [message],
+            questions: [
+                "Check the harness and model configuration and the preserved diagnostics, then relabel the issue ready-for-agent to retry or handle it by hand.",
+            ],
+        };
+        const recovered = await recovery.handleHandOff({
+            runId: context.runId,
+            repository: context.repository,
+            workspace: context.workspace,
+            repositoryPath: context.repositoryPath,
+            issue: context.issue,
+            checkpoint: { branch: captured.branch, sha: captured.head },
+            fingerprint: issueFreshnessFingerprint(context),
+            decision,
+            repositoryInvariant: context.repositoryInvariant,
+            signal: context.signal,
+        });
+        return outcome(decision, recovered.diagnosticsPath);
+    },
     route: async ({ context, artifacts, request, checkpoint }) => {
         if (
             request === undefined &&

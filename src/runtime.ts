@@ -55,6 +55,7 @@ import {
     makeIssueRecoveryService,
     type IssueRecoveryService,
 } from "./issues/app/recovery.ts";
+import { nodeReviewEvidenceFiles } from "./issues/adapters/review-evidence-file-system.ts";
 import { nodeRecoveryFileSystem } from "./issues/adapters/recovery-file-system.ts";
 import {
     makePreflightAssessmentService,
@@ -269,6 +270,7 @@ export const makeLiveRuntime = ({
         issueVerification,
         resolutionVerification,
         handOffRouter,
+        nodeReviewEvidenceFiles,
     );
     const triage = makeTriageService({ progress, resolutionVerification });
     const issueExecutor = makeIssueExecutorService(

@@ -5,7 +5,10 @@ import { join } from "node:path";
 
 import { z } from "zod";
 
-import type { AgentSessions } from "../../src/agent/sessions.ts";
+import {
+    sessionFailure,
+    type AgentSessions,
+} from "../../src/agent/sessions.ts";
 import type {
     HarnessOutcome,
     HarnessRole,
@@ -553,6 +556,8 @@ type ImplementationHarnessOptions = {
     readonly verification?: IssueVerificationService;
     readonly recovery?: IssueRecoveryService;
     readonly beforeRun?: (request: SessionRequest) => Promise<void>;
+    /** Size of the range diff the fake git operations return. */
+    readonly rangeDiffLength?: number;
 };
 
 const makeImplementationHarness = async (
@@ -614,7 +619,9 @@ const makeImplementationHarness = async (
         readRangeDiff: async (_path, base, head) => {
             trace.push("ops:readRangeDiff");
             rangeDiffs.push({ base, head });
-            return "diff --git a/x b/x";
+            return options.rangeDiffLength === undefined
+                ? "diff --git a/x b/x"
+                : `diff --git a/x b/x\n${"+".repeat(options.rangeDiffLength)}`;
         },
         squashCandidates: async () => {
             trace.push("ops:squash");
@@ -649,6 +656,12 @@ const makeImplementationHarness = async (
             ],
         }),
     };
+    const evidence: Array<{
+        readonly repositoryPath: string;
+        readonly name: string;
+        readonly contents: string;
+        removed: boolean;
+    }> = [];
     const executor = makeImplementationExecutorService(
         preparation,
         operations,
@@ -658,6 +671,18 @@ const makeImplementationHarness = async (
         verification,
         makeResolutionVerificationService(progress),
         router,
+        {
+            publish: async (input) => {
+                const entry = { ...input, removed: false };
+                evidence.push(entry);
+                return {
+                    path: `${input.repositoryPath}/.ralphie-review/${input.name}`,
+                    remove: async () => {
+                        entry.removed = true;
+                    },
+                };
+            },
+        },
     );
     return {
         executor,
@@ -668,6 +693,7 @@ const makeImplementationHarness = async (
         trace,
         events,
         verifyCalls,
+        evidence,
         recoveryInputs,
         recoveryTrace,
         commitMessages,
@@ -1192,6 +1218,90 @@ describe("issue executor hand-off routing", () => {
         expect(store.has(IssueArtifactKind.PendingHandOff)).toBe(false);
         expect(store.has(IssueArtifactKind.HandOffDecision)).toBe(true);
         expect(verifyCalls).toEqual([INVARIANT]);
+    });
+
+    describe("session failures before attempts", () => {
+        const preflightFailing = (error: RalphieError) => ({
+            assess: async (): Promise<never> => {
+                throw error;
+            },
+        });
+        const timeout = sessionFailure("preflight", {
+            kind: "timeout",
+            message: "took too long",
+        });
+
+        test("a pre-flight session failure becomes a ready-for-human hand-off", async () => {
+            const harness = await makeExecutorHarness({
+                grounding: preflightFailing(timeout),
+            });
+            const outcome = await harness.executor.execute(harness.context);
+            expect(outcome).toMatchObject({
+                kind: IssueExecutionOutcomeKind.HandOff,
+                reason: HandOffReason.NeedsHumanJudgment,
+                diagnosticsPath: "/diag/hand-off",
+            });
+            expect(harness.recoveryInputs).toHaveLength(1);
+        });
+
+        test("a decomposer session failure becomes a hand-off", async () => {
+            const harness = await makeExecutorHarness({
+                grounding: {
+                    assess: async () => ({
+                        decision: {
+                            disposition: GroundingDisposition.Actionable,
+                            fitsOneSession: false,
+                        },
+                        sessionID: "preflight-1",
+                    }),
+                },
+                decomposition: {
+                    execute: async () => {
+                        throw sessionFailure("decomposer", {
+                            kind: "invalid_result",
+                            message: "schema never validated",
+                        });
+                    },
+                },
+            });
+            const outcome = await harness.executor.execute(harness.context);
+            expect(outcome.kind).toBe(IssueExecutionOutcomeKind.HandOff);
+        });
+
+        test("checkout and GitHub errors keep failing so the next run retries", async () => {
+            const harness = await makeExecutorHarness({
+                grounding: preflightFailing(
+                    new RalphieError({ message: "checkout failed" }),
+                ),
+            });
+            const outcome = await harness.executor.execute(harness.context);
+            expect(outcome).toEqual({
+                kind: IssueExecutionOutcomeKind.Failed,
+                message: "checkout failed",
+            });
+            expect(harness.recoveryInputs).toHaveLength(0);
+        });
+
+        test("a user stop never hands off", async () => {
+            const harness = await makeExecutorHarness({
+                grounding: preflightFailing(
+                    sessionFailure("preflight", {
+                        kind: "aborted",
+                        message: "stopped",
+                    }),
+                ),
+            });
+            const controller = new AbortController();
+            controller.abort();
+            const stopped = await harness.executor.execute({
+                ...harness.context,
+                signal: controller.signal,
+            });
+            expect(stopped.kind).toBe(IssueExecutionOutcomeKind.Failed);
+            const cancelled = await harness.executor.execute(harness.context);
+            expect(cancelled.kind).toBe(IssueExecutionOutcomeKind.Failed);
+            expect(harness.recoveryInputs).toHaveLength(0);
+        });
     });
 
     test("routes fitsOneSession false to decomposition without implementing", async () => {
@@ -2370,6 +2480,43 @@ describe("two-axis review gate", () => {
         expect(standards?.prompt).toContain("<candidate-diff>");
         expect(spec?.prompt).toContain("The issue body is the contract.");
         expect(spec?.prompt).toContain(`Fixed point: ${CHECKPOINT.sha}`);
+    });
+
+    test("a diff over the prompt limit is published as a file the reviewers must read, and removed afterwards", async () => {
+        const harness = await makeImplementationHarness({
+            rangeDiffLength: 150_000,
+            scripts: [
+                implement,
+                ...reviewScripts({ structured: approvedReview }),
+            ],
+        });
+        await run(harness);
+        expect(harness.evidence).toHaveLength(1);
+        const [file] = harness.evidence;
+        expect(file?.contents).toContain("Commits, oldest first:");
+        expect(file?.contents.length).toBeGreaterThan(150_000);
+        expect(file?.removed).toBe(true);
+        for (const title of ["Review standards", "Review spec"]) {
+            const prompt = harness.fullPrompts.find((p: { title: string }) =>
+                p.title.startsWith(title),
+            );
+            expect(prompt?.prompt).toContain(
+                `${file?.repositoryPath}/.ralphie-review/candidate-diff.txt`,
+            );
+            expect(prompt?.prompt).toContain("Read that whole file");
+            expect(prompt?.prompt).toContain("candidate diff truncated");
+        }
+    });
+
+    test("a small diff stays in the prompt and publishes no file", async () => {
+        const harness = await makeImplementationHarness({
+            scripts: [
+                implement,
+                ...reviewScripts({ structured: approvedReview }),
+            ],
+        });
+        await run(harness);
+        expect(harness.evidence).toHaveLength(0);
     });
 
     test("smells never block", async () => {

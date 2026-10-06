@@ -1,5 +1,6 @@
 import { type ProgressReporterService } from "../../progress/ports.ts";
 import { RalphieError } from "../../shared/error.ts";
+import { isAbortedSession, isSessionFailure } from "../../agent/sessions.ts";
 import { DecompositionDepthLimitError } from "../domain/decomposition-markdown.ts";
 import {
     IssueArtifactKind,
@@ -96,6 +97,9 @@ export const makeIssueExecutorService = (
             );
             return await routeResolutionDecision(context, artifacts, decision);
         } catch (error) {
+            if (isSessionFailure(error) && context.signal?.aborted !== true) {
+                throw error;
+            }
             return {
                 kind: IssueExecutionOutcomeKind.Failed,
                 message: `Fresh resolution verification failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -285,10 +289,48 @@ export const makeIssueExecutorService = (
         };
     };
 
+    /**
+     * A failed agent session (harness error, timeout, invalid result) is a
+     * human's problem and becomes a ready-for-human hand-off so the issue does
+     * not re-enter the queue unchanged. Checkout and GitHub infrastructure
+     * errors, and any failure after a user stop, stay Failed so the next run
+     * retries.
+     */
+    const failOrHandOff = async (
+        context: IssueExecutionContext,
+        error: RalphieError,
+        pendingHandOff: boolean,
+    ): Promise<IssueExecutionOutcome> => {
+        const failed = {
+            kind: IssueExecutionOutcomeKind.Failed,
+            message: error.message,
+        } as const;
+        if (
+            handOffRouter === undefined ||
+            pendingHandOff ||
+            context.signal?.aborted === true ||
+            !isSessionFailure(error) ||
+            isAbortedSession(error)
+        ) {
+            return failed;
+        }
+        try {
+            return await handOffRouter.handOffSessionFailure({
+                context,
+                message: error.message,
+            });
+        } catch {
+            return failed;
+        }
+    };
+
     return {
         execute: async (context) => {
+            let artifacts:
+                | Awaited<ReturnType<IssueArtifactStoreService["forIssue"]>>
+                | undefined;
             try {
-                const artifacts = await artifactStores.forIssue(
+                artifacts = await artifactStores.forIssue(
                     context.issue.number,
                     { repository: context.repository },
                     context.signal,
@@ -302,10 +344,12 @@ export const makeIssueExecutorService = (
                     );
                 }
                 if (error instanceof RalphieError) {
-                    return {
-                        kind: IssueExecutionOutcomeKind.Failed,
-                        message: error.message,
-                    } as const;
+                    return await failOrHandOff(
+                        context,
+                        error,
+                        artifacts?.has(IssueArtifactKind.PendingHandOff) ===
+                            true,
+                    );
                 }
                 throw error;
             }

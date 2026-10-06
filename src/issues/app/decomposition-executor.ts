@@ -51,6 +51,26 @@ const existingMapping = async (
         ? await input.artifacts.read(IssueArtifactKind.CreatedIssueNumbers)
         : {};
 
+/** The agent-ready label plus the parent's labels that gate intake. */
+const childLabels = (
+    context: WorkflowExecutorInput["context"],
+    agentReadyLabel: string,
+): ReadonlyArray<string> => {
+    const gating = new Set(
+        (context.intakeLabels ?? []).map((label) => label.toLowerCase()),
+    );
+    const inherited = context.issue.labels.filter((label) =>
+        gating.has(label.toLowerCase()),
+    );
+    const seen = new Set<string>();
+    return [agentReadyLabel, ...inherited].filter((label) => {
+        const key = label.toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+};
+
 const issueContext = (input: WorkflowExecutorInput) => ({
     issue: {
         number: input.context.issue.number,
@@ -322,7 +342,7 @@ export const makeDecompositionExecutorService = (
                             lineage,
                             issueNumbers: nextMapping,
                         }),
-                        labels: [agentReadyLabel],
+                        labels: childLabels(context, agentReadyLabel),
                     }),
                 input,
             );

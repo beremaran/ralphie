@@ -123,6 +123,11 @@ export type IssueExecutionContext = {
     readonly signal?: AbortSignal;
     /** Maximum generated-child lineage depth allowed for decomposition. */
     readonly maxDecompositionDepth?: number;
+    /**
+     * Labels that gate intake. Decomposed children inherit those of them that
+     * the parent carries, so a scoped run still picks the children up.
+     */
+    readonly intakeLabels?: ReadonlyArray<string>;
 };
 
 /**

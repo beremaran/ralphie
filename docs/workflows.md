@@ -118,8 +118,13 @@ flowchart TD
    parallel as read-only sessions on the checkpoint-to-candidate range, using
    the vendored `/code-review` axes. Reviewers cannot run Git (see
    [Safety](safety.md#agent-and-mutation-boundaries)), so Ralphie puts the
-   fixed point, commit list and range diff in each prompt. The standards reviewer
-   gets the repository's standards sources (`AGENTS.md`, `CLAUDE.md`,
+   fixed point, commit list and range diff in each prompt. A range diff over
+   100,000 characters is truncated in the prompt, so Ralphie also writes the
+   full commit list and diff to `.ralphie-review/candidate-diff.txt` in the
+   checkout (listed in `.git/info/exclude`, so it can never be staged), names
+   that path in both prompts and tells the reviewers to read it whole with their
+   Read tool before judging; the file is removed when the reviews end. The
+   standards reviewer gets the repository's standards sources (`AGENTS.md`, `CLAUDE.md`,
    `CONTRIBUTING.md`, `CODING_STANDARDS.md`, `GLOSSARY.md`, `docs/adr`,
    `docs/agents`) and the smell baseline; the spec reviewer gets the Agent
    Brief, or the issue body when there is none. Each returns structured
@@ -156,8 +161,16 @@ clean checkpoint, and sends the issue through decomposition.
 Pre-flight's `already_resolved` disposition is tentative. A fresh verifier must
 confirm it before completion; an `unresolved` result corrects the route to
 actionable, proceeds to implementation, and supplies its summary
-and evidence to the first implementation session. Invalid output or verifier
-infrastructure failure still fails closed.
+and evidence to the first implementation session.
+
+Agent session failures (a harness error, timeout, or result that never
+validates) in pre-flight, the resolution verifier, hand-off verification or
+decomposition are handled like implementation failures: the issue becomes a
+`ready-for-human` hand-off (reason `needs_human_judgment`) with preserved
+diagnostics, so it does not re-enter the queue unchanged. Checkout, repository
+invariant and GitHub errors are not session failures; they fail the issue and
+the next run retries it, as does any failure after a stop request. A hand-off
+whose verifier session failed stays pending and is resumed by the next run.
 
 ### Fix sessions
 
@@ -262,9 +275,8 @@ marks the contract an implementer works from. The recovery details are in
 2. Create child issues, blockers first, in the to-tickets issue template
    (`## Parent`, `## What to build`, `## Acceptance criteria`, `## Blocked by`)
    behind Ralphie's hidden stable marker, each with the agent-ready label
-   (`labels.ready-for-agent`). Children do not receive the labels listed in
-   `intake.requireLabels`, so a repository that narrows intake with them must
-   label children itself before a later run picks them up.
+   (`labels.ready-for-agent`) plus every label of the parent that appears in
+   `intake.requireLabels`, so a run scoped by those labels picks the children up.
 3. Attach each created or recovered child to the original issue as a **native
    GitHub sub-issue**, reconciling against GitHub's reported hierarchy.
 4. Represent each declared `dependsOn` edge as a **native GitHub

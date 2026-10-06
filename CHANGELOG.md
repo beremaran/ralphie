@@ -84,6 +84,14 @@ Changed sections before upgrading.
   review fix that changes nothing, a failed or timed-out session, a repair that
   changes the tree after the last review) now ends in an
   `implementation_exhausted` hand-off, not only an exhausted retry budget.
+- Agent session failures in pre-flight, resolution verification and
+  decomposition now become `ready-for-human` hand-offs too; checkout and GitHub
+  errors still fail so the next run retries.
+- Session isolation also removes `SSH_AUTH_SOCK` and askpass helpers, empties
+  the global and system git config and credential helpers, disables git
+  terminal prompts and makes `GIT_SSH_COMMAND` fail, so a session cannot push
+  over ssh even in yolo mode. Keys readable on disk or in a keyring still need
+  a dedicated OS user.
 - The latest `## Agent Brief` comment is exempt from the 4000-character comment
   trim and the 20-comment limit when issues are read.
 - `--notify-needs-attention` and `--needs-attention-label` fail with tailored
@@ -119,8 +127,8 @@ Changed sections before upgrading.
 - Breaking: decomposition runs the vendored `/to-tickets` skill. Children use
   `{key, title, whatToBuild, acceptanceCriteria, dependsOn}` and are created
   blockers first in the to-tickets template (`## Parent`, `## What to build`,
-  `## Acceptance criteria`, `## Blocked by`) with the agent-ready label but not
-  the `intake.requireLabels` labels. The parent issue's body is never rewritten
+  `## Acceptance criteria`, `## Blocked by`) with the agent-ready label and the
+  parent's `intake.requireLabels` labels. The parent issue's body is never rewritten
   any more; it is recognised by its native sub-issues, and closed with one
   disclaimed comment when its children are done.
 - Implementation runs the vendored `/implement` skill, and the implementer

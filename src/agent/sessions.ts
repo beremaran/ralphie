@@ -98,9 +98,16 @@ export const isSessionFailure = (error: unknown): boolean => {
         typeof cause === "object" &&
         cause !== null &&
         "kind" in cause &&
-        "message" in cause
+        typeof cause.kind === "string" &&
+        "message" in cause &&
+        typeof cause.message === "string"
     );
 };
+
+/** Whether a session failure was the caller cancelling it (a user stop). */
+export const isAbortedSession = (error: unknown): boolean =>
+    isSessionFailure(error) &&
+    (error as { cause: { kind: string } }).cause.kind === "aborted";
 
 /** The error a failed session raises; the failure stays on `cause`. */
 export const sessionFailure = (
