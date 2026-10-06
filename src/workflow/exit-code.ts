@@ -13,7 +13,17 @@ export const exitCodeForError = (
     signal: AbortSignal,
 ): RalphieExitCode => {
     if (signal.aborted) return RalphieExitCode.Cancelled;
-    return error instanceof RunHaltedError
-        ? RalphieExitCode.Halted
-        : RalphieExitCode.Failure;
+    return isHalt(error) ? RalphieExitCode.Halted : RalphieExitCode.Failure;
+};
+
+/** The command boundary wraps errors, so look through the cause chain. */
+const isHalt = (error: unknown): boolean => {
+    for (let current = error, depth = 0; depth < 8; depth += 1) {
+        if (current instanceof RunHaltedError) return true;
+        if (!(current instanceof Error) || current.cause === undefined) {
+            return false;
+        }
+        current = current.cause;
+    }
+    return false;
 };

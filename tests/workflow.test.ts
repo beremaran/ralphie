@@ -1228,6 +1228,15 @@ describe("workflow", () => {
                 new AbortController().signal,
             ),
         ).toBe(RalphieExitCode.Halted);
+        // The command boundary wraps errors; the halt must survive the wrap.
+        expect(
+            exitCodeForError(
+                new Error("wrapped", {
+                    cause: new RunHaltedError({ message: "x" }),
+                }),
+                new AbortController().signal,
+            ),
+        ).toBe(RalphieExitCode.Halted);
         expect(
             calls.filter((call) => call.startsWith("executeIssue:")),
         ).toHaveLength(1);
