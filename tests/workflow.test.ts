@@ -555,7 +555,7 @@ describe("workflow", () => {
         ]);
         const handOff = events.find(({ status }) => status === "hand-off");
         expect(handOff).toMatchObject({
-            stage: "grounding",
+            stage: "hand-off",
             current: 1,
             total: 2,
             details: {
@@ -714,7 +714,7 @@ describe("workflow", () => {
         expect(events.some(({ status }) => status === "failed")).toBe(false);
         expect(events).toContainEqual(
             expect.objectContaining({
-                stage: "grounding",
+                stage: "hand-off",
                 status: "hand-off",
                 details: expect.objectContaining({
                     reason: HandOffReason.ExternalDependency,
@@ -1009,7 +1009,7 @@ describe("workflow", () => {
         expect(pendingState).toMatchObject({
             status: RunStateStatus.Active,
             runId: "test-run",
-            activeIssue: { issueNumber: 42, stage: "grounding" },
+            activeIssue: { issueNumber: 42, stage: "hand-off" },
             checkout: { branch: "develop", head: "head-1" },
             queue: {
                 pending: [

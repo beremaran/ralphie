@@ -84,6 +84,15 @@ describe("native CLI parser", () => {
         }
     });
 
+    test("explains that hand-offs replace the needs-attention flags", () => {
+        expect(() =>
+            parseCliArgs(["owner/repository", "--notify-needs-attention"]),
+        ).toThrow("Hand-offs are always on");
+        expect(() =>
+            parseCliArgs(["owner/repository", "--needs-attention-label", "x"]),
+        ).toThrow("labels.ready-for-human");
+    });
+
     test("still rejects flags removed by earlier releases", () => {
         for (const args of [
             ["owner/repository", "--on-hand-off", "halt"],

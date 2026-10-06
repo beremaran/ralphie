@@ -77,6 +77,18 @@ Changed sections before upgrading.
 
 ### Changed
 
+- Breaking: JSON Lines events that reported the `grounding` and
+  `issue-grounding` stages now report `preflight` (pre-flight work) or
+  `hand-off` (hand-off decisions and their verification).
+- Every terminal implementation failure (repeated blocking review findings, a
+  review fix that changes nothing, a failed or timed-out session, a repair that
+  changes the tree after the last review) now ends in an
+  `implementation_exhausted` hand-off, not only an exhausted retry budget.
+- The latest `## Agent Brief` comment is exempt from the 4000-character comment
+  trim and the 20-comment limit when issues are read.
+- `--notify-needs-attention` and `--needs-attention-label` fail with tailored
+  errors; startup now checks each harness against a minimum version and skips
+  the `triager` role when `triage.enabled` is false.
 - Breaking: Ralphie is invoked as `ralphie [owner/]repo` and requires the
   configuration file; a missing file fails with the path it looked for. A bare
   repository name takes its owner from `defaultOwner` or the `gh` login.

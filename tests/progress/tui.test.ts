@@ -511,7 +511,7 @@ describe("OpenTUI progress coordinator", () => {
             issue: { number: 7, title: "Broken check" },
         });
         await coordinator.progress.emit({
-            stage: "grounding",
+            stage: "hand-off",
             status: "hand-off",
             message: "hand-off-marker",
             issue: { number: 8, title: "Needs a decision" },

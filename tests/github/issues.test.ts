@@ -207,6 +207,47 @@ describe("GitHub issues", () => {
         );
     });
 
+    test("keeps the latest Agent Brief in full beyond the comment and length bounds", async () => {
+        const brief = `## Agent Brief\n${"b".repeat(MAX_ISSUE_COMMENT_BODY_LENGTH * 2)}`;
+        const comments = Array.from(
+            { length: MAX_ISSUE_COMMENTS + 5 },
+            (_, index) => ({
+                id: index + 1,
+                body: index === 0 ? brief : `Comment ${index + 1}`,
+                updated_at: "2026-08-01T00:00:00.000Z",
+            }),
+        );
+        const listComments = Symbol("listComments");
+        const client = {
+            rest: {
+                issues: {
+                    get: async () => ({
+                        data: {
+                            number: 12,
+                            title: "Issue",
+                            html_url: "https://github.com/o/r/issues/12",
+                            body: "Body",
+                            state: "open",
+                            updated_at: "2026-08-30T00:00:00.000Z",
+                            comments: comments.length,
+                            labels: [],
+                        },
+                    }),
+                    listComments,
+                },
+            },
+            paginate: async () => comments,
+        } as unknown as Octokit;
+
+        const issue = await makeGitHubIssuesService(sessionFor(client)).refresh(
+            "o/r",
+            12,
+        );
+
+        expect(issue.comments).toHaveLength(MAX_ISSUE_COMMENTS + 1);
+        expect(issue.comments?.[0]?.body).toBe(brief);
+    });
+
     test("maps issue listing failures into the domain error", async () => {
         const client = {
             rest: { issues: { listForRepo: Symbol("listForRepo") } },

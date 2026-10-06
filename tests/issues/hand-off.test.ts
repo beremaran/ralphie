@@ -1820,12 +1820,37 @@ describe("implementation executor hand-off routing", () => {
                 },
             ],
         });
-        await expect(
-            harness.executor.execute({
-                context: harness.context,
-                artifacts: harness.store,
-            }),
-        ).rejects.toThrow("verifier/router service");
+        const outcome = await harness.executor.execute({
+            context: harness.context,
+            artifacts: harness.store,
+        });
+        expect(outcome).toMatchObject({
+            kind: IssueExecutionOutcomeKind.HandOff,
+            reason: HandOffReason.ImplementationExhausted,
+            summary: expect.stringContaining("verifier/router service"),
+        });
+    });
+
+    test("hands off a failed implementation session instead of requeueing", async () => {
+        const harness = await makeImplementationHarness({
+            scripts: [
+                {
+                    titlePrefix: "Implement issue #42",
+                    result: { error: true },
+                },
+            ],
+        });
+
+        const outcome = await harness.executor.execute({
+            context: harness.context,
+            artifacts: harness.store,
+        });
+
+        expect(outcome).toMatchObject({
+            kind: IssueExecutionOutcomeKind.HandOff,
+            reason: HandOffReason.ImplementationExhausted,
+            diagnosticsPath: "/diag/hand-off",
+        });
     });
 });
 

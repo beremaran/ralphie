@@ -16,6 +16,8 @@ export type StartupReport = {
 export type StartupCheckInput = {
     readonly roles: RoleAssignments;
     readonly maxBudgetUsd?: number | undefined;
+    /** Whether AFK triage runs; the triager needs no harness when it does not. */
+    readonly triageEnabled?: boolean | undefined;
 };
 
 export type HarnessStartupChecker = (
@@ -25,9 +27,11 @@ export type HarnessStartupChecker = (
 /** The roles each harness is assigned, in the roles' own order. */
 const rolesByHarness = (
     roles: RoleAssignments,
+    triageEnabled: boolean,
 ): ReadonlyMap<string, ReadonlyArray<string>> => {
     const grouped = new Map<string, string[]>();
     for (const [role, assignment] of Object.entries(roles)) {
+        if (role === "triager" && !triageEnabled) continue;
         grouped.set(assignment.harness, [
             ...(grouped.get(assignment.harness) ?? []),
             role,
@@ -54,6 +58,7 @@ const installationErrors = async (
     harnesses: ReadonlyMap<string, ReadonlyArray<string>>,
 ): Promise<{
     readonly errors: ReadonlyArray<string>;
+    readonly warnings: ReadonlyArray<string>;
     readonly installed: ReadonlyArray<string>;
 }> => {
     const results = await Promise.all(
@@ -74,6 +79,9 @@ const installationErrors = async (
     );
     return {
         errors,
+        warnings: results.flatMap(({ result }) =>
+            result.ok && result.warning !== undefined ? [result.warning] : [],
+        ),
         installed: results.flatMap(({ harness, result }) =>
             result.ok ? [harness] : [],
         ),
@@ -126,20 +134,23 @@ const budgetWarnings = (
 
 /**
  * Check, before any work starts, that every assigned harness is installed,
- * that `safe` approval is available where configured, and that editing roles
+ * (and at the minimum supported version), that `safe` approval is available where configured, and that editing roles
  * never run on a harness without a sandbox unless they are set to `yolo`.
  * Every message names the configuration change that fixes it.
  */
 export const makeHarnessStartupChecker =
     (probe: HarnessProbe): HarnessStartupChecker =>
-    async ({ roles, maxBudgetUsd }) => {
-        const harnesses = rolesByHarness(roles);
+    async ({ roles, maxBudgetUsd, triageEnabled = true }) => {
+        const harnesses = rolesByHarness(roles, triageEnabled);
         const installation = await installationErrors(probe, harnesses);
         return {
             errors: [
                 ...installation.errors,
                 ...(await approvalErrors(probe, roles, installation.installed)),
             ],
-            warnings: budgetWarnings(probe, harnesses, maxBudgetUsd),
+            warnings: [
+                ...installation.warnings,
+                ...budgetWarnings(probe, harnesses, maxBudgetUsd),
+            ],
         };
     };

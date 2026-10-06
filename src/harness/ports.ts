@@ -264,7 +264,7 @@ export type HarnessService = {
 
 /** Outcome of one startup probe. */
 export type ProbeResult =
-    | { readonly ok: true }
+    | { readonly ok: true; readonly warning?: string }
     | { readonly ok: false; readonly message: string };
 
 /**

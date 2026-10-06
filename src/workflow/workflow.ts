@@ -990,7 +990,7 @@ export const workflow = async (
             activeQueueIssues.set(issue.number, issue);
             activeIssue = {
                 issueNumber: issue.number,
-                stage: "grounding",
+                stage: "preflight",
             };
             const issueBaseCheckout = { ...checkout };
             restoreCancellationCheckout =
@@ -1123,7 +1123,7 @@ export const workflow = async (
                 },
                 current: issueContext.current,
                 total: issueContext.total,
-                stage: "grounding",
+                stage: "hand-off",
                 status: "hand-off",
                 message: handOffProgressMessage(
                     issueContext.issue.number,
@@ -1194,7 +1194,7 @@ export const workflow = async (
             await publishHandOff(issueContext.issue.number, outcome);
             await persistState(RunStateStatus.Active, {
                 issueNumber: issueContext.issue.number,
-                stage: "grounding",
+                stage: "hand-off",
             });
         };
 

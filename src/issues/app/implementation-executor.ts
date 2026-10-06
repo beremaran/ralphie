@@ -1224,8 +1224,10 @@ export const makeImplementationExecutorService = (
     };
 
     /**
-     * Out-of-attempts failures are a human's problem: preserve diagnostics,
-     * restore the clean checkout and hand the issue off as ready-for-human.
+     * Every terminal failure is a human's problem, whether the attempts ran
+     * out, a review loop stalled or a session failed: preserve diagnostics,
+     * restore the clean checkout and hand the issue off as ready-for-human so
+     * it never re-enters the queue unchanged.
      */
     const handOffWhenExhausted = async (
         input: WorkflowExecutorInput,
@@ -1233,7 +1235,6 @@ export const makeImplementationExecutorService = (
         result: WorkflowExecutorResult,
     ): Promise<WorkflowExecutorResult> => {
         if (result.kind !== IssueExecutionOutcomeKind.Failed) return result;
-        if (result.exhausted !== true) return result;
         const { context } = input;
         const decision: HandOffDecision = {
             disposition: GroundingDisposition.HandOff,
@@ -1264,6 +1265,27 @@ export const makeImplementationExecutorService = (
         };
     };
 
+    /** Session and git failures become a Failed result; aborts still throw. */
+    const runAttemptsOrFail = async (
+        input: WorkflowExecutorInput,
+        checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
+        invariant: { readonly branch: string; readonly head: string },
+    ): Promise<WorkflowExecutorResult> => {
+        try {
+            return await runImplementationAttempts(
+                input,
+                checkpoint,
+                invariant,
+            );
+        } catch (error) {
+            if (input.context.signal?.aborted === true) throw error;
+            return {
+                kind: IssueExecutionOutcomeKind.Failed,
+                message: asRalphieError(error).message,
+            };
+        }
+    };
+
     const executeImplementation = async (
         input: WorkflowExecutorInput,
     ): Promise<WorkflowExecutorResult> => {
@@ -1286,7 +1308,7 @@ export const makeImplementationExecutorService = (
         return await handOffWhenExhausted(
             input,
             checkpoint,
-            await runImplementationAttempts(input, checkpoint, invariant),
+            await runAttemptsOrFail(input, checkpoint, invariant),
         );
     };
 

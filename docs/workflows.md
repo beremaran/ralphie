@@ -99,8 +99,9 @@ flowchart TD
    (which drives `/tdd`) with an overlay: do not commit, leave changes in the
    working tree, skip the closing code review. The session must return
    `{status: done | needs_attention, summary, commitMessage, needsAttention?}`;
-   prose or premature model termination is not completion. A `needs_attention`
-   result is routed as a hand-off request. The latest issue comment that starts
+   prose or premature model termination is not completion. The literal
+   `needs_attention` status is a hand-off request, which Ralphie routes through
+   hand-off verification rather than treating it as a failure. The latest issue comment that starts
    with `## Agent Brief` is the contract: it is included in full and is exempt
    from comment trimming, with the body and other comments as background.
    Without a brief the issue body is the contract.
@@ -143,8 +144,12 @@ When implementation produces no changes, a fresh read-only session must prove
 that the current checkout already resolves the issue and return concrete
 evidence. A proven resolution is completed and closed. An unresolved result is
 fed back to a fresh implementation session for up to
-`limits.implementationAttempts` attempts. Only an exhausted
-retry budget fails the issue. If the review budget is
+`limits.implementationAttempts` attempts. Every other terminal failure of
+an implementation (an exhausted retry budget, a review loop that repeats the
+same blocking findings, a failed or timed-out session, a review fix that
+changes nothing) ends in an `implementation_exhausted` hand-off, so a failing
+issue never returns to the queue unchanged. A run interrupted by a stop request
+is not a failure and hands nothing off. If the review budget is
 exhausted, Ralphie preserves the patch and review diagnostics, restores the
 clean checkpoint, and sends the issue through decomposition.
 
@@ -238,7 +243,7 @@ agent-ready label, the next run's intake skips it until a human relabels it.
 | Reason | State label | Comment |
 | --- | --- | --- |
 | `missing_information`, `conflicting_requirements`, `cannot_reproduce`, `outdated_premise` | `needs-info` | Triage Notes: what was established, what is still needed from the reporter. |
-| `implementation_exhausted` (implementation attempts or verification repairs ran out) | `ready-for-human` | `## Hand-off` write-up: reason, summary, what was tried, what a human must decide, and the diagnostics location. |
+| `implementation_exhausted` (attempts or verification repairs ran out, or the implementation failed terminally) | `ready-for-human` | `## Hand-off` write-up: reason, summary, what was tried, what a human must decide, and the diagnostics location. |
 | `decomposition_limit_reached` (review never converged at the depth limit) | `ready-for-human` | Same write-up. |
 | `external_dependency` reported by a session | `ready-for-human` | Same write-up. |
 
