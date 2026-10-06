@@ -1,10 +1,5 @@
 import { kindForStatus } from "../failure-classification.ts";
-import {
-    CommandAbortedError,
-    CommandTimeoutError,
-    type CommandRunnerService,
-} from "../../process/ports.ts";
-import { RalphieError } from "../../shared/error.ts";
+import { type CommandRunnerService } from "../../process/ports.ts";
 import type {
     HarnessAdapter,
     HarnessFailure,
@@ -17,6 +12,7 @@ import {
     type ClaudeResult,
     type ClaudeStreamSummary,
 } from "./claude-code-stream.ts";
+import { classifyThrown, failure } from "./outcome.ts";
 
 const EXECUTABLE = "claude";
 
@@ -63,33 +59,6 @@ const buildArguments = (turn: TurnRequest): readonly string[] => [
     ),
     ...optionalFlag("--resume", turn.resumeSessionID),
 ];
-
-const failure = (
-    kind: HarnessFailure["kind"],
-    message: string,
-    harnessSessionID?: string,
-): TurnOutcome => ({
-    ok: false,
-    failure: {
-        kind,
-        message,
-        ...(harnessSessionID === undefined ? {} : { harnessSessionID }),
-    },
-});
-
-const classifyThrown = (error: unknown): TurnOutcome => {
-    if (error instanceof CommandTimeoutError) {
-        return failure("timeout", error.message);
-    }
-    if (error instanceof CommandAbortedError) {
-        return failure("aborted", error.message);
-    }
-    const message = error instanceof Error ? error.message : String(error);
-    return failure(
-        error instanceof RalphieError ? "unavailable" : "harness",
-        message,
-    );
-};
 
 const resultFailureKind = (
     result: ClaudeResult,

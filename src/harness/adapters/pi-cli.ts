@@ -1,16 +1,7 @@
-import {
-    CommandAbortedError,
-    CommandTimeoutError,
-    type CommandRunnerService,
-} from "../../process/ports.ts";
-import { RalphieError } from "../../shared/error.ts";
-import type {
-    HarnessAdapter,
-    HarnessFailure,
-    TurnOutcome,
-    TurnRequest,
-} from "../ports.ts";
+import { type CommandRunnerService } from "../../process/ports.ts";
+import type { HarnessAdapter, TurnOutcome, TurnRequest } from "../ports.ts";
 import { makePiStreamReader, type PiStreamSummary } from "./pi-cli-stream.ts";
+import { classifyThrown, failure } from "./outcome.ts";
 
 const EXECUTABLE = "pi";
 
@@ -39,33 +30,6 @@ const buildArguments = (turn: TurnRequest): readonly string[] => [
     ...optionalFlag("--thinking", turn.effort),
     ...optionalFlag("--session", turn.resumeSessionID),
 ];
-
-const failure = (
-    kind: HarnessFailure["kind"],
-    message: string,
-    harnessSessionID?: string,
-): TurnOutcome => ({
-    ok: false,
-    failure: {
-        kind,
-        message,
-        ...(harnessSessionID === undefined ? {} : { harnessSessionID }),
-    },
-});
-
-const classifyThrown = (error: unknown): TurnOutcome => {
-    if (error instanceof CommandTimeoutError) {
-        return failure("timeout", error.message);
-    }
-    if (error instanceof CommandAbortedError) {
-        return failure("aborted", error.message);
-    }
-    const message = error instanceof Error ? error.message : String(error);
-    return failure(
-        error instanceof RalphieError ? "unavailable" : "harness",
-        message,
-    );
-};
 
 /**
  * Settle a finished process. Pi exits 0 even when the response failed, so
