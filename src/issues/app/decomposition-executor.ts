@@ -1,9 +1,8 @@
 import {
-    decompositionMarker,
     nextDecompositionLineage,
+    orderChildrenByDependencies,
     parseDecompositionMarker,
     renderChildIssueBody,
-    renderDecomposedOriginalBody,
     type DecompositionLineage,
 } from "../domain/decomposition-markdown.ts";
 import {
@@ -15,6 +14,7 @@ import { type GitHubIssuesService } from "../../github/ports.ts";
 import { type GitHubIssue } from "../../github/domain.ts";
 import { type GitHubIssueRelationshipService } from "../../github/ports.ts";
 import { buildDecompositionPrompt } from "../../agent/prompts.ts";
+import { skillInvocation } from "../../harness/app/skill-injection.ts";
 import { requestStructuredOutput } from "../../agent/structured-output.ts";
 import type { ProgressReporterService } from "../../progress/ports.ts";
 import { RalphieError } from "../../shared/error.ts";
@@ -35,6 +35,8 @@ import {
 import type { ReviewAttempt } from "./recovery.ts";
 import type { HandOffRouterService } from "./hand-off.ts";
 import { DEFAULT_MAX_DECOMPOSITION_DEPTH } from "../domain/decomposition-markdown.ts";
+
+const DEFAULT_AGENT_READY_LABEL = "ready-for-agent";
 
 export type DecompositionExecutorService = {
     readonly execute: (
@@ -62,6 +64,7 @@ export const makeDecompositionExecutorService = (
     relationships: GitHubIssueRelationshipService,
     progress: ProgressReporterService,
     handOffRouter?: HandOffRouterService,
+    agentReadyLabel = DEFAULT_AGENT_READY_LABEL,
 ): DecompositionExecutorService => {
     const recoverableMutation = async <Output>(
         operation: string,
@@ -177,6 +180,10 @@ export const makeDecompositionExecutorService = (
                 issue: context.issue,
                 repositoryPath: context.repositoryPath,
                 targetBranch: context.targetBranch,
+                toTicketsInvocation: skillInvocation(
+                    context.agent.roles.decomposer.harness,
+                    "to-tickets",
+                ),
                 failedReviewSummaries: reviewAttempts.map(
                     ({ decision }) => decision,
                 ),
@@ -302,14 +309,20 @@ export const makeDecompositionExecutorService = (
     ): Promise<CreatedIssueNumberMapping> => {
         const { context } = input;
         let nextMapping = mapping;
-        for (const child of breakdown.issues) {
+        // Blockers are created first so each body can name real issue numbers.
+        for (const child of orderChildrenByDependencies(breakdown.issues)) {
             if (nextMapping[child.key] !== undefined) continue;
             const created = await recoverableMutation(
                 `create-child-${child.key}`,
                 () =>
                     mutations.create(context.repository, {
                         title: child.title,
-                        body: `${decompositionMarker(lineage, child.key)}\n\n${child.body}`,
+                        body: renderChildIssueBody({
+                            child,
+                            lineage,
+                            issueNumbers: nextMapping,
+                        }),
+                        labels: [agentReadyLabel],
                     }),
                 input,
             );
@@ -328,42 +341,6 @@ export const makeDecompositionExecutorService = (
         return nextMapping;
     };
 
-    const linkChildren = async (
-        input: WorkflowExecutorInput,
-        breakdown: IssueBreakdownDecision,
-        lineage: DecompositionLineage,
-        mapping: CreatedIssueNumberMapping,
-    ): Promise<void> => {
-        const { context } = input;
-        for (const child of breakdown.issues) {
-            const childNumber = mapping[child.key];
-            if (childNumber === undefined) {
-                throw new RalphieError({
-                    message: `Missing created issue for ${child.key}.`,
-                });
-            }
-            await recoverableMutation(
-                `link-child-${child.key}`,
-                () =>
-                    mutations.update(context.repository, childNumber, {
-                        body: renderChildIssueBody({
-                            child,
-                            lineage,
-                            issueNumbers: mapping,
-                        }),
-                    }),
-                input,
-            );
-        }
-    };
-
-    /**
-     * Attach every created or recovered child to the original issue as a
-     * native sub-issue, reconciling against what GitHub already reports so a
-     * restart cannot duplicate relationships. Conflicting native hierarchy or
-     * marker lineage halts with a recovery diagnostic instead of silently
-     * reparenting or rewriting issues.
-     */
     /** True when an attached child's marker disagrees with the intended parent. */
     const markerLineageConflict = (
         body: string | null,
@@ -637,27 +614,12 @@ export const makeDecompositionExecutorService = (
             lineage,
             mapping,
         );
-        await linkChildren(input, breakdown, lineage, mapping);
         await attachChildrenToParent(input, breakdown, lineage, mapping);
         await reconcileNativeDependencies(input, breakdown, mapping);
 
-        await recoverableMutation(
-            "rewrite-original",
-            () =>
-                mutations.update(context.repository, context.issue.number, {
-                    body: renderDecomposedOriginalBody({
-                        original: context.issue,
-                        breakdown,
-                        issueNumbers: mapping,
-                        lineage,
-                    }),
-                }),
-            input,
-        );
-
-        // The decomposed parent stays open as the native tracking issue for
-        // its sub-issues; it is never closed as a duplicate merely because it
-        // was decomposed.
+        // The parent issue is never modified. It stays open as the native
+        // tracking issue for its sub-issues and is closed with a comment by
+        // parent completion once every child is closed.
         return {
             kind: IssueExecutionOutcomeKind.Decomposed,
             childIssueNumbers: breakdown.issues.map(

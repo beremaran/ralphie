@@ -40,7 +40,6 @@ import {
     type DecompositionExecutorService,
 } from "../../src/issues/app/decomposition-executor.ts";
 import {
-    ComplexityLevel,
     GroundingDisposition,
     IssueResolutionStatus,
     HandOffReason,
@@ -662,6 +661,9 @@ const makeDecompositionHarness = async (
         close: async () => {
             githubCalls.push("close");
             return issue;
+        },
+        comment: async () => {
+            githubCalls.push("comment");
         },
     };
     const issues: GitHubIssuesService = {
@@ -1805,15 +1807,15 @@ describe("decomposition executor hand-off routing", () => {
                                 {
                                     key: "a",
                                     title: "Child A",
-                                    body: "Work for A.",
-                                    estimatedComplexity: ComplexityLevel.Level2,
+                                    whatToBuild: "Work for A.",
+                                    acceptanceCriteria: ["A works."],
                                     dependsOn: [],
                                 },
                                 {
                                     key: "b",
                                     title: "Child B",
-                                    body: "Work for B.",
-                                    estimatedComplexity: ComplexityLevel.Level2,
+                                    whatToBuild: "Work for B.",
+                                    acceptanceCriteria: ["B works."],
                                     dependsOn: ["a"],
                                 },
                             ],
@@ -1854,15 +1856,15 @@ describe("decomposition executor hand-off routing", () => {
                                 {
                                     key: "a",
                                     title: "Child A",
-                                    body: "Work for A.",
-                                    estimatedComplexity: ComplexityLevel.Level2,
+                                    whatToBuild: "Work for A.",
+                                    acceptanceCriteria: ["A works."],
                                     dependsOn: [],
                                 },
                                 {
                                     key: "b",
                                     title: "Child B",
-                                    body: "Work for B.",
-                                    estimatedComplexity: ComplexityLevel.Level2,
+                                    whatToBuild: "Work for B.",
+                                    acceptanceCriteria: ["B works."],
                                     dependsOn: ["a"],
                                 },
                             ],

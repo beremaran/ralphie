@@ -85,10 +85,15 @@ export const parseDecompositionMarker = (
     };
 };
 
-/** True when an issue is a decomposed parent that GitHub tracks via sub-issues. */
+/**
+ * True when an issue is a decomposed parent that GitHub tracks via sub-issues.
+ * The parent body is never modified, so the native sub-issue count is the
+ * signal; the legacy rewritten-body marker still counts for older runs.
+ */
 export const isDecomposedParent = (issue: GitHubIssue): boolean =>
+    (issue.subIssueCount ?? 0) > 0 ||
     issue.body?.includes(`<!-- ${RALPHIE_DECOMPOSITION_MARKER} original=`) ===
-    true;
+        true;
 
 /** Derive lineage for the children of an issue, including recursively generated children. */
 export const nextDecompositionLineage = (
@@ -105,92 +110,84 @@ export const nextDecompositionLineage = (
     };
 };
 
-/** Read GitHub issue-number dependencies from a generated child body. */
+/** Read GitHub issue-number blockers from a generated child body. */
 export const parseGeneratedIssueDependencies = (
     issue: GitHubIssue,
 ): ReadonlyArray<number> => {
     if (!issue.body?.includes(`<!-- ${RALPHIE_DECOMPOSITION_MARKER} `))
         return [];
-    const dependencySection = issue.body
-        .split("## Dependencies\n\n")[1]
+    const section = issue.body
+        .split(/^## (?:Blocked by|Dependencies)[ \t]*\n\n/m)[1]
         ?.split("\n\n## ")[0];
-    if (dependencySection === undefined) return [];
-    return [...dependencySection.matchAll(/^- #(\d+)(?:\s|$)/gm)].map((match) =>
+    if (section === undefined) return [];
+    return [...section.matchAll(/^- #(\d+)(?:\s|$)/gm)].map((match) =>
         Number(match[1]),
     );
 };
 
+type BreakdownChild = IssueBreakdownDecision["issues"][number];
+
+/**
+ * Order children so every blocker precedes the children it blocks. The
+ * decomposer's own order is kept wherever the graph allows it.
+ */
+export const orderChildrenByDependencies = (
+    children: ReadonlyArray<BreakdownChild>,
+): ReadonlyArray<BreakdownChild> => {
+    const ordered: BreakdownChild[] = [];
+    const placed = new Set<string>();
+    while (ordered.length < children.length) {
+        const next = children.find(
+            (child) =>
+                !placed.has(child.key) &&
+                child.dependsOn.every((key) => placed.has(key)),
+        );
+        if (next === undefined) {
+            throw new RalphieError({
+                message: "The breakdown dependency graph contains a cycle.",
+            });
+        }
+        ordered.push(next);
+        placed.add(next.key);
+    }
+    return ordered;
+};
+
+/**
+ * Render a child in the to-tickets issue template (Parent, What to build,
+ * Acceptance criteria, Blocked by) behind the stable recovery marker. Every
+ * blocker must already have an issue number.
+ */
 export const renderChildIssueBody = (input: {
-    readonly child: IssueBreakdownDecision["issues"][number];
+    readonly child: BreakdownChild;
     readonly lineage: DecompositionLineage;
     readonly issueNumbers: Readonly<Record<string, number>>;
 }): string => {
     const { child, lineage, issueNumbers } = input;
-    const dependencies = child.dependsOn.map((key) => {
+    const blockers = child.dependsOn.map((key) => {
         const number = issueNumbers[key];
         if (number === undefined) {
             throw new RalphieError({
-                message: `Cannot render dependency ${key}; its GitHub issue number is unknown.`,
+                message: `Cannot render blocker ${key}; its GitHub issue number is unknown.`,
             });
         }
-        return `- ${issueLink(number)} (${key})`;
+        return `- ${issueLink(number)}`;
     });
-
-    // Native sub-issues replace the body-level parent/sibling/lineage lists.
-    // The stable marker remains as private recovery metadata and the
-    // dependency section remains the queue's deterministic source of edges.
     return `${decompositionMarker(lineage, child.key)}
 
-${child.body}
+## Parent
 
-## Dependencies
+${issueLink(lineage.parentIssueNumber)}
 
-${dependencies.length === 0 ? "- None" : dependencies.join("\n")}`;
-};
+## What to build
 
-export const renderDecomposedOriginalBody = (input: {
-    readonly original: GitHubIssue;
-    readonly breakdown: IssueBreakdownDecision;
-    readonly issueNumbers: Readonly<Record<string, number>>;
-    readonly lineage: DecompositionLineage;
-}): string => {
-    validateDepth(input.lineage.depth);
-    const originalSection = "## Original issue content\n\n";
-    const originalBody = input.original.body ?? "";
-    const preservedOriginal = originalBody.includes(
-        `<!-- ${RALPHIE_DECOMPOSITION_MARKER} original=`,
-    )
-        ? (originalBody.split(originalSection)[1] ?? "")
-        : originalBody;
-    const stack = input.breakdown.issues.map((child) => {
-        const number = input.issueNumbers[child.key];
-        if (number === undefined) {
-            throw new RalphieError({
-                message: `Cannot rewrite the original issue; child ${child.key} has no GitHub issue number.`,
-            });
-        }
-        const dependencies = child.dependsOn
-            .map((key) => input.issueNumbers[key])
-            .filter((value): value is number => value !== undefined)
-            .map(issueLink);
-        return `- ${issueLink(number)} — ${child.title}${
-            dependencies.length === 0
-                ? ""
-                : ` (depends on ${dependencies.join(", ")})`
-        }`;
-    });
+${child.whatToBuild}
 
-    return `<!-- ${RALPHIE_DECOMPOSITION_MARKER} original=${input.original.number} depth=${input.lineage.depth} -->
+## Acceptance criteria
 
-This issue was decomposed into the following independently actionable issue stack:
+${child.acceptanceCriteria.map((criterion) => `- [ ] ${criterion}`).join("\n")}
 
-${stack.join("\n")}
+## Blocked by
 
-## Decomposition rationale
-
-${input.breakdown.rationale}
-
-## Original issue content
-
-${preservedOriginal}`;
+${blockers.length === 0 ? "None (can start immediately)" : blockers.join("\n")}`;
 };
