@@ -6,7 +6,12 @@ import {
     allIssuesListed,
     HALTED_EXIT_CODE,
     type ImplementationEvidence,
+    judgeHandOff,
     judgeImplementation,
+    smokeExitCode,
+    smokeScenarios,
+    greetingFile,
+    greetingText,
     parseRunLog,
     judgeDecomposition,
     smokeVerdict,
@@ -68,8 +73,11 @@ describe("live smoke evidence", () => {
         stateReason: "COMPLETED",
         closedByRalphie: true,
         newCommits: 1,
-        changedFiles: ["greeting.txt"],
-        greeting: "hello\n",
+        changedFiles: ["greeting-abc.txt"],
+        file: "greeting-abc.txt",
+        expected: "hello abc",
+        greeting: "hello abc\n",
+        reviewed: true,
     };
 
     test("passes only with a closure and a commit that adds the greeting", () => {
@@ -83,16 +91,18 @@ describe("live smoke evidence", () => {
             newCommits: 0,
             changedFiles: [],
             greeting: undefined,
+            reviewed: false,
         }).join(";");
+        expect(problems).toContain("no review stage");
         expect(problems).toContain("no closure by Ralphie");
         expect(problems).toContain("nothing was implemented");
-        expect(problems).toContain("greeting.txt");
+        expect(problems).toContain("greeting-abc.txt");
     });
 
     test("requires the commit to touch the greeting file", () => {
         expect(
             judgeImplementation({ ...done, changedFiles: ["other.txt"] }),
-        ).toEqual(["no new commit touched greeting.txt"]);
+        ).toEqual(["no new commit touched greeting-abc.txt"]);
     });
 
     test("an open issue is reported as not closed", () => {
@@ -203,5 +213,63 @@ describe("live smoke verdicts", () => {
         expect(smokeVerdict(0, [])).toBe("PASS");
         expect(smokeVerdict(0, ["x"])).toBe("FAIL");
         expect(smokeVerdict(1, ["ralphie exited 1"])).toBe("FAIL");
+    });
+});
+describe("live smoke run uniqueness, hand-off and exit", () => {
+    test("each run asks for its own file and content", () => {
+        expect(greetingFile("a1")).not.toBe(greetingFile("b2"));
+        const [implementation] = smokeScenarios("pi", "a1");
+        expect(implementation?.body).toContain(greetingFile("a1"));
+        expect(implementation?.body).toContain(greetingText("a1"));
+        expect(implementation?.title).toContain("a1");
+    });
+
+    test("reads review stage events per issue", () => {
+        const log = parseRunLog(
+            JSON.stringify({
+                stage: "review",
+                status: "started",
+                message: "Reviewing",
+                issue: { number: 4 },
+            }),
+        );
+        expect([...log.reviewed]).toEqual([4]);
+    });
+
+    test("an untouched open issue is not a hand-off", () => {
+        const problems = judgeHandOff({
+            state: "OPEN",
+            labels: ["ready-for-agent"],
+            comments: [],
+        }).join(";");
+        expect(problems).toContain("none of the labels");
+        expect(problems).toContain("no Ralphie hand-off comment");
+    });
+
+    test("a labelled issue with Ralphie's comment is a hand-off", () => {
+        expect(
+            judgeHandOff({
+                state: "OPEN",
+                labels: ["ready-for-human"],
+                comments: [`<!-- ${HAND_OFF_MARKER} -->\nWhat format?`],
+            }),
+        ).toEqual([]);
+    });
+
+    test("a closed or missing hand-off issue fails", () => {
+        expect(judgeHandOff(undefined)).toHaveLength(1);
+        expect(
+            judgeHandOff({
+                state: "CLOSED",
+                labels: ["needs-info"],
+                comments: [`<!-- ${HAND_OFF_MARKER} -->`],
+            }),
+        ).toEqual(["hand-off issue should stay open for a human"]);
+    });
+
+    test("fails when no harness ran", () => {
+        expect(smokeExitCode(0, 0)).toBe(1);
+        expect(smokeExitCode(0, 2)).toBe(0);
+        expect(smokeExitCode(1, 2)).toBe(1);
     });
 });

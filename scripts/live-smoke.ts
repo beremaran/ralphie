@@ -123,20 +123,27 @@ export type SmokeScenario = {
     readonly body: string;
 };
 
-export const smokeScenarios = (harness: SmokeHarness): SmokeScenario[] => [
+/** The scratch repository is reused, so every run asks for its own file. */
+export const greetingFile = (runId: string): string => `greeting-${runId}.txt`;
+export const greetingText = (runId: string): string => `hello ${runId}`;
+
+export const smokeScenarios = (
+    harness: SmokeHarness,
+    runId: string,
+): SmokeScenario[] => [
     {
         name: "implementation",
-        title: `Smoke ${harness}: add greeting file`,
-        body: "Create a file `greeting.txt` at the repository root containing exactly `hello`.",
+        title: `Smoke ${harness} ${runId}: add greeting file`,
+        body: `Create a file \`${greetingFile(runId)}\` at the repository root containing exactly \`${greetingText(runId)}\`.`,
     },
     {
         name: "hand-off",
-        title: `Smoke ${harness}: ambiguous requirement`,
+        title: `Smoke ${harness} ${runId}: ambiguous requirement`,
         body: "Make the output format match the agreed format. There is no agreed format written anywhere; a human must decide it.",
     },
     {
         name: "decomposition",
-        title: `Smoke ${harness}: large feature`,
+        title: `Smoke ${harness} ${runId}: large feature`,
         body: "Build a complete command-line todo application with persistence, tagging, search, import and export, a plugin system, and a full test suite. This is far too large for one session and should be split into smaller issues.",
     },
 ];
@@ -178,6 +185,40 @@ export const judgeDecomposition = (
         : "no child issue was worked to a genuine outcome (completed, or handed off for a real reason)";
 };
 
+/**
+ * The hand-off scenario passes only when Ralphie handed the issue to a human:
+ * still open, a human-attention label, and Ralphie's hand-off comment. An
+ * issue Ralphie never touched, or one a failed session left alone, fails.
+ */
+export const judgeHandOff = (
+    issue: Pick<SmokeChild, "state" | "labels" | "comments"> | undefined,
+): string[] => {
+    if (issue === undefined) return ["hand-off issue was not found"];
+    const problems: string[] = [];
+    if (issue.state !== "OPEN") {
+        problems.push("hand-off issue should stay open for a human");
+    }
+    if (!issue.labels.some((label) => HUMAN_LABELS.includes(label))) {
+        problems.push(
+            `hand-off issue has none of the labels ${HUMAN_LABELS.join(", ")}`,
+        );
+    }
+    if (!issue.comments.some((body) => body.includes(HAND_OFF_MARKER))) {
+        problems.push("hand-off issue has no Ralphie hand-off comment");
+    } else if (
+        issue.comments.some((body) => HARNESS_FAILURE_COMMENT.test(body))
+    ) {
+        problems.push(
+            "hand-off blames a failed harness session, not the issue",
+        );
+    }
+    return problems;
+};
+
+/** SKIPped harnesses prove nothing: a run where none ran must fail. */
+export const smokeExitCode = (failed: number, ran: number): number =>
+    failed === 0 && ran > 0 ? 0 : 1;
+
 export type SmokeVerdict = "PASS" | "FAIL" | "INCONCLUSIVE";
 
 /** A transient halt proves nothing either way; any other problem fails. */
@@ -199,6 +240,8 @@ export const allIssuesListed = (
 export type RunLog = {
     /** Issues Ralphie itself reported closing as completed. */
     readonly closedAsCompleted: ReadonlySet<number>;
+    /** Issues for which Ralphie reported a review stage event. */
+    readonly reviewed: ReadonlySet<number>;
     /** The final `Run completed...` (or `Run stopped...`) message, if any. */
     readonly summary?: string;
 };
@@ -221,28 +264,35 @@ const parseLogLine = (line: string): LogEvent | undefined => {
     }
 };
 
+const recordIssueStage = (
+    event: LogEvent,
+    closed: Set<number>,
+    reviewed: Set<number>,
+): void => {
+    const number = event.issue?.number;
+    if (typeof number !== "number") return;
+    if (event.stage === "review") reviewed.add(number);
+    if (event.stage === "issue-closure" && event.status === "succeeded") {
+        closed.add(number);
+    }
+};
+
 /** Reads JSON Lines from `ralphie --output json`, ignoring non-JSON lines. */
 export const parseRunLog = (text: string): RunLog => {
     const closed = new Set<number>();
+    const reviewed = new Set<number>();
     let summary: string | undefined;
     for (const line of text.split("\n")) {
         const event = parseLogLine(line.trim());
         if (event === undefined || typeof event.message !== "string") continue;
-        const number = event.issue?.number;
-        if (
-            event.stage === "issue-closure" &&
-            event.status === "succeeded" &&
-            typeof number === "number"
-        ) {
-            closed.add(number);
-        }
+        recordIssueStage(event, closed, reviewed);
         if (/^Run (completed|stopped)/.test(event.message)) {
             summary = event.message;
         }
     }
     return summary === undefined
-        ? { closedAsCompleted: closed }
-        : { closedAsCompleted: closed, summary };
+        ? { closedAsCompleted: closed, reviewed }
+        : { closedAsCompleted: closed, reviewed, summary };
 };
 
 /** What the scratch repository shows about the implementation scenario. */
@@ -255,8 +305,14 @@ export type ImplementationEvidence = {
     readonly newCommits: number;
     /** Files those commits touched. */
     readonly changedFiles: readonly string[];
-    /** Content of greeting.txt on the default branch, if present. */
+    /** The per-run file the issue asked for. */
+    readonly file: string;
+    /** The exact content the issue asked for. */
+    readonly expected: string;
+    /** Content of that file on the default branch, if present. */
     readonly greeting: string | undefined;
+    /** Ralphie's run log shows a review stage for this issue. */
+    readonly reviewed: boolean;
 };
 
 /**
@@ -279,15 +335,20 @@ export const judgeImplementation = (
             "implementation issue was closed, but the run log shows no closure by Ralphie",
         );
     }
+    if (!evidence.reviewed) {
+        problems.push("the run log shows no review stage for the issue");
+    }
     if (evidence.newCommits === 0) {
         problems.push(
             "no commit landed on the default branch during the run, so nothing was implemented",
         );
-    } else if (!evidence.changedFiles.includes("greeting.txt")) {
-        problems.push("no new commit touched greeting.txt");
+    } else if (!evidence.changedFiles.includes(evidence.file)) {
+        problems.push(`no new commit touched ${evidence.file}`);
     }
-    if (evidence.greeting?.trim() !== "hello") {
-        problems.push("greeting.txt on the default branch is not `hello`");
+    if (evidence.greeting?.trim() !== evidence.expected) {
+        problems.push(
+            `${evidence.file} on the default branch is not \`${evidence.expected}\``,
+        );
     }
     return problems;
 };
@@ -386,12 +447,13 @@ const commitsSince = async (
 
 const greetingOnDefaultBranch = async (
     repository: string,
+    file: string,
 ): Promise<string | undefined> => {
     const content = await run(
         [
             "gh",
             "api",
-            `repos/${repository}/contents/greeting.txt`,
+            `repos/${repository}/contents/${file}`,
             "--jq",
             ".content",
         ],
@@ -406,6 +468,7 @@ const verify = async (
     created: ReadonlyMap<string, number>,
     baseline: string | undefined,
     log: RunLog,
+    runId: string,
 ): Promise<string[]> => {
     const labelled = await listIssues(repository, label);
     const find = (name: string): IssueView | undefined =>
@@ -417,12 +480,31 @@ const verify = async (
         closedByRalphie:
             implementation !== undefined &&
             log.closedAsCompleted.has(implementation.number),
+        reviewed:
+            implementation !== undefined &&
+            log.reviewed.has(implementation.number),
+        file: greetingFile(runId),
+        expected: greetingText(runId),
         ...(await commitsSince(repository, baseline)),
-        greeting: await greetingOnDefaultBranch(repository),
+        greeting: await greetingOnDefaultBranch(
+            repository,
+            greetingFile(runId),
+        ),
     });
-    if (find("hand-off")?.state !== "OPEN") {
-        problems.push("hand-off issue should stay open for a human");
-    }
+    const handOff = find("hand-off");
+    problems.push(
+        ...judgeHandOff(
+            handOff === undefined
+                ? undefined
+                : {
+                      state: handOff.state,
+                      labels: (handOff.labels ?? []).map(({ name }) => name),
+                      comments: (handOff.comments ?? []).map(
+                          ({ body }) => body,
+                      ),
+                  },
+        ),
+    );
     const newest = Math.max(...created.values());
     const children = (await listIssues(repository))
         .filter((issue) => issue.number > newest)
@@ -444,6 +526,7 @@ const fileScenarios = async (
     options: SmokeOptions,
     harness: SmokeHarness,
     label: string,
+    runId: string,
 ): Promise<Map<string, number>> => {
     await gh("label", "create", label, "--repo", options.repository, "--force");
     await gh(
@@ -455,7 +538,7 @@ const fileScenarios = async (
         "--force",
     );
     const created = new Map<string, number>();
-    for (const scenario of smokeScenarios(harness)) {
+    for (const scenario of smokeScenarios(harness, runId)) {
         const url = await gh(
             "issue",
             "create",
@@ -571,7 +654,8 @@ const smokeHarness = async (
     harness: SmokeHarness,
 ): Promise<{ readonly exitCode: number; readonly problems: string[] }> => {
     const label = `smoke-${harness}`;
-    const created = await fileScenarios(options, harness, label);
+    const runId = crypto.randomUUID().slice(0, 8);
+    const created = await fileScenarios(options, harness, label, runId);
     const directory = await mkdtemp(
         join(tmpdir(), `ralphie-smoke-${harness}-`),
     );
@@ -593,6 +677,7 @@ const smokeHarness = async (
                           created,
                           baseline,
                           log,
+                          runId,
                       )
                     : [failure],
         };
@@ -620,10 +705,10 @@ const describeError = (error: unknown): string =>
 const smokeOne = async (
     options: SmokeOptions,
     harness: SmokeHarness,
-): Promise<boolean> => {
+): Promise<"ok" | "failed" | "skipped"> => {
     if (Bun.which(harness) === null) {
         console.log(`SKIP ${harness}: executable not installed`);
-        return true;
+        return "skipped";
     }
     try {
         const { exitCode, problems } = await smokeHarness(options, harness);
@@ -635,10 +720,10 @@ const smokeOne = async (
                   ? `PASS ${harness}`
                   : `FAIL ${harness}: ${problems.join("; ")}`,
         );
-        return verdict !== "FAIL";
+        return verdict === "FAIL" ? "failed" : "ok";
     } catch (error) {
         console.log(`FAIL ${harness}: ${describeError(error)}`);
-        return false;
+        return "failed";
     }
 };
 
@@ -651,10 +736,14 @@ const main = async (): Promise<number> => {
         return 2;
     }
     let failed = 0;
+    let ran = 0;
     for (const harness of options.harnesses) {
-        failed += (await smokeOne(options, harness)) ? 0 : 1;
+        const outcome = await smokeOne(options, harness);
+        failed += outcome === "failed" ? 1 : 0;
+        ran += outcome === "skipped" ? 0 : 1;
     }
-    return failed === 0 ? 0 : 1;
+    if (ran === 0) console.error("No harness was run: none is installed.");
+    return smokeExitCode(failed, ran);
 };
 
 if (import.meta.main) {
