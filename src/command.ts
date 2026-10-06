@@ -71,6 +71,14 @@ const REMOVED_FLAGS: Readonly<Record<string, string>> = {
     thinking: "harnesses.<harness>.effort or roles.<role>.effort",
 };
 
+/** Former flags whose replacement is not a single config key. */
+const REMOVED_FLAG_MESSAGES: Readonly<Record<string, string>> = {
+    "notify-needs-attention":
+        "Hand-offs are always on: Ralphie always comments and relabels an issue it hands to a human.",
+    "needs-attention-label":
+        "Hand-offs are always on. Set labels.ready-for-human in the config file to rename the hand-off label, or override it for one run with --set.",
+};
+
 type ParsedCli = {
     readonly init: boolean;
     readonly help: boolean;
@@ -127,6 +135,12 @@ const rejectRemovedFlags = (args: ReadonlyArray<string>): void => {
     });
     for (const token of tokens) {
         if (token.kind !== "option") continue;
+        const tailored = REMOVED_FLAG_MESSAGES[token.name];
+        if (tailored !== undefined) {
+            throw new RalphieError({
+                message: `Option ${token.rawName} was removed. ${tailored}`,
+            });
+        }
         const key = REMOVED_FLAGS[token.name];
         if (key !== undefined) {
             throw new RalphieError({
@@ -420,6 +434,7 @@ const runStartupChecks = async (
     const report = await check({
         roles: config.roles,
         maxBudgetUsd: config.settings.limits.maxBudgetUsd,
+        triageEnabled: config.settings.triage.enabled,
     });
     for (const warning of report.warnings) {
         await progress.emit({

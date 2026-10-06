@@ -57,7 +57,7 @@ lines.
   preserved as supplied.
 
 JSON events use a stable operational vocabulary and include `runId`,
-`timestamp`, `stage`, `status`, and `message`. Grounding and pre-flight events identify
+`timestamp`, `stage`, `status`, and `message`. Pre-flight and hand-off events identify
 whether agent work was skipped. Human-readable hand-off decisions name
 the issue number and title and show the current/total queue position. JSON
 output retains the complete event payload, including the structured details
@@ -232,7 +232,7 @@ run; the issue keeps its labels and a later run re-evaluates it from scratch.
 
 When an executor session or pre-flight asks for a hand-off, Ralphie first persists the
 bounded request, clean checkpoint, and issue freshness fingerprint. Exactly one
-fresh read-only grounding session verifies that request before the next artifact,
+fresh read-only hand-off verification session verifies that request before the next artifact,
 Git, or GitHub mutation. Only a `hand_off` verifier disposition confirms
 it; actionable and already-resolved dispositions continue the original flow.
 The confirmed decision is persisted before recovery writes a bounded binary-safe

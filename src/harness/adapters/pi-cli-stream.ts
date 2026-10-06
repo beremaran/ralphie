@@ -1,4 +1,11 @@
 import type { TurnEvent } from "../ports.ts";
+import {
+    asNumberOrZero,
+    asRecord,
+    asString,
+    type JsonRecord,
+    parseLine,
+} from "./json-record.ts";
 
 /** How the last assistant message of a pi run ended. */
 export type PiFinalMessage =
@@ -9,32 +16,6 @@ export type PiStreamSummary = {
     readonly sessionID: string | undefined;
     /** The last assistant message; earlier retried failures are superseded. */
     readonly final: PiFinalMessage | undefined;
-};
-
-type JsonRecord = Readonly<Record<string, unknown>>;
-
-const asRecord = (value: unknown): JsonRecord | undefined =>
-    typeof value === "object" && value !== null && !Array.isArray(value)
-        ? (value as JsonRecord)
-        : undefined;
-
-const asString = (value: unknown): string | undefined =>
-    typeof value === "string" ? value : undefined;
-
-const asNumber = (value: unknown): number =>
-    typeof value === "number" && Number.isFinite(value) ? value : 0;
-
-/**
- * Parse one line. Lines are split on `\n` only by the process port, so
- * U+2028 and U+2029 inside strings survive and `JSON.parse` accepts them.
- */
-const parseLine = (line: string): JsonRecord | undefined => {
-    if (!line.trim().startsWith("{")) return undefined;
-    try {
-        return asRecord(JSON.parse(line));
-    } catch {
-        return undefined;
-    }
 };
 
 const contentBlocks = (message: JsonRecord): readonly JsonRecord[] => {
@@ -111,11 +92,11 @@ export const makePiStreamReader = (input: {
     const addUsage = (raw: unknown): void => {
         const record = asRecord(raw);
         if (record === undefined) return;
-        usage.input += asNumber(record.input);
-        usage.output += asNumber(record.output);
-        usage.cacheRead += asNumber(record.cacheRead);
-        usage.cacheWrite += asNumber(record.cacheWrite);
-        usage.cost += asNumber(asRecord(record.cost)?.total);
+        usage.input += asNumberOrZero(record.input);
+        usage.output += asNumberOrZero(record.output);
+        usage.cacheRead += asNumberOrZero(record.cacheRead);
+        usage.cacheWrite += asNumberOrZero(record.cacheWrite);
+        usage.cost += asNumberOrZero(asRecord(record.cost)?.total);
     };
 
     const assistantEnd = (message: JsonRecord): void => {

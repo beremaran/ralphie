@@ -1,4 +1,11 @@
 import type { TurnEvent } from "../ports.ts";
+import {
+    asNumber,
+    asRecord,
+    asString,
+    type JsonRecord,
+    parseLine,
+} from "./json-record.ts";
 
 /** What Claude Code reported when the session ended. */
 export type ClaudeResult = {
@@ -20,28 +27,6 @@ export type ClaudeStreamSummary = {
     /** Error code Claude Code attached to an assistant message, if any. */
     readonly assistantError: string | undefined;
     readonly result: ClaudeResult | undefined;
-};
-
-type JsonRecord = Readonly<Record<string, unknown>>;
-
-const asRecord = (value: unknown): JsonRecord | undefined =>
-    typeof value === "object" && value !== null && !Array.isArray(value)
-        ? (value as JsonRecord)
-        : undefined;
-
-const asString = (value: unknown): string | undefined =>
-    typeof value === "string" ? value : undefined;
-
-const asNumber = (value: unknown): number | undefined =>
-    typeof value === "number" && Number.isFinite(value) ? value : undefined;
-
-const parseLine = (line: string): JsonRecord | undefined => {
-    if (!line.trim().startsWith("{")) return undefined;
-    try {
-        return asRecord(JSON.parse(line));
-    } catch {
-        return undefined;
-    }
 };
 
 const contentBlocks = (message: unknown): readonly JsonRecord[] => {

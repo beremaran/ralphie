@@ -229,3 +229,73 @@ describe("harness probe", () => {
         expect(probe.capabilities("nothing")).toBeUndefined();
     });
 });
+describe("harness minimum versions", () => {
+    test("accepts the minimum version and newer", async () => {
+        const { probe } = probeFor([
+            { stdout: "codex-cli 0.160.0\n" },
+            { stdout: "2.1.290 (Claude Code)\n" },
+        ]);
+
+        expect(await probe.installed("codex")).toEqual({ ok: true });
+        expect(await probe.installed("claude")).toEqual({ ok: true });
+    });
+
+    test("names the harness and required version when too old", async () => {
+        const { probe } = probeFor([{ stdout: "2.1.288 (Claude Code)\n" }]);
+
+        const result = await probe.installed("claude");
+
+        expect(result).toMatchObject({ ok: false });
+        if (!result.ok) {
+            expect(result.message).toContain("claude 2.1.288");
+            expect(result.message).toContain("2.1.289");
+        }
+    });
+
+    test("warns instead of failing when the version cannot be read", async () => {
+        const { probe } = probeFor([{ stdout: "dev build\n" }]);
+
+        const result = await probe.installed("pi");
+
+        expect(result.ok).toBe(true);
+        expect(result.ok && result.warning).toContain("pi 1.0.2");
+    });
+
+    test("startup reports the unreadable-version warning", async () => {
+        const warning = "Could not read the pi version";
+        const report = await check(
+            { harnesses: {}, roles: { reviewer: "pi" } },
+            {
+                ...probeWith(),
+                installed: async (name) =>
+                    name === "pi" ? { ok: true, warning } : { ok: true },
+            },
+        );
+
+        expect(report.errors).toEqual([]);
+        expect(report.warnings).toEqual([warning]);
+    });
+});
+
+describe("startup checks and the triager", () => {
+    const probe = probeWith({ missing: ["codex"] });
+    const configuration = { harnesses: {}, roles: { triager: "codex" } };
+
+    test("skip the triager's harness when triage is disabled", async () => {
+        const report = await makeHarnessStartupChecker(probe)({
+            roles: resolveRoleAssignments(configuration),
+            triageEnabled: false,
+        });
+
+        expect(report.errors).toEqual([]);
+    });
+
+    test("check the triager's harness when triage is enabled", async () => {
+        const report = await makeHarnessStartupChecker(probe)({
+            roles: resolveRoleAssignments(configuration),
+            triageEnabled: true,
+        });
+
+        expect(report.errors[0]).toContain("Harness codex is not usable");
+    });
+});

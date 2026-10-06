@@ -1,6 +1,7 @@
 import type { Octokit } from "octokit";
 
 import { RalphieError } from "../../shared/error.ts";
+import { isAgentBrief } from "../../issues/domain/triage.ts";
 import { parseRepositorySlug } from "../repository.ts";
 import {
     MAX_ISSUE_COMMENT_BODY_LENGTH,
@@ -114,12 +115,18 @@ const mapIssueComments = (
     readonly comments: ReadonlyArray<GitHubIssueComment>;
     readonly commentVersion: string;
 } => {
+    const latestBrief = comments.findLast((comment) =>
+        isAgentBrief(comment.body ?? ""),
+    );
+    const recent = new Set(comments.slice(-MAX_ISSUE_COMMENTS));
     const boundedComments = comments
-        .slice(-MAX_ISSUE_COMMENTS)
+        .filter((comment) => recent.has(comment) || comment === latestBrief)
         .map((comment) => ({
             id: comment.id,
             ...loginOf(comment.user),
-            body: truncateCommentBody(comment.body ?? ""),
+            body: isAgentBrief(comment.body ?? "")
+                ? (comment.body ?? "")
+                : truncateCommentBody(comment.body ?? ""),
             updatedAt: issueUpdatedAt(comment.updated_at),
         }));
     return {

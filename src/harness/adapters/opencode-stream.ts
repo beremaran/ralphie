@@ -1,4 +1,11 @@
 import type { TurnEvent } from "../ports.ts";
+import {
+    asNumberOrZero,
+    asRecord,
+    asString,
+    type JsonRecord,
+    parseLine,
+} from "./json-record.ts";
 
 /** An `error` event OpenCode printed; its process then exits with code 1. */
 export type OpenCodeError = {
@@ -11,28 +18,6 @@ export type OpenCodeStreamSummary = {
     /** Text parts of the last step that produced any: the final message. */
     readonly text: string | undefined;
     readonly error: OpenCodeError | undefined;
-};
-
-type JsonRecord = Readonly<Record<string, unknown>>;
-
-const asRecord = (value: unknown): JsonRecord | undefined =>
-    typeof value === "object" && value !== null && !Array.isArray(value)
-        ? (value as JsonRecord)
-        : undefined;
-
-const asString = (value: unknown): string | undefined =>
-    typeof value === "string" ? value : undefined;
-
-const asNumber = (value: unknown): number =>
-    typeof value === "number" && Number.isFinite(value) ? value : 0;
-
-const parseLine = (line: string): JsonRecord | undefined => {
-    if (!line.trim().startsWith("{")) return undefined;
-    try {
-        return asRecord(JSON.parse(line));
-    } catch {
-        return undefined;
-    }
 };
 
 const toolFailed = (state: JsonRecord): boolean =>
@@ -80,11 +65,12 @@ type Tally = {
 const addStep = (tally: Tally, part: JsonRecord): void => {
     const tokens = asRecord(part.tokens) ?? {};
     const cache = asRecord(tokens.cache) ?? {};
-    tally.inputTokens += asNumber(tokens.input);
-    tally.outputTokens += asNumber(tokens.output) + asNumber(tokens.reasoning);
-    tally.cacheReadTokens += asNumber(cache.read);
-    tally.cacheWriteTokens += asNumber(cache.write);
-    tally.costUsd += asNumber(part.cost);
+    tally.inputTokens += asNumberOrZero(tokens.input);
+    tally.outputTokens +=
+        asNumberOrZero(tokens.output) + asNumberOrZero(tokens.reasoning);
+    tally.cacheReadTokens += asNumberOrZero(cache.read);
+    tally.cacheWriteTokens += asNumberOrZero(cache.write);
+    tally.costUsd += asNumberOrZero(part.cost);
     tally.steps += 1;
 };
 

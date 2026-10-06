@@ -158,6 +158,18 @@ repair sessions are the `fixer`; the review gate runs the `standards-reviewer`
 and the `spec-reviewer`; issue-resolution checks are the `resolution-verifier`;
 and decomposition is the `decomposer`.
 
+Startup checks each assigned harness (the `triager` only when
+`triage.enabled` is true) by running its `--version`. A harness older than the
+minimum below stops the run with an error naming the harness and the version it
+needs. Output that contains no readable version only produces a warning.
+
+| Harness | Minimum version |
+| --- | --- |
+| Claude Code (`claude`) | 2.1.289 |
+| Codex (`codex`) | 0.160.0 |
+| OpenCode (`opencode`) | 2.0.22 |
+| pi (`pi`) | 1.0.2 |
+
 Only the editing roles (`implementer`, `fixer`) may edit the checkout; the
 others run read-only. How the editing roles are approved is described under
 [Approval modes](safety.md#approval-modes), and each session's time limit is
@@ -248,3 +260,5 @@ Each former flag now fails with an error naming its replacement.
 | `--workspace` | `workspace` |
 | `--model` | `harnesses.<harness>.model` or `roles.<role>.model` |
 | `--thinking` | `harnesses.<harness>.effort` or `roles.<role>.effort` |
+| `--notify-needs-attention` | none: hand-offs are always on |
+| `--needs-attention-label` | `labels.ready-for-human` |

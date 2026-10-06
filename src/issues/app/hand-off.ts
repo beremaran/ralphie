@@ -1,5 +1,5 @@
 import { type IssueCheckpoint } from "../../git/ports.ts";
-import { buildGroundingPrompt } from "../../agent/prompts.ts";
+import { buildHandOffVerificationPrompt } from "../../agent/prompts.ts";
 import { requestStructuredOutput } from "../../agent/structured-output.ts";
 import type { HandOffRequest } from "../../agent/task-session.ts";
 import { RalphieError } from "../../shared/error.ts";
@@ -59,7 +59,7 @@ export const issueFreshnessFingerprint = (
 const verificationPrompt = (
     context: IssueExecutionContext,
     request: HandOffRequest,
-): string => `${buildGroundingPrompt({
+): string => `${buildHandOffVerificationPrompt({
     issue: context.issue,
     repositoryPath: context.repositoryPath,
     targetBranch: context.targetBranch,

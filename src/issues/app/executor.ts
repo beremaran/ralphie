@@ -141,9 +141,9 @@ export const makeIssueExecutorService = (
                 number: context.issue.number,
                 title: context.issue.title,
             },
-            stage: "grounding",
+            stage: "hand-off",
             status: "skipped",
-            message: `Reusing the previous grounding decision for #${context.issue.number}; agent grounding was skipped.`,
+            message: `Reusing the previous hand-off decision for #${context.issue.number}; the hand-off verification session was skipped.`,
             details: { agentWorkSkipped: true },
         });
         const { decision } = await artifacts.read(

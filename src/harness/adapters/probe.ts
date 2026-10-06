@@ -12,6 +12,54 @@ type Dependencies = {
     readonly adapters: Readonly<Record<string, HarnessAdapter>>;
 };
 
+/** The oldest release of each harness CLI Ralphie is verified against. */
+export const MINIMUM_HARNESS_VERSIONS: Readonly<Record<string, string>> = {
+    claude: "2.1.289",
+    codex: "0.160.0",
+    opencode: "2.0.22",
+    pi: "1.0.2",
+};
+
+const VERSION_PATTERN = /(\d+)\.(\d+)\.(\d+)/;
+
+const parseVersion = (output: string): ReadonlyArray<number> | undefined => {
+    const match = VERSION_PATTERN.exec(output);
+    return match === null
+        ? undefined
+        : [Number(match[1]), Number(match[2]), Number(match[3])];
+};
+
+const isOlder = (
+    actual: ReadonlyArray<number>,
+    minimum: ReadonlyArray<number>,
+): boolean => {
+    for (const [index, part] of minimum.entries()) {
+        const found = actual[index] ?? 0;
+        if (found !== part) return found < part;
+    }
+    return false;
+};
+
+/** Compare `--version` output with the harness's minimum version. */
+const versionResult = (executable: string, output: string): ProbeResult => {
+    const minimum = MINIMUM_HARNESS_VERSIONS[executable];
+    if (minimum === undefined) return { ok: true };
+    const actual = parseVersion(output);
+    if (actual === undefined) {
+        return {
+            ok: true,
+            warning: `Could not read the ${executable} version from its --version output; Ralphie needs ${executable} ${minimum} or newer.`,
+        };
+    }
+    const required = parseVersion(minimum) ?? [];
+    return isOlder(actual, required)
+        ? {
+              ok: false,
+              message: `${executable} ${actual.join(".")} is older than the minimum supported ${executable} ${minimum}; upgrade ${executable} to ${minimum} or newer`,
+          }
+        : { ok: true };
+};
+
 const reasonOf = (error: unknown): string =>
     error instanceof Error ? error.message : String(error);
 
@@ -25,7 +73,7 @@ const installed = async (
             processGroup: true,
         });
         return result.exitCode === 0
-            ? { ok: true }
+            ? versionResult(executable, `${result.stdout}\n${result.stderr}`)
             : {
                   ok: false,
                   message: `${executable} --version exited with code ${result.exitCode}`,

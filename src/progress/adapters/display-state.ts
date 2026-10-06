@@ -77,8 +77,6 @@ export const PROGRESS_STAGE_LABELS: Readonly<Record<ProgressStage, string>> = {
     "issue-planning": "Planning issue",
     "issue-execution": "Executing issue",
     "issue-queue": "Updating issue queue",
-    grounding: "Checking issue readiness",
-    "issue-grounding": "Checking issue readiness",
     triage: "Triaging issue",
     preflight: "Pre-flight check",
     implementation: "Implementing changes",
@@ -276,7 +274,7 @@ const displayIssuesFrom = (
 
 /**
  * Status transitions are driven only by terminal queue events, so mid-issue
- * stages (grounding, verification, review) never overwrite an outcome and a
+ * stages (pre-flight, verification, review) never overwrite an outcome and a
  * later hand-off decision can still supersede an execution success.
  */
 const displayQueueStatusFor = (

@@ -140,6 +140,16 @@ environment enforces it instead of the prompts.
   pointing at a fresh, empty temporary directory that is removed when the
   session ends, so a stored `gh` login is not visible either. These entries
   override anything a request sets.
+- **Keyring limitation.** `GH_CONFIG_DIR` isolation hides a `gh` login stored
+  in the config directory, but not a token that `gh` keeps in the operating
+  system keyring (for example the macOS Keychain). A session that runs as the
+  same OS user can still reach that credential through `gh` or the keyring
+  itself. Ralphie does not claim to block it. What it does guarantee is that
+  it never hands a token to a session and that its own delivery push is
+  verified against the remote. To close the gap, authenticate `gh` with a
+  token in the environment or a file-based config (`gh auth login
+  --insecure-storage`), or run Ralphie as a dedicated OS user whose keyring
+  holds no credentials.
 - **No push from the workspace.** After preparing the checkout Ralphie sets
   origin's push URL to a disabled value, so `git push` inside the workspace
   fails. Ralphie's own delivery push names the fetch URL explicitly, never

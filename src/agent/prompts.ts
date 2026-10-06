@@ -13,8 +13,6 @@ import {
 } from "../issues/domain/triage.ts";
 import type { VerificationEvidence } from "../issues/app/verification.ts";
 
-export type GroundingPromptInput = ComplexityPromptInput;
-
 export type ComplexityPromptInput = {
     readonly issue: GitHubIssue;
     readonly repositoryPath: string;
@@ -199,12 +197,13 @@ caller, not the final implementation or review decision. Do not use it for
 work that is merely hard, large, slow, or uncertain. Always still fill in
 \`result\` with the final result when the task is done.`;
 
-export const buildGroundingPrompt = ({
+/** The prompt of the fresh read-only session that verifies a hand-off request. */
+export const buildHandOffVerificationPrompt = ({
     issue,
     repositoryPath,
     targetBranch,
     headSha,
-}: GroundingPromptInput): string => `Determine whether this GitHub issue is ready to be worked on now.
+}: ComplexityPromptInput): string => `Determine whether this GitHub issue is ready to be worked on now.
 
 Inspect the checkout and issue text using read-only operations. Return exactly
 one of the existing dispositions: "actionable", "already_resolved", or
@@ -242,7 +241,7 @@ export const buildPreflightPrompt = ({
     repositoryPath,
     targetBranch,
     headSha,
-}: GroundingPromptInput): string => `Run the pre-flight check for this GitHub issue: decide whether it can be worked on now and whether one session can finish it.
+}: ComplexityPromptInput): string => `Run the pre-flight check for this GitHub issue: decide whether it can be worked on now and whether one session can finish it.
 
 Inspect the checkout and issue text using read-only operations. Return exactly
 one disposition:
