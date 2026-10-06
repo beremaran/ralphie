@@ -33,11 +33,11 @@ that binds concrete adapters into the runtime bundle.
 | --- | --- | --- |
 | `agent` | `src/agent/` | Prompts, structured-output and text-task helpers, and the role-to-session mapping (access mode, timeouts) over the harness port. |
 | `config` | `src/config/` | YAML configuration: the zod schema (`settings.ts`), layering and `--set` overrides (`load.ts`, `overrides.ts`), and the file-reader port with its Bun YAML adapter. |
-| `harness` | `src/harness/` | Provider-neutral harness port (session request, events, typed failures, structured results), the service that runs sessions and repairs invalid results, and one CLI adapter per harness (Claude Code, Codex, pi and OpenCode). Every workflow session runs through it; `app/roles.ts` resolves the configured role assignments. |
+| `harness` | `src/harness/` | Provider-neutral harness port (session request, events, typed failures, structured results), the service that runs sessions and repairs invalid results, and one CLI adapter per harness (Claude Code, Codex, pi and OpenCode). Every workflow session runs through it, wrapped by session isolation, the read-only fingerprint guard and skill injection; `app/roles.ts` resolves the configured role assignments. The vendored skills live in `vendor/mattpocock-skills/` (see [Development](development.md#vendored-skills)). |
 | `github` | `src/github/` | Issue value objects, repository slug parsing, and the Octokit/`gh` adapters. |
 | `git` | `src/git/` | Checkout preparation, checkpoints, issue operations, invariants, and remote-safety adapters. |
 | `issues` | `src/issues/` | Domain (`domain/`), executors and artifact/recovery logic (`app/`), filesystem adapters (`adapters/`). |
-| `progress` | `src/progress/` | `ports.ts` contract plus the OpenTUI interactive adapter and the plain/JSON adapters. |
+| `progress` | `src/progress/` | `ports.ts` contract plus the OpenTUI interactive adapter and the plain/JSON adapters. It renders only harness-neutral session events and imports nothing from `agent` or a harness adapter. |
 | `run` | `src/run/` | Versioned run-state schemas, the state/event-log ports, and their adapters. |
 | `process` | `src/process/` | Bounded command runner port (timeout, abort, stdin, streamed stdout lines), the helper, and its adapter. |
 | `workspace` | `src/workspace/` | Path expansion, the workspace port, and the protected-removal adapter. |
@@ -84,7 +84,8 @@ Spike against OpenCode v2.0.22 (the published docs mostly describe v1). The reco
 - **Model and effort**: `--model provider/model#variant`; the variant plays the part of effort and is only applied together with a model.
 - **Access**: there is no sandbox. Read-only uses `--agent plan`, which denies edit tools but still allows shell commands, so it is not a hard guarantee. `--auto` approves every permission that is not denied and is the only editing mode; `safe` is refused with an `access` failure before anything runs. Without `--auto` a headless run cannot answer approval prompts.
 - **Structured output**: none native. The service falls back to the fenced JSON block protocol.
-- **Skills**: a skill under `.opencode/skills/<name>/` is loaded headlessly through the `skill` tool (recorded in `skill.jsonl`). Skills hidden from the model (user-only) were not tested; the vendored skills need a live check once the harness is selected for a role.
+- **Skills**: a skill under `.opencode/skills/<name>/` is loaded headlessly through the `skill` tool (recorded in `skill.jsonl`). Skills hidden from the model (user-only) were not tested.
+- **Not verified live**: the spike had no usable model credits, so a successful read-only `--agent plan` run, resuming with `--session`, and user-only skills headlessly are untested against the real CLI. The recorded success streams come from earlier notes; only the error streams were recorded fresh. Run [the live smoke script](development.md#live-smoke-script) with `--harness opencode` before relying on it.
 
 ## Dependency and side-effect rules
 
@@ -128,6 +129,8 @@ the normal check gate.
 | Runtime dependency assembly | `src/runtime.ts` |
 | Run orchestration, queue, state transitions | `src/workflow/workflow.ts`, `src/issues/domain/queue.ts` |
 | Pre-flight routing | `src/issues/app/executor.ts`, `src/issues/app/preflight.ts` |
+| Hand-offs | `src/issues/domain/hand-off.ts`, `src/issues/app/hand-off.ts`, `src/github/adapters/hand-off.ts` |
+| AFK triage | `src/workflow/triage-phase.ts`, `src/issues/app/triage.ts`, `src/github/adapters/triage.ts` |
 | Implementation/review/delivery | `src/issues/app/implementation-executor.ts`, `src/issues/app/verification.ts`, `src/git/adapters/issue-operations.ts`, `src/git/adapters/remote-safety.ts` |
 | Decomposition and GitHub mutations | `src/issues/app/decomposition-executor.ts`, `src/github/adapters/issue-mutations.ts`, `src/github/adapters/issue-relationships.ts` |
 | Role assignments, session requests, and structured results | `src/harness/app/roles.ts`, `src/agent/` |

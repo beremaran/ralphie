@@ -151,22 +151,24 @@ harness defaults for that role.
 | `roles.standards-reviewer`, `roles.spec-reviewer` | `roles.reviewer`, else `roles.default` | Per-role assignment. |
 | `roles.fixer` | the resolved `implementer` | Per-role assignment. |
 
-Today's sessions map onto the roles as follows: the pre-flight session and
-hand-off confirmation are the `preflight`,
-implementation is the `implementer`, repair sessions are the `fixer`, review
-is the `standards-reviewer`, issue-resolution checks are the
-`resolution-verifier`, and decomposition is the `decomposer`. The
-`spec-reviewer` is assigned but not yet used.
+The sessions map onto the roles as follows: AFK triage is the `triager`; the
+pre-flight session and hand-off confirmation are the `preflight`;
+implementation is the `implementer` (it also writes the commit message);
+repair sessions are the `fixer`; the review gate runs the `standards-reviewer`
+and the `spec-reviewer`; issue-resolution checks are the `resolution-verifier`;
+and decomposition is the `decomposer`.
 
-Editing roles (`implementer`, `fixer`) run in the harness's `safe` mode and
-the others read-only. Each invocation has a wall-clock limit of 60 minutes
-for editing roles and 15 minutes for read-only roles.
+Only the editing roles (`implementer`, `fixer`) may edit the checkout; the
+others run read-only. How the editing roles are approved is described under
+[Approval modes](safety.md#approval-modes), and each session's time limit is
+under `limits.sessionTimeoutMinutes`. `pi` and `opencode` editing roles need
+`approval: yolo`.
 
 ### `intake`
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `intake.requireLabels` | `[]` | An issue must carry every listed label to enter the queue (AND filter). Added to the mandatory `labels.ready-for-agent` label. |
+| `intake.requireLabels` | `[]` | An issue must carry every listed label to enter the queue (AND filter). Added to the mandatory `labels.ready-for-agent` label. Children created by decomposition get only the agent-ready label (see [Decomposition](workflows.md#decomposition-workflow)). |
 | `intake.sort` | `created:asc` | Queue order: `created`, `updated`, or `comments`, optionally suffixed `:asc` or `:desc`. Without a suffix the order is ascending. |
 
 ### `triage`
@@ -217,7 +219,7 @@ All limits are positive; counts are integers.
 | `limits.verificationFixes` | `5` | Repair attempts allowed after a failing `verify` command. |
 | `limits.sessionTimeoutMinutes.edit` | `60` | Wall-clock limit of one session in an editing role. Exceeding it kills the session's process group and counts as a failed attempt. |
 | `limits.sessionTimeoutMinutes.readOnly` | `15` | The same limit for read-only roles. |
-| `limits.maxBudgetUsd` | none | Spend cap in US dollars for each session, passed to harnesses that enforce one (Claude Code). Startup warns for every assigned harness that cannot enforce it. |
+| `limits.maxBudgetUsd` | none | Spend cap in US dollars for each session. Only Claude Code enforces it; Codex, pi and OpenCode ignore it, and startup warns for every assigned harness that cannot. |
 | `limits.maxDecompositionDepth` | `3` | Maximum generated-child lineage depth. Reaching it hands the issue off as `ready-for-human` and continues independent work. |
 
 ### Repository entries

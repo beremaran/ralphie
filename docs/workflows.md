@@ -73,16 +73,16 @@ flowchart TD
     B -->|true| C[Implementation session]
     C --> D[Deterministically stage changes]
     D -->|Changes present| V[Configured verification]
-    V -->|Passed| E[Fresh review session]
+    V -->|Passed| E[Candidate commit, standards and spec reviews]
     V -->|Command failed| R[Resume implementer with /diagnosing-bugs]
     R --> D
     D -->|No changes| N[Fresh structured resolution verification]
     N -->|Resolved with evidence| O[Close issue as completed]
     N -->|Unresolved or uncertain| P[Fail and leave issue open]
-    E -->|Approved and reverified| F[Structured commit message]
+    E -->|Approved| F[Squash candidates and reverify]
     E -->|Changes requested| G[Resume implementer with /implement]
     G --> D
-    E -->|Five reviews exhausted| H[Preserve diagnostics and restore checkout]
+    E -->|Review rounds exhausted| H[Preserve diagnostics and restore checkout]
     B -->|false| I[Structured decomposition]
     H --> I
     I --> J[Create and cross-link child issues]
@@ -115,9 +115,9 @@ flowchart TD
    are never pushed.
 6. Run the review gate: a standards reviewer and a spec reviewer start in
    parallel as read-only sessions on the checkpoint-to-candidate range, using
-   the vendored `/code-review` axes. Read-only Claude sessions have no shell,
-   so Ralphie puts the fixed point, commit list and range diff in each prompt;
-   the reviewers read other files with their file tools. The standards reviewer
+   the vendored `/code-review` axes. Reviewers cannot run Git (see
+   [Safety](safety.md#agent-and-mutation-boundaries)), so Ralphie puts the
+   fixed point, commit list and range diff in each prompt. The standards reviewer
    gets the repository's standards sources (`AGENTS.md`, `CLAUDE.md`,
    `CONTRIBUTING.md`, `CODING_STANDARDS.md`, `GLOSSARY.md`, `docs/adr`,
    `docs/agents`) and the smell baseline; the spec reviewer gets the Agent
@@ -189,15 +189,16 @@ sequenceDiagram
     R->>G: Stage all changes and read exact diff
 
     alt Changes present
-        loop Until approved or five reviews
+        loop Until approved or review rounds exhausted
             R->>G: Run configured verification commands (when any)
             opt Verification command fails and repair budget remains
                 R->>P: Resume implementer with /diagnosing-bugs
                 P-->>R: Update the checkout
                 R->>G: Restage and rerun verification
             end
-            R->>P: Start fresh structured-review session
-            P-->>R: Return approved or changes requested
+            R->>G: Create local candidate commit
+            R->>P: Start standards and spec review sessions
+            P-->>R: Return findings; Ralphie computes the verdict
             opt Changes requested and budget remains
                 R->>P: Resume implementer with /implement
                 P-->>R: Update the checkout
@@ -206,8 +207,7 @@ sequenceDiagram
         end
         R->>G: Reverify the exact approved staged tree
     alt Review approved
-            R->>P: Generate structured commit message
-            R->>G: Commit exact staged tree
+            R->>G: Squash candidates, commit with the implementer's message
             R->>G: Revalidate destination, HEAD, and remote base
             R->>G: Push selected branch without force
             G->>GH: Send branch update
@@ -257,7 +257,9 @@ marks the contract an implementer works from. The recovery details are in
 2. Create child issues, blockers first, in the to-tickets issue template
    (`## Parent`, `## What to build`, `## Acceptance criteria`, `## Blocked by`)
    behind Ralphie's hidden stable marker, each with the agent-ready label
-   (`labels.ready-for-agent`).
+   (`labels.ready-for-agent`). Children do not receive the labels listed in
+   `intake.requireLabels`, so a repository that narrows intake with them must
+   label children itself before a later run picks them up.
 3. Attach each created or recovered child to the original issue as a **native
    GitHub sub-issue**, reconciling against GitHub's reported hierarchy.
 4. Represent each declared `dependsOn` edge as a **native GitHub

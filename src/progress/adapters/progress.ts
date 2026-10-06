@@ -75,7 +75,7 @@ const formatIssue = (event: ProgressEvent, style: ProgressStyle): string => {
     if (event.issue === undefined) return "";
     const number = style(cyan, `#${event.issue.number}`);
     if (event.status !== "hand-off") return ` ${number}`;
-    return ` ${number} ${style(dim, humanText(event.issue.title))} —`;
+    return ` ${number} ${style(dim, humanText(event.issue.title))} -`;
 };
 
 const CLEAR_LIVE_LINE = "\r\x1b[2K";

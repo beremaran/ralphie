@@ -18,6 +18,7 @@
     "LICENSE",
     "docs/architecture.md",
     "docs/cli-reference.md",
+    "docs/configuration.md",
     "docs/development.md",
     "docs/getting-started.md",
     "docs/operations-and-recovery.md",

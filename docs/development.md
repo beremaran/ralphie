@@ -49,7 +49,7 @@ bun run package:check -- \
 
 The project is a Bun + TypeScript CLI in strict mode. The entry point is
 `index.ts`; services are assembled as an explicit dependency object in
-`src/runtime.ts`, and `src/workflow.ts` orchestrates them. Formatting is Biome
+`src/runtime.ts`, and `src/workflow/workflow.ts` orchestrates them. Formatting is Biome
 with four-space indentation, double quotes, and semicolons. Keep functions
 small: the configured cognitive-complexity limit is the meaningful lint
 constraint.
@@ -78,7 +78,9 @@ The scratch repository must be named both by flag and by the
 `RALPHIE_SMOKE_SCRATCH_REPO` environment variable, and the project repository
 is refused. Use a throwaway repository: Ralphie commits and pushes to its
 default branch. Outcomes depend on model judgement, so one failed scenario is
-a prompt to inspect the run, not necessarily a regression.
+a prompt to inspect the run, not necessarily a regression. The script has
+never been run live: it was written and unit-tested for its guard and argument
+parsing only, so expect to fix the first real run.
 
 ## Source reachability boundary
 

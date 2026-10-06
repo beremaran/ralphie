@@ -18,20 +18,18 @@ Ralphie is distributed as a single npm package. Running it needs:
 - [Git](https://git-scm.com/) and the
   [GitHub CLI](https://cli.github.com/) (`gh`);
 - a POSIX shell;
-- the [Claude Code](https://code.claude.com/docs) command-line program
-  (`claude`), signed in.
+- at least one supported coding-agent command-line program, signed in: Claude
+  Code (`claude`, the default), Codex (`codex`), pi (`pi`), or OpenCode
+  (`opencode`).
 
 Agent sessions run through that program, headless, in the repository
 checkout. It brings its own login, so Ralphie asks for no model credentials
-and stores none. Pick a model and effort with the `harnesses` and `roles`
-keys in the [configuration file](configuration.md#harnesses-and-roles);
-without them Claude Code uses its own defaults.
-
-Ralphie constrains every agent session to the repository checkout. Sessions
-run in the harness's own permission mode (read-only roles may only read the
-checkout), and post-task verification fails the task when the checkout's branch
-or head moved anyway. Sessions never commit, push, or mutate GitHub; Ralphie's
-deterministic services do.
+and stores none. Pick the harness, model and effort per role with the
+`harnesses` and `roles` keys in the
+[configuration file](configuration.md#harnesses-and-roles); without them every
+role uses Claude Code with its own defaults. Sessions never commit, push, or
+mutate GitHub; Ralphie's deterministic services do (see the
+[safety model](safety.md#agent-and-mutation-boundaries)).
 
 For interactive GitHub authentication, run `gh auth login` and verify the
 selected account with `gh auth status`. For unattended runs, set `GH_TOKEN`
@@ -39,6 +37,10 @@ selected account with `gh auth status`. For unattended runs, set `GH_TOKEN`
 credential is supplied as an input and does not need to be printed or exposed;
 a mounted GitHub CLI profile is not required when an environment token is
 provided. This contract covers `github.com` only.
+
+Ralphie only works on open issues labelled `ready-for-agent` (the label name
+is configurable). Label at least one issue before the first run, or enable
+[AFK triage](workflows.md#afk-triage).
 
 Permission needs depend on the run. The issue workflow needs
 read access to the target repository and its issues, permission to push to the
@@ -116,7 +118,7 @@ environment you run Ralphie in.
 
 ## First run
 
-Run against one issue in a repository you control:
+Run against the `ready-for-agent` issues of a repository you control:
 
 ```bash
 bunx @beremaran/ralphie owner/repository
@@ -129,11 +131,10 @@ bun run index.ts owner/repository
 ```
 
 This performs authentication and Git preflight, prepares a clean checkout,
-discovers issues, and asks the configured harness to ground, implement, verify, and commit the
+discovers issues, and asks the configured harness to pre-flight, implement, review, and commit the
 work. Successful delivery pushes directly to the selected branch and closes the
 issue. See [Workflows](workflows.md) for what the selected route means and
 [Operations and recovery](operations-and-recovery.md)
 for the artifacts it leaves behind.
 
-For all available options and mode-specific commands, continue to the [CLI
-reference](cli-reference.md).
+For all available options, continue to the [CLI reference](cli-reference.md).
