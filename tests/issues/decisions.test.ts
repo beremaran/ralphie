@@ -1,35 +1,35 @@
 import { describe, expect, test } from "bun:test";
 
 import {
-    GroundingDisposition,
-    groundingDecisionSchema,
+    PreflightDisposition,
+    handOffVerificationSchema,
     preflightDecisionSchema,
 } from "../../src/issues/domain/decisions.ts";
 
 describe("grounding decision schema", () => {
     test("accepts an actionable result", () => {
-        const parsed = groundingDecisionSchema.safeParse({
-            disposition: GroundingDisposition.Actionable,
+        const parsed = handOffVerificationSchema.safeParse({
+            disposition: PreflightDisposition.Actionable,
         });
         expect(parsed.success).toBe(true);
         expect(parsed.data).toEqual({
-            disposition: GroundingDisposition.Actionable,
+            disposition: PreflightDisposition.Actionable,
         });
     });
 
     test("accepts an already-resolved result", () => {
-        const parsed = groundingDecisionSchema.safeParse({
-            disposition: GroundingDisposition.AlreadyResolved,
+        const parsed = handOffVerificationSchema.safeParse({
+            disposition: PreflightDisposition.AlreadyResolved,
         });
         expect(parsed.success).toBe(true);
         expect(parsed.data).toEqual({
-            disposition: GroundingDisposition.AlreadyResolved,
+            disposition: PreflightDisposition.AlreadyResolved,
         });
     });
 
     test("still enforces hand-off branch requirements", () => {
-        const parsed = groundingDecisionSchema.safeParse({
-            disposition: GroundingDisposition.HandOff,
+        const parsed = handOffVerificationSchema.safeParse({
+            disposition: PreflightDisposition.HandOff,
             reason: "missing_information",
             summary: "A prerequisite is still open.",
             evidence: [],
@@ -42,12 +42,12 @@ describe("pre-flight decision schema", () => {
     test("requires fitsOneSession for an actionable result", () => {
         expect(
             preflightDecisionSchema.safeParse({
-                disposition: GroundingDisposition.Actionable,
+                disposition: PreflightDisposition.Actionable,
             }).success,
         ).toBe(false);
         expect(
             preflightDecisionSchema.safeParse({
-                disposition: GroundingDisposition.Actionable,
+                disposition: PreflightDisposition.Actionable,
                 fitsOneSession: false,
             }).success,
         ).toBe(true);
@@ -56,13 +56,13 @@ describe("pre-flight decision schema", () => {
     test("accepts a blocked result naming open issues and rejects an empty list", () => {
         expect(
             preflightDecisionSchema.safeParse({
-                disposition: GroundingDisposition.Blocked,
+                disposition: PreflightDisposition.Blocked,
                 blockedBy: [12],
             }).success,
         ).toBe(true);
         expect(
             preflightDecisionSchema.safeParse({
-                disposition: GroundingDisposition.Blocked,
+                disposition: PreflightDisposition.Blocked,
                 blockedBy: [],
             }).success,
         ).toBe(false);

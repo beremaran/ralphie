@@ -43,12 +43,12 @@ import {
     type DecompositionExecutorService,
 } from "../../src/issues/app/decomposition-executor.ts";
 import {
-    GroundingDisposition,
+    PreflightDisposition,
     IssueResolutionStatus,
     HandOffReason,
-    groundingDecisionSchema,
+    handOffVerificationSchema,
     preflightDecisionSchema,
-    type GroundingDecision,
+    type HandOffVerification,
 } from "../../src/issues/domain/decisions.ts";
 import {
     implementationResultSchema,
@@ -126,14 +126,14 @@ const attentionRequest: HandOffRequest = {
 };
 
 const attentionDecision = {
-    disposition: GroundingDisposition.HandOff as const,
+    disposition: PreflightDisposition.HandOff as const,
     reason: HandOffReason.MissingInformation as const,
     summary: "A prerequisite is still open.",
     evidence: ["Issue body links the open prerequisite."],
     questions: ["Complete the prerequisite, then retry."],
 };
 
-const confirmedVerifierOutput: GroundingDecision = attentionDecision;
+const confirmedVerifierOutput: HandOffVerification = attentionDecision;
 
 const commitMessage = { subject: "Implement the requested behavior" };
 const implementationChanged = {
@@ -478,7 +478,7 @@ const makeExecutorHarness = async (options: ExecutorHarnessOptions = {}) => {
             trace.push(`preflight:${context.issue.number}`);
             return {
                 decision: {
-                    disposition: GroundingDisposition.Actionable,
+                    disposition: PreflightDisposition.Actionable,
                     fitsOneSession: true,
                 },
                 sessionID: "preflight-1",
@@ -803,7 +803,7 @@ describe("structured-output hand-off side channel", () => {
                 titlePrefix: "Check readiness of issue #42",
                 result: {
                     structured: {
-                        disposition: GroundingDisposition.Actionable,
+                        disposition: PreflightDisposition.Actionable,
                     },
                     handOff: attentionRequest,
                 },
@@ -814,10 +814,10 @@ describe("structured-output hand-off side channel", () => {
             directory: "/work/repository",
             title: "Check readiness of issue #42",
             prompt: "ground the fixture issue",
-            schema: groundingDecisionSchema,
+            schema: handOffVerificationSchema,
         });
         expect(result.output).toEqual({
-            disposition: GroundingDisposition.Actionable,
+            disposition: PreflightDisposition.Actionable,
         });
         expect(result.handOff).toEqual(attentionRequest);
     });
@@ -828,7 +828,7 @@ describe("structured-output hand-off side channel", () => {
                 titlePrefix: "Pre-flight issue #42",
                 result: {
                     structured: {
-                        disposition: GroundingDisposition.Actionable,
+                        disposition: PreflightDisposition.Actionable,
                         fitsOneSession: false,
                     },
                     handOff: attentionRequest,
@@ -843,7 +843,7 @@ describe("structured-output hand-off side channel", () => {
             schema: preflightDecisionSchema,
         });
         expect(result.output).toEqual({
-            disposition: GroundingDisposition.Actionable,
+            disposition: PreflightDisposition.Actionable,
             fitsOneSession: false,
         });
         expect(result.handOff).toEqual(attentionRequest);
@@ -855,7 +855,7 @@ describe("structured-output hand-off side channel", () => {
                 titlePrefix: "Check readiness of issue #42",
                 result: {
                     structured: {
-                        disposition: GroundingDisposition.Actionable,
+                        disposition: PreflightDisposition.Actionable,
                     },
                     handOff: { reason: "not-a-reason" },
                 },
@@ -867,7 +867,7 @@ describe("structured-output hand-off side channel", () => {
                 directory: "/work/repository",
                 title: "Check readiness of issue #42",
                 prompt: "ground the fixture issue",
-                schema: groundingDecisionSchema,
+                schema: handOffVerificationSchema,
             }),
         ).rejects.toBeInstanceOf(RalphieError);
     });
@@ -885,7 +885,7 @@ describe("structured-output hand-off side channel", () => {
                 directory: "/work/repository",
                 title: "Check readiness of issue #42",
                 prompt: "ground the fixture issue",
-                schema: groundingDecisionSchema,
+                schema: handOffVerificationSchema,
             }),
         ).rejects.toBeInstanceOf(RalphieError);
     });
@@ -910,8 +910,8 @@ describe("hand-off router", () => {
     });
 
     test.each([
-        { disposition: GroundingDisposition.Actionable },
-        { disposition: GroundingDisposition.AlreadyResolved },
+        { disposition: PreflightDisposition.Actionable },
+        { disposition: PreflightDisposition.AlreadyResolved },
     ])(
         "clears the handoff and resumes when the verifier returns $disposition",
         async ({ disposition }) => {
@@ -1172,7 +1172,7 @@ describe("issue executor hand-off routing", () => {
                 titlePrefix: VERIFIER_TITLE,
                 result: {
                     structured: {
-                        disposition: GroundingDisposition.Actionable,
+                        disposition: PreflightDisposition.Actionable,
                     },
                 },
             },
@@ -1249,7 +1249,7 @@ describe("issue executor hand-off routing", () => {
                 grounding: {
                     assess: async () => ({
                         decision: {
-                            disposition: GroundingDisposition.Actionable,
+                            disposition: PreflightDisposition.Actionable,
                             fitsOneSession: false,
                         },
                         sessionID: "preflight-1",
@@ -1292,7 +1292,7 @@ describe("issue executor hand-off routing", () => {
                 grounding: {
                     assess: async () => ({
                         decision: {
-                            disposition: GroundingDisposition.Actionable,
+                            disposition: PreflightDisposition.Actionable,
                             fitsOneSession: false,
                         },
                         sessionID: "preflight-1",
@@ -1358,7 +1358,7 @@ describe("issue executor hand-off routing", () => {
             grounding: {
                 assess: async () => ({
                     decision: {
-                        disposition: GroundingDisposition.Actionable,
+                        disposition: PreflightDisposition.Actionable,
                         fitsOneSession: false,
                     },
                     sessionID: "preflight-1",
@@ -1378,7 +1378,7 @@ describe("issue executor hand-off routing", () => {
             grounding: {
                 assess: async () => ({
                     decision: {
-                        disposition: GroundingDisposition.Blocked,
+                        disposition: PreflightDisposition.Blocked,
                         blockedBy: [7, 9],
                     },
                     sessionID: "preflight-1",
@@ -1657,8 +1657,8 @@ describe("implementation executor hand-off routing", () => {
     });
 
     test.each([
-        { disposition: GroundingDisposition.Actionable },
-        { disposition: GroundingDisposition.AlreadyResolved },
+        { disposition: PreflightDisposition.Actionable },
+        { disposition: PreflightDisposition.AlreadyResolved },
     ])(
         "resumes the original implementation and review flow when the verifier rejects with $disposition",
         async ({ disposition }) => {

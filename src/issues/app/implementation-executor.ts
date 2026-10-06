@@ -49,7 +49,7 @@ import { IssueArtifactKind, issueFreshnessFingerprint } from "./artifacts.ts";
 import {
     type CommitMessageDecision,
     commitMessageDecisionSchema,
-    GroundingDisposition,
+    PreflightDisposition,
     type HandOffDecision,
     HandOffReason,
     type IssueResolutionDecision,
@@ -79,7 +79,7 @@ import {
 import type { HandOffRouterService } from "./hand-off.ts";
 import type { ReviewEvidenceFiles } from "./review-evidence.ts";
 
-/** The implementation workflow for issues with complexity 0 through 3. */
+/** The implementation workflow for issues with the implementation route. */
 export type ImplementationExecutorService = {
     readonly execute: (
         input: WorkflowExecutorInput,
@@ -1284,7 +1284,7 @@ export const makeImplementationExecutorService = (
         if (result.kind !== IssueExecutionOutcomeKind.Failed) return result;
         const { context } = input;
         const decision: HandOffDecision = {
-            disposition: GroundingDisposition.HandOff,
+            disposition: PreflightDisposition.HandOff,
             reason: HandOffReason.ImplementationExhausted,
             summary: `Ralphie could not finish issue #${context.issue.number}: ${result.message}`,
             evidence: [result.message],

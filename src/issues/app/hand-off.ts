@@ -11,8 +11,8 @@ import {
     type PendingHandOffArtifact,
 } from "./artifacts.ts";
 import {
-    GroundingDisposition,
-    groundingDecisionSchema,
+    PreflightDisposition,
+    handOffVerificationSchema,
     HandOffReason,
     type HandOffDecision,
 } from "../domain/decisions.ts";
@@ -76,7 +76,7 @@ const verificationPrompt = (
 
 An earlier agent made this bounded hand-off request:
 <hand-off-request>${JSON.stringify(request)}</hand-off-request>
-Independently verify the request and submit the grounding disposition with the required tool.`;
+Independently verify the request and submit the pre-flight disposition with the required tool.`;
 
 const outcome = (
     decision: HandOffDecision,
@@ -129,7 +129,7 @@ const verifyHandoff = async (
         directory: context.repositoryPath,
         title: `Verify hand-off request for issue #${context.issue.number}`,
         prompt: verificationPrompt(context, handoff.request),
-        schema: groundingDecisionSchema,
+        schema: handOffVerificationSchema,
         role: "preflight",
         repositoryInvariant: {
             branch: handoff.checkpoint.branch,
@@ -138,7 +138,7 @@ const verifyHandoff = async (
         verifyRepositoryInvariant: context.repositoryInvariant.verify,
         signal: context.signal,
     });
-    if (verified.output.disposition !== GroundingDisposition.HandOff) {
+    if (verified.output.disposition !== PreflightDisposition.HandOff) {
         await artifacts.clearPendingHandOff(context.signal);
         return undefined;
     }
@@ -185,7 +185,7 @@ export const makeHandOffRouterService = (
             context.signal,
         );
         const decision: HandOffDecision = {
-            disposition: GroundingDisposition.HandOff,
+            disposition: PreflightDisposition.HandOff,
             reason: HandOffReason.NeedsHumanJudgment,
             summary: `An agent session failed while Ralphie was working on issue #${context.issue.number}: ${message}`,
             evidence: [message],
