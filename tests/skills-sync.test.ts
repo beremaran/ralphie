@@ -18,6 +18,35 @@ import {
     verifyVendoredCopy,
 } from "../scripts/skills-sync.ts";
 
+describe("skills-sync workflow", () => {
+    test("is valid YAML that syncs weekly and on demand and opens a pull request only for real changes", async () => {
+        const text = await readFile(
+            join(
+                import.meta.dir,
+                "..",
+                ".github",
+                "workflows",
+                "skills-sync.yml",
+            ),
+            "utf8",
+        );
+        const workflow = Bun.YAML.parse(text) as {
+            on: { schedule: unknown[]; workflow_dispatch: unknown };
+            jobs: { sync: { steps: { if?: string; uses?: string }[] } };
+        };
+        expect(workflow.on.schedule).toHaveLength(1);
+        expect(workflow.on.workflow_dispatch).toBeDefined();
+        const steps = workflow.jobs.sync.steps;
+        const pullRequest = steps.find((step) =>
+            step.uses?.startsWith("peter-evans/create-pull-request"),
+        );
+        expect(pullRequest?.if).toBe("steps.sync.outputs.changed == 'true'");
+        // A commit-only bump (no vendored file or location changed) is not
+        // "changed", so it never opens a pull request.
+        expect(text).toContain("del(.commit)");
+    });
+});
+
 const COMMIT_A = "a".repeat(40);
 const COMMIT_B = "b".repeat(40);
 

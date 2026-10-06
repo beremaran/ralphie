@@ -55,7 +55,7 @@ afterEach(async () => {
 });
 
 /** Run one session and report what the harness could see while it ran. */
-const sessionView = async (harness: string) => {
+const sessionView = async (harness: string, during?: () => Promise<void>) => {
     const location = skillLocation(harness) ?? "";
     const seen: Record<string, string | undefined> = {};
     const scripted = makeScriptedAdapter({
@@ -82,6 +82,7 @@ const sessionView = async (harness: string) => {
                 join(checkout, "docs/agents/triage-labels.md"),
                 "utf8",
             ).catch(() => undefined);
+            await during?.();
             return await scripted.adapter.runTurn(turn);
         },
     };
@@ -201,6 +202,50 @@ describe("generated docs", () => {
         );
         expect(exclude).not.toContain("issue-tracker.md");
     });
+});
+
+describe("skill locations", () => {
+    test("each harness discovers skills in its own project directory", () => {
+        expect(
+            Object.fromEntries(
+                HARNESS_NAMES.map((name) => [name, skillLocation(name)]),
+            ),
+        ).toEqual({
+            claude: ".claude/skills",
+            codex: ".agents/skills",
+            pi: ".pi/skills",
+            opencode: ".opencode/skills",
+        });
+    });
+});
+
+describe("git hygiene", () => {
+    const git = async (...args: string[]): Promise<string> => {
+        const child = Bun.spawn(["git", ...args], {
+            cwd: checkout,
+            stdout: "pipe",
+            stderr: "pipe",
+        });
+        const [out] = await Promise.all([
+            new Response(child.stdout).text(),
+            child.exited,
+        ]);
+        return out.trim();
+    };
+
+    for (const harness of HARNESS_NAMES) {
+        test(`${harness}: git add -A stages nothing Ralphie injected`, async () => {
+            await rm(join(checkout, ".git"), { recursive: true });
+            await git("init", "-q");
+            await writeFile(join(checkout, "real.txt"), "work");
+            let staged = "unset";
+            await sessionView(harness, async () => {
+                await git("add", "-A");
+                staged = await git("diff", "--cached", "--name-only");
+            });
+            expect(staged).toBe("real.txt");
+        });
+    }
 });
 
 describe("skillInvocation", () => {

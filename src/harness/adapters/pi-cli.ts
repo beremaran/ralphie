@@ -26,9 +26,9 @@ const optionalFlag = (
 ): readonly string[] => (value === undefined ? [] : [flag, value]);
 
 /**
- * Command line for one turn. The prompt travels on stdin. `safe` and `yolo`
- * are the same session: pi never asks for approval, so there is no weaker
- * editing mode to request.
+ * Command line for one turn. The prompt travels on stdin. Pi never asks for
+ * approval, so editing is only offered as `yolo`; `safe` is refused before
+ * this is built.
  */
 const buildArguments = (turn: TurnRequest): readonly string[] => [
     "-p",
@@ -110,6 +110,12 @@ export const makePiCliAdapter = (deps: {
     name: "pi",
     capabilities: { nativeSchema: false, budgetCap: false },
     runTurn: async (turn) => {
+        if (turn.access === "safe") {
+            return failure(
+                "access",
+                'pi has no safe edit mode; editing sessions need access "yolo" for this harness.',
+            );
+        }
         const reader = makePiStreamReader({ onEvent: turn.onEvent });
         try {
             const exit = await deps.runner.run(

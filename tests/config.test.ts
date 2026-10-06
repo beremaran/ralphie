@@ -264,6 +264,18 @@ const failureFor = async (
 };
 
 describe("validation", () => {
+    test("rejects credential-looking keys instead of storing them", async () => {
+        const { message } = await failureFor(`
+token: ghp_secret
+harnesses:
+  claude:
+    apiKey: sk-secret
+`);
+
+        expect(message).toContain("  token: unknown key");
+        expect(message).toContain("  harnesses.claude.apiKey: unknown key");
+    });
+
     test("names the path of unknown keys, wrong types and unknown values", async () => {
         const { config, message } = await failureFor(`
 workspac: /tmp/typo

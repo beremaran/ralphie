@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { z } from "zod";
 
+import { makeHarnessService } from "../../src/harness/app/harness-service.ts";
 import type {
     HarnessAdapter,
     HarnessFailureKind,
@@ -80,6 +82,12 @@ export type HarnessAdapterFixtures = {
         readonly structured?: RecordedStream & {
             readonly expect: { readonly structured: unknown };
         };
+        /**
+         * A stream whose structured result is `{ "answer": "ok" }`: native
+         * output for `nativeSchema` adapters, the JSON block fallback for the
+         * rest. Defaults to `structured` when that is given.
+         */
+        readonly validResult?: RecordedStream;
         /** Streams the adapter must classify as typed failures. */
         readonly failures: readonly (RecordedStream & {
             readonly name: string;
@@ -234,6 +242,12 @@ export const harnessAdapterContract = (
             expect(options?.signal).toBeDefined();
             controller.abort();
             expect(options?.signal?.aborted).toBe(true);
+        });
+
+        test("runs every process in its own group with untrimmed stdout", async () => {
+            const { invocations } = await run([stream(fixtures.streams.reply)]);
+            expect(invocations[0]?.options.processGroup).toBe(true);
+            expect(invocations[0]?.options.trimStdout).toBe(false);
         });
 
         test("passes model, effort and budget when given", async () => {
@@ -444,6 +458,74 @@ export const harnessAdapterContract = (
             expect(outcome).toMatchObject({
                 ok: false,
                 failure: { kind: "unavailable" },
+            });
+        });
+
+        describe("structured results through the harness service", () => {
+            const schema = z.object({ answer: z.string() });
+            const service = (scripts: readonly ProcessScript[]) => {
+                const { runner, invocations } = makeScriptedRunner(scripts);
+                const adapter = fixtures.make(runner);
+                return {
+                    invocations,
+                    run: async () =>
+                        await makeHarnessService({
+                            adapters: { [adapter.name]: adapter },
+                            listener: () => undefined,
+                            ids: { next: () => "ralphie-session" },
+                        }).run({
+                            role: "implementer",
+                            harness: adapter.name,
+                            prompt: "do it",
+                            directory: "/work/repo",
+                            access: "read-only",
+                            timeoutMs: 1000,
+                            resultSchema: schema,
+                        }),
+                };
+            };
+            const valid = (): RecordedStream => {
+                const found =
+                    fixtures.streams.validResult ?? fixtures.streams.structured;
+                if (found === undefined) {
+                    throw new Error("fixtures need a validResult stream");
+                }
+                return found;
+            };
+
+            test("resumes the session with the error, then accepts a valid result", async () => {
+                const { run: runService, invocations } = service([
+                    stream(fixtures.streams.reply),
+                    stream(valid()),
+                ]);
+                const outcome = await runService();
+                expect(outcome).toMatchObject({
+                    ok: true,
+                    value: { answer: "ok" },
+                });
+                expect(invocations).toHaveLength(2);
+                const second = invocations[1];
+                if (second === undefined) throw new Error("no resume turn");
+                expectCommandLine(
+                    second,
+                    fixtures.commandLine.resume(
+                        fixtures.streams.reply.expect.harnessSessionID,
+                    ),
+                );
+            });
+
+            test("fails closed when every turn stays invalid", async () => {
+                const { run: runService, invocations } = service([
+                    stream(fixtures.streams.reply),
+                    stream(fixtures.streams.reply),
+                    stream(fixtures.streams.reply),
+                ]);
+                const outcome = await runService();
+                expect(outcome).toMatchObject({
+                    ok: false,
+                    failure: { kind: "invalid_result" },
+                });
+                expect(invocations.length).toBeGreaterThan(1);
             });
         });
     });
