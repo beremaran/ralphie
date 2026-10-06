@@ -32,7 +32,7 @@ Flow: `index.ts` → `src/cli.ts` / `src/command.ts` / `src/options.ts` (inbound
 
 `tests/architecture.test.ts` enforces these rules, so violations fail the suite:
 
-- Contexts may import another context's `ports.ts` and domain modules, never its `adapters/`. Only `runtime.ts` and `command.ts` instantiate adapters.
+- Contexts may import another context's `ports.ts`, domain modules, and pure `app/` helpers (no I/O, no process/vendor imports), never its `adapters/`. Only `runtime.ts` and `command.ts` instantiate adapters.
 - Non-adapter code must not import `node:fs`, `node:child_process`, vendor SDKs, or process streams. File-system ports used by app code (e.g. `IssueArtifactFileSystem`, `RecoveryFileSystem`) are declared in `issues/app/` and implemented in `issues/adapters/`.
 - Octokit appears only in the `github` context.
 - Application code never reads the clock, generates IDs, or builds workspace paths itself. `Clock`, `IdGenerator`, and `RunLayout` are injected.

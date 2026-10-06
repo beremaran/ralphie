@@ -116,13 +116,15 @@ describe("hexagonal boundaries", () => {
         ).toEqual([]);
     });
 
-    test("ports and domain modules never import adapters", async () => {
+    test("ports, domain, and app modules never import adapters", async () => {
         expect(
             await offenders(
                 (file) => {
                     const path = relativePath(file);
                     return (
-                        path.endsWith("ports.ts") || path.includes("/domain/")
+                        path.endsWith("ports.ts") ||
+                        path.includes("/domain/") ||
+                        path.includes("/app/")
                     );
                 },
                 ({ target }) => isAdapterPath(target),
