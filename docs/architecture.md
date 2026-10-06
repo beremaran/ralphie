@@ -97,6 +97,8 @@ services under `src/git/adapters/` and `src/github/adapters/` perform those side
 effects and verify their invariants. The explicit runtime object makes these
 boundaries testable without a framework-specific execution model.
 
+The `GitRepositoryFactsService` port in `src/git/ports.ts` reads HEAD, branch, status, recent log, and tracked files so read-only prompts, whose sessions have no shell, receive them as a `<repository-facts>` block.
+
 Agent configuration is separate from persistent workspace state: the
 `harnesses` and `roles` configuration keys choose the harness, model, and
 effort per role, and each harness CLI keeps its own login and credentials.
