@@ -63,6 +63,41 @@ roles:
         });
     });
 
+    test("hands skills.dir to the runtime as the skills directory", async () => {
+        const config = await writeTemporaryFile(`
+skills:
+  dir: /opt/custom-skills
+`);
+        let directory: string | undefined;
+
+        await workflowOptionsFor(["owner/repository", "--config", config], {
+            factories: {
+                makeRuntime: (input) => {
+                    directory = input.skills.directory;
+                    return {} as never;
+                },
+            },
+        });
+
+        expect(directory).toBe("/opt/custom-skills");
+    });
+
+    test("falls back to the bundled skills without skills.dir", async () => {
+        const config = await writeTemporaryFile("{}");
+        let directory: string | undefined;
+
+        await workflowOptionsFor(["owner/repository", "--config", config], {
+            factories: {
+                makeRuntime: (input) => {
+                    directory = input.skills.directory;
+                    return {} as never;
+                },
+            },
+        });
+
+        expect(directory).toEndWith("vendor/mattpocock-skills");
+    });
+
     test("passes session timeouts and the budget cap to the workflow", async () => {
         const config = await writeTemporaryFile(`
 limits:

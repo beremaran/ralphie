@@ -76,6 +76,14 @@ describe("native CLI parser", () => {
                 "limits.maxDecompositionDepth",
             ],
             [["--workspace", "/tmp/w"], "workspace"],
+            [
+                ["--model", "m"],
+                "harnesses.<harness>.model or roles.<role>.model",
+            ],
+            [
+                ["--thinking", "high"],
+                "harnesses.<harness>.effort or roles.<role>.effort",
+            ],
         ] as const) {
             const flag = (args[0] ?? "").split("=")[0];
             expect(() => parseCliArgs(["owner/repository", ...args])).toThrow(

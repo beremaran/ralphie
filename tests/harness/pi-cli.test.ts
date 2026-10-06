@@ -46,7 +46,7 @@ harnessAdapterContract({
                 present: [["--tools", "read,grep,find,ls"]],
                 absent: ["bash", "write", "edit"],
             },
-            safe: { present: [], absent: ["--tools"] },
+            safe: { refuses: { messageIncludes: "yolo" } },
             yolo: { present: [], absent: ["--tools"] },
         },
         model: (model) => ({ present: [["--model", model]] }),
@@ -85,6 +85,7 @@ harnessAdapterContract({
         },
         toolUse: {
             ...recorded("yolo-edit.jsonl"),
+            access: "yolo",
             expect: {
                 text: "done",
                 events: [
@@ -128,6 +129,12 @@ harnessAdapterContract({
                     },
                 ],
             },
+        },
+        validResult: {
+            stdout: fixture("readonly-text.jsonl").replaceAll(
+                '"text": "ok"',
+                '"text": "```json\\n{\\"answer\\": \\"ok\\"}\\n```"',
+            ),
         },
         failures: [
             {

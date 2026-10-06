@@ -50,6 +50,12 @@ harnessAdapterContract({
         resume: (id) => ({ present: [["--session", id]] }),
     },
     streams: {
+        validResult: {
+            stdout: fixture("text.jsonl").replace(
+                '"text":"ok"',
+                '"text":"```json\\n{\\"answer\\": \\"ok\\"}\\n```"',
+            ),
+        },
         reply: {
             ...recorded("text.jsonl"),
             expect: {
