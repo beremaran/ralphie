@@ -40,12 +40,9 @@ import {
     type DecompositionExecutorService,
 } from "../../src/issues/app/decomposition-executor.ts";
 import {
-    ComplexityLevel,
     GroundingDisposition,
     IssueResolutionStatus,
     HandOffReason,
-    ReviewFindingSeverity,
-    ReviewVerdict,
     groundingDecisionSchema,
     preflightDecisionSchema,
     type GroundingDecision,
@@ -150,15 +147,32 @@ const implementationHandoff = {
     },
 };
 const approvedReview = {
-    verdict: ReviewVerdict.Approved,
-    summary: "The staged changes address the issue.",
+    summary: "The candidate commits address the issue.",
     findings: [],
 };
 const changesRequestedReview = (description: string) => ({
-    verdict: ReviewVerdict.ChangesRequested,
     summary: `Findings remain: ${description}`,
-    findings: [{ severity: ReviewFindingSeverity.Blocking, description }],
+    findings: [
+        {
+            kind: "violation",
+            standard: "AGENTS.md: keep functions small",
+            description,
+        },
+    ],
 });
+const approvedSpecReview = {
+    summary: "The brief is satisfied.",
+    findings: [],
+};
+
+/** Scripts for the two parallel review sessions of one review round. */
+const reviewScripts = (
+    standards: FakeScript["result"],
+    spec: FakeScript["result"] = { structured: approvedSpecReview },
+): FakeScript[] => [
+    { titlePrefix: "Review standards for issue #42", result: standards },
+    { titlePrefix: "Review spec for issue #42", result: spec },
+];
 
 type FakeStructuredResponse = {
     readonly structured?: unknown;
@@ -171,7 +185,7 @@ type FakeScript = {
     readonly count?: number;
     readonly result:
         | FakeStructuredResponse
-        | ((served: number) => FakeStructuredResponse);
+        | ((served: number, request: SessionRequest) => FakeStructuredResponse);
 };
 
 type RecordedCreate = {
@@ -191,11 +205,19 @@ type RecordedPrompt = {
  * order; the first matching script with remaining budget wins. Scripted
  * values go through the request's result schema like the real service does.
  */
-const fakePi = (scripts: ReadonlyArray<FakeScript>) => {
+const fakePi = (
+    scripts: ReadonlyArray<FakeScript>,
+    beforeRun?: (request: SessionRequest) => Promise<void>,
+) => {
     const creates: RecordedCreate[] = [];
     const prompts: RecordedPrompt[] = [];
+    const fullPrompts: Array<{ title: string; prompt: string }> = [];
     const served = new Map<string, number>();
-    const nextResponse = (title: string): FakeStructuredResponse => {
+    const requests: SessionRequest[] = [];
+    const nextResponse = (
+        title: string,
+        request: SessionRequest,
+    ): FakeStructuredResponse => {
         const index = scripts.findIndex((script) => {
             const remaining =
                 (script.count ?? Number.POSITIVE_INFINITY) -
@@ -209,17 +231,21 @@ const fakePi = (scripts: ReadonlyArray<FakeScript>) => {
         const servedCount = (served.get(script.titlePrefix) ?? 0) + 1;
         served.set(script.titlePrefix, servedCount);
         return typeof script.result === "function"
-            ? script.result(servedCount)
+            ? script.result(servedCount, request)
             : script.result;
     };
     const run = async (
         request: SessionRequest & { readonly resultSchema?: z.ZodType },
     ): Promise<HarnessOutcome<unknown>> => {
+        await beforeRun?.(request);
+        await beforeRun?.(request);
         const title = request.title ?? "";
         const sessionID = `session-${creates.length + 1}`;
         creates.push({ sessionID, title, role: request.role });
-        const response = nextResponse(title);
+        requests.push(request);
+        const response = nextResponse(title, request);
         prompts.push({ sessionID, title });
+        fullPrompts.push({ title, prompt: request.prompt });
         if (response.error === true) {
             return {
                 ok: false,
@@ -254,7 +280,7 @@ const fakePi = (scripts: ReadonlyArray<FakeScript>) => {
     const client: AgentSessions = sessionsFor({
         run: run as HarnessService["run"],
     });
-    return { client, creates, prompts };
+    return { client, creates, prompts, fullPrompts, requests };
 };
 
 const verifierPromptsOf = (prompts: ReadonlyArray<RecordedPrompt>) =>
@@ -526,6 +552,7 @@ type ImplementationHarnessOptions = {
     >;
     readonly verification?: IssueVerificationService;
     readonly recovery?: IssueRecoveryService;
+    readonly beforeRun?: (request: SessionRequest) => Promise<void>;
 };
 
 const makeImplementationHarness = async (
@@ -533,7 +560,10 @@ const makeImplementationHarness = async (
 ) => {
     const events: ProgressUpdate[] = [];
     const progress = makeTestProgressRecorder(events);
-    const { client, creates, prompts } = fakePi(options.scripts ?? []);
+    const { client, creates, prompts, fullPrompts, requests } = fakePi(
+        options.scripts ?? [],
+        options.beforeRun,
+    );
     const store = await makeTrackedStore();
     const recoveryTrace: string[] = [];
     const fakeRecovery = makeFakeRecovery({
@@ -556,6 +586,9 @@ const makeImplementationHarness = async (
     };
     const trace: string[] = [];
     const commitMessages: unknown[] = [];
+    const candidateSubjects: string[] = [];
+    const rangeDiffs: Array<{ base: string; head: string }> = [];
+    const pushedShas: string[] = [];
     const operations: GitIssueOperationsService = {
         stageAll: async () => {
             trace.push("ops:stageAll");
@@ -573,8 +606,22 @@ const makeImplementationHarness = async (
             trace.push("ops:commit");
             return { sha: "c".repeat(40), treeSha: "t".repeat(40) };
         },
-        push: async () => {
+        commitCandidate: async (_path, message) => {
+            trace.push("ops:commitCandidate");
+            candidateSubjects.push(message.subject);
+            return { sha: "d".repeat(40), treeSha: "t".repeat(40) };
+        },
+        readRangeDiff: async (_path, base, head) => {
+            trace.push("ops:readRangeDiff");
+            rangeDiffs.push({ base, head });
+            return "diff --git a/x b/x";
+        },
+        squashCandidates: async () => {
+            trace.push("ops:squash");
+        },
+        push: async (_path, _branch, sha) => {
             trace.push("ops:push");
+            pushedShas.push(sha);
         },
     };
     const preparation: GitIssuePreparationService = {
@@ -624,6 +671,11 @@ const makeImplementationHarness = async (
         recoveryInputs,
         recoveryTrace,
         commitMessages,
+        candidateSubjects,
+        rangeDiffs,
+        pushedShas,
+        fullPrompts,
+        requests,
     };
 };
 
@@ -662,6 +714,9 @@ const makeDecompositionHarness = async (
         close: async () => {
             githubCalls.push("close");
             return issue;
+        },
+        comment: async () => {
+            githubCalls.push("comment");
         },
     };
     const issues: GitHubIssuesService = {
@@ -1427,10 +1482,7 @@ describe("implementation executor hand-off routing", () => {
                     titlePrefix: "Implement issue #42",
                     result: { structured: implementationChanged },
                 },
-                {
-                    titlePrefix: "Review issue #42",
-                    result: { structured: approvedReview },
-                },
+                ...reviewScripts({ structured: approvedReview }),
             ],
         });
         const outcome = await harness.executor.execute({
@@ -1466,10 +1518,7 @@ describe("implementation executor hand-off routing", () => {
                         titlePrefix: VERIFIER_TITLE,
                         result: { structured: { disposition } },
                     },
-                    {
-                        titlePrefix: "Review issue #42",
-                        result: { structured: approvedReview },
-                    },
+                    ...reviewScripts({ structured: approvedReview }),
                 ],
             });
             const outcome = await harness.executor.execute({
@@ -1526,13 +1575,10 @@ describe("implementation executor hand-off routing", () => {
                     titlePrefix: "Implement issue #42",
                     result: { structured: implementationChanged },
                 },
-                {
-                    titlePrefix: "Review issue #42",
-                    result: {
-                        structured: approvedReview,
-                        handOff: attentionRequest,
-                    },
-                },
+                ...reviewScripts({
+                    structured: approvedReview,
+                    handOff: attentionRequest,
+                }),
                 {
                     titlePrefix: VERIFIER_TITLE,
                     result: { structured: confirmedVerifierOutput },
@@ -1549,7 +1595,7 @@ describe("implementation executor hand-off routing", () => {
         });
         expect(verifierPromptsOf(harness.prompts)).toHaveLength(1);
         expect(harness.recoveryInputs).toHaveLength(1);
-        expect(harness.prompts).toHaveLength(3);
+        expect(harness.prompts).toHaveLength(4);
         expect(harness.trace).not.toContain("ops:commit");
         expect(harness.trace).not.toContain("ops:push");
     });
@@ -1590,10 +1636,7 @@ describe("implementation executor hand-off routing", () => {
                     titlePrefix: "Implement issue #42",
                     result: { structured: implementationChanged },
                 },
-                {
-                    titlePrefix: "Review issue #42",
-                    result: { structured: approvedReview },
-                },
+                ...reviewScripts({ structured: approvedReview }),
             ],
         });
         await harness.executor.execute({
@@ -1631,12 +1674,9 @@ describe("implementation executor hand-off routing", () => {
                     titlePrefix: "Implement issue #42",
                     result: { structured: implementationChanged },
                 },
-                {
-                    titlePrefix: "Review issue #42",
-                    result: (served) => ({
-                        structured: changesRequestedReview(`Finding ${served}`),
-                    }),
-                },
+                ...reviewScripts((served) => ({
+                    structured: changesRequestedReview(`Finding ${served}`),
+                })),
                 {
                     titlePrefix: "Address review for issue #42",
                     result: {},
@@ -1652,7 +1692,7 @@ describe("implementation executor hand-off routing", () => {
             expect(outcome.diagnosticsPath).toBe("/diag/review-exhaustion");
         }
         const reviewPrompts = harness.prompts.filter(({ title }) =>
-            title.startsWith("Review issue #42"),
+            title.startsWith("Review standards for issue #42"),
         );
         expect(reviewPrompts).toHaveLength(REVIEW_ITERATION_LIMIT);
         expect(verifierPromptsOf(harness.prompts)).toHaveLength(0);
@@ -1687,14 +1727,11 @@ describe("implementation executor hand-off routing", () => {
                             titlePrefix: "Implement issue #42",
                             result: { structured: implementationChanged },
                         },
-                        {
-                            titlePrefix: "Review issue #42",
-                            result: (served) => ({
-                                structured: changesRequestedReview(
-                                    `Finding ${served}`,
-                                ),
-                            }),
-                        },
+                        ...reviewScripts((served) => ({
+                            structured: changesRequestedReview(
+                                `Finding ${served}`,
+                            ),
+                        })),
                         {
                             titlePrefix: "Address review for issue #42",
                             result: {},
@@ -1710,7 +1747,7 @@ describe("implementation executor hand-off routing", () => {
                 expect(outcome.kind).toBe(IssueExecutionOutcomeKind.Escalated);
                 expect(
                     harness.prompts.filter(({ title }) =>
-                        title.startsWith("Review issue #42"),
+                        title.startsWith("Review standards for issue #42"),
                     ),
                 ).toHaveLength(reviewRounds);
             } finally {
@@ -1805,15 +1842,15 @@ describe("decomposition executor hand-off routing", () => {
                                 {
                                     key: "a",
                                     title: "Child A",
-                                    body: "Work for A.",
-                                    estimatedComplexity: ComplexityLevel.Level2,
+                                    whatToBuild: "Work for A.",
+                                    acceptanceCriteria: ["A works."],
                                     dependsOn: [],
                                 },
                                 {
                                     key: "b",
                                     title: "Child B",
-                                    body: "Work for B.",
-                                    estimatedComplexity: ComplexityLevel.Level2,
+                                    whatToBuild: "Work for B.",
+                                    acceptanceCriteria: ["B works."],
                                     dependsOn: ["a"],
                                 },
                             ],
@@ -1854,15 +1891,15 @@ describe("decomposition executor hand-off routing", () => {
                                 {
                                     key: "a",
                                     title: "Child A",
-                                    body: "Work for A.",
-                                    estimatedComplexity: ComplexityLevel.Level2,
+                                    whatToBuild: "Work for A.",
+                                    acceptanceCriteria: ["A works."],
                                     dependsOn: [],
                                 },
                                 {
                                     key: "b",
                                     title: "Child B",
-                                    body: "Work for B.",
-                                    estimatedComplexity: ComplexityLevel.Level2,
+                                    whatToBuild: "Work for B.",
+                                    acceptanceCriteria: ["B works."],
                                     dependsOn: ["a"],
                                 },
                             ],
@@ -2230,5 +2267,430 @@ describe("hand-off recovery diagnostics", () => {
         } finally {
             rmSync(workspace, { recursive: true, force: true });
         }
+    });
+});
+describe("two-axis review gate", () => {
+    const run = async (
+        harness: Awaited<ReturnType<typeof makeImplementationHarness>>,
+    ) =>
+        await harness.executor.execute({
+            context: harness.context,
+            artifacts: harness.store,
+        });
+    const implement = {
+        titlePrefix: "Implement issue #42",
+        result: { structured: implementationChanged },
+    };
+    const smell = {
+        kind: "smell",
+        standard: "Feature Envy",
+        description: "A helper reaches into another module's data.",
+    };
+    const specFinding = (kind: string) => ({
+        kind,
+        requirement: "The command prints a summary.",
+        description: `Spec finding: ${kind}`,
+    });
+
+    test("runs both reviewers in parallel against the candidate commit", async () => {
+        const started = new Set<string>();
+        let release: () => void = () => {};
+        const bothStarted = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        const harness = await makeImplementationHarness({
+            scripts: [
+                implement,
+                ...reviewScripts({ structured: approvedReview }),
+            ],
+            beforeRun: async (request) => {
+                if (
+                    request.role !== "standards-reviewer" &&
+                    request.role !== "spec-reviewer"
+                ) {
+                    return;
+                }
+                started.add(request.role);
+                if (started.size === 2) release();
+                await bothStarted;
+            },
+        });
+        const outcome = await run(harness);
+        expect(outcome).toMatchObject({ completion: "pushed-commit" });
+        expect([...started].sort()).toEqual([
+            "spec-reviewer",
+            "standards-reviewer",
+        ]);
+        expect(harness.rangeDiffs).toEqual([
+            { base: CHECKPOINT.sha, head: "d".repeat(40) },
+        ]);
+    });
+
+    test("reviewers get the range, diff and their axis sources in the prompt", async () => {
+        const harness = await makeImplementationHarness({
+            scripts: [
+                implement,
+                ...reviewScripts({ structured: approvedReview }),
+            ],
+        });
+        await run(harness);
+        const standards = harness.fullPrompts.find((p: { title: string }) =>
+            p.title.startsWith("Review standards"),
+        );
+        const spec = harness.fullPrompts.find((p: { title: string }) =>
+            p.title.startsWith("Review spec"),
+        );
+        expect(standards?.prompt).toContain(`Fixed point: ${CHECKPOINT.sha}`);
+        expect(standards?.prompt).toContain("AGENTS.md");
+        expect(standards?.prompt).toContain("<candidate-diff>");
+        expect(spec?.prompt).toContain("The issue body is the contract.");
+        expect(spec?.prompt).toContain(`Fixed point: ${CHECKPOINT.sha}`);
+    });
+
+    test("smells never block", async () => {
+        const harness = await makeImplementationHarness({
+            scripts: [
+                implement,
+                ...reviewScripts({
+                    structured: {
+                        summary: "Smelly but standard.",
+                        findings: [smell],
+                    },
+                }),
+            ],
+        });
+        const outcome = await run(harness);
+        expect(outcome).toMatchObject({ completion: "pushed-commit" });
+        expect(harness.candidateSubjects).toHaveLength(1);
+    });
+
+    test("a documented-standard violation blocks until fixed", async () => {
+        const harness = await makeImplementationHarness({
+            scripts: [
+                implement,
+                ...reviewScripts((served) => ({
+                    structured:
+                        served === 1
+                            ? changesRequestedReview("Too long")
+                            : approvedReview,
+                })),
+                { titlePrefix: "Address review for issue #42", result: {} },
+            ],
+        });
+        const outcome = await run(harness);
+        expect(outcome).toMatchObject({ completion: "pushed-commit" });
+        expect(harness.candidateSubjects).toEqual([
+            commitMessage.subject,
+            "Address review findings (round 2)",
+        ]);
+    });
+
+    test.each(["missing", "partial", "wrong", "scope_creep"])(
+        "a %s spec finding blocks",
+        async (kind) => {
+            const harness = await makeImplementationHarness({
+                budgets: { reviewRounds: 1 },
+                scripts: [
+                    implement,
+                    ...reviewScripts(
+                        { structured: approvedReview },
+                        {
+                            structured: {
+                                summary: "Gap.",
+                                findings: [specFinding(kind)],
+                            },
+                        },
+                    ),
+                ],
+            });
+            const outcome = await run(harness);
+            expect(outcome.kind).toBe(IssueExecutionOutcomeKind.Escalated);
+            expect(harness.trace).not.toContain("ops:commit");
+            expect(harness.trace).not.toContain("ops:push");
+        },
+    );
+
+    test("delivers exactly one created commit and never pushes a candidate", async () => {
+        const harness = await makeImplementationHarness({
+            scripts: [
+                implement,
+                ...reviewScripts((served) => ({
+                    structured:
+                        served < 3
+                            ? changesRequestedReview(`Finding ${served}`)
+                            : approvedReview,
+                })),
+                { titlePrefix: "Address review for issue #42", result: {} },
+            ],
+        });
+        const outcome = await run(harness);
+        expect(outcome).toMatchObject({
+            completion: "pushed-commit",
+            commitSha: "c".repeat(40),
+        });
+        const candidates = harness.trace.filter(
+            (entry) => entry === "ops:commitCandidate",
+        );
+        expect(candidates).toHaveLength(3);
+        expect(harness.trace.filter((e) => e === "ops:commit")).toHaveLength(1);
+        expect(harness.trace.filter((e) => e === "ops:push")).toHaveLength(1);
+        expect(harness.pushedShas).toEqual(["c".repeat(40)]);
+        const squash = harness.trace.indexOf("ops:squash");
+        expect(squash).toBeGreaterThan(
+            harness.trace.lastIndexOf("ops:commitCandidate"),
+        );
+        expect(harness.trace.indexOf("ops:commit")).toBeGreaterThan(squash);
+        expect(harness.commitMessages).toEqual([commitMessage]);
+    });
+
+    test("re-reviews when the final reverification repair changes the approved tree", async () => {
+        let verifications = 0;
+        const harness = await makeImplementationHarness({
+            scripts: [
+                implement,
+                ...reviewScripts({ structured: approvedReview }),
+                {
+                    titlePrefix: "Repair verification for issue #42",
+                    result: {},
+                },
+            ],
+            verification: {
+                stagedTreeSha: async () => TREE_SHA,
+                verify: async () => {
+                    verifications += 1;
+                    if (verifications === 2) {
+                        throw new VerificationCommandError({
+                            stagedTreeSha: TREE_SHA,
+                            commands: [
+                                {
+                                    command: "test",
+                                    exitCode: 1,
+                                    stdout: "",
+                                    stderr: "boom",
+                                },
+                            ],
+                        });
+                    }
+                    return {
+                        stagedTreeSha:
+                            verifications < 2 ? TREE_SHA : "9".repeat(40),
+                        commands: [
+                            {
+                                command: "test",
+                                exitCode: 0,
+                                stdout: "",
+                                stderr: "",
+                            },
+                        ],
+                    };
+                },
+            },
+        });
+        const outcome = await run(harness);
+        expect(outcome).toMatchObject({ completion: "pushed-commit" });
+        expect(
+            harness.prompts.filter(({ title }) =>
+                title.startsWith("Review standards for issue #42"),
+            ),
+        ).toHaveLength(2);
+        expect(
+            harness.trace.filter((entry) => entry === "ops:commitCandidate"),
+        ).toHaveLength(2);
+    });
+});
+describe("fixes resume the implementer session", () => {
+    const implement: FakeScript = {
+        titlePrefix: "Implement issue #42",
+        result: { structured: implementationChanged },
+    };
+    const redOnce = (): IssueVerificationService => {
+        let calls = 0;
+        return {
+            stagedTreeSha: async () => TREE_SHA,
+            verify: async () => {
+                calls += 1;
+                if (calls === 1) {
+                    throw new VerificationCommandError({
+                        stagedTreeSha: TREE_SHA,
+                        commands: [
+                            {
+                                command: "bun test",
+                                exitCode: 1,
+                                stdout: "",
+                                stderr: "boom in parser",
+                            },
+                        ],
+                    });
+                }
+                return {
+                    stagedTreeSha: TREE_SHA,
+                    commands: [
+                        {
+                            command: "test",
+                            exitCode: 0,
+                            stdout: "",
+                            stderr: "",
+                        },
+                    ],
+                };
+            },
+        };
+    };
+    const execute = (harness: {
+        readonly executor: ImplementationExecutorService;
+        readonly context: IssueExecutionContext;
+        readonly store: IssueArtifactStore;
+    }) =>
+        harness.executor.execute({
+            context: harness.context,
+            artifacts: harness.store,
+        });
+    const fixRequests = (
+        requests: ReadonlyArray<SessionRequest>,
+        titlePrefix: string,
+    ) => requests.filter(({ title }) => title?.startsWith(titlePrefix));
+    const blockThenApprove = (served: number, blocked = 1) => ({
+        structured:
+            served <= blocked
+                ? changesRequestedReview(`Finding ${served}`)
+                : approvedReview,
+    });
+
+    test("a verification failure resumes the implementer with /diagnosing-bugs", async () => {
+        const harness = await makeImplementationHarness({
+            verification: redOnce(),
+            scripts: [
+                implement,
+                ...reviewScripts({ structured: approvedReview }),
+                {
+                    titlePrefix: "Repair verification for issue #42",
+                    result: {},
+                },
+            ],
+        });
+        const outcome = await execute(harness);
+        expect(outcome).toMatchObject({ completion: "pushed-commit" });
+        const [repair] = fixRequests(
+            harness.requests,
+            "Repair verification for issue #42",
+        );
+        expect(repair?.role).toBe("fixer");
+        expect(repair?.resumeSessionID).toBe("session-1");
+        expect(repair?.prompt).toContain("/diagnosing-bugs");
+        expect(repair?.prompt).toContain("boom in parser");
+    });
+
+    test("a review failure resumes the implementer with /implement and the findings", async () => {
+        const harness = await makeImplementationHarness({
+            scripts: [
+                implement,
+                ...reviewScripts((served) => blockThenApprove(served)),
+                { titlePrefix: "Address review for issue #42", result: {} },
+            ],
+        });
+        const outcome = await execute(harness);
+        expect(outcome).toMatchObject({ completion: "pushed-commit" });
+        const [fix] = fixRequests(
+            harness.requests,
+            "Address review for issue #42",
+        );
+        expect(fix?.resumeSessionID).toBe("session-1");
+        expect(fix?.prompt).toContain("/implement");
+        expect(fix?.prompt).toContain("Finding 1");
+    });
+
+    test("the next fix continues the session that did the last fix", async () => {
+        const harness = await makeImplementationHarness({
+            scripts: [
+                implement,
+                ...reviewScripts((served) => blockThenApprove(served, 2)),
+                { titlePrefix: "Address review for issue #42", result: {} },
+            ],
+        });
+        await execute(harness);
+        const fixes = fixRequests(
+            harness.requests,
+            "Address review for issue #42",
+        );
+        expect(fixes).toHaveLength(2);
+        const firstFix = harness.creates.find(({ title }) =>
+            title?.startsWith("Address review for issue #42 (attempt 1)"),
+        );
+        expect(fixes[1]?.resumeSessionID).toBe(firstFix?.sessionID);
+    });
+
+    test("a failed resume falls back to a fresh fixer session", async () => {
+        const harness = await makeImplementationHarness({
+            scripts: [
+                implement,
+                ...reviewScripts((served) => blockThenApprove(served)),
+                {
+                    titlePrefix: "Address review for issue #42",
+                    result: (_served, request) =>
+                        request.resumeSessionID === undefined
+                            ? {}
+                            : { error: true },
+                },
+            ],
+        });
+        const outcome = await execute(harness);
+        expect(outcome).toMatchObject({ completion: "pushed-commit" });
+        const fixes = fixRequests(
+            harness.requests,
+            "Address review for issue #42",
+        );
+        expect(fixes).toHaveLength(2);
+        expect(fixes[0]?.resumeSessionID).toBe("session-1");
+        expect(fixes[1]?.resumeSessionID).toBeUndefined();
+        expect(fixes[1]?.role).toBe("fixer");
+        expect(fixes[1]?.prompt).toContain("fresh context");
+        expect(fixes[1]?.prompt).toContain("Finding 1");
+        expect(
+            harness.events.some(
+                (event) =>
+                    event.status === "info" &&
+                    event.message.includes("fresh fixer session"),
+            ),
+        ).toBe(true);
+        expect(
+            harness.events.some(
+                (event) =>
+                    event.stage === "review-fix" && event.status === "failed",
+            ),
+        ).toBe(false);
+    });
+
+    test("verification fixes still stop at their budget while resuming", async () => {
+        const harness = await makeImplementationHarness({
+            budgets: { verificationFixes: 2 },
+            verification: {
+                stagedTreeSha: async () => TREE_SHA,
+                verify: async () => {
+                    throw new VerificationCommandError({
+                        stagedTreeSha: TREE_SHA,
+                        commands: [
+                            {
+                                command: "bun test",
+                                exitCode: 1,
+                                stdout: "",
+                                stderr: "still red",
+                            },
+                        ],
+                    });
+                },
+            },
+            scripts: [
+                implement,
+                {
+                    titlePrefix: "Repair verification for issue #42",
+                    result: {},
+                },
+            ],
+        });
+        const outcome = await execute(harness);
+        expect(outcome.kind).toBe(IssueExecutionOutcomeKind.HandOff);
+        expect(
+            fixRequests(harness.requests, "Repair verification for issue #42"),
+        ).toHaveLength(2);
     });
 });

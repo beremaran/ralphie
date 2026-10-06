@@ -57,6 +57,8 @@ export class GitHubMutationRecoveryError extends RalphieError {
 export type CreateGitHubIssueInput = {
     readonly title: string;
     readonly body: string;
+    /** Labels applied at creation. */
+    readonly labels?: ReadonlyArray<string>;
 };
 
 export type UpdateGitHubIssueInput = {
@@ -79,6 +81,12 @@ export type GitHubIssueMutationService = {
         issueNumber: number,
         reason: GitHubIssueCloseReason,
     ) => Promise<GitHubIssue>;
+    /** Post a new comment on an issue. */
+    readonly comment: (
+        repository: string,
+        issueNumber: number,
+        body: string,
+    ) => Promise<void>;
 };
 
 export type GitHubIssueRelationshipService = {

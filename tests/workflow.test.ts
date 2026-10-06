@@ -199,6 +199,9 @@ const testRuntime = (
         update: async () => {
             throw new RalphieError({ message: "unused" });
         },
+        comment: async (_repository, issueNumber) => {
+            calls.push(`commentIssue:${issueNumber}`);
+        },
         close: async (_repository, issueNumber) => {
             calls.push(`closeIssue:${issueNumber}`);
             if (options.closeFailure) throw options.closeFailure;
@@ -214,6 +217,12 @@ const testRuntime = (
         readStagedBinaryDiff: async () => "",
         hasStagedChanges: async () => false,
         commit: async () => ({ sha: "a".repeat(40), treeSha: "b".repeat(40) }),
+        commitCandidate: async () => ({
+            sha: "c".repeat(40),
+            treeSha: "b".repeat(40),
+        }),
+        readRangeDiff: async () => "",
+        squashCandidates: async () => {},
         push: async (_path, branch) => {
             calls.push(`pushBranch:${branch}`);
         },
@@ -1764,6 +1773,10 @@ describe("workflow", () => {
         );
         expect(summary.outcomes).toEqual([]);
         expect(calls).toContain("closeIssue:43");
+        expect(calls.indexOf("commentIssue:43")).toBeGreaterThan(-1);
+        expect(calls.indexOf("commentIssue:43")).toBeLessThan(
+            calls.indexOf("closeIssue:43"),
+        );
         expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
     });
 

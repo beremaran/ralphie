@@ -258,6 +258,7 @@ export const makeLiveRuntime = ({
         githubIssueRelationships,
         progress,
         handOffRouter,
+        skills?.labels["ready-for-agent"],
     );
     const implementationExecutor = makeImplementationExecutorService(
         actualGitIssuePreparation,

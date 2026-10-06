@@ -36,6 +36,7 @@ export type GitHubIssueRecord = {
     readonly updated_at?: string;
     readonly comments?: number;
     readonly pull_request?: unknown;
+    readonly sub_issues_summary?: { readonly total?: number };
     readonly labels?: ReadonlyArray<
         | string
         | {
@@ -145,6 +146,9 @@ export const mapGitHubIssue = (
         comments: mappedComments.comments,
         commentCount: issue.comments ?? rawComments.length,
         commentVersion: mappedComments.commentVersion || updatedAt,
+        ...(issue.sub_issues_summary?.total === undefined
+            ? {}
+            : { subIssueCount: issue.sub_issues_summary.total }),
     };
 };
 

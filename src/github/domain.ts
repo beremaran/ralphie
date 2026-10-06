@@ -55,6 +55,8 @@ export type GitHubIssue = {
     readonly commentCount?: number;
     /** The latest comment update timestamp, or the issue timestamp when empty. */
     readonly commentVersion?: string;
+    /** Number of native sub-issues, when GitHub reports it. */
+    readonly subIssueCount?: number;
 };
 
 export type GitHubDecompositionChild = GitHubIssue & {

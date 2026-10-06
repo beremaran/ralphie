@@ -4,7 +4,11 @@ import {
     type CommandResult,
     type CommandRunnerService,
 } from "../../process/ports.ts";
-import { GitPushError, type GitIssueOperationsService } from "../ports.ts";
+import {
+    GitPushError,
+    type GitCommitResult,
+    type GitIssueOperationsService,
+} from "../ports.ts";
 import { RalphieError } from "../../shared/error.ts";
 
 const validBranch = (branch: string): boolean => branch.trim().length > 0;
@@ -133,6 +137,57 @@ export const makeGitIssueOperationsService = (
         );
     };
 
+    const commitStaged = async (
+        repositoryPath: string,
+        message: CommitMessageDecision,
+    ): Promise<GitCommitResult> => {
+        if (!validCommitMessage(message)) {
+            throw new RalphieError({
+                message:
+                    "Commit message subject must be non-empty and at most 72 characters; body must be non-empty when provided.",
+            });
+        }
+        const git = async (args: string[], failure: string): Promise<string> =>
+            (
+                await requireSuccess(
+                    runner,
+                    "git",
+                    ["-C", repositoryPath, ...args],
+                    failure,
+                )
+            ).stdout;
+        const expectedTree = await git(
+            ["write-tree"],
+            "Failed to capture the staged issue tree",
+        );
+        const commitArgs = ["commit", "-m", message.subject];
+        if (message.body !== undefined) commitArgs.push("-m", message.body);
+        await git(commitArgs, "Failed to commit the staged issue changes");
+        const sha = await git(
+            ["rev-parse", "HEAD"],
+            "Failed to read the created issue commit",
+        );
+        const actualTree = await git(
+            ["rev-parse", "HEAD^{tree}"],
+            "Failed to verify the created issue tree",
+        );
+        if (actualTree !== expectedTree) {
+            throw new RalphieError({
+                message: `Created issue commit ${sha} does not contain the expected staged tree.`,
+            });
+        }
+        const checkoutStatus = await git(
+            ["status", "--porcelain=v1"],
+            "Failed to verify the issue checkout after commit",
+        );
+        if (checkoutStatus !== "") {
+            throw new RalphieError({
+                message: "Issue checkout is dirty after commit.",
+            });
+        }
+        return { sha, treeSha: actualTree };
+    };
+
     return {
         stageAll: async (repositoryPath) => {
             (
@@ -170,67 +225,50 @@ export const makeGitIssueOperationsService = (
             });
         },
 
-        commit: async (repositoryPath, message) => {
-            if (!validCommitMessage(message)) {
-                throw new RalphieError({
-                    message:
-                        "Commit message subject must be non-empty and at most 72 characters; body must be non-empty when provided.",
-                });
-            }
+        commit: (repositoryPath, message) =>
+            commitStaged(repositoryPath, message),
 
-            const expectedTree = (
-                await requireSuccess(
-                    runner,
-                    "git",
-                    ["-C", repositoryPath, "write-tree"],
-                    "Failed to capture the staged issue tree",
-                )
-            ).stdout;
-            const commitArgs = ["commit", "-m", message.subject];
-            if (message.body !== undefined) commitArgs.push("-m", message.body);
-            (
-                await requireSuccess(
-                    runner,
-                    "git",
-                    ["-C", repositoryPath, ...commitArgs],
-                    "Failed to commit the staged issue changes",
-                )
-            ).stdout;
-            const sha = (
-                await requireSuccess(
-                    runner,
-                    "git",
-                    ["-C", repositoryPath, "rev-parse", "HEAD"],
-                    "Failed to read the created issue commit",
-                )
-            ).stdout;
-            const actualTree = (
+        commitCandidate: (repositoryPath, message) =>
+            commitStaged(repositoryPath, message),
+
+        readRangeDiff: (repositoryPath, base, head) =>
+            requireSuccess(
+                runner,
+                "git",
+                ["-C", repositoryPath, "diff", "--binary", `${base}..${head}`],
+                "Failed to read the candidate commit range diff",
+                { trimStdout: false },
+            ).then((result) => result.stdout),
+
+        squashCandidates: async (repositoryPath, baseSha) => {
+            const tree = (
                 await requireSuccess(
                     runner,
                     "git",
                     ["-C", repositoryPath, "rev-parse", "HEAD^{tree}"],
-                    "Failed to verify the created issue tree",
+                    "Failed to read the candidate tree",
                 )
             ).stdout;
-            if (actualTree !== expectedTree) {
-                throw new RalphieError({
-                    message: `Created issue commit ${sha} does not contain the expected staged tree.`,
-                });
-            }
-            const checkoutStatus = (
+            await requireSuccess(
+                runner,
+                "git",
+                ["-C", repositoryPath, "reset", "--soft", baseSha],
+                "Failed to squash the candidate commits",
+            );
+            const staged = (
                 await requireSuccess(
                     runner,
                     "git",
-                    ["-C", repositoryPath, "status", "--porcelain=v1"],
-                    "Failed to verify the issue checkout after commit",
+                    ["-C", repositoryPath, "write-tree"],
+                    "Failed to verify the squashed tree",
                 )
             ).stdout;
-            if (checkoutStatus !== "") {
+            if (staged !== tree) {
                 throw new RalphieError({
-                    message: "Issue checkout is dirty after commit.",
+                    message:
+                        "Squashing the candidate commits changed the staged tree.",
                 });
             }
-            return { sha, treeSha: actualTree };
         },
 
         push: (repositoryPath, branch, expectedCommitSha) =>

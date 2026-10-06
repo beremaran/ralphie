@@ -30,6 +30,7 @@ export type AgentTaskRequest = {
     readonly directory: string;
     readonly title: string;
     readonly prompt: string;
+    readonly resumeSessionID?: string;
     readonly signal?: AbortSignal;
     readonly repositoryInvariant?: AgentRepositoryInvariant;
     readonly verifyRepositoryInvariant?: AgentRepositoryInvariantVerifier;

@@ -65,6 +65,28 @@ export type GitIssueOperationsService = {
         repositoryPath: string,
         message: CommitMessageDecision,
     ) => Promise<GitCommitResult>;
+    /**
+     * Commit the staged changes as a local candidate for review. Candidates
+     * are never pushed; `squashCandidates` folds them away before delivery.
+     */
+    readonly commitCandidate: (
+        repositoryPath: string,
+        message: CommitMessageDecision,
+    ) => Promise<GitCommitResult>;
+    /** The binary patch from `base` to `head`, for reviewing a commit range. */
+    readonly readRangeDiff: (
+        repositoryPath: string,
+        base: string,
+        head: string,
+    ) => Promise<string>;
+    /**
+     * Fold every candidate commit above `baseSha` back into the index (soft
+     * reset), keeping the final tree staged and the working tree unchanged.
+     */
+    readonly squashCandidates: (
+        repositoryPath: string,
+        baseSha: string,
+    ) => Promise<void>;
     /** Push a commit to the configured branch without force and verify origin. */
     readonly push: (
         repositoryPath: string,

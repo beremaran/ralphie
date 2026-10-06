@@ -52,6 +52,8 @@ export type SessionInput = {
     readonly directory: string;
     readonly title: string;
     readonly prompt: string;
+    /** Continue this harness-native session instead of starting a new one. */
+    readonly resumeSessionID?: string;
     readonly signal?: AbortSignal;
 };
 
@@ -82,8 +84,22 @@ export const sessionRequest = (
         ...(assignment.effort === undefined
             ? {}
             : { effort: assignment.effort }),
+        ...(input.resumeSessionID === undefined
+            ? {}
+            : { resumeSessionID: input.resumeSessionID }),
         ...(input.signal === undefined ? {} : { signal: input.signal }),
     };
+};
+
+/** Whether an error came from the harness failing a session (not a Ralphie check). */
+export const isSessionFailure = (error: unknown): boolean => {
+    const cause = error instanceof RalphieError ? error.cause : undefined;
+    return (
+        typeof cause === "object" &&
+        cause !== null &&
+        "kind" in cause &&
+        "message" in cause
+    );
 };
 
 /** The error a failed session raises; the failure stays on `cause`. */
