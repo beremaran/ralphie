@@ -119,8 +119,8 @@ Changed sections before upgrading.
 - Breaking: decomposition runs the vendored `/to-tickets` skill. Children use
   `{key, title, whatToBuild, acceptanceCriteria, dependsOn}` and are created
   blockers first in the to-tickets template (`## Parent`, `## What to build`,
-  `## Acceptance criteria`, `## Blocked by`) with the agent-ready label but not
-  the `intake.requireLabels` labels. The parent issue's body is never rewritten
+  `## Acceptance criteria`, `## Blocked by`) with the agent-ready label and the
+  parent's `intake.requireLabels` labels. The parent issue's body is never rewritten
   any more; it is recognised by its native sub-issues, and closed with one
   disclaimed comment when its children are done.
 - Implementation runs the vendored `/implement` skill, and the implementer

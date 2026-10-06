@@ -180,7 +180,7 @@ under `limits.sessionTimeoutMinutes`. `pi` and `opencode` editing roles need
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `intake.requireLabels` | `[]` | An issue must carry every listed label to enter the queue (AND filter). Added to the mandatory `labels.ready-for-agent` label. Children created by decomposition get only the agent-ready label (see [Decomposition](workflows.md#decomposition-workflow)). |
+| `intake.requireLabels` | `[]` | An issue must carry every listed label to enter the queue (AND filter). Added to the mandatory `labels.ready-for-agent` label. Children created by decomposition inherit the parent's labels listed here, plus the agent-ready label (see [Decomposition](workflows.md#decomposition-workflow)). |
 | `intake.sort` | `created:asc` | Queue order: `created`, `updated`, or `comments`, optionally suffixed `:asc` or `:desc`. Without a suffix the order is ascending. |
 
 ### `triage`

@@ -262,9 +262,8 @@ marks the contract an implementer works from. The recovery details are in
 2. Create child issues, blockers first, in the to-tickets issue template
    (`## Parent`, `## What to build`, `## Acceptance criteria`, `## Blocked by`)
    behind Ralphie's hidden stable marker, each with the agent-ready label
-   (`labels.ready-for-agent`). Children do not receive the labels listed in
-   `intake.requireLabels`, so a repository that narrows intake with them must
-   label children itself before a later run picks them up.
+   (`labels.ready-for-agent`) plus every label of the parent that appears in
+   `intake.requireLabels`, so a run scoped by those labels picks the children up.
 3. Attach each created or recovered child to the original issue as a **native
    GitHub sub-issue**, reconciling against GitHub's reported hierarchy.
 4. Represent each declared `dependsOn` edge as a **native GitHub

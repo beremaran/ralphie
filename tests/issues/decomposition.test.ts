@@ -75,6 +75,8 @@ const setup = async (
     options: {
         readonly existing?: ReadonlyArray<GitHubIssue>;
         readonly agentPrompts?: string[];
+        readonly parentLabels?: ReadonlyArray<string>;
+        readonly intakeLabels?: ReadonlyArray<string>;
     } = {},
 ) => {
     const created: Created[] = [];
@@ -143,7 +145,13 @@ const setup = async (
         verify: async () => {},
     };
     const context: IssueExecutionContext = {
-        issue: parent,
+        issue:
+            options.parentLabels === undefined
+                ? parent
+                : { ...parent, labels: options.parentLabels },
+        ...(options.intakeLabels === undefined
+            ? {}
+            : { intakeLabels: options.intakeLabels }),
         repository: "owner/repo",
         repositoryPath: "/work/repository",
         targetBranch: "develop",
@@ -166,6 +174,25 @@ const setup = async (
 };
 
 describe("decomposition publishing", () => {
+    test("children inherit the parent's intake labels plus the agent-ready label", async () => {
+        const harness = await setup({
+            parentLabels: ["Agent-Ready", "bug", "backend", "unrelated"],
+            intakeLabels: ["agent-ready", "bug", "backend", "frontend"],
+        });
+        await harness.store.write(
+            IssueArtifactKind.IssueBreakdownDecision,
+            breakdown,
+        );
+        await harness.executor.execute({
+            context: harness.context,
+            artifacts: harness.store,
+        });
+        expect(harness.created.map(({ labels }) => labels)).toEqual([
+            ["agent-ready", "bug", "backend"],
+            ["agent-ready", "bug", "backend"],
+        ]);
+    });
+
     test("publishes children in the ticket template with the label and native links, blockers first", async () => {
         const harness = await setup();
         await harness.store.write(
