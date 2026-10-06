@@ -3,7 +3,11 @@ import { describe, expect, test } from "bun:test";
 import { HAND_OFF_MARKER } from "../src/github/adapters/hand-off.ts";
 import { RalphieExitCode } from "../src/workflow/exit-code.ts";
 import {
+    allIssuesListed,
     HALTED_EXIT_CODE,
+    type ImplementationEvidence,
+    judgeImplementation,
+    parseRunLog,
     judgeDecomposition,
     smokeVerdict,
     type SmokeChild,
@@ -55,6 +59,79 @@ describe("live smoke guard", () => {
         const config = smokeConfig("codex", "/tmp/w");
         expect(config).toContain("default: codex");
         expect(config).toContain("requireLabels: [smoke-codex]");
+    });
+});
+
+describe("live smoke evidence", () => {
+    const done: ImplementationEvidence = {
+        state: "CLOSED",
+        stateReason: "COMPLETED",
+        closedByRalphie: true,
+        newCommits: 1,
+        changedFiles: ["greeting.txt"],
+        greeting: "hello\n",
+    };
+
+    test("passes only with a closure and a commit that adds the greeting", () => {
+        expect(judgeImplementation(done)).toEqual([]);
+    });
+
+    test("a closed issue with no commit and no closure event is not enough", () => {
+        const problems = judgeImplementation({
+            ...done,
+            closedByRalphie: false,
+            newCommits: 0,
+            changedFiles: [],
+            greeting: undefined,
+        }).join(";");
+        expect(problems).toContain("no closure by Ralphie");
+        expect(problems).toContain("nothing was implemented");
+        expect(problems).toContain("greeting.txt");
+    });
+
+    test("requires the commit to touch the greeting file", () => {
+        expect(
+            judgeImplementation({ ...done, changedFiles: ["other.txt"] }),
+        ).toEqual(["no new commit touched greeting.txt"]);
+    });
+
+    test("an open issue is reported as not closed", () => {
+        expect(judgeImplementation({ ...done, state: "OPEN" })).toEqual([
+            "implementation issue was not closed",
+        ]);
+    });
+
+    test("waits until every created issue is listed", () => {
+        expect(allIssuesListed([1, 2, 3], [1, 3])).toBe(false);
+        expect(allIssuesListed([1, 2, 3], [3, 2, 1, 9])).toBe(true);
+    });
+
+    test("reads closures and the final summary from the JSON Lines log", () => {
+        const log = parseRunLog(
+            [
+                "not json",
+                JSON.stringify({
+                    stage: "issue-closure",
+                    status: "succeeded",
+                    message: "Issue #7 closed as completed.",
+                    issue: { number: 7 },
+                }),
+                JSON.stringify({
+                    stage: "issue-closure",
+                    status: "failed",
+                    message: "Issue #8 close failed",
+                    issue: { number: 8 },
+                }),
+                JSON.stringify({
+                    stage: "run",
+                    status: "succeeded",
+                    message: "Run completed: 1 completed",
+                }),
+            ].join("\n"),
+        );
+        expect([...log.closedAsCompleted]).toEqual([7]);
+        expect(log.summary).toBe("Run completed: 1 completed");
+        expect(parseRunLog("").summary).toBeUndefined();
     });
 });
 

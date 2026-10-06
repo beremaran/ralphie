@@ -19,7 +19,15 @@ Changed sections before upgrading.
   stops the rest of the queue, and exits `75` with a message naming the failure
   and its reset time. Definite failures still hand off. `scripts/live-smoke.ts`
   reports such a halt as INCONCLUSIVE and requires a decomposition to have a
-  child worked to a genuine outcome before it passes.
+  child worked to a genuine outcome before it passes. It also waits for the
+  created issues to appear in the label listing before it starts Ralphie, passes
+  the implementation scenario only when Ralphie reported the closure and a new
+  commit added `greeting.txt`, and saves each run's `--output json` log to a
+  temp file whose path and `Run completed` line it prints.
+- Parallel reviewer sessions in one working directory no longer collide while
+  skills are injected (`ENOTEMPTY` when setting a same-named repository skill
+  aside). They share one injection, and the last release restores the checkout,
+  including directories Ralphie created.
 - Harnesses and roles. Every agent session runs on a headless harness CLI:
   Claude Code (`claude`, the default), Codex (`codex`), pi (`pi`) or OpenCode
   (`opencode`). The `harnesses` (per-harness `model`, `effort`, `approval`) and

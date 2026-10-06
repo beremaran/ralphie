@@ -189,6 +189,109 @@ export const smokeVerdict = (
     return exitCode === 0 && problems.length === 0 ? "PASS" : "FAIL";
 };
 
+/** True once every created issue shows up in a label-filtered listing. */
+export const allIssuesListed = (
+    expected: readonly number[],
+    listed: readonly number[],
+): boolean => expected.every((number) => listed.includes(number));
+
+/** What Ralphie's `--output json` run log says happened. */
+export type RunLog = {
+    /** Issues Ralphie itself reported closing as completed. */
+    readonly closedAsCompleted: ReadonlySet<number>;
+    /** The final `Run completed...` (or `Run stopped...`) message, if any. */
+    readonly summary?: string;
+};
+
+type LogEvent = {
+    readonly stage?: unknown;
+    readonly status?: unknown;
+    readonly message?: unknown;
+    readonly issue?: { readonly number?: unknown };
+};
+
+const parseLogLine = (line: string): LogEvent | undefined => {
+    try {
+        const value: unknown = JSON.parse(line);
+        return typeof value === "object" && value !== null
+            ? (value as LogEvent)
+            : undefined;
+    } catch {
+        return undefined;
+    }
+};
+
+/** Reads JSON Lines from `ralphie --output json`, ignoring non-JSON lines. */
+export const parseRunLog = (text: string): RunLog => {
+    const closed = new Set<number>();
+    let summary: string | undefined;
+    for (const line of text.split("\n")) {
+        const event = parseLogLine(line.trim());
+        if (event === undefined || typeof event.message !== "string") continue;
+        const number = event.issue?.number;
+        if (
+            event.stage === "issue-closure" &&
+            event.status === "succeeded" &&
+            typeof number === "number"
+        ) {
+            closed.add(number);
+        }
+        if (/^Run (completed|stopped)/.test(event.message)) {
+            summary = event.message;
+        }
+    }
+    return summary === undefined
+        ? { closedAsCompleted: closed }
+        : { closedAsCompleted: closed, summary };
+};
+
+/** What the scratch repository shows about the implementation scenario. */
+export type ImplementationEvidence = {
+    readonly state: string | undefined;
+    readonly stateReason?: string | null;
+    /** Ralphie's run log reports closing this issue as completed. */
+    readonly closedByRalphie: boolean;
+    /** Commits that landed on the default branch during the run. */
+    readonly newCommits: number;
+    /** Files those commits touched. */
+    readonly changedFiles: readonly string[];
+    /** Content of greeting.txt on the default branch, if present. */
+    readonly greeting: string | undefined;
+};
+
+/**
+ * The implementation scenario passes only on evidence Ralphie did the work: a
+ * new commit during the run that adds greeting.txt containing `hello`, and a
+ * closure Ralphie itself reported. A closed issue alone proves nothing.
+ */
+export const judgeImplementation = (
+    evidence: ImplementationEvidence,
+): string[] => {
+    if (evidence.state !== "CLOSED") {
+        return ["implementation issue was not closed"];
+    }
+    const problems: string[] = [];
+    if (evidence.stateReason !== "COMPLETED") {
+        problems.push("implementation issue was not closed as completed");
+    }
+    if (!evidence.closedByRalphie) {
+        problems.push(
+            "implementation issue was closed, but the run log shows no closure by Ralphie",
+        );
+    }
+    if (evidence.newCommits === 0) {
+        problems.push(
+            "no commit landed on the default branch during the run, so nothing was implemented",
+        );
+    } else if (!evidence.changedFiles.includes("greeting.txt")) {
+        problems.push("no new commit touched greeting.txt");
+    }
+    if (evidence.greeting?.trim() !== "hello") {
+        problems.push("greeting.txt on the default branch is not `hello`");
+    }
+    return problems;
+};
+
 type Run = {
     readonly code: number;
     readonly stdout: string;
@@ -248,19 +351,76 @@ const listIssues = async (
         ),
     ) as IssueView[];
 
+/** The default branch head, or undefined for an empty repository. */
+const headSha = async (repository: string): Promise<string | undefined> => {
+    const result = await run(
+        ["gh", "api", `repos/${repository}/commits/HEAD`, "--jq", ".sha"],
+        process.env,
+    );
+    return result.code === 0 ? result.stdout.trim() : undefined;
+};
+
+const decodeBase64 = (content: string): string =>
+    Buffer.from(content.replace(/\s/g, ""), "base64").toString("utf8");
+
+type Landed = { readonly newCommits: number; readonly changedFiles: string[] };
+
+/** Commits on the default branch since `baseline`, with the files they touched. */
+const commitsSince = async (
+    repository: string,
+    baseline: string | undefined,
+): Promise<Landed> => {
+    const head = await headSha(repository);
+    if (head === undefined || head === baseline) {
+        return { newCommits: 0, changedFiles: [] };
+    }
+    if (baseline === undefined) return { newCommits: 1, changedFiles: [] };
+    const compare = JSON.parse(
+        await gh("api", `repos/${repository}/compare/${baseline}...${head}`),
+    ) as { ahead_by: number; files?: { filename: string }[] };
+    return {
+        newCommits: compare.ahead_by,
+        changedFiles: (compare.files ?? []).map((file) => file.filename),
+    };
+};
+
+const greetingOnDefaultBranch = async (
+    repository: string,
+): Promise<string | undefined> => {
+    const content = await run(
+        [
+            "gh",
+            "api",
+            `repos/${repository}/contents/greeting.txt`,
+            "--jq",
+            ".content",
+        ],
+        process.env,
+    );
+    return content.code === 0 ? decodeBase64(content.stdout) : undefined;
+};
+
 const verify = async (
     repository: string,
     label: string,
     created: ReadonlyMap<string, number>,
+    baseline: string | undefined,
+    log: RunLog,
 ): Promise<string[]> => {
-    const problems: string[] = [];
     const labelled = await listIssues(repository, label);
-    const state = (name: string): string | undefined =>
-        labelled.find((issue) => issue.number === created.get(name))?.state;
-    if (state("implementation") !== "CLOSED") {
-        problems.push("implementation issue was not closed");
-    }
-    if (state("hand-off") !== "OPEN") {
+    const find = (name: string): IssueView | undefined =>
+        labelled.find((issue) => issue.number === created.get(name));
+    const implementation = find("implementation");
+    const problems = judgeImplementation({
+        state: implementation?.state,
+        stateReason: implementation?.stateReason ?? null,
+        closedByRalphie:
+            implementation !== undefined &&
+            log.closedAsCompleted.has(implementation.number),
+        ...(await commitsSince(repository, baseline)),
+        greeting: await greetingOnDefaultBranch(repository),
+    });
+    if (find("hand-off")?.state !== "OPEN") {
         problems.push("hand-off issue should stay open for a human");
     }
     const newest = Math.max(...created.values());
@@ -313,24 +473,96 @@ const fileScenarios = async (
     return created;
 };
 
+const LISTING_TIMEOUT_MS = 90_000;
+const LISTING_POLL_MS = 3_000;
+
+/**
+ * GitHub's issue listing lags creation by seconds; Ralphie's intake would see
+ * no open issues. Poll until every created issue appears under both labels.
+ */
+const waitForListing = async (
+    repository: string,
+    label: string,
+    created: ReadonlyMap<string, number>,
+): Promise<void> => {
+    const expected = [...created.values()];
+    const deadline = Date.now() + LISTING_TIMEOUT_MS;
+    for (;;) {
+        const listed = JSON.parse(
+            await gh(
+                "issue",
+                "list",
+                "--repo",
+                repository,
+                "--state",
+                "open",
+                "--limit",
+                "100",
+                "--label",
+                `${READY_LABEL},${label}`,
+                "--json",
+                "number",
+            ),
+        ) as { number: number }[];
+        if (
+            allIssuesListed(
+                expected,
+                listed.map((issue) => issue.number),
+            )
+        ) {
+            return;
+        }
+        if (Date.now() > deadline) {
+            throw new Error(
+                `created issues were not listed under ${READY_LABEL},${label} within ${LISTING_TIMEOUT_MS / 1000}s`,
+            );
+        }
+        await Bun.sleep(LISTING_POLL_MS);
+    }
+};
+
+type RalphieRun = {
+    readonly code: number;
+    readonly failure?: string;
+    readonly log: RunLog;
+};
+
 const runRalphie = async (
     options: SmokeOptions,
     harness: SmokeHarness,
     directory: string,
-): Promise<{ readonly code: number; readonly failure?: string }> => {
+): Promise<RalphieRun> => {
     const config = join(directory, "config.yaml");
     await writeFile(config, smokeConfig(harness, join(directory, "workspace")));
     const entry = join(resolve(import.meta.dir, ".."), "index.ts");
     const result = await run(
-        ["bun", "run", entry, options.repository, "--config", config],
+        [
+            "bun",
+            "run",
+            entry,
+            options.repository,
+            "--config",
+            config,
+            "--output",
+            "json",
+        ],
         process.env,
     );
-    console.log(result.stdout.slice(-2000));
+    // Kept outside `directory`, which is deleted, so the run can be inspected.
+    const logDirectory = await mkdtemp(
+        join(tmpdir(), `ralphie-smoke-log-${harness}-`),
+    );
+    const logPath = join(logDirectory, "run.jsonl");
+    await writeFile(logPath, result.stdout);
+    const log = parseRunLog(result.stdout);
+    console.log(`${harness} run log: ${logPath}`);
+    console.log(log.summary ?? "(no `Run completed:` summary line in the log)");
     return result.code === 0
-        ? { code: 0 }
+        ? { code: 0, log }
         : {
               code: result.code,
               failure: `ralphie exited ${result.code}: ${result.stderr.trim().slice(-500)}`,
+              log,
           };
 };
 
@@ -344,12 +576,24 @@ const smokeHarness = async (
         join(tmpdir(), `ralphie-smoke-${harness}-`),
     );
     try {
-        const { code, failure } = await runRalphie(options, harness, directory);
+        await waitForListing(options.repository, label, created);
+        const baseline = await headSha(options.repository);
+        const { code, failure, log } = await runRalphie(
+            options,
+            harness,
+            directory,
+        );
         return {
             exitCode: code,
             problems:
                 failure === undefined
-                    ? await verify(options.repository, label, created)
+                    ? await verify(
+                          options.repository,
+                          label,
+                          created,
+                          baseline,
+                          log,
+                      )
                     : [failure],
         };
     } finally {
