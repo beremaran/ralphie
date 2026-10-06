@@ -180,8 +180,46 @@ test("codex writes the schema to a file and removes it afterwards", async () => 
     await makeCodexAdapter({ runner, schemaFiles }).runTurn(
         turn({ jsonSchema: { type: "object" } }),
     );
-    expect(written).toEqual(['{"type":"object"}']);
+    expect(JSON.parse(written[0] ?? "")).toEqual({
+        type: "object",
+        properties: {},
+        required: [],
+        additionalProperties: false,
+    });
     expect(disposed).toBe(1);
+});
+
+test("codex writes a strict schema and strips nulls from the reply", async () => {
+    written.length = 0;
+    const events = [
+        { type: "thread.started", thread_id: "t1" },
+        { type: "turn.started" },
+        {
+            type: "item.completed",
+            item: {
+                id: "i",
+                type: "agent_message",
+                text: JSON.stringify({ a: "x", b: null }),
+            },
+        },
+        { type: "turn.completed", usage: {} },
+    ];
+    const { runner } = makeScriptedRunner([
+        { stdout: events.map((event) => JSON.stringify(event)).join("\n") },
+    ]);
+    const outcome = await makeCodexAdapter({ runner, schemaFiles }).runTurn(
+        turn({
+            jsonSchema: {
+                type: "object",
+                properties: { a: { type: "string" }, b: { type: "string" } },
+                required: ["a"],
+            },
+        }),
+    );
+    const schema = JSON.parse(written[0] ?? "");
+    expect(schema.required).toEqual(["a", "b"]);
+    expect(schema.additionalProperties).toBe(false);
+    expect(outcome.ok && outcome.structured).toEqual({ a: "x" });
 });
 
 test("codex resume sets the sandbox through config", async () => {
