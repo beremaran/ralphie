@@ -101,6 +101,61 @@ describe("session environment isolation", () => {
     });
 });
 
+describe("session git and ssh isolation", () => {
+    test("a spawned git sees no credential helper, no ssh agent and a failing ssh command", async () => {
+        const repository = await mkdtemp(join(tmpdir(), "ralphie-ssh-"));
+        const probe: HarnessService = {
+            run: (async (req: SessionRequest) => {
+                await CommandRunnerLive.run("git", [
+                    "-C",
+                    repository,
+                    "init",
+                    "-q",
+                ]);
+                await CommandRunnerLive.run("git", [
+                    "-C",
+                    repository,
+                    "config",
+                    "credential.helper",
+                    "store",
+                ]);
+                const helper = await CommandRunnerLive.run(
+                    "git",
+                    ["-C", repository, "config", "--get", "credential.helper"],
+                    { env: req.env ?? {} },
+                );
+                const env = await CommandRunnerLive.run(
+                    "sh",
+                    [
+                        "-c",
+                        'echo "[${SSH_AUTH_SOCK-unset}][$GIT_TERMINAL_PROMPT]"; $GIT_SSH_COMMAND || echo failed',
+                    ],
+                    { env: req.env ?? {} },
+                );
+                return {
+                    ok: true,
+                    harnessSessionID: "x",
+                    text: `${helper.stdout.trim()}|${env.stdout.trim()}`,
+                    value: undefined,
+                };
+            }) as HarnessService["run"],
+        };
+        const previous = process.env.SSH_AUTH_SOCK;
+        process.env.SSH_AUTH_SOCK = "/tmp/agent.sock";
+        try {
+            const outcome = await isolateSessions(
+                probe,
+                makeTemporaryScratchDirectories(),
+            ).run(request());
+            expect(outcome.ok && outcome.text).toBe("|[unset][0]\nfailed");
+        } finally {
+            await rm(repository, { recursive: true, force: true });
+            if (previous === undefined) delete process.env.SSH_AUTH_SOCK;
+            else process.env.SSH_AUTH_SOCK = previous;
+        }
+    });
+});
+
 describe("read-only session guard", () => {
     const withRepository = async (
         body: (path: string) => Promise<void>,

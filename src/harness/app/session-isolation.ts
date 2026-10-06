@@ -14,10 +14,20 @@ export const GITHUB_CREDENTIAL_VARIABLES: ReadonlyArray<string> = [
     "GITHUB_ENTERPRISE_TOKEN",
 ];
 
+/** Variables through which a session could reach an SSH agent or prompt. */
+export const SSH_AGENT_VARIABLES: ReadonlyArray<string> = [
+    "SSH_AUTH_SOCK",
+    "SSH_ASKPASS",
+    "GIT_ASKPASS",
+];
+
 /**
- * The environment of an isolated session: no GitHub tokens (an undefined
- * value removes the variable) and a `gh` config directory that is empty, so
- * no stored login exists. These entries win over the request's own.
+ * The environment of an isolated session: no GitHub tokens or SSH agent (an
+ * undefined value removes the variable), a `gh` config directory that is
+ * empty, git configuration that cannot supply credential helpers (global and
+ * system files are `/dev/null`, and the repository's own helper list is reset
+ * through `GIT_CONFIG_COUNT`), no terminal prompts, and an ssh command that
+ * always fails. These entries win over the request's own.
  */
 export const isolatedEnvironment = (
     env: SessionRequest["env"],
@@ -25,9 +35,20 @@ export const isolatedEnvironment = (
 ): NonNullable<SessionRequest["env"]> => ({
     ...env,
     ...Object.fromEntries(
-        GITHUB_CREDENTIAL_VARIABLES.map((name) => [name, undefined]),
+        [...GITHUB_CREDENTIAL_VARIABLES, ...SSH_AGENT_VARIABLES].map((name) => [
+            name,
+            undefined,
+        ]),
     ),
     GH_CONFIG_DIR: configDirectory,
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_SYSTEM: "/dev/null",
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_KEY_0: "credential.helper",
+    GIT_CONFIG_VALUE_0: "",
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_SSH_COMMAND: "false",
 });
 
 /** Run every session without GitHub credentials (ADR-0003). */
