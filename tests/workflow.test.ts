@@ -1,3 +1,8 @@
+import {
+    exitCodeForError,
+    RalphieExitCode,
+} from "../src/workflow/exit-code.ts";
+import { RunHaltedError } from "../src/shared/error.ts";
 import { describe, expect, test } from "bun:test";
 
 import { type GitRepositoryService } from "../src/git/ports.ts";
@@ -1192,6 +1197,48 @@ describe("workflow", () => {
         ).toHaveLength(2);
         expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
         expect(calls).toContain("restoreCheckout");
+    });
+
+    test("a deferred issue halts the queue, changes nothing and names the reset time", async () => {
+        const calls: string[] = [];
+        const states: RunState[] = [];
+        await expect(
+            workflow(
+                baseOptions,
+                testRuntime(calls, states, {
+                    issueLists: [[firstIssue, secondIssue]],
+                    outcomes: [
+                        {
+                            kind: IssueExecutionOutcomeKind.Deferred,
+                            reason: "You've hit your session limit",
+                            cause: "transient",
+                            resetHint: "3:10pm",
+                        },
+                    ],
+                }),
+            ),
+        ).rejects.toMatchObject({
+            message: expect.stringMatching(
+                /Run halted at issue #\d+.*left untouched.*resets 3:10pm/,
+            ),
+        });
+        expect(
+            exitCodeForError(
+                new RunHaltedError({ message: "x" }),
+                new AbortController().signal,
+            ),
+        ).toBe(RalphieExitCode.Halted);
+        expect(
+            calls.filter((call) => call.startsWith("executeIssue:")),
+        ).toHaveLength(1);
+        expect(calls).toContain("restoreCheckout");
+        expect(calls.some((call) => /handOff|close|label/i.test(call))).toBe(
+            false,
+        );
+        expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
+        expect(states.at(-1)?.outcomes[0]).toMatchObject({
+            outcome: { kind: IssueExecutionOutcomeKind.Deferred },
+        });
     });
 
     test("persists a recoverable closure stage when GitHub closure fails", async () => {

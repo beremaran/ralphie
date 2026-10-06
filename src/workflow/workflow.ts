@@ -33,7 +33,7 @@ import {
     RunStateStatus,
 } from "../run/state.ts";
 import type { Clock, RunControl } from "../run/ports.ts";
-import { RalphieError } from "../shared/error.ts";
+import { RalphieError, RunHaltedError } from "../shared/error.ts";
 import { DEFAULT_MAX_DECOMPOSITION_DEPTH } from "../issues/domain/decomposition-markdown.ts";
 import type {
     IssueWorkflow,
@@ -113,6 +113,8 @@ const outcomeMessage = (
             return `Issue #${issueNumber} escalated: ${outcome.reason}`;
         case IssueExecutionOutcomeKind.Failed:
             return `Issue #${issueNumber} failed: ${outcome.message}`;
+        case IssueExecutionOutcomeKind.Deferred:
+            return `Issue #${issueNumber} deferred, left untouched: ${outcome.reason}`;
         case IssueExecutionOutcomeKind.Skipped:
             return `Issue #${issueNumber} skipped: ${outcome.reason}`;
     }
@@ -195,6 +197,15 @@ const copyOutcome = (outcome: IssueExecutionOutcome): RunStateOutcome => {
             };
         case IssueExecutionOutcomeKind.Skipped:
             return copySkippedOutcome(outcome);
+        case IssueExecutionOutcomeKind.Deferred:
+            return {
+                kind: outcome.kind,
+                reason: outcome.reason,
+                cause: outcome.cause,
+                ...(outcome.resetHint === undefined
+                    ? {}
+                    : { resetHint: outcome.resetHint }),
+            };
         case IssueExecutionOutcomeKind.Failed:
             return {
                 kind: outcome.kind,
@@ -579,7 +590,33 @@ const summaryMessage = (
     `${counts.decomposed} decomposed, ` +
     `${counts.escalated} escalated, ` +
     `${counts[IssueExecutionOutcomeKind.HandOff]} hand-off, ` +
-    `${counts.skipped} skipped, ${counts.failed} failed.`;
+    `${counts.skipped} skipped, ${counts.deferred} deferred, ${counts.failed} failed.`;
+
+/** The final message of a run halted by a limit, outage or expired login. */
+const haltMessage = (
+    issueNumber: number,
+    outcome: Extract<
+        IssueExecutionOutcome,
+        { readonly kind: IssueExecutionOutcomeKind.Deferred }
+    >,
+    counts: Readonly<Record<IssueExecutionOutcomeKind, number>>,
+): string => {
+    const cause =
+        outcome.cause === "auth"
+            ? "The harness credentials are missing or expired; sign in again"
+            : "A harness limit or outage stopped the run; retry once it clears";
+    const reset =
+        outcome.resetHint === undefined
+            ? ""
+            : ` The limit resets ${outcome.resetHint}.`;
+    return (
+        `Run halted at issue #${issueNumber}, which was left untouched ` +
+        `(no hand-off, labels unchanged): ${outcome.reason} ${cause}.${reset} ` +
+        `${counts.completed} completed, ${counts.decomposed} decomposed, ` +
+        `${counts[IssueExecutionOutcomeKind.HandOff]} hand-off, ` +
+        `${counts.failed} failed before the halt.`
+    );
+};
 
 const emitRunStarted = async (
     progress: ProgressReporterService,
@@ -1267,6 +1304,11 @@ export const workflow = async (
                 await handleFailedIssue(issueContext);
                 return;
             }
+            if (outcome.kind === IssueExecutionOutcomeKind.Deferred) {
+                halted = { issueNumber: issueContext.issue.number, outcome };
+                await handleFailedIssue(issueContext);
+                return;
+            }
             if (outcome.kind === IssueExecutionOutcomeKind.HandOff) {
                 await handleHandOffIssue(issueContext, outcome);
                 await finishSuccessfulIssue(issueContext);
@@ -1354,6 +1396,16 @@ export const workflow = async (
             return true;
         };
 
+        let halted:
+            | {
+                  readonly issueNumber: number;
+                  readonly outcome: Extract<
+                      IssueExecutionOutcome,
+                      { readonly kind: IssueExecutionOutcomeKind.Deferred }
+                  >;
+              }
+            | undefined;
+
         const processQueue = async (): Promise<void> => {
             const step = async (): Promise<boolean> => {
                 await waitForQueueControl(control, signal);
@@ -1362,14 +1414,17 @@ export const workflow = async (
                 return await processNextIssue();
             };
             while (queue.state() === IssueQueueState.Ready) {
-                if (!(await step())) break;
+                if (!(await step()) || halted !== undefined) break;
             }
         };
 
         await triageBeforeQueue();
         await processQueue();
 
-        if (queue.state() === IssueQueueState.DependencyBlocked) {
+        if (
+            halted === undefined &&
+            queue.state() === IssueQueueState.DependencyBlocked
+        ) {
             await handleDependencyBlockedQueue({
                 queue,
                 recordIssueOutcome,
@@ -1383,6 +1438,15 @@ export const workflow = async (
         activeQueueIssues.clear();
         restoreCancellationCheckout = undefined;
         const summary = summarize(actualRunId, outcomes);
+        if (halted !== undefined) {
+            throw new RunHaltedError({
+                message: haltMessage(
+                    halted.issueNumber,
+                    halted.outcome,
+                    summary.counts,
+                ),
+            });
+        }
         if (summary.counts.failed > 0) {
             throw new RalphieError({
                 message: summaryMessage(

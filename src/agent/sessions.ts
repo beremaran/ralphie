@@ -7,6 +7,7 @@ import {
     type SessionRequest,
 } from "../harness/ports.ts";
 import type { RoleAssignments, SessionApproval } from "../harness/app/roles.ts";
+import { isHaltingFailure } from "../harness/failure-classification.ts";
 import { RalphieError } from "../shared/error.ts";
 
 /** What the issue workflow needs to start sessions: a harness and the roles. */
@@ -102,6 +103,16 @@ export const isSessionFailure = (error: unknown): boolean => {
         "message" in cause &&
         typeof cause.message === "string"
     );
+};
+
+/**
+ * The environmental failure (limit, outage, expired login) behind an error,
+ * if that is what it is. Such a failure ends the run; it never hands off.
+ */
+export const haltingFailure = (error: unknown): HarnessFailure | undefined => {
+    if (!isSessionFailure(error)) return undefined;
+    const cause = (error as RalphieError).cause as HarnessFailure;
+    return isHaltingFailure(cause) ? cause : undefined;
 };
 
 /** Whether a session failure was the caller cancelling it (a user stop). */

@@ -127,6 +127,15 @@ harnessAdapterContract({
                 },
             },
             {
+                name: "a session limit that resets later",
+                ...recorded("session-limit.jsonl"),
+                access: "read-only",
+                expect: {
+                    kind: "transient",
+                    messageIncludes: "session limit",
+                },
+            },
+            {
                 name: "an exhausted budget",
                 ...recorded("budget-exceeded.jsonl"),
                 access: "read-only",

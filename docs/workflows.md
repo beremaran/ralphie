@@ -172,6 +172,18 @@ invariant and GitHub errors are not session failures; they fail the issue and
 the next run retries it, as does any failure after a stop request. A hand-off
 whose verifier session failed stays pending and is resumed by the next run.
 
+A session failure that is environmental is not a hand-off either. A rate,
+usage, session or quota limit (for example Claude's "You've hit your session
+limit"), an overloaded or unavailable provider (429, 5xx), a network error,
+exhausted credits, or an expired login says nothing about the issue, and every
+further session would fail the same way. Ralphie restores the checkout,
+leaves the issue's labels and comments untouched, records a `deferred`
+outcome, stops the rest of the queue and exits `75` with a message naming the
+failure and, when the harness reports it, the reset time. Rerun once the limit
+clears or the login is renewed. Definite failures (an invalid or never
+validating result, an unknown model, refused access, a session timeout, real
+work that did not succeed) still hand off.
+
 ### Fix sessions
 
 Fixes continue the implementer's own session, so the agent keeps the context it
@@ -263,7 +275,7 @@ agent-ready label, the next run's intake skips it until a human relabels it.
 Exhausted attempts preserve a diagnostic patch and restore the clean checkout
 before the hand-off, like the other recovery paths. An open-blocker skip (from
 pre-flight or from queue order) is not a hand-off and changes nothing on
-GitHub. The write-up deliberately avoids the `## Agent Brief` heading, which
+GitHub, and neither is a deferral caused by a limit, outage or expired login. The write-up deliberately avoids the `## Agent Brief` heading, which
 marks the contract an implementer works from. The recovery details are in
 [Operations and recovery](operations-and-recovery.md#hand-off-handling).
 

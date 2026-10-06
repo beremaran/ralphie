@@ -1,4 +1,5 @@
 import { buildTriagePrompt } from "../../agent/prompts.ts";
+import { haltingFailure } from "../../agent/sessions.ts";
 import { requestStructuredOutput } from "../../agent/structured-output.ts";
 import { skillInvocation } from "../../harness/app/skill-injection.ts";
 import type { ProgressReporterService } from "../../progress/ports.ts";
@@ -102,7 +103,12 @@ export const makeTriageService = ({
                 "a fresh verification did not prove it.",
             );
         } catch (error) {
-            if (context.signal?.aborted === true) throw error;
+            if (
+                context.signal?.aborted === true ||
+                haltingFailure(error) !== undefined
+            ) {
+                throw error;
+            }
             return unverifiedClaim(
                 claimed,
                 `the fresh verification failed: ${messageOf(error)}`,

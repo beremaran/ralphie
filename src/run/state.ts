@@ -7,7 +7,7 @@ import {
     HandOffReason,
     nonBlankStringSchema,
 } from "../issues/domain/decisions.ts";
-export const RUN_STATE_VERSION = 14 as const;
+export const RUN_STATE_VERSION = 15 as const;
 
 export enum RunStateStatus {
     Active = "active",
@@ -101,6 +101,12 @@ const currentOutcomeSchema = z.union([
             reason: z.string().min(1),
         })
         .strict(),
+    z.object({
+        kind: z.literal(IssueExecutionOutcomeKind.Deferred),
+        reason: z.string().min(1),
+        cause: z.enum(["transient", "auth"]),
+        resetHint: z.string().min(1).optional(),
+    }),
     z.object({
         kind: z.literal(IssueExecutionOutcomeKind.Failed),
         message: z.string().min(1),
