@@ -16,8 +16,9 @@ Ralphie loads the first of these that applies:
    absolute path.
 3. `~/.config/ralphie/config.yaml`.
 
-There is no built-in fallback: when no file exists, Ralphie stops at startup
-and names the path it looked for. An empty file is valid and means "all
+There is no built-in fallback: when no file exists, Ralphie stops at startup,
+names the path it looked for, and points at `ralphie init`, which writes a
+starter file. An empty file is valid and means "all
 defaults".
 
 The file is validated with a strict schema before anything else runs. Unknown
