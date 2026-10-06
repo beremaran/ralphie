@@ -39,6 +39,8 @@ export enum HandOffReason {
     CannotReproduce = "cannot_reproduce",
     DecompositionLimitReached = "decomposition_limit_reached",
     ImplementationExhausted = "implementation_exhausted",
+    /** A judgment call, design decision or manual step only a human can make. */
+    NeedsHumanJudgment = "needs_human_judgment",
 }
 
 export enum GroundingDisposition {

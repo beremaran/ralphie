@@ -9,7 +9,12 @@ import type {
 } from "../issues/app/execution.ts";
 import type { GitHubIssuesService } from "../github/ports.ts";
 import type { GitHubIssueMutationService } from "../github/ports.ts";
-import type { GitHubHandOffService } from "../github/ports.ts";
+import type {
+    GitHubHandOffService,
+    GitHubTriageService,
+} from "../github/ports.ts";
+import type { TriageService } from "../issues/app/triage.ts";
+import type { TriageStateLabels } from "../issues/domain/triage.ts";
 import type { HandOffLabels } from "../issues/domain/hand-off.ts";
 import type { ParentCompletionService } from "../issues/ports.ts";
 import type {
@@ -49,6 +54,10 @@ export type IssueWorkflowRuntime = {
     readonly githubIssues: GitHubIssuesService;
     readonly githubIssueMutations: GitHubIssueMutationService;
     readonly githubHandOff: GitHubHandOffService;
+    /** Posts Agent Briefs and already-implemented comments for AFK triage. */
+    readonly githubTriage: GitHubTriageService;
+    /** The read-only triager; only used when `WorkflowOptions.triage` is set. */
+    readonly triage: TriageService;
     readonly gitRepository: GitRepositoryService;
     readonly gitRepositoryInvariant: GitRepositoryInvariantService;
     readonly gitIssueCheckpoint: GitIssueCheckpointService;
@@ -56,6 +65,14 @@ export type IssueWorkflowRuntime = {
     readonly parentCompletion: ParentCompletionService;
     readonly issueExecutor: IssueExecutorService;
     readonly harness: HarnessService;
+};
+
+/** Opt-in AFK triage of issues that are not agent-ready yet. */
+export type WorkflowTriageOptions = {
+    /** The repository's label for each of the five triage roles. */
+    readonly labels: TriageStateLabels;
+    /** Only issues carrying every one of these labels are triaged. */
+    readonly requireLabels: ReadonlyArray<string>;
 };
 
 export type WorkflowOptions = {
@@ -80,6 +97,8 @@ export type WorkflowOptions = {
     readonly runId: string;
     /** The triage state labels hand-offs apply; canonical names by default. */
     readonly handOffLabels?: HandOffLabels;
+    /** AFK triage runs before the queue when set; absent means disabled. */
+    readonly triage?: WorkflowTriageOptions;
 };
 
 export type WorkflowSummary = {

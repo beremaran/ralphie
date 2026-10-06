@@ -48,6 +48,11 @@ const intakeSchema = z.strictObject({
     sort: z.enum(INTAKE_SORTS).default("created:asc"),
 });
 
+/** AFK triage of issues that are not agent-ready yet. Opt-in. */
+const triageSchema = z.strictObject({
+    enabled: z.boolean().default(false),
+});
+
 const labelsSchema = z.strictObject({
     "needs-triage": nonEmptyString.default("needs-triage"),
     "needs-info": nonEmptyString.default("needs-info"),
@@ -135,6 +140,7 @@ const overridableSettings = {
     harnesses: harnessesSchema.prefault({}),
     roles: rolesSchema.prefault({}),
     intake: intakeSchema.prefault({}),
+    triage: triageSchema.prefault({}),
     labels: labelsSchema.prefault({}),
     skills: skillsSchema.prefault({}),
     limits: limitsSchema.prefault({}),

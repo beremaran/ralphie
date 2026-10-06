@@ -23,7 +23,12 @@ import { type ParentCompletionService } from "./issues/ports.ts";
 import { makeGitHubIssuesService } from "./github/adapters/issues.ts";
 import { type GitHubIssuesService } from "./github/ports.ts";
 import { makeGitHubHandOffService } from "./github/adapters/hand-off.ts";
-import { type GitHubHandOffService } from "./github/ports.ts";
+import { makeGitHubTriageService } from "./github/adapters/triage.ts";
+import {
+    type GitHubHandOffService,
+    type GitHubTriageService,
+} from "./github/ports.ts";
+import { makeTriageService, type TriageService } from "./issues/app/triage.ts";
 import {
     makeIssueArtifactStoreService,
     type IssueArtifactStoreService,
@@ -106,6 +111,10 @@ export type RalphieRuntime = {
     readonly parentCompletion: ParentCompletionService;
     /** Posts hand-off comments and swaps triage labels. */
     readonly githubHandOff: GitHubHandOffService;
+    /** Posts Agent Briefs and already-implemented comments for AFK triage. */
+    readonly githubTriage: GitHubTriageService;
+    /** The read-only AFK triager. */
+    readonly triage: TriageService;
     readonly gitRepository: GitRepositoryService;
     readonly gitRepositoryInvariant: GitRepositoryInvariantService;
     readonly gitIssueCheckpoint: GitIssueCheckpointService;
@@ -194,6 +203,7 @@ export const makeLiveRuntime = ({
         mutations: githubIssueMutations,
     });
     const githubHandOff = makeGitHubHandOffService(githubConnection.session);
+    const githubTriage = makeGitHubTriageService(githubConnection.session);
     const bareHarness = makeHarnessService({
         adapters: makeHarnessAdapters(commandRunner),
         listener: sessionListener,
@@ -259,6 +269,7 @@ export const makeLiveRuntime = ({
         resolutionVerification,
         handOffRouter,
     );
+    const triage = makeTriageService({ progress, resolutionVerification });
     const issueExecutor = makeIssueExecutorService(
         issueArtifactStore,
         implementationExecutor,
@@ -276,6 +287,8 @@ export const makeLiveRuntime = ({
         githubIssueRelationships,
         parentCompletion,
         githubHandOff,
+        githubTriage,
+        triage,
         gitRepository,
         gitRepositoryInvariant,
         gitIssueCheckpoint,

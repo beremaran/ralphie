@@ -7,6 +7,13 @@ All notable changes to Ralphie are documented here. The project follows
 
 ### Added
 
+- Opt-in AFK triage (`triage.enabled`, default off). A read-only `triager`
+  session runs the vendored `/triage` over unlabelled issues, `needs-triage`
+  issues and `needs-info` issues the reporter has answered. It promotes an issue
+  to `ready-for-agent` with an Agent Brief (implemented in the same run), hands
+  off to `needs-info` or `ready-for-human`, or closes an already implemented
+  issue as completed once a fresh resolution verifier proves it. It never
+  applies `wontfix` and never writes `.out-of-scope/`.
 - Hand-offs are always on and replace needs-attention outcomes and the opt-in
   notification flags. Anything that needs a human moves the issue to
   `needs-info` (missing information, conflicting requirements, cannot
