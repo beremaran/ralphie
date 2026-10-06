@@ -64,7 +64,12 @@ implementation task that goes through review, an ambiguous task that must end
 in a hand-off, and an oversized task that must be decomposed), runs Ralphie
 with every role on that harness in `yolo` approval, checks the outcomes, and
 closes the issues afterwards as not planned (`--keep-issues` leaves them).
-Each harness ends as PASS, FAIL or INCONCLUSIVE. The decomposition scenario
+The script waits until GitHub lists the new issues before starting Ralphie, runs
+it with `--output json`, and prints the path of the saved JSON Lines log with
+the final `Run completed` line. The implementation scenario passes only when
+the log shows Ralphie closing the issue as completed and a new commit on the
+default branch added `greeting.txt` containing `hello`; a closed issue alone is
+not evidence. Each harness ends as PASS, FAIL or INCONCLUSIVE. The decomposition scenario
 passes only when a child issue was then worked to a genuine terminal outcome:
 closed as completed by Ralphie, or handed off for a real reason rather than a
 failed session. When Ralphie exits `75` because a usage limit, outage or

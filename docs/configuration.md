@@ -214,7 +214,9 @@ skills directory (`.claude/skills`, `.agents/skills` for Codex, `.pi/skills`,
 `.opencode/skills`). A repository skill with the same name is set aside for the
 session and restored afterwards, so Ralphie's copy wins while other repository
 skills stay available. Everything injected is added to the checkout's
-`.git/info/exclude`, and is removed again when the session ends. If the
+`.git/info/exclude`, and is removed again when the session ends. Sessions that
+overlap in one working directory (the parallel reviewers) share one injection:
+the first prepares the checkout, and the last to finish restores it. If the
 repository has no `docs/agents/issue-tracker.md` or
 `docs/agents/triage-labels.md`, Ralphie generates them for the session: the
 label table comes from `labels`, and the tracker doc says issue content is in

@@ -145,9 +145,11 @@ const recoverShadowed = async (
         await fileSystem.remove(target);
         await fileSystem.move(join(shadowRoot, name), target);
     }
+    await removeIfEmpty(fileSystem, shadowRoot);
 };
 
 type Layout = {
+    readonly directory: string;
     readonly skillsRoot: string;
     readonly shadowRoot: string;
     readonly docsRoot: string;
@@ -157,6 +159,7 @@ type Layout = {
 const layoutFor = (directory: string, location: string): Layout => {
     const parent = dirname(location);
     return {
+        directory,
         skillsRoot: join(directory, location),
         shadowRoot: join(directory, parent, SHADOW_DIRECTORY),
         docsRoot: join(directory, "docs", "agents"),
@@ -165,6 +168,46 @@ const layoutFor = (directory: string, location: string): Layout => {
 };
 
 type Undo = Array<() => Promise<void>>;
+
+/** Run recorded undo steps newest first, emptying the list. */
+const undoAll = async (undo: Undo): Promise<void> => {
+    for (const step of undo.splice(0).reverse()) await step();
+};
+
+/** Remove a directory Ralphie created, once nothing is left in it. */
+const removeIfEmpty = async (
+    fileSystem: SkillFileSystem,
+    path: string,
+): Promise<void> => {
+    if ((await fileSystem.listDirectories(path)).length === 0) {
+        await fileSystem.remove(path);
+    }
+};
+
+/**
+ * Create a directory and any missing parents inside the checkout, recording
+ * undo steps that remove the ones Ralphie made, once they are empty again.
+ */
+const ensureDirectory = async (
+    fileSystem: SkillFileSystem,
+    layout: Layout,
+    path: string,
+    undo: Undo,
+): Promise<void> => {
+    const missing: string[] = [];
+    for (
+        let current = path;
+        current.length > layout.directory.length &&
+        !(await fileSystem.exists(current));
+        current = dirname(current)
+    ) {
+        missing.push(current);
+    }
+    await fileSystem.makeDirectory(path);
+    for (const created of missing.reverse()) {
+        undo.push(async () => await removeIfEmpty(fileSystem, created));
+    }
+};
 
 type GeneratedDoc = { readonly name: string; readonly contents: string };
 
@@ -179,7 +222,7 @@ const injectSkill = async (
     const target = join(layout.skillsRoot, name);
     if (await fileSystem.exists(target)) {
         const shadowed = join(layout.shadowRoot, name);
-        await fileSystem.makeDirectory(layout.shadowRoot);
+        await ensureDirectory(fileSystem, layout, layout.shadowRoot, undo);
         await fileSystem.move(target, shadowed);
         undo.push(async () => {
             await fileSystem.remove(target);
@@ -208,16 +251,25 @@ const missingDocsIn = async (
 
 const writeDocs = async (
     fileSystem: SkillFileSystem,
-    docsRoot: string,
+    layout: Layout,
     docs: readonly GeneratedDoc[],
     undo: Undo,
 ): Promise<void> => {
     for (const doc of docs) {
-        const file = join(docsRoot, doc.name);
-        await fileSystem.makeDirectory(docsRoot);
+        const file = join(layout.docsRoot, doc.name);
+        await ensureDirectory(fileSystem, layout, layout.docsRoot, undo);
         await fileSystem.writeText(file, doc.contents);
         undo.push(async () => await fileSystem.remove(file));
     }
+};
+
+type Prepared = {
+    /** Sessions currently holding this directory's preparation. */
+    holders: number;
+    /** Locations already prepared; later sessions reuse them. */
+    readonly locations: Set<string>;
+    /** Every change made, undone by the last release. */
+    readonly undo: Undo;
 };
 
 /**
@@ -228,6 +280,11 @@ const writeDocs = async (
  * release, so Ralphie's copy wins while other repository skills stay
  * available. Everything added is listed in `.git/info/exclude`. Generated
  * `docs/agents` files exist only where the repository lacks its own.
+ *
+ * Sessions may overlap in one working directory (parallel reviewers). The
+ * first prepares, later ones reuse that preparation, and the last release
+ * restores the checkout. Work per directory is serialised, so preparation
+ * and restoration never interleave.
  */
 export const makeSessionPreparation = (
     deps: Dependencies,
@@ -253,7 +310,12 @@ export const makeSessionPreparation = (
             ...layout.excludes,
             ...missingDocs.map((doc) => `/docs/agents/${doc.name}`),
         ]);
-        await fileSystem.makeDirectory(layout.skillsRoot);
+        if (!(await fileSystem.exists(layout.skillsRoot))) {
+            await fileSystem.makeDirectory(layout.skillsRoot);
+            undo.push(
+                async () => await removeIfEmpty(fileSystem, layout.skillsRoot),
+            );
+        }
         for (const name of await skillNames(fileSystem, deps.skillsDirectory)) {
             await injectSkill(
                 fileSystem,
@@ -263,21 +325,63 @@ export const makeSessionPreparation = (
                 undo,
             );
         }
-        await writeDocs(fileSystem, layout.docsRoot, missingDocs, undo);
+        await writeDocs(fileSystem, layout, missingDocs, undo);
+    };
+    const states = new Map<string, Prepared>();
+    const tails = new Map<string, Promise<unknown>>();
+    /** Run `work` after everything queued earlier for the same directory. */
+    const serialised = async <T>(
+        directory: string,
+        work: () => Promise<T>,
+    ): Promise<T> => {
+        const result = (tails.get(directory) ?? Promise.resolve()).then(
+            work,
+            work,
+        );
+        const tail = result.catch(() => {});
+        tails.set(directory, tail);
+        void tail.then(() => {
+            if (tails.get(directory) === tail) tails.delete(directory);
+        });
+        return await result;
+    };
+    const acquire = async (directory: string, location: string) => {
+        const state = states.get(directory) ?? {
+            holders: 0,
+            locations: new Set<string>(),
+            undo: [],
+        };
+        if (!state.locations.has(location)) {
+            const undo: Undo = [];
+            try {
+                await prepare(directory, location, undo);
+            } catch (error) {
+                await undoAll(undo);
+                throw error;
+            }
+            state.undo.push(...undo);
+            state.locations.add(location);
+        }
+        state.holders += 1;
+        states.set(directory, state);
+    };
+    const drop = async (directory: string): Promise<void> => {
+        const state = states.get(directory);
+        if (state === undefined) return;
+        state.holders -= 1;
+        if (state.holders > 0) return;
+        states.delete(directory);
+        await undoAll(state.undo);
     };
     return async ({ directory, harness }) => {
         const location = skillLocation(harness);
         if (location === undefined) return async () => {};
-        const undo: Undo = [];
-        const release: Release = async () => {
-            for (const step of undo.splice(0).reverse()) await step();
+        await serialised(directory, () => acquire(directory, location));
+        let released = false;
+        return async () => {
+            if (released) return;
+            released = true;
+            await serialised(directory, () => drop(directory));
         };
-        try {
-            await prepare(directory, location, undo);
-            return release;
-        } catch (error) {
-            await release();
-            throw error;
-        }
     };
 };
