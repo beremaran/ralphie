@@ -350,6 +350,35 @@ export const makeIssueExecutorService = (
         }
     };
 
+    /** The ceiling hands off with preserved diagnostics when a router exists. */
+    const handOffDepthLimit = async (
+        context: IssueExecutionContext,
+        error: DecompositionDepthLimitError,
+    ): Promise<IssueExecutionOutcome> => {
+        const limit = decompositionLimitOutcome(context.issue.number, error);
+        if (
+            handOffRouter === undefined ||
+            limit.kind !== IssueExecutionOutcomeKind.HandOff ||
+            context.signal?.aborted === true
+        ) {
+            return limit;
+        }
+        try {
+            return await handOffRouter.handOffWithDecision({
+                context,
+                decision: {
+                    disposition: GroundingDisposition.HandOff,
+                    reason: limit.reason,
+                    summary: limit.summary,
+                    evidence: limit.evidence,
+                    questions: limit.questions,
+                },
+            });
+        } catch {
+            return limit;
+        }
+    };
+
     return {
         execute: async (context) => {
             let artifacts:
@@ -364,10 +393,7 @@ export const makeIssueExecutorService = (
                 return await executeIssue(context, artifacts);
             } catch (error) {
                 if (error instanceof DecompositionDepthLimitError) {
-                    return decompositionLimitOutcome(
-                        context.issue.number,
-                        error,
-                    );
+                    return await handOffDepthLimit(context, error);
                 }
                 if (error instanceof RalphieError) {
                     const deferred = deferredOutcome(context, error);

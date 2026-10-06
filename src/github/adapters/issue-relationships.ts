@@ -92,17 +92,14 @@ const listSubIssues = async (
 ): Promise<ReadonlyArray<GitHubIssue>> => {
     const parameters = repositoryParameters(repository);
     try {
-        const response = await client.request(
+        const records = (await client.paginate(
             "GET /repos/{owner}/{repo}/issues/{issue_number}/sub_issues",
             {
                 ...parameters,
                 issue_number: issueNumber,
                 per_page: 100,
             },
-        );
-        const records = response.data as ReadonlyArray<
-            Parameters<typeof mapGitHubIssue>[0]
-        >;
+        )) as ReadonlyArray<Parameters<typeof mapGitHubIssue>[0]>;
         return records.map((record) => mapGitHubIssue(record));
     } catch (cause) {
         throw relationshipError(
@@ -159,17 +156,14 @@ const listBlockedBy = async (
 ): Promise<ReadonlyArray<GitHubIssue>> => {
     const parameters = repositoryParameters(repository);
     try {
-        const response = await client.request(
+        const records = (await client.paginate(
             "GET /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by",
             {
                 ...parameters,
                 issue_number: issueNumber,
                 per_page: 100,
             },
-        );
-        const records = response.data as ReadonlyArray<
-            Parameters<typeof mapGitHubIssue>[0]
-        >;
+        )) as ReadonlyArray<Parameters<typeof mapGitHubIssue>[0]>;
         return records.map((record) => mapGitHubIssue(record));
     } catch (cause) {
         throw relationshipError(

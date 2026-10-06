@@ -1812,7 +1812,8 @@ describe("workflow", () => {
             ...firstIssue,
             number: 43,
             title: "Decomposed parent",
-            body: "<!-- ralphie:decomposition original=43 depth=1 -->\n\nDecomposed work.",
+            body: "Decomposed work.",
+            subIssueCount: 2,
         };
         const closedChild: GitHubIssue = {
             ...secondIssue,
@@ -1843,7 +1844,8 @@ describe("workflow", () => {
             ...firstIssue,
             number: 43,
             title: "Decomposed parent",
-            body: "<!-- ralphie:decomposition original=43 depth=1 -->\n\nDecomposed work.",
+            body: "Decomposed work.",
+            subIssueCount: 2,
         };
         const openChild: GitHubIssue = {
             ...secondIssue,
