@@ -556,6 +556,8 @@ type ImplementationHarnessOptions = {
     readonly verification?: IssueVerificationService;
     readonly recovery?: IssueRecoveryService;
     readonly beforeRun?: (request: SessionRequest) => Promise<void>;
+    /** Size of the range diff the fake git operations return. */
+    readonly rangeDiffLength?: number;
 };
 
 const makeImplementationHarness = async (
@@ -617,7 +619,9 @@ const makeImplementationHarness = async (
         readRangeDiff: async (_path, base, head) => {
             trace.push("ops:readRangeDiff");
             rangeDiffs.push({ base, head });
-            return "diff --git a/x b/x";
+            return options.rangeDiffLength === undefined
+                ? "diff --git a/x b/x"
+                : `diff --git a/x b/x\n${"+".repeat(options.rangeDiffLength)}`;
         },
         squashCandidates: async () => {
             trace.push("ops:squash");
@@ -652,6 +656,12 @@ const makeImplementationHarness = async (
             ],
         }),
     };
+    const evidence: Array<{
+        readonly repositoryPath: string;
+        readonly name: string;
+        readonly contents: string;
+        removed: boolean;
+    }> = [];
     const executor = makeImplementationExecutorService(
         preparation,
         operations,
@@ -661,6 +671,18 @@ const makeImplementationHarness = async (
         verification,
         makeResolutionVerificationService(progress),
         router,
+        {
+            publish: async (input) => {
+                const entry = { ...input, removed: false };
+                evidence.push(entry);
+                return {
+                    path: `${input.repositoryPath}/.ralphie-review/${input.name}`,
+                    remove: async () => {
+                        entry.removed = true;
+                    },
+                };
+            },
+        },
     );
     return {
         executor,
@@ -671,6 +693,7 @@ const makeImplementationHarness = async (
         trace,
         events,
         verifyCalls,
+        evidence,
         recoveryInputs,
         recoveryTrace,
         commitMessages,
@@ -2457,6 +2480,43 @@ describe("two-axis review gate", () => {
         expect(standards?.prompt).toContain("<candidate-diff>");
         expect(spec?.prompt).toContain("The issue body is the contract.");
         expect(spec?.prompt).toContain(`Fixed point: ${CHECKPOINT.sha}`);
+    });
+
+    test("a diff over the prompt limit is published as a file the reviewers must read, and removed afterwards", async () => {
+        const harness = await makeImplementationHarness({
+            rangeDiffLength: 150_000,
+            scripts: [
+                implement,
+                ...reviewScripts({ structured: approvedReview }),
+            ],
+        });
+        await run(harness);
+        expect(harness.evidence).toHaveLength(1);
+        const [file] = harness.evidence;
+        expect(file?.contents).toContain("Commits, oldest first:");
+        expect(file?.contents.length).toBeGreaterThan(150_000);
+        expect(file?.removed).toBe(true);
+        for (const title of ["Review standards", "Review spec"]) {
+            const prompt = harness.fullPrompts.find((p: { title: string }) =>
+                p.title.startsWith(title),
+            );
+            expect(prompt?.prompt).toContain(
+                `${file?.repositoryPath}/.ralphie-review/candidate-diff.txt`,
+            );
+            expect(prompt?.prompt).toContain("Read that whole file");
+            expect(prompt?.prompt).toContain("candidate diff truncated");
+        }
+    });
+
+    test("a small diff stays in the prompt and publishes no file", async () => {
+        const harness = await makeImplementationHarness({
+            scripts: [
+                implement,
+                ...reviewScripts({ structured: approvedReview }),
+            ],
+        });
+        await run(harness);
+        expect(harness.evidence).toHaveLength(0);
     });
 
     test("smells never block", async () => {

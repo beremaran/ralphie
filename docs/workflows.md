@@ -118,8 +118,13 @@ flowchart TD
    parallel as read-only sessions on the checkpoint-to-candidate range, using
    the vendored `/code-review` axes. Reviewers cannot run Git (see
    [Safety](safety.md#agent-and-mutation-boundaries)), so Ralphie puts the
-   fixed point, commit list and range diff in each prompt. The standards reviewer
-   gets the repository's standards sources (`AGENTS.md`, `CLAUDE.md`,
+   fixed point, commit list and range diff in each prompt. A range diff over
+   100,000 characters is truncated in the prompt, so Ralphie also writes the
+   full commit list and diff to `.ralphie-review/candidate-diff.txt` in the
+   checkout (listed in `.git/info/exclude`, so it can never be staged), names
+   that path in both prompts and tells the reviewers to read it whole with their
+   Read tool before judging; the file is removed when the reviews end. The
+   standards reviewer gets the repository's standards sources (`AGENTS.md`, `CLAUDE.md`,
    `CONTRIBUTING.md`, `CODING_STANDARDS.md`, `GLOSSARY.md`, `docs/adr`,
    `docs/agents`) and the smell baseline; the spec reviewer gets the Agent
    Brief, or the issue body when there is none. Each returns structured
