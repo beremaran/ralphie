@@ -42,6 +42,15 @@ export type HandOffRouterService = {
         readonly context: IssueExecutionContext;
         readonly message: string;
     }) => Promise<IssueExecutionOutcome>;
+    /**
+     * Hand the issue off with a decision Ralphie itself reached (such as the
+     * decomposition depth limit), preserving diagnostics at the current
+     * checkout so the hand-off comment has a real location.
+     */
+    readonly handOffWithDecision: (input: {
+        readonly context: IssueExecutionContext;
+        readonly decision: HandOffDecision;
+    }) => Promise<IssueExecutionOutcome>;
 };
 
 export const issueFreshnessFingerprint = (
@@ -178,48 +187,56 @@ const recoverHandoff = async (
 
 export const makeHandOffRouterService = (
     recovery: IssueRecoveryService,
-): HandOffRouterService => ({
-    handOffSessionFailure: async ({ context, message }) => {
-        const captured = await context.repositoryInvariant.capture(
-            context.repositoryPath,
-            context.signal,
-        );
-        const decision: HandOffDecision = {
-            disposition: PreflightDisposition.HandOff,
-            reason: HandOffReason.NeedsHumanJudgment,
-            summary: `An agent session failed while Ralphie was working on issue #${context.issue.number}: ${message}`,
-            evidence: [message],
-            questions: [
-                "Check the harness and model configuration and the preserved diagnostics, then relabel the issue ready-for-agent to retry or handle it by hand.",
-            ],
+): HandOffRouterService => {
+    const handOffWithDecision: HandOffRouterService["handOffWithDecision"] =
+        async ({ context, decision }) => {
+            const captured = await context.repositoryInvariant.capture(
+                context.repositoryPath,
+                context.signal,
+            );
+            const recovered = await recovery.handleHandOff({
+                runId: context.runId,
+                repository: context.repository,
+                workspace: context.workspace,
+                repositoryPath: context.repositoryPath,
+                issue: context.issue,
+                checkpoint: { branch: captured.branch, sha: captured.head },
+                fingerprint: issueFreshnessFingerprint(context),
+                decision,
+                repositoryInvariant: context.repositoryInvariant,
+                signal: context.signal,
+            });
+            return outcome(decision, recovered.diagnosticsPath);
         };
-        const recovered = await recovery.handleHandOff({
-            runId: context.runId,
-            repository: context.repository,
-            workspace: context.workspace,
-            repositoryPath: context.repositoryPath,
-            issue: context.issue,
-            checkpoint: { branch: captured.branch, sha: captured.head },
-            fingerprint: issueFreshnessFingerprint(context),
-            decision,
-            repositoryInvariant: context.repositoryInvariant,
-            signal: context.signal,
-        });
-        return outcome(decision, recovered.diagnosticsPath);
-    },
-    route: async ({ context, artifacts, request, checkpoint }) => {
-        if (
-            request === undefined &&
-            !artifacts.has(IssueArtifactKind.PendingHandOff)
-        ) {
-            return undefined;
-        }
-        const fingerprint = issueFreshnessFingerprint(context);
-        const input = { context, artifacts, request, checkpoint };
-        const handoff = await loadHandoff(input, fingerprint);
-        if (handoff === undefined) return undefined;
-        const decision = await verifyHandoff(input, handoff);
-        if (decision === undefined) return undefined;
-        return await recoverHandoff(input, handoff, decision, recovery);
-    },
-});
+    return {
+        handOffWithDecision,
+        handOffSessionFailure: async ({ context, message }) =>
+            handOffWithDecision({
+                context,
+                decision: {
+                    disposition: PreflightDisposition.HandOff,
+                    reason: HandOffReason.NeedsHumanJudgment,
+                    summary: `An agent session failed while Ralphie was working on issue #${context.issue.number}: ${message}`,
+                    evidence: [message],
+                    questions: [
+                        "Check the harness and model configuration and the preserved diagnostics, then relabel the issue ready-for-agent to retry or handle it by hand.",
+                    ],
+                },
+            }),
+        route: async ({ context, artifacts, request, checkpoint }) => {
+            if (
+                request === undefined &&
+                !artifacts.has(IssueArtifactKind.PendingHandOff)
+            ) {
+                return undefined;
+            }
+            const fingerprint = issueFreshnessFingerprint(context);
+            const input = { context, artifacts, request, checkpoint };
+            const handoff = await loadHandoff(input, fingerprint);
+            if (handoff === undefined) return undefined;
+            const decision = await verifyHandoff(input, handoff);
+            if (decision === undefined) return undefined;
+            return await recoverHandoff(input, handoff, decision, recovery);
+        },
+    };
+};

@@ -153,10 +153,14 @@ evidence. A proven resolution is completed and closed. An unresolved result is
 fed back to a fresh implementation session for up to
 `limits.implementationAttempts` attempts. Every other terminal failure of
 an implementation (an exhausted retry budget, a review loop that repeats the
-same blocking findings, a failed or timed-out session, a review fix that
-changes nothing) ends in an `implementation_exhausted` hand-off, so a failing
-issue never returns to the queue unchanged. A run interrupted by a stop request
-is not a failure and hands nothing off. If the review budget is
+same blocking findings, a failed session, a timed-out fixer session, a review
+fix that changes nothing) ends in an `implementation_exhausted` hand-off, so a failing
+issue never returns to the queue unchanged. A timed-out implementer session counts as a
+failed implementation attempt: a fresh session retries, told that its
+predecessor timed out and may have left edits, while
+`limits.implementationAttempts` remain, and the last timeout hands off
+`ready-for-human`. A fixer timeout hands off directly without a retry. A run
+interrupted by a stop request is not a failure and hands nothing off. If the review budget is
 exhausted, Ralphie preserves the patch and review diagnostics, restores the
 clean checkpoint, and sends the issue through decomposition.
 

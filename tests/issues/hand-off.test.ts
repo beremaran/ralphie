@@ -49,6 +49,7 @@ import {
     handOffVerificationSchema,
     preflightDecisionSchema,
     type HandOffVerification,
+    type IssueResolutionDecision,
 } from "../../src/issues/domain/decisions.ts";
 import {
     implementationResultSchema,
@@ -60,6 +61,7 @@ import {
     type IssueExecutionContext,
     IssueExecutionOutcomeKind,
 } from "../../src/issues/app/execution.ts";
+import { DecompositionDepthLimitError } from "../../src/issues/domain/decomposition-markdown.ts";
 import { makeIssueExecutorService } from "../../src/issues/app/executor.ts";
 import {
     makeHandOffRouterService,
@@ -181,6 +183,8 @@ type FakeStructuredResponse = {
     readonly structured?: unknown;
     readonly handOff?: unknown;
     readonly error?: boolean;
+    /** The failure kind of an `error` response; defaults to "harness". */
+    readonly failureKind?: "timeout" | "access";
 };
 
 type FakeScript = {
@@ -253,7 +257,7 @@ const fakePi = (
             return {
                 ok: false,
                 failure: {
-                    kind: "harness",
+                    kind: response.failureKind ?? "harness",
                     message: `fake prompt failure for ${title}`,
                 },
             };
@@ -551,13 +555,15 @@ type ImplementationHarnessOptions = {
     readonly recoveryFailure?: boolean;
     readonly budgets?: Pick<
         IssueExecutionContext,
-        "reviewRounds" | "verificationFixes"
+        "reviewRounds" | "verificationFixes" | "implementationAttempts"
     >;
     readonly verification?: IssueVerificationService;
     readonly recovery?: IssueRecoveryService;
     readonly beforeRun?: (request: SessionRequest) => Promise<void>;
     /** Size of the range diff the fake git operations return. */
     readonly rangeDiffLength?: number;
+    /** Whether the Nth (1-based) `hasStagedChanges` call sees staged changes. */
+    readonly hasStaged?: (call: number) => boolean;
 };
 
 const makeImplementationHarness = async (
@@ -594,6 +600,7 @@ const makeImplementationHarness = async (
     const candidateSubjects: string[] = [];
     const rangeDiffs: Array<{ base: string; head: string }> = [];
     const pushedShas: string[] = [];
+    let stagedChecks = 0;
     const operations: GitIssueOperationsService = {
         stageAll: async () => {
             trace.push("ops:stageAll");
@@ -604,7 +611,8 @@ const makeImplementationHarness = async (
         },
         hasStagedChanges: async () => {
             trace.push("ops:hasStaged");
-            return true;
+            stagedChecks += 1;
+            return options.hasStaged?.(stagedChecks) ?? true;
         },
         commit: async (_path, message) => {
             commitMessages.push(message);
@@ -1369,6 +1377,54 @@ describe("issue executor hand-off routing", () => {
         expect(outcome.kind).toBe(IssueExecutionOutcomeKind.Decomposed);
         expect(trace).toContain("decomposition:42");
         expect(trace).not.toContain("implementation:42");
+    });
+
+    const depthLimit = {
+        execute: async () => {
+            throw new DecompositionDepthLimitError(4, 3);
+        },
+    } satisfies DecompositionExecutorService;
+    const decomposeGrounding: PreflightAssessmentService = {
+        assess: async () => ({
+            decision: {
+                disposition: PreflightDisposition.Actionable,
+                fitsOneSession: false,
+            },
+            sessionID: "preflight-1",
+        }),
+    };
+
+    test("a decomposition depth limit hands off with preserved diagnostics", async () => {
+        const harness = await makeExecutorHarness({
+            grounding: decomposeGrounding,
+            decomposition: depthLimit,
+        });
+        const outcome = await harness.executor.execute(harness.context);
+        expect(outcome).toMatchObject({
+            kind: IssueExecutionOutcomeKind.HandOff,
+            reason: HandOffReason.DecompositionLimitReached,
+            diagnosticsPath: "/diag/hand-off",
+        });
+        expect(harness.recoveryInputs).toHaveLength(1);
+        expect(harness.recoveryInputs[0]?.decision.reason).toBe(
+            HandOffReason.DecompositionLimitReached,
+        );
+    });
+
+    test("a decomposition depth limit still hands off when no router is wired", async () => {
+        const harness = await makeExecutorHarness({
+            grounding: decomposeGrounding,
+            decomposition: depthLimit,
+            withRouter: false,
+        });
+        const outcome = await harness.executor.execute(harness.context);
+        expect(outcome).toMatchObject({
+            kind: IssueExecutionOutcomeKind.HandOff,
+            reason: HandOffReason.DecompositionLimitReached,
+        });
+        expect(
+            (outcome as { diagnosticsPath?: string }).diagnosticsPath,
+        ).toBeUndefined();
     });
 
     test("skips an issue blocked by an open issue without implementing", async () => {
@@ -2911,5 +2967,307 @@ describe("fixes resume the implementer session", () => {
         expect(
             fixRequests(harness.requests, "Repair verification for issue #42"),
         ).toHaveLength(2);
+    });
+});
+describe("no-change implementation attempts", () => {
+    const implement: FakeScript = {
+        titlePrefix: "Implement issue #42",
+        result: { structured: implementationChanged },
+    };
+    const resolver = (
+        status: "resolved" | "unresolved",
+        summary: string,
+    ): FakeScript => ({
+        titlePrefix: "Verify resolution of issue #42",
+        result: { structured: { status, summary, evidence: ["checked"] } },
+    });
+    const execute = (
+        harness: Awaited<ReturnType<typeof makeImplementationHarness>>,
+        extra: { unresolvedResolution?: IssueResolutionDecision } = {},
+    ) =>
+        harness.executor.execute({
+            context: harness.context,
+            artifacts: harness.store,
+            ...extra,
+        });
+    const implementPrompts = (
+        harness: Awaited<ReturnType<typeof makeImplementationHarness>>,
+    ) =>
+        harness.fullPrompts.filter(({ title }) =>
+            title.startsWith("Implement issue #42"),
+        );
+
+    test("completes as already-resolved when the verifier confirms it", async () => {
+        const harness = await makeImplementationHarness({
+            hasStaged: () => false,
+            scripts: [implement, resolver("resolved", "Already done.")],
+        });
+        const outcome = await execute(harness);
+        expect(outcome).toMatchObject({
+            kind: IssueExecutionOutcomeKind.Completed,
+            completion: "already-resolved",
+            resolutionSummary: "Already done.",
+        });
+        expect(harness.trace).not.toContain("ops:commit");
+        expect(harness.trace).not.toContain("ops:push");
+    });
+
+    test("retries with the verifier's summary while attempts remain", async () => {
+        const harness = await makeImplementationHarness({
+            hasStaged: (call) => call >= 2,
+            scripts: [
+                implement,
+                resolver("unresolved", "The parser still ignores flags."),
+                ...reviewScripts({ structured: approvedReview }),
+            ],
+        });
+        const outcome = await execute(harness);
+        expect(outcome).toMatchObject({ completion: "pushed-commit" });
+        const prompts = implementPrompts(harness);
+        expect(prompts).toHaveLength(2);
+        expect(prompts[1]?.prompt).toContain("implementation attempt 2");
+        expect(prompts[1]?.prompt).toContain("The parser still ignores flags.");
+    });
+
+    test("fails exhausted on the final attempt and hands the issue off", async () => {
+        const harness = await makeImplementationHarness({
+            budgets: { implementationAttempts: 2 },
+            hasStaged: () => false,
+            scripts: [
+                implement,
+                resolver("unresolved", "Nothing was changed."),
+            ],
+        });
+        const outcome = await execute(harness);
+        expect(implementPrompts(harness)).toHaveLength(2);
+        expect(outcome).toMatchObject({
+            kind: IssueExecutionOutcomeKind.HandOff,
+            reason: HandOffReason.ImplementationExhausted,
+            diagnosticsPath: "/diag/hand-off",
+            summary: expect.stringContaining(
+                "remains unresolved after 2 no-change implementation attempts",
+            ),
+        });
+        expect(harness.trace).not.toContain("ops:push");
+    });
+
+    test("an earlier unresolved verification drives the first prompt", async () => {
+        const harness = await makeImplementationHarness({
+            scripts: [
+                implement,
+                ...reviewScripts({ structured: approvedReview }),
+            ],
+        });
+        const outcome = await execute(harness, {
+            unresolvedResolution: {
+                status: IssueResolutionStatus.Unresolved,
+                summary: "The checkout lacks the flag.",
+                evidence: ["no --flag in options.ts"],
+            },
+        });
+        expect(outcome).toMatchObject({ completion: "pushed-commit" });
+        const [first] = implementPrompts(harness);
+        expect(first?.prompt).toContain("rejected an earlier tentative");
+        expect(first?.prompt).toContain("The checkout lacks the flag.");
+        expect(first?.prompt).toContain("no --flag in options.ts");
+    });
+});
+
+describe("implementation executor failure accounting", () => {
+    const implement: FakeScript = {
+        titlePrefix: "Implement issue #42",
+        result: { structured: implementationChanged },
+    };
+    const execute = (
+        harness: Awaited<ReturnType<typeof makeImplementationHarness>>,
+    ) =>
+        harness.executor.execute({
+            context: harness.context,
+            artifacts: harness.store,
+        });
+    const titled = (
+        harness: Awaited<ReturnType<typeof makeImplementationHarness>>,
+        prefix: string,
+    ) => harness.prompts.filter(({ title }) => title.startsWith(prefix));
+    const redVerification: IssueVerificationService = {
+        stagedTreeSha: async () => TREE_SHA,
+        verify: async () => {
+            throw new VerificationCommandError({
+                stagedTreeSha: TREE_SHA,
+                commands: [
+                    {
+                        command: "bun test",
+                        exitCode: 1,
+                        stdout: "",
+                        stderr: "red",
+                    },
+                ],
+            });
+        },
+    };
+
+    test("a needs_attention result the verifier rejects continues with the fallback commit message", async () => {
+        const harness = await makeImplementationHarness({
+            scripts: [
+                {
+                    titlePrefix: "Implement issue #42",
+                    result: { structured: implementationHandoff },
+                },
+                {
+                    titlePrefix: VERIFIER_TITLE,
+                    result: {
+                        structured: {
+                            disposition: PreflightDisposition.Actionable,
+                        },
+                    },
+                },
+                ...reviewScripts({ structured: approvedReview }),
+            ],
+        });
+        const outcome = await execute(harness);
+        expect(outcome).toMatchObject({ completion: "pushed-commit" });
+        expect(harness.candidateSubjects).toEqual(["Address issue #42"]);
+        expect(harness.commitMessages).toEqual([
+            { subject: "Address issue #42" },
+        ]);
+        expect(harness.recoveryInputs).toHaveLength(0);
+    });
+
+    test("an implementer timeout is a failed attempt that retries", async () => {
+        const harness = await makeImplementationHarness({
+            scripts: [
+                {
+                    titlePrefix: "Implement issue #42",
+                    count: 1,
+                    result: { error: true, failureKind: "timeout" },
+                },
+                implement,
+                ...reviewScripts({ structured: approvedReview }),
+            ],
+        });
+        const outcome = await execute(harness);
+        expect(outcome).toMatchObject({ completion: "pushed-commit" });
+        const implementers = harness.fullPrompts.filter(({ title }) =>
+            title.startsWith("Implement issue #42"),
+        );
+        expect(implementers).toHaveLength(2);
+        expect(implementers[1]?.prompt).toContain("implementation attempt 2");
+        expect(implementers[1]?.prompt).toContain("timed out");
+        expect(harness.recoveryInputs).toHaveLength(0);
+    });
+
+    test("implementer timeouts hand off once the attempts are used up", async () => {
+        const harness = await makeImplementationHarness({
+            budgets: { implementationAttempts: 2 },
+            scripts: [
+                {
+                    titlePrefix: "Implement issue #42",
+                    result: { error: true, failureKind: "timeout" },
+                },
+            ],
+        });
+        const outcome = await execute(harness);
+        expect(titled(harness, "Implement issue #42")).toHaveLength(2);
+        expect(outcome).toMatchObject({
+            kind: IssueExecutionOutcomeKind.HandOff,
+            reason: HandOffReason.ImplementationExhausted,
+            summary: expect.stringContaining("timeout"),
+        });
+        expect(harness.trace).not.toContain("ops:push");
+    });
+
+    test("a fixer timeout hands off without another implementation attempt", async () => {
+        const harness = await makeImplementationHarness({
+            verification: redVerification,
+            scripts: [
+                implement,
+                {
+                    titlePrefix: "Repair verification for issue #42",
+                    result: { error: true, failureKind: "timeout" },
+                },
+            ],
+        });
+        const outcome = await execute(harness);
+        expect(outcome.kind).toBe(IssueExecutionOutcomeKind.HandOff);
+        expect(titled(harness, "Implement issue #42")).toHaveLength(1);
+        expect(harness.trace).not.toContain("ops:push");
+    });
+
+    test("a read-only role denied access fails closed with no commit or push", async () => {
+        const harness = await makeImplementationHarness({
+            scripts: [
+                implement,
+                {
+                    titlePrefix: "Review standards for issue #42",
+                    result: { error: true, failureKind: "access" },
+                },
+                {
+                    titlePrefix: "Review spec for issue #42",
+                    result: { structured: approvedSpecReview },
+                },
+            ],
+        });
+        const outcome = await execute(harness);
+        expect(outcome).toMatchObject({
+            kind: IssueExecutionOutcomeKind.HandOff,
+            reason: HandOffReason.ImplementationExhausted,
+            summary: expect.stringContaining("access"),
+        });
+        expect(harness.trace).not.toContain("ops:commit");
+        expect(harness.trace).not.toContain("ops:push");
+        expect(harness.pushedShas).toEqual([]);
+    });
+
+    test("a verification repair that changes the approved tree on the last round fails instead of re-reviewing", async () => {
+        let verifications = 0;
+        const green = (stagedTreeSha: string) => ({
+            stagedTreeSha,
+            commands: [
+                { command: "test", exitCode: 0, stdout: "", stderr: "" },
+            ],
+        });
+        const harness = await makeImplementationHarness({
+            budgets: { reviewRounds: 1 },
+            scripts: [
+                implement,
+                ...reviewScripts({ structured: approvedReview }),
+                {
+                    titlePrefix: "Repair verification for issue #42",
+                    result: {},
+                },
+            ],
+            verification: {
+                stagedTreeSha: async () => TREE_SHA,
+                verify: async () => {
+                    verifications += 1;
+                    if (verifications === 2) {
+                        throw new VerificationCommandError({
+                            stagedTreeSha: TREE_SHA,
+                            commands: [
+                                {
+                                    command: "test",
+                                    exitCode: 1,
+                                    stdout: "",
+                                    stderr: "boom",
+                                },
+                            ],
+                        });
+                    }
+                    return green(verifications < 2 ? TREE_SHA : "9".repeat(40));
+                },
+            },
+        });
+        const outcome = await execute(harness);
+        expect(outcome).toMatchObject({
+            kind: IssueExecutionOutcomeKind.HandOff,
+            summary: expect.stringContaining(
+                "changed the staged tree after the final review attempt",
+            ),
+        });
+        expect(titled(harness, "Review standards for issue #42")).toHaveLength(
+            1,
+        );
+        expect(harness.trace).not.toContain("ops:commit");
+        expect(harness.trace).not.toContain("ops:push");
     });
 });

@@ -1,4 +1,4 @@
-import { haltingFailure } from "../../agent/sessions.ts";
+import { haltingFailure, isSessionFailure } from "../../agent/sessions.ts";
 import {
     type GitIssueOperationError,
     type GitIssueOperationsService,
@@ -217,10 +217,19 @@ const promptInput = (context: IssueExecutionContext) => ({
     ),
 });
 
+/** Why an earlier implementation attempt is being retried. */
+type RetryReason =
+    | { readonly kind: "unresolved"; readonly summary: string }
+    | { readonly kind: "timeout" };
+
+const isTimeoutFailure = (error: unknown): boolean =>
+    isSessionFailure(error) &&
+    (error as { cause: { kind: string } }).cause.kind === "timeout";
+
 const implementationPrompt = (
     input: WorkflowExecutorInput,
     attempt: number,
-    unresolvedSummary: string | undefined,
+    retry: RetryReason | undefined,
 ): string => {
     const { context, unresolvedResolution } = input;
     if (attempt === 1 && unresolvedResolution !== undefined) {
@@ -230,12 +239,17 @@ const implementationPrompt = (
             evidence: unresolvedResolution.evidence,
         });
     }
-    if (unresolvedSummary !== undefined) {
+    if (retry?.kind === "unresolved") {
         return buildImplementationRetryPrompt({
             ...promptInput(context),
-            unresolvedSummary,
+            unresolvedSummary: retry.summary,
             attempt,
         });
+    }
+    if (retry?.kind === "timeout") {
+        return `${buildImplementationPrompt(promptInput(context))}
+
+This is implementation attempt ${attempt}. The previous implementation session timed out before it submitted a result. Its edits may remain in the checkout: inspect them, finish the work and submit the implementation result.`;
     }
     return buildImplementationPrompt(promptInput(context));
 };
@@ -459,10 +473,10 @@ export const makeImplementationExecutorService = (
         checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
         attempt: number,
         fix: FixSession,
-        unresolvedSummary?: string,
+        retry?: RetryReason,
     ): Promise<WorkflowExecutorResult | CommitMessageDecision> => {
         const { context } = input;
-        const prompt = implementationPrompt(input, attempt, unresolvedSummary);
+        const prompt = implementationPrompt(input, attempt, retry);
         const result = await stage(
             progress,
             input,
@@ -1219,6 +1233,77 @@ export const makeImplementationExecutorService = (
         });
     };
 
+    /** A timeout is a failed attempt: it retries while attempts remain. */
+    const runImplementationOrTimeout = async (
+        input: WorkflowExecutorInput,
+        invariant: { readonly branch: string; readonly head: string },
+        checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
+        attempt: number,
+        fix: FixSession,
+        retry: RetryReason | undefined,
+    ): Promise<
+        WorkflowExecutorResult | CommitMessageDecision | "timed-out"
+    > => {
+        try {
+            return await runImplementation(
+                input,
+                invariant,
+                checkpoint,
+                attempt,
+                fix,
+                retry,
+            );
+        } catch (error) {
+            if (
+                !isTimeoutFailure(error) ||
+                attempt >= implementationBudget(input.context) ||
+                input.context.signal?.aborted === true
+            ) {
+                throw error;
+            }
+            return "timed-out";
+        }
+    };
+
+    /** Stage the attempt: review staged changes, or verify a no-change result. */
+    const stageAndInspect = async (
+        input: WorkflowExecutorInput,
+        checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
+        invariant: { readonly branch: string; readonly head: string },
+        fix: FixSession,
+        commitMessage: CommitMessageDecision,
+        attempt: number,
+    ): Promise<
+        WorkflowExecutorResult | { readonly unresolvedSummary: string }
+    > => {
+        const { context } = input;
+        const maximumAttempts = implementationBudget(context);
+        checkSignal(context.signal);
+        await stage(
+            progress,
+            input,
+            "change-staging",
+            `Inspecting and staging implementation attempt ${attempt}...`,
+            () => operations.stageAll(context.repositoryPath),
+            `Implementation attempt ${attempt} inspected.`,
+            undefined,
+            { attempt, maxAttempts: maximumAttempts },
+        );
+        if (await operations.hasStagedChanges(context.repositoryPath)) {
+            await input.artifacts.write(
+                IssueArtifactKind.CommitMessageDecision,
+                commitMessage,
+                context.signal,
+            );
+            return await runReviewLoop(input, checkpoint, invariant, fix);
+        }
+        return await inspectNoChangeResolution(
+            input,
+            checkpoint,
+            attempt === maximumAttempts,
+        );
+    };
+
     const runImplementationAttempts = async (
         input: WorkflowExecutorInput,
         checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
@@ -1227,43 +1312,37 @@ export const makeImplementationExecutorService = (
         const { context } = input;
         const maximumAttempts = implementationBudget(context);
         const fix = newFixSession(context.agent.roles.implementer.harness);
-        let unresolvedSummary: string | undefined;
+        let retry: RetryReason | undefined;
         for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
-            const implementation = await runImplementation(
+            const implementation = await runImplementationOrTimeout(
                 input,
                 invariant,
                 checkpoint,
                 attempt,
                 fix,
-                unresolvedSummary,
+                retry,
             );
-            if ("kind" in implementation) return implementation;
-            checkSignal(context.signal);
-            await stage(
-                progress,
-                input,
-                "change-staging",
-                `Inspecting and staging implementation attempt ${attempt}...`,
-                () => operations.stageAll(context.repositoryPath),
-                `Implementation attempt ${attempt} inspected.`,
-                undefined,
-                { attempt, maxAttempts: maximumAttempts },
-            );
-            if (await operations.hasStagedChanges(context.repositoryPath)) {
-                await input.artifacts.write(
-                    IssueArtifactKind.CommitMessageDecision,
-                    implementation,
-                    context.signal,
-                );
-                return await runReviewLoop(input, checkpoint, invariant, fix);
+            if (implementation === "timed-out") {
+                retry = { kind: "timeout" };
+                continue;
             }
-            const noChange = await inspectNoChangeResolution(
+            if ("kind" in implementation) return implementation;
+            const outcome = await stageAndInspect(
                 input,
                 checkpoint,
-                attempt === maximumAttempts,
+                invariant,
+                fix,
+                implementation,
+                attempt,
             );
-            if (!("unresolvedSummary" in noChange)) return noChange;
-            unresolvedSummary = noChange.unresolvedSummary;
+            if ("unresolvedSummary" in outcome) {
+                retry = {
+                    kind: "unresolved",
+                    summary: outcome.unresolvedSummary,
+                };
+                continue;
+            }
+            return outcome;
         }
         throw new RalphieError({
             message: "Implementation retry loop ended unexpectedly.",

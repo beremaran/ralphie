@@ -230,7 +230,7 @@ All limits are positive; counts are integers.
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `limits.implementationAttempts` | `3` | Implementation attempts allowed when sessions leave an unresolved empty diff. |
+| `limits.implementationAttempts` | `3` | Implementation attempts allowed when sessions leave an unresolved empty diff or an implementer session times out. After the last attempt the issue is handed off `ready-for-human`. |
 | `limits.reviewRounds` | `5` | Review rounds before the issue escalates to decomposition. At most `20`. |
 | `limits.verificationFixes` | `5` | Repair attempts allowed after a failing `verify` command. |
 | `limits.sessionTimeoutMinutes.edit` | `60` | Wall-clock limit of one session in an editing role. Exceeding it kills the session's process group and counts as a failed attempt. |
