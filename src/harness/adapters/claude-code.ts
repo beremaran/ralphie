@@ -1,3 +1,4 @@
+import { kindForStatus } from "../failure-classification.ts";
 import {
     CommandAbortedError,
     CommandTimeoutError,
@@ -106,7 +107,9 @@ const resultFailureKind = (
     ) {
         return "model";
     }
-    return "harness";
+    if (summary.assistantError === "rate_limit") return "transient";
+    if (summary.assistantError === "authentication_failed") return "auth";
+    return kindForStatus(result.apiErrorStatus) ?? "harness";
 };
 
 const describeResultFailure = (result: ClaudeResult): string => {

@@ -13,6 +13,13 @@ Changed sections before upgrading.
 
 ### Added
 
+- Transient harness failures no longer hand issues off. A rate, usage, session
+  or quota limit, an overloaded or unreachable provider, exhausted credits or an
+  expired login now defers the issue untouched (no labels or comments change),
+  stops the rest of the queue, and exits `75` with a message naming the failure
+  and its reset time. Definite failures still hand off. `scripts/live-smoke.ts`
+  reports such a halt as INCONCLUSIVE and requires a decomposition to have a
+  child worked to a genuine outcome before it passes.
 - Harnesses and roles. Every agent session runs on a headless harness CLI:
   Claude Code (`claude`, the default), Codex (`codex`), pi (`pi`) or OpenCode
   (`opencode`). The `harnesses` (per-harness `model`, `effort`, `approval`) and
@@ -114,8 +121,9 @@ Changed sections before upgrading.
   artifacts are renamed (`hand-off`, `hand_off`, `hand-off-decision`,
   `pending-hand-off`). The implementer's own result keeps
   `status: needs_attention`, which is routed as a hand-off request.
-- Breaking: run state is version 14 (version 13 replaced `selection` with the
-  per-role assignments, 14 renamed the hand-off fields). Older state is not
+- Breaking: run state is version 15 (version 13 replaced `selection` with the
+  per-role assignments, 14 renamed the hand-off fields, 15 added the `deferred`
+  outcome). Older state is not
   migrated, and artifacts written by earlier versions (`complexity-decision`,
   decomposition breakdowns with `body` and `estimatedComplexity`) are not read.
 - Breaking: `--output json` carries `session_event` records instead of

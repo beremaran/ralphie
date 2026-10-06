@@ -21,6 +21,8 @@ export enum IssueExecutionOutcomeKind {
     HandOff = "hand-off",
     Escalated = "escalated",
     Skipped = "skipped",
+    /** The environment (limit, outage, expired login) stopped the issue. */
+    Deferred = "deferred",
     Failed = "failed",
 }
 
@@ -81,6 +83,13 @@ export type IssueExecutionOutcome =
     | {
           readonly kind: IssueExecutionOutcomeKind.Skipped;
           readonly reason: string;
+      }
+    | {
+          readonly kind: IssueExecutionOutcomeKind.Deferred;
+          /** Why the run halted, naming the failure and any reset time. */
+          readonly reason: string;
+          readonly cause: "transient" | "auth";
+          readonly resetHint?: string;
       }
     | {
           readonly kind: IssueExecutionOutcomeKind.Failed;

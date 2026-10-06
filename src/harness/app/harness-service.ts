@@ -1,3 +1,4 @@
+import { classifyFailure } from "../failure-classification.ts";
 import type { z } from "zod";
 
 import type { IdGenerator } from "../../run/ports.ts";
@@ -254,11 +255,14 @@ export const makeHarnessService = (deps: Dependencies): HarnessService => {
                 : await runPrepared(deps.preparation, request, () =>
                       runOnAdapter(adapter, request, emit, maxCorrections),
                   );
-        if (!outcome.ok) {
-            emit({ type: "error", message: outcome.failure.message });
+        const settled: HarnessOutcome<unknown> = outcome.ok
+            ? outcome
+            : { ok: false, failure: classifyFailure(outcome.failure) };
+        if (!settled.ok) {
+            emit({ type: "error", message: settled.failure.message });
         }
         emit({ type: "session_finished" });
-        return outcome;
+        return settled;
     };
 
     return { run: run as HarnessService["run"] };

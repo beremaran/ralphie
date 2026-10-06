@@ -185,6 +185,12 @@ stateDiagram-v2
 - One issue failure restores its checkout, persists the failed outcome, retains
   artifacts, and continues to later issues.
 - Ordinary failures set process exit code `1`.
+- A limit, outage or expired login ends the run early. The affected issue is
+  recorded as `deferred` after its checkout is restored, nothing on GitHub
+  changes, no later issue starts, and the process exits `75` with a message
+  that names the failure and the reset time when the harness reports one. State
+  and artifacts are kept and cleanup is skipped. Rerun after the limit clears
+  or you sign in again.
 - Cancellation is checked before long-running boundaries and passed to the running session, which is killed.
   Ralphie attempts to restore the clean issue checkpoint, saves state with the
   active issue, skips cleanup, and exits `130`.
@@ -272,7 +278,7 @@ published atomically before the exact checkpoint is restored and verified.
 
 There is no resume command. When a run fails or is interrupted:
 
-1. the process exits `1` (or `130` on cancellation);
+1. the process exits `1` (`75` after a limit or outage, `130` on cancellation);
 2. the workspace retains `state.json`, `events.jsonl`, and per-issue artifacts
    for diagnosis;
 3. issues that were not closed remain open and are selected again on the next

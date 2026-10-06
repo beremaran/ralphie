@@ -14,6 +14,17 @@ import { parseArgs } from "node:util";
 export const HARNESSES = ["claude", "codex", "pi", "opencode"] as const;
 export type SmokeHarness = (typeof HARNESSES)[number];
 
+/**
+ * Ralphie's exit code when a limit, outage or expired login halted the run
+ * (RalphieExitCode.Halted). The run proved nothing, so it is inconclusive.
+ */
+export const HALTED_EXIT_CODE = 75;
+export const HAND_OFF_MARKER = "ralphie:hand-off";
+const HUMAN_LABELS = ["ready-for-human", "needs-info"];
+/** Wording of a hand-off that blames the harness instead of the issue. */
+const HARNESS_FAILURE_COMMENT =
+    /agent session failed|session limit|usage limit|rate[ _-]?limit|overloaded|quota/i;
+
 export const SCRATCH_ENV = "RALPHIE_SMOKE_SCRATCH_REPO";
 export const READY_LABEL = "ready-for-agent";
 const PROTECTED_REPOSITORIES = ["beremaran/ralphie"];
@@ -130,6 +141,54 @@ export const smokeScenarios = (harness: SmokeHarness): SmokeScenario[] => [
     },
 ];
 
+/** A child issue as `gh issue list --json` reports it, flattened. */
+export type SmokeChild = {
+    readonly number: number;
+    readonly state: string;
+    readonly stateReason?: string | null;
+    readonly labels: readonly string[];
+    readonly comments: readonly string[];
+};
+
+const worked = (child: SmokeChild): boolean => {
+    if (child.state === "CLOSED") return child.stateReason === "COMPLETED";
+    const handedOff = child.comments.some((body) =>
+        body.includes(HAND_OFF_MARKER),
+    );
+    return (
+        handedOff &&
+        child.labels.some((label) => HUMAN_LABELS.includes(label)) &&
+        !child.comments.some((body) => HARNESS_FAILURE_COMMENT.test(body))
+    );
+};
+
+/**
+ * A decomposition only counts when Ralphie then worked a child to a genuine
+ * terminal outcome: closed as completed (the script's own cleanup closes as
+ * not planned), or handed off for a real reason. Children that exist but
+ * were never worked, or that were handed off because the harness failed, do
+ * not prove the run.
+ */
+export const judgeDecomposition = (
+    children: readonly SmokeChild[],
+): string | undefined => {
+    if (children.length === 0) return "decomposition created no child issues";
+    return children.some(worked)
+        ? undefined
+        : "no child issue was worked to a genuine outcome (completed, or handed off for a real reason)";
+};
+
+export type SmokeVerdict = "PASS" | "FAIL" | "INCONCLUSIVE";
+
+/** A transient halt proves nothing either way; any other problem fails. */
+export const smokeVerdict = (
+    exitCode: number,
+    problems: readonly string[],
+): SmokeVerdict => {
+    if (exitCode === HALTED_EXIT_CODE) return "INCONCLUSIVE";
+    return exitCode === 0 && problems.length === 0 ? "PASS" : "FAIL";
+};
+
 type Run = {
     readonly code: number;
     readonly stdout: string;
@@ -161,7 +220,13 @@ const gh = async (...args: string[]): Promise<string> => {
     return result.stdout;
 };
 
-type IssueView = { number: number; state: string };
+type IssueView = {
+    number: number;
+    state: string;
+    stateReason?: string | null;
+    labels?: { name: string }[];
+    comments?: { body: string }[];
+};
 
 const listIssues = async (
     repository: string,
@@ -179,7 +244,7 @@ const listIssues = async (
             "100",
             ...(label === undefined ? [] : ["--label", label]),
             "--json",
-            "number,state",
+            "number,state,stateReason,labels,comments",
         ),
     ) as IssueView[];
 
@@ -199,11 +264,19 @@ const verify = async (
         problems.push("hand-off issue should stay open for a human");
     }
     const newest = Math.max(...created.values());
-    if (
-        !(await listIssues(repository)).some((issue) => issue.number > newest)
-    ) {
-        problems.push("decomposition created no child issues");
-    }
+    const children = (await listIssues(repository))
+        .filter((issue) => issue.number > newest)
+        .map(
+            (issue): SmokeChild => ({
+                number: issue.number,
+                state: issue.state,
+                stateReason: issue.stateReason ?? null,
+                labels: (issue.labels ?? []).map(({ name }) => name),
+                comments: (issue.comments ?? []).map(({ body }) => body),
+            }),
+        );
+    const decomposition = judgeDecomposition(children);
+    if (decomposition !== undefined) problems.push(decomposition);
     return problems;
 };
 
@@ -244,7 +317,7 @@ const runRalphie = async (
     options: SmokeOptions,
     harness: SmokeHarness,
     directory: string,
-): Promise<string | undefined> => {
+): Promise<{ readonly code: number; readonly failure?: string }> => {
     const config = join(directory, "config.yaml");
     await writeFile(config, smokeConfig(harness, join(directory, "workspace")));
     const entry = join(resolve(import.meta.dir, ".."), "index.ts");
@@ -254,24 +327,31 @@ const runRalphie = async (
     );
     console.log(result.stdout.slice(-2000));
     return result.code === 0
-        ? undefined
-        : `ralphie exited ${result.code}: ${result.stderr.trim().slice(-500)}`;
+        ? { code: 0 }
+        : {
+              code: result.code,
+              failure: `ralphie exited ${result.code}: ${result.stderr.trim().slice(-500)}`,
+          };
 };
 
 const smokeHarness = async (
     options: SmokeOptions,
     harness: SmokeHarness,
-): Promise<string[]> => {
+): Promise<{ readonly exitCode: number; readonly problems: string[] }> => {
     const label = `smoke-${harness}`;
     const created = await fileScenarios(options, harness, label);
     const directory = await mkdtemp(
         join(tmpdir(), `ralphie-smoke-${harness}-`),
     );
     try {
-        const failure = await runRalphie(options, harness, directory);
-        return failure === undefined
-            ? await verify(options.repository, label, created)
-            : [failure];
+        const { code, failure } = await runRalphie(options, harness, directory);
+        return {
+            exitCode: code,
+            problems:
+                failure === undefined
+                    ? await verify(options.repository, label, created)
+                    : [failure],
+        };
     } finally {
         await rm(directory, { recursive: true, force: true });
         if (!options.keepIssues) {
@@ -282,6 +362,8 @@ const smokeHarness = async (
                     String(issue.number),
                     "--repo",
                     options.repository,
+                    "--reason",
+                    "not planned",
                 );
             }
         }
@@ -300,13 +382,16 @@ const smokeOne = async (
         return true;
     }
     try {
-        const problems = await smokeHarness(options, harness);
+        const { exitCode, problems } = await smokeHarness(options, harness);
+        const verdict = smokeVerdict(exitCode, problems);
         console.log(
-            problems.length === 0
-                ? `PASS ${harness}`
-                : `FAIL ${harness}: ${problems.join("; ")}`,
+            verdict === "INCONCLUSIVE"
+                ? `INCONCLUSIVE ${harness}: ralphie halted on a limit, outage or expired login; rerun when it clears (${problems.join("; ")})`
+                : verdict === "PASS"
+                  ? `PASS ${harness}`
+                  : `FAIL ${harness}: ${problems.join("; ")}`,
         );
-        return problems.length === 0;
+        return verdict !== "FAIL";
     } catch (error) {
         console.log(`FAIL ${harness}: ${describeError(error)}`);
         return false;

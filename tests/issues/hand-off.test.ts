@@ -1268,6 +1268,53 @@ describe("issue executor hand-off routing", () => {
             expect(outcome.kind).toBe(IssueExecutionOutcomeKind.HandOff);
         });
 
+        test("a usage limit defers the issue without handing it off", async () => {
+            const harness = await makeExecutorHarness({
+                grounding: preflightFailing(
+                    sessionFailure("preflight", {
+                        kind: "transient",
+                        message: "You've hit your session limit",
+                        resetHint: "3:10pm",
+                    }),
+                ),
+            });
+            const outcome = await harness.executor.execute(harness.context);
+            expect(outcome).toMatchObject({
+                kind: IssueExecutionOutcomeKind.Deferred,
+                cause: "transient",
+                resetHint: "3:10pm",
+            });
+            expect(harness.recoveryInputs).toHaveLength(0);
+        });
+
+        test("expired credentials defer the issue as an auth halt", async () => {
+            const harness = await makeExecutorHarness({
+                grounding: {
+                    assess: async () => ({
+                        decision: {
+                            disposition: GroundingDisposition.Actionable,
+                            fitsOneSession: false,
+                        },
+                        sessionID: "preflight-1",
+                    }),
+                },
+                decomposition: {
+                    execute: async () => {
+                        throw sessionFailure("decomposer", {
+                            kind: "auth",
+                            message: "not logged in",
+                        });
+                    },
+                },
+            });
+            const outcome = await harness.executor.execute(harness.context);
+            expect(outcome).toMatchObject({
+                kind: IssueExecutionOutcomeKind.Deferred,
+                cause: "auth",
+            });
+            expect(harness.recoveryInputs).toHaveLength(0);
+        });
+
         test("checkout and GitHub errors keep failing so the next run retries", async () => {
             const harness = await makeExecutorHarness({
                 grounding: preflightFailing(

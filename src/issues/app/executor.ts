@@ -1,6 +1,10 @@
 import { type ProgressReporterService } from "../../progress/ports.ts";
 import { RalphieError } from "../../shared/error.ts";
-import { isAbortedSession, isSessionFailure } from "../../agent/sessions.ts";
+import {
+    haltingFailure,
+    isAbortedSession,
+    isSessionFailure,
+} from "../../agent/sessions.ts";
 import { DecompositionDepthLimitError } from "../domain/decomposition-markdown.ts";
 import {
     IssueArtifactKind,
@@ -290,6 +294,28 @@ export const makeIssueExecutorService = (
     };
 
     /**
+     * A limit, outage or expired login says nothing about the issue: it is
+     * deferred untouched and the run halts, so no label or comment changes.
+     */
+    const deferredOutcome = (
+        context: IssueExecutionContext,
+        error: RalphieError,
+    ): IssueExecutionOutcome | undefined => {
+        const failure = haltingFailure(error);
+        if (failure === undefined || context.signal?.aborted === true) {
+            return undefined;
+        }
+        return {
+            kind: IssueExecutionOutcomeKind.Deferred,
+            reason: error.message,
+            cause: failure.kind === "auth" ? "auth" : "transient",
+            ...(failure.resetHint === undefined
+                ? {}
+                : { resetHint: failure.resetHint }),
+        };
+    };
+
+    /**
      * A failed agent session (harness error, timeout, invalid result) is a
      * human's problem and becomes a ready-for-human hand-off so the issue does
      * not re-enter the queue unchanged. Checkout and GitHub infrastructure
@@ -344,6 +370,8 @@ export const makeIssueExecutorService = (
                     );
                 }
                 if (error instanceof RalphieError) {
+                    const deferred = deferredOutcome(context, error);
+                    if (deferred !== undefined) return deferred;
                     return await failOrHandOff(
                         context,
                         error,

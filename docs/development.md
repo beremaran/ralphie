@@ -63,7 +63,13 @@ three issues labelled `ready-for-agent` and `smoke-<harness>` (an
 implementation task that goes through review, an ambiguous task that must end
 in a hand-off, and an oversized task that must be decomposed), runs Ralphie
 with every role on that harness in `yolo` approval, checks the outcomes, and
-closes the issues afterwards (`--keep-issues` leaves them).
+closes the issues afterwards as not planned (`--keep-issues` leaves them).
+Each harness ends as PASS, FAIL or INCONCLUSIVE. The decomposition scenario
+passes only when a child issue was then worked to a genuine terminal outcome:
+closed as completed by Ralphie, or handed off for a real reason rather than a
+failed session. When Ralphie exits `75` because a usage limit, outage or
+expired login halted the run, the harness is INCONCLUSIVE, not a pass or a
+failure; rerun it once the limit clears.
 
 It is never run by `bun run test`, `bun run check`, or CI: it needs live
 harness logins, model spend, and GitHub credentials. Run it by hand before a

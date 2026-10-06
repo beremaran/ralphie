@@ -174,6 +174,14 @@ export type HarnessFailureKind =
     | "budget"
     /** The harness did not grant the requested access mode. */
     | "access"
+    /**
+     * A rate, usage, session or quota limit, an overloaded provider or an
+     * unreachable network. It clears by itself and says nothing about the
+     * issue.
+     */
+    | "transient"
+    /** Credentials are missing or expired; only the operator can fix this. */
+    | "auth"
     /** The harness itself reported an error. */
     | "harness"
     /** The structured result stayed invalid after every correction. */
@@ -184,6 +192,8 @@ export type HarnessFailure = {
     readonly message: string;
     /** Resumable id of the session, when the harness reported one. */
     readonly harnessSessionID?: string;
+    /** When a `transient` limit clears, as the harness worded it. */
+    readonly resetHint?: string;
 };
 
 export type HarnessCapabilities = {

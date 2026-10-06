@@ -1,4 +1,5 @@
 import {
+    haltingFailure,
     isSessionFailure,
     sessionIdFor,
     type AgentSessions,
@@ -105,7 +106,11 @@ const tryResume = async (
         });
         return result;
     } catch (error) {
-        if (request.signal?.aborted === true || !isSessionFailure(error)) {
+        if (
+            request.signal?.aborted === true ||
+            !isSessionFailure(error) ||
+            haltingFailure(error) !== undefined
+        ) {
             throw error;
         }
         return { failure: failureText(error) };

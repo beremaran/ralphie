@@ -1,3 +1,4 @@
+import { haltingFailure } from "../../agent/sessions.ts";
 import {
     type GitIssueOperationError,
     type GitIssueOperationsService,
@@ -1311,7 +1312,8 @@ export const makeImplementationExecutorService = (
         };
     };
 
-    /** Session and git failures become a Failed result; aborts still throw. */
+    /** Session and git failures become a Failed result; aborts and halting
+     * (limit, outage, login) failures still throw. */
     const runAttemptsOrFail = async (
         input: WorkflowExecutorInput,
         checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
@@ -1324,7 +1326,12 @@ export const makeImplementationExecutorService = (
                 invariant,
             );
         } catch (error) {
-            if (input.context.signal?.aborted === true) throw error;
+            if (
+                input.context.signal?.aborted === true ||
+                haltingFailure(error) !== undefined
+            ) {
+                throw error;
+            }
             return {
                 kind: IssueExecutionOutcomeKind.Failed,
                 message: asRalphieError(error).message,
