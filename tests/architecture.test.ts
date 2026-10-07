@@ -116,13 +116,15 @@ describe("hexagonal boundaries", () => {
         ).toEqual([]);
     });
 
-    test("ports and domain modules never import adapters", async () => {
+    test("ports, domain, and app modules never import adapters", async () => {
         expect(
             await offenders(
                 (file) => {
                     const path = relativePath(file);
                     return (
-                        path.endsWith("ports.ts") || path.includes("/domain/")
+                        path.endsWith("ports.ts") ||
+                        path.includes("/domain/") ||
+                        path.includes("/app/")
                     );
                 },
                 ({ target }) => isAdapterPath(target),
@@ -153,6 +155,36 @@ describe("hexagonal boundaries", () => {
                         importer !== "runtime.ts"
                     );
                 },
+            ),
+        ).toEqual([]);
+    });
+
+    test("progress output consumes session events, never a harness's native events", async () => {
+        expect(
+            await offenders(
+                (file) => relativePath(file).startsWith("progress/"),
+                ({ target }) =>
+                    target.startsWith("agent/") ||
+                    target.startsWith("pi/") ||
+                    target.startsWith("@earendil-works/"),
+            ),
+        ).toEqual([]);
+    });
+
+    test("harness code outside its adapters is free of process and vendor imports", async () => {
+        expect(
+            await offenders(
+                (file) => {
+                    const path = relativePath(file);
+                    return (
+                        path.startsWith("harness/") &&
+                        !path.startsWith("harness/adapters/")
+                    );
+                },
+                ({ target }) =>
+                    target.startsWith("process/") ||
+                    target.startsWith("@") ||
+                    target.startsWith("node:"),
             ),
         ).toEqual([]);
     });

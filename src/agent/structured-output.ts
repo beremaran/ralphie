@@ -1,16 +1,18 @@
-import { AgentSessionProfile, type AgentClient } from "./ports.ts";
 import { z } from "zod";
 
-import { RalphieError } from "../shared/error.ts";
-import type { AgentModel } from "./model.ts";
+import type { HarnessRole, SessionAccess } from "../harness/ports.ts";
+import { RalphieError, errorMessage } from "../shared/error.ts";
+import {
+    type AgentSessions,
+    sessionFailure,
+    sessionIdFor,
+    sessionRequest,
+} from "./sessions.ts";
 import {
     type AgentRepositoryInvariant,
-    type AgentSessionDiagnostics,
-    needsAttentionToolDescriptor,
-    parseNeedsAttentionRequest,
+    handOffRequestSchema,
     reportAgentFailure,
-    toAgentAssistantError,
-    type NeedsAttentionRequest,
+    type HandOffRequest,
 } from "./task-session.ts";
 import {
     type ProgressStage,
@@ -19,22 +21,12 @@ import {
 } from "../progress/ports.ts";
 
 export type StructuredOutputRequest<Output> = {
+    readonly role: HarnessRole;
+    readonly access?: SessionAccess;
     readonly directory: string;
     readonly title: string;
     readonly prompt: string;
     readonly schema: z.ZodType<Output>;
-    readonly retryCount?: number;
-    readonly agent?: string;
-    readonly permission?: ReadonlyArray<{
-        readonly permission: string;
-        readonly pattern: string;
-        readonly action: "allow" | "deny";
-    }>;
-    readonly profile?: AgentSessionProfile;
-    readonly model?: AgentModel;
-    readonly variant?: string;
-    readonly runId?: string;
-    readonly diagnostics?: AgentSessionDiagnostics;
     readonly signal?: AbortSignal;
     readonly repositoryInvariant?: AgentRepositoryInvariant;
     readonly verifyRepositoryInvariant?: (
@@ -51,110 +43,18 @@ export type StructuredOutputRequest<Output> = {
 export type StructuredOutputResult<Output> = {
     readonly sessionID: string;
     readonly output: Output;
-    readonly needsAttention?: NeedsAttentionRequest;
+    readonly handOff?: HandOffRequest;
 };
 
-const describeApiError = (error: unknown): string => {
-    if (typeof error !== "object" || error === null) return String(error);
-
-    const candidate = error as {
-        readonly name?: unknown;
-        readonly data?: { readonly message?: unknown };
-    };
-    const name =
-        typeof candidate.name === "string" ? candidate.name : "AgentError";
-    const message =
-        typeof candidate.data?.message === "string"
-            ? candidate.data.message
-            : JSON.stringify(error);
-
-    return `${name}: ${message}`;
-};
-
-const describeFailureCause = (cause: unknown): string => {
-    if (typeof cause !== "object" || cause === null) return String(cause);
-
-    const candidate = cause as {
-        readonly name?: unknown;
-        readonly message?: unknown;
-    };
-    const parts: string[] = [];
-    if (typeof candidate.name === "string" && candidate.name !== "") {
-        parts.push(candidate.name);
-    }
-    if (typeof candidate.message === "string" && candidate.message !== "") {
-        parts.push(candidate.message);
-    }
-    return parts.length === 0 ? String(cause) : parts.join(": ");
-};
-
-const signalOptions = (signal: AbortSignal | undefined) =>
-    signal === undefined ? undefined : { signal };
-
-const createSessionInput = <Output>(
-    request: StructuredOutputRequest<Output>,
-) => ({
-    directory: request.directory,
-    title: request.title,
-    ...(request.agent === undefined ? {} : { agent: request.agent }),
-    ...(request.profile === undefined ? {} : { profile: request.profile }),
-    ...(request.model === undefined ? {} : { model: request.model }),
-    ...(request.variant === undefined ? {} : { variant: request.variant }),
-});
-
-const validateStructuredOutput = <Output>(
-    schema: z.ZodType<Output>,
-    value: unknown,
-): { readonly success: boolean; readonly error?: string } => {
-    const parsed = schema.safeParse(value);
-    return parsed.success
-        ? { success: true }
-        : { success: false, error: z.prettifyError(parsed.error) };
-};
-
-const promptInput = <Output>(
-    request: StructuredOutputRequest<Output>,
-    sessionID: string,
-) => ({
-    sessionID,
-    directory: request.directory,
-    ...(request.agent === undefined ? {} : { agent: request.agent }),
-    ...(request.model === undefined ? {} : { model: request.model }),
-    ...(request.variant === undefined ? {} : { variant: request.variant }),
-    ...(request.profile === undefined ? {} : { profile: request.profile }),
-    format: {
-        type: "tool" as const,
-        tool: {
-            name: "submit_result",
-            description:
-                "Submit the final structured result for this task. Call this " +
-                "exactly once with the complete, schema-valid result after " +
-                "finishing the requested work.",
-            schema: z.toJSONSchema(request.schema),
-        },
-        retryCount: request.retryCount ?? 2,
-        validate: (value: unknown) =>
-            validateStructuredOutput(request.schema, value),
-    },
-    needsAttentionTool: needsAttentionToolDescriptor(),
-    parts: [{ type: "text" as const, text: request.prompt }],
-});
-
-const recordSessionDiagnostics = <Output>(
-    request: StructuredOutputRequest<Output>,
-    sessionID: string,
-): void => {
-    if (request.runId === undefined || request.diagnostics === undefined) {
-        return;
-    }
-    request.diagnostics.record(request.runId, {
-        sessionID,
-        directory: request.directory,
-        ...(request.agent === undefined ? {} : { agent: request.agent }),
-        ...(request.model === undefined ? {} : { model: request.model }),
-        ...(request.variant === undefined ? {} : { variant: request.variant }),
+/**
+ * The result contract every structured session returns: the task's own result
+ * plus an optional bounded request to defer the work.
+ */
+export const envelopeSchema = <Output>(schema: z.ZodType<Output>) =>
+    z.object({
+        result: schema,
+        handOff: handOffRequestSchema.optional(),
     });
-};
 
 const verifyStructuredOutputRequest = async <Output>(
     request: StructuredOutputRequest<Output>,
@@ -174,78 +74,40 @@ const verifyStructuredOutputRequest = async <Output>(
     }
 };
 
-const promptForStructuredOutput = async <Output>(
-    client: AgentClient,
+const runStructuredSession = async <Output>(
+    sessions: AgentSessions,
     request: StructuredOutputRequest<Output>,
-    sessionID: string,
 ): Promise<StructuredOutputResult<Output>> => {
-    const response = await client.session.prompt(
-        promptInput(request, sessionID),
-        signalOptions(request.signal),
-    );
-
-    if (response.error !== undefined || response.data === undefined) {
-        throw new Error(
-            `Pi prompt failed: ${describeApiError(response.error)}`,
-        );
-    }
-
-    if (response.data.info.error !== undefined) {
-        const assistantError = toAgentAssistantError(response.data.info.error);
-        throw new RalphieError({
-            message: `Pi assistant failed (${assistantError.kind}): ${assistantError.message}`,
-            cause: assistantError,
-        });
-    }
-
-    const parsed = request.schema.safeParse(response.data.info.structured);
-    if (!parsed.success) {
-        throw new Error(
-            `Pi returned invalid structured output: ${z.prettifyError(parsed.error)}`,
-        );
-    }
-
+    request.signal?.throwIfAborted();
+    const outcome = await sessions.harness.run({
+        ...sessionRequest(sessions, {
+            ...request,
+            prompt: `${request.prompt}\n\nPut the task result in the \`result\` field of your structured result.`,
+        }),
+        resultSchema: envelopeSchema(request.schema),
+    });
+    if (!outcome.ok) throw sessionFailure(request.role, outcome.failure);
     await verifyStructuredOutputRequest(request);
-    const needsAttention = parseNeedsAttentionRequest(
-        response.data.needsAttention,
-    );
+    const { result, handOff } = outcome.value;
     return {
-        sessionID,
-        output: parsed.data,
-        ...(needsAttention === undefined ? {} : { needsAttention }),
+        sessionID: sessionIdFor(outcome.harnessSessionID),
+        output: result,
+        ...(handOff === undefined ? {} : { handOff }),
     };
 };
 
 export const requestStructuredOutput = async <Output>(
-    client: AgentClient,
+    sessions: AgentSessions,
     request: StructuredOutputRequest<Output>,
 ): Promise<StructuredOutputResult<Output>> => {
     try {
-        request.signal?.throwIfAborted();
-        const session = await client.session.create(
-            createSessionInput(request),
-            signalOptions(request.signal),
-        );
-
-        if (session.error !== undefined || session.data === undefined) {
-            throw new Error(
-                `Could not create pi session: ${describeApiError(session.error)}`,
-            );
-        }
-
-        recordSessionDiagnostics(request, session.data.id);
-
-        return await promptForStructuredOutput(
-            client,
-            request,
-            session.data.id,
-        );
+        return await runStructuredSession(sessions, request);
     } catch (cause) {
         const error =
             cause instanceof RalphieError
                 ? cause
                 : new RalphieError({
-                      message: `Failed to get structured output from pi. Cause: ${describeFailureCause(cause)}`,
+                      message: `Failed to get structured output from the ${request.role} session. Cause: ${errorMessage(cause)}`,
                       cause,
                   });
         await reportAgentFailure(request, error);

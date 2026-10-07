@@ -8,7 +8,7 @@ import {
 import { requireSuccess } from "../../process/require-success.ts";
 import { type CommandRunnerService } from "../../process/ports.ts";
 import type { GitRepositoryService, PreparedRepository } from "../ports.ts";
-import { RalphieError } from "../../shared/error.ts";
+import { hasErrorCode, RalphieError } from "../../shared/error.ts";
 import { resolveWorkspacePath } from "../../shared/workspace-path.ts";
 
 const pathExists = async (path: string): Promise<boolean> => {
@@ -16,7 +16,7 @@ const pathExists = async (path: string): Promise<boolean> => {
         await stat(path);
         return true;
     } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+        if (hasErrorCode(error, "ENOENT")) return false;
         throw error;
     }
 };
@@ -102,6 +102,24 @@ const requireGit = async (
         signal === undefined ? undefined : { signal },
     );
 
+/** Where `git push origin` points once pushing from the workspace is disabled. */
+export const DISABLED_PUSH_URL = "disabled://ralphie-sessions-cannot-push";
+
+/** Make `git push` in the workspace fail; Ralphie pushes to an explicit URL. */
+const disablePush = async (
+    runner: CommandRunnerService,
+    repositoryPath: string,
+    signal: AbortSignal | undefined,
+): Promise<void> => {
+    await requireGit(
+        runner,
+        repositoryPath,
+        ["remote", "set-url", "--push", "origin", DISABLED_PUSH_URL],
+        "Failed to disable pushing from the workspace.",
+        signal,
+    );
+};
+
 const selectBranch = async (
     runner: CommandRunnerService,
     repositoryPath: string,
@@ -165,6 +183,8 @@ const prepareRepositoryState = async (
                 `${repositoryPath} contains ${originSlug}, not ${parsed.slug}.`,
             );
         }
+
+        await disablePush(runner, repositoryPath, signal);
 
         if (exists)
             await requireGit(

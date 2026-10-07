@@ -164,3 +164,49 @@ describe("CommandRunnerLive abortable subprocess", () => {
         ).rejects.toBeInstanceOf(CommandAbortedError);
     });
 });
+
+describe("CommandRunnerLive stdin and line streaming", () => {
+    test("feeds the stdin option to the child", async () => {
+        const result = await CommandRunnerLive.run("cat", [], {
+            stdin: "prompt from stdin\nsecond line",
+            trimStdout: false,
+        });
+
+        expect(result.exitCode).toBe(0);
+        expect(result.stdout).toBe("prompt from stdin\nsecond line");
+    });
+
+    test("reports each complete stdout line while the child runs", async () => {
+        const lines: string[] = [];
+        const result = await CommandRunnerLive.run(
+            "/bin/sh",
+            ["-c", "printf 'one\\ntwo\\n'; printf 'tail-without-newline'"],
+            { onStdoutLine: (line) => lines.push(line), trimStdout: false },
+        );
+
+        expect(lines).toEqual(["one", "two", "tail-without-newline"]);
+        expect(result.stdout).toBe("one\ntwo\ntail-without-newline");
+    });
+
+    test("delivers a line before the child exits", async () => {
+        const seen: number[] = [];
+        const started = Date.now();
+        await CommandRunnerLive.run("/bin/sh", ["-c", "echo early; sleep 1"], {
+            onStdoutLine: () => seen.push(Date.now() - started),
+        });
+
+        expect(seen).toHaveLength(1);
+        expect(seen[0]).toBeLessThan(800);
+    });
+
+    test("does not split lines on Unicode line separators", async () => {
+        const lines: string[] = [];
+        await CommandRunnerLive.run(
+            "/bin/sh",
+            ["-c", "printf 'a\\342\\200\\250b\\n'"],
+            { onStdoutLine: (line) => lines.push(line) },
+        );
+
+        expect(lines).toEqual(["a b"]);
+    });
+});

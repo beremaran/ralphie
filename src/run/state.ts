@@ -1,12 +1,13 @@
 import { z } from "zod";
 
-import { IssueExecutionOutcomeKind } from "../issues/app/execution.ts";
+import { HARNESS_ROLES } from "../harness/ports.ts";
+import { IssueExecutionOutcomeKind } from "../issues/app/execution-model.ts";
 import { DEFAULT_MAX_DECOMPOSITION_DEPTH } from "../issues/domain/decomposition-markdown.ts";
 import {
-    NeedsAttentionReason,
+    HandOffReason,
     nonBlankStringSchema,
 } from "../issues/domain/decisions.ts";
-export const RUN_STATE_VERSION = 12 as const;
+export const RUN_STATE_VERSION = 15 as const;
 
 export enum RunStateStatus {
     Active = "active",
@@ -35,37 +36,37 @@ const issueSchema = z.object({
     commentVersion: z.string().min(1).optional(),
 });
 
-const needsAttentionOutcomeSchema = z.union([
+const handOffOutcomeSchema = z.union([
     z
         .object({
-            kind: z.literal(IssueExecutionOutcomeKind.NeedsAttention),
-            reason: z.enum(NeedsAttentionReason),
+            kind: z.literal(IssueExecutionOutcomeKind.HandOff),
+            reason: z.enum(HandOffReason),
             summary: nonBlankStringSchema,
             evidence: z.array(nonBlankStringSchema).min(1),
             questions: z.array(nonBlankStringSchema).min(1),
             artifactPath: z.string().min(1),
-            route: z.literal("needs-attention").optional(),
+            route: z.literal("hand-off").optional(),
         })
         .strict(),
     z
         .object({
-            kind: z.literal(IssueExecutionOutcomeKind.NeedsAttention),
-            reason: z.enum(NeedsAttentionReason),
+            kind: z.literal(IssueExecutionOutcomeKind.HandOff),
+            reason: z.enum(HandOffReason),
             summary: nonBlankStringSchema,
             evidence: z.array(nonBlankStringSchema).min(1),
             questions: z.array(nonBlankStringSchema).min(1),
             diagnosticsPath: z.string().min(1),
-            route: z.literal("needs-attention").optional(),
+            route: z.literal("hand-off").optional(),
         })
         .strict(),
     z
         .object({
-            kind: z.literal(IssueExecutionOutcomeKind.NeedsAttention),
-            reason: z.enum(NeedsAttentionReason),
+            kind: z.literal(IssueExecutionOutcomeKind.HandOff),
+            reason: z.enum(HandOffReason),
             summary: nonBlankStringSchema,
             evidence: z.array(nonBlankStringSchema).min(1),
             questions: z.array(nonBlankStringSchema).min(1),
-            route: z.literal("needs-attention"),
+            route: z.literal("hand-off"),
         })
         .strict(),
 ]);
@@ -93,13 +94,19 @@ const currentOutcomeSchema = z.union([
         reason: z.string().min(1),
         childIssueNumbers: z.array(z.number().int().positive()).optional(),
     }),
-    needsAttentionOutcomeSchema,
+    handOffOutcomeSchema,
     z
         .object({
             kind: z.literal(IssueExecutionOutcomeKind.Skipped),
             reason: z.string().min(1),
         })
         .strict(),
+    z.object({
+        kind: z.literal(IssueExecutionOutcomeKind.Deferred),
+        reason: z.string().min(1),
+        cause: z.enum(["transient", "auth"]),
+        resetHint: z.string().min(1).optional(),
+    }),
     z.object({
         kind: z.literal(IssueExecutionOutcomeKind.Failed),
         message: z.string().min(1),
@@ -128,19 +135,16 @@ const runStateFields = {
     runId: z.string().min(1),
     repository: z.string().min(1),
     branch: z.string().min(1),
-    /** Whether needs-attention outcomes should be published to GitHub. */
-    notificationsEnabled: z.boolean().optional(),
-    needsAttentionLabel: z.string().trim().min(1).optional(),
-    selection: z.object({
-        agent: z.string().min(1),
-        model: z
-            .object({
-                providerID: z.string().min(1),
-                modelID: z.string().min(1),
-            })
-            .optional(),
-        variant: z.string().min(1).optional(),
-    }),
+    /** The harness assignment of every role for this run. */
+    roles: z.record(
+        z.enum(HARNESS_ROLES),
+        z.object({
+            harness: z.string().min(1),
+            approval: z.enum(["safe", "yolo"]).optional(),
+            model: z.string().min(1).optional(),
+            effort: z.string().min(1).optional(),
+        }),
+    ),
     maxDecompositionDepth: z
         .number()
         .int()

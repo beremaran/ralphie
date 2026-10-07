@@ -1,17 +1,18 @@
 # Ralphie
 
-**Turn a GitHub issue queue into reviewed commits with pi.**
+**Turn a GitHub issue queue into reviewed commits with a coding-agent harness.**
 
 [![CI](https://github.com/beremaran/ralphie/actions/workflows/ci.yml/badge.svg)](https://github.com/beremaran/ralphie/actions/workflows/ci.yml)
 
 Ralphie is an opinionated CLI that reads open GitHub issues, asks
-[pi](https://pi.dev/docs/latest) for schema-validated decisions, and
+a headless coding-agent harness (Claude Code first) for schema-validated
+decisions, and
 routes each issue to either focused implementation or dependency-aware
 decomposition. Agents handle reasoning and code changes; Ralphie keeps Git,
 GitHub, run state, diagnostics, and safety checks deterministic.
 
 > [!CAUTION]
-> Ralphie works directly on the branch selected by `--branch`, commits approved
+> Ralphie works directly on the branch selected in the configuration file, commits approved
 > work, and pushes directly to that branch. Ralphie is pre-1.0. Validate against
 > a repository you control before enabling mutations.
 
@@ -23,7 +24,9 @@ Run the latest release without installing globally:
 bunx @beremaran/ralphie --version
 ```
 
-Run the issue queue:
+Write a starter config with `bunx @beremaran/ralphie init` (it detects the
+harnesses on PATH; see [Configuration](./docs/configuration.md)), then run the
+issue queue:
 
 ```bash
 bunx @beremaran/ralphie owner/repository

@@ -8,10 +8,13 @@ paths.
 
 ## Progress output
 
-Ralphie receives the complete pi event stream while each task runs,
-including thinking deltas, assistant text, tool calls, and tool results. Tasks
-and issues are intentionally processed sequentially so this event stream remains
-ordered. JSON output exposes it losslessly for integrations.
+While each session runs, Ralphie translates its harness's native event stream
+into one harness-neutral set of session events: assistant text and thinking,
+tool calls, tool results, errors, and token usage. Every output mode renders
+only these events, so output looks the same whichever harness ran the session.
+Tasks and issues are intentionally processed sequentially so the event stream
+remains ordered. JSON output carries every session event for integrations; see
+[Session events](#session-events).
 
 Ralphie adapts its presentation to its environment. `--output default`
 resolves to the full-screen TUI only when stdin and stderr are both TTYs and
@@ -20,59 +23,99 @@ lines.
 
 - Interactive terminals get an OpenTUI application (the same rendering core
   OpenCode 1.0 uses): a borderless layout with a background header line
-  (repository, active model, pause state), an issue sidebar, a scrollable
+  (repository, pause state), an issue sidebar, a scrollable
   transcript that streams assistant text as it arrives, and a footer status
   line (stage, activity, elapsed time). Transcript turns start with a colored
-  `● pi · <title>` role label and blank-line separation; assistant text is
-  indented and plain, thinking is dim, and each tool call is one row
+  `● <harness> · <title>` role label and blank-line separation; assistant text
+  is indented and plain, thinking is dim, each tool call is one row
   (`✓ $ <command> · 1.2s`, `✓ read <path>`, `✗ <tool> <path> · failed:
-  <detail>`). The sidebar lists every issue discovered in the run with its
-  outcome (`○` queued, `▶` active, `✓` completed, `✗` failed, `⚠`
-  needs-attention, `−` skipped) and follows the active issue until you navigate
-  away with `[`/`]` or Ctrl+Left/Right; each issue keeps its own transcript, so
-  processed issues stay browsable while the run continues. The queue starts
+  <detail>`), and a session error is a red `✗ <message>` row. The sidebar
+  lists every issue discovered in the run with its outcome (`○` queued, `▶`
+  active, `✓` completed, `✗` failed, `⚠` hand-off, `−` skipped) and
+  follows the active issue until you navigate away with `[`/`]` or
+  Ctrl+Left/Right; each issue keeps its own transcript, so processed issues
+  stay browsable while the run continues. The queue starts
   paused so the discovered plan can be inspected before work begins; `p`
   resumes or pauses it between issues, `s` stops the queue after the active
   issue and drains the run normally, and `q` (like Ctrl-C) cancels immediately.
-  `m` opens the model picker: the pi catalog with the selected model's thinking
-  levels, `Tab` switches panes, `Enter` applies the pick to every later issue
-  (the session in flight keeps its model), and `Esc` cancels. The header shows
-  the active model and level; the footer and sidebar hints show the pending
-  pause or stop. Tool output, long commands, and deep paths stay inside the
+  The footer and sidebar hints show the pending pause or stop. Tool output, long commands, and deep paths stay inside the
   transcript panel; resize is handled by the renderer; Ctrl-C is forwarded as
   SIGINT so cancellation still restores the checkout and saves state; disposal
   destroys the renderer and restores the terminal.
 - CI and redirected output are the deterministic noninteractive fallback:
   append-only, byte-identical across identical runs, with neither ANSI cursor
   controls (`ESC`) nor carriage-return bytes; `stripTerminalControls` is an
-  identity no-op on these streams. Assistant and thinking text are buffered per
-  part and printed as complete `│  ` lines; each tool completion gets one
-  summary line.
-- `--output json` writes progress and `agent_event` objects one per line to
-  stdout with stderr empty: every non-empty line parses as one complete JSON
-  record, human headers/glyphs never appear, and values are preserved as
-  supplied.
+  identity no-op on these streams. Each session is a block that opens with
+  `╭─ <harness> · <title>` and closes with `╰─ done`. Assistant and thinking
+  text are buffered per block and printed as complete `│  ` lines; each tool
+  call gets one line, each tool completion one summary line
+  (`│  ✓ <tool> done` or `│  ✗ <tool> failed: <output>`), and each session
+  error one `│  ✗ <message>` line. Usage is not printed.
+- `--output json` writes progress records and `session_event` records one per
+  line to stdout with stderr empty: every non-empty line parses as one
+  complete JSON record, human headers/glyphs never appear, and values are
+  preserved as supplied.
 
 JSON events use a stable operational vocabulary and include `runId`,
-`timestamp`, `stage`, `status`, and `message`. Grounding events identify
-whether agent work was skipped. Human-readable needs-attention decisions name
+`timestamp`, `stage`, `status`, and `message`. Pre-flight and hand-off events identify
+whether agent work was skipped. Human-readable hand-off decisions name
 the issue number and title and show the current/total queue position. JSON
 output retains the complete event payload, including the structured details
 field; human-readable output never renders that field. A
-`needs-attention` event includes its reason, summary, evidence, questions,
+`hand-off` event includes its reason, summary, evidence, questions,
 diagnostic or artifact path, and queue position.
 Depending on the event, it may also include the repository, review attempt,
 session ID, commit SHA, created issue numbers, or diagnostic paths. Supplied
-progress-event values are preserved as-is; pi transcripts are never
+progress-event values are preserved as-is; session transcripts are never
 redacted, and terminal control sequences are stripped at the
 reporting boundary.
+
+### Session events
+
+Each `session_event` record wraps one session event with the session it
+belongs to:
+
+```json
+{"type":"session_event","sessionID":"claude-7d3e2a1b","directory":"/work/owner/repo","harness":"claude","title":"Implement #42","event":{"type":"tool_call","callId":"call-1","name":"Bash","input":{"command":"bun test"}}}
+```
+
+| Field       | Meaning                                                   |
+| ----------- | --------------------------------------------------------- |
+| `sessionID` | Ralphie's id for the session.                             |
+| `directory` | Working directory of the session.                         |
+| `harness`   | Name of the harness that ran the session, such as `claude`. |
+| `title`     | Human-readable session label; omitted when there is none. |
+| `event`     | One of the event shapes below, discriminated by `type`.   |
+
+`event` is one of:
+
+- `{"type":"session_started"}`: the session began producing work.
+- `{"type":"assistant_text","kind":"text"|"thinking","text":…,"done":…}`: a
+  fragment of assistant output. Fragments of one `kind` concatenate into a
+  block until one arrives with `done: true`. `text` is only the fragment: a
+  closing fragment may be empty, and a whole block may arrive as a single
+  fragment with `done: true`.
+- `{"type":"tool_call","callId":…,"name":…,"input":{…}}`: the assistant
+  started a tool. `callId` pairs the call with its result.
+- `{"type":"tool_result","callId":…,"name":…,"output":…,"isError":…}`: the
+  tool finished. `output` is its text output, empty when it has none.
+- `{"type":"error","message":…}`: the harness or model reported a failure.
+- `{"type":"usage","inputTokens":…,"outputTokens":…}`, optionally with
+  `cacheReadTokens`, `cacheWriteTokens`, and `costUsd`: tokens, and cost where
+  the harness reports it, consumed since the session's previous `usage` event.
+  Sum the events for a session total.
+- `{"type":"session_finished"}`: the session stopped producing work. Failures
+  are reported by `error` events, not here.
+
+Tool names and `input` fields are the harness's own (for example Claude Code's
+`Bash` tool takes `command`), so consumers that need tool-specific detail should key
+on `harness` as well as `name`.
 
 ## State and artifacts
 
 The workspace's `.ralphie` directory contains only repository checkouts and
-Ralphie's run state, events, and recovery artifacts. Pi credentials and
-default-model settings live in `~/.pi/agent` (or `PI_CODING_AGENT_DIR`) and
-are never written under this path.
+Ralphie's run state, events, and recovery artifacts. Harness credentials and
+settings belong to each harness CLI and are never written under this path.
 
 Run artifacts live under:
 
@@ -95,12 +138,12 @@ A normal issue execution obtains a durable per-issue artifact store at:
 ```
 
 The store prevents accidental overwrites and records readiness deferrals,
-complexity decisions, checkpoints, review attempts, commit messages, created
+pre-flight decisions, checkpoints, review attempts, commit messages, created
 commits, resolution proof, decomposition decisions, and created child-number
 mappings. Stale or legacy un-fingerprinted decisions are removed on load
 without disturbing the other artifacts for the issue.
 
-A successful or interrupted run uses this more detailed layout (pi
+A successful or interrupted run uses this more detailed layout (harness
 configuration is not stored in this tree):
 
 ```text
@@ -110,13 +153,17 @@ configuration is not stored in this tree):
 └── issues/
     └── <issue-number>/
         ├── artifacts.json
-        └── review-exhaustion/
+        ├── review-exhaustion/
+        │   ├── changes.patch
+        │   └── metadata.json
+        └── hand-off-<id>/
             ├── changes.patch
             └── metadata.json
 ```
 
 `state.json` is versioned, schema-validated, and atomically replaced. It
-contains the repository/branch, notification settings, pi model selection,
+contains the repository/branch, the role assignments
+(harness, model, effort),
 pending and completed queue numbers, processed count, outcomes, active
 issue/stage, checkout invariant, and update time. State is saved before the
 queue starts, when an issue becomes active, after each issue outcome, after
@@ -140,9 +187,15 @@ stateDiagram-v2
 
 - One issue failure restores its checkout, persists the failed outcome, retains
   artifacts, and continues to later issues.
-- The agent runtime is closed on success, failure, cancellation, and scoped defects. Ordinary
-  failures set process exit code `1`.
-- Cancellation is checked before long-running boundaries and passed into the agent runtime.
+- Ordinary failures set process exit code `1`.
+- A limit, outage or expired login ends the run early. The affected issue is
+  recorded as `deferred` after its checkout is restored, nothing on GitHub
+  changes, no later issue starts, and the process exits `75` with a message
+  that names the failure and the reset time when the harness reports one. State
+  and artifacts are kept and cleanup is skipped. Rerun after the limit clears
+  or you sign in again. Why this halts instead of handing off is recorded in
+  [ADR-0004](adr/0004-environmental-failures-halt-instead-of-handing-off.md).
+- Cancellation is checked before long-running boundaries and passed to the running session, which is killed.
   Ralphie attempts to restore the clean issue checkpoint, saves state with the
   active issue, skips cleanup, and exits `130`.
 - Successful completion persists `complete`, then removes the entire workspace
@@ -156,39 +209,41 @@ prerequisites are not marked complete, so dependent issues remain blocked.
 After draining all reachable work, the run exits with status `1` and an
 aggregate partial-failure summary.
 
-Needs-attention outcomes also continue the queue. A drained run completes with
-status `0`, and the deferred issue remains open. The deterministic
+Hand-off outcomes also continue the queue. A drained run completes with
+status `0`, and the handed-off issue remains open but leaves the intake queue
+because it no longer carries the agent-ready label. The deterministic
 `decomposition_limit_reached` boundary behaves the same way: raise the
-persisted `--max-decomposition-depth`, narrow the issue, or resolve its review
-findings manually before a later run. It never closes or marks the capped
-issue complete, so dependent work remains blocked.
+persisted `limits.maxDecompositionDepth`, narrow the issue, or resolve its review
+findings manually, then relabel the issue `ready-for-agent` for a later run.
+It never closes or marks the capped issue complete, so dependent work remains
+blocked.
 
-## Needs-attention handling
+## Hand-off handling
 
-A validated needs-attention decision is not an ordinary failure. Ralphie
+A validated hand-off decision is not an ordinary failure. Ralphie
 persists the summary, evidence, questions, and issue
 freshness metadata in the run artifacts, keeps the issue open, and continues
 with later work.
-Notifications are disabled unless `--notify-needs-attention` is supplied; a
-label by itself is rejected. When opted in, Ralphie publishes through the
-GitHub notification service after recording the outcome and before moving to
-the next issue. Notification applies only to agent-reported
-needs-attention blockers: issues held back by open queue dependencies are
-recorded as needs-attention outcomes but never notified or labeled, because
-their blocker resolves by queue completion rather than by a human decision.
-A notification failure fails the run; the issue remains open and a later run
-re-evaluates it from scratch.
 
-When any executor session requests needs attention, Ralphie first persists the
+The labels and comments a hand-off publishes are described under
+[Hand-offs](workflows.md#hand-offs). They are published after recording the
+outcome and before moving to the next issue. The comment carries a hidden
+`ralphie:hand-off` marker, so a retry updates it instead of posting another.
+Issues held back by open
+blockers, whether reported by pre-flight or by queue order, are recorded as
+skipped and change nothing on GitHub. A hand-off publishing failure fails the
+run; the issue keeps its labels and a later run re-evaluates it from scratch.
+
+When an executor session or pre-flight asks for a hand-off, Ralphie first persists the
 bounded request, clean checkpoint, and issue freshness fingerprint. Exactly one
-fresh read-only grounding session verifies that request before the next artifact,
-Git, or GitHub mutation. Only a `needs_attention` verifier disposition confirms
+fresh read-only hand-off verification session verifies that request before the next artifact,
+Git, or GitHub mutation. Only a `hand_off` verifier disposition confirms
 it; actionable and already-resolved dispositions continue the original flow.
 The confirmed decision is persisted before recovery writes a bounded binary-safe
 patch and decision diagnostic, then restores and verifies the exact clean
-checkpoint. A verifier or recovery interruption retains the handoff so a later
+checkpoint. A verifier or recovery interruption retains the pending hand-off so a later
 attempt can retry verification or recovery without rerunning completed agent
-work. The saved decision and handoff are reused only when live `updatedAt` and
+work. The saved decision and pending hand-off are reused only when live `updatedAt` and
 comment freshness metadata exactly match; a changed or invalid fingerprint
 removes both atomically before routing continues.
 
@@ -210,9 +265,9 @@ stateDiagram-v2
     Cleaned --> [*]
 ```
 
-Needs-attention recovery diagnostics use the same issue directory and contain
+Hand-off recovery diagnostics use the same issue directory and contain
 `changes.patch` plus `metadata.json` under a fingerprint-bound
-`needs-attention-<id>/` directory. The patch includes tracked staged and unstaged
+`hand-off-<id>/` directory. The patch includes tracked staged and unstaged
 changes as well as untracked files. Matching diagnostics are reused within the
 run; a fresh fingerprint receives a distinct directory. Diagnostics are
 published atomically before the exact checkpoint is restored and verified.
@@ -221,8 +276,8 @@ published atomically before the exact checkpoint is restored and verified.
 
 There is no resume command. When a run fails or is interrupted:
 
-1. the agent runtime is closed and the process exits `1` (or `130` on
-   cancellation);
+1. the process exits non-zero (see
+   [exit status](#failure-cancellation-and-exit-status));
 2. the workspace retains `state.json`, `events.jsonl`, and per-issue artifacts
    for diagnosis;
 3. issues that were not closed remain open and are selected again on the next
@@ -230,9 +285,17 @@ There is no resume command. When a run fails or is interrupted:
 4. the next run removes the workspace, prepares a fresh checkout, and
    re-evaluates every matching open issue from scratch.
 
+A hard crash (a killed process, a power loss) in the middle of the review gate
+is the one case that leaves the retained checkout unclean: Ralphie creates
+local candidate commits while review is in progress, so HEAD may sit at a
+candidate commit. Candidate commits are never pushed, and the next run
+discards the whole workspace; inspect the retained checkout before starting
+it if you need the work. Ordinary failures and cancellation restore the
+checkpoint first.
+
 Because each run starts clean, recovery is a new run rather than a continuation:
 completed issues are already closed and no longer selected, while interrupted
-issues repeat grounding, implementation, and review. Inspect the retained
+issues repeat pre-flight, implementation, and review. Inspect the retained
 `state.json` and artifacts before deleting them if the failure needs
 investigation.
 
@@ -248,10 +311,11 @@ drained run exits `1` if any issue failed.
 
 A configured deterministic verification command returning non-zero is handled
 before it becomes an issue failure. Ralphie gives the bounded command output and
-staged diff to a fresh verification-fix session, restages its changes, and
-retries up to five times. Only repair exhaustion or a non-repairable
+staged diff to the implementer's session (resumed with `/diagnosing-bugs`, or a
+fresh fixer session when it cannot be resumed), restages its changes, and
+retries up to `limits.verificationFixes` times. Only repair exhaustion or a non-repairable
 verification fault (for example a command changing the staged tree) reaches the
-ordinary failure boundary. When no `--verify-command` is configured, the gate
+ordinary failure boundary. When no `verify` commands are configured, the gate
 is skipped.
 
 ## Cleanup

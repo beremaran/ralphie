@@ -1,0 +1,37 @@
+{
+    "repository": "https://github.com/mattpocock/skills",
+    "commit": "4588b32ecab9ecc9fc8cc6b6c5e7d675b6004b0d",
+    "skills": {
+        "code-review": "skills/engineering/code-review",
+        "codebase-design": "skills/engineering/codebase-design",
+        "diagnosing-bugs": "skills/engineering/diagnosing-bugs",
+        "implement": "skills/engineering/implement",
+        "tdd": "skills/engineering/tdd",
+        "to-tickets": "skills/engineering/to-tickets",
+        "triage": "skills/engineering/triage"
+    },
+    "files": {
+        "LICENSE": "f1dd2c09108dde1a5f56097cee8461b3ea834499",
+        "code-review/SKILL.md": "e28d7acbf7b3bb4d7817b7eb5d9c105af03f6ec4",
+        "code-review/agents/openai.yaml": "9076774ba327f49068db9273feceda03bfe940fa",
+        "codebase-design/DEEPENING.md": "cd94075cfd754d147555c5d747a16431ed4c7dd8",
+        "codebase-design/DESIGN-IT-TWICE.md": "d0990138c35c800bd821289a73115e52680c1620",
+        "codebase-design/SKILL.md": "3f63c8146dd2604b419c929e9876b90c30d410e9",
+        "codebase-design/agents/openai.yaml": "3180715edb37f6e96bec42f92f00169faa8886ef",
+        "diagnosing-bugs/SKILL.md": "1b929e29fb519c26b500d3eda744177986883ac8",
+        "diagnosing-bugs/agents/openai.yaml": "a13a755a77634ce61a649a3a0d905a66d3865b35",
+        "diagnosing-bugs/scripts/hitl-loop.template.sh": "243198464a8401a7ba1d63b3708fa43c3d067665",
+        "implement/SKILL.md": "7a0b11f5f4fe9505ea5c7983c3083ba1bf754f69",
+        "implement/agents/openai.yaml": "f8794dc153b409052a9167baf10858cf01b36175",
+        "tdd/SKILL.md": "250871ccdfefa7525309acfebda090edf4046882",
+        "tdd/agents/openai.yaml": "651b838a7663e027b1b8884491e867f26bb9a021",
+        "tdd/mocking.md": "71cbfee674d93244ce81d1830b930ca9a69200bd",
+        "tdd/tests.md": "7ab86479f925a1f9e8ba680af33cb3b12e015381",
+        "to-tickets/SKILL.md": "e868c831fcfb1e124e010bcdf84a429ec879160f",
+        "to-tickets/agents/openai.yaml": "24605a5db64e4fc750b999aa94aea126bee814ee",
+        "triage/AGENT-BRIEF.md": "1462fcd9e8cc21921158c296149dc05d9be39d20",
+        "triage/OUT-OF-SCOPE.md": "c9fba2f77ee0619975ec8488c0d4861a0c7e3151",
+        "triage/SKILL.md": "3fd5617e906cf9b71a6b17424791adb905fc248b",
+        "triage/agents/openai.yaml": "acb366cf0f2527e8925ff1223b77610ac0b1be4c"
+    }
+}

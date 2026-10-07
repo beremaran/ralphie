@@ -1,33 +1,20 @@
 import { describe, expect, test } from "bun:test";
 
-import type {
-    AgentEventContext,
-    AgentSessionEvent,
-} from "../../src/agent/ports.ts";
 import {
     DISPLAY_ACTIVITY_LABELS,
     PROGRESS_STAGE_LABELS,
     createDisplayState,
     progressStageLabel,
-    reduceAgentSessionEvent,
+    reduceSessionEvent,
     reduceProgressUpdate,
     type DisplayClock,
 } from "../../src/progress/adapters/display-state.ts";
 import type { ProgressStage } from "../../src/progress/ports.ts";
 
-const context: AgentEventContext = {
-    sessionID: "session-1",
-    directory: "/workspace/repository",
-    title: "Task",
-};
-
 const at =
     (value: string): DisplayClock =>
     () =>
         value;
-
-const piEvent = (event: object): AgentSessionEvent =>
-    event as AgentSessionEvent;
 
 const baseProgress = {
     stage: "issue-execution" as const,
@@ -45,7 +32,6 @@ describe("display state", () => {
             activity: "waiting",
             activityLabel: DISPLAY_ACTIVITY_LABELS.waiting,
             queue: [],
-            models: [],
         });
     });
 
@@ -85,14 +71,14 @@ describe("display state", () => {
         });
         expect(state.queue[0]?.status).toBe("completed");
 
-        // A later needs-attention decision supersedes the execution success.
+        // A later hand-off decision supersedes the execution success.
         state = reduceProgressUpdate(state, {
-            stage: "grounding",
-            status: "needs-attention",
-            message: "Issue #13 needs attention.",
+            stage: "hand-off",
+            status: "hand-off",
+            message: "Issue #13 handed off.",
             issue: { number: 13, title: "Display state" },
         });
-        expect(state.queue[0]?.status).toBe("needs-attention");
+        expect(state.queue[0]?.status).toBe("hand-off");
 
         state = reduceProgressUpdate(state, {
             stage: "issue-queue",
@@ -110,66 +96,6 @@ describe("display state", () => {
             issue: { number: 99, title: "Tracking parent" },
         });
         expect(state.queue.map(({ number }) => number)).toEqual([13, 14, 15]);
-    });
-
-    test("tracks the runtime model catalog and the run's initial selection", () => {
-        const state = reduceProgressUpdate(undefined, {
-            stage: "agent-runtime",
-            status: "succeeded",
-            message: "Pi agent runtime ready.",
-            details: {
-                models: [
-                    {
-                        provider: "openai",
-                        id: "gpt-5",
-                        name: "GPT-5",
-                        reasoning: true,
-                        thinkingLevels: ["low", "high"],
-                    },
-                    {
-                        provider: "openai",
-                        id: "gpt-4o",
-                        name: "GPT-4o",
-                        reasoning: false,
-                        thinkingLevels: [],
-                    },
-                ],
-                selection: {
-                    model: { provider: "openai", id: "gpt-5" },
-                    variant: "high",
-                },
-            },
-        });
-
-        expect(state.models).toEqual([
-            {
-                provider: "openai",
-                id: "gpt-5",
-                name: "GPT-5",
-                thinkingLevels: ["low", "high"],
-            },
-            {
-                provider: "openai",
-                id: "gpt-4o",
-                name: "GPT-4o",
-                thinkingLevels: [],
-            },
-        ]);
-        expect(state.model).toEqual({
-            provider: "openai",
-            id: "gpt-5",
-            variant: "high",
-        });
-
-        // Later progress updates keep the catalog and selection.
-        const next = reduceProgressUpdate(state, {
-            stage: "issue-queue",
-            status: "info",
-            message: "Issue queue ready with 1 issue.",
-            details: { issues: [{ number: 5, title: "Next" }] },
-        });
-        expect(next.models).toEqual(state.models);
-        expect(next.model).toEqual(state.model);
     });
 
     test("appends refreshed issues to the queue without duplicates", () => {
@@ -200,34 +126,28 @@ describe("display state", () => {
 
     test("provides a label for every progress stage", () => {
         const stages = Object.keys(PROGRESS_STAGE_LABELS) as ProgressStage[];
-        expect(stages).toHaveLength(34);
+        expect(stages).toHaveLength(31);
         for (const stage of stages) {
             expect(PROGRESS_STAGE_LABELS[stage]).not.toBe("");
         }
-        expect(PROGRESS_STAGE_LABELS.grounding).toBe(
-            "Checking issue readiness",
-        );
-        expect(PROGRESS_STAGE_LABELS["complexity-assessment"]).toBe(
-            "Assessing complexity",
-        );
+        expect(PROGRESS_STAGE_LABELS.preflight).toBe("Pre-flight check");
         expect(PROGRESS_STAGE_LABELS["resolution-verification"]).toBe(
             "Verifying resolution",
         );
-        expect(PROGRESS_STAGE_LABELS["pr-gate"]).toBe("Waiting for PR checks");
     });
 
-    test("reduces the grounding needs-attention stage to waiting activity", () => {
+    test("reduces the hand-off stage to waiting activity", () => {
         const state = reduceProgressUpdate(undefined, {
-            stage: "grounding",
-            status: "needs-attention",
-            message: "Issue needs attention.",
+            stage: "hand-off",
+            status: "hand-off",
+            message: "Issue handed off.",
             issue: { number: 13, title: "Display state" },
             current: 1,
             total: 3,
         });
 
         expect(state).toMatchObject({
-            stage: "grounding",
+            stage: "hand-off",
             activity: "waiting",
             activityLabel: "Waiting",
             issue: { current: 1, total: 3, number: 13 },
@@ -281,62 +201,61 @@ describe("display state", () => {
         });
     });
 
-    test("maps agent startup, thinking, response, tool, compaction, retry, and waiting activity", () => {
+    test("maps session startup, thinking, response, tool, and waiting activity", () => {
         let state = reduceProgressUpdate(undefined, baseProgress, at("now"));
-        state = reduceAgentSessionEvent(
-            state,
-            piEvent({ type: "agent_start" }),
-            context,
-        );
+        state = reduceSessionEvent(state, { type: "session_started" });
         expect(state.activity).toBe("thinking");
 
-        state = reduceAgentSessionEvent(
-            state,
-            piEvent({
-                type: "message_update",
-                assistantMessageEvent: { type: "thinking_delta", delta: "..." },
-            }),
-            context,
-        );
+        state = reduceSessionEvent(state, {
+            type: "assistant_text",
+            kind: "thinking",
+            text: "...",
+            done: false,
+        });
         expect(state.activity).toBe("thinking");
 
-        state = reduceAgentSessionEvent(
-            state,
-            piEvent({
-                type: "message_update",
-                assistantMessageEvent: { type: "text_delta", delta: "answer" },
-            }),
-            context,
-        );
+        state = reduceSessionEvent(state, {
+            type: "assistant_text",
+            kind: "text",
+            text: "answer",
+            done: false,
+        });
         expect(state.activity).toBe("responding");
 
-        state = reduceAgentSessionEvent(
-            state,
-            piEvent({
-                type: "tool_execution_start",
-                toolCallId: "tool-1",
-                toolName: "bash",
-                args: {},
-            }),
-            context,
-        );
+        state = reduceSessionEvent(state, {
+            type: "tool_call",
+            callId: "tool-1",
+            name: "bash",
+            input: {},
+        });
         expect(state).toMatchObject({
             activity: "tool",
             activityLabel: "Using bash",
         });
+
+        state = reduceSessionEvent(state, {
+            type: "tool_result",
+            callId: "tool-1",
+            name: "bash",
+            output: "",
+            isError: false,
+        });
+        expect(state.activity).toBe("thinking");
+
+        state = reduceSessionEvent(state, { type: "session_finished" });
+        expect(state).toMatchObject({
+            activity: "waiting",
+            activityLabel: "Waiting",
+        });
     });
 
-    test("retains review attempt metadata through agent events", () => {
+    test("retains review attempt metadata through session events", () => {
         const state = reduceProgressUpdate(undefined, {
             ...baseProgress,
             attempt: 3,
             maxAttempts: 5,
         });
-        const next = reduceAgentSessionEvent(
-            state,
-            piEvent({ type: "turn_start" }),
-            context,
-        );
+        const next = reduceSessionEvent(state, { type: "session_started" });
         expect(next.reviewAttempt).toEqual({ current: 3, total: 5 });
     });
 
@@ -390,16 +309,12 @@ describe("display state", () => {
                 title: "Bearer private-value",
             },
         });
-        const next = reduceAgentSessionEvent(
-            state,
-            piEvent({
-                type: "tool_execution_start",
-                toolCallId: "tool-1",
-                toolName: "\u001b[31mBearer private-value\u001b[0m",
-                args: {},
-            }),
-            context,
-        );
+        const next = reduceSessionEvent(state, {
+            type: "tool_call",
+            callId: "tool-1",
+            name: "\u001b[31mBearer private-value\u001b[0m",
+            input: {},
+        });
 
         expect(next.repository).toBe("owner/repo?token=private-value");
         expect(next.issue?.title).toBe("Bearer private-value");
@@ -434,16 +349,12 @@ describe("display state", () => {
                 title: "title\u0007\nsecond line\u009b3J",
             },
         });
-        const next = reduceAgentSessionEvent(
-            state,
-            piEvent({
-                type: "tool_execution_start",
-                toolCallId: "tool-1",
-                toolName: "read\u001b[2J\nforged",
-                args: {},
-            }),
-            context,
-        );
+        const next = reduceSessionEvent(state, {
+            type: "tool_call",
+            callId: "tool-1",
+            name: "read\u001b[2J\nforged",
+            input: {},
+        });
 
         expect(state.repository).toBe("owner/repo forged");
         expect(state.issue?.title).toBe("title second line");

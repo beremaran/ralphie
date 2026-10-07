@@ -1,7 +1,4 @@
-import type {
-    AgentEventContext,
-    AgentSessionEvent,
-} from "../../agent/ports.ts";
+import type { SessionEvent } from "../../harness/ports.ts";
 import { stripTerminalControls } from "../../shared/terminal.ts";
 import type {
     ProgressEvent,
@@ -25,27 +22,13 @@ export type DisplayQueueStatus =
     | "active"
     | "completed"
     | "failed"
-    | "needs-attention"
+    | "hand-off"
     | "skipped";
 
 export type DisplayQueueIssue = {
     readonly number: number;
     readonly title: string;
     readonly status: DisplayQueueStatus;
-};
-
-/** One model advertised by the pi runtime catalog. */
-export type DisplayModel = {
-    readonly provider: string;
-    readonly id: string;
-    readonly name: string;
-    readonly thinkingLevels: ReadonlyArray<string>;
-};
-
-export type DisplayModelSelection = {
-    readonly provider: string;
-    readonly id: string;
-    readonly variant?: string;
 };
 
 export type DisplayReviewAttempt = {
@@ -68,10 +51,6 @@ export type DisplayState = {
     readonly activityLabel: string;
     /** Every issue discovered in this run, in queue order, with its latest status. */
     readonly queue: ReadonlyArray<DisplayQueueIssue>;
-    /** Models advertised by the pi runtime, used by the model picker. */
-    readonly models: ReadonlyArray<DisplayModel>;
-    /** The model and thinking level the run started with. */
-    readonly model?: DisplayModelSelection;
     /** Epoch milliseconds at which the current stage became active. */
     readonly stageStartedAt?: number;
 };
@@ -98,9 +77,8 @@ export const PROGRESS_STAGE_LABELS: Readonly<Record<ProgressStage, string>> = {
     "issue-planning": "Planning issue",
     "issue-execution": "Executing issue",
     "issue-queue": "Updating issue queue",
-    grounding: "Checking issue readiness",
-    "issue-grounding": "Checking issue readiness",
-    "complexity-assessment": "Assessing complexity",
+    triage: "Triaging issue",
+    preflight: "Pre-flight check",
     implementation: "Implementing changes",
     "change-staging": "Staging changes",
     verification: "Running verification",
@@ -110,15 +88,13 @@ export const PROGRESS_STAGE_LABELS: Readonly<Record<ProgressStage, string>> = {
     "review-fix": "Addressing review findings",
     "review-exhaustion": "Handling review exhaustion",
     "checkout-restore": "Restoring checkout",
-    "commit-message": "Generating commit message",
     commit: "Creating commit",
     push: "Pushing changes",
     decomposition: "Decomposing issue",
     "issue-creation": "Creating issues",
     "issue-relationships": "Linking issues",
     "issue-closure": "Closing issue",
-    "pr-gate": "Waiting for PR checks",
-    notification: "Publishing needs-attention notification",
+    "hand-off": "Handing off issue",
 };
 
 /** Stable labels for activities that do not carry a dynamic name. */
@@ -135,7 +111,6 @@ const makeInitialDisplayState = (): DisplayState => ({
     activity: "waiting",
     activityLabel: DISPLAY_ACTIVITY_LABELS.waiting,
     queue: [],
-    models: [],
 });
 
 export const createDisplayState = (): DisplayState => makeInitialDisplayState();
@@ -215,42 +190,6 @@ const normalizedState = (state: DisplayState): DisplayState => ({
         DISPLAY_ACTIVITY_LABELS[state.activity],
     ),
 });
-
-const nestedTimestamp = (value: unknown): number | undefined => {
-    const direct = timestampValue(value);
-    if (direct !== undefined) return direct;
-    const record = recordValue(value);
-    const timestamp = timestampValue(record.timestamp);
-    if (timestamp !== undefined) return timestamp;
-    const created = timestampValue(record.created);
-    if (created !== undefined) return created;
-    return record.time === undefined ? undefined : nestedTimestamp(record.time);
-};
-
-const timestampFromPi = (
-    event: AgentSessionEvent,
-    context: AgentEventContext,
-    clock: DisplayClock,
-): number => {
-    const eventRecord = recordValue(event);
-    const message = eventRecord.message;
-    const partial = recordValue(eventRecord.assistantMessageEvent).partial;
-    const result = eventRecord.result;
-    const contextTimestamp = (recordValue(context) as { timestamp?: unknown })
-        .timestamp;
-    for (const candidate of [
-        eventRecord.timestamp,
-        eventRecord.time,
-        message,
-        partial,
-        result,
-        contextTimestamp,
-    ]) {
-        const timestamp = nestedTimestamp(candidate);
-        if (timestamp !== undefined) return timestamp;
-    }
-    return clockValue(clock);
-};
 
 const repositoryFor = (
     state: DisplayState,
@@ -334,13 +273,13 @@ const displayIssuesFrom = (
 
 /**
  * Status transitions are driven only by terminal queue events, so mid-issue
- * stages (grounding, verification, review) never overwrite an outcome and a
- * later needs-attention decision can still supersede an execution success.
+ * stages (pre-flight, verification, review) never overwrite an outcome and a
+ * later hand-off decision can still supersede an execution success.
  */
 const displayQueueStatusFor = (
     update: ProgressUpdate,
 ): DisplayQueueStatus | undefined => {
-    if (update.status === "needs-attention") return "needs-attention";
+    if (update.status === "hand-off") return "hand-off";
     if (update.stage === "issue-execution") {
         if (update.status === "started") return "active";
         if (update.status === "succeeded") return "completed";
@@ -386,65 +325,6 @@ const displayQueueFor = (
     return queue.map((entry) =>
         entry.number === issueNumber ? { ...entry, status } : entry,
     );
-};
-
-const displayModelsFrom = (value: unknown): ReadonlyArray<DisplayModel> => {
-    if (!Array.isArray(value)) return [];
-    const models: Array<DisplayModel> = [];
-    for (const entry of value) {
-        const record = recordValue(entry);
-        const provider = stringValue(record.provider);
-        const id = stringValue(record.id);
-        const name = stringValue(record.name);
-        if (provider === undefined || id === undefined || name === undefined) {
-            continue;
-        }
-        const levels = Array.isArray(record.thinkingLevels)
-            ? record.thinkingLevels.flatMap((level) =>
-                  typeof level === "string" ? [displayText(level)] : [],
-              )
-            : [];
-        models.push({
-            provider: displayText(provider),
-            id: displayText(id),
-            name: displayText(name),
-            thinkingLevels: levels,
-        });
-    }
-    return models;
-};
-
-const displayModelSelectionFrom = (
-    value: unknown,
-): DisplayModelSelection | undefined => {
-    const record = recordValue(value);
-    const model = recordValue(record.model);
-    const provider = stringValue(model.provider);
-    const id = stringValue(model.id);
-    if (provider === undefined || id === undefined) return undefined;
-    const variant = stringValue(record.variant);
-    return {
-        provider: displayText(provider),
-        id: displayText(id),
-        ...(variant === undefined || variant.trim() === ""
-            ? {}
-            : { variant: displayText(variant) }),
-    };
-};
-
-const runtimeCatalogFor = (
-    state: DisplayState,
-    update: ProgressUpdate,
-): Pick<DisplayState, "models" | "model"> => {
-    if (update.stage !== "agent-runtime" || update.status !== "succeeded") {
-        return { models: state.models, model: state.model };
-    }
-    const details = recordValue(update.details);
-    const models = displayModelsFrom(details.models);
-    return {
-        models: models.length === 0 ? state.models : models,
-        model: displayModelSelectionFrom(details.selection) ?? state.model,
-    };
 };
 
 const reviewAttemptFor = (
@@ -505,7 +385,6 @@ export const reduceProgressUpdate = (
     const repository = repositoryFor(state, update);
     const issue = issueFor(state, update);
     const queue = displayQueueFor(state, update);
-    const { models, model } = runtimeCatalogFor(state, update);
     const nestedIssueContext = nestedIssueContextFor(state, update);
     const reviewAttempt = isLeafCompletion(update)
         ? undefined
@@ -521,8 +400,6 @@ export const reduceProgressUpdate = (
         ...(repository === undefined ? {} : { repository }),
         ...(issue === undefined ? {} : { issue }),
         queue,
-        models,
-        ...(model === undefined ? {} : { model }),
         ...nestedIssueContext,
         ...(reviewAttempt === undefined ? {} : { reviewAttempt }),
         stage,
@@ -543,93 +420,39 @@ const change = (activity: DisplayActivity, label?: string): ActivityChange => ({
     ...(label === undefined ? {} : { label }),
 });
 
-const messageToolName = (
-    event: Extract<AgentSessionEvent, { type: "message_update" }>,
-): string | undefined =>
-    stringValue(
-        recordValue(recordValue(event.assistantMessageEvent).toolCall).name,
-    );
-
-const messageActivity = (
-    event: Extract<AgentSessionEvent, { type: "message_update" }>,
-): ActivityChange | undefined => {
-    const kind = event.assistantMessageEvent.type;
-    if (
-        kind === "thinking_start" ||
-        kind === "thinking_delta" ||
-        kind === "thinking_end"
-    ) {
-        return change("thinking");
-    }
-    if (kind === "text_start" || kind === "text_delta" || kind === "text_end") {
-        return change("responding");
-    }
-    if (
-        kind === "toolcall_start" ||
-        kind === "toolcall_delta" ||
-        kind === "toolcall_end"
-    ) {
-        const toolName = messageToolName(event);
-        return toolName === undefined
-            ? change("tool")
-            : change("tool", activityLabelFor("tool", toolName));
-    }
-    if (kind === "start") return change("thinking");
-    if (kind === "done") return change("waiting");
-    if (kind === "error") return change("waiting");
-    return undefined;
-};
-
-const lifecycleActivity = (
-    event: AgentSessionEvent,
-): ActivityChange | undefined => {
+const sessionActivity = (event: SessionEvent): ActivityChange | undefined => {
     switch (event.type) {
-        case "agent_start":
-        case "turn_start":
+        case "session_started":
             return change("thinking");
-        case "turn_end":
-        case "agent_end":
+        case "assistant_text":
+            return change(
+                event.kind === "thinking" ? "thinking" : "responding",
+            );
+        case "tool_call":
+            return change("tool", activityLabelFor("tool", event.name));
+        case "tool_result":
+            // The harness hands the tool output back to the model.
+            return change("thinking");
+        case "error":
+        case "session_finished":
             return change("waiting");
-        default:
+        case "usage":
             return undefined;
     }
 };
 
-const agentActivity = (
-    event: AgentSessionEvent,
-): ActivityChange | undefined => {
-    if (event.type === "message_update") return messageActivity(event);
-    if (event.type === "tool_execution_start") {
-        return change("tool", activityLabelFor("tool", event.toolName));
-    }
-    if (event.type === "tool_execution_update") {
-        return change("tool", activityLabelFor("tool", event.toolName));
-    }
-    if (event.type === "tool_execution_end") {
-        return change("waiting");
-    }
-    if (event.type === "message_start") {
-        return recordValue(event.message).role === "assistant"
-            ? change("responding")
-            : change("waiting");
-    }
-    if (event.type === "message_end") return change("waiting");
-    return lifecycleActivity(event);
-};
-
-export const reduceAgentSessionEvent = (
+export const reduceSessionEvent = (
     currentState: DisplayState | undefined,
-    event: AgentSessionEvent,
-    context: AgentEventContext = { sessionID: "", directory: "" },
+    event: SessionEvent,
     now?: DisplayClock | DisplayStateOptions,
 ): DisplayState => {
     const state = normalizedState(currentState ?? makeInitialDisplayState());
-    const activity = agentActivity(event);
+    const activity = sessionActivity(event);
     if (activity === undefined) return state;
     const timestamp =
         state.stage === undefined || state.stageStartedAt !== undefined
             ? undefined
-            : timestampFromPi(event, context, clockFrom(now));
+            : clockValue(clockFrom(now));
     return {
         ...state,
         ...(timestamp === undefined ? {} : { stageStartedAt: timestamp }),
@@ -640,47 +463,3 @@ export const reduceAgentSessionEvent = (
         ),
     };
 };
-
-export function updateDisplayState(
-    state: DisplayState | undefined,
-    update: ProgressUpdate | ProgressEvent,
-    now?: DisplayClock | DisplayStateOptions,
-): DisplayState;
-export function updateDisplayState(
-    state: DisplayState | undefined,
-    event: AgentSessionEvent,
-    context: AgentEventContext,
-    now?: DisplayClock | DisplayStateOptions,
-): DisplayState;
-export function updateDisplayState(
-    state: DisplayState | undefined,
-    event: AgentSessionEvent,
-    now?: DisplayClock | DisplayStateOptions,
-): DisplayState;
-export function updateDisplayState(
-    state: DisplayState | undefined,
-    input: ProgressUpdate | ProgressEvent | AgentSessionEvent,
-    contextOrNow?: AgentEventContext | DisplayClock | DisplayStateOptions,
-    now?: DisplayClock | DisplayStateOptions,
-): DisplayState {
-    if ("type" in input) {
-        const hasContext =
-            typeof contextOrNow === "object" &&
-            contextOrNow !== null &&
-            "sessionID" in contextOrNow &&
-            "directory" in contextOrNow;
-        const context = hasContext
-            ? (contextOrNow as AgentEventContext)
-            : undefined;
-        const clock = hasContext
-            ? now
-            : (contextOrNow as DisplayClock | DisplayStateOptions | undefined);
-        return reduceAgentSessionEvent(
-            state,
-            input,
-            context ?? { sessionID: "", directory: "" },
-            clock,
-        );
-    }
-    return reduceProgressUpdate(state, input, contextOrNow as DisplayClock);
-}

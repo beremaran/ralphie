@@ -31,6 +31,8 @@ export type GitHubIssueState = "open" | "closed";
 
 export type GitHubIssueComment = {
     readonly id: number;
+    /** The login of the commenter, when GitHub reports one. */
+    readonly author?: string;
     readonly body: string;
     readonly updatedAt: string;
 };
@@ -39,6 +41,8 @@ export type GitHubIssue = {
     readonly number: number;
     readonly title: string;
     readonly url: string;
+    /** The login of the reporter, when GitHub reports one. */
+    readonly author?: string;
     readonly body: string | null;
     readonly labels: ReadonlyArray<string>;
     /** Present on all snapshots returned by the live issues service. */
@@ -51,6 +55,8 @@ export type GitHubIssue = {
     readonly commentCount?: number;
     /** The latest comment update timestamp, or the issue timestamp when empty. */
     readonly commentVersion?: string;
+    /** Number of native sub-issues, when GitHub reports it. */
+    readonly subIssueCount?: number;
 };
 
 export type GitHubDecompositionChild = GitHubIssue & {

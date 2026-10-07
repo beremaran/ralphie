@@ -8,7 +8,7 @@ reading map.
 
 > [!CAUTION]
 > Ralphie commits approved work and pushes directly to the branch selected by
-> `--branch`. Test against a disposable repository before enabling mutations.
+> `repos."owner/repo".branch` (default `main`, otherwise `master`). Test against a disposable repository before enabling mutations.
 
 ## Delivery guardrails
 
@@ -35,12 +35,10 @@ force-pushed over. Cancellation is checked at every mutation boundary, the push
 is attempted at most once, and failures and cancellations leave a clean,
 recoverable checkout.
 
-Implementation agents may use normal shell composition, pipes, redirection,
-and language runtimes. Ralphie's shell hook rejects explicit agent requests for
-orchestration-owned Git/GitHub mutations such as commits, pushes, branch
-changes, resets, cleans, and `gh` calls. This hook is a guardrail, not a
-security sandbox: deterministic repository invariants and the isolated
-delivery services remain authoritative.
+Implementation agents may use whatever shell their harness grants. Ralphie does
+not filter their commands: the guardrails are the session environment (see
+[Session isolation](#session-isolation)) and the deterministic repository
+invariants and delivery services, which remain authoritative.
 
 ## Workspace risk
 
@@ -51,10 +49,9 @@ Tracked modifications and untracked, non-ignored files inside that checkout are
 discarded. Keep unrelated work outside Ralphie's workspace.
 
 The workspace's `.ralphie` directory contains only repository checkouts and
-Ralphie's run state, events, and recovery artifacts. Pi credentials and
-default-model settings live in `~/.pi/agent` (or `PI_CODING_AGENT_DIR`) and are
-never written under this path; keep provider configuration outside the
-workspace.
+Ralphie's run state, events, and recovery artifacts. Harness credentials and
+settings belong to each harness CLI and are never written under this path;
+keep provider configuration outside the workspace.
 
 Ralphie removes the entire workspace recursively before preparing a run and
 again after a successful run, after protected-path checks. The retained
@@ -64,24 +61,28 @@ a path dedicated to Ralphie:
 
 ```bash
 bunx @beremaran/ralphie owner/repository \
-  --workspace /tmp/ralphie
+  --set workspace=/tmp/ralphie
 ```
 
 ## Agent and mutation boundaries
 
-Agent sessions are rooted at the repository checkout. Review-profile sessions
-expose read-only tools (`read` and the non-mutating shell allowlist) and deny
-file writes; implementation sessions may edit the checkout. Every session
-enforces a shell denylist that rejects commits, pushes, branch/reset/clean
-operations, and `gh` commands before execution, and post-task verification
-fails the task when the checkout moved anyway. Structured decisions are
-returned by calling a `submit_result` tool whose parameters are the canonical
-Zod schema; invalid arguments come back to the model as tool errors so it can
-correct itself in the same turn, and the captured call is re-validated at the
-Ralphie domain boundary. A repository-backed blocker is a
-`request_needs_attention` tool call, not a mutation-capable tool. Ralphie
+Agent sessions run as headless harness CLI invocations rooted at the
+repository checkout. Read-only roles run in the harness's read-only mode
+(Claude Code plan mode limited to the Read, Glob and Grep tools, so there is
+no shell: reviewers cannot run `git diff`, and Ralphie puts the diff in their
+prompt instead); the `implementer` and `fixer` run under their
+[approval mode](#approval-modes) and may edit the checkout. Post-task
+verification fails the task when the checkout's branch or head moved anyway.
+Structured decisions are returned as a result validated against the canonical
+Zod schema (natively where the harness supports it, otherwise from a final
+JSON block, with a bounded number of corrections), and the validated value is
+what the domain boundary accepts. A repository-backed blocker is the
+implementer's `needs_attention` status with a `needsAttention` object (`reason`
+and `questions`) in that result, or a pre-flight `hand_off` disposition; neither
+is a mutation-capable tool, and Ralphie verifies the request before handing
+off. Ralphie
 stages, verifies, commits, pushes, and mutates
-GitHub through deterministic domain services. Invalid output or a pi failure
+GitHub through deterministic domain services. Invalid output or a harness failure
 becomes a failed issue outcome without proceeding to the next operation.
 A turn that produces no assistant message fails instead of producing a
 decision.
@@ -91,33 +92,93 @@ change that selects a project license fails closed unless that exact license
 is authorized by the issue text, deferring to a maintainer decision instead of
 silently establishing policy.
 
-Verification is opt-in: Ralphie runs only the commands supplied with
-`--verify-command`, and when none are supplied the gate is skipped and review
+Verification is opt-in: Ralphie runs only the commands listed under
+`repos."owner/repo".verify`, and when none are listed the gate is skipped and review
 proceeds on the staged diff. Configured commands run against the staged tree
 and their evidence is
 bound to that tree before review or commit. A non-zero command exit is treated
-as actionable implementation feedback: a fresh fix session receives bounded
-failure evidence, and Ralphie restages and retries up to five times.
+as actionable implementation feedback: the fix session (the implementer's, resumed) receives bounded
+failure evidence, and Ralphie restages and retries up to `limits.verificationFixes` times.
 Staged-tree mutation and exhausted repair remain
 hard safety stops. The direct-push path never uses force. See
 [Workflows](workflows.md) for the complete implementation and delivery sequence,
 and [Operations and recovery](operations-and-recovery.md) for what remains
 available after a safety stop.
 
+## Approval modes
+
+Read-only roles never edit and ignore the approval mode. The editing roles
+(`implementer` and `fixer`) run under `approval`, set at the top level of the
+configuration and overridable per repository and per harness
+(`harnesses.<name>.approval`):
+
+- `safe` (default) uses the harness's own approval or sandbox: Claude Code
+  auto mode, or the Codex workspace-write sandbox.
+- `yolo` turns off every approval and sandbox check (Claude Code
+  `bypassPermissions`, Codex `--dangerously-bypass-approvals-and-sandbox`, and
+  the only mode pi and OpenCode have). Use it only in an environment that is
+  already isolated.
+
+Before any work starts, Ralphie checks that every assigned harness starts,
+that `safe` is actually granted where configured (Claude Code can silently
+fall back from auto mode), and that no editing role runs on pi or OpenCode
+without `yolo`, because neither has a sandbox or approval system. A failure
+stops the run within seconds and names the configuration change that fixes it,
+such as `harnesses.pi.approval: yolo` or moving the role with
+`roles.implementer`. Spend caps (`limits.maxBudgetUsd`) are covered in
+[Configuration](configuration.md#limits).
+
+Each session also has a wall-clock limit
+([`limits.sessionTimeoutMinutes`](configuration.md#limits)); exceeding it kills
+the session's whole process group, so tools the harness started die with it.
+
+## Session isolation
+
+Sessions never hold GitHub or push authority (ADR-0003); the session
+environment enforces it instead of the prompts.
+
+- **No credentials.** Every session starts without `GH_TOKEN`, `GITHUB_TOKEN`,
+  `GH_ENTERPRISE_TOKEN` and `GITHUB_ENTERPRISE_TOKEN`, and with `GH_CONFIG_DIR`
+  pointing at a fresh, empty temporary directory that is removed when the
+  session ends, so a stored `gh` login is not visible either. These entries
+  override anything a request sets.
+- **No SSH or git credentials.** Every session also starts without
+  `SSH_AUTH_SOCK`, `SSH_ASKPASS` and `GIT_ASKPASS`, with `GIT_CONFIG_GLOBAL`
+  and `GIT_CONFIG_SYSTEM` set to `/dev/null` and the repository's
+  `credential.helper` list reset (so no credential helper applies),
+  `GIT_TERMINAL_PROMPT=0`, and `GIT_SSH_COMMAND=false`, so a git remote cannot
+  authenticate through an ssh agent, a helper or a prompt. Ralphie's own
+  delivery push runs outside sessions and is unaffected.
+- **Residual limitation.** The environment cannot hide credentials that a
+  process running as the same OS user can read directly: a private key under
+  `~/.ssh` used through an explicit `ssh -i`, a `gh` token read straight out of
+  the operating system keyring (for example with `security find-generic-password`
+  on macOS), or a credential file read by path. `gh` itself is logged out in a
+  session even when its token lives in the keyring, because it finds keyring
+  entries through the hosts file in its now-empty config directory. Ralphie does not claim to block these, and a determined
+  yolo session could still use them. What it guarantees is that it never hands
+  a token to a session, that the checkout's push URL is disabled, and that its
+  own delivery push is verified against the remote. To close the gap, run
+  Ralphie as a dedicated OS user whose home, keyring and ssh keys hold no
+  credentials for the repository.
+- **No push from the workspace.** After preparing the checkout Ralphie sets
+  origin's push URL to a disabled value, so `git push` inside the workspace
+  fails. Ralphie's own delivery push names the fetch URL explicitly, never
+  uses force, and is verified against the remote afterwards.
+- **Read-only means unchanged.** Before and after every read-only session
+  Ralphie fingerprints HEAD, the index, tracked changes and untracked file
+  contents. Any difference fails the session (kind `access`), which fails the
+  issue closed.
+
 ## Bounded command execution
 
-No command runs unbounded. Every process Ralphie spawns, and every shell
-command its implementation agent runs, carries a hard deadline so a hung
-process fails loudly instead of stalling an issue run:
+No command runs unbounded. Every process Ralphie spawns carries a hard
+deadline so a hung process fails loudly instead of stalling an issue run:
 
-- **Agent shell commands** default to a 120-second timeout with a 600-second
-  maximum. An omitted `timeout` gets the default; a larger declared timeout is
-  clamped to the ceiling so the model cannot disable the guardrail. A timed-out
-  command returns to the agent as a tool error with its partial output, and the
-  agent may retry with an explicit `timeout` for genuinely slower commands.
+- **Sessions** are bounded by `limits.sessionTimeoutMinutes`, described above.
 - **Ralphie-owned commands** (git and `gh` operations against the repository,
   workspace preparation, authentication checks) default to a 10-minute timeout.
-- **Verification commands** (`--verify-command`) run under a 30-minute timeout
+- **Verification commands** (`verify`) run under a 30-minute timeout
   because they execute the repository's full gate; they are the deliberate
   exception to the shorter defaults. When no command is configured, no
   verification process runs.

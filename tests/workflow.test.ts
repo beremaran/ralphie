@@ -1,6 +1,9 @@
+import {
+    exitCodeForError,
+    RalphieExitCode,
+} from "../src/workflow/exit-code.ts";
+import { RunHaltedError } from "../src/shared/error.ts";
 import { describe, expect, test } from "bun:test";
-import type { AgentClient } from "../src/agent/ports.ts";
-import { type PiModelInfo } from "../src/agent/pi-models.ts";
 
 import { type GitRepositoryService } from "../src/git/ports.ts";
 import { type GitRepositoryInvariantService } from "../src/git/ports.ts";
@@ -9,37 +12,39 @@ import { type GitIssueOperationsService } from "../src/git/ports.ts";
 import { type GitHubConnectionService } from "../src/github/ports.ts";
 import { type GitHubIssueMutationService } from "../src/github/ports.ts";
 import { makeParentCompletionService } from "../src/issues/app/parent-completion.ts";
-import { type GitHubNeedsAttentionNotificationService } from "../src/github/ports.ts";
+import {
+    type GitHubHandOffInput,
+    type GitHubHandOffService,
+} from "../src/github/ports.ts";
 import { type GitHubIssuesService } from "../src/github/ports.ts";
+import { type GitHubTriageService } from "../src/github/ports.ts";
+import { type TriageService } from "../src/issues/app/triage.ts";
+import { type TriageResult } from "../src/issues/domain/triage.ts";
 import { type GitHubIssue } from "../src/github/domain.ts";
 import {
     type IssueExecutionContext,
     type IssueExecutionOutcome,
     IssueExecutionOutcomeKind,
-} from "../src/issues/app/execution.ts";
+} from "../src/issues/app/execution-model.ts";
 import {
     makeIssueExecutorService,
     type IssueExecutorService,
-} from "../src/issues/app/executor.ts";
+} from "../src/issues/app/issue-routing.ts";
 import {
     IssueArtifactKind,
     type IssueArtifactStoreService,
     makeIssueArtifactStore,
 } from "../src/issues/app/artifacts.ts";
-import { DEFAULT_AGENT } from "../src/agent/model.ts";
-import type { AgentModel, AgentSelection } from "../src/agent/model.ts";
-import { type PiAgentService } from "../src/pi/ports.ts";
+import { defaultRoles } from "./shared/agent-sessions.ts";
+import { makeFakeHarness } from "./shared/fake-harness.ts";
+import { resolveRoleAssignments } from "../src/harness/app/roles.ts";
 import type {
     ProgressReporterService,
     ProgressUpdate,
 } from "../src/progress/ports.ts";
 import { makeTestProgressRecorder } from "./shared/progress-recorder.ts";
 import { countingIds, fixedClock, testLayout } from "./shared/test-values.ts";
-import {
-    type RunControl,
-    type RunControlSelection,
-    type RunEventLog,
-} from "../src/run/ports.ts";
+import { type RunControl, type RunEventLog } from "../src/run/ports.ts";
 import { type RunStateStoreService } from "../src/run/ports.ts";
 import { type RunState, RunStateStatus } from "../src/run/state.ts";
 import { type WorkspaceService } from "../src/workspace/ports.ts";
@@ -48,11 +53,10 @@ import { IssueOrder, IssueSort } from "../src/github/domain.ts";
 import type { IssueWorkflowRuntime } from "../src/runtime.ts";
 import { RalphieError } from "../src/shared/error.ts";
 import {
-    ComplexityLevel,
-    type GroundingDecision,
-    GroundingDisposition,
+    type PreflightDecision,
+    PreflightDisposition,
     IssueResolutionStatus,
-    NeedsAttentionReason,
+    HandOffReason,
 } from "../src/issues/domain/decisions.ts";
 
 const firstIssue: GitHubIssue = {
@@ -81,28 +85,24 @@ type TestRuntimeOptions = {
     readonly refreshFailure?: RalphieError;
     readonly githubFailure?: RalphieError;
     readonly gitFailure?: RalphieError;
-    readonly startFailure?: RalphieError;
     readonly removeFailure?: RalphieError;
     readonly closeFailure?: RalphieError;
     readonly abortOnExecute?: AbortController;
     readonly abortAt?: "github" | "repository" | "issues" | "agent" | "between";
     readonly abortController?: AbortController;
     readonly captureStart?: number;
-    readonly failPiReadyProgress?: boolean;
     readonly executionContexts?: IssueExecutionContext[];
     readonly executeGate?: (context: IssueExecutionContext) => Promise<void>;
     readonly issueExecutor?: IssueExecutorService;
     readonly artifactStore?: IssueArtifactStoreService;
     readonly refreshedIssues?: Readonly<Record<number, GitHubIssue>>;
-    readonly needsAttentionNotification?: GitHubNeedsAttentionNotificationService;
+    readonly handOffService?: GitHubHandOffService;
+    readonly triageService?: TriageService;
+    readonly githubTriage?: GitHubTriageService;
     readonly onStateSave?: (state: RunState) => void;
     readonly eventLog?: RunEventLog;
     /** Native sub-issues reported for every parent during reconciliation. */
     readonly parentSubIssues?: ReadonlyArray<GitHubIssue>;
-    /** Model catalog exposed by the mock pi runtime for thinking validation. */
-    readonly piCatalog?: ReadonlyArray<PiModelInfo>;
-    /** Default model exposed by the mock pi runtime. */
-    readonly piDefaultModel?: AgentModel;
 };
 
 const testRuntime = (
@@ -204,6 +204,9 @@ const testRuntime = (
         update: async () => {
             throw new RalphieError({ message: "unused" });
         },
+        comment: async (_repository, issueNumber) => {
+            calls.push(`commentIssue:${issueNumber}`);
+        },
         close: async (_repository, issueNumber) => {
             calls.push(`closeIssue:${issueNumber}`);
             if (options.closeFailure) throw options.closeFailure;
@@ -219,19 +222,23 @@ const testRuntime = (
         readStagedBinaryDiff: async () => "",
         hasStagedChanges: async () => false,
         commit: async () => ({ sha: "a".repeat(40), treeSha: "b".repeat(40) }),
+        commitCandidate: async () => ({
+            sha: "c".repeat(40),
+            treeSha: "b".repeat(40),
+        }),
+        readRangeDiff: async () => "",
+        squashCandidates: async () => {},
         push: async (_path, branch) => {
             calls.push(`pushBranch:${branch}`);
         },
     };
     const issueExecutor: IssueExecutorService = options.issueExecutor ?? {
         execute: async (context) => {
-            // Snapshot: agentSelection resolves live, so reading the captured
-            // context later would report a newer pick.
             options.executionContexts?.push({ ...context });
             if (options.executeGate !== undefined)
                 await options.executeGate(context);
             calls.push(
-                `executeIssue:${context.issue.number}:${context.repositoryPath}:${context.targetBranch}:${context.agentSelection.agent}`,
+                `executeIssue:${context.issue.number}:${context.repositoryPath}:${context.targetBranch}:${context.agent.roles.implementer.harness}`,
             );
             if (options.abortOnExecute !== undefined) {
                 options.abortOnExecute.abort();
@@ -243,23 +250,6 @@ const testRuntime = (
             if (result === undefined) throw new Error("Missing test outcome");
             if (options.abortAt === "between") options.abortController?.abort();
             return result;
-        },
-    };
-    const agentRuntime: PiAgentService = {
-        start: async () => {
-            if (options.startFailure) throw options.startFailure;
-            calls.push("startServer");
-            if (options.abortAt === "agent") options.abortController?.abort();
-            return {
-                client: {} as AgentClient,
-                catalog: options.piCatalog ?? [],
-                ...(options.piDefaultModel === undefined
-                    ? {}
-                    : { defaultModel: options.piDefaultModel }),
-                close: async () => {
-                    calls.push("closeRuntime");
-                },
-            };
         },
     };
     const eventLog: RunEventLog = options.eventLog ?? {
@@ -285,20 +275,7 @@ const testRuntime = (
         },
     };
     const progressRecorder = makeTestProgressRecorder(progressEvents);
-    const progress: ProgressReporterService = options.failPiReadyProgress
-        ? {
-              ...progressRecorder,
-              emit: async (update) => {
-                  if (
-                      update.stage === "agent-runtime" &&
-                      update.status === "succeeded"
-                  ) {
-                      throw new Error("Agent ready progress emission failed");
-                  }
-                  await progressRecorder.emit(update);
-              },
-          }
-        : progressRecorder;
+    const progress: ProgressReporterService = progressRecorder;
     const relationships = {
         listSubIssues: async () => options.parentSubIssues ?? [],
         parentOf: async () => undefined,
@@ -315,18 +292,24 @@ const testRuntime = (
             relationships,
             mutations,
         }),
-        githubNeedsAttentionNotification:
-            options.needsAttentionNotification ?? {
-                notify: async () => {
-                    throw new Error("unused");
-                },
-            },
+        githubHandOff: options.handOffService ?? {
+            handOff: async () => ({ comment: "created" }),
+        },
         gitRepository: repository,
         gitRepositoryInvariant: invariant,
         gitIssueCheckpoint: checkpoint,
         gitIssueOperations: operations,
+        githubTriage: options.githubTriage ?? {
+            promote: async () => ({ comment: "created" }),
+            explainImplemented: async () => ({ comment: "created" }),
+        },
+        triage: options.triageService ?? {
+            triage: async () => {
+                throw new Error("Triage must not run in this test");
+            },
+        },
         issueExecutor,
-        agentRuntime,
+        harness: makeFakeHarness().service,
         progress,
         runEventLog: eventLog,
         runStateStore: stateStore,
@@ -366,19 +349,26 @@ type GroundedRoute =
     | "actionable"
     | "decomposition"
     | "already-resolved"
-    | "needs-attention";
+    | "hand-off";
 
-const groundingDecisionFor = (route: GroundedRoute): GroundingDecision => {
+const preflightDecisionFor = (route: GroundedRoute): PreflightDecision => {
     switch (route) {
         case "actionable":
-        case "decomposition":
-            return { disposition: GroundingDisposition.Actionable };
-        case "already-resolved":
-            return { disposition: GroundingDisposition.AlreadyResolved };
-        case "needs-attention":
             return {
-                disposition: GroundingDisposition.NeedsAttention,
-                reason: NeedsAttentionReason.ExternalDependency,
+                disposition: PreflightDisposition.Actionable,
+                fitsOneSession: true,
+            };
+        case "decomposition":
+            return {
+                disposition: PreflightDisposition.Actionable,
+                fitsOneSession: false,
+            };
+        case "already-resolved":
+            return { disposition: PreflightDisposition.AlreadyResolved };
+        case "hand-off":
+            return {
+                disposition: PreflightDisposition.HandOff,
+                reason: HandOffReason.ExternalDependency,
                 summary: "A prerequisite is still open.",
                 evidence: ["Issue body links the open prerequisite."],
                 questions: ["Complete the prerequisite, then retry."],
@@ -416,18 +406,6 @@ const groundedRouteExecutor = (
     return makeIssueExecutorService(
         artifacts,
         {
-            assess: async (context) => {
-                calls.push(`complexity:${context.issue.number}`);
-                return {
-                    decision: {
-                        complexity: ComplexityLevel.Level2,
-                        rationale: "The fixture is directly actionable.",
-                    },
-                    sessionID: `complexity-${context.issue.number}`,
-                };
-            },
-        },
-        {
             execute: async ({ context }) => {
                 calls.push(`implementation:${context.issue.number}`);
                 calls.push(
@@ -448,12 +426,12 @@ const groundedRouteExecutor = (
         },
         {
             assess: async (context) => {
-                calls.push(`grounding:${context.issue.number}`);
+                calls.push(`preflight:${context.issue.number}`);
                 return {
-                    decision: groundingDecisionFor(
+                    decision: preflightDecisionFor(
                         routes[context.issue.number] ?? "actionable",
                     ),
-                    sessionID: `grounding-${context.issue.number}`,
+                    sessionID: `preflight-${context.issue.number}`,
                 };
             },
         },
@@ -481,7 +459,7 @@ const baseOptions = {
         sort: IssueSort.Created,
         order: IssueOrder.Ascending,
     },
-    agent: DEFAULT_AGENT,
+    roles: defaultRoles(),
     workspace: "/tmp/ralphie",
     runId: "test-run",
 } as const;
@@ -494,9 +472,10 @@ describe("workflow", () => {
         const summary = await workflow(
             {
                 ...baseOptions,
-                model: { providerID: "openai", modelID: "gpt-5" },
-                modelVariant: "high",
-                agent: "reviewer",
+                roles: resolveRoleAssignments({
+                    harnesses: { codex: { model: "gpt-5", effort: "high" } },
+                    roles: { default: "codex" },
+                }),
                 maxDecompositionDepth: 6,
             },
             testRuntime(calls, states, {}, events),
@@ -512,11 +491,9 @@ describe("workflow", () => {
             "verifyGitInstalled",
             "prepareRepository:owner/repo:develop:/tmp/ralphie",
             "listIssues:owner/repo:bug:created:asc",
-            "startServer",
             "refreshIssue:42",
-            "executeIssue:42:/tmp/ralphie/repo:develop:reviewer",
+            "executeIssue:42:/tmp/ralphie/repo:develop:codex",
             "closeIssue:42",
-            "closeRuntime",
             "removeWorkspace:/tmp/ralphie",
             "closeEventLog",
         ]);
@@ -525,73 +502,23 @@ describe("workflow", () => {
         );
     });
 
-    test("fails fast before any issue work when the thinking level is unsupported", async () => {
+    test("completed issues are closed without any hand-off", async () => {
         const calls: string[] = [];
-        const states: RunState[] = [];
-        await expect(
-            workflow(
-                {
-                    ...baseOptions,
-                    model: {
-                        providerID: "opencode-go",
-                        modelID: "deepseek-v4-flash",
-                    },
-                    modelVariant: "medium",
-                },
-                testRuntime(calls, states, {
-                    piCatalog: [
-                        {
-                            provider: "opencode-go",
-                            id: "deepseek-v4-flash",
-                            name: "DeepSeek V4 Flash",
-                            reasoning: true,
-                            thinkingLevels: ["off", "low", "high", "max"],
-                        },
-                    ],
-                }),
-            ),
-        ).rejects.toThrow(/--thinking/);
-        expectNoIssueWork(calls);
-        expect(calls).toContain("closeRuntime");
-    });
-
-    test("skips thinking validation when the runtime exposes no model catalog", async () => {
-        const calls: string[] = [];
-        const states: RunState[] = [];
+        let handedOff = false;
         const summary = await workflow(
-            {
-                ...baseOptions,
-                model: {
-                    providerID: "opencode-go",
-                    modelID: "deepseek-v4-flash",
-                },
-                modelVariant: "medium",
-            },
-            testRuntime(calls, states, {}),
-        );
-        expect(summary.counts.completed).toBe(1);
-    });
-
-    test("keeps completed issue closure unchanged when notifications are enabled", async () => {
-        const calls: string[] = [];
-        let notified = false;
-        const summary = await workflow(
-            {
-                ...baseOptions,
-                notificationsEnabled: true,
-            },
+            baseOptions,
             testRuntime(calls, [], {
-                needsAttentionNotification: {
-                    notify: async () => {
-                        notified = true;
-                        return { comment: "created", label: "applied" };
+                handOffService: {
+                    handOff: async () => {
+                        handedOff = true;
+                        return { comment: "created" };
                     },
                 },
             }),
         );
 
         expect(summary.counts.completed).toBe(1);
-        expect(notified).toBeFalse();
+        expect(handedOff).toBeFalse();
         expect(calls).toContain("closeIssue:42");
     });
 
@@ -608,14 +535,14 @@ describe("workflow", () => {
                     issueLists: [[firstIssue, secondIssue]],
                     outcomes: [
                         {
-                            kind: IssueExecutionOutcomeKind.NeedsAttention,
-                            reason: NeedsAttentionReason.ExternalDependency,
+                            kind: IssueExecutionOutcomeKind.HandOff,
+                            reason: HandOffReason.ExternalDependency,
                             summary: "A prerequisite is still open.",
                             evidence: ["Issue body links the prerequisite."],
                             questions: [
                                 "Complete the prerequisite, then retry.",
                             ],
-                            artifactPath: "/tmp/needs-attention.json",
+                            artifactPath: "/tmp/hand-off.json",
                         },
                         {
                             kind: IssueExecutionOutcomeKind.Completed,
@@ -631,36 +558,32 @@ describe("workflow", () => {
         expect(summary.outcomes.map(({ issueNumber }) => issueNumber)).toEqual([
             42, 43,
         ]);
-        const needsAttention = events.find(
-            ({ status }) => status === "needs-attention",
-        );
-        expect(needsAttention).toMatchObject({
-            stage: "grounding",
+        const handOff = events.find(({ status }) => status === "hand-off");
+        expect(handOff).toMatchObject({
+            stage: "hand-off",
             current: 1,
             total: 2,
             details: {
-                reason: NeedsAttentionReason.ExternalDependency,
+                reason: HandOffReason.ExternalDependency,
                 summary: "A prerequisite is still open.",
                 evidence: ["Issue body links the prerequisite."],
                 questions: ["Complete the prerequisite, then retry."],
-                artifactPath: "/tmp/needs-attention.json",
+                artifactPath: "/tmp/hand-off.json",
                 queuePosition: 1,
             },
         });
-        expect(summary.counts[IssueExecutionOutcomeKind.NeedsAttention]).toBe(
-            1,
-        );
+        expect(summary.counts[IssueExecutionOutcomeKind.HandOff]).toBe(1);
         expect(states.at(-1)?.queue.completedIssueNumbers).toEqual([43]);
         expect(calls).not.toContain("closeIssue:42");
         expect(calls).toContain("closeIssue:43");
     });
 
-    test("keeps a confirmed needs-attention recovery outcome open with its diagnostics path and no Git or GitHub mutations", async () => {
+    test("keeps a confirmed hand-off recovery outcome open with its diagnostics path and no Git or GitHub mutations", async () => {
         const calls: string[] = [];
         const states: RunState[] = [];
         const events: ProgressUpdate[] = [];
         const diagnosticsPath =
-            "/tmp/.ralphie/runs/run-1/issues/42/needs-attention-abc/changes.patch";
+            "/tmp/.ralphie/runs/run-1/issues/42/hand-off-abc/changes.patch";
         const summary = await workflow(
             { ...baseOptions },
             testRuntime(
@@ -670,8 +593,8 @@ describe("workflow", () => {
                     issueLists: [[firstIssue, secondIssue]],
                     outcomes: [
                         {
-                            kind: IssueExecutionOutcomeKind.NeedsAttention,
-                            reason: NeedsAttentionReason.MissingInformation,
+                            kind: IssueExecutionOutcomeKind.HandOff,
+                            reason: HandOffReason.MissingInformation,
                             summary: "A prerequisite is still open.",
                             evidence: [
                                 "Issue body links the open prerequisite.",
@@ -693,19 +616,17 @@ describe("workflow", () => {
         );
 
         expect(summary.outcomes[0]?.outcome).toMatchObject({
-            kind: IssueExecutionOutcomeKind.NeedsAttention,
-            reason: NeedsAttentionReason.MissingInformation,
+            kind: IssueExecutionOutcomeKind.HandOff,
+            reason: HandOffReason.MissingInformation,
             summary: "A prerequisite is still open.",
             evidence: ["Issue body links the open prerequisite."],
             questions: ["Complete the prerequisite, then retry."],
             diagnosticsPath,
         });
-        const needsAttention = events.find(
-            ({ status }) => status === "needs-attention",
-        );
-        expect(needsAttention).toMatchObject({
+        const handOff = events.find(({ status }) => status === "hand-off");
+        expect(handOff).toMatchObject({
             details: {
-                reason: NeedsAttentionReason.MissingInformation,
+                reason: HandOffReason.MissingInformation,
                 summary: "A prerequisite is still open.",
                 evidence: ["Issue body links the open prerequisite."],
                 questions: ["Complete the prerequisite, then retry."],
@@ -716,7 +637,7 @@ describe("workflow", () => {
             expect.objectContaining({
                 issueNumber: 42,
                 outcome: expect.objectContaining({
-                    kind: IssueExecutionOutcomeKind.NeedsAttention,
+                    kind: IssueExecutionOutcomeKind.HandOff,
                     diagnosticsPath,
                 }),
             }),
@@ -739,8 +660,8 @@ describe("workflow", () => {
                 issueLists: [[firstIssue, secondIssue]],
                 outcomes: [
                     {
-                        kind: IssueExecutionOutcomeKind.NeedsAttention,
-                        reason: NeedsAttentionReason.DecompositionLimitReached,
+                        kind: IssueExecutionOutcomeKind.HandOff,
+                        reason: HandOffReason.DecompositionLimitReached,
                         summary: "Maximum decomposition depth reached.",
                         evidence: [
                             "The next depth exceeds the configured maximum.",
@@ -748,7 +669,7 @@ describe("workflow", () => {
                         questions: [
                             "Increase the maximum or narrow the issue.",
                         ],
-                        route: "needs-attention",
+                        route: "hand-off",
                     },
                     {
                         kind: IssueExecutionOutcomeKind.Completed,
@@ -762,14 +683,12 @@ describe("workflow", () => {
         expect(summary.outcomes.map(({ issueNumber }) => issueNumber)).toEqual([
             42, 43,
         ]);
-        expect(summary.counts[IssueExecutionOutcomeKind.NeedsAttention]).toBe(
-            1,
-        );
+        expect(summary.counts[IssueExecutionOutcomeKind.HandOff]).toBe(1);
         expect(calls).toContain("closeIssue:43");
         expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
     });
 
-    test("records a needs-attention outcome and continues without reporting an ordinary failure", async () => {
+    test("records a hand-off outcome and continues without reporting an ordinary failure", async () => {
         const calls: string[] = [];
         const states: RunState[] = [];
         const events: ProgressUpdate[] = [];
@@ -783,43 +702,39 @@ describe("workflow", () => {
                 {
                     outcomes: [
                         {
-                            kind: IssueExecutionOutcomeKind.NeedsAttention,
-                            reason: NeedsAttentionReason.ExternalDependency,
+                            kind: IssueExecutionOutcomeKind.HandOff,
+                            reason: HandOffReason.ExternalDependency,
                             summary: "A prerequisite is still open.",
                             evidence: ["The prerequisite is unresolved."],
                             questions: ["When will it be available?"],
-                            artifactPath: "/tmp/needs-attention.json",
+                            artifactPath: "/tmp/hand-off.json",
                         },
                     ],
                 },
                 events,
             ),
         );
-        expect(summary.counts[IssueExecutionOutcomeKind.NeedsAttention]).toBe(
-            1,
-        );
+        expect(summary.counts[IssueExecutionOutcomeKind.HandOff]).toBe(1);
         expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
         expect(events.some(({ status }) => status === "failed")).toBe(false);
         expect(events).toContainEqual(
             expect.objectContaining({
-                stage: "grounding",
-                status: "needs-attention",
+                stage: "hand-off",
+                status: "hand-off",
                 details: expect.objectContaining({
-                    reason: NeedsAttentionReason.ExternalDependency,
+                    reason: HandOffReason.ExternalDependency,
                     summary: "A prerequisite is still open.",
                     evidence: ["The prerequisite is unresolved."],
                     questions: ["When will it be available?"],
-                    artifactPath: "/tmp/needs-attention.json",
+                    artifactPath: "/tmp/hand-off.json",
                 }),
             }),
         );
-        expect(events.some(({ status }) => status === "needs-attention")).toBe(
-            true,
-        );
+        expect(events.some(({ status }) => status === "hand-off")).toBe(true);
         expect(calls).not.toContain("closeIssue:42");
     });
 
-    test("surfaces dependency-blocked issues as needs-attention outcomes and continues", async () => {
+    test("skips dependency-blocked issues without a hand-off and continues", async () => {
         const calls: string[] = [];
         const states: RunState[] = [];
         const events: ProgressUpdate[] = [];
@@ -839,12 +754,12 @@ describe("workflow", () => {
                     issueLists: [[firstIssue, blockedIssue]],
                     outcomes: [
                         {
-                            kind: IssueExecutionOutcomeKind.NeedsAttention,
-                            reason: NeedsAttentionReason.MissingInformation,
+                            kind: IssueExecutionOutcomeKind.HandOff,
+                            reason: HandOffReason.MissingInformation,
                             summary: "The prerequisite needs an answer.",
                             evidence: ["The prerequisite is unanswered."],
                             questions: ["What is the answer?"],
-                            route: "needs-attention",
+                            route: "hand-off",
                         },
                     ],
                 },
@@ -853,38 +768,28 @@ describe("workflow", () => {
         );
 
         // The dependency never completed, so the blocked issue was never
-        // handed to the executor, never closed, and never notified unless the
-        // blocked path itself reports it.
-        expect(summary.counts[IssueExecutionOutcomeKind.NeedsAttention]).toBe(
-            2,
-        );
+        // handed to the executor or closed, and nothing changed on GitHub.
+        expect(summary.counts[IssueExecutionOutcomeKind.HandOff]).toBe(1);
+        expect(summary.counts[IssueExecutionOutcomeKind.Skipped]).toBe(1);
         expect(calls).not.toContain("executeIssue:44");
         expect(calls).not.toContain("closeIssue:42");
         expect(calls).not.toContain("closeIssue:44");
         expect(events.some(({ status }) => status === "failed")).toBe(false);
         expect(events).toContainEqual(
             expect.objectContaining({
-                stage: "grounding",
-                status: "needs-attention",
+                stage: "issue-queue",
+                status: "skipped",
                 issue: { number: 44, title: firstIssue.title },
-                details: expect.objectContaining({
-                    reason: NeedsAttentionReason.ExternalDependency,
-                    summary: expect.stringContaining("#42"),
-                }),
+                message: expect.stringContaining("#42"),
             }),
         );
         const blockedOutcome = states
             .at(-1)
             ?.outcomes.find((entry) => entry.issueNumber === 44)?.outcome;
-        if (blockedOutcome?.kind !== IssueExecutionOutcomeKind.NeedsAttention) {
-            throw new Error("Expected a needs-attention outcome for #44.");
+        if (blockedOutcome?.kind !== IssueExecutionOutcomeKind.Skipped) {
+            throw new Error("Expected a skipped outcome for #44.");
         }
-        expect(blockedOutcome.reason).toBe(
-            NeedsAttentionReason.ExternalDependency,
-        );
-        expect(
-            blockedOutcome.evidence.some((item) => item.includes("#42")),
-        ).toBe(true);
+        expect(blockedOutcome.reason).toContain("#42");
         expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
         expect(
             states.at(-1)?.queue.pending.map(({ number }) => number),
@@ -907,21 +812,20 @@ describe("workflow", () => {
                 issueLists: [[firstIssue, blockedIssue]],
                 outcomes: [
                     {
-                        kind: IssueExecutionOutcomeKind.NeedsAttention,
-                        reason: NeedsAttentionReason.MissingInformation,
+                        kind: IssueExecutionOutcomeKind.HandOff,
+                        reason: HandOffReason.MissingInformation,
                         summary: "The prerequisite needs an answer.",
                         evidence: ["The prerequisite is unanswered."],
                         questions: ["What is the answer?"],
-                        route: "needs-attention",
+                        route: "hand-off",
                     },
                 ],
             }),
         );
 
         expect(summary.counts[IssueExecutionOutcomeKind.Completed]).toBe(0);
-        expect(summary.counts[IssueExecutionOutcomeKind.NeedsAttention]).toBe(
-            2,
-        );
+        expect(summary.counts[IssueExecutionOutcomeKind.HandOff]).toBe(1);
+        expect(summary.counts[IssueExecutionOutcomeKind.Skipped]).toBe(1);
         expect(summary.outcomes.map(({ issueNumber }) => issueNumber)).toEqual([
             42, 44,
         ]);
@@ -933,7 +837,7 @@ describe("workflow", () => {
         ).toContain(44);
     });
 
-    test("does not notify dependency-blocked issues; notifies genuine needs-attention outcomes", async () => {
+    test("hands off genuine outcomes but leaves dependency-blocked issues untouched", async () => {
         const calls: string[] = [];
         const states: RunState[] = [];
         const blockedIssue: GitHubIssue = {
@@ -941,59 +845,126 @@ describe("workflow", () => {
             number: 44,
             body: '<!-- ralphie:decomposition root=7 parent=35 key="blocked" depth=2 -->\n\nBlocked work.\n\n## Dependencies\n\n- #42 (prerequisite)',
         };
+        const handOffs: Array<{
+            readonly issueNumber: number;
+            readonly input: GitHubHandOffInput;
+        }> = [];
         const summary = await workflow(
-            {
-                ...baseOptions,
-                notificationsEnabled: true,
-                needsAttentionLabel: "needs-attention",
-            },
+            baseOptions,
             testRuntime(calls, states, {
                 issueLists: [[firstIssue, blockedIssue]],
                 outcomes: [
                     {
-                        kind: IssueExecutionOutcomeKind.NeedsAttention,
-                        reason: NeedsAttentionReason.MissingInformation,
+                        kind: IssueExecutionOutcomeKind.HandOff,
+                        reason: HandOffReason.MissingInformation,
                         summary: "The prerequisite needs an answer.",
                         evidence: ["The prerequisite is unanswered."],
                         questions: ["What is the answer?"],
-                        route: "needs-attention",
+                        route: "hand-off",
                     },
                 ],
-                needsAttentionNotification: {
-                    notify: async (_repo, issueNumber, input, label) => {
-                        calls.push(`notifyNeedsAttention:${issueNumber}`);
-                        expect(issueNumber).toBe(firstIssue.number);
-                        expect(input.reason).toBe(
-                            NeedsAttentionReason.MissingInformation,
-                        );
-                        expect(label).toBe("needs-attention");
-                        return {
-                            comment: "created" as const,
-                            label: "applied" as const,
-                        };
+                handOffService: {
+                    handOff: async (_repo, issueNumber, input) => {
+                        handOffs.push({ issueNumber, input });
+                        return { comment: "created" };
                     },
                 },
             }),
         );
 
-        expect(summary.counts[IssueExecutionOutcomeKind.NeedsAttention]).toBe(
-            2,
-        );
-        // The dependency-blocked issue (#44) is recorded but never notified:
-        // open queue dependencies resolve by queue completion, not by human
-        // attention. Only the agent-reported blocker (#firstIssue) notifies.
-        expect(
-            calls.filter((call) => call.startsWith("notifyNeedsAttention:")),
-        ).toEqual([`notifyNeedsAttention:${firstIssue.number}`]);
+        expect(summary.counts[IssueExecutionOutcomeKind.HandOff]).toBe(1);
+        expect(summary.counts[IssueExecutionOutcomeKind.Skipped]).toBe(1);
+        expect(handOffs.map(({ issueNumber }) => issueNumber)).toEqual([
+            firstIssue.number,
+        ]);
         expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
     });
 
-    test("persists the needs-attention outcome before continuing to the next issue", async () => {
+    test.each([
+        [HandOffReason.MissingInformation, "needs-info", "## Triage Notes"],
+        [
+            HandOffReason.ConflictingRequirements,
+            "needs-info",
+            "## Triage Notes",
+        ],
+        [HandOffReason.CannotReproduce, "needs-info", "## Triage Notes"],
+        [HandOffReason.OutdatedPremise, "needs-info", "## Triage Notes"],
+        [HandOffReason.ExternalDependency, "ready-for-human", "## Hand-off"],
+        [
+            HandOffReason.ImplementationExhausted,
+            "ready-for-human",
+            "## Hand-off",
+        ],
+        [
+            HandOffReason.DecompositionLimitReached,
+            "ready-for-human",
+            "## Hand-off",
+        ],
+    ] as const)(
+        "hands off %s to %s with the AI disclaimer first",
+        async (reason, label, heading) => {
+            const calls: string[] = [];
+            const handOffs: GitHubHandOffInput[] = [];
+            await workflow(
+                {
+                    ...baseOptions,
+                    handOffLabels: {
+                        "needs-info": "needs-info",
+                        "ready-for-human": "ready-for-human",
+                        replaces: [
+                            "ready-for-agent",
+                            "needs-info",
+                            "ready-for-human",
+                        ],
+                    },
+                },
+                testRuntime(calls, [], {
+                    outcomes: [
+                        {
+                            kind: IssueExecutionOutcomeKind.HandOff,
+                            reason,
+                            summary: "Why the issue was handed off.",
+                            evidence: ["What was established."],
+                            questions: ["What happens next?"],
+                            diagnosticsPath: "/tmp/diagnostics/issue-42",
+                        },
+                    ],
+                    handOffService: {
+                        handOff: async (_repo, _issueNumber, input) => {
+                            handOffs.push(input);
+                            return { comment: "created" };
+                        },
+                    },
+                }),
+            );
+
+            expect(handOffs).toHaveLength(1);
+            const [handOff] = handOffs;
+            expect(handOff?.label).toBe(label);
+            expect(handOff?.replaceLabels).toEqual([
+                "ready-for-agent",
+                "needs-info",
+                "ready-for-human",
+            ]);
+            expect(
+                handOff?.body.startsWith(
+                    "> *This was generated by AI during triage.*",
+                ),
+            ).toBe(true);
+            expect(handOff?.body).toContain(heading);
+            expect(handOff?.body).toContain("What happens next?");
+            if (label === "ready-for-human") {
+                expect(handOff?.body).toContain("/tmp/diagnostics/issue-42");
+            }
+        },
+    );
+
+    test("persists the hand-off outcome before continuing to the next issue", async () => {
         const calls: string[] = [];
         const states: RunState[] = [];
         const events: ProgressUpdate[] = [];
         const executor = groundedRouteExecutor(calls, {
-            42: "needs-attention",
+            42: "hand-off",
             43: "actionable",
         });
         let savedOutcome = false;
@@ -1020,11 +991,11 @@ describe("workflow", () => {
                                 ({ issueNumber, outcome }) =>
                                     issueNumber === 42 &&
                                     outcome.kind ===
-                                        IssueExecutionOutcomeKind.NeedsAttention,
+                                        IssueExecutionOutcomeKind.HandOff,
                             )
                         ) {
                             savedOutcome = true;
-                            calls.push("save:needs-attention");
+                            calls.push("save:hand-off");
                         }
                     },
                 },
@@ -1038,12 +1009,12 @@ describe("workflow", () => {
                 state.outcomes.some(({ issueNumber }) => issueNumber === 42),
         );
         if (pendingState === undefined) {
-            throw new Error("Missing persisted needs-attention state");
+            throw new Error("Missing persisted hand-off state");
         }
         expect(pendingState).toMatchObject({
             status: RunStateStatus.Active,
             runId: "test-run",
-            activeIssue: { issueNumber: 42, stage: "grounding" },
+            activeIssue: { issueNumber: 42, stage: "hand-off" },
             checkout: { branch: "develop", head: "head-1" },
             queue: {
                 pending: [
@@ -1057,54 +1028,43 @@ describe("workflow", () => {
         const outcome42 = pendingState.outcomes.find(
             ({ issueNumber }) => issueNumber === 42,
         )?.outcome;
-        if (outcome42?.kind !== IssueExecutionOutcomeKind.NeedsAttention) {
-            throw new Error("Expected a needs-attention outcome for #42.");
+        if (outcome42?.kind !== IssueExecutionOutcomeKind.HandOff) {
+            throw new Error("Expected a hand-off outcome for #42.");
         }
         expect(
             "artifactPath" in outcome42 && outcome42.artifactPath,
         ).toBeString();
         expectCallOrder(calls, [
-            `artifact:42:${IssueArtifactKind.NeedsAttentionDecision}`,
-            "save:needs-attention",
-            "closeRuntime",
+            `artifact:42:${IssueArtifactKind.HandOffDecision}`,
+            "save:hand-off",
         ]);
-        expect(summary.counts[IssueExecutionOutcomeKind.NeedsAttention]).toBe(
-            1,
-        );
+        expect(summary.counts[IssueExecutionOutcomeKind.HandOff]).toBe(1);
         expect(summary.counts.completed).toBe(1);
-        expect(calls).toContain("grounding:43");
+        expect(calls).toContain("preflight:43");
         expect(calls).toContain("closeIssue:43");
         expect(calls).not.toContain("closeIssue:42");
         expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
         expect(events.some(({ status }) => status === "failed")).toBeFalse();
     });
 
-    test("does not notify when needs-attention notifications are disabled", async () => {
-        const states: RunState[] = [];
-        let notified = false;
-        const notification: GitHubNeedsAttentionNotificationService = {
-            notify: async () => {
-                notified = true;
-                return { comment: "created", label: "not-configured" };
-            },
-        };
+    test("passes the configured attempt budgets to the issue executor", async () => {
+        const contexts: IssueExecutionContext[] = [];
+
         await workflow(
-            { ...baseOptions, notificationsEnabled: false },
-            testRuntime([], states, {
-                needsAttentionNotification: notification,
-                outcomes: [
-                    {
-                        kind: IssueExecutionOutcomeKind.NeedsAttention,
-                        reason: NeedsAttentionReason.ExternalDependency,
-                        summary: "A prerequisite is still open.",
-                        evidence: ["The prerequisite is unresolved."],
-                        questions: ["When will it be available?"],
-                        artifactPath: "/tmp/needs-attention.json",
-                    },
-                ],
-            }),
+            {
+                ...baseOptions,
+                implementationAttempts: 4,
+                reviewRounds: 6,
+                verificationFixes: 2,
+            },
+            testRuntime([], [], { executionContexts: contexts }),
         );
-        expect(notified).toBeFalse();
+
+        expect(contexts[0]).toMatchObject({
+            implementationAttempts: 4,
+            reviewRounds: 6,
+            verificationFixes: 2,
+        });
     });
 
     test("refreshes the selected issue before execution", async () => {
@@ -1206,7 +1166,6 @@ describe("workflow", () => {
             issueNumber: 42,
             outcome: { kind: IssueExecutionOutcomeKind.Failed },
         });
-        expect(calls.at(-1)).toBe("closeRuntime");
     });
 
     test("continues independent issues after failure and reports partial failure after draining", async () => {
@@ -1240,18 +1199,55 @@ describe("workflow", () => {
         expect(calls).toContain("restoreCheckout");
     });
 
-    test("closes the agent if ready progress reporting fails after startup", async () => {
+    test("a deferred issue halts the queue, changes nothing and names the reset time", async () => {
         const calls: string[] = [];
         const states: RunState[] = [];
         await expect(
             workflow(
                 baseOptions,
                 testRuntime(calls, states, {
-                    failPiReadyProgress: true,
+                    issueLists: [[firstIssue, secondIssue]],
+                    outcomes: [
+                        {
+                            kind: IssueExecutionOutcomeKind.Deferred,
+                            reason: "You've hit your session limit",
+                            cause: "transient",
+                            resetHint: "3:10pm",
+                        },
+                    ],
                 }),
             ),
-        ).rejects.toThrow("Agent ready progress emission failed");
-        expect(calls).toContain("closeRuntime");
+        ).rejects.toMatchObject({
+            message: expect.stringMatching(
+                /Run halted at issue #\d+.*left untouched.*resets 3:10pm/,
+            ),
+        });
+        expect(
+            exitCodeForError(
+                new RunHaltedError({ message: "x" }),
+                new AbortController().signal,
+            ),
+        ).toBe(RalphieExitCode.Halted);
+        // The command boundary wraps errors; the halt must survive the wrap.
+        expect(
+            exitCodeForError(
+                new Error("wrapped", {
+                    cause: new RunHaltedError({ message: "x" }),
+                }),
+                new AbortController().signal,
+            ),
+        ).toBe(RalphieExitCode.Halted);
+        expect(
+            calls.filter((call) => call.startsWith("executeIssue:")),
+        ).toHaveLength(1);
+        expect(calls).toContain("restoreCheckout");
+        expect(calls.some((call) => /handOff|close|label/i.test(call))).toBe(
+            false,
+        );
+        expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
+        expect(states.at(-1)?.outcomes[0]).toMatchObject({
+            outcome: { kind: IssueExecutionOutcomeKind.Deferred },
+        });
     });
 
     test("persists a recoverable closure stage when GitHub closure fails", async () => {
@@ -1386,37 +1382,12 @@ describe("workflow", () => {
                 "removeWorkspace:/tmp/ralphie",
                 ...expectedCalls,
             ]);
-            expect(calls).not.toContain("startServer");
             expect(
                 calls.filter((call) => call === "removeWorkspace:/tmp/ralphie"),
             ).toHaveLength(1);
             expect(states).toHaveLength(0);
         },
     );
-
-    test("cancels after the agent starts, closes the server, and saves active state", async () => {
-        const calls: string[] = [];
-        const states: RunState[] = [];
-        const controller = new AbortController();
-        await expect(
-            workflow(
-                { ...baseOptions, signal: controller.signal },
-                testRuntime(calls, states, {
-                    abortAt: "agent",
-                    abortController: controller,
-                }),
-            ),
-        ).rejects.toThrow("Run cancelled");
-        expect(calls).toContain("startServer");
-        expect(calls).toContain("closeRuntime");
-        expect(calls).not.toContain(
-            "executeIssue:42:/tmp/ralphie/repo:develop:build",
-        );
-        expect(
-            calls.filter((call) => call === "removeWorkspace:/tmp/ralphie"),
-        ).toHaveLength(1);
-        expect(states.at(-1)?.status).toBe(RunStateStatus.Active);
-    });
 
     test("cancels between issues, closes the server, saves state, and does not start the next issue", async () => {
         const calls: string[] = [];
@@ -1438,10 +1409,9 @@ describe("workflow", () => {
         ).rejects.toThrow("Run cancelled");
         expect(
             calls.filter((call) => call.startsWith("executeIssue:")),
-        ).toEqual(["executeIssue:42:/tmp/ralphie/repo:develop:build"]);
-        expect(calls).toContain("closeRuntime");
+        ).toEqual(["executeIssue:42:/tmp/ralphie/repo:develop:claude"]);
         expect(calls).not.toContain(
-            "executeIssue:51:/tmp/ralphie/repo:develop:build",
+            "executeIssue:51:/tmp/ralphie/repo:develop:claude",
         );
         expect(states.at(-1)?.status).toBe(RunStateStatus.Active);
         expect(
@@ -1672,158 +1642,42 @@ describe("workflow", () => {
         );
     });
 
-    test("publishes the pi catalog and run selection with the runtime event", async () => {
-        const calls: string[] = [];
-        const states: RunState[] = [];
-        const events: ProgressUpdate[] = [];
-        const catalog = [
-            {
-                provider: "openai",
-                id: "gpt-5",
-                name: "GPT-5",
-                reasoning: true,
-                thinkingLevels: ["low", "high"],
-            },
-        ];
-        await workflow(
-            {
-                ...baseOptions,
-                model: { providerID: "openai", modelID: "gpt-5" },
-                modelVariant: "high",
-            },
-            testRuntime(
-                calls,
-                states,
-                { issueLists: [[firstIssue]], piCatalog: catalog },
-                events,
-            ),
-        );
-
-        const runtimeReady = events.find(
-            ({ stage, status }) =>
-                stage === "agent-runtime" && status === "succeeded",
-        );
-        expect(runtimeReady?.details).toEqual({
-            models: catalog,
-            selection: {
-                model: { provider: "openai", id: "gpt-5" },
-                variant: "high",
-            },
-        });
-    });
-
-    test("applies a run-control model selection to issues started after the pick", async () => {
+    test("hands the harness and the resolved role assignments to the executor and the run state", async () => {
         const calls: string[] = [];
         const states: RunState[] = [];
         const contexts: IssueExecutionContext[] = [];
-        const thirdIssue: GitHubIssue = {
-            ...firstIssue,
-            number: 44,
-            title: "Third test issue",
-        };
-        let override: RunControlSelection | undefined;
-        const summary = await workflow(
-            {
-                ...baseOptions,
-                model: { providerID: "openai", modelID: "gpt-5" },
-                modelVariant: "high",
-                control: {
-                    waitForQueue: async () => {},
-                    stopAfterCurrent: () => false,
-                    issueSelection: () => override,
-                },
+        const roles = resolveRoleAssignments({
+            harnesses: { claude: { model: "opus", effort: "high" } },
+            roles: {
+                reviewer: { harness: "claude", model: "sonnet" },
             },
-            testRuntime(calls, states, {
-                issueLists: [[firstIssue, secondIssue, thirdIssue]],
-                executionContexts: contexts,
-                executeGate: async (context) => {
-                    if (context.issue.number === 42) {
-                        override = {
-                            model: {
-                                providerID: "anthropic",
-                                modelID: "claude-sonnet-4",
-                            },
-                            variant: "low",
-                        };
-                    }
-                    if (context.issue.number === 43) {
-                        override = {
-                            model: {
-                                providerID: "openai",
-                                modelID: "gpt-4o",
-                            },
-                        };
-                    }
-                },
-            }),
+        });
+        await workflow(
+            { ...baseOptions, roles },
+            testRuntime(calls, states, { executionContexts: contexts }),
         );
 
-        expect(summary.outcomes).toHaveLength(3);
-        expect(contexts[0]?.agentSelection).toEqual({
-            agent: DEFAULT_AGENT,
-            model: { providerID: "openai", modelID: "gpt-5" },
-            variant: "high",
+        expect(contexts).toHaveLength(1);
+        expect(contexts[0]?.agent.roles).toEqual(roles);
+        expect(contexts[0]?.agent.roles["spec-reviewer"]).toEqual({
+            harness: "claude",
+            approval: "safe",
+            model: "sonnet",
+            effort: "high",
         });
-        expect(contexts[1]?.agentSelection).toEqual({
-            agent: DEFAULT_AGENT,
-            model: { providerID: "anthropic", modelID: "claude-sonnet-4" },
-            variant: "low",
-        });
-        // A pick without a level drops the CLI variant for the model default.
-        expect(contexts[2]?.agentSelection).toEqual({
-            agent: DEFAULT_AGENT,
-            model: { providerID: "openai", modelID: "gpt-4o" },
-        });
+        expect(states.at(-1)?.roles).toEqual(roles);
     });
 
-    test("applies a pick made during an issue to that running issue", async () => {
+    test("reports the role assignments when the run starts", async () => {
         const calls: string[] = [];
         const states: RunState[] = [];
-        const selections: Array<AgentSelection> = [];
-        let override: RunControlSelection | undefined;
-        await workflow(
-            {
-                ...baseOptions,
-                model: { providerID: "openai", modelID: "gpt-5" },
-                control: {
-                    waitForQueue: async () => {},
-                    stopAfterCurrent: () => false,
-                    issueSelection: () => override,
-                },
-            },
-            testRuntime(calls, states, {
-                issueExecutor: {
-                    execute: async (context) => {
-                        selections.push(context.agentSelection);
-                        override = {
-                            model: {
-                                providerID: "anthropic",
-                                modelID: "claude-sonnet-4",
-                            },
-                            variant: "low",
-                        };
-                        selections.push(context.agentSelection);
-                        return {
-                            kind: IssueExecutionOutcomeKind.Completed,
-                            completion: "pushed-commit",
-                            commitSha: "abc123",
-                        };
-                    },
-                },
-            }),
-        );
+        const events: ProgressUpdate[] = [];
+        await workflow(baseOptions, testRuntime(calls, states, {}, events));
 
-        expect(selections).toEqual([
-            {
-                agent: DEFAULT_AGENT,
-                model: { providerID: "openai", modelID: "gpt-5" },
-            },
-            {
-                agent: DEFAULT_AGENT,
-                model: { providerID: "anthropic", modelID: "claude-sonnet-4" },
-                variant: "low",
-            },
-        ]);
+        const started = events.find(
+            ({ stage, status }) => stage === "run" && status === "info",
+        );
+        expect(started?.details?.roles).toEqual(baseOptions.roles);
     });
 
     test.each([
@@ -1958,7 +1812,8 @@ describe("workflow", () => {
             ...firstIssue,
             number: 43,
             title: "Decomposed parent",
-            body: "<!-- ralphie:decomposition original=43 depth=1 -->\n\nDecomposed work.",
+            body: "Decomposed work.",
+            subIssueCount: 2,
         };
         const closedChild: GitHubIssue = {
             ...secondIssue,
@@ -1975,6 +1830,10 @@ describe("workflow", () => {
         );
         expect(summary.outcomes).toEqual([]);
         expect(calls).toContain("closeIssue:43");
+        expect(calls.indexOf("commentIssue:43")).toBeGreaterThan(-1);
+        expect(calls.indexOf("commentIssue:43")).toBeLessThan(
+            calls.indexOf("closeIssue:43"),
+        );
         expect(states.at(-1)?.status).toBe(RunStateStatus.Complete);
     });
 
@@ -1985,7 +1844,8 @@ describe("workflow", () => {
             ...firstIssue,
             number: 43,
             title: "Decomposed parent",
-            body: "<!-- ralphie:decomposition original=43 depth=1 -->\n\nDecomposed work.",
+            body: "Decomposed work.",
+            subIssueCount: 2,
         };
         const openChild: GitHubIssue = {
             ...secondIssue,
@@ -2000,5 +1860,281 @@ describe("workflow", () => {
             }),
         );
         expect(calls).not.toContain("closeIssue:43");
+    });
+});
+describe("workflow AFK triage", () => {
+    const stateLabels = {
+        "needs-triage": "needs-triage",
+        "needs-info": "needs-info",
+        "ready-for-agent": "ready-for-agent",
+        "ready-for-human": "ready-for-human",
+        wontfix: "wontfix",
+    } as const;
+    const triageOptions = { labels: stateLabels, requireLabels: [] } as const;
+    const readyIssue: GitHubIssue = { ...firstIssue, labels: ["bug"] };
+    const candidate = (number: number, labels: string[]): GitHubIssue => ({
+        ...firstIssue,
+        number,
+        title: `Candidate ${number}`,
+        labels,
+    });
+
+    type TriageCall = { readonly issue: number; readonly bucket: string };
+
+    const scriptedTriage = (
+        results: Readonly<Record<number, TriageResult>>,
+        seen: TriageCall[] = [],
+    ): TriageService => ({
+        triage: async ({ context, bucket }) => {
+            seen.push({ issue: context.issue.number, bucket });
+            const result = results[context.issue.number];
+            if (result === undefined) throw new Error("unscripted triage");
+            return result;
+        },
+    });
+
+    const brief = "## Agent Brief\n\n**Summary:** Do the thing.";
+
+    test("does not triage unless it is enabled", async () => {
+        const calls: string[] = [];
+        await workflow(
+            baseOptions,
+            testRuntime(calls, [], {
+                issueLists: [[readyIssue, candidate(50, [])]],
+            }),
+        );
+
+        expect(calls.filter((call) => call.startsWith("listIssues"))).toEqual([
+            "listIssues:owner/repo:bug:created:asc",
+        ]);
+    });
+
+    test("triages only the three buckets", async () => {
+        const seen: TriageCall[] = [];
+        const notes = {
+            id: 1,
+            author: "ralphie",
+            body: "> *This was generated by AI during triage.*\n\n## Triage Notes",
+            updatedAt: "2026-08-28T00:00:00.000Z",
+        };
+        const reply = {
+            id: 2,
+            author: "reporter",
+            body: "More detail.",
+            updatedAt: "2026-08-28T00:00:00.000Z",
+        };
+        const waiting = {
+            ...candidate(53, ["needs-info"]),
+            author: "reporter",
+            comments: [notes],
+        };
+        const answered = {
+            ...candidate(54, ["needs-info"]),
+            author: "reporter",
+            comments: [notes, reply],
+        };
+        const handOff = {
+            kind: "hand-off",
+            reason: HandOffReason.NeedsHumanJudgment,
+            summary: "A design call.",
+            evidence: [],
+            questions: ["Decide."],
+        } as const;
+        await workflow(
+            { ...baseOptions, triage: triageOptions },
+            testRuntime([], [], {
+                issueLists: [
+                    [],
+                    [
+                        candidate(49, ["bug", "ready-for-agent"]),
+                        candidate(50, []),
+                        candidate(51, ["needs-triage"]),
+                        candidate(52, ["ready-for-human"]),
+                        waiting,
+                        answered,
+                        candidate(55, ["wontfix"]),
+                    ],
+                ],
+                triageService: scriptedTriage(
+                    { 50: handOff, 51: handOff, 54: handOff },
+                    seen,
+                ),
+            }),
+        );
+
+        expect(seen).toEqual([
+            { issue: 50, bucket: "unlabelled" },
+            { issue: 51, bucket: "needs-triage" },
+            { issue: 54, bucket: "needs-info-reply" },
+        ]);
+    });
+
+    test("lists triage candidates with only the required labels", async () => {
+        const calls: string[] = [];
+        await workflow(
+            {
+                ...baseOptions,
+                triage: { ...triageOptions, requireLabels: ["backend"] },
+            },
+            testRuntime(calls, [], { issueLists: [[]] }),
+        );
+
+        expect(calls.filter((call) => call.startsWith("listIssues"))).toEqual([
+            "listIssues:owner/repo:bug:created:asc",
+            "listIssues:owner/repo:backend:created:asc",
+        ]);
+    });
+
+    test("a promoted issue gets its brief and is implemented in the same run", async () => {
+        const calls: string[] = [];
+        const promotions: Array<{
+            readonly issue: number;
+            readonly input: GitHubHandOffInput;
+        }> = [];
+        const promoted = candidate(50, ["bug", "ready-for-agent"]);
+        const summary = await workflow(
+            { ...baseOptions, triage: triageOptions },
+            testRuntime(calls, [], {
+                issueLists: [[], [candidate(50, [])], [promoted]],
+                refreshedIssues: { 50: promoted },
+                triageService: scriptedTriage({
+                    50: { kind: "promote", brief },
+                }),
+                githubTriage: {
+                    promote: async (_repo, issue, input) => {
+                        calls.push(`promote:${issue}`);
+                        promotions.push({ issue, input });
+                        return { comment: "created" };
+                    },
+                    explainImplemented: async () => ({ comment: "created" }),
+                },
+            }),
+        );
+
+        expect(promotions).toHaveLength(1);
+        const input = promotions[0]!.input;
+        expect(
+            input.body.startsWith(
+                "> *This was generated by AI during triage.*\n\n## Agent Brief",
+            ),
+        ).toBe(true);
+        expect(input.label).toBe("ready-for-agent");
+        expect(input.replaceLabels).toEqual(Object.values(stateLabels));
+        expectCallOrder(calls, [
+            "promote:50",
+            "executeIssue:50:/tmp/ralphie/repo:develop:claude",
+            "closeIssue:50",
+        ]);
+        expect(summary.counts.completed).toBe(1);
+    });
+
+    test("hand-offs go to the matching state label and are recorded", async () => {
+        const handOffs: GitHubHandOffInput[] = [];
+        const summary = await workflow(
+            { ...baseOptions, triage: triageOptions },
+            testRuntime([], [], {
+                issueLists: [[], [candidate(50, []), candidate(51, [])]],
+                triageService: scriptedTriage({
+                    50: {
+                        kind: "hand-off",
+                        reason: HandOffReason.MissingInformation,
+                        summary: "Unclear.",
+                        evidence: ["src/a.ts"],
+                        questions: ["Which version?"],
+                    },
+                    51: {
+                        kind: "hand-off",
+                        reason: HandOffReason.NeedsHumanJudgment,
+                        summary: "A design call.",
+                        evidence: [],
+                        questions: ["Decide."],
+                    },
+                }),
+                handOffService: {
+                    handOff: async (_repo, _issue, input) => {
+                        handOffs.push(input);
+                        return { comment: "created" };
+                    },
+                },
+            }),
+        );
+
+        expect(handOffs.map(({ label }) => label)).toEqual([
+            "needs-info",
+            "ready-for-human",
+        ]);
+        expect(handOffs[0]?.body).toContain("## Triage Notes");
+        expect(
+            handOffs.every(({ label }) => label !== stateLabels.wontfix),
+        ).toBe(true);
+        expect(summary.counts["hand-off"]).toBe(2);
+    });
+
+    test("an already implemented issue is explained and closed as completed", async () => {
+        const calls: string[] = [];
+        const comments: string[] = [];
+        const summary = await workflow(
+            { ...baseOptions, triage: triageOptions },
+            testRuntime(calls, [], {
+                issueLists: [[], [candidate(50, [])]],
+                triageService: scriptedTriage({
+                    50: {
+                        kind: "already-implemented",
+                        summary: "It lives in src/thing.ts.",
+                        evidence: ["src/thing.ts"],
+                    },
+                }),
+                githubTriage: {
+                    promote: async () => ({ comment: "created" }),
+                    explainImplemented: async (_repo, issue, body) => {
+                        calls.push(`explain:${issue}`);
+                        comments.push(body);
+                        return { comment: "created" };
+                    },
+                },
+            }),
+        );
+
+        expectCallOrder(calls, ["explain:50", "closeIssue:50"]);
+        expect(
+            comments[0]?.startsWith(
+                "> *This was generated by AI during triage.*",
+            ),
+        ).toBe(true);
+        expect(comments[0]).toContain("src/thing.ts");
+        expect(summary.counts.completed).toBe(1);
+        expect(summary.outcomes[0]?.outcome).toMatchObject({
+            completion: "already-resolved",
+        });
+    });
+
+    test("a failed triage session fails that issue and the run continues", async () => {
+        const calls: string[] = [];
+        const states: RunState[] = [];
+        await expect(
+            workflow(
+                { ...baseOptions, triage: triageOptions },
+                testRuntime(calls, states, {
+                    issueLists: [[readyIssue], [candidate(50, [])]],
+                    triageService: {
+                        triage: async () => {
+                            throw new RalphieError({
+                                message: "model is down",
+                            });
+                        },
+                    },
+                }),
+            ),
+        ).rejects.toThrow("Run drained with issue failures");
+
+        expect(calls.some((call) => call.startsWith("executeIssue:42"))).toBe(
+            true,
+        );
+        expect(
+            states
+                .at(-1)
+                ?.outcomes.find(({ issueNumber }) => issueNumber === 50)
+                ?.outcome,
+        ).toMatchObject({ kind: "failed" });
     });
 });

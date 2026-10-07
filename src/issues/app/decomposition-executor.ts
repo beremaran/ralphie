@@ -1,9 +1,8 @@
 import {
-    decompositionMarker,
     nextDecompositionLineage,
+    orderChildrenByDependencies,
     parseDecompositionMarker,
     renderChildIssueBody,
-    renderDecomposedOriginalBody,
     type DecompositionLineage,
 } from "../domain/decomposition-markdown.ts";
 import {
@@ -15,9 +14,10 @@ import { type GitHubIssuesService } from "../../github/ports.ts";
 import { type GitHubIssue } from "../../github/domain.ts";
 import { type GitHubIssueRelationshipService } from "../../github/ports.ts";
 import { buildDecompositionPrompt } from "../../agent/prompts.ts";
+import { skillInvocation } from "../../harness/app/skill-injection.ts";
 import { requestStructuredOutput } from "../../agent/structured-output.ts";
 import type { ProgressReporterService } from "../../progress/ports.ts";
-import { RalphieError } from "../../shared/error.ts";
+import { RalphieError, errorMessage } from "../../shared/error.ts";
 import {
     IssueArtifactKind,
     type CreatedIssueDependencyMapping,
@@ -31,10 +31,12 @@ import {
     IssueExecutionOutcomeKind,
     type WorkflowExecutorInput,
     type WorkflowExecutorResult,
-} from "./execution.ts";
+} from "./execution-model.ts";
 import type { ReviewAttempt } from "./recovery.ts";
-import type { NeedsAttentionRouterService } from "./needs-attention.ts";
+import type { HandOffRouterService } from "./hand-off.ts";
 import { DEFAULT_MAX_DECOMPOSITION_DEPTH } from "../domain/decomposition-markdown.ts";
+
+const DEFAULT_AGENT_READY_LABEL = "ready-for-agent";
 
 export type DecompositionExecutorService = {
     readonly execute: (
@@ -49,6 +51,26 @@ const existingMapping = async (
         ? await input.artifacts.read(IssueArtifactKind.CreatedIssueNumbers)
         : {};
 
+/** The agent-ready label plus the parent's labels that gate intake. */
+const childLabels = (
+    context: WorkflowExecutorInput["context"],
+    agentReadyLabel: string,
+): ReadonlyArray<string> => {
+    const gating = new Set(
+        (context.intakeLabels ?? []).map((label) => label.toLowerCase()),
+    );
+    const inherited = context.issue.labels.filter((label) =>
+        gating.has(label.toLowerCase()),
+    );
+    const seen = new Set<string>();
+    return [agentReadyLabel, ...inherited].filter((label) => {
+        const key = label.toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+};
+
 const issueContext = (input: WorkflowExecutorInput) => ({
     issue: {
         number: input.context.issue.number,
@@ -61,7 +83,8 @@ export const makeDecompositionExecutorService = (
     issues: GitHubIssuesService,
     relationships: GitHubIssueRelationshipService,
     progress: ProgressReporterService,
-    needsAttentionRouter?: NeedsAttentionRouterService,
+    handOffRouter?: HandOffRouterService,
+    agentReadyLabel = DEFAULT_AGENT_READY_LABEL,
 ): DecompositionExecutorService => {
     const recoverableMutation = async <Output>(
         operation: string,
@@ -101,8 +124,7 @@ export const makeDecompositionExecutorService = (
             });
             return output;
         } catch (error) {
-            const message =
-                error instanceof Error ? error.message : String(error);
+            const message = errorMessage(error);
             await progress.emit({
                 ...context,
                 stage,
@@ -177,16 +199,16 @@ export const makeDecompositionExecutorService = (
                 issue: context.issue,
                 repositoryPath: context.repositoryPath,
                 targetBranch: context.targetBranch,
+                toTicketsInvocation: skillInvocation(
+                    context.agent.roles.decomposer.harness,
+                    "to-tickets",
+                ),
                 failedReviewSummaries: reviewAttempts.map(
                     ({ decision }) => decision,
                 ),
             }),
             schema: issueBreakdownDecisionSchema,
-            agent: context.agentSelection.agent,
-            model: context.agentSelection.model,
-            variant: context.agentSelection.variant,
-            runId: context.runId,
-            diagnostics: context.agentDiagnostics,
+            role: "decomposer",
             verifyAfter: (signal) =>
                 context.repositoryInvariant.verify(
                     context.repositoryPath,
@@ -198,23 +220,23 @@ export const makeDecompositionExecutorService = (
             progressIssue: issueContext(input).issue,
             signal: context.signal,
         });
-        if (result.needsAttention !== undefined) {
-            if (needsAttentionRouter === undefined) {
+        if (result.handOff !== undefined) {
+            if (handOffRouter === undefined) {
                 throw new RalphieError({
                     message:
-                        "A needs-attention signal requires the verifier/router service.",
+                        "A hand-off signal requires the verifier/router service.",
                 });
             }
-            const routed = await needsAttentionRouter.route({
+            const routed = await handOffRouter.route({
                 context,
                 artifacts,
-                request: result.needsAttention,
+                request: result.handOff,
                 checkpoint: {
                     branch: invariant.branch,
                     sha: invariant.head,
                 },
             });
-            if (routed !== undefined) throw new RoutedNeedsAttention(routed);
+            if (routed !== undefined) throw new RoutedHandOff(routed);
         }
         await artifacts.write(
             IssueArtifactKind.IssueBreakdownDecision,
@@ -306,14 +328,20 @@ export const makeDecompositionExecutorService = (
     ): Promise<CreatedIssueNumberMapping> => {
         const { context } = input;
         let nextMapping = mapping;
-        for (const child of breakdown.issues) {
+        // Blockers are created first so each body can name real issue numbers.
+        for (const child of orderChildrenByDependencies(breakdown.issues)) {
             if (nextMapping[child.key] !== undefined) continue;
             const created = await recoverableMutation(
                 `create-child-${child.key}`,
                 () =>
                     mutations.create(context.repository, {
                         title: child.title,
-                        body: `${decompositionMarker(lineage, child.key)}\n\n${child.body}`,
+                        body: renderChildIssueBody({
+                            child,
+                            lineage,
+                            issueNumbers: nextMapping,
+                        }),
+                        labels: childLabels(context, agentReadyLabel),
                     }),
                 input,
             );
@@ -332,42 +360,6 @@ export const makeDecompositionExecutorService = (
         return nextMapping;
     };
 
-    const linkChildren = async (
-        input: WorkflowExecutorInput,
-        breakdown: IssueBreakdownDecision,
-        lineage: DecompositionLineage,
-        mapping: CreatedIssueNumberMapping,
-    ): Promise<void> => {
-        const { context } = input;
-        for (const child of breakdown.issues) {
-            const childNumber = mapping[child.key];
-            if (childNumber === undefined) {
-                throw new RalphieError({
-                    message: `Missing created issue for ${child.key}.`,
-                });
-            }
-            await recoverableMutation(
-                `link-child-${child.key}`,
-                () =>
-                    mutations.update(context.repository, childNumber, {
-                        body: renderChildIssueBody({
-                            child,
-                            lineage,
-                            issueNumbers: mapping,
-                        }),
-                    }),
-                input,
-            );
-        }
-    };
-
-    /**
-     * Attach every created or recovered child to the original issue as a
-     * native sub-issue, reconciling against what GitHub already reports so a
-     * restart cannot duplicate relationships. Conflicting native hierarchy or
-     * marker lineage halts with a recovery diagnostic instead of silently
-     * reparenting or rewriting issues.
-     */
     /** True when an attached child's marker disagrees with the intended parent. */
     const markerLineageConflict = (
         body: string | null,
@@ -641,27 +633,12 @@ export const makeDecompositionExecutorService = (
             lineage,
             mapping,
         );
-        await linkChildren(input, breakdown, lineage, mapping);
         await attachChildrenToParent(input, breakdown, lineage, mapping);
         await reconcileNativeDependencies(input, breakdown, mapping);
 
-        await recoverableMutation(
-            "rewrite-original",
-            () =>
-                mutations.update(context.repository, context.issue.number, {
-                    body: renderDecomposedOriginalBody({
-                        original: context.issue,
-                        breakdown,
-                        issueNumbers: mapping,
-                        lineage,
-                    }),
-                }),
-            input,
-        );
-
-        // The decomposed parent stays open as the native tracking issue for
-        // its sub-issues; it is never closed as a duplicate merely because it
-        // was decomposed.
+        // The parent issue is never modified. It stays open as the native
+        // tracking issue for its sub-issues and is closed with a comment by
+        // parent completion once every child is closed.
         return {
             kind: IssueExecutionOutcomeKind.Decomposed,
             childIssueNumbers: breakdown.issues.map(
@@ -675,7 +652,7 @@ export const makeDecompositionExecutorService = (
             try {
                 return await executeDecomposition(input);
             } catch (error) {
-                if (error instanceof RoutedNeedsAttention) {
+                if (error instanceof RoutedHandOff) {
                     return error.outcome;
                 }
                 throw error;
@@ -684,8 +661,8 @@ export const makeDecompositionExecutorService = (
     };
 };
 
-class RoutedNeedsAttention extends Error {
+class RoutedHandOff extends Error {
     constructor(readonly outcome: WorkflowExecutorResult) {
-        super("Needs attention");
+        super("Hand-off");
     }
 }

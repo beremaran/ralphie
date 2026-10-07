@@ -5,6 +5,188 @@ All notable changes to Ralphie are documented here. The project follows
 
 ## [Unreleased]
 
+This release replaces the in-process pi agent with headless harness CLIs and
+moves every setting into a configuration file. It contains breaking changes to
+the command line, the configuration, the run state, the JSON Lines output, and
+the way issues are selected and handed back to humans. Read the Removed and
+Changed sections before upgrading.
+
+### Added
+
+- Transient harness failures no longer hand issues off. A rate, usage, session
+  or quota limit, an overloaded or unreachable provider, exhausted credits or an
+  expired login now defers the issue untouched (no labels or comments change),
+  stops the rest of the queue, and exits `75` with a message naming the failure
+  and its reset time. Definite failures still hand off. `scripts/live-smoke.ts`
+  reports such a halt as INCONCLUSIVE and requires a decomposition to have a
+  child worked to a genuine outcome before it passes. It also waits for the
+  created issues to appear in the label listing before it starts Ralphie, passes
+  the implementation scenario only when Ralphie reported the closure and a new
+  commit added `greeting.txt`, and saves each run's `--output json` log to a
+  temp file whose path and `Run completed` line it prints.
+- Parallel reviewer sessions in one working directory no longer collide while
+  skills are injected (`ENOTEMPTY` when setting a same-named repository skill
+  aside). They share one injection, and the last release restores the checkout,
+  including directories Ralphie created.
+- Harnesses and roles. Every agent session runs on a headless harness CLI:
+  Claude Code (`claude`, the default), Codex (`codex`), pi (`pi`) or OpenCode
+  (`opencode`). The `harnesses` (per-harness `model`, `effort`, `approval`) and
+  `roles` keys assign a harness, model and effort to each of the eight roles
+  (`triager`, `preflight`, `implementer`, `fixer`, `standards-reviewer`,
+  `spec-reviewer`, `resolution-verifier`, `decomposer`). Every role falls back
+  to `roles.default`, both reviewers to `roles.reviewer`, and the fixer to the
+  implementer. See `docs/configuration.md`.
+- OpenCode is experimental. Its adapter has not been verified against a live
+  model, so startup refuses any role assigned to `opencode` until the
+  configuration sets `harnesses.opencode.experimental: true`.
+- YAML configuration. Ralphie reads `$XDG_CONFIG_HOME/ralphie/config.yaml` (else
+  `~/.config/ralphie/config.yaml`, or `--config <path>`), validated with a
+  strict schema at startup. Settings layer from defaults, the top level, the
+  matching `repos."owner/repo"` entry, and repeatable `--set path=value`
+  overrides. Review rounds and verification fixes are configurable under
+  `limits`, and `labels` maps the five canonical triage labels.
+- `ralphie init` detects the harnesses on PATH and writes a commented config
+  file at the default location (or `--config`), never overwriting an existing
+  one. A run without a config file points at it.
+- `approval: safe | yolo` (top level, per repository, and per harness) sets how
+  the editing roles run. Startup verifies that every assigned harness is
+  installed, that safe approval is available, and that pi and OpenCode editing
+  roles are set to `yolo`, failing within seconds with the config change that
+  fixes it.
+- `limits.sessionTimeoutMinutes` (`edit` 60, `readOnly` 15) bounds each session;
+  a timeout kills the session's process group. `limits.maxBudgetUsd` caps spend
+  per session, enforced only by Claude Code, with a startup warning for the
+  other harnesses.
+- Vendored skills. Sessions run Matt Pocock's `triage`, `to-tickets`,
+  `implement`, `tdd`, `code-review`, `codebase-design` and `diagnosing-bugs`
+  skills from a pinned copy in `vendor/mattpocock-skills/`, packaged with the
+  release. Ralphie injects them (or `skills.dir`) into the harness's project
+  skills directory for the session, excludes them from Git, removes them
+  afterwards, and generates `docs/agents` tracker and label docs only when the
+  repository lacks them. `bun run skills:sync` refreshes the copy and a
+  scheduled workflow opens a PR when upstream moves.
+- Hand-offs, always on. Anything that needs a human moves the issue to
+  `needs-info` (missing information, conflicting requirements, cannot
+  reproduce, outdated premise; Triage Notes comment) or `ready-for-human`
+  (exhausted implementation attempts or verification repairs, the
+  decomposition depth limit, an external dependency, a decision that needs
+  human judgment; write-up with the diagnostics location). Ralphie replaces
+  the issue's single triage state label, so the next run's intake skips it.
+  Every comment Ralphie posts starts with the AI disclaimer.
+- Opt-in AFK triage (`triage.enabled`, default off). A read-only `triager`
+  session runs the vendored `/triage` over unlabelled issues, `needs-triage`
+  issues and `needs-info` issues the reporter has answered. It promotes an issue
+  to `ready-for-agent` with an Agent Brief (implemented in the same run), hands
+  off to `needs-info` or `ready-for-human`, or closes an already implemented
+  issue as completed once a fresh resolution verifier proves it. It never
+  applies `wontfix` and never writes `.out-of-scope/`.
+- Candidate-commit review gate. After verification Ralphie creates a local
+  candidate commit and runs a standards reviewer and a spec reviewer in
+  parallel over the range diff; smells never block. Approved candidates are
+  squashed into the single delivered commit.
+- Session isolation: sessions start without `GH_TOKEN`, `GITHUB_TOKEN` and the
+  enterprise variants, with an empty `GH_CONFIG_DIR`, origin's push URL
+  disabled inside the workspace, and a fingerprint check that fails any
+  read-only session that changed the checkout.
+- `bun run smoke:live`, an opt-in script that runs the CLI against a scratch
+  repository per installed harness. It is not part of `bun run check` or CI.
+- Harness-neutral session events in JSON Lines output (see Changed) and a
+  shared contract suite for harness adapters.
+
+### Changed
+
+- Breaking: JSON Lines events that reported the `grounding` and
+  `issue-grounding` stages now report `preflight` (pre-flight work) or
+  `hand-off` (hand-off decisions and their verification).
+- Every terminal implementation failure (repeated blocking review findings, a
+  review fix that changes nothing, a failed or timed-out session, a repair that
+  changes the tree after the last review) now ends in an
+  `implementation_exhausted` hand-off, not only an exhausted retry budget.
+- Agent session failures in pre-flight, resolution verification and
+  decomposition now become `ready-for-human` hand-offs too; checkout and GitHub
+  errors still fail so the next run retries.
+- Session isolation also removes `SSH_AUTH_SOCK` and askpass helpers, empties
+  the global and system git config and credential helpers, disables git
+  terminal prompts and makes `GIT_SSH_COMMAND` fail, so a session cannot push
+  over ssh even in yolo mode. Keys readable on disk or in a keyring still need
+  a dedicated OS user.
+- The latest `## Agent Brief` comment is exempt from the 4000-character comment
+  trim and the 20-comment limit when issues are read.
+- `--notify-needs-attention` and `--needs-attention-label` fail with tailored
+  errors; startup now checks each harness against a minimum version and skips
+  the `triager` role when `triage.enabled` is false.
+- Breaking: Ralphie is invoked as `ralphie [owner/]repo` and requires the
+  configuration file; a missing file fails with the path it looked for. A bare
+  repository name takes its owner from `defaultOwner` or the `gh` login.
+- Breaking: intake reads only open issues carrying the `labels.ready-for-agent`
+  label (and every `intake.requireLabels` label). Issues without them are never
+  read, so existing queues must be labelled or run with `triage.enabled`.
+- Breaking: one read-only pre-flight session per issue replaces the grounding
+  session and the 0-5 complexity assessment. It returns `actionable` with
+  `fitsOneSession`, `already_resolved`, `blocked` (skipped without a label
+  change) or `hand_off`. Open-blocker skips from queue order are `skipped`
+  outcomes that change nothing on GitHub. Decomposition no longer carries a
+  complexity estimate.
+- Breaking: hand-offs replace "needs attention" and the notification flags
+  throughout. The outcome kind, result field, progress stage and status, and
+  artifacts are renamed (`hand-off`, `hand_off`, `hand-off-decision`,
+  `pending-hand-off`). The implementer's own result keeps
+  `status: needs_attention`, which is routed as a hand-off request.
+- Breaking: run state is version 15 (version 13 replaced `selection` with the
+  per-role assignments, 14 renamed the hand-off fields, 15 added the `deferred`
+  outcome). Older state is not
+  migrated, and artifacts written by earlier versions (`complexity-decision`,
+  decomposition breakdowns with `body` and `estimatedComplexity`) are not read.
+- Breaking: `--output json` carries `session_event` records instead of
+  `agent_event` records: `{type, sessionID, directory, harness, title?, event}`
+  where `event` is one harness-neutral shape (`session_started`,
+  `assistant_text`, `tool_call`, `tool_result`, `error`, `usage`,
+  `session_finished`). Tool names and inputs are the harness's own. See
+  `docs/operations-and-recovery.md`.
+- Breaking: decomposition runs the vendored `/to-tickets` skill. Children use
+  `{key, title, whatToBuild, acceptanceCriteria, dependsOn}` and are created
+  blockers first in the to-tickets template (`## Parent`, `## What to build`,
+  `## Acceptance criteria`, `## Blocked by`) with the agent-ready label and the
+  parent's `intake.requireLabels` labels. The parent issue's body is never rewritten
+  any more; it is recognised by its native sub-issues, and closed with one
+  disclaimed comment when its children are done.
+- Implementation runs the vendored `/implement` skill, and the implementer
+  writes the commit message (no separate commit-message session). Fixes resume
+  the implementer's session where the harness allows it, starting a fresh
+  session when resuming fails or the estimated context nears 400,000 characters.
+- Read-only sessions have no shell on Claude Code, so Ralphie puts the range
+  diff in the reviewers' prompts.
+- Structured results are validated values, with the optional hand-off request
+  as a field of the result instead of a tool call; repair sessions can no
+  longer raise one.
+- Interactive output: the TUI header no longer shows a model. Pause (`p`), stop
+  (`s`) and quit (`q`) are unchanged.
+
+### Removed
+
+- Breaking: the in-process pi SDK runtime, its credential store and model
+  catalog, and the `@earendil-works/pi-agent-core` and `@earendil-works/pi-ai`
+  dependencies. Ralphie no longer reads `~/.pi/agent/auth.json`,
+  `PI_CODING_AGENT_DIR` or provider API-key variables; each harness CLI keeps
+  its own login. The pi CLI remains available as a harness.
+- Breaking: the TUI model picker (`m`).
+- Breaking: `--branch` (`-b`), `--verify-command`, `--issue-label`,
+  `--issue-sort`, `--implementation-attempts`, `--max-decomposition-depth`,
+  `--workspace`, `--model` and `--thinking`. Each fails with an error naming
+  the configuration key that replaces it (`docs/configuration.md`).
+- Breaking: `--notify-needs-attention`, `--needs-attention-label` and the
+  `notifications` configuration section. Hand-offs are always on, so there is
+  nothing left to opt into; each flag fails with a tailored error (see
+  Changed).
+
+## Before the harness release
+
+Everything below predates the harness release. It was kept under a single
+Unreleased heading, so it mixes what shipped in v0.1.0 to v0.1.2 with changes
+merged afterwards and is not attributed to a version. Mentions of removed
+surfaces (OpenCode, the pi SDK, `--on-needs-attention`, `lgtm`, and so on)
+describe history, not the current tool.
+
 ### Removed
 
 - Remove the `quiet` and `verbose` output modes. `--output` now accepts only
@@ -47,8 +229,8 @@ All notable changes to Ralphie are documented here. The project follows
   delivery/diagnostics/repair subsystem, and their tests and docs.
 
 - Replace the external OpenCode server integration and the multi-harness/ACP
-  discovery layer with the in-process pi agent runtime
-  (`@earendil-works/pi-agent-core` plus `@earendil-works/pi-ai`). Deleted
+  discovery layer with an in-process agent runtime (itself replaced by the
+  harness CLIs, see above). Deleted
   `src/harness/` (six-kind harness contracts and Antigravity
   executable/ACP discovery) and `src/opencode/` (server client, transport,
   permission watcher, and model-variant catalog). `--opencode-url`,
@@ -87,9 +269,7 @@ All notable changes to Ralphie are documented here. The project follows
   queued issues. Interactive runs start paused so the discovered plan can be
   inspected before work begins; `p` resumes or pauses the queue between issues,
   `s` stops the queue after the active issue and drains the run with a "Run
-  stopped by request" summary, and `q` cancels immediately. `m` opens a model
-  picker over the pi catalog with the selected model's thinking levels: Tab
-  switches panes, Enter applies the pick to later issues, and Esc cancels. The
+  stopped by request" summary, and `q` cancels immediately. The
   footer/breadcrumb/terminal-controller stack and its PTY test suites are gone. Plain (piped/CI) and JSON output are unchanged in
   shape, and the interactive renderer loads lazily so help, plain, and JSON
   paths never touch the native module.
@@ -99,13 +279,6 @@ All notable changes to Ralphie are documented here. The project follows
   that no longer matches the filters is reported as skipped instead of
   disappearing silently. Plain output gains one line per skipped issue and the
   JSON audit gains the queue details.
-
-- Replace fenced-JSON structured output with tool-call submission. Structured
-  sessions register a `submit_result` tool whose parameters are the decision
-  schema; invalid arguments are returned to the model as tool errors so it can
-  correct itself within the turn, and the captured call is the validated
-  result. The needs-attention channel is a `request_needs_attention` tool call
-  instead of a fenced block.
 
 - Give GitHub adapters an owned session. `connect()` authenticates once and
   the capability adapters read the client internally, so no port method,
@@ -268,7 +441,7 @@ All notable changes to Ralphie are documented here. The project follows
   single region whose total height never exceeds three terminal rows (no panel
   added beneath the footer), every row is clipped before it can wrap, and each
   replacement repaints the region in place using the terminal stream boundary
-  primitives — repaints are deferred while a transcript fragment is open
+  primitives: repaints are deferred while a transcript fragment is open
   mid-line or a control sequence is incomplete, and the region clears/restores
   without overwriting streamed assistant text, splitting an ANSI/control
   sequence, or inserting bytes into a partial line. Resize, disposal, stale
@@ -448,7 +621,7 @@ All notable changes to Ralphie are documented here. The project follows
 - The `pr` gate now streams dedicated `pr-gate` progress events for
   registration (pull-request number and exact head SHA), poll progress only
   for meaningful check transitions (registration, checks registering,
-  appearing or disappearing, and status changes — unchanged polls never
+  appearing or disappearing, and status changes: unchanged polls never
   emit), head invalidation, and terminal success/failure, timeout, and
   cancellation with the check summary and reason. Human and verbose output
   explain the PR number, exact SHA, check summary, and reason; JSON output
@@ -506,8 +679,8 @@ All notable changes to Ralphie are documented here. The project follows
   left untouched.
 - Dry-run decomposition reporting: a complexity 4–5 dry run performs the
   read-only breakdown session and reports the intended native sub-issue
-  hierarchy — children to create or reuse, sub-issue attachments, dependency
-  edges, and the open tracking parent — without mutating GitHub or writing
+  hierarchy: children to create or reuse, sub-issue attachments, dependency
+  edges, and the open tracking parent: without mutating GitHub or writing
   artifacts. An unverified needs-attention signal from the planning session is
   reported as a needs-attention route without invoking recovery.
 - A deterministic GitHub issue-relationship domain service

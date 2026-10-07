@@ -1,6 +1,7 @@
 import type { Octokit } from "octokit";
 
 import { RalphieError } from "../../shared/error.ts";
+import { isAgentBrief } from "../../issues/domain/triage.ts";
 import { parseRepositorySlug } from "../repository.ts";
 import {
     MAX_ISSUE_COMMENT_BODY_LENGTH,
@@ -31,10 +32,12 @@ export type GitHubIssueRecord = {
     readonly title: string;
     readonly html_url: string;
     readonly body?: string | null;
+    readonly user?: { readonly login?: string | null } | null;
     readonly state?: string;
     readonly updated_at?: string;
     readonly comments?: number;
     readonly pull_request?: unknown;
+    readonly sub_issues_summary?: { readonly total?: number };
     readonly labels?: ReadonlyArray<
         | string
         | {
@@ -46,8 +49,13 @@ export type GitHubIssueRecord = {
 type GitHubIssueCommentRecord = {
     readonly id: number;
     readonly body?: string | null;
+    readonly user?: { readonly login?: string | null } | null;
     readonly updated_at: string;
 };
+
+const loginOf = (
+    user: { readonly login?: string | null } | null | undefined,
+): { readonly author?: string } => (user?.login ? { author: user.login } : {});
 
 const issueState = (state: string | undefined): GitHubIssueState => {
     if (state === "open" || state === "closed") return state;
@@ -107,11 +115,18 @@ const mapIssueComments = (
     readonly comments: ReadonlyArray<GitHubIssueComment>;
     readonly commentVersion: string;
 } => {
+    const latestBrief = comments.findLast((comment) =>
+        isAgentBrief(comment.body ?? ""),
+    );
+    const recent = new Set(comments.slice(-MAX_ISSUE_COMMENTS));
     const boundedComments = comments
-        .slice(-MAX_ISSUE_COMMENTS)
+        .filter((comment) => recent.has(comment) || comment === latestBrief)
         .map((comment) => ({
             id: comment.id,
-            body: truncateCommentBody(comment.body ?? ""),
+            ...loginOf(comment.user),
+            body: isAgentBrief(comment.body ?? "")
+                ? (comment.body ?? "")
+                : truncateCommentBody(comment.body ?? ""),
             updatedAt: issueUpdatedAt(comment.updated_at),
         }));
     return {
@@ -130,6 +145,7 @@ export const mapGitHubIssue = (
         number: issue.number,
         title: issue.title,
         url: issue.html_url,
+        ...loginOf(issue.user),
         body: issue.body ?? null,
         labels: issueLabels(issue.labels),
         state: issueState(issue.state),
@@ -137,6 +153,9 @@ export const mapGitHubIssue = (
         comments: mappedComments.comments,
         commentCount: issue.comments ?? rawComments.length,
         commentVersion: mappedComments.commentVersion || updatedAt,
+        ...(issue.sub_issues_summary?.total === undefined
+            ? {}
+            : { subIssueCount: issue.sub_issues_summary.total }),
     };
 };
 

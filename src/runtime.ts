@@ -22,17 +22,18 @@ import { makeParentCompletionService } from "./issues/app/parent-completion.ts";
 import { type ParentCompletionService } from "./issues/ports.ts";
 import { makeGitHubIssuesService } from "./github/adapters/issues.ts";
 import { type GitHubIssuesService } from "./github/ports.ts";
-import { makeGitHubNeedsAttentionNotificationService } from "./github/adapters/needs-attention.ts";
-import { type GitHubNeedsAttentionNotificationService } from "./github/ports.ts";
+import { makeGitHubHandOffService } from "./github/adapters/hand-off.ts";
+import { makeGitHubTriageService } from "./github/adapters/triage.ts";
+import {
+    type GitHubHandOffService,
+    type GitHubTriageService,
+} from "./github/ports.ts";
+import { makeTriageService, type TriageService } from "./issues/app/triage.ts";
 import {
     makeIssueArtifactStoreService,
     type IssueArtifactStoreService,
 } from "./issues/app/artifacts.ts";
 import { nodeIssueArtifactFileSystem } from "./issues/adapters/artifact-file-system.ts";
-import {
-    makeComplexityAssessmentService,
-    type ComplexityAssessmentService,
-} from "./issues/app/complexity.ts";
 import {
     makeDecompositionExecutorService,
     type DecompositionExecutorService,
@@ -49,21 +50,43 @@ import {
 import {
     makeIssueExecutorService,
     type IssueExecutorService,
-} from "./issues/app/executor.ts";
+} from "./issues/app/issue-routing.ts";
 import {
     makeIssueRecoveryService,
     type IssueRecoveryService,
 } from "./issues/app/recovery.ts";
+import { nodeReviewEvidenceFiles } from "./issues/adapters/review-evidence-file-system.ts";
 import { nodeRecoveryFileSystem } from "./issues/adapters/recovery-file-system.ts";
 import {
-    makeGroundingAssessmentService,
-    type GroundingAssessmentService,
-} from "./issues/app/grounding.ts";
+    makePreflightAssessmentService,
+    type PreflightAssessmentService,
+} from "./issues/app/preflight.ts";
 import {
-    makeNeedsAttentionRouterService,
-    type NeedsAttentionRouterService,
-} from "./issues/app/needs-attention.ts";
-import { type PiAgentService } from "./pi/ports.ts";
+    makeHandOffRouterService,
+    type HandOffRouterService,
+} from "./issues/app/hand-off.ts";
+import { makeClaudeCodeAdapter } from "./harness/adapters/claude-code.ts";
+import { makeOpenCodeAdapter } from "./harness/adapters/opencode.ts";
+import { makeCodexAdapter } from "./harness/adapters/codex.ts";
+import { makeTemporarySchemaFileWriter } from "./harness/adapters/schema-file.ts";
+import { makePiCliAdapter } from "./harness/adapters/pi-cli.ts";
+import { makeHarnessService } from "./harness/app/harness-service.ts";
+import { nodeSkillFileSystem } from "./harness/adapters/skill-file-system.ts";
+import { makeSessionPreparation } from "./harness/app/skill-injection.ts";
+import type { TriageLabels } from "./issues/domain/triage-roles.ts";
+import {
+    guardReadOnlySessions,
+    isolateSessions,
+} from "./harness/app/session-isolation.ts";
+import { makeTemporaryScratchDirectories } from "./harness/adapters/scratch-directory.ts";
+import { makeGitWorkingTreeService } from "./git/adapters/working-tree.ts";
+import { makeGitRepositoryFactsService } from "./git/adapters/repository-facts.ts";
+import { provideRepositoryFacts } from "./agent/repository-facts.ts";
+import {
+    type HarnessAdapter,
+    type HarnessService,
+    type SessionEventListener,
+} from "./harness/ports.ts";
 import { type ProgressReporterService } from "./progress/ports.ts";
 import {
     type Clock,
@@ -87,8 +110,12 @@ export type RalphieRuntime = {
     readonly githubIssueMutations: GitHubIssueMutationService;
     readonly githubIssueRelationships: GitHubIssueRelationshipService;
     readonly parentCompletion: ParentCompletionService;
-    /** Publishes structured needs-attention outcomes outside issue execution. */
-    readonly githubNeedsAttentionNotification: GitHubNeedsAttentionNotificationService;
+    /** Posts hand-off comments and swaps triage labels. */
+    readonly githubHandOff: GitHubHandOffService;
+    /** Posts Agent Briefs and already-implemented comments for AFK triage. */
+    readonly githubTriage: GitHubTriageService;
+    /** The read-only AFK triager. */
+    readonly triage: TriageService;
     readonly gitRepository: GitRepositoryService;
     readonly gitRepositoryInvariant: GitRepositoryInvariantService;
     readonly gitIssueCheckpoint: GitIssueCheckpointService;
@@ -96,16 +123,16 @@ export type RalphieRuntime = {
     readonly gitIssuePreparation: GitIssuePreparationService;
     readonly gitRemoteSafety: GitRemoteSafetyService;
     readonly issueArtifactStore: IssueArtifactStoreService;
-    readonly complexityAssessment: ComplexityAssessmentService;
-    readonly groundingAssessment: GroundingAssessmentService;
+    readonly preflightAssessment: PreflightAssessmentService;
     /** Shared fresh, read-only resolution verifier for issue routes. */
     readonly resolutionVerification: ResolutionVerificationService;
     readonly decompositionExecutor: DecompositionExecutorService;
     readonly implementationExecutor: ImplementationExecutorService;
     readonly issueExecutor: IssueExecutorService;
     readonly issueRecovery: IssueRecoveryService;
-    readonly needsAttentionRouter: NeedsAttentionRouterService;
-    readonly agentRuntime: PiAgentService;
+    readonly handOffRouter: HandOffRouterService;
+    /** Runs every agent session through the configured harness CLIs. */
+    readonly harness: HarnessService;
     readonly progress: ProgressReporterService;
     readonly runEventLog: RunEventLog;
     readonly runStateStore: RunStateStoreService;
@@ -115,11 +142,20 @@ export type RalphieRuntime = {
     readonly workspace: WorkspaceService;
 };
 
+export type SkillInjectionSettings = {
+    /** Directory whose subdirectories are the skills to inject. */
+    readonly directory: string;
+    readonly labels: TriageLabels;
+};
+
 export type RuntimeOverrides = {
-    readonly agentRuntime: PiAgentService;
     readonly progress: ProgressReporterService;
     readonly runEventLog: RunEventLog;
     readonly layout: RunLayout;
+    /** Receives the events of harness sessions; defaults to discarding them. */
+    readonly sessionListener?: SessionEventListener;
+    /** Skills and label vocabulary injected into every session; omitted means none. */
+    readonly skills?: SkillInjectionSettings;
     readonly clock?: Clock;
     readonly ids?: IdGenerator;
     /** Optional deterministic seam for the issue artifact store. */
@@ -128,12 +164,26 @@ export type RuntimeOverrides = {
     readonly workspace?: WorkspaceService;
 };
 
+/** Every harness adapter, keyed by the name roles use to select it. */
+export const makeHarnessAdapters = (
+    commandRunner: CommandRunnerService,
+): Record<string, HarnessAdapter> => ({
+    claude: makeClaudeCodeAdapter({ runner: commandRunner }),
+    opencode: makeOpenCodeAdapter({ runner: commandRunner }),
+    codex: makeCodexAdapter({
+        runner: commandRunner,
+        schemaFiles: makeTemporarySchemaFileWriter(),
+    }),
+    pi: makePiCliAdapter({ runner: commandRunner }),
+});
+
 /** Assemble the small object graph for one run. */
 export const makeLiveRuntime = ({
-    agentRuntime,
     progress,
     runEventLog,
     layout,
+    sessionListener = () => {},
+    skills,
     clock = systemClock,
     ids = makeIdGenerator(),
     commandRunner = CommandRunnerLive,
@@ -153,8 +203,29 @@ export const makeLiveRuntime = ({
         relationships: githubIssueRelationships,
         mutations: githubIssueMutations,
     });
-    const githubNeedsAttentionNotification =
-        makeGitHubNeedsAttentionNotificationService(githubConnection.session);
+    const githubHandOff = makeGitHubHandOffService(githubConnection.session);
+    const githubTriage = makeGitHubTriageService(githubConnection.session);
+    const bareHarness = makeHarnessService({
+        adapters: makeHarnessAdapters(commandRunner),
+        listener: sessionListener,
+        ids,
+        ...(skills === undefined
+            ? {}
+            : {
+                  preparation: makeSessionPreparation({
+                      fileSystem: nodeSkillFileSystem,
+                      skillsDirectory: skills.directory,
+                      labels: skills.labels,
+                  }),
+              }),
+    });
+    const harness = provideRepositoryFacts(
+        guardReadOnlySessions(
+            isolateSessions(bareHarness, makeTemporaryScratchDirectories()),
+            makeGitWorkingTreeService(commandRunner).fingerprint,
+        ),
+        makeGitRepositoryFactsService(commandRunner).read,
+    );
     const gitRepository = makeGitRepositoryService(commandRunner);
     const gitRepositoryInvariant =
         makeGitRepositoryInvariantService(commandRunner);
@@ -181,17 +252,17 @@ export const makeLiveRuntime = ({
         progress,
         gitRepositoryInvariant,
     );
-    const needsAttentionRouter = makeNeedsAttentionRouterService(issueRecovery);
+    const handOffRouter = makeHandOffRouterService(issueRecovery);
     const issueVerification = makeIssueVerificationService(commandRunner);
-    const complexityAssessment = makeComplexityAssessmentService(progress);
-    const groundingAssessment = makeGroundingAssessmentService(progress);
+    const preflightAssessment = makePreflightAssessmentService(progress);
     const resolutionVerification = makeResolutionVerificationService(progress);
     const decompositionExecutor = makeDecompositionExecutorService(
         githubIssueMutations,
         githubIssues,
         githubIssueRelationships,
         progress,
-        needsAttentionRouter,
+        handOffRouter,
+        skills?.labels["ready-for-agent"],
     );
     const implementationExecutor = makeImplementationExecutorService(
         actualGitIssuePreparation,
@@ -201,17 +272,18 @@ export const makeLiveRuntime = ({
         progress,
         issueVerification,
         resolutionVerification,
-        needsAttentionRouter,
+        handOffRouter,
+        nodeReviewEvidenceFiles,
     );
+    const triage = makeTriageService({ progress, resolutionVerification });
     const issueExecutor = makeIssueExecutorService(
         issueArtifactStore,
-        complexityAssessment,
         implementationExecutor,
         decompositionExecutor,
-        groundingAssessment,
+        preflightAssessment,
         resolutionVerification,
         progress,
-        needsAttentionRouter,
+        handOffRouter,
     );
     return {
         commandRunner,
@@ -220,7 +292,9 @@ export const makeLiveRuntime = ({
         githubIssueMutations,
         githubIssueRelationships,
         parentCompletion,
-        githubNeedsAttentionNotification,
+        githubHandOff,
+        githubTriage,
+        triage,
         gitRepository,
         gitRepositoryInvariant,
         gitIssueCheckpoint,
@@ -228,15 +302,14 @@ export const makeLiveRuntime = ({
         gitIssuePreparation: actualGitIssuePreparation,
         gitRemoteSafety,
         issueArtifactStore,
-        complexityAssessment,
-        groundingAssessment,
+        preflightAssessment,
         resolutionVerification,
         decompositionExecutor,
         implementationExecutor,
         issueExecutor,
         issueRecovery,
-        needsAttentionRouter,
-        agentRuntime,
+        handOffRouter,
+        harness,
         progress,
         runEventLog,
         runStateStore,

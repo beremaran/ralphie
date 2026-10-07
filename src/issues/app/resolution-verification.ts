@@ -1,19 +1,19 @@
 import { buildResolutionVerificationPrompt } from "../../agent/prompts.ts";
 import { requestStructuredOutput } from "../../agent/structured-output.ts";
 import type { ProgressReporterService } from "../../progress/ports.ts";
-import { RalphieError } from "../../shared/error.ts";
+import { RalphieError, errorMessage } from "../../shared/error.ts";
 import {
     resolutionVerificationDecisionSchema,
     type ResolutionVerificationDecision,
     IssueResolutionStatus,
 } from "../domain/decisions.ts";
-import type { IssueExecutionContext } from "./execution.ts";
-import type { NeedsAttentionRequest } from "../../agent/task-session.ts";
+import type { IssueExecutionContext } from "./execution-model.ts";
+import type { HandOffRequest } from "../../agent/task-session.ts";
 
 export type ResolutionVerificationResult = {
     readonly decision: ResolutionVerificationDecision;
     readonly sessionID: string;
-    readonly needsAttention?: NeedsAttentionRequest;
+    readonly handOff?: HandOffRequest;
 };
 
 export type ResolutionVerificationService = {
@@ -21,9 +21,6 @@ export type ResolutionVerificationService = {
         context: IssueExecutionContext,
     ) => Promise<ResolutionVerificationResult>;
 };
-
-const messageOf = (error: unknown): string =>
-    error instanceof Error ? error.message : String(error);
 
 /**
  * Run the fresh, read-only check used when an implementation produces no
@@ -65,11 +62,7 @@ export const makeResolutionVerificationService = (
                     headSha: checkpoint.head,
                 }),
                 schema: resolutionVerificationDecisionSchema,
-                agent: context.agentSelection.agent,
-                model: context.agentSelection.model,
-                variant: context.agentSelection.variant,
-                runId: context.runId,
-                diagnostics: context.agentDiagnostics,
+                role: "resolution-verifier",
                 repositoryInvariant: checkpoint,
                 verifyRepositoryInvariant: context.repositoryInvariant.verify,
                 progress,
@@ -93,16 +86,16 @@ export const makeResolutionVerificationService = (
             return {
                 decision: result.output,
                 sessionID: result.sessionID,
-                ...(result.needsAttention === undefined
+                ...(result.handOff === undefined
                     ? {}
-                    : { needsAttention: result.needsAttention }),
+                    : { handOff: result.handOff }),
             };
         } catch (error) {
             await progress.emit({
                 issue,
                 stage: "resolution-verification",
                 status: "failed",
-                message: `Resolution verification failed: ${messageOf(error)}`,
+                message: `Resolution verification failed: ${errorMessage(error)}`,
             });
             throw error;
         }

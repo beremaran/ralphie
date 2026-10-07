@@ -1,5 +1,4 @@
 import { RalphieError } from "../shared/error.ts";
-import type { NeedsAttentionReason } from "../issues/domain/decisions.ts";
 import type {
     DecompositionChildrenQuery,
     GitHubDecompositionChild,
@@ -10,6 +9,11 @@ import type {
 /** Outbound port for authenticating against GitHub exactly once per run. */
 export type GitHubConnectionService = {
     readonly connect: () => Promise<void>;
+};
+
+/** Outbound port for the user that `gh` is authenticated as. */
+export type GitHubViewerService = {
+    readonly login: () => Promise<string>;
 };
 
 export type GitHubIssuesService = {
@@ -53,6 +57,8 @@ export class GitHubMutationRecoveryError extends RalphieError {
 export type CreateGitHubIssueInput = {
     readonly title: string;
     readonly body: string;
+    /** Labels applied at creation. */
+    readonly labels?: ReadonlyArray<string>;
 };
 
 export type UpdateGitHubIssueInput = {
@@ -75,6 +81,12 @@ export type GitHubIssueMutationService = {
         issueNumber: number,
         reason: GitHubIssueCloseReason,
     ) => Promise<GitHubIssue>;
+    /** Post a new comment on an issue. */
+    readonly comment: (
+        repository: string,
+        issueNumber: number,
+        body: string,
+    ) => Promise<void>;
 };
 
 export type GitHubIssueRelationshipService = {
@@ -114,24 +126,55 @@ export type GitHubIssueRelationshipService = {
     ) => Promise<void>;
 };
 
-export type NeedsAttentionNotificationInput = {
-    readonly reason: NeedsAttentionReason;
-    readonly summary: string;
-    readonly evidence: ReadonlyArray<string>;
-    readonly questions: ReadonlyArray<string>;
-    readonly labelName?: string;
+export type GitHubHandOffInput = {
+    /** The full comment text; it already starts with the AI disclaimer. */
+    readonly body: string;
+    /** The triage state label the issue moves to. */
+    readonly label: string;
+    /** Every triage state label; all but `label` are removed from the issue. */
+    readonly replaceLabels: ReadonlyArray<string>;
 };
 
-export type NeedsAttentionNotificationResult = {
+export type GitHubHandOffResult = {
     readonly comment: "created" | "updated" | "unchanged";
-    readonly label: "applied" | "not-configured";
 };
 
-export type GitHubNeedsAttentionNotificationService = {
-    readonly notify: (
+export type GitHubHandOffService = {
+    /**
+     * Post the hand-off comment (once per issue, updated when it changed) and
+     * replace the issue's triage state label.
+     */
+    readonly handOff: (
         repository: string,
-        sourceIssueNumber: number,
-        input: NeedsAttentionNotificationInput,
-        labelName?: string,
-    ) => Promise<NeedsAttentionNotificationResult>;
+        issueNumber: number,
+        input: GitHubHandOffInput,
+    ) => Promise<GitHubHandOffResult>;
+};
+
+export type GitHubTriageCommentResult = {
+    readonly comment: "created" | "unchanged";
+};
+
+/** Posts the comments and label moves AFK triage decides on. */
+export type GitHubTriageService = {
+    /**
+     * Post the Agent Brief as a new comment (a repeat of the same text is a
+     * no-op, so a restart never duplicates it) and move the issue to the
+     * ready-for-agent state label. `input.body` already starts with the AI
+     * disclaimer.
+     */
+    readonly promote: (
+        repository: string,
+        issueNumber: number,
+        input: GitHubHandOffInput,
+    ) => Promise<GitHubTriageCommentResult>;
+    /**
+     * Post the comment that points to where a request already lives, once.
+     * The caller closes the issue afterwards.
+     */
+    readonly explainImplemented: (
+        repository: string,
+        issueNumber: number,
+        body: string,
+    ) => Promise<GitHubTriageCommentResult>;
 };

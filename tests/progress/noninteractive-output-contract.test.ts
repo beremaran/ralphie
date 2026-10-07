@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 
 import type {
-    AgentEventContext,
-    AgentSessionEvent,
-} from "../../src/agent/ports.ts";
+    SessionEvent,
+    SessionEventContext,
+} from "../../src/harness/ports.ts";
 import { makeProgressCoordinator } from "../../src/progress/adapters/coordinator.ts";
 import type { ProgressRenderMode } from "../../src/progress/adapters/progress.ts";
 import type { ProgressUpdate } from "../../src/progress/ports.ts";
@@ -13,42 +13,32 @@ const FIXED_TIMESTAMP = "2026-09-09T00:00:00.000Z";
 const RUN_ID = "fixed-output-run";
 const ASSISTANT_TOKEN = "ghx_0123456789abcdef0123456789abcdef";
 
-const context: AgentEventContext = {
+const context: SessionEventContext = {
     sessionID: "output-session",
     directory: "/workspace/owner/repository",
+    harness: "pi",
     title: "Output contract",
 };
 
-const asEvent = (value: unknown): AgentSessionEvent =>
-    value as AgentSessionEvent;
-
-const agentEvents = (): readonly AgentSessionEvent[] => [
-    asEvent({ type: "agent_start" }),
-    asEvent({
-        type: "message_update",
-        assistantMessageEvent: { type: "text_start", contentIndex: 0 },
-    }),
-    asEvent({
-        type: "message_update",
-        assistantMessageEvent: {
-            type: "text_delta",
-            contentIndex: 0,
-            delta: `Bearer ${ASSISTANT_TOKEN.slice(0, 18)}`,
-        },
-    }),
-    asEvent({
-        type: "message_update",
-        assistantMessageEvent: {
-            type: "text_delta",
-            contentIndex: 0,
-            delta: ASSISTANT_TOKEN.slice(18),
-        },
-    }),
-    asEvent({
-        type: "tool_execution_start",
-        toolCallId: "tool-1",
-        toolName: "contract-tool",
-        args: {
+const sessionEvents = (): readonly SessionEvent[] => [
+    { type: "session_started" },
+    {
+        type: "assistant_text",
+        kind: "text",
+        text: `Bearer ${ASSISTANT_TOKEN.slice(0, 18)}`,
+        done: false,
+    },
+    {
+        type: "assistant_text",
+        kind: "text",
+        text: ASSISTANT_TOKEN.slice(18),
+        done: false,
+    },
+    {
+        type: "tool_call",
+        callId: "tool-1",
+        name: "contract-tool",
+        input: {
             command: "echo output contract",
             zero: 0,
             flag: false,
@@ -56,26 +46,38 @@ const agentEvents = (): readonly AgentSessionEvent[] => [
             array: [],
             object: {},
         },
-    }),
-    asEvent({
-        type: "tool_execution_end",
-        toolCallId: "tool-1",
-        toolName: "contract-tool",
-        result: {
-            content: "tool result",
-            zero: 0,
-            flag: false,
-            empty: "",
-            array: [],
-            object: {},
-        },
+    },
+    {
+        type: "tool_result",
+        callId: "tool-1",
+        name: "contract-tool",
+        output: "tool result",
         isError: false,
-    }),
-    asEvent({
-        type: "message_update",
-        assistantMessageEvent: { type: "text_end", contentIndex: 0 },
-    }),
-    asEvent({ type: "agent_end" }),
+    },
+    {
+        type: "tool_call",
+        callId: "tool-2",
+        name: "failing-tool",
+        input: {},
+    },
+    {
+        type: "tool_result",
+        callId: "tool-2",
+        name: "failing-tool",
+        output: "tool-failure-marker",
+        isError: true,
+    },
+    { type: "assistant_text", kind: "text", text: "", done: true },
+    {
+        type: "usage",
+        inputTokens: 12,
+        outputTokens: 34,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        costUsd: 0,
+    },
+    { type: "error", message: "session-error-marker" },
+    { type: "session_finished" },
 ];
 
 const richDetails: Readonly<Record<string, unknown>> = {
@@ -113,8 +115,8 @@ const progressUpdates = (): readonly ProgressUpdate[] => [
     },
     {
         stage: "verification",
-        status: "needs-attention",
-        message: "needs-attention-marker",
+        status: "hand-off",
+        message: "hand-off-marker",
         repository: "owner/repository",
         issue: { number: 17, title: "Output contract issue" },
         details: richDetails,
@@ -140,15 +142,9 @@ const play = async (mode: ProgressRenderMode): Promise<Capture> => {
         width: () => 80,
     });
 
-    const events = agentEvents();
-    coordinator.piListener(events[0] as AgentSessionEvent, context);
-    coordinator.piListener(events[1] as AgentSessionEvent, context);
-    coordinator.piListener(events[2] as AgentSessionEvent, context);
-    coordinator.piListener(events[3] as AgentSessionEvent, context);
-    coordinator.piListener(events[4] as AgentSessionEvent, context);
-    coordinator.piListener(events[5] as AgentSessionEvent, context);
-    coordinator.piListener(events[6] as AgentSessionEvent, context);
-    coordinator.piListener(events[7] as AgentSessionEvent, context);
+    for (const event of sessionEvents()) {
+        coordinator.sessionListener(event, context);
+    }
 
     for (const update of progressUpdates()) {
         await coordinator.progress.emit(update);
@@ -176,10 +172,12 @@ const parseJsonLines = (stdout: string): readonly JsonRecord[] => {
     return lines.slice(0, -1).map((line) => JSON.parse(line) as JsonRecord);
 };
 
-const isAgentEventRecord = (record: JsonRecord): boolean =>
-    record.type === "agent_event" &&
+const isSessionEventRecord = (record: JsonRecord): boolean =>
+    record.type === "session_event" &&
     record.sessionID === context.sessionID &&
     record.directory === context.directory &&
+    record.harness === context.harness &&
+    record.title === context.title &&
     typeof record.event === "object" &&
     record.event !== null;
 
@@ -213,11 +211,15 @@ describe("deterministic noninteractive output contracts", () => {
         expect(first.stderr).toContain("routine-start-marker");
         expect(first.stderr).toContain("routine-success-marker");
         expect(first.stderr).toContain("failed-marker");
-        expect(first.stderr).toContain("needs-attention-marker");
+        expect(first.stderr).toContain("hand-off-marker");
         expect(first.stderr).toContain(`Bearer ${ASSISTANT_TOKEN}`);
         expect(first.stderr).toContain("╭─ pi · Output contract");
         expect(first.stderr).toContain("│  contract-tool ");
         expect(first.stderr).toContain("│  ✓ contract-tool done");
+        expect(first.stderr).toContain(
+            "│  ✗ failing-tool failed: tool-failure-marker",
+        );
+        expect(first.stderr).toContain("│  ✗ session-error-marker");
         expect(first.stderr).toContain("╰─ done");
         // Human progress lines never render the structured details payload;
         // use --output json or the events.jsonl audit for the full record.
@@ -238,17 +240,17 @@ describe("deterministic noninteractive output contracts", () => {
 
         const records = parseJsonLines(first.stdout);
         expect(records.length).toBe(
-            agentEvents().length + progressUpdates().length,
+            sessionEvents().length + progressUpdates().length,
         );
         const progressRecords = records.filter(isProgressRecord);
-        const eventRecords = records.filter(isAgentEventRecord);
+        const eventRecords = records.filter(isSessionEventRecord);
         expect(progressRecords).toHaveLength(progressUpdates().length);
-        expect(eventRecords).toHaveLength(agentEvents().length);
+        expect(eventRecords).toHaveLength(sessionEvents().length);
 
         for (const record of records) {
-            expect(isProgressRecord(record) || isAgentEventRecord(record)).toBe(
-                true,
-            );
+            expect(
+                isProgressRecord(record) || isSessionEventRecord(record),
+            ).toBe(true);
             if (isProgressRecord(record)) {
                 expect(record.runId).toBe(RUN_ID);
                 expect(record.timestamp).toBe(FIXED_TIMESTAMP);
@@ -262,17 +264,14 @@ describe("deterministic noninteractive output contracts", () => {
             })),
         );
         expect(eventRecords.map((record) => record.event)).toEqual([
-            ...agentEvents(),
+            ...sessionEvents(),
         ]);
 
         const assistantDeltas = eventRecords
-            .map((record) => record.event as AgentSessionEvent)
-            .filter(
-                (event) =>
-                    event.type === "message_update" &&
-                    event.assistantMessageEvent.type === "text_delta",
+            .map((record) => record.event as SessionEvent)
+            .flatMap((event) =>
+                event.type === "assistant_text" ? [event.text] : [],
             )
-            .map((event) => event.assistantMessageEvent.delta)
             .join("");
         expect(assistantDeltas).toBe(`Bearer ${ASSISTANT_TOKEN}`);
         for (const glyph of humanGlyphs) {

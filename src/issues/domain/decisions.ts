@@ -1,21 +1,5 @@
 import { z } from "zod";
 
-export enum ComplexityLevel {
-    Level0 = 0,
-    Level1 = 1,
-    Level2 = 2,
-    Level3 = 3,
-    Level4 = 4,
-    Level5 = 5,
-}
-
-export enum ImplementationComplexityLevel {
-    Level0 = ComplexityLevel.Level0,
-    Level1 = ComplexityLevel.Level1,
-    Level2 = ComplexityLevel.Level2,
-    Level3 = ComplexityLevel.Level3,
-}
-
 export enum ReviewVerdict {
     Approved = "approved",
     ChangesRequested = "changes_requested",
@@ -31,32 +15,24 @@ export enum IssueResolutionStatus {
     Unresolved = "unresolved",
 }
 
-export enum NeedsAttentionReason {
+export enum HandOffReason {
     OutdatedPremise = "outdated_premise",
     ConflictingRequirements = "conflicting_requirements",
     MissingInformation = "missing_information",
     ExternalDependency = "external_dependency",
     CannotReproduce = "cannot_reproduce",
     DecompositionLimitReached = "decomposition_limit_reached",
+    ImplementationExhausted = "implementation_exhausted",
+    /** A judgment call, design decision or manual step only a human can make. */
+    NeedsHumanJudgment = "needs_human_judgment",
 }
 
-export enum GroundingDisposition {
+export enum PreflightDisposition {
     Actionable = "actionable",
     AlreadyResolved = "already_resolved",
-    NeedsAttention = "needs_attention",
+    Blocked = "blocked",
+    HandOff = "hand_off",
 }
-
-export const complexityDecisionSchema = z.object({
-    complexity: z
-        .enum(ComplexityLevel)
-        .describe("Issue complexity from 0 (trivial) to 5 (very complex)."),
-    rationale: z
-        .string()
-        .min(1)
-        .describe("A concise explanation of the assigned complexity."),
-});
-
-export type ComplexityDecision = z.infer<typeof complexityDecisionSchema>;
 
 export const reviewDecisionSchema = z
     .object({
@@ -117,33 +93,67 @@ export type IssueResolutionDecision = z.infer<
 >;
 export type ResolutionVerificationDecision = IssueResolutionDecision;
 
-const groundingActionableDecisionSchema = z.object({
-    disposition: z.literal(GroundingDisposition.Actionable),
+const preflightBareActionableSchema = z.object({
+    disposition: z.literal(PreflightDisposition.Actionable),
 });
 
-const groundingAlreadyResolvedDecisionSchema = z.object({
-    disposition: z.literal(GroundingDisposition.AlreadyResolved),
+const alreadyResolvedDecisionSchema = z.object({
+    disposition: z.literal(PreflightDisposition.AlreadyResolved),
 });
 
-export const needsAttentionDecisionSchema = z
+export const handOffDecisionSchema = z
     .object({
-        disposition: z.literal(GroundingDisposition.NeedsAttention),
-        reason: z.enum(NeedsAttentionReason),
+        disposition: z.literal(PreflightDisposition.HandOff),
+        reason: z.enum(HandOffReason),
         summary: nonBlankStringSchema,
         evidence: z.array(nonBlankStringSchema).min(1),
         questions: z.array(nonBlankStringSchema).min(1),
     })
     .strict();
 
-export const groundingDecisionSchema = z.discriminatedUnion("disposition", [
-    groundingActionableDecisionSchema,
-    groundingAlreadyResolvedDecisionSchema,
-    needsAttentionDecisionSchema,
+export const handOffVerificationSchema = z.discriminatedUnion("disposition", [
+    preflightBareActionableSchema,
+    alreadyResolvedDecisionSchema,
+    handOffDecisionSchema,
 ]);
 
-export type GroundingDecision = z.infer<typeof groundingDecisionSchema>;
-export type NeedsAttentionDecision = Omit<
-    z.infer<typeof needsAttentionDecisionSchema>,
+const preflightActionableDecisionSchema = z.object({
+    disposition: z.literal(PreflightDisposition.Actionable),
+    fitsOneSession: z
+        .boolean()
+        .describe(
+            "True when one implementation session can finish the whole issue; false when it must be decomposed into child issues.",
+        ),
+});
+
+const preflightBlockedDecisionSchema = z.object({
+    disposition: z.literal(PreflightDisposition.Blocked),
+    blockedBy: z
+        .array(z.number().int().positive())
+        .min(1)
+        .describe("Numbers of the open issues that must be finished first."),
+});
+
+/** The single read-only pre-flight session's disposition for one issue. */
+export const preflightDecisionSchema = z.discriminatedUnion("disposition", [
+    preflightActionableDecisionSchema,
+    alreadyResolvedDecisionSchema,
+    preflightBlockedDecisionSchema,
+    handOffDecisionSchema,
+]);
+
+export type PreflightDecision = z.infer<typeof preflightDecisionSchema>;
+
+/** What is retained about an actionable pre-flight for restarts. */
+export const sessionFitDecisionSchema = z.object({
+    fitsOneSession: z.boolean(),
+});
+
+export type SessionFitDecision = z.infer<typeof sessionFitDecisionSchema>;
+
+export type HandOffVerification = z.infer<typeof handOffVerificationSchema>;
+export type HandOffDecision = Omit<
+    z.infer<typeof handOffDecisionSchema>,
     "evidence" | "questions"
 > & {
     readonly evidence: ReadonlyArray<string>;
@@ -170,9 +180,19 @@ export const issueBreakdownDecisionSchema = z
                             "A stable identifier used by dependency references.",
                         ),
                     title: z.string().min(1).max(256),
-                    body: z.string().min(1),
-                    estimatedComplexity: z.enum(ImplementationComplexityLevel),
-                    dependsOn: z.array(z.string().min(1)),
+                    whatToBuild: z
+                        .string()
+                        .min(1)
+                        .describe(
+                            "The end-to-end behaviour this ticket delivers, without file paths or code snippets.",
+                        ),
+                    acceptanceCriteria: z
+                        .array(z.string().min(1))
+                        .min(1)
+                        .describe("One verifiable criterion per entry."),
+                    dependsOn: z
+                        .array(z.string().min(1))
+                        .describe("Keys of the tickets that block this one."),
                 }),
             )
             .min(2),

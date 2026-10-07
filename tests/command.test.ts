@@ -4,171 +4,254 @@ import { runCli } from "../src/cli.ts";
 import { HELP_TEXT, parseCliArgs, runCommand } from "../src/command.ts";
 import { RalphieExitCode } from "../src/workflow/exit-code.ts";
 import { RalphieError } from "../src/shared/error.ts";
-import { IssueOrder, IssueSort } from "../src/github/domain.ts";
-import { makeTestProgressRecorder } from "./shared/progress-recorder.ts";
+import {
+    recordingFactories,
+    workflowErrorFor,
+    workflowOptionsFor,
+    writeTemporaryFile,
+} from "./shared/config-fixture.ts";
 
 describe("native CLI parser", () => {
-    test("documents the issue workflow in help", () => {
-        expect(HELP_TEXT).toContain("--thinking <level>");
-        expect(HELP_TEXT).toContain("--implementation-attempts <n>");
-        expect(HELP_TEXT).toContain("--max-decomposition-depth <n>");
-        expect(HELP_TEXT).toContain("--notify-needs-attention");
-        expect(HELP_TEXT).toContain("--needs-attention-label <name>");
+    test("documents the shrunken command surface in help", () => {
+        expect(HELP_TEXT).toContain("Usage: ralphie [owner/]repository");
+        for (const option of [
+            "--config <path>",
+            "--set <path=value>",
+            "--output <mode>",
+        ]) {
+            expect(HELP_TEXT).toContain(option);
+        }
         for (const removed of [
+            "--model",
+            "--thinking",
+            "--branch",
+            "--issue-label",
+            "--issue-sort",
+            "--verify-command",
+            "--implementation-attempts",
+            "--max-decomposition-depth",
+            "--workspace",
+            "--notify-hand-off",
+            "--hand-off-label",
             "maintain-issues",
-            "get-pipelines-green",
             "--max-issues",
             "--dry-run",
-            "--resume",
-            "--clean",
-            "--implementation-fallback-model",
         ]) {
             expect(HELP_TEXT).not.toContain(removed);
         }
     });
 
-    test("parses positional repository, repeatable labels, flags, and values", () => {
+    test("parses the repository, config path and repeatable --set", () => {
         const parsed = parseCliArgs([
             "owner/repository",
-            "--issue-label",
-            "bug",
-            "--issue-label=ready",
+            "--config",
+            "/etc/ralphie.yaml",
+            "--set",
+            "limits.reviewRounds=3",
+            "--set=workspace=/tmp/w",
         ]);
 
         expect(parsed.help).toBe(false);
         expect(parsed.version).toBe(false);
         expect(parsed.options).toMatchObject({
             repo: "owner/repository",
-            issueLabels: ["bug", "ready"],
+            configPath: "/etc/ralphie.yaml",
+            overrides: ["limits.reviewRounds=3", "workspace=/tmp/w"],
         });
     });
 
-    test("rejects the removed halt policy flags", () => {
+    test("names the config key that replaces each removed flag", () => {
+        for (const [args, key] of [
+            [["--branch", "main"], 'repos."<owner/repo>".branch'],
+            [["-b", "main"], 'repos."<owner/repo>".branch'],
+            [["--verify-command=bun test"], 'repos."<owner/repo>".verify'],
+            [["--issue-label", "bug"], "intake.requireLabels"],
+            [["--issue-sort", "updated"], "intake.sort"],
+            [
+                ["--implementation-attempts", "2"],
+                "limits.implementationAttempts",
+            ],
+            [
+                ["--max-decomposition-depth", "4"],
+                "limits.maxDecompositionDepth",
+            ],
+            [["--workspace", "/tmp/w"], "workspace"],
+            [
+                ["--model", "m"],
+                "harnesses.<harness>.model or roles.<role>.model",
+            ],
+            [
+                ["--thinking", "high"],
+                "harnesses.<harness>.effort or roles.<role>.effort",
+            ],
+        ] as const) {
+            const flag = (args[0] ?? "").split("=")[0];
+            expect(() => parseCliArgs(["owner/repository", ...args])).toThrow(
+                `Option ${flag} was removed. Set ${key} in the config file instead, or override it for one run with --set.`,
+            );
+        }
+    });
+
+    test("explains that hand-offs replace the needs-attention flags", () => {
+        expect(() =>
+            parseCliArgs(["owner/repository", "--notify-needs-attention"]),
+        ).toThrow("Hand-offs are always on");
+        expect(() =>
+            parseCliArgs(["owner/repository", "--needs-attention-label", "x"]),
+        ).toThrow("labels.ready-for-human");
+    });
+
+    test("still rejects flags removed by earlier releases", () => {
         for (const args of [
-            ["owner/repository", "--on-needs-attention", "halt"],
+            ["owner/repository", "--on-hand-off", "halt"],
+            ["owner/repository", "--notify-hand-off"],
+            ["owner/repository", "--hand-off-label", "blocked"],
             ["owner/repository", "--on-issue-failure", "continue"],
+            ["owner/repository", "--mode", "issues"],
+            ["owner/repository", "--max-attempts", "2"],
+            ["owner/repository", "--pipeline-timeout", "10m"],
+            ["owner/repository", "--duplicate-action", "close"],
+            ["owner/repository", "--max-issues", "1"],
+            ["owner/repository", "--dry-run"],
+            ["owner/repository", "--resume", "state.json"],
+            ["owner/repository", "--clean", "both"],
+            ["owner/repository", "--implementation-fallback-model", "o/m"],
         ]) {
             expect(() => parseCliArgs(args)).toThrow();
         }
     });
 
-    test("parses the single thinking level and implementation controls", () => {
-        const options = parseCliArgs([
+    test.each([
+        ["--model", "harnesses.<harness>.model"],
+        ["--thinking", "harnesses.<harness>.effort"],
+    ])(
+        "rejects %s and names the config keys that replace it",
+        async (flag, key) => {
+            const config = await writeTemporaryFile("{}");
+
+            const error = await workflowErrorFor([
+                "owner/repository",
+                "--config",
+                config,
+                flag,
+                "high",
+            ]);
+
+            expect(error.message).toContain(`Option ${flag} was removed`);
+            expect(error.message).toContain(key);
+        },
+    );
+
+    test("resolves the role assignments from harnesses and roles", async () => {
+        const config = await writeTemporaryFile(`
+harnesses:
+  claude:
+    model: opus
+    effort: high
+roles:
+  reviewer:
+    harness: claude
+    model: sonnet
+`);
+
+        const options = await workflowOptionsFor([
             "owner/repository",
-            "--thinking",
-            "high",
-            "--implementation-attempts",
-            "4",
-        ]).options;
-        expect(options.thinking).toBe("high");
-        expect(options.implementationAttempts).toBe(4);
-        expect(() =>
-            parseCliArgs([
-                "owner/repository",
-                "--implementation-attempts",
-                "0",
-            ]),
-        ).toThrow();
-    });
+            "--config",
+            config,
+        ]);
 
-    test("parses and validates the maximum decomposition depth", () => {
-        expect(
-            parseCliArgs(["owner/repository", "--max-decomposition-depth", "6"])
-                .options.maxDecompositionDepth,
-        ).toBe(6);
-        expect(() =>
-            parseCliArgs([
-                "owner/repository",
-                "--max-decomposition-depth",
-                "0",
-            ]),
-        ).toThrow();
-    });
-
-    test("parses the opt-in notification flag and trims its label", () => {
-        const options = parseCliArgs([
-            "owner/repository",
-            "--notify-needs-attention",
-            "--needs-attention-label",
-            "  blocked  ",
-        ]).options;
-
-        expect(options.notifyNeedsAttention).toBeTrue();
-        expect(options.needsAttentionLabel).toBe("blocked");
-    });
-
-    test("rejects a needs-attention label without notification opt-in", () => {
-        expect(() =>
-            parseCliArgs([
-                "owner/repository",
-                "--needs-attention-label",
-                "blocked",
-            ]),
-        ).toThrow(
-            "Option --needs-attention-label requires --notify-needs-attention.",
-        );
-    });
-
-    test("passes notification opt-in and label to the workflow", async () => {
-        let workflowOptions: Record<string, unknown> | undefined;
-        await runCommand(
-            [
-                "owner/repository",
-                "--notify-needs-attention",
-                "--needs-attention-label",
-                "needs-attention",
-            ],
-            {
-                factories: {
-                    makeCoordinator: () => ({
-                        progress: makeTestProgressRecorder([]),
-                        piListener: () => {},
-                        ready: Promise.resolve(),
-                        dispose: async () => {},
-                    }),
-                    makeAgentRuntime: () => ({
-                        start: async () => undefined as never,
-                    }),
-                    makeRuntime: () => ({}) as never,
-                    runWorkflow: async (options) => {
-                        workflowOptions = options as Record<string, unknown>;
-                        return undefined as never;
-                    },
-                },
-            },
-        );
-
-        expect(workflowOptions).toMatchObject({
-            notificationsEnabled: true,
-            needsAttentionLabel: "needs-attention",
+        expect(options.roles.implementer).toEqual({
+            harness: "claude",
+            approval: "safe",
+            model: "opus",
+            effort: "high",
         });
+        expect(options.roles["standards-reviewer"]).toEqual({
+            harness: "claude",
+            approval: "safe",
+            model: "sonnet",
+            effort: "high",
+        });
+    });
+
+    test("passes the mapped triage labels to the workflow for hand-offs", async () => {
+        const config = await writeTemporaryFile(
+            "labels:\n  needs-info: waiting-on-reporter\n  ready-for-human: human-turn\n",
+        );
+
+        const options = await workflowOptionsFor([
+            "owner/repository",
+            "--config",
+            config,
+        ]);
+
+        expect(options.handOffLabels).toEqual({
+            "needs-info": "waiting-on-reporter",
+            "ready-for-human": "human-turn",
+            replaces: [
+                "needs-triage",
+                "waiting-on-reporter",
+                "ready-for-agent",
+                "human-turn",
+                "wontfix",
+            ],
+        });
+    });
+
+    test("triage is off by default and opt-in per repository", async () => {
+        const config = await writeTemporaryFile(
+            "intake:\n  requireLabels: [backend]\nlabels:\n  ready-for-agent: afk\nrepos:\n  owner/triaged:\n    triage:\n      enabled: true\n",
+        );
+
+        const off = await workflowOptionsFor([
+            "owner/repository",
+            "--config",
+            config,
+        ]);
+        const on = await workflowOptionsFor([
+            "owner/triaged",
+            "--config",
+            config,
+        ]);
+
+        expect(off.triage).toBeUndefined();
+        expect(on.triage?.requireLabels).toEqual(["backend"]);
+        expect(on.triage?.labels["ready-for-agent"]).toBe("afk");
+    });
+
+    test("rejects the former notifications section", async () => {
+        const config = await writeTemporaryFile(
+            "notifications:\n  enabled: true\n",
+        );
+
+        const error = await workflowErrorFor([
+            "owner/repository",
+            "--config",
+            config,
+        ]);
+
+        expect(error.message).toContain("notifications");
     });
 
     test("keeps sensitive values verbatim in wrapped command errors", async () => {
         process.env.GH_TOKEN = "private-auth-token";
+        const config = await writeTemporaryFile("{}");
         try {
             const failure = new RalphieError({
                 message:
                     "Failed: Bearer private-value at https://example.test/api?token=query-secret; " +
                     "environment token private-auth-token leaked.",
             });
-            const error = await runCommand(["owner/repository"], {
-                factories: {
-                    makeCoordinator: () => ({
-                        progress: makeTestProgressRecorder([]),
-                        piListener: () => {},
-                        ready: Promise.resolve(),
-                        dispose: async () => {},
+            const error = await runCommand(
+                ["owner/repository", "--config", config],
+                {
+                    factories: recordingFactories(() => {}, {
+                        runWorkflow: async () => {
+                            throw failure;
+                        },
                     }),
-                    makeAgentRuntime: () => ({
-                        start: async () => undefined as never,
-                    }),
-                    makeRuntime: () => ({}) as never,
-                    runWorkflow: async () => {
-                        throw failure;
-                    },
                 },
-            }).then(
+            ).then(
                 () => {
                     throw new Error("expected runCommand to reject");
                 },
@@ -203,49 +286,23 @@ describe("native CLI parser", () => {
         }
     });
 
-    test("rejects the removed mode and pipeline flags", () => {
-        for (const args of [
-            ["owner/repository", "--mode", "issues"],
-            ["owner/repository", "--max-attempts", "2"],
-            ["owner/repository", "--pipeline-timeout", "10m"],
-            ["owner/repository", "--duplicate-action", "close"],
-            ["owner/repository", "--max-issues", "1"],
-            ["owner/repository", "--dry-run"],
-            ["owner/repository", "--resume", "state.json"],
-            ["owner/repository", "--clean", "both"],
-            ["owner/repository", "--implementation-fallback-model", "o/m"],
-        ]) {
-            expect(() => parseCliArgs(args)).toThrow();
-        }
-    });
+    test("answers --help and --version without a config file", async () => {
+        const written: string[] = [];
+        const output = {
+            stdout: (text: string) => written.push(text),
+            stderr: (text: string) => written.push(text),
+        };
+        const isolated = {
+            output,
+            environment: {},
+            homeDirectory: "/nonexistent/ralphie-test-home",
+        };
 
-    test("parses compound issue sort and validates enums", () => {
-        expect(
-            parseCliArgs(["owner/repository", "--issue-sort", "updated:desc"])
-                .options,
-        ).toMatchObject({
-            issueSort: IssueSort.Updated,
-            issueOrder: IssueOrder.Descending,
-        });
-        expect(
-            parseCliArgs(["owner/repository", "--issue-sort", "created"])
-                .options,
-        ).toMatchObject({
-            issueSort: IssueSort.Created,
-            issueOrder: IssueOrder.Ascending,
-        });
-        expect(() =>
-            parseCliArgs(["owner/repository", "--issue-sort", "invalid"]),
-        ).toThrow();
-        expect(() =>
-            parseCliArgs([
-                "owner/repository",
-                "--issue-sort",
-                "created:sideways",
-            ]),
-        ).toThrow();
-        expect(String(IssueSort.Created)).toBe("created");
-        expect(String(IssueOrder.Ascending)).toBe("asc");
+        await runCommand(["--help"], isolated);
+        await runCommand(["--version", "--output", "json"], isolated);
+
+        expect(written[0]).toBe(HELP_TEXT);
+        expect(JSON.parse(written[1] ?? "")).toHaveProperty("version");
     });
 
     test("parses every supported output mode", () => {

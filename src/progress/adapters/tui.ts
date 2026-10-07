@@ -1,24 +1,18 @@
 import type {
     BoxRenderable,
     CliRenderer,
-    InputRenderable,
     ScrollBoxRenderable,
-    SelectRenderable,
     StyledText,
     TextChunk,
     TextRenderable,
 } from "@opentui/core";
 
 import type {
-    AgentEventContext,
-    AgentSessionEvent,
-    AgentEventListener,
-} from "../../agent/ports.ts";
-import type {
-    RunControl,
-    RunControlSelection,
-    RunEventLog,
-} from "../../run/ports.ts";
+    SessionEvent,
+    SessionEventContext,
+    SessionEventListener,
+} from "../../harness/ports.ts";
+import type { RunControl, RunEventLog } from "../../run/ports.ts";
 import type {
     ProgressEvent,
     ProgressReporterService,
@@ -27,14 +21,13 @@ import type {
 import {
     createDisplayState,
     progressStageLabel,
-    reduceAgentSessionEvent,
+    reduceSessionEvent,
     reduceProgressUpdate,
-    type DisplayModel,
     type DisplayQueueIssue,
     type DisplayQueueStatus,
     type DisplayState,
 } from "./display-state.ts";
-import { contentText, toolTarget } from "./tool-line.ts";
+import { toolTarget } from "./tool-line.ts";
 import type {
     ProgressCoordinator,
     ProgressCoordinatorOptions,
@@ -90,20 +83,7 @@ const SPINNER_FRAMES = [
 const SPINNER_INTERVAL_MS = 120;
 const PAUSE_HINT = "p pause · s stop · q quit";
 const RESUME_HINT = "p resume · s stop · q quit";
-const NAVIGATION_HINT = "m model · [ ] issue · ↑↓";
-const PICKER_HINT =
-    "type to search · ↑↓ move · Tab pane · Enter apply · Esc cancel";
-const PICKER_COLORS = {
-    backgroundColor: "#16161e",
-    focusedBackgroundColor: "#1a1b26",
-    textColor: "#c0caf5",
-    focusedTextColor: "#c0caf5",
-    selectedBackgroundColor: "#2f334d",
-    selectedTextColor: "#c0caf5",
-    descriptionColor: "#565f89",
-    selectedDescriptionColor: "#7aa2f7",
-} as const;
-
+const NAVIGATION_HINT = "[ ] issue · ↑↓";
 const QUEUE_STATUS_STYLES: Readonly<
     Record<
         DisplayQueueStatus,
@@ -114,7 +94,7 @@ const QUEUE_STATUS_STYLES: Readonly<
     active: { glyph: "▶", color: "#7aa2f7" },
     completed: { glyph: "✓", color: "#9ece6a" },
     failed: { glyph: "✗", color: "#f7768e" },
-    "needs-attention": { glyph: "⚠", color: "#e0af68" },
+    "hand-off": { glyph: "⚠", color: "#e0af68" },
     skipped: { glyph: "−", color: "#565f89" },
 };
 
@@ -150,10 +130,6 @@ type Ui = {
     readonly controlHint: TextRenderable;
     readonly transcript: ScrollBoxRenderable;
     readonly status: TextRenderable;
-    readonly pickerOverlay: BoxRenderable;
-    readonly searchInput: InputRenderable;
-    readonly modelList: SelectRenderable;
-    readonly levelList: SelectRenderable;
 };
 
 const elapsedLabel = (startedAt: number | undefined, now: number): string => {
@@ -221,9 +197,6 @@ export const makeTuiProgressCoordinator = (
     // The queue starts held so the first issue never races the renderer.
     let paused = true;
     let stopRequested = false;
-    let modelPickerOpen = false;
-    let modelQuery = "";
-    let pickedSelection: RunControlSelection | undefined;
     const resumeWaiters: Array<() => void> = [];
 
     const withUi = (run: (current: Ui) => void): void => {
@@ -383,7 +356,7 @@ export const makeTuiProgressCoordinator = (
             ({ status }) =>
                 status === "completed" ||
                 status === "failed" ||
-                status === "needs-attention" ||
+                status === "hand-off" ||
                 status === "skipped",
         ).length;
         current.sidebarCount.content = styled(
@@ -470,22 +443,11 @@ export const makeTuiProgressCoordinator = (
     const renderHeader = (current: Ui): void => {
         const mod = current.mod;
         const detail = state.repository ?? "ralphie";
-        const model = activeModelReference();
-        const variant = activeVariant();
         current.header.content = styled(
             mod,
             mod.fg(THEME.accent)(mod.bold("ralphie")),
             mod.fg(THEME.dim)(" · "),
             mod.fg(THEME.muted)(detail),
-            ...(model === undefined
-                ? []
-                : [
-                      mod.fg(THEME.dim)(" · "),
-                      mod.fg(THEME.purple)(model),
-                      ...(variant === undefined
-                          ? []
-                          : [mod.fg(THEME.dim)(` · ${variant}`)]),
-                  ]),
         );
         current.headerState.content = headerStateContent(current);
     };
@@ -574,186 +536,6 @@ export const makeTuiProgressCoordinator = (
             });
         },
         stopAfterCurrent: () => stopRequested,
-        issueSelection: () => pickedSelection,
-    };
-
-    const activeModelReference = (): string | undefined => {
-        if (pickedSelection !== undefined) {
-            return `${pickedSelection.model.providerID}/${pickedSelection.model.modelID}`;
-        }
-        return state.model === undefined
-            ? undefined
-            : `${state.model.provider}/${state.model.id}`;
-    };
-
-    const activeVariant = (): string | undefined =>
-        pickedSelection !== undefined
-            ? pickedSelection.variant
-            : state.model?.variant;
-
-    const pickerModels = (): ReadonlyArray<DisplayModel> => {
-        const query = modelQuery.trim().toLowerCase();
-        if (query === "") return state.models;
-        return state.models.filter((model) =>
-            `${model.name} ${model.provider}/${model.id}`
-                .toLowerCase()
-                .includes(query),
-        );
-    };
-
-    const currentPickerModel = (current: Ui): DisplayModel | undefined =>
-        pickerModels()[current.modelList.getSelectedIndex()];
-
-    const pickerLevelOptions = (
-        model: DisplayModel | undefined,
-    ): Array<{ readonly name: string; readonly description: string }> => [
-        { name: "default", description: "" },
-        ...(model?.thinkingLevels ?? []).map((level) => ({
-            name: level,
-            description: "",
-        })),
-    ];
-
-    const selectedLevelIndex = (model: DisplayModel | undefined): number => {
-        if (model === undefined) return 0;
-        if (activeModelReference() !== `${model.provider}/${model.id}`) {
-            return 0;
-        }
-        const variant = activeVariant();
-        if (variant === undefined) return 0;
-        const index = model.thinkingLevels.indexOf(variant);
-        return index < 0 ? 0 : index + 1;
-    };
-
-    const refreshLevelOptions = (current: Ui): void => {
-        const model = currentPickerModel(current);
-        current.levelList.options = pickerLevelOptions(model);
-        current.levelList.setSelectedIndex(selectedLevelIndex(model));
-    };
-
-    const refreshModelOptions = (current: Ui): void => {
-        current.modelList.options = pickerModels().map((model) => ({
-            name: model.name,
-            description: `${model.provider}/${model.id}`,
-        }));
-        current.modelList.setSelectedIndex(0);
-        refreshLevelOptions(current);
-    };
-
-    const closeModelPicker = (current: Ui): void => {
-        if (!modelPickerOpen) return;
-        modelPickerOpen = false;
-        current.pickerOverlay.visible = false;
-        current.transcript.focus();
-        current.renderer.requestRender();
-    };
-
-    const openModelPicker = (current: Ui): void => {
-        if (state.models.length === 0) {
-            appendLine(
-                current,
-                undefined,
-                styled(
-                    current.mod,
-                    current.mod.fg("#565f89")(
-                        "• Model catalog is not available yet.",
-                    ),
-                ),
-            );
-            current.renderer.requestRender();
-            return;
-        }
-        modelPickerOpen = true;
-        modelQuery = "";
-        current.searchInput.value = "";
-        refreshModelOptions(current);
-        const reference = activeModelReference();
-        const index = pickerModels().findIndex(
-            (model) => `${model.provider}/${model.id}` === reference,
-        );
-        current.modelList.setSelectedIndex(index >= 0 ? index : 0);
-        refreshLevelOptions(current);
-        current.pickerOverlay.visible = true;
-        current.searchInput.focus();
-        current.renderer.requestRender();
-    };
-
-    const applyModelPick = (current: Ui): void => {
-        const model = currentPickerModel(current);
-        if (model === undefined) {
-            closeModelPicker(current);
-            return;
-        }
-        const levelIndex = current.levelList.getSelectedIndex();
-        const variant =
-            levelIndex <= 0 ? undefined : model.thinkingLevels[levelIndex - 1];
-        pickedSelection = {
-            model: { providerID: model.provider, modelID: model.id },
-            ...(variant === undefined ? {} : { variant }),
-        };
-        closeModelPicker(current);
-        refreshStatus();
-    };
-
-    const togglePickerPane = (current: Ui): void => {
-        if (current.searchInput.focused) {
-            current.modelList.focus();
-            return;
-        }
-        if (current.modelList.focused) {
-            current.levelList.focus();
-            return;
-        }
-        current.searchInput.focus();
-    };
-
-    const moveFocusFromSearch = (key: {
-        readonly name?: string;
-        readonly preventDefault?: () => void;
-    }): void => {
-        withUi((current) => {
-            if (!current.searchInput.focused) return;
-            key.preventDefault?.();
-            current.modelList.focus();
-            if (key.name === "down") current.modelList.moveDown();
-            else current.modelList.moveUp();
-        });
-    };
-
-    const modelPickerToggleKey = (key: {
-        readonly ctrl?: boolean;
-        readonly name?: string;
-        readonly preventDefault?: () => void;
-    }): boolean => {
-        if (key.ctrl === true || key.name !== "m") return false;
-        key.preventDefault?.();
-        withUi(openModelPicker);
-        return true;
-    };
-
-    const dispatchModelPickerKey = (key: {
-        readonly ctrl?: boolean;
-        readonly name?: string;
-        readonly preventDefault?: () => void;
-    }): boolean => {
-        if (!modelPickerOpen) return modelPickerToggleKey(key);
-        if (key.name === "escape") {
-            key.preventDefault?.();
-            withUi(closeModelPicker);
-            return true;
-        }
-        if (key.name === "tab") {
-            key.preventDefault?.();
-            withUi(togglePickerPane);
-            return true;
-        }
-        if (key.name === "down" || key.name === "up") {
-            moveFocusFromSearch(key);
-            return true;
-        }
-        // Typing reaches the focused search input; Up/Down/Enter reach the
-        // focused Select.
-        return true;
     };
 
     const dispatchKey = (key: unknown): void => {
@@ -766,7 +548,6 @@ export const makeTuiProgressCoordinator = (
             quit();
             return;
         }
-        if (dispatchModelPickerKey(parsed)) return;
         if (parsed.ctrl !== true && dispatchControlKey(parsed.name)) {
             parsed.preventDefault?.();
             return;
@@ -787,17 +568,6 @@ export const makeTuiProgressCoordinator = (
             ? `${(milliseconds / 1000).toFixed(1)}s`
             : `${minutes}m ${String(seconds % 60).padStart(2, "0")}s`;
     };
-
-    const toolCallId = (event: AgentSessionEvent): string | undefined => {
-        const id = (event as { toolCallId?: unknown }).toolCallId;
-        return typeof id === "string" && id !== "" ? id : undefined;
-    };
-
-    const toolLabel = (event: AgentSessionEvent): string =>
-        toolTarget(
-            (event as { toolName?: unknown }).toolName,
-            (event as { args?: unknown }).args,
-        );
 
     const toolResultLine = (
         current: Ui,
@@ -872,12 +642,13 @@ export const makeTuiProgressCoordinator = (
         });
     };
 
-    const onToolStart = (event: AgentSessionEvent): void => {
+    const onToolCall = (
+        event: Extract<SessionEvent, { type: "tool_call" }>,
+    ): void => {
         const key = activeIssue;
-        const id = toolCallId(event);
-        if (id !== undefined) {
-            pendingTools.set(id, {
-                label: toolLabel(event),
+        if (event.callId !== "") {
+            pendingTools.set(event.callId, {
+                label: toolTarget(event.name, event.input),
                 startedAt: now().getTime(),
             });
         }
@@ -885,15 +656,13 @@ export const makeTuiProgressCoordinator = (
         refreshStatus();
     };
 
-    const onToolEnd = (event: AgentSessionEvent): void => {
+    const onToolResult = (
+        event: Extract<SessionEvent, { type: "tool_result" }>,
+    ): void => {
         const key = activeIssue;
-        const id = toolCallId(event);
-        const pending = id === undefined ? undefined : pendingTools.get(id);
-        if (id !== undefined) pendingTools.delete(id);
-        const isError = (event as { isError?: unknown }).isError === true;
-        const detail = isError
-            ? contentText((event as { result?: unknown }).result)
-            : undefined;
+        const pending = pendingTools.get(event.callId);
+        pendingTools.delete(event.callId);
+        const detail = event.isError ? event.output : undefined;
         const duration =
             pending === undefined
                 ? undefined
@@ -904,7 +673,7 @@ export const makeTuiProgressCoordinator = (
                 current,
                 key,
                 toolResultLine(current, {
-                    label: pending?.label ?? toolLabel(event),
+                    label: pending?.label ?? toolTarget(event.name, undefined),
                     ...(duration === undefined ? {} : { duration }),
                     ...(detail === undefined || detail.trim() === ""
                         ? {}
@@ -916,7 +685,7 @@ export const makeTuiProgressCoordinator = (
         refreshStatus();
     };
 
-    const onAgentStart = (context: AgentEventContext): void => {
+    const onSessionStarted = (context: SessionEventContext): void => {
         const key = activeIssue;
         withUi((current) => {
             endStreamFor(key);
@@ -929,7 +698,7 @@ export const makeTuiProgressCoordinator = (
                     current.mod.fg(THEME.accent)("● "),
                     current.mod.fg(THEME.accent)(
                         current.mod.bold(
-                            `pi · ${context.title ?? context.sessionID}`,
+                            `${context.harness} · ${context.title ?? context.sessionID}`,
                         ),
                     ),
                 ),
@@ -938,50 +707,58 @@ export const makeTuiProgressCoordinator = (
         refreshStatus();
     };
 
-    const onAgentEnd = (): void => {
+    const endStream = (): void => {
         const key = activeIssue;
         withUi(() => endStreamFor(key));
         refreshStatus();
     };
 
-    const onMessageUpdate = (event: AgentSessionEvent): void => {
-        const update = (
-            event as {
-                assistantMessageEvent?: {
-                    type?: unknown;
-                    delta?: unknown;
-                };
-            }
-        ).assistantMessageEvent;
-        if (update?.type === "text_delta" && typeof update.delta === "string") {
-            streamDelta("text", update.delta);
-            return;
-        }
-        if (
-            update?.type === "thinking_delta" &&
-            typeof update.delta === "string"
-        ) {
-            streamDelta("thinking", update.delta);
-            return;
-        }
-        if (update?.type === "text_end" || update?.type === "thinking_end") {
-            const key = activeIssue;
-            withUi(() => endStreamFor(key));
-            refreshStatus();
-        }
+    const onAssistantText = (
+        event: Extract<SessionEvent, { type: "assistant_text" }>,
+    ): void => {
+        if (event.text !== "") streamDelta(event.kind, event.text);
+        if (event.done) endStream();
     };
 
-    const handleAgentEvent = (
-        event: AgentSessionEvent,
-        context: AgentEventContext,
+    const onSessionError = (message: string): void => {
+        const key = activeIssue;
+        withUi((current) => {
+            endStreamFor(key);
+            appendLine(
+                current,
+                key,
+                styled(
+                    current.mod,
+                    current.mod.fg(THEME.red)("✗ "),
+                    current.mod.fg(THEME.red)(preview(oneLine(message), 160)),
+                ),
+                { indent: 2 },
+            );
+        });
+        refreshStatus();
+    };
+
+    const handleSessionEvent = (
+        event: SessionEvent,
+        context: SessionEventContext,
     ): void => {
-        const type = (event as { type?: unknown }).type;
-        state = reduceAgentSessionEvent(state, event, context, now);
-        if (type === "tool_execution_start") return onToolStart(event);
-        if (type === "tool_execution_end") return onToolEnd(event);
-        if (type === "agent_start") return onAgentStart(context);
-        if (type === "agent_end") return onAgentEnd();
-        if (type === "message_update") return onMessageUpdate(event);
+        state = reduceSessionEvent(state, event, now);
+        switch (event.type) {
+            case "session_started":
+                return onSessionStarted(context);
+            case "session_finished":
+                return endStream();
+            case "assistant_text":
+                return onAssistantText(event);
+            case "tool_call":
+                return onToolCall(event);
+            case "tool_result":
+                return onToolResult(event);
+            case "error":
+                return onSessionError(event.message);
+            case "usage":
+                return;
+        }
     };
 
     const persist = (update: ProgressUpdate): void => {
@@ -1025,7 +802,7 @@ export const makeTuiProgressCoordinator = (
                     mod,
                     mod.fg(THEME.dim)(`−${label} ${update.message}`),
                 );
-            case "needs-attention":
+            case "hand-off":
                 return styled(
                     mod,
                     mod.fg(THEME.yellow)("⚠"),
@@ -1054,7 +831,7 @@ export const makeTuiProgressCoordinator = (
         state = reduceProgressUpdate(state, update, now);
         const key = transcriptKeyFor(update);
         // Only an issue that starts executing becomes the followed issue;
-        // skipped or needs-attention events keep the current view.
+        // skipped or hand-off events keep the current view.
         if (
             key !== undefined &&
             update.stage === "issue-execution" &&
@@ -1215,111 +992,6 @@ export const makeTuiProgressCoordinator = (
             width: "100%",
             wrapMode: "none",
         });
-        const pickerOverlay = new mod.BoxRenderable(renderer, {
-            id: "tui-model-picker-overlay",
-            position: "absolute",
-            top: 0,
-            left: 0,
-            width: "100%",
-            height: "100%",
-            justifyContent: "center",
-            alignItems: "center",
-            zIndex: 20,
-            visible: false,
-        });
-        const pickerBox = new mod.BoxRenderable(renderer, {
-            id: "tui-model-picker",
-            flexDirection: "column",
-            width: 96,
-            maxWidth: "94%",
-            height: 24,
-            maxHeight: "90%",
-            borderStyle: "rounded",
-            borderColor: THEME.divider,
-            backgroundColor: THEME.bar,
-            title: " Select model ",
-            titleAlignment: "left",
-            paddingLeft: 1,
-            paddingRight: 1,
-        });
-        const pickerHint = new mod.TextRenderable(renderer, {
-            id: "tui-model-picker-hint",
-            content: styled(mod, mod.fg("#565f89")(PICKER_HINT)),
-            height: 1,
-            width: "100%",
-            wrapMode: "none",
-        });
-        const searchInput = new mod.InputRenderable(renderer, {
-            id: "tui-model-search",
-            width: "100%",
-            value: "",
-            placeholder: "Search models…",
-            backgroundColor: PICKER_COLORS.backgroundColor,
-            focusedBackgroundColor: PICKER_COLORS.focusedBackgroundColor,
-            textColor: PICKER_COLORS.textColor,
-            focusedTextColor: PICKER_COLORS.focusedTextColor,
-            placeholderColor: THEME.dim,
-        });
-        const pickerRow = new mod.BoxRenderable(renderer, {
-            id: "tui-model-picker-row",
-            flexDirection: "row",
-            flexGrow: 1,
-            width: "100%",
-        });
-        const modelColumn = new mod.BoxRenderable(renderer, {
-            id: "tui-model-picker-models",
-            flexDirection: "column",
-            flexGrow: 1,
-            minWidth: 0,
-        });
-        const levelColumn = new mod.BoxRenderable(renderer, {
-            id: "tui-model-picker-levels",
-            flexDirection: "column",
-            width: 24,
-        });
-        const modelHeader = new mod.TextRenderable(renderer, {
-            id: "tui-model-picker-models-header",
-            content: styled(mod, mod.fg("#565f89")("Models")),
-            height: 1,
-            width: "100%",
-            wrapMode: "none",
-        });
-        const levelHeader = new mod.TextRenderable(renderer, {
-            id: "tui-model-picker-levels-header",
-            content: styled(mod, mod.fg("#565f89")("Thinking level")),
-            height: 1,
-            width: "100%",
-            wrapMode: "none",
-        });
-        const modelList = new mod.SelectRenderable(renderer, {
-            id: "tui-model-list",
-            flexGrow: 1,
-            width: "100%",
-            options: [],
-            showScrollIndicator: true,
-            wrapSelection: true,
-            ...PICKER_COLORS,
-        });
-        const levelList = new mod.SelectRenderable(renderer, {
-            id: "tui-level-list",
-            flexGrow: 1,
-            width: "100%",
-            options: [],
-            showDescription: false,
-            showScrollIndicator: true,
-            wrapSelection: true,
-            ...PICKER_COLORS,
-        });
-        pickerBox.add(pickerHint);
-        pickerBox.add(searchInput);
-        pickerBox.add(pickerRow);
-        pickerRow.add(modelColumn);
-        pickerRow.add(levelColumn);
-        modelColumn.add(modelHeader);
-        modelColumn.add(modelList);
-        levelColumn.add(levelHeader);
-        levelColumn.add(levelList);
-        pickerOverlay.add(pickerBox);
         renderer.root.add(root);
         root.add(headerBar);
         headerBar.add(header);
@@ -1333,7 +1005,6 @@ export const makeTuiProgressCoordinator = (
         sidebarPane.add(controlHint);
         sidebarPane.add(navigationHint);
         body.add(transcript);
-        body.add(pickerOverlay);
         root.add(footerBar);
         footerBar.add(status);
         // Rows select on click; keep events from moving focus off the
@@ -1351,35 +1022,8 @@ export const makeTuiProgressCoordinator = (
             controlHint,
             transcript,
             status,
-            pickerOverlay,
-            searchInput,
-            modelList,
-            levelList,
         };
         transcript.focus();
-        modelList.on("selectionChanged", () => {
-            if (ui !== undefined) refreshLevelOptions(ui);
-        });
-        searchInput.on("input", (value: string) => {
-            withUi((current) => {
-                modelQuery = value;
-                refreshModelOptions(current);
-                current.renderer.requestRender();
-            });
-        });
-        searchInput.on("enter", () => {
-            withUi((current) => {
-                if (currentPickerModel(current) !== undefined) {
-                    applyModelPick(current);
-                }
-            });
-        });
-        modelList.on("itemSelected", () => {
-            if (ui !== undefined) applyModelPick(ui);
-        });
-        levelList.on("itemSelected", () => {
-            if (ui !== undefined) applyModelPick(ui);
-        });
         renderer.keyInput.on("keypress", dispatchKey);
         renderHeader(ui);
         renderStatus(ui);
@@ -1403,14 +1047,14 @@ export const makeTuiProgressCoordinator = (
         },
     };
 
-    const piListener: AgentEventListener = (event, context) => {
+    const sessionListener: SessionEventListener = (event, context) => {
         if (disposed) return;
-        handleAgentEvent(event, context);
+        handleSessionEvent(event, context);
     };
 
     return {
         progress,
-        piListener,
+        sessionListener,
         control,
         ready: readyPromise.catch(() => undefined),
         dispose: async () => {

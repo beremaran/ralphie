@@ -21,9 +21,8 @@ export type ProgressStage =
     | "issue-planning"
     | "issue-execution"
     | "issue-queue"
-    | "grounding"
-    | "issue-grounding"
-    | "complexity-assessment"
+    | "triage"
+    | "preflight"
     | "implementation"
     | "change-staging"
     | "verification"
@@ -33,22 +32,20 @@ export type ProgressStage =
     | "review-fix"
     | "review-exhaustion"
     | "checkout-restore"
-    | "commit-message"
     | "commit"
     | "push"
     | "decomposition"
     | "issue-creation"
     | "issue-relationships"
     | "issue-closure"
-    | "pr-gate"
-    | "notification";
+    | "hand-off";
 
 export type ProgressStatus =
     | "started"
     | "succeeded"
     | "failed"
     | "skipped"
-    | "needs-attention"
+    | "hand-off"
     | "info";
 
 export type ProgressIssue = {

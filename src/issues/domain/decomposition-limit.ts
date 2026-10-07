@@ -1,25 +1,25 @@
 import type { DecompositionDepthLimitError } from "./decomposition-markdown.ts";
-import { NeedsAttentionReason } from "./decisions.ts";
+import { HandOffReason } from "./decisions.ts";
 import {
     IssueExecutionOutcomeKind,
     type IssueExecutionOutcome,
-} from "../app/execution.ts";
+} from "../app/execution-model.ts";
 
 /** Turn the configured recursion ceiling into a controlled, non-halting route. */
 export const decompositionLimitOutcome = (
     issueNumber: number,
     error: DecompositionDepthLimitError,
 ): IssueExecutionOutcome => ({
-    kind: IssueExecutionOutcomeKind.NeedsAttention,
-    reason: NeedsAttentionReason.DecompositionLimitReached,
+    kind: IssueExecutionOutcomeKind.HandOff,
+    reason: HandOffReason.DecompositionLimitReached,
     summary:
         `Issue #${issueNumber} reached the configured maximum decomposition depth ` +
-        `${error.maximumDepth}; Ralphie left it open and will continue with independent issues.`,
+        `${error.maximumDepth}; Ralphie handed it off and will continue with independent issues.`,
     evidence: [
-        `The next decomposition would create depth ${error.depth}, above --max-decomposition-depth ${error.maximumDepth}.`,
+        `The next decomposition would create depth ${error.depth}, above limits.maxDecompositionDepth (${error.maximumDepth}).`,
     ],
     questions: [
-        `Increase --max-decomposition-depth above ${error.maximumDepth}, narrow the issue manually, or resolve the remaining review findings.`,
+        `Increase limits.maxDecompositionDepth above ${error.maximumDepth}, narrow the issue manually, or resolve the remaining review findings.`,
     ],
-    route: "needs-attention",
+    route: "hand-off",
 });

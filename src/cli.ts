@@ -1,5 +1,6 @@
 import { runCommand } from "./command.ts";
 import { exitCodeForError } from "./workflow/exit-code.ts";
+import { errorMessage } from "./shared/error.ts";
 
 /** Start the CLI with a native AbortSignal rather than a framework context. */
 export const runCli = async (
@@ -12,7 +13,7 @@ export const runCli = async (
         await runCommand(args, { signal: controller.signal });
     } catch (error) {
         process.exitCode = exitCodeForError(error, controller.signal);
-        const message = error instanceof Error ? error.message : String(error);
+        const message = errorMessage(error);
         process.stderr.write(`${message}\n`);
     } finally {
         process.removeListener("SIGINT", onInterrupt);

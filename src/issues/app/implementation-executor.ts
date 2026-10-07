@@ -1,209 +1,73 @@
-import {
-    type GitIssueOperationError,
-    type GitIssueOperationsService,
+import { haltingFailure } from "../../agent/sessions.ts";
+import type {
+    GitIssueOperationError,
+    GitIssueOperationsService,
+    GitRemoteSafetyService,
+    IssueCheckpoint,
 } from "../../git/ports.ts";
-import { type GitIssuePreparationService } from "../ports.ts";
-import { type GitRemoteSafetyService } from "../../git/ports.ts";
+import type { GitIssuePreparationService } from "../ports.ts";
 import {
-    buildCommitMessagePrompt,
-    buildImplementationAfterResolutionCorrectionPrompt,
-    buildImplementationPrompt,
-    buildImplementationRetryPrompt,
-    buildReviewFixPrompt,
-    buildReviewPrompt,
-    buildVerificationFixPrompt,
-} from "../../agent/prompts.ts";
+    type FixSession,
+    newFixSession,
+    recordFixTurn,
+} from "./fix-session.ts";
 import { requestStructuredOutput } from "../../agent/structured-output.ts";
-import { AgentSessionProfile } from "../../agent/ports.ts";
-import {
-    runAgentTask,
-    type NeedsAttentionRequest,
-} from "../../agent/task-session.ts";
-import { z } from "zod";
-import {
-    type ProgressStage,
-    type ProgressReporterService,
-} from "../../progress/ports.ts";
-import { RalphieError } from "../../shared/error.ts";
+import type { HandOffRequest } from "../../agent/task-session.ts";
+import type { ProgressReporterService } from "../../progress/ports.ts";
+import { RalphieError, errorMessage } from "../../shared/error.ts";
 import {
     IssueExecutionOutcomeKind,
     type WorkflowExecutorInput,
     type WorkflowExecutorResult,
-} from "./execution.ts";
+} from "./execution-model.ts";
 import { IssueArtifactKind, issueFreshnessFingerprint } from "./artifacts.ts";
 import {
-    commitMessageDecisionSchema,
+    type CommitMessageDecision,
+    PreflightDisposition,
+    type HandOffDecision,
+    HandOffReason,
     type IssueResolutionDecision,
     IssueResolutionStatus,
-    reviewDecisionSchema,
-    ReviewVerdict,
 } from "../domain/decisions.ts";
-import { type IssueRecoveryService, type ReviewAttempt } from "./recovery.ts";
-import { REVIEW_ITERATION_LIMIT } from "../domain/stage.ts";
-import { assertProtectedDecisionsAuthorized } from "../domain/scope-policy.ts";
-import type {
-    IssueVerificationService,
-    VerificationEvidence,
-} from "./verification.ts";
-import { VerificationCommandError } from "./verification.ts";
+import type { IssueRecoveryService } from "./recovery.ts";
+import type { IssueVerificationService } from "./verification.ts";
 import {
     makeResolutionVerificationService,
     type ResolutionVerificationService,
 } from "./resolution-verification.ts";
-import type { NeedsAttentionRouterService } from "./needs-attention.ts";
+import type { HandOffRouterService } from "./hand-off.ts";
+import type { ReviewEvidenceFiles } from "./review-evidence.ts";
+import {
+    checkSignal,
+    implementationBudget,
+    issueProgress,
+    readCheckpoint,
+    stage,
+} from "./implementation-stage.ts";
+import {
+    fallbackCommitMessage,
+    handoffRequest,
+    implementationPrompt,
+    implementationResultSchema,
+    retriesAfterTimeout,
+    type RetryReason,
+} from "./implementation-attempt.ts";
+import { makeCandidateReview } from "./candidate-review.ts";
 
-/** The implementation workflow for issues with complexity 0 through 3. */
+/** The implementation workflow for issues with the implementation route. */
 export type ImplementationExecutorService = {
     readonly execute: (
         input: WorkflowExecutorInput,
     ) => Promise<WorkflowExecutorResult>;
 };
 
-export type ReviewFixOutcome = {
-    readonly status: "staged";
-    readonly unresolvedFindings: ReadonlyArray<string>;
-};
-
-type VerificationResult =
-    | { readonly status: "passed"; readonly verification: VerificationEvidence }
-    | WorkflowExecutorResult;
-
-type VerificationAttempt =
-    | { readonly status: "passed"; readonly verification: VerificationEvidence }
-    | {
-          readonly status: "repairable";
-          readonly error: VerificationCommandError;
-      };
-
-const sameBlockingFindings = (
-    previous: ReviewAttempt | undefined,
-    current: ReviewAttempt,
-): boolean =>
-    previous?.decision.verdict === ReviewVerdict.ChangesRequested &&
-    JSON.stringify(previous.decision.findings) ===
-        JSON.stringify(current.decision.findings);
-
 const asRalphieError = (error: unknown): RalphieError => {
     if (error instanceof RalphieError) return error;
     return new RalphieError({
-        message: error instanceof Error ? error.message : String(error),
+        message: errorMessage(error),
         cause: error,
     });
 };
-
-const issueProgress = (input: WorkflowExecutorInput) => ({
-    issue: {
-        number: input.context.issue.number,
-        title: input.context.issue.title,
-    },
-});
-
-const checkSignal = (signal: AbortSignal | undefined): void => {
-    try {
-        signal?.throwIfAborted();
-    } catch (cause) {
-        throw new RalphieError({
-            message: "Issue execution was aborted.",
-            cause,
-        });
-    }
-};
-
-const implementationResultSchema = z
-    .object({
-        status: z.enum(["changed", "already_resolved"]),
-        summary: z.string().trim().min(1),
-        validation: z.array(z.string().trim().min(1)).max(20),
-    })
-    .strict();
-
-const implementationPrompt = (
-    input: WorkflowExecutorInput,
-    attempt: number,
-    unresolvedSummary: string | undefined,
-): string => {
-    const { context, unresolvedResolution } = input;
-    if (attempt === 1 && unresolvedResolution !== undefined) {
-        return buildImplementationAfterResolutionCorrectionPrompt({
-            issue: context.issue,
-            repositoryPath: context.repositoryPath,
-            targetBranch: context.targetBranch,
-            unresolvedSummary: unresolvedResolution.summary,
-            evidence: unresolvedResolution.evidence,
-        });
-    }
-    if (unresolvedSummary !== undefined) {
-        return buildImplementationRetryPrompt({
-            issue: context.issue,
-            repositoryPath: context.repositoryPath,
-            targetBranch: context.targetBranch,
-            unresolvedSummary,
-            attempt,
-        });
-    }
-    return buildImplementationPrompt({
-        issue: context.issue,
-        repositoryPath: context.repositoryPath,
-        targetBranch: context.targetBranch,
-    });
-};
-
-const stage = async <A>(
-    progress: ProgressReporterService,
-    input: WorkflowExecutorInput,
-    progressStage: ProgressStage,
-    startedMessage: string,
-    operation: () => Promise<A>,
-    succeededMessage: string | ((value: A) => string),
-    details?: Readonly<Record<string, unknown>>,
-    attempt?: number,
-): Promise<A> => {
-    const base = {
-        ...issueProgress(input),
-        stage: progressStage,
-        ...(attempt === undefined
-            ? {}
-            : { attempt, maxAttempts: REVIEW_ITERATION_LIMIT }),
-        ...(details === undefined ? {} : { details }),
-    };
-    await progress.emit({
-        ...base,
-        status: "started",
-        message: startedMessage,
-    });
-    try {
-        const value = await operation();
-        await progress.emit({
-            ...base,
-            status: "succeeded",
-            message:
-                typeof succeededMessage === "function"
-                    ? succeededMessage(value)
-                    : succeededMessage,
-        });
-        return value;
-    } catch (error) {
-        await progress.emit({
-            ...base,
-            status: "failed",
-            message: `${startedMessage.replace(/\.{3}$/, "")} failed: ${
-                error instanceof Error ? error.message : String(error)
-            }`,
-        });
-        throw error;
-    }
-};
-
-const readCheckpoint = async (
-    preparation: GitIssuePreparationService,
-    input: WorkflowExecutorInput,
-) =>
-    preparation.prepare({
-        issueNumber: input.context.issue.number,
-        repositoryPath: input.context.repositoryPath,
-        branch: input.context.targetBranch,
-        signal: input.context.signal,
-    });
 
 export const makeImplementationExecutorService = (
     preparation: GitIssuePreparationService,
@@ -223,21 +87,22 @@ export const makeImplementationExecutorService = (
     resolutionVerification: ResolutionVerificationService = makeResolutionVerificationService(
         progress,
     ),
-    needsAttentionRouter?: NeedsAttentionRouterService,
+    handOffRouter?: HandOffRouterService,
+    reviewEvidence?: ReviewEvidenceFiles,
 ): ImplementationExecutorService => {
     const routeSignal = async (
         input: WorkflowExecutorInput,
-        request: NeedsAttentionRequest | undefined,
-        checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
+        request: HandOffRequest | undefined,
+        checkpoint: IssueCheckpoint,
     ): Promise<WorkflowExecutorResult | undefined> => {
         if (request === undefined) return undefined;
-        if (needsAttentionRouter === undefined) {
+        if (handOffRouter === undefined) {
             throw new RalphieError({
                 message:
-                    "A needs-attention signal requires the verifier/router service.",
+                    "A hand-off signal requires the verifier/router service.",
             });
         }
-        return await needsAttentionRouter.route({
+        return await handOffRouter.route({
             ...input,
             request,
             checkpoint,
@@ -350,11 +215,13 @@ export const makeImplementationExecutorService = (
     const runImplementation = async (
         input: WorkflowExecutorInput,
         invariant: { readonly branch: string; readonly head: string },
-        checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
+        checkpoint: IssueCheckpoint,
         attempt: number,
-        unresolvedSummary?: string,
-    ): Promise<WorkflowExecutorResult | undefined> => {
+        fix: FixSession,
+        retry?: RetryReason,
+    ): Promise<WorkflowExecutorResult | CommitMessageDecision> => {
         const { context } = input;
+        const prompt = implementationPrompt(input, attempt, retry);
         const result = await stage(
             progress,
             input,
@@ -364,18 +231,10 @@ export const makeImplementationExecutorService = (
                 requestStructuredOutput(context.agent, {
                     directory: context.repositoryPath,
                     title: `Implement issue #${context.issue.number}`,
-                    agent: context.agentSelection.agent,
-                    model: context.agentSelection.model,
-                    variant: context.agentSelection.variant,
+                    role: "implementer",
 
                     schema: implementationResultSchema,
-                    prompt: implementationPrompt(
-                        input,
-                        attempt,
-                        unresolvedSummary,
-                    ),
-                    runId: context.runId,
-                    diagnostics: context.agentDiagnostics,
+                    prompt,
                     repositoryInvariant: invariant,
                     verifyRepositoryInvariant:
                         context.repositoryInvariant.verify,
@@ -386,25 +245,35 @@ export const makeImplementationExecutorService = (
                 }),
             "Implementation session submitted; inspecting repository changes.",
             undefined,
-            attempt,
+            { attempt, maxAttempts: implementationBudget(context) },
         );
-        return await routeSignal(input, result.needsAttention, checkpoint);
+        recordFixTurn(fix, {
+            sessionID: result.sessionID,
+            consumedChars: prompt.length + result.output.summary.length,
+            resumed: false,
+        });
+        const routed = await routeSignal(
+            input,
+            result.handOff ?? handoffRequest(result.output),
+            checkpoint,
+        );
+        return (
+            routed ??
+            result.output.commitMessage ??
+            fallbackCommitMessage(context.issue)
+        );
     };
 
     const inspectNoChangeResolution = async (
         input: WorkflowExecutorInput,
-        checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
+        checkpoint: IssueCheckpoint,
         finalAttempt: boolean,
     ): Promise<
         WorkflowExecutorResult | { readonly unresolvedSummary: string }
     > => {
         const { context, artifacts } = input;
         const resolution = await resolutionVerification.verify(context);
-        const routed = await routeSignal(
-            input,
-            resolution.needsAttention,
-            checkpoint,
-        );
+        const routed = await routeSignal(input, resolution.handOff, checkpoint);
         if (routed !== undefined) return routed;
         const outcome = resolutionOutcome(resolution.decision);
         if (
@@ -424,599 +293,207 @@ export const makeImplementationExecutorService = (
         return outcome.kind === IssueExecutionOutcomeKind.Failed
             ? {
                   ...outcome,
-                  message: `Issue remains unresolved after ${context.implementationAttempts ?? 3} no-change implementation attempts: ${outcome.message}`,
+                  message: `Issue remains unresolved after ${implementationBudget(context)} no-change implementation attempts: ${outcome.message}`,
+                  exhausted: true,
               }
             : outcome;
     };
+    const candidateReview = makeCandidateReview({
+        operations,
+        remoteSafety,
+        recovery,
+        progress,
+        verification,
+        reviewEvidence,
+        routeSignal,
+    });
 
-    const verifyStagedChanges = async (
-        input: WorkflowExecutorInput,
-    ): Promise<VerificationEvidence> => {
-        const diff = await operations.readStagedBinaryDiff(
-            input.context.repositoryPath,
-        );
-        assertProtectedDecisionsAuthorized(input.context.issue, diff);
-        const commands = input.context.verificationCommands ?? [];
-        return stage(
-            progress,
-            input,
-            "verification",
-            commands.length === 0
-                ? "Skipping deterministic verification (no --verify-command configured)..."
-                : "Running deterministic verification...",
-            () => verification.verify(input.context.repositoryPath, commands),
-            commands.length === 0
-                ? "Deterministic verification skipped."
-                : "Deterministic verification passed.",
-        );
-    };
-
-    const repairVerificationFailure = async (
+    /** A timeout is a failed attempt: it retries while attempts remain. */
+    const runImplementationOrTimeout = async (
         input: WorkflowExecutorInput,
         invariant: { readonly branch: string; readonly head: string },
-        checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
-        failure: VerificationCommandError,
+        checkpoint: IssueCheckpoint,
         attempt: number,
-    ): Promise<WorkflowExecutorResult | undefined> => {
-        const { context } = input;
-        const stagedDiff = await operations.readStagedBinaryDiff(
-            context.repositoryPath,
-        );
-        const result = await stage(
-            progress,
-            input,
-            "verification-fix",
-            `Repairing deterministic verification (attempt ${attempt}/${REVIEW_ITERATION_LIMIT})...`,
-            () =>
-                runAgentTask(context.agent, {
-                    directory: context.repositoryPath,
-                    title: `Repair verification for issue #${context.issue.number} (attempt ${attempt})`,
-                    selection: context.agentSelection,
-                    prompt: buildVerificationFixPrompt({
-                        issue: context.issue,
-                        repositoryPath: context.repositoryPath,
-                        targetBranch: context.targetBranch,
-                        stagedDiff,
-                        failedVerification: failure.verification,
-                    }),
-                    runId: context.runId,
-                    diagnostics: context.agentDiagnostics,
-                    repositoryInvariant: invariant,
-                    verifyRepositoryInvariant:
-                        context.repositoryInvariant.verify,
-                    progress,
-                    progressStage: "verification-fix",
-                    progressIssue: issueProgress(input).issue,
-                    signal: context.signal,
-                }),
-            "Verification-fix agent finished; deterministic verification pending.",
-            undefined,
-            attempt,
-        );
-        const routed = await routeSignal(
-            input,
-            result.needsAttention,
-            checkpoint,
-        );
-        if (routed !== undefined) return routed;
-        checkSignal(context.signal);
-        await stage(
-            progress,
-            input,
-            "change-staging",
-            `Restaging verification-fix changes (attempt ${attempt})...`,
-            () => operations.stageAll(context.repositoryPath),
-            "Verification-fix changes staged.",
-            undefined,
-            attempt,
-        );
-        return undefined;
-    };
-
-    const ensureVerificationPassing = async (
-        input: WorkflowExecutorInput,
-        invariant: { readonly branch: string; readonly head: string },
-        checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
-    ): Promise<VerificationResult> => {
-        const attemptVerification = async (): Promise<VerificationAttempt> => {
-            try {
-                return {
-                    status: "passed",
-                    verification: await verifyStagedChanges(input),
-                };
-            } catch (error) {
-                if (!(error instanceof VerificationCommandError)) throw error;
-                return { status: "repairable", error };
-            }
-        };
-        for (let attempt = 1; attempt <= REVIEW_ITERATION_LIMIT; attempt += 1) {
-            const verification = await attemptVerification();
-            if (verification.status === "passed") return verification;
-            const routed = await repairVerificationFailure(
+        fix: FixSession,
+        retry: RetryReason | undefined,
+    ): Promise<
+        WorkflowExecutorResult | CommitMessageDecision | "timed-out"
+    > => {
+        try {
+            return await runImplementation(
                 input,
                 invariant,
                 checkpoint,
-                verification.error,
                 attempt,
+                fix,
+                retry,
             );
-            if (routed !== undefined) return routed;
+        } catch (error) {
+            if (
+                !retriesAfterTimeout(
+                    error,
+                    attempt,
+                    implementationBudget(input.context),
+                    input.context.signal,
+                )
+            ) {
+                throw error;
+            }
+            return "timed-out";
         }
-        const finalVerification = await attemptVerification();
-        return finalVerification.status === "passed"
-            ? finalVerification
-            : {
-                  kind: IssueExecutionOutcomeKind.Failed,
-                  message: `Deterministic verification still failed after ${REVIEW_ITERATION_LIMIT} repair attempts: ${finalVerification.error.message}`,
-              };
     };
 
-    const runReviewAttempt = async (
+    /** Stage the attempt: review staged changes, or verify a no-change result. */
+    const stageAndInspect = async (
         input: WorkflowExecutorInput,
+        checkpoint: IssueCheckpoint,
         invariant: { readonly branch: string; readonly head: string },
+        fix: FixSession,
+        commitMessage: CommitMessageDecision,
         attempt: number,
-        verificationEvidence: VerificationEvidence,
-        previousReviews: ReadonlyArray<ReviewAttempt>,
-        checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
-    ): Promise<ReviewAttempt | WorkflowExecutorResult> => {
+    ): Promise<
+        WorkflowExecutorResult | { readonly unresolvedSummary: string }
+    > => {
         const { context } = input;
-        const stagedDiff = await operations.readStagedBinaryDiff(
-            context.repositoryPath,
-        );
-        const reviewResult = await stage(
-            progress,
-            input,
-            "review",
-            `Reviewing staged changes (attempt ${attempt}/${REVIEW_ITERATION_LIMIT})...`,
-            () =>
-                requestStructuredOutput(context.agent, {
-                    directory: context.repositoryPath,
-                    title: `Review issue #${context.issue.number} (attempt ${attempt})`,
-                    prompt: buildReviewPrompt({
-                        issue: context.issue,
-                        repositoryPath: context.repositoryPath,
-                        targetBranch: context.targetBranch,
-                        stagedDiff,
-                        verification: verificationEvidence,
-                        previousReviews: previousReviews.map(
-                            ({ decision }) => decision,
-                        ),
-                    }),
-                    schema: reviewDecisionSchema,
-                    profile: AgentSessionProfile.Review,
-                    agent: context.agentSelection.agent,
-                    model: context.agentSelection.model,
-                    variant: context.agentSelection.variant,
-                    runId: context.runId,
-                    diagnostics: context.agentDiagnostics,
-                    repositoryInvariant: invariant,
-                    verifyRepositoryInvariant:
-                        context.repositoryInvariant.verify,
-                    progress,
-                    progressStage: "review",
-                    progressIssue: issueProgress(input).issue,
-                    signal: context.signal,
-                }),
-            ({ output }) =>
-                `Review ${attempt}/${REVIEW_ITERATION_LIMIT}: ${output.verdict}.`,
-            undefined,
-            attempt,
-        );
-        const routed = await routeSignal(
-            input,
-            reviewResult.needsAttention,
-            checkpoint,
-        );
-        if (routed !== undefined) return routed;
-        return {
-            attempt,
-            sessionID: reviewResult.sessionID,
-            stagedTreeSha: verificationEvidence.stagedTreeSha,
-            verification: verificationEvidence,
-            decision: reviewResult.output,
-        };
-    };
-
-    const commitApprovedReview = async (
-        input: WorkflowExecutorInput,
-        invariant: { readonly branch: string; readonly head: string },
-        checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
-        approvedReview: ReviewAttempt,
-        verificationEvidence: VerificationEvidence,
-    ): Promise<WorkflowExecutorResult> => {
-        const { context, artifacts } = input;
-        if (
-            approvedReview.stagedTreeSha === undefined ||
-            verificationEvidence.stagedTreeSha.toLowerCase() !==
-                approvedReview.stagedTreeSha.toLowerCase()
-        ) {
-            throw new RalphieError({
-                message:
-                    "The staged tree changed after approval; refusing to commit without a matching review.",
-            });
-        }
-        const finalDiff = await operations.readStagedBinaryDiff(
-            context.repositoryPath,
-        );
-        const commitMessage = await stage(
-            progress,
-            input,
-            "commit-message",
-            "Generating a commit message...",
-            () =>
-                requestStructuredOutput(context.agent, {
-                    directory: context.repositoryPath,
-                    title: `Generate commit message for issue #${context.issue.number}`,
-                    prompt: buildCommitMessagePrompt({
-                        issue: context.issue,
-                        repositoryPath: context.repositoryPath,
-                        targetBranch: context.targetBranch,
-                        stagedDiff: finalDiff,
-                        verification: verificationEvidence,
-                    }),
-                    schema: commitMessageDecisionSchema,
-                    agent: context.agentSelection.agent,
-                    model: context.agentSelection.model,
-                    variant: context.agentSelection.variant,
-                    runId: context.runId,
-                    diagnostics: context.agentDiagnostics,
-                    repositoryInvariant: invariant,
-                    verifyRepositoryInvariant:
-                        context.repositoryInvariant.verify,
-                    progress,
-                    progressStage: "commit-message",
-                    progressIssue: issueProgress(input).issue,
-                    signal: context.signal,
-                }),
-            "Commit message generated.",
-        );
-        const routed = await routeSignal(
-            input,
-            commitMessage.needsAttention,
-            checkpoint,
-        );
-        if (routed !== undefined) return routed;
-        await artifacts.write(
-            IssueArtifactKind.CommitMessageDecision,
-            commitMessage.output,
-            context.signal,
-        );
-        const commit = await stage(
-            progress,
-            input,
-            "commit",
-            "Committing implementation changes...",
-            () =>
-                operations.commit(context.repositoryPath, commitMessage.output),
-            "Implementation changes committed.",
-        );
-        await artifacts.write(
-            IssueArtifactKind.CreatedCommit,
-            commit,
-            context.signal,
-        );
-        checkSignal(context.signal);
-        await progress.emit({
-            ...issueProgress(input),
-            stage: "commit",
-            status: "info",
-            message: "Created the issue commit.",
-            details: { commitSha: commit.sha },
-        });
-        await stage(
-            progress,
-            input,
-            "push",
-            `Pushing ${context.targetBranch}...`,
-            async () => {
-                await remoteSafety.verifyDirectPush({
-                    repository: context.repository,
-                    repositoryPath: context.repositoryPath,
-                    branch: context.targetBranch,
-                    intendedBaseSha: checkpoint.sha,
-                    expectedCommitSha: commit.sha,
-                    pushMode: "non-force",
-                });
-                await operations.push(
-                    context.repositoryPath,
-                    context.targetBranch,
-                    commit.sha,
-                );
-            },
-            `Pushed ${context.targetBranch}.`,
-            { commitSha: commit.sha },
-        );
-        return {
-            kind: IssueExecutionOutcomeKind.Completed,
-            completion: "pushed-commit",
-            commitSha: commit.sha,
-            reviewCount: approvedReview.attempt,
-        } as const;
-    };
-
-    const applyReviewFix = async (
-        input: WorkflowExecutorInput,
-        invariant: { readonly branch: string; readonly head: string },
-        review: ReviewAttempt,
-        attempt: number,
-    ): Promise<WorkflowExecutorResult | ReviewFixOutcome> => {
-        const { context } = input;
-        const currentDiff = await operations.readStagedBinaryDiff(
-            context.repositoryPath,
-        );
-        const result = await stage(
-            progress,
-            input,
-            "review-fix",
-            `Addressing review findings (attempt ${attempt})...`,
-            () =>
-                runAgentTask(context.agent, {
-                    directory: context.repositoryPath,
-                    title: `Address review for issue #${context.issue.number} (attempt ${attempt})`,
-                    selection: context.agentSelection,
-                    prompt: buildReviewFixPrompt({
-                        issue: context.issue,
-                        repositoryPath: context.repositoryPath,
-                        targetBranch: context.targetBranch,
-                        stagedDiff: currentDiff,
-                        review: review.decision,
-                        verification: review.verification,
-                    }),
-                    runId: context.runId,
-                    diagnostics: context.agentDiagnostics,
-                    repositoryInvariant: invariant,
-                    verifyRepositoryInvariant:
-                        context.repositoryInvariant.verify,
-                    progress,
-                    progressStage: "review-fix",
-                    progressIssue: issueProgress(input).issue,
-                    signal: context.signal,
-                }),
-            "Review-fix agent finished; deterministic verification pending.",
-            undefined,
-            attempt,
-        );
-        const routed = await routeSignal(input, result.needsAttention, {
-            branch: invariant.branch,
-            sha: invariant.head,
-        });
-        if (routed !== undefined) return routed;
+        const maximumAttempts = implementationBudget(context);
         checkSignal(context.signal);
         await stage(
             progress,
             input,
             "change-staging",
-            `Restaging review-fix changes (attempt ${attempt})...`,
+            `Inspecting and staging implementation attempt ${attempt}...`,
             () => operations.stageAll(context.repositoryPath),
-            "Review-fix changes staged.",
+            `Implementation attempt ${attempt} inspected.`,
             undefined,
-            attempt,
+            { attempt, maxAttempts: maximumAttempts },
         );
         if (await operations.hasStagedChanges(context.repositoryPath)) {
-            return {
-                status: "staged",
-                unresolvedFindings: [],
-            };
+            await input.artifacts.write(
+                IssueArtifactKind.CommitMessageDecision,
+                commitMessage,
+                context.signal,
+            );
+            return await candidateReview.run(input, checkpoint, invariant, fix);
         }
-        await progress.emit({
-            ...issueProgress(input),
-            stage: "review-fix",
-            status: "failed",
-            attempt,
-            maxAttempts: REVIEW_ITERATION_LIMIT,
-            message: `Review fix attempt ${attempt} produced no changes.`,
-        });
-        return {
-            kind: IssueExecutionOutcomeKind.Failed,
-            message: `Review fix attempt ${attempt} produced no changes.`,
-        } as const;
+        return await inspectNoChangeResolution(
+            input,
+            checkpoint,
+            attempt === maximumAttempts,
+        );
     };
 
-    const exhaustReviews = async (
+    const runImplementationAttempts = async (
         input: WorkflowExecutorInput,
-        checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
-        reviews: ReadonlyArray<ReviewAttempt>,
+        checkpoint: IssueCheckpoint,
+        invariant: { readonly branch: string; readonly head: string },
     ): Promise<WorkflowExecutorResult> => {
         const { context } = input;
-        const exhausted = await recovery.handleReviewExhaustion({
+        const maximumAttempts = implementationBudget(context);
+        const fix = newFixSession(context.agent.roles.implementer.harness);
+        let retry: RetryReason | undefined;
+        for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
+            const implementation = await runImplementationOrTimeout(
+                input,
+                invariant,
+                checkpoint,
+                attempt,
+                fix,
+                retry,
+            );
+            if (implementation === "timed-out") {
+                retry = { kind: "timeout" };
+                continue;
+            }
+            if ("kind" in implementation) return implementation;
+            const outcome = await stageAndInspect(
+                input,
+                checkpoint,
+                invariant,
+                fix,
+                implementation,
+                attempt,
+            );
+            if ("unresolvedSummary" in outcome) {
+                retry = {
+                    kind: "unresolved",
+                    summary: outcome.unresolvedSummary,
+                };
+                continue;
+            }
+            return outcome;
+        }
+        throw new RalphieError({
+            message: "Implementation retry loop ended unexpectedly.",
+        });
+    };
+
+    /**
+     * Every terminal failure is a human's problem, whether the attempts ran
+     * out, a review loop stalled or a session failed: preserve diagnostics,
+     * restore the clean checkout and hand the issue off as ready-for-human so
+     * it never re-enters the queue unchanged.
+     */
+    const handOffWhenExhausted = async (
+        input: WorkflowExecutorInput,
+        checkpoint: IssueCheckpoint,
+        result: WorkflowExecutorResult,
+    ): Promise<WorkflowExecutorResult> => {
+        if (result.kind !== IssueExecutionOutcomeKind.Failed) return result;
+        const { context } = input;
+        const decision: HandOffDecision = {
+            disposition: PreflightDisposition.HandOff,
+            reason: HandOffReason.ImplementationExhausted,
+            summary: `Ralphie could not finish issue #${context.issue.number}: ${result.message}`,
+            evidence: [result.message],
+            questions: [
+                "Review the preserved diagnostics, then finish the change by hand or rewrite the issue so an agent can complete it.",
+            ],
+        };
+        const { disposition: _disposition, ...details } = decision;
+        const recovered = await recovery.handleHandOff({
             runId: context.runId,
             repository: context.repository,
             workspace: context.workspace,
             repositoryPath: context.repositoryPath,
             issue: context.issue,
             checkpoint,
-            reviews,
+            fingerprint: issueFreshnessFingerprint(context.issue),
+            decision,
+            repositoryInvariant: context.repositoryInvariant,
+            signal: context.signal,
         });
         return {
-            kind: IssueExecutionOutcomeKind.Escalated,
-            diagnosticsPath: exhausted.diagnosticsPath,
-            reason: "Review did not converge within the review iteration budget.",
+            kind: IssueExecutionOutcomeKind.HandOff,
+            ...details,
+            diagnosticsPath: recovered.diagnosticsPath,
         };
     };
 
-    const handleReviewDecision = async (
+    /** Session and git failures become a Failed result; aborts and halting
+     * (limit, outage, login) failures still throw. */
+    const runAttemptsOrFail = async (
         input: WorkflowExecutorInput,
-        checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
-        invariant: { readonly branch: string; readonly head: string },
-        review: ReviewAttempt,
-        reviews: ReadonlyArray<ReviewAttempt>,
-        attempt: number,
-        isRepeated: boolean,
-    ): Promise<WorkflowExecutorResult | undefined> => {
-        if (isRepeated) {
-            return {
-                kind: IssueExecutionOutcomeKind.Failed,
-                message:
-                    "Review repeated the same blocking findings after a verified fix; stopping instead of looping.",
-            };
-        }
-        if (attempt === REVIEW_ITERATION_LIMIT) {
-            return await exhaustReviews(input, checkpoint, reviews);
-        }
-        const fixOutcome = await applyReviewFix(
-            input,
-            invariant,
-            review,
-            attempt,
-        );
-        return "kind" in fixOutcome ? fixOutcome : undefined;
-    };
-
-    const handleApprovedReview = async (
-        input: WorkflowExecutorInput,
-        checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
-        invariant: { readonly branch: string; readonly head: string },
-        review: ReviewAttempt,
-        attempt: number,
-    ): Promise<WorkflowExecutorResult | undefined> => {
-        const finalVerification = await ensureVerificationPassing(
-            input,
-            invariant,
-            checkpoint,
-        );
-        if (!("status" in finalVerification)) return finalVerification;
-        if (
-            finalVerification.verification.stagedTreeSha.toLowerCase() ===
-            review.stagedTreeSha?.toLowerCase()
-        ) {
-            return await commitApprovedReview(
-                input,
-                invariant,
-                checkpoint,
-                review,
-                finalVerification.verification,
-            );
-        }
-        if (attempt === REVIEW_ITERATION_LIMIT) {
-            return {
-                kind: IssueExecutionOutcomeKind.Failed,
-                message:
-                    "Verification repair changed the staged tree after the final review attempt; refusing to commit without another review.",
-            };
-        }
-        await progress.emit({
-            ...issueProgress(input),
-            stage: "review",
-            status: "info",
-            attempt,
-            maxAttempts: REVIEW_ITERATION_LIMIT,
-            message:
-                "Verification repair changed the approved staged tree; reviewing the repaired tree again.",
-        });
-        return undefined;
-    };
-
-    const finishReviewAttempt = async (
-        input: WorkflowExecutorInput,
-        checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
-        invariant: { readonly branch: string; readonly head: string },
-        review: ReviewAttempt,
-        reviews: ReadonlyArray<ReviewAttempt>,
-        attempt: number,
-        isRepeated: boolean,
-    ): Promise<WorkflowExecutorResult | undefined> =>
-        review.decision.verdict === ReviewVerdict.Approved
-            ? await handleApprovedReview(
-                  input,
-                  checkpoint,
-                  invariant,
-                  review,
-                  attempt,
-              )
-            : await handleReviewDecision(
-                  input,
-                  checkpoint,
-                  invariant,
-                  review,
-                  reviews,
-                  attempt,
-                  isRepeated,
-              );
-
-    const runReviewLoop = async (
-        input: WorkflowExecutorInput,
-        checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
+        checkpoint: IssueCheckpoint,
         invariant: { readonly branch: string; readonly head: string },
     ): Promise<WorkflowExecutorResult> => {
-        const { context, artifacts } = input;
-        const reviews: ReviewAttempt[] = [];
-        for (let attempt = 1; attempt <= REVIEW_ITERATION_LIMIT; attempt += 1) {
-            checkSignal(context.signal);
-            const verification = await ensureVerificationPassing(
-                input,
-                invariant,
-                checkpoint,
-            );
-            if (!("status" in verification)) return verification;
-            const review = await runReviewAttempt(
-                input,
-                invariant,
-                attempt,
-                verification.verification,
-                reviews,
-                checkpoint,
-            );
-            if ("kind" in review) return review;
-            const isRepeated = sameBlockingFindings(reviews.at(-1), review);
-            reviews.push(review);
-            await artifacts.appendReview(review, context.signal);
-            const outcome = await finishReviewAttempt(
+        try {
+            return await runImplementationAttempts(
                 input,
                 checkpoint,
                 invariant,
-                review,
-                reviews,
-                attempt,
-                isRepeated,
             );
-            if (outcome !== undefined) return outcome;
-        }
-        throw new RalphieError({
-            message: "Implementation review loop ended unexpectedly.",
-        });
-    };
-
-    const runImplementationAttempts = async (
-        input: WorkflowExecutorInput,
-        checkpoint: Awaited<ReturnType<typeof readCheckpoint>>,
-        invariant: { readonly branch: string; readonly head: string },
-    ): Promise<WorkflowExecutorResult> => {
-        const { context } = input;
-        const maximumAttempts = context.implementationAttempts ?? 3;
-        let unresolvedSummary: string | undefined;
-        for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
-            const implementation = await runImplementation(
-                input,
-                invariant,
-                checkpoint,
-                attempt,
-                unresolvedSummary,
-            );
-            if (implementation !== undefined) return implementation;
-            checkSignal(context.signal);
-            await stage(
-                progress,
-                input,
-                "change-staging",
-                `Inspecting and staging implementation attempt ${attempt}...`,
-                () => operations.stageAll(context.repositoryPath),
-                `Implementation attempt ${attempt} inspected.`,
-                undefined,
-                attempt,
-            );
-            if (await operations.hasStagedChanges(context.repositoryPath)) {
-                return await runReviewLoop(input, checkpoint, invariant);
+        } catch (error) {
+            if (
+                input.context.signal?.aborted === true ||
+                haltingFailure(error) !== undefined
+            ) {
+                throw error;
             }
-            const noChange = await inspectNoChangeResolution(
-                input,
-                checkpoint,
-                attempt === maximumAttempts,
-            );
-            if (!("unresolvedSummary" in noChange)) return noChange;
-            unresolvedSummary = noChange.unresolvedSummary;
+            return {
+                kind: IssueExecutionOutcomeKind.Failed,
+                message: asRalphieError(error).message,
+            };
         }
-        throw new RalphieError({
-            message: "Implementation retry loop ended unexpectedly.",
-        });
     };
 
     const executeImplementation = async (
@@ -1038,7 +515,11 @@ export const makeImplementationExecutorService = (
         if (recovered !== undefined) return recovered;
 
         const { checkpoint, invariant } = await prepareAttempt(input);
-        return await runImplementationAttempts(input, checkpoint, invariant);
+        return await handOffWhenExhausted(
+            input,
+            checkpoint,
+            await runAttemptsOrFail(input, checkpoint, invariant),
+        );
     };
 
     return {

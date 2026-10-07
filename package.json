@@ -1,7 +1,7 @@
 {
   "name": "@beremaran/ralphie",
   "version": "0.1.2",
-  "description": "Turn a GitHub issue queue into reviewed commits with pi.",
+  "description": "Turn a GitHub issue queue into reviewed commits with coding-agent harnesses.",
   "module": "./dist/ralphie.js",
   "main": "./dist/ralphie.js",
   "type": "module",
@@ -18,12 +18,14 @@
     "LICENSE",
     "docs/architecture.md",
     "docs/cli-reference.md",
+    "docs/configuration.md",
     "docs/development.md",
     "docs/getting-started.md",
     "docs/operations-and-recovery.md",
     "docs/README.md",
     "docs/safety.md",
-    "docs/workflows.md"
+    "docs/workflows.md",
+    "vendor/mattpocock-skills"
   ],
   "repository": {
     "type": "git",
@@ -41,7 +43,7 @@
     "github-issues",
     "automation",
     "ai",
-    "pi",
+    "claude-code",
     "agent",
     "npm"
   ],
@@ -58,8 +60,6 @@
     "typescript": "^5"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "^0.85.1",
-    "@earendil-works/pi-ai": "^0.85.1",
     "@opentui/core": "^0.5.11",
     "octokit": "^5.0.5",
     "proper-lockfile": "^4.1.2",
@@ -78,6 +78,8 @@
     "package:inspect": "bun run scripts/package-smoke.ts --dry-run",
     "prepack": "bun run build:package",
     "source:audit": "bun run scripts/source-reachability.ts --json",
+    "smoke:live": "bun run scripts/live-smoke.ts",
+    "skills:sync": "bun run scripts/skills-sync.ts",
     "test": "bun test tests",
     "typecheck": "bunx tsc --noEmit"
   }
