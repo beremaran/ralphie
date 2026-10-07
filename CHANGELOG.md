@@ -5,6 +5,13 @@ All notable changes to Ralphie are documented here. The project follows
 
 ## [Unreleased]
 
+### Changed
+
+- Agent sessions now inherit Ralphie's GitHub and git authority and may use
+  `gh` to read issues, pull requests, comments and CI results. Prompts instruct
+  sessions not to mutate GitHub or commit/push; these instructions are not
+  technically enforced. See the safety model for the remaining checks.
+
 ## [0.2.2] - 2026-10-07
 
 ### Changed
