@@ -223,7 +223,8 @@ the first prepares the checkout, and the last to finish restores it. If the
 repository has no `docs/agents/issue-tracker.md` or
 `docs/agents/triage-labels.md`, Ralphie generates them for the session: the
 label table comes from `labels`, and the tracker doc says issue content is in
-the prompt and sessions must not use `gh`. Committed versions always win.
+the prompt, permits `gh` reads, and instructs sessions not to mutate the
+tracker. Committed versions always win.
 
 ### `limits`
 

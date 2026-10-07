@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR-0005
 ---
 
 # Sessions never commit, push, or mutate GitHub, even under `/implement`
@@ -12,3 +12,7 @@ restore, the binding between the reviewed tree and the delivered commit, and the
 non-force push checks under Ralphie's control. `/code-review` still needs
 commits to diff against, so Ralphie creates local candidate commits on top of the
 checkpoint and squashes them into one created commit before delivery.
+
+> **Superseded in part by ADR-0005.** Sessions now inherit GitHub and git
+> authority, so "never" is a prompt instruction, not an enforced boundary. The
+> candidate-commit and verified-delivery design above still applies.

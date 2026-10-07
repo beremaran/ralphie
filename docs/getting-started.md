@@ -27,9 +27,8 @@ checkout. It brings its own login, so Ralphie asks for no model credentials
 and stores none. Pick the harness, model and effort per role with the
 `harnesses` and `roles` keys in the
 [configuration file](configuration.md#harnesses-and-roles); without them every
-role uses Claude Code with its own defaults. Sessions never commit, push, or
-mutate GitHub; Ralphie's deterministic services do (see the
-[safety model](safety.md#agent-and-mutation-boundaries)).
+role uses Claude Code with its own defaults. Sessions inherit Ralphie's GitHub
+and git authority; see the [safety model](safety.md#session-authority).
 
 For interactive GitHub authentication, run `gh auth login` and verify the
 selected account with `gh auth status`. For unattended runs, supply a token

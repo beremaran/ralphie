@@ -34,6 +34,47 @@ const exists = async (path: string): Promise<boolean> =>
         () => false,
     );
 
+const expectReadOnlyTrackerGuide = (guide: string | undefined): void => {
+    expect(guide).toContain(
+        "You may use the `gh` CLI to read issues, pull requests, comments and CI results.",
+    );
+    expect(guide).toContain(
+        "Do not create, edit, comment on, label, close or reopen",
+    );
+    expect(guide).toContain(
+        "Ralphie performs every change to the tracker itself.",
+    );
+    expect(guide).not.toMatch(
+        /\bgh\s+(?:issue\s+(?:create|comment|edit|close|reopen)|pr\s+(?:create|comment|edit|close|reopen|review))\b/i,
+    );
+
+    expect(guide).not.toMatch(/\b(?:POST|PATCH|PUT|DELETE)\b/i);
+    const apiLines = Array.from(
+        (guide ?? "").matchAll(/`(gh api[^`]*)`/g),
+        (match) => match[1] ?? "",
+    );
+    expect(apiLines.every((line) => /\bgh api --method GET\b/.test(line))).toBe(
+        true,
+    );
+};
+
+const expectTrackerReadCommands = (guide: string | undefined): void => {
+    expect(guide).toContain("never use the API to write tracker data.");
+    expect(guide).toContain("gh api --method GET");
+
+    for (const command of [
+        "gh issue view",
+        "gh issue list",
+        "gh pr view",
+        "gh pr diff",
+        "gh pr list",
+        "gh run list",
+        "gh run view",
+    ]) {
+        expect(guide).toContain(command);
+    }
+};
+
 let root: string;
 let skills: string;
 let checkout: string;
@@ -176,24 +217,34 @@ describe("shadowing", () => {
 });
 
 describe("generated docs", () => {
-    test("render the label table and forbid gh", async () => {
+    test("render labels and tell sessions to use gh for read-only tracker access", async () => {
         const { seen } = await sessionView("claude");
         expect(seen["labels"]).toContain("| `ready-for-agent` | `agent-ok` |");
-        expect(seen["tracker"]).toContain("prompt");
-        expect(seen["tracker"]).toContain("gh");
+        expect(seen["tracker"]).toContain(
+            "Ralphie supplies the issue content in the prompt.",
+        );
+        expectReadOnlyTrackerGuide(seen["tracker"]);
+        expect(seen["tracker"]).not.toContain("Do not use the `gh` CLI");
+        expect(seen["tracker"]).not.toContain("do not call the GitHub API");
     });
 
-    test("the repository's committed docs win and stay untouched", async () => {
+    test("committed issue-tracker guidance keeps injected access read-only", async () => {
         const docs = join(checkout, "docs/agents");
         await mkdir(docs, { recursive: true });
-        await writeFile(join(docs, "issue-tracker.md"), "committed");
+        const committedTracker = await readFile(
+            join(import.meta.dir, "../../docs/agents/issue-tracker.md"),
+            "utf8",
+        );
+        await writeFile(join(docs, "issue-tracker.md"), committedTracker);
 
         const { seen } = await sessionView("claude");
 
-        expect(seen["tracker"]).toBe("committed");
+        expect(seen["tracker"]).toBe(committedTracker);
+        expectReadOnlyTrackerGuide(seen["tracker"]);
+        expectTrackerReadCommands(seen["tracker"]);
         expect(seen["labels"]).toContain("agent-ok");
         expect(await readFile(join(docs, "issue-tracker.md"), "utf8")).toBe(
-            "committed",
+            committedTracker,
         );
         expect(await exists(join(docs, "triage-labels.md"))).toBe(false);
         const exclude = await readFile(

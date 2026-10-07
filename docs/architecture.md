@@ -33,7 +33,7 @@ that binds concrete adapters into the runtime bundle.
 | --- | --- | --- |
 | `agent` | `src/agent/` | Prompts, structured-output and text-task helpers, and the role-to-session mapping (access mode, timeouts) over the harness port. Kept apart from `harness` on purpose: `agent` holds Ralphie's own prompts and role policy, while `harness` stays provider-neutral session plumbing that knows nothing about issues. |
 | `config` | `src/config/` | YAML configuration: the zod schema (`settings.ts`), layering and `--set` overrides (`load.ts`, `overrides.ts`), and the file-reader port with its Bun YAML adapter. |
-| `harness` | `src/harness/` | Provider-neutral harness port (session request, events, typed failures, structured results), the service that runs sessions and repairs invalid results, and one CLI adapter per harness (Claude Code, Codex, pi and OpenCode). Every workflow session runs through it, wrapped by session isolation, the read-only fingerprint guard and skill injection; `app/roles.ts` resolves the configured role assignments. The vendored skills live in `vendor/mattpocock-skills/` (see [Development](development.md#vendored-skills)). |
+| `harness` | `src/harness/` | Provider-neutral harness port (session request, events, typed failures, structured results), the service that runs sessions and repairs invalid results, and one CLI adapter per harness (Claude Code, Codex, pi and OpenCode). Every workflow session runs through it with the read-only fingerprint guard and skill injection; the session environment inherits Ralphie's GitHub and git authority (see [Safety](safety.md#session-authority)). `app/roles.ts` resolves the configured role assignments. The vendored skills live in `vendor/mattpocock-skills/` (see [Development](development.md#vendored-skills)). |
 | `github` | `src/github/` | Issue value objects, repository slug parsing, and the Octokit/`gh` adapters. |
 | `git` | `src/git/` | Checkout preparation, checkpoints, issue operations, invariants, and remote-safety adapters. |
 | `issues` | `src/issues/` | Domain (`domain/`), executors and artifact/recovery logic (`app/`), filesystem adapters (`adapters/`). |
@@ -105,11 +105,13 @@ Spike against OpenCode v2.0.22 (the published docs mostly describe v1). The reco
 
 ## Dependency and side-effect rules
 
-Agents own reasoning and edits within their permitted tool boundary. They do not
-own commits, pushes, issue mutations, or delivery sequencing. Deterministic
-services under `src/git/adapters/` and `src/github/adapters/` perform those side
-effects and verify their invariants. The explicit runtime object makes these
-boundaries testable without a framework-specific execution model.
+Sessions handle reasoning and code edits; Ralphie's deterministic services own
+the intended commit, push, tracker mutation, and delivery sequence. Prompts
+instruct sessions not to commit, push, or mutate GitHub (see
+[Session authority](safety.md#session-authority)). The adapters under `src/git/adapters/` and
+`src/github/adapters/` perform Ralphie's side effects and verify their
+invariants. The explicit runtime object makes this intended workflow
+testable without a framework-specific execution model.
 
 The `GitRepositoryFactsService` port in `src/git/ports.ts` reads HEAD, branch, status, recent log, and tracked files so read-only prompts, whose sessions have no shell, receive them as a `<repository-facts>` block.
 

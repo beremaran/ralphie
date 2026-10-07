@@ -24,3 +24,6 @@ so it carries no lesson against this decision.
   sandbox or approval system (OpenCode, pi) can only run editing roles with an
   explicit `approval: yolo`.
 - The in-TUI model picker is gone; models are configured per harness and role.
+
+> **Update:** ADR-0005 removed the credential and push-URL isolation named above.
+> The read-only check and structured-result validation remain.
