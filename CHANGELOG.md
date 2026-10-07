@@ -5,6 +5,16 @@ All notable changes to Ralphie are documented here. The project follows
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-07
+
+### Fixed
+
+- The tag-triggered publish workflow now passes the release tag to its
+  validation step, and publishes with `npm publish --provenance` through npm
+  trusted publishing instead of a stored token. 0.2.0 was published by hand;
+  0.2.1 is the first release published by the workflow. There are no changes to
+  the CLI.
+
 ## [0.2.0] - 2026-10-07
 
 This release replaces the in-process pi agent with headless harness CLIs and
@@ -828,5 +838,6 @@ describe history, not the current tool.
 - Prevent no-change agent runs from being silently skipped without proving
   whether the issue is already resolved.
 
-[Unreleased]: https://github.com/beremaran/ralphie/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/beremaran/ralphie/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/beremaran/ralphie/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/beremaran/ralphie/compare/v0.1.2...v0.2.0
