@@ -1,6 +1,6 @@
 {
   "name": "@beremaran/ralphie",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Turn a GitHub issue queue into reviewed commits with coding-agent harnesses.",
   "module": "./dist/ralphie.js",
   "main": "./dist/ralphie.js",

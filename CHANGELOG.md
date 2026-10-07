@@ -5,6 +5,14 @@ All notable changes to Ralphie are documented here. The project follows
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-10-07
+
+### Changed
+
+- The README quick start now shows a global install, `bun add -g
+  @beremaran/ralphie`, next to the scoped `bunx` command. There are no changes
+  to the CLI.
+
 ## [0.2.1] - 2026-10-07
 
 ### Fixed
@@ -838,6 +846,7 @@ describe history, not the current tool.
 - Prevent no-change agent runs from being silently skipped without proving
   whether the issue is already resolved.
 
-[Unreleased]: https://github.com/beremaran/ralphie/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/beremaran/ralphie/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/beremaran/ralphie/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/beremaran/ralphie/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/beremaran/ralphie/compare/v0.1.2...v0.2.0
