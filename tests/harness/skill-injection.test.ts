@@ -176,11 +176,23 @@ describe("shadowing", () => {
 });
 
 describe("generated docs", () => {
-    test("render the label table and forbid gh", async () => {
+    test("render labels and tell sessions to use gh for read-only tracker access", async () => {
         const { seen } = await sessionView("claude");
         expect(seen["labels"]).toContain("| `ready-for-agent` | `agent-ok` |");
-        expect(seen["tracker"]).toContain("prompt");
-        expect(seen["tracker"]).toContain("gh");
+        expect(seen["tracker"]).toContain(
+            "Ralphie supplies the issue content in the prompt.",
+        );
+        expect(seen["tracker"]).toContain(
+            "You may use the `gh` CLI to read issues, pull requests, comments and CI results.",
+        );
+        expect(seen["tracker"]).toContain(
+            "Do not create, edit, comment on, label, close or reopen anything.",
+        );
+        expect(seen["tracker"]).toContain(
+            "Ralphie performs every change to the tracker itself.",
+        );
+        expect(seen["tracker"]).not.toContain("Do not use the `gh` CLI");
+        expect(seen["tracker"]).not.toContain("do not call the GitHub API");
     });
 
     test("the repository's committed docs win and stay untouched", async () => {
