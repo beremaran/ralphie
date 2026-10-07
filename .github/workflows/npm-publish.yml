@@ -28,6 +28,8 @@ jobs:
       - run: bun install --frozen-lockfile
 
       - name: Validate tag and package version
+        env:
+          TAG: ${{ github.ref_name }}
         run: bun scripts/validate-npm-context.ts
 
       - name: Build the package
