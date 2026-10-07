@@ -103,8 +103,7 @@ export const makeGitIssueOperationsService = (
                 message: "Cannot push an issue commit to an empty branch name.",
             });
         }
-        // The workspace's push URL is disabled so sessions cannot push; the
-        // delivery push names the fetch URL explicitly instead.
+        // Name origin's fetch URL explicitly instead of relying on a push URL.
         const url = (
             await requireSuccess(
                 runner,

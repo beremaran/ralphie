@@ -64,13 +64,6 @@ test("prepares an existing repository through the command runner", async () => {
         expect(operations).toEqual([
             ["rev-parse", "--is-inside-work-tree"],
             ["remote", "get-url", "origin"],
-            [
-                "remote",
-                "set-url",
-                "--push",
-                "origin",
-                "disabled://ralphie-sessions-cannot-push",
-            ],
             ["fetch", "--prune", "origin"],
             ["status", "--porcelain"],
             ["reset", "--hard"],
