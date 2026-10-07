@@ -24,6 +24,13 @@ Run the latest release without installing globally:
 bunx @beremaran/ralphie --version
 ```
 
+Or install it globally; the command it provides is `ralphie`:
+
+```bash
+bun add -g @beremaran/ralphie
+ralphie --version
+```
+
 Write a starter config with `bunx @beremaran/ralphie init` (it detects the
 harnesses on PATH; see [Configuration](./docs/configuration.md)), then run the
 issue queue:
