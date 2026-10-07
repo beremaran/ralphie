@@ -42,9 +42,8 @@ either. Resolve it with `gh pr view 42` and fall back to `gh issue view 42`.
 
 ## Skills that ask to publish tracker content
 
-Do not publish it yourself. Return the proposed issue, comment, label change or
-other tracker update in your structured result so Ralphie can decide whether to
-apply it.
+Do not publish it yourself. Ralphie owns tracker updates; describe the proposed
+change in your response instead.
 
 When a skill says to fetch a ticket, run `gh issue view <number> --comments`.
 

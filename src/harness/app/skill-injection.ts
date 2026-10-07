@@ -75,6 +75,7 @@ Ralphie supplies the issue content in the prompt. Work from that text.
 You may use the \`gh\` CLI to read issues, pull requests, comments and CI results.
 Do not create, edit, comment on, label, close or reopen anything.
 Ralphie performs every change to the tracker itself.
+For raw GitHub API calls, pass \`--method GET\`; never use the API to write.
 `;
 
 const labelsDoc = (labels: TriageLabels): string =>

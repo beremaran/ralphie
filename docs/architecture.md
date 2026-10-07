@@ -107,12 +107,10 @@ Spike against OpenCode v2.0.22 (the published docs mostly describe v1). The reco
 
 Sessions handle reasoning and code edits; Ralphie's deterministic services own
 the intended commit, push, tracker mutation, and delivery sequence. Prompts
-instruct sessions not to commit, push, or mutate GitHub. Sessions inherit
-Ralphie's GitHub and git authority, so those instructions are behavioral and
-are not technically enforced. The adapters under `src/git/adapters/` and
+instruct sessions not to commit, push, or mutate GitHub (see
+[Session authority](safety.md#session-authority)). The adapters under `src/git/adapters/` and
 `src/github/adapters/` perform Ralphie's side effects and verify their
-invariants; see [Session authority](safety.md#session-authority) for the
-remaining limits. The explicit runtime object makes this intended workflow
+invariants. The explicit runtime object makes this intended workflow
 testable without a framework-specific execution model.
 
 The `GitRepositoryFactsService` port in `src/git/ports.ts` reads HEAD, branch, status, recent log, and tracked files so read-only prompts, whose sessions have no shell, receive them as a `<repository-facts>` block.

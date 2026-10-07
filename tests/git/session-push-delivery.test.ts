@@ -8,6 +8,9 @@ import { makeGitRemoteSafetyService } from "../../src/git/adapters/remote-safety
 import { makeGitRepositoryService } from "../../src/git/adapters/repository.ts";
 import { CommandRunnerLive } from "../../src/process/adapters/command-runner.ts";
 import type { CommandRunnerService } from "../../src/process/ports.ts";
+import { IssueArtifactKind } from "../../src/issues/app/artifacts.ts";
+import type { WorkflowExecutorInput } from "../../src/issues/app/execution-model.ts";
+import { makeImplementationExecutorService } from "../../src/issues/app/implementation-executor.ts";
 import { commitCleanGitBase } from "../shared/git-fixture.ts";
 
 const ORIGIN_URL = "https://github.com/owner/repository.git";
@@ -113,7 +116,7 @@ test("workspace preparation preserves origin's push URL and delivery is non-forc
     }
 });
 
-test("delivery rejects an early session push before pushing its created commit", async () => {
+test("implementation executor rejects an early session push before pushing its created commit", async () => {
     const harness = await prepareLocalRemote();
     try {
         const { work, remote, baseSha, runner, commands } = harness;
@@ -128,23 +131,45 @@ test("delivery rejects an early session push before pushing its created commit",
         await run(work, "commit", "-q", "-m", "created delivery commit");
         const createdSha = await run(work, "rev-parse", "HEAD");
 
-        const deliver = async () => {
-            await makeGitRemoteSafetyService(runner).verifyDirectPush({
+        const artifacts = {
+            invalidateStaleIssueDecisions: async () => undefined,
+            has: (kind: IssueArtifactKind) =>
+                kind === IssueArtifactKind.IssueCheckpoint ||
+                kind === IssueArtifactKind.CreatedCommit,
+            read: async (kind: IssueArtifactKind) =>
+                kind === IssueArtifactKind.IssueCheckpoint
+                    ? { branch: "main", sha: baseSha }
+                    : { sha: createdSha },
+        };
+        const executor = makeImplementationExecutorService(
+            {} as never,
+            makeGitIssueOperationsService(runner),
+            makeGitRemoteSafetyService(runner),
+            {} as never,
+            { emit: async () => undefined },
+        );
+        const input = {
+            artifacts,
+            context: {
+                issue: {
+                    number: 7,
+                    title: "t",
+                    body: "b",
+                    labels: [],
+                    updatedAt: "2026-10-07T00:00:00Z",
+                    commentCount: 0,
+                },
                 repository: "owner/repository",
                 repositoryPath: work,
-                branch: "main",
-                intendedBaseSha: baseSha,
-                expectedCommitSha: createdSha,
-                pushMode: "non-force",
-            });
-            await makeGitIssueOperationsService(runner).push(
-                work,
-                "main",
-                createdSha,
-            );
-        };
+                targetBranch: "main",
+                repositoryInvariant: {
+                    capture: async () => ({ branch: "main", head: createdSha }),
+                    verify: async () => undefined,
+                },
+            },
+        } as unknown as WorkflowExecutorInput;
 
-        await expect(deliver()).rejects.toMatchObject({
+        await expect(executor.execute(input)).rejects.toMatchObject({
             name: "GitRemoteSafetyError",
             kind: "diverged-base",
             message: `Remote origin/main moved from intended base ${baseSha} to ${sessionSha}.`,

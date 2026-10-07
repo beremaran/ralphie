@@ -28,10 +28,7 @@ and stores none. Pick the harness, model and effort per role with the
 `harnesses` and `roles` keys in the
 [configuration file](configuration.md#harnesses-and-roles); without them every
 role uses Claude Code with its own defaults. Sessions inherit Ralphie's GitHub
-and git authority. Prompts allow `gh` reads and instruct sessions not to mutate
-GitHub or commit/push; these instructions are not technical enforcement. See
-the [safety model](safety.md#session-authority) for the remaining checks and
-their limits.
+and git authority; see the [safety model](safety.md#session-authority).
 
 For interactive GitHub authentication, run `gh auth login` and verify the
 selected account with `gh auth status`. For unattended runs, supply a token

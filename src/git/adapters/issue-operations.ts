@@ -103,7 +103,7 @@ export const makeGitIssueOperationsService = (
                 message: "Cannot push an issue commit to an empty branch name.",
             });
         }
-        // Name origin's fetch URL explicitly instead of relying on a push URL.
+        // Push to the explicit URL so the push targets it, not a configured remote.
         const url = (
             await requireSuccess(
                 runner,

@@ -204,10 +204,7 @@ Reviewing a sync pull request:
 1. Read the upstream diff in the pull request (or its compare link) for each
    driven skill, not only the vendored paths.
 2. Check whether the new skill text fits Ralphie's intended flow: schema-validated
-   tool results and direct delivery by deterministic services. Prompts instruct
-   sessions not to commit, push, or mutate GitHub; because sessions inherit that
-   authority, the prompt states intended behavior rather than enforcing it.
-   Where skill text conflicts, change the Ralphie skill overlay in the same
+   tool results and direct delivery by deterministic services. Where skill text conflicts, change the Ralphie skill overlay in the same
    pull request, never the vendored files.
 3. Pull requests opened with the workflow's token do not trigger CI. Close and
    reopen the pull request, or run `bun run check` on its branch, before merging.
@@ -223,8 +220,7 @@ Before submitting a change:
 1. Add or update tests for the behavior.
 2. Run `bun run check`.
 3. Keep Ralphie's intended Git and GitHub mutation workflow inside deterministic
-   domain services. Prompts instruct sessions not to commit, push, or mutate
-   GitHub, but sessions inherit that authority and can ignore the instructions.
+   domain services. See [Session authority](safety.md#session-authority).
 4. Update the authoritative page under [`docs/`](README.md) when documentation
    changes. Update [`CHANGELOG.md`](../CHANGELOG.md) when the command surface, the
    output shape, the run-state version, or the recovery contract changes.

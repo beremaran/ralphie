@@ -37,7 +37,7 @@ Flow: `index.ts` → `src/cli.ts` / `src/command.ts` / `src/options.ts` (inbound
 - Octokit appears only in the `github` context.
 - Application code never reads the clock, generates IDs, or builds workspace paths itself. `Clock`, `IdGenerator`, and `RunLayout` are injected.
 
-Ralphie's intended workflow assigns reasoning and edits to sessions and Git, GitHub, run-state, and safety side effects to deterministic services. Prompts instruct sessions not to commit, push, or mutate GitHub, but sessions inherit GitHub and git authority, so those instructions are not access controls. The adapters in `src/git/adapters/` and `src/github/adapters/` own and verify Ralphie's operations, including non-force push, checkpoint restore, and remote rechecks.
+Ralphie's intended workflow assigns reasoning and edits to sessions and Git, GitHub, run-state, and safety side effects to deterministic services. Session authority and its limits are described in `docs/safety.md`. The adapters in `src/git/adapters/` and `src/github/adapters/` own and verify Ralphie's operations, including non-force push, checkpoint restore, and remote rechecks.
 
 Agent output is structured: results are zod-validated values (the harness's native schema output where it has one, otherwise a final fenced JSON block, with bounded correction turns), not prose. Prose or premature termination does not count as completion.
 
@@ -64,7 +64,7 @@ Releases: bump `package.json` `version` and `CHANGELOG.md`, then push a `v<x.y.z
 
 ### Issue tracker
 
-Issues live in this repo's GitHub Issues, operated via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+Issues live in this repo's GitHub Issues, operated via the `gh` CLI. `docs/agents/issue-tracker.md` is the read-only guide Ralphie sessions receive; maintainers write to the tracker with `gh` directly.
 
 ### Triage labels
 
