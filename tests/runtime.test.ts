@@ -77,9 +77,25 @@ describe("runtime factory", () => {
         expect(outcome).toMatchObject({ ok: false, failure: { kind: "exit" } });
     });
 
-    test("runs sessions isolated from credentials and guards read-only ones", async () => {
+    test("passes the session environment through and guards read-only sessions", async () => {
         const fixture = await makeGitFixture();
         const harnessCalls: CommandRunOptions[] = [];
+        const sessionEnv = {
+            GH_TOKEN: "gh-token",
+            GITHUB_TOKEN: "github-token",
+            GH_ENTERPRISE_TOKEN: "gh-enterprise-token",
+            GITHUB_ENTERPRISE_TOKEN: "github-enterprise-token",
+            GH_CONFIG_DIR: "/home/me/.config/gh",
+            SSH_AUTH_SOCK: "/tmp/ssh-agent.sock",
+            SSH_ASKPASS: "/usr/bin/ssh-askpass",
+            GIT_ASKPASS: "/usr/bin/git-askpass",
+            GIT_CONFIG_GLOBAL: "/home/me/.gitconfig",
+            GIT_CONFIG_SYSTEM: "/etc/gitconfig",
+            GIT_CONFIG_NOSYSTEM: "0",
+            GIT_CONFIG_COUNT: "0",
+            GIT_TERMINAL_PROMPT: "1",
+            GIT_SSH_COMMAND: "ssh -i /home/me/.ssh/id_ed25519",
+        };
         const runtime = makeLiveRuntime({
             progress: makeTestProgressRecorder([]),
             runEventLog: { append: () => {}, close: () => {} },
@@ -111,6 +127,7 @@ describe("runtime factory", () => {
                 directory: fixture.repositoryPath,
                 access: "read-only",
                 timeoutMs: 1_000,
+                env: sessionEnv,
             });
 
             expect(outcome).toMatchObject({
@@ -119,11 +136,7 @@ describe("runtime factory", () => {
             });
             expect(harnessCalls).toHaveLength(1);
             const env = harnessCalls[0]?.env ?? {};
-            // An undefined entry removes the variable from the child.
-            expect("GH_TOKEN" in env).toBe(true);
-            expect(env["GH_TOKEN"]).toBeUndefined();
-            expect(env["GH_CONFIG_DIR"]).toBeString();
-            expect(env["GIT_SSH_COMMAND"]).toBe("false");
+            expect(env).toEqual(sessionEnv);
         } finally {
             await fixture.cleanup();
         }

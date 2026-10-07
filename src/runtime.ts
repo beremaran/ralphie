@@ -74,11 +74,7 @@ import { makeHarnessService } from "./harness/app/harness-service.ts";
 import { nodeSkillFileSystem } from "./harness/adapters/skill-file-system.ts";
 import { makeSessionPreparation } from "./harness/app/skill-injection.ts";
 import type { TriageLabels } from "./issues/domain/triage-roles.ts";
-import {
-    guardReadOnlySessions,
-    isolateSessions,
-} from "./harness/app/session-isolation.ts";
-import { makeTemporaryScratchDirectories } from "./harness/adapters/scratch-directory.ts";
+import { guardReadOnlySessions } from "./harness/app/read-only-session-guard.ts";
 import { makeGitWorkingTreeService } from "./git/adapters/working-tree.ts";
 import { makeGitRepositoryFactsService } from "./git/adapters/repository-facts.ts";
 import { provideRepositoryFacts } from "./agent/repository-facts.ts";
@@ -221,7 +217,7 @@ export const makeLiveRuntime = ({
     });
     const harness = provideRepositoryFacts(
         guardReadOnlySessions(
-            isolateSessions(bareHarness, makeTemporaryScratchDirectories()),
+            bareHarness,
             makeGitWorkingTreeService(commandRunner).fingerprint,
         ),
         makeGitRepositoryFactsService(commandRunner).read,
