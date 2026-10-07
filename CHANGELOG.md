@@ -5,6 +5,8 @@ All notable changes to Ralphie are documented here. The project follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-07
+
 This release replaces the in-process pi agent with headless harness CLIs and
 moves every setting into a configuration file. It contains breaking changes to
 the command line, the configuration, the run state, the JSON Lines output, and
@@ -826,4 +828,5 @@ describe history, not the current tool.
 - Prevent no-change agent runs from being silently skipped without proving
   whether the issue is already resolved.
 
-[Unreleased]: https://github.com/beremaran/ralphie/commits/main
+[Unreleased]: https://github.com/beremaran/ralphie/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/beremaran/ralphie/compare/v0.1.2...v0.2.0
