@@ -134,7 +134,8 @@ package:check` packs, installs, and runs it in an isolated directory, and
 `package.json` `version` and `CHANGELOG.md`, push a `v<major>.<minor>.<patch>`
 tag, and the tag-triggered publish workflow validates the tag/package version
 (`scripts/validate-npm-context.ts`), builds, smoke-checks, and runs
-`bun publish`. No other distribution channel exists.
+`npm publish --provenance` using npm trusted publishing (OIDC; no stored
+token). No other distribution channel exists.
 
 The `bun run test` suite is deliberately offline: it combines fast in-memory
 unit tests with local integration, PTY, and temporary-checkout coverage. It does
