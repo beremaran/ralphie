@@ -35,10 +35,12 @@ force-pushed over. Cancellation is checked at every mutation boundary, the push
 is attempted at most once, and failures and cancellations leave a clean,
 recoverable checkout.
 
-Implementation agents may use whatever shell their harness grants. Ralphie does
-not filter their commands: the guardrails are the session environment (see
-[Session isolation](#session-isolation)) and the deterministic repository
-invariants and delivery services, which remain authoritative.
+Implementation sessions may use whatever shell their harness grants. Ralphie
+does not filter their commands: sessions inherit the GitHub and git authority
+available to Ralphie, while prompts state the allowed behavior. The remaining
+automated checks are the read-only fingerprint guard, checkpoint restore, and
+delivery's remote verification and non-force push (see
+[Session authority](#session-authority)).
 
 ## Workspace risk
 
@@ -132,43 +134,37 @@ Each session also has a wall-clock limit
 ([`limits.sessionTimeoutMinutes`](configuration.md#limits)); exceeding it kills
 the session's whole process group, so tools the harness started die with it.
 
-## Session isolation
+## Session authority
 
-Sessions never hold GitHub or push authority (ADR-0003); the session
-environment enforces it instead of the prompts.
+Every session inherits the GitHub and git authority available to Ralphie,
+including its token or `gh auth login` profile and its git credentials. Sessions
+may use `gh` to read issues, pull requests, comments and CI results. Their
+prompts instruct them not to create, edit, comment on, label, close or reopen
+GitHub issues, and not to commit or push. These are behavioral instructions,
+not technical restrictions: a session that ignores them can mutate GitHub or
+commit and push when the inherited credentials allow it. The `origin` push URL
+is not disabled inside the workspace.
 
-- **No credentials.** Every session starts without `GH_TOKEN`, `GITHUB_TOKEN`,
-  `GH_ENTERPRISE_TOKEN` and `GITHUB_ENTERPRISE_TOKEN`, and with `GH_CONFIG_DIR`
-  pointing at a fresh, empty temporary directory that is removed when the
-  session ends, so a stored `gh` login is not visible either. These entries
-  override anything a request sets.
-- **No SSH or git credentials.** Every session also starts without
-  `SSH_AUTH_SOCK`, `SSH_ASKPASS` and `GIT_ASKPASS`, with `GIT_CONFIG_GLOBAL`
-  and `GIT_CONFIG_SYSTEM` set to `/dev/null` and the repository's
-  `credential.helper` list reset (so no credential helper applies),
-  `GIT_TERMINAL_PROMPT=0`, and `GIT_SSH_COMMAND=false`, so a git remote cannot
-  authenticate through an ssh agent, a helper or a prompt. Ralphie's own
-  delivery push runs outside sessions and is unaffected.
-- **Residual limitation.** The environment cannot hide credentials that a
-  process running as the same OS user can read directly: a private key under
-  `~/.ssh` used through an explicit `ssh -i`, a `gh` token read straight out of
-  the operating system keyring (for example with `security find-generic-password`
-  on macOS), or a credential file read by path. `gh` itself is logged out in a
-  session even when its token lives in the keyring, because it finds keyring
-  entries through the hosts file in its now-empty config directory. Ralphie does not claim to block these, and a determined
-  yolo session could still use them. What it guarantees is that it never hands
-  a token to a session, that the checkout's push URL is disabled, and that its
-  own delivery push is verified against the remote. To close the gap, run
-  Ralphie as a dedicated OS user whose home, keyring and ssh keys hold no
-  credentials for the repository.
-- **No push from the workspace.** After preparing the checkout Ralphie sets
-  origin's push URL to a disabled value, so `git push` inside the workspace
-  fails. Ralphie's own delivery push names the fetch URL explicitly, never
-  uses force, and is verified against the remote afterwards.
-- **Read-only means unchanged.** Before and after every read-only session
+Ralphie retains three checks around session work:
+
+- **Read-only fingerprint guard.** Before and after every read-only session,
   Ralphie fingerprints HEAD, the index, tracked changes and untracked file
-  contents. Any difference fails the session (kind `access`), which fails the
-  issue closed.
+  contents. Any difference fails the session (kind `access`) and the issue.
+- **Checkpoint restore.** On a failed issue outcome, Ralphie restores and
+  verifies the local checkout against its saved clean issue checkpoint. This
+  does not undo a GitHub mutation or a push a session already made.
+- **Verified delivery.** Ralphie's delivery push is non-force, rechecks the
+  expected remote branch immediately before pushing, and verifies the remote
+  afterwards. Unexpected remote movement, including an early session push,
+  stops delivery instead of being adopted or overwritten. This detects the
+  movement; it does not reverse the session's push.
+
+For a hard boundary on the credentials and repositories available to sessions,
+run Ralphie under a dedicated OS user with only the intended credentials, or
+use a fine-grained GitHub token scoped to the target repository with only the
+permissions Ralphie needs. Sessions inherit those permissions. A repository
+scope limits which repository the token can reach; it does not make access
+read-only within that repository.
 
 ## Bounded command execution
 
