@@ -10,9 +10,7 @@ import {
 } from "node:fs/promises";
 
 import type { SkillFileSystem } from "../app/skill-injection.ts";
-
-const isMissing = (error: unknown): boolean =>
-    error instanceof Error && "code" in error && error.code === "ENOENT";
+import { hasErrorCode } from "../../shared/error.ts";
 
 /** Node file-system adapter for skill injection. */
 export const nodeSkillFileSystem: SkillFileSystem = {
@@ -21,7 +19,7 @@ export const nodeSkillFileSystem: SkillFileSystem = {
             await stat(path);
             return true;
         } catch (error) {
-            if (isMissing(error)) return false;
+            if (hasErrorCode(error, "ENOENT")) return false;
             throw error;
         }
     },
@@ -32,7 +30,7 @@ export const nodeSkillFileSystem: SkillFileSystem = {
                 .filter((entry) => entry.isDirectory())
                 .map((entry) => entry.name);
         } catch (error) {
-            if (isMissing(error)) return [];
+            if (hasErrorCode(error, "ENOENT")) return [];
             throw error;
         }
     },
@@ -55,7 +53,7 @@ export const nodeSkillFileSystem: SkillFileSystem = {
         try {
             return await readFile(path, "utf8");
         } catch (error) {
-            if (isMissing(error)) return undefined;
+            if (hasErrorCode(error, "ENOENT")) return undefined;
             throw error;
         }
     },

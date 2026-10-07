@@ -8,7 +8,11 @@ import { loadSettings } from "../src/config/load.ts";
 import { parseRepositoryArgument } from "../src/github/repository.ts";
 import { resolveRoleAssignments } from "../src/harness/app/roles.ts";
 import { makeHarnessStartupChecker } from "../src/harness/app/startup-checks.ts";
-import { HARNESS_NAMES, type HarnessProbe } from "../src/harness/ports.ts";
+import {
+    HARNESS_NAMES,
+    type HarnessProbe,
+    UNVERIFIED_HARNESSES,
+} from "../src/harness/ports.ts";
 import {
     temporaryDirectory,
     workflowErrorFor,
@@ -107,7 +111,18 @@ describe("ralphie init", () => {
                 probeWith([harness]),
             )({ roles: resolveRoleAssignments(loaded.settings) });
 
-            expect(report.errors).toEqual([]);
+            if (UNVERIFIED_HARNESSES.includes(harness)) {
+                // The starter leaves the opt-in commented; startup names it.
+                expect(report.errors).toHaveLength(1);
+                expect(report.errors[0]).toContain(
+                    `harnesses.${harness}.experimental: true`,
+                );
+                expect(await readFile(configPathFor(home), "utf8")).toContain(
+                    "# experimental: true",
+                );
+            } else {
+                expect(report.errors).toEqual([]);
+            }
         });
     }
 

@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 
 import {
     IssueArtifactKind,
@@ -8,6 +10,9 @@ import type { HarnessService } from "../src/harness/ports.ts";
 import { sessionsFor } from "./shared/agent-sessions.ts";
 import { makeTestProgressRecorder } from "./shared/progress-recorder.ts";
 import { makeLiveRuntime } from "../src/runtime.ts";
+import { CommandRunnerLive } from "../src/process/adapters/command-runner.ts";
+import type { CommandRunOptions } from "../src/process/ports.ts";
+import { makeGitFixture } from "./shared/git-fixture.ts";
 import { testLayout } from "./shared/test-values.ts";
 
 const originalFetch = globalThis.fetch;
@@ -70,6 +75,58 @@ describe("runtime factory", () => {
 
         expect(spawned).toEqual(["claude"]);
         expect(outcome).toMatchObject({ ok: false, failure: { kind: "exit" } });
+    });
+
+    test("runs sessions isolated from credentials and guards read-only ones", async () => {
+        const fixture = await makeGitFixture();
+        const harnessCalls: CommandRunOptions[] = [];
+        const runtime = makeLiveRuntime({
+            progress: makeTestProgressRecorder([]),
+            runEventLog: { append: () => {}, close: () => {} },
+            layout: testLayout(),
+            commandRunner: {
+                run: async (command, args, options) => {
+                    if (command !== "claude") {
+                        return await CommandRunnerLive.run(
+                            command,
+                            args,
+                            options,
+                        );
+                    }
+                    harnessCalls.push(options ?? {});
+                    // A misbehaving read-only session that edits the tree.
+                    await writeFile(
+                        join(fixture.repositoryPath, "stray.txt"),
+                        "edited\n",
+                    );
+                    return { exitCode: 1, stdout: "", stderr: "stub" };
+                },
+            },
+        });
+        try {
+            const outcome = await runtime.harness.run({
+                role: "spec-reviewer",
+                harness: "claude",
+                prompt: "p",
+                directory: fixture.repositoryPath,
+                access: "read-only",
+                timeoutMs: 1_000,
+            });
+
+            expect(outcome).toMatchObject({
+                ok: false,
+                failure: { kind: "access" },
+            });
+            expect(harnessCalls).toHaveLength(1);
+            const env = harnessCalls[0]?.env ?? {};
+            // An undefined entry removes the variable from the child.
+            expect("GH_TOKEN" in env).toBe(true);
+            expect(env["GH_TOKEN"]).toBeUndefined();
+            expect(env["GH_CONFIG_DIR"]).toBeString();
+            expect(env["GIT_SSH_COMMAND"]).toBe("false");
+        } finally {
+            await fixture.cleanup();
+        }
     });
 
     test("publishes decomposition children with the configured ready-for-agent label", async () => {

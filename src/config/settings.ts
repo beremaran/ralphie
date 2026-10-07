@@ -2,6 +2,10 @@ import { z } from "zod";
 
 import { IssueOrder, IssueSort } from "../github/domain.ts";
 import { HARNESS_NAMES } from "../harness/ports.ts";
+import {
+    TRIAGE_ROLES,
+    type TriageLabels,
+} from "../issues/domain/triage-roles.ts";
 import { DEFAULT_MAX_DECOMPOSITION_DEPTH } from "../issues/domain/decomposition-markdown.ts";
 import {
     DEFAULT_IMPLEMENTATION_ATTEMPTS,
@@ -16,15 +20,6 @@ export const DEFAULT_EDIT_SESSION_TIMEOUT_MINUTES = 60;
 
 /** Minutes one session may run in a read-only role. */
 export const DEFAULT_READ_ONLY_SESSION_TIMEOUT_MINUTES = 15;
-
-/** Matt Pocock's five canonical triage roles, in his documented order. */
-export const TRIAGE_ROLES = [
-    "needs-triage",
-    "needs-info",
-    "ready-for-agent",
-    "ready-for-human",
-    "wontfix",
-] as const;
 
 const INTAKE_SORTS = [
     "created",
@@ -53,13 +48,22 @@ const triageSchema = z.strictObject({
     enabled: z.boolean().default(false),
 });
 
-const labelsSchema = z.strictObject({
-    "needs-triage": nonEmptyString.default("needs-triage"),
-    "needs-info": nonEmptyString.default("needs-info"),
-    "ready-for-agent": nonEmptyString.default("ready-for-agent"),
-    "ready-for-human": nonEmptyString.default("ready-for-human"),
-    wontfix: nonEmptyString.default("wontfix"),
-});
+/** A strict object with one entry per name, so the keys track the list. */
+const keyedBy = <Key extends string, Schema extends z.ZodType>(
+    keys: ReadonlyArray<Key>,
+    schemaFor: (key: Key) => Schema,
+) =>
+    z.strictObject(
+        Object.fromEntries(keys.map((key) => [key, schemaFor(key)])) as Record<
+            Key,
+            Schema
+        >,
+    );
+
+/** Each triage role's label defaults to the role's own name. */
+const labelsSchema = keyedBy(TRIAGE_ROLES, (role) =>
+    nonEmptyString.default(role),
+);
 
 const sessionTimeoutSchema = z.strictObject({
     edit: positiveInteger.default(DEFAULT_EDIT_SESSION_TIMEOUT_MINUTES),
@@ -79,6 +83,8 @@ const limitsSchema = z.strictObject({
     implementationAttempts: positiveInteger.default(
         DEFAULT_IMPLEMENTATION_ATTEMPTS,
     ),
+    // Capped because review attempts are persisted and recovery validates
+    // them against the same bound; verification fixes are never persisted.
     reviewRounds: positiveInteger
         .max(MAX_REVIEW_ROUNDS)
         .default(REVIEW_ITERATION_LIMIT),
@@ -98,14 +104,13 @@ const harnessSettingsSchema = z.strictObject({
     model: nonEmptyString.optional(),
     effort: nonEmptyString.optional(),
     approval: approvalSchema.optional(),
+    /** Opt in to a harness whose adapter is not verified live yet. */
+    experimental: z.boolean().optional(),
 });
 
-const harnessesSchema = z.strictObject({
-    claude: harnessSettingsSchema.optional(),
-    codex: harnessSettingsSchema.optional(),
-    pi: harnessSettingsSchema.optional(),
-    opencode: harnessSettingsSchema.optional(),
-});
+const harnessesSchema = keyedBy(HARNESS_NAMES, () =>
+    harnessSettingsSchema.optional(),
+);
 
 /** A role runs on a harness, optionally with its own model and effort. */
 const roleAssignmentSchema = z.union([
@@ -188,10 +193,7 @@ export const configFileSchema = z.strictObject({
     repos: reposSchema.default({}),
 });
 
-const refineLabels = (
-    labels: Readonly<Record<(typeof TRIAGE_ROLES)[number], string>>,
-    context: z.RefinementCtx,
-): void => {
+const refineLabels = (labels: TriageLabels, context: z.RefinementCtx): void => {
     const roles = new Map<string, string>();
     for (const role of TRIAGE_ROLES) {
         const label = labels[role].toLowerCase();
@@ -215,8 +217,6 @@ export const repositorySettingsSchema = repositoryEntrySchema.superRefine(
 );
 
 export type RepositorySettings = z.output<typeof repositorySettingsSchema>;
-
-export type TriageLabels = RepositorySettings["labels"];
 
 /** Split an `intake.sort` value into the GitHub sort field and direction. */
 export const intakeOrdering = (

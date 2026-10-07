@@ -17,7 +17,7 @@ import { buildDecompositionPrompt } from "../../agent/prompts.ts";
 import { skillInvocation } from "../../harness/app/skill-injection.ts";
 import { requestStructuredOutput } from "../../agent/structured-output.ts";
 import type { ProgressReporterService } from "../../progress/ports.ts";
-import { RalphieError } from "../../shared/error.ts";
+import { RalphieError, errorMessage } from "../../shared/error.ts";
 import {
     IssueArtifactKind,
     type CreatedIssueDependencyMapping,
@@ -31,7 +31,7 @@ import {
     IssueExecutionOutcomeKind,
     type WorkflowExecutorInput,
     type WorkflowExecutorResult,
-} from "./execution.ts";
+} from "./execution-model.ts";
 import type { ReviewAttempt } from "./recovery.ts";
 import type { HandOffRouterService } from "./hand-off.ts";
 import { DEFAULT_MAX_DECOMPOSITION_DEPTH } from "../domain/decomposition-markdown.ts";
@@ -124,8 +124,7 @@ export const makeDecompositionExecutorService = (
             });
             return output;
         } catch (error) {
-            const message =
-                error instanceof Error ? error.message : String(error);
+            const message = errorMessage(error);
             await progress.emit({
                 ...context,
                 stage,

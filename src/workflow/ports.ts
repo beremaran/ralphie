@@ -6,7 +6,7 @@ import type { IssueFilters } from "../github/domain.ts";
 import type {
     IssueExecutionOutcome,
     IssueExecutionOutcomeKind,
-} from "../issues/app/execution.ts";
+} from "../issues/app/execution-model.ts";
 import type { GitHubIssuesService } from "../github/ports.ts";
 import type { GitHubIssueMutationService } from "../github/ports.ts";
 import type {
@@ -33,7 +33,7 @@ import type {
     RunStateStoreService,
 } from "../run/ports.ts";
 import type { WorkspaceService } from "../workspace/ports.ts";
-import type { IssueExecutorService } from "../issues/app/executor.ts";
+import type { IssueExecutorService } from "../issues/app/issue-routing.ts";
 
 /**
  * The focused dependency bundle consumed by the issue workflow.

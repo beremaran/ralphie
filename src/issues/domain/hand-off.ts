@@ -1,4 +1,5 @@
 import { HandOffReason } from "./decisions.ts";
+import { TRIAGE_ROLES, type TriageLabels } from "./triage-roles.ts";
 
 /** The human-facing triage state an issue moves to when it is handed off. */
 export type HandOffTarget = "needs-info" | "ready-for-human";
@@ -31,40 +32,17 @@ export type HandOffLabels = {
     readonly replaces: ReadonlyArray<string>;
 };
 
-export const CANONICAL_HAND_OFF_LABELS: HandOffLabels = {
-    "needs-info": "needs-info",
-    "ready-for-human": "ready-for-human",
-    replaces: [
-        "needs-triage",
-        "needs-info",
-        "ready-for-agent",
-        "ready-for-human",
-        "wontfix",
-    ],
-};
-
-export const handOffLabelsFrom = (
-    labels: Readonly<
-        Record<
-            | "needs-triage"
-            | "needs-info"
-            | "ready-for-agent"
-            | "ready-for-human"
-            | "wontfix",
-            string
-        >
-    >,
-): HandOffLabels => ({
+export const handOffLabelsFrom = (labels: TriageLabels): HandOffLabels => ({
     "needs-info": labels["needs-info"],
     "ready-for-human": labels["ready-for-human"],
-    replaces: [
-        labels["needs-triage"],
-        labels["needs-info"],
-        labels["ready-for-agent"],
-        labels["ready-for-human"],
-        labels.wontfix,
-    ],
+    replaces: TRIAGE_ROLES.map((role) => labels[role]),
 });
+
+export const CANONICAL_HAND_OFF_LABELS: HandOffLabels = handOffLabelsFrom(
+    Object.fromEntries(
+        TRIAGE_ROLES.map((role) => [role, role]),
+    ) as TriageLabels,
+);
 
 export type HandOffContent = {
     readonly reason: HandOffReason;

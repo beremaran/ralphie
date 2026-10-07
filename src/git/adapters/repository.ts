@@ -8,7 +8,7 @@ import {
 import { requireSuccess } from "../../process/require-success.ts";
 import { type CommandRunnerService } from "../../process/ports.ts";
 import type { GitRepositoryService, PreparedRepository } from "../ports.ts";
-import { RalphieError } from "../../shared/error.ts";
+import { hasErrorCode, RalphieError } from "../../shared/error.ts";
 import { resolveWorkspacePath } from "../../shared/workspace-path.ts";
 
 const pathExists = async (path: string): Promise<boolean> => {
@@ -16,7 +16,7 @@ const pathExists = async (path: string): Promise<boolean> => {
         await stat(path);
         return true;
     } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+        if (hasErrorCode(error, "ENOENT")) return false;
         throw error;
     }
 };

@@ -7,7 +7,7 @@ import {
     toStrictJsonSchema,
 } from "../../src/harness/adapters/codex-schema.ts";
 import { toJsonSchema } from "../../src/harness/app/structured-result.ts";
-import { implementationResultSchema } from "../../src/issues/app/implementation-executor.ts";
+import { implementationResultSchema } from "../../src/issues/app/implementation-attempt.ts";
 import {
     commitMessageDecisionSchema,
     handOffVerificationSchema,

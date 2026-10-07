@@ -104,6 +104,10 @@ export const smokeConfig = (harness: SmokeHarness, workspace: string): string =>
     [
         `workspace: ${JSON.stringify(workspace)}`,
         "approval: yolo",
+        // The smoke run is how an unverified harness gets verified.
+        ...(harness === "opencode"
+            ? ["harnesses:", "  opencode:", "    experimental: true"]
+            : []),
         "roles:",
         `  default: ${harness}`,
         "limits:",

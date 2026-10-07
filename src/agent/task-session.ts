@@ -6,7 +6,7 @@ import {
     type ProgressIssue,
     type ProgressReporterService,
 } from "../progress/ports.ts";
-import { RalphieError } from "../shared/error.ts";
+import { causesOf, RalphieError } from "../shared/error.ts";
 import {
     type AgentSessions,
     sessionFailure,
@@ -74,23 +74,11 @@ export type AgentTaskResult = {
     readonly text: string;
 };
 
-const causeMessage = (error: RalphieError): string | undefined => {
-    let cause: unknown = error.cause;
-    for (let depth = 0; depth < 4 && cause !== undefined; depth += 1) {
-        if (cause instanceof Error && cause.message !== error.message) {
-            return cause.message;
-        }
-        if (
-            typeof cause !== "object" ||
-            cause === null ||
-            !("cause" in cause)
-        ) {
-            return undefined;
-        }
-        cause = (cause as { readonly cause?: unknown }).cause;
-    }
-    return undefined;
-};
+const causeMessage = (error: RalphieError): string | undefined =>
+    causesOf(error).find(
+        (cause): cause is Error =>
+            cause instanceof Error && cause.message !== error.message,
+    )?.message;
 
 export const reportAgentFailure = async (
     request: {

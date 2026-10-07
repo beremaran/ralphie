@@ -193,7 +193,8 @@ stateDiagram-v2
   changes, no later issue starts, and the process exits `75` with a message
   that names the failure and the reset time when the harness reports one. State
   and artifacts are kept and cleanup is skipped. Rerun after the limit clears
-  or you sign in again.
+  or you sign in again. Why this halts instead of handing off is recorded in
+  [ADR-0004](adr/0004-environmental-failures-halt-instead-of-handing-off.md).
 - Cancellation is checked before long-running boundaries and passed to the running session, which is killed.
   Ralphie attempts to restore the clean issue checkpoint, saves state with the
   active issue, skips cleanup, and exits `130`.

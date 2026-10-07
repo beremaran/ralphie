@@ -39,10 +39,12 @@ const check = (
     configuration: Parameters<typeof resolveRoleAssignments>[0],
     probe: HarnessProbe,
     maxBudgetUsd?: number,
+    experimentalHarnesses: readonly string[] = [],
 ) =>
     makeHarnessStartupChecker(probe)({
         roles: resolveRoleAssignments(configuration),
         maxBudgetUsd,
+        experimentalHarnesses,
     });
 
 describe("harness startup checks", () => {
@@ -101,8 +103,11 @@ describe("harness startup checks", () => {
         const report = await check(
             { harnesses: {}, roles: { fixer: "opencode" } },
             probeWith(),
+            undefined,
+            ["opencode"],
         );
 
+        expect(report.errors).toHaveLength(1);
         expect(report.errors[0]).toContain("fixer would edit with opencode");
     });
 
@@ -113,9 +118,27 @@ describe("harness startup checks", () => {
                 roles: { implementer: "pi", reviewer: "opencode" },
             },
             probeWith(),
+            undefined,
+            ["opencode"],
         );
 
         expect(report.errors).toEqual([]);
+    });
+
+    test("refuse OpenCode until the configuration opts in", async () => {
+        const report = await check(
+            { harnesses: {}, roles: { reviewer: "opencode" } },
+            probeWith(),
+        );
+
+        expect(report.errors).toHaveLength(1);
+        expect(report.errors[0]).toContain(
+            "opencode has not been verified against a live model",
+        );
+        expect(report.errors[0]).toContain(
+            "harnesses.opencode.experimental: true",
+        );
+        expect(report.errors[0]).toContain("standards-reviewer, spec-reviewer");
     });
 
     test("allow pi in a read-only role without yolo", async () => {

@@ -1,11 +1,10 @@
-import { EDITING_ROLES, type HarnessProbe } from "../ports.ts";
+import {
+    EDITING_ROLES,
+    HARNESSES_WITHOUT_SAFE_MODE,
+    type HarnessProbe,
+    UNVERIFIED_HARNESSES,
+} from "../ports.ts";
 import type { RoleAssignments } from "./roles.ts";
-
-/** Harnesses with neither a sandbox nor an approval system to run `safe`. */
-export const HARNESSES_WITHOUT_SAFE_MODE: ReadonlyArray<string> = [
-    "pi",
-    "opencode",
-];
 
 /** What startup found: errors stop the run, warnings are only reported. */
 export type StartupReport = {
@@ -18,6 +17,8 @@ export type StartupCheckInput = {
     readonly maxBudgetUsd?: number | undefined;
     /** Whether AFK triage runs; the triager needs no harness when it does not. */
     readonly triageEnabled?: boolean | undefined;
+    /** Harnesses the configuration opted in to with `experimental: true`. */
+    readonly experimentalHarnesses?: ReadonlyArray<string> | undefined;
 };
 
 export type HarnessStartupChecker = (
@@ -117,6 +118,24 @@ const approvalErrors = async (
     return errors;
 };
 
+const unverifiedErrors = (
+    harnesses: ReadonlyMap<string, ReadonlyArray<string>>,
+    experimental: ReadonlyArray<string>,
+): ReadonlyArray<string> =>
+    [...harnesses]
+        .filter(
+            ([harness]) =>
+                UNVERIFIED_HARNESSES.includes(harness) &&
+                !experimental.includes(harness),
+        )
+        .map(
+            ([harness, roles]) =>
+                `Harness ${harness} has not been verified against a live ` +
+                `model yet. Set harnesses.${harness}.experimental: true to ` +
+                `use it anyway, or assign its roles (${roles.join(", ")}) to ` +
+                `another harness with roles.default or roles.<role>.`,
+        );
+
 const budgetWarnings = (
     probe: HarnessProbe,
     harnesses: ReadonlyMap<string, ReadonlyArray<string>>,
@@ -135,16 +154,23 @@ const budgetWarnings = (
 /**
  * Check, before any work starts, that every assigned harness is installed,
  * (and at the minimum supported version), that `safe` approval is available where configured, and that editing roles
- * never run on a harness without a sandbox unless they are set to `yolo`.
+ * never run on a harness without a sandbox unless they are set to `yolo`,
+ * and that an unverified harness runs only when the configuration opts in.
  * Every message names the configuration change that fixes it.
  */
 export const makeHarnessStartupChecker =
     (probe: HarnessProbe): HarnessStartupChecker =>
-    async ({ roles, maxBudgetUsd, triageEnabled = true }) => {
+    async ({
+        roles,
+        maxBudgetUsd,
+        triageEnabled = true,
+        experimentalHarnesses = [],
+    }) => {
         const harnesses = rolesByHarness(roles, triageEnabled);
         const installation = await installationErrors(probe, harnesses);
         return {
             errors: [
+                ...unverifiedErrors(harnesses, experimentalHarnesses),
                 ...installation.errors,
                 ...(await approvalErrors(probe, roles, installation.installed)),
             ],

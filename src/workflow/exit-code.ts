@@ -1,4 +1,4 @@
-import { RunHaltedError } from "../shared/error.ts";
+import { causesOf, RunHaltedError } from "../shared/error.ts";
 
 export enum RalphieExitCode {
     Success = 0,
@@ -17,13 +17,7 @@ export const exitCodeForError = (
 };
 
 /** The command boundary wraps errors, so look through the cause chain. */
-const isHalt = (error: unknown): boolean => {
-    for (let current = error, depth = 0; depth < 8; depth += 1) {
-        if (current instanceof RunHaltedError) return true;
-        if (!(current instanceof Error) || current.cause === undefined) {
-            return false;
-        }
-        current = current.cause;
-    }
-    return false;
-};
+const isHalt = (error: unknown): boolean =>
+    [error, ...causesOf(error)].some(
+        (current) => current instanceof RunHaltedError,
+    );

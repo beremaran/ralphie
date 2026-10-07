@@ -1,13 +1,13 @@
 import { buildResolutionVerificationPrompt } from "../../agent/prompts.ts";
 import { requestStructuredOutput } from "../../agent/structured-output.ts";
 import type { ProgressReporterService } from "../../progress/ports.ts";
-import { RalphieError } from "../../shared/error.ts";
+import { RalphieError, errorMessage } from "../../shared/error.ts";
 import {
     resolutionVerificationDecisionSchema,
     type ResolutionVerificationDecision,
     IssueResolutionStatus,
 } from "../domain/decisions.ts";
-import type { IssueExecutionContext } from "./execution.ts";
+import type { IssueExecutionContext } from "./execution-model.ts";
 import type { HandOffRequest } from "../../agent/task-session.ts";
 
 export type ResolutionVerificationResult = {
@@ -21,9 +21,6 @@ export type ResolutionVerificationService = {
         context: IssueExecutionContext,
     ) => Promise<ResolutionVerificationResult>;
 };
-
-const messageOf = (error: unknown): string =>
-    error instanceof Error ? error.message : String(error);
 
 /**
  * Run the fresh, read-only check used when an implementation produces no
@@ -98,7 +95,7 @@ export const makeResolutionVerificationService = (
                 issue,
                 stage: "resolution-verification",
                 status: "failed",
-                message: `Resolution verification failed: ${messageOf(error)}`,
+                message: `Resolution verification failed: ${errorMessage(error)}`,
             });
             throw error;
         }

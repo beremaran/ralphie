@@ -32,11 +32,14 @@ describe("command startup checks", () => {
         expect(runtimeMade).toBe(false);
     });
 
-    test("checks the resolved roles and the budget cap", async () => {
+    test("checks the resolved roles, the budget cap and the opt-ins", async () => {
         const config = await writeTemporaryFile(`
 approval: yolo
 limits:
   maxBudgetUsd: 3
+harnesses:
+  opencode:
+    experimental: true
 roles:
   reviewer: codex
 `);
@@ -55,8 +58,10 @@ roles:
         const input = seen[0] as {
             roles: Record<string, { harness: string; approval: string }>;
             maxBudgetUsd: number;
+            experimentalHarnesses: string[];
         };
         expect(input.maxBudgetUsd).toBe(3);
+        expect(input.experimentalHarnesses).toEqual(["opencode"]);
         expect(input.roles["standards-reviewer"]).toMatchObject({
             harness: "codex",
             approval: "yolo",

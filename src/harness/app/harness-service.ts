@@ -23,6 +23,7 @@ import {
     parseNativeResult,
     toJsonSchema,
 } from "./structured-result.ts";
+import { errorMessage } from "../../shared/error.ts";
 
 /** Resumes of one session allowed to repair an invalid structured result. */
 const DEFAULT_MAX_RESULT_CORRECTIONS = 2;
@@ -207,7 +208,7 @@ const runPrepared = async (
             harness: request.harness,
         });
     } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const message = errorMessage(error);
         return failed(
             "unavailable",
             `Could not prepare the session: ${message}`,

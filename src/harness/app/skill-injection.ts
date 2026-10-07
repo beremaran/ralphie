@@ -1,20 +1,13 @@
+import {
+    TRIAGE_ROLES,
+    type TriageLabels,
+} from "../../issues/domain/triage-roles.ts";
+import type { HarnessName } from "../ports.ts";
+
 /** Checkout paths use forward slashes; keeps this module free of node:path. */
 const join = (...parts: readonly string[]): string => parts.join("/");
 
 const dirname = (path: string): string => path.slice(0, path.lastIndexOf("/"));
-
-/** The five triage roles the generated label table covers. */
-const LABEL_ROLES = [
-    "needs-triage",
-    "needs-info",
-    "ready-for-agent",
-    "ready-for-human",
-    "wontfix",
-] as const;
-
-export type TriageLabels = Readonly<
-    Record<(typeof LABEL_ROLES)[number], string>
->;
 
 /** File-system operations skill injection needs; implemented in `adapters/`. */
 export type SkillFileSystem = {
@@ -30,38 +23,50 @@ export type SkillFileSystem = {
     readonly readText: (path: string) => Promise<string | undefined>;
 };
 
-/** Where each harness discovers project skills, relative to the checkout. */
-const SKILL_LOCATIONS: Readonly<Record<string, string>> = {
-    claude: ".claude/skills",
-    codex: ".agents/skills",
-    pi: ".pi/skills",
-    opencode: ".opencode/skills",
+/**
+ * How each harness finds and invokes a skill: the project skills directory,
+ * relative to the checkout, and how a prompt invokes a user-only skill
+ * (`/name`, `$name` or `/skill:name`). OpenCode has no user syntax for skills,
+ * so it names the skill for the model's own skill tool.
+ *
+ * Skills always go into the project location. Of the per-invocation options,
+ * only pi has one (`--skill <path>`); Claude Code's `--plugin-dir` namespaces
+ * skills as `plugin:name`, and Codex and OpenCode have none. One mechanism for
+ * every harness keeps shadowing and the git exclude list in one place.
+ */
+const SKILL_SUPPORT: Readonly<
+    Record<
+        HarnessName,
+        {
+            readonly location: string;
+            readonly invoke: (name: string) => string;
+        }
+    >
+> = {
+    claude: { location: ".claude/skills", invoke: (name) => `/${name}` },
+    codex: { location: ".agents/skills", invoke: (name) => `$${name}` },
+    pi: { location: ".pi/skills", invoke: (name) => `/skill:${name}` },
+    opencode: {
+        location: ".opencode/skills",
+        invoke: (name) => `the ${name} skill`,
+    },
 };
+
+const skillSupport = (harness: string) =>
+    Object.hasOwn(SKILL_SUPPORT, harness)
+        ? SKILL_SUPPORT[harness as HarnessName]
+        : undefined;
 
 /** The project skills directory of a harness, or undefined when unknown. */
 export const skillLocation = (harness: string): string | undefined =>
-    SKILL_LOCATIONS[harness];
+    skillSupport(harness)?.location;
+
+/** How a prompt invokes a user-only skill in the given harness. */
+export const skillInvocation = (harness: string, name: string): string =>
+    skillSupport(harness)?.invoke(name) ?? `the ${name} skill`;
 
 /** Where a displaced repository skill waits until the session ends. */
 const SHADOW_DIRECTORY = ".ralphie-shadowed";
-
-/**
- * How a prompt invokes a user-only skill in each harness: `/name`, `$name`
- * or `/skill:name`. OpenCode has no user syntax for skills, so it names the
- * skill for the model's own skill tool.
- */
-export const skillInvocation = (harness: string, name: string): string => {
-    switch (harness) {
-        case "claude":
-            return `/${name}`;
-        case "codex":
-            return `$${name}`;
-        case "pi":
-            return `/skill:${name}`;
-        default:
-            return `the ${name} skill`;
-    }
-};
 
 const TRACKER_DOC = `# Issue tracker
 
@@ -80,7 +85,7 @@ const labelsDoc = (labels: TriageLabels): string =>
         "",
         "| Role | Label in this tracker |",
         "| --- | --- |",
-        ...LABEL_ROLES.map((role) => `| \`${role}\` | \`${labels[role]}\` |`),
+        ...TRIAGE_ROLES.map((role) => `| \`${role}\` | \`${labels[role]}\` |`),
         "",
         "When a skill mentions a role, use the corresponding label string.",
         "",

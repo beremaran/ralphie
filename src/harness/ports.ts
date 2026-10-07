@@ -123,6 +123,21 @@ export const HARNESS_NAMES = ["claude", "codex", "pi", "opencode"] as const;
 export type HarnessName = (typeof HARNESS_NAMES)[number];
 
 /**
+ * Harnesses whose adapter was never verified against a live model. A role may
+ * use one only after the configuration opts in with
+ * `harnesses.<name>.experimental: true`.
+ */
+export const UNVERIFIED_HARNESSES: ReadonlyArray<string> = [
+    "opencode",
+] satisfies ReadonlyArray<HarnessName>;
+
+/** Harnesses with neither a sandbox nor an approval system to run `safe`. */
+export const HARNESSES_WITHOUT_SAFE_MODE: ReadonlyArray<string> = [
+    "pi",
+    "opencode",
+] satisfies ReadonlyArray<HarnessName>;
+
+/**
  * What a session may do to the working tree.
  *
  * - `read-only`: inspect only; the harness's own read-only mode.

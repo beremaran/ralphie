@@ -1,12 +1,12 @@
 import { buildPreflightPrompt } from "../../agent/prompts.ts";
 import { requestStructuredOutput } from "../../agent/structured-output.ts";
 import type { ProgressReporterService } from "../../progress/ports.ts";
-import { RalphieError } from "../../shared/error.ts";
+import { RalphieError, errorMessage } from "../../shared/error.ts";
 import {
     type PreflightDecision,
     preflightDecisionSchema,
 } from "../domain/decisions.ts";
-import type { IssueExecutionContext } from "./execution.ts";
+import type { IssueExecutionContext } from "./execution-model.ts";
 import type { HandOffRequest } from "../../agent/task-session.ts";
 
 export type PreflightAssessmentResult = {
@@ -20,9 +20,6 @@ export type PreflightAssessmentService = {
         context: IssueExecutionContext,
     ) => Promise<PreflightAssessmentResult>;
 };
-
-const messageOf = (error: unknown): string =>
-    error instanceof Error ? error.message : String(error);
 
 export const makePreflightAssessmentService = (
     progress: ProgressReporterService,
@@ -90,7 +87,7 @@ export const makePreflightAssessmentService = (
                 issue,
                 stage: "preflight",
                 status: "failed",
-                message: `Pre-flight failed: ${messageOf(error)}`,
+                message: `Pre-flight failed: ${errorMessage(error)}`,
                 details: { agentWorkSkipped: false },
             });
             throw error;

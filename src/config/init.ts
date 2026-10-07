@@ -1,21 +1,27 @@
 import {
     HARNESS_NAMES,
+    HARNESSES_WITHOUT_SAFE_MODE,
     type HarnessName,
     type HarnessProbe,
+    UNVERIFIED_HARNESSES,
 } from "../harness/ports.ts";
 import { RalphieError } from "../shared/error.ts";
 import type { ConfigDocumentWriter } from "./ports.ts";
 
-/** Harnesses with no sandbox or approval system, so editing needs `yolo`. */
-const YOLO_ONLY: ReadonlyArray<string> = ["pi", "opencode"];
-
 const harnessSection = (harness: string): ReadonlyArray<string> =>
-    YOLO_ONLY.includes(harness)
+    HARNESSES_WITHOUT_SAFE_MODE.includes(harness)
         ? [
               "harnesses:",
               `  ${harness}:`,
               `    # ${harness} has no sandbox, so editing roles must run as yolo.`,
               "    approval: yolo",
+              ...(UNVERIFIED_HARNESSES.includes(harness)
+                  ? [
+                        `    # ${harness} is not verified against a live model yet;`,
+                        "    # uncomment to opt in.",
+                        "    # experimental: true",
+                    ]
+                  : []),
               "    # model:",
               "    # effort:",
           ]

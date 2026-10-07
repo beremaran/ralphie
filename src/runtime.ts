@@ -50,7 +50,7 @@ import {
 import {
     makeIssueExecutorService,
     type IssueExecutorService,
-} from "./issues/app/executor.ts";
+} from "./issues/app/issue-routing.ts";
 import {
     makeIssueRecoveryService,
     type IssueRecoveryService,
@@ -72,10 +72,8 @@ import { makeTemporarySchemaFileWriter } from "./harness/adapters/schema-file.ts
 import { makePiCliAdapter } from "./harness/adapters/pi-cli.ts";
 import { makeHarnessService } from "./harness/app/harness-service.ts";
 import { nodeSkillFileSystem } from "./harness/adapters/skill-file-system.ts";
-import {
-    makeSessionPreparation,
-    type TriageLabels,
-} from "./harness/app/skill-injection.ts";
+import { makeSessionPreparation } from "./harness/app/skill-injection.ts";
+import type { TriageLabels } from "./issues/domain/triage-roles.ts";
 import {
     guardReadOnlySessions,
     isolateSessions,

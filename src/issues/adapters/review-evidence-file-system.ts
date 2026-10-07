@@ -2,11 +2,9 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { ReviewEvidenceFiles } from "../app/review-evidence.ts";
+import { hasErrorCode } from "../../shared/error.ts";
 
 const EVIDENCE_DIRECTORY = ".ralphie-review";
-
-const isMissing = (error: unknown): boolean =>
-    error instanceof Error && "code" in error && error.code === "ENOENT";
 
 /** Add the evidence directory to the checkout's local exclude list. */
 const excludeEvidenceDirectory = async (
@@ -19,7 +17,7 @@ const excludeEvidenceDirectory = async (
     try {
         current = await readFile(file, "utf8");
     } catch (error) {
-        if (!isMissing(error)) throw error;
+        if (!hasErrorCode(error, "ENOENT")) throw error;
     }
     if (current.split("\n").includes(entry)) return;
     await mkdir(infoDirectory, { recursive: true });

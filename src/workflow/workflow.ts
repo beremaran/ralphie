@@ -16,7 +16,7 @@ import {
     IssueExecutionOutcomeKind,
     type IssueExecutionContext,
     type IssueExecutionOutcome,
-} from "../issues/app/execution.ts";
+} from "../issues/app/execution-model.ts";
 import {
     createIssueQueue,
     IssueQueueState,
@@ -33,7 +33,12 @@ import {
     RunStateStatus,
 } from "../run/state.ts";
 import type { Clock, RunControl } from "../run/ports.ts";
-import { RalphieError, RunHaltedError } from "../shared/error.ts";
+import {
+    RalphieError,
+    errorMessage,
+    throwIfAborted,
+    RunHaltedError,
+} from "../shared/error.ts";
 import { DEFAULT_MAX_DECOMPOSITION_DEPTH } from "../issues/domain/decomposition-markdown.ts";
 import type {
     IssueWorkflow,
@@ -46,25 +51,14 @@ import { runTriagePhase } from "./triage-phase.ts";
 
 export type { WorkflowOptions, WorkflowSummary } from "./ports.ts";
 
-const errorMessage = (error: unknown): string =>
-    error instanceof Error ? error.message : String(error);
-
 const unreachableOutcome = (outcome: never): never => {
     throw new RalphieError({
         message: `Unsupported issue execution outcome: ${String(outcome)}.`,
     });
 };
 
-const checkCancellation = (signal: AbortSignal | undefined): void => {
-    try {
-        signal?.throwIfAborted();
-    } catch (cause) {
-        throw new RalphieError({
-            message: "Run cancelled before the next operation started.",
-            cause,
-        });
-    }
-};
+const checkCancellation = (signal: AbortSignal | undefined): void =>
+    throwIfAborted(signal, "Run cancelled before the next operation started.");
 
 /**
  * Wait for the queue control without stranding a cancelled run: aborting the

@@ -31,7 +31,7 @@ import {
     type IssueWorkflowRuntime,
     type SkillInjectionSettings,
 } from "./runtime.ts";
-import type { SessionEventListener } from "./harness/ports.ts";
+import { HARNESS_NAMES, type SessionEventListener } from "./harness/ports.ts";
 import { makeHarnessProbe } from "./harness/adapters/probe.ts";
 import {
     makeHarnessStartupChecker,
@@ -45,7 +45,7 @@ import { BUILD_INFO } from "./build-info.ts";
 import { makeRunEventLog } from "./run/adapters/event-log.ts";
 import type { RunControl, RunEventLog, RunLayout } from "./run/ports.ts";
 import { makeRunLayout } from "./run/adapters/layout.ts";
-import { RalphieError } from "./shared/error.ts";
+import { RalphieError, errorMessage } from "./shared/error.ts";
 
 const cliOptions = {
     config: { type: "string" },
@@ -435,6 +435,9 @@ const runStartupChecks = async (
         roles: config.roles,
         maxBudgetUsd: config.settings.limits.maxBudgetUsd,
         triageEnabled: config.settings.triage.enabled,
+        experimentalHarnesses: HARNESS_NAMES.filter(
+            (name) => config.settings.harnesses[name]?.experimental === true,
+        ),
     });
     for (const warning of report.warnings) {
         await progress.emit({
@@ -453,7 +456,7 @@ const runStartupChecks = async (
 };
 
 const commandErrorFor = (error: unknown, signal: AbortSignal): Error => {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorMessage(error);
     process.exitCode = exitCodeForError(error, signal);
     return new Error(message, { cause: error });
 };

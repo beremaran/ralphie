@@ -36,6 +36,9 @@ Changed sections before upgrading.
   `spec-reviewer`, `resolution-verifier`, `decomposer`). Every role falls back
   to `roles.default`, both reviewers to `roles.reviewer`, and the fixer to the
   implementer. See `docs/configuration.md`.
+- OpenCode is experimental. Its adapter has not been verified against a live
+  model, so startup refuses any role assigned to `opencode` until the
+  configuration sets `harnesses.opencode.experimental: true`.
 - YAML configuration. Ralphie reads `$XDG_CONFIG_HOME/ralphie/config.yaml` (else
   `~/.config/ralphie/config.yaml`, or `--config <path>`), validated with a
   strict schema at startup. Settings layer from defaults, the top level, the

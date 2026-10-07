@@ -8,7 +8,7 @@ import {
     IssueExecutionOutcomeKind,
     type IssueExecutionContext,
     type IssueExecutionOutcome,
-} from "../issues/app/execution.ts";
+} from "../issues/app/execution-model.ts";
 import type { TriageService } from "../issues/app/triage.ts";
 import {
     renderAgentBriefComment,

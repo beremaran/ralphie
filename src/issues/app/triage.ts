@@ -3,7 +3,7 @@ import { haltingFailure } from "../../agent/sessions.ts";
 import { requestStructuredOutput } from "../../agent/structured-output.ts";
 import { skillInvocation } from "../../harness/app/skill-injection.ts";
 import type { ProgressReporterService } from "../../progress/ports.ts";
-import { RalphieError } from "../../shared/error.ts";
+import { RalphieError, errorMessage } from "../../shared/error.ts";
 import { HandOffReason, IssueResolutionStatus } from "../domain/decisions.ts";
 import {
     triageDecisionSchema,
@@ -12,7 +12,7 @@ import {
     type TriageResult,
     type TriageStateLabels,
 } from "../domain/triage.ts";
-import type { IssueExecutionContext } from "./execution.ts";
+import type { IssueExecutionContext } from "./execution-model.ts";
 import type { ResolutionVerificationService } from "./resolution-verification.ts";
 
 export type TriageRequest = {
@@ -34,9 +34,6 @@ type TriageDependencies = {
     readonly progress: ProgressReporterService;
     readonly resolutionVerification: ResolutionVerificationService;
 };
-
-const messageOf = (error: unknown): string =>
-    error instanceof Error ? error.message : String(error);
 
 const toResult = (
     decision: Exclude<TriageDecision, { outcome: "already_implemented" }>,
@@ -111,7 +108,7 @@ export const makeTriageService = ({
             }
             return unverifiedClaim(
                 claimed,
-                `the fresh verification failed: ${messageOf(error)}`,
+                `the fresh verification failed: ${errorMessage(error)}`,
             );
         }
     };
@@ -185,7 +182,7 @@ export const makeTriageService = ({
                     issue,
                     stage: "triage",
                     status: "failed",
-                    message: `Triage failed: ${messageOf(error)}`,
+                    message: `Triage failed: ${errorMessage(error)}`,
                 });
                 throw error;
             }

@@ -9,7 +9,11 @@ import { type GitRepositoryInvariantService } from "../../git/ports.ts";
 import type { HandOffRequest } from "../../agent/task-session.ts";
 import type { GitHubIssue } from "../../github/domain.ts";
 import { type ProgressReporterService } from "../../progress/ports.ts";
-import { RalphieError } from "../../shared/error.ts";
+import {
+    errorMessage,
+    hasErrorCode,
+    RalphieError,
+} from "../../shared/error.ts";
 import {
     handOffDecisionSchema,
     type HandOffDecision,
@@ -232,8 +236,8 @@ const matchingDiagnostic = async (
         }
         return true;
     } catch (cause) {
-        const code = (cause as NodeJS.ErrnoException).code;
-        if (code === "ENOENT" || code === "ENOTDIR") return false;
+        if (hasErrorCode(cause, "ENOENT") || hasErrorCode(cause, "ENOTDIR"))
+            return false;
         throw recoverableError(
             `Failed to validate hand-off diagnostics at ${diagnosticsPath}. Checkout was not restored.`,
             cause,
@@ -329,7 +333,7 @@ export const makeIssueRecoveryService = (
                 ...issueContext,
                 stage: "checkout-restore",
                 status: "failed",
-                message: `Checkout restoration failed: ${error instanceof Error ? error.message : String(error)}`,
+                message: `Checkout restoration failed: ${errorMessage(error)}`,
                 details: { diagnosticsPath },
             });
             throw error;
@@ -402,7 +406,7 @@ export const makeIssueRecoveryService = (
                 ...issueContext,
                 stage: "checkout-restore",
                 status: "failed",
-                message: `Hand-off checkout recovery failed: ${cause instanceof Error ? cause.message : String(cause)}`,
+                message: `Hand-off checkout recovery failed: ${errorMessage(cause)}`,
                 details: { diagnosticsPath },
             });
             throw recoverableError(

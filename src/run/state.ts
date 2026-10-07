@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { HARNESS_ROLES } from "../harness/ports.ts";
-import { IssueExecutionOutcomeKind } from "../issues/app/execution.ts";
+import { IssueExecutionOutcomeKind } from "../issues/app/execution-model.ts";
 import { DEFAULT_MAX_DECOMPOSITION_DEPTH } from "../issues/domain/decomposition-markdown.ts";
 import {
     HandOffReason,

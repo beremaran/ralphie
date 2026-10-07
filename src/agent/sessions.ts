@@ -115,10 +115,21 @@ export const haltingFailure = (error: unknown): HarnessFailure | undefined => {
     return isHaltingFailure(cause) ? cause : undefined;
 };
 
+/** The kind of a failed session's harness failure, if the error is one. */
+export const sessionFailureKind = (
+    error: unknown,
+): HarnessFailure["kind"] | undefined =>
+    isSessionFailure(error)
+        ? ((error as RalphieError).cause as HarnessFailure).kind
+        : undefined;
+
 /** Whether a session failure was the caller cancelling it (a user stop). */
 export const isAbortedSession = (error: unknown): boolean =>
-    isSessionFailure(error) &&
-    (error as { cause: { kind: string } }).cause.kind === "aborted";
+    sessionFailureKind(error) === "aborted";
+
+/** Whether a session failed because it ran past its time limit. */
+export const isTimedOutSession = (error: unknown): boolean =>
+    sessionFailureKind(error) === "timeout";
 
 /** The error a failed session raises; the failure stays on `cause`. */
 export const sessionFailure = (

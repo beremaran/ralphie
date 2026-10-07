@@ -51,8 +51,8 @@ import {
     type HandOffVerification,
     type IssueResolutionDecision,
 } from "../../src/issues/domain/decisions.ts";
+import { implementationResultSchema } from "../../src/issues/app/implementation-attempt.ts";
 import {
-    implementationResultSchema,
     makeImplementationExecutorService,
     type ImplementationExecutorService,
 } from "../../src/issues/app/implementation-executor.ts";
@@ -60,9 +60,9 @@ import type { PreflightAssessmentService } from "../../src/issues/app/preflight.
 import {
     type IssueExecutionContext,
     IssueExecutionOutcomeKind,
-} from "../../src/issues/app/execution.ts";
+} from "../../src/issues/app/execution-model.ts";
 import { DecompositionDepthLimitError } from "../../src/issues/domain/decomposition-markdown.ts";
-import { makeIssueExecutorService } from "../../src/issues/app/executor.ts";
+import { makeIssueExecutorService } from "../../src/issues/app/issue-routing.ts";
 import {
     makeHandOffRouterService,
     type HandOffRouterService,

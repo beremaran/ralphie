@@ -151,9 +151,11 @@ environment enforces it instead of the prompts.
   delivery push runs outside sessions and is unaffected.
 - **Residual limitation.** The environment cannot hide credentials that a
   process running as the same OS user can read directly: a private key under
-  `~/.ssh` used through an explicit `ssh -i`, a token that `gh` keeps in the
-  operating system keyring (for example the macOS Keychain), or a credential
-  file read by path. Ralphie does not claim to block these, and a determined
+  `~/.ssh` used through an explicit `ssh -i`, a `gh` token read straight out of
+  the operating system keyring (for example with `security find-generic-password`
+  on macOS), or a credential file read by path. `gh` itself is logged out in a
+  session even when its token lives in the keyring, because it finds keyring
+  entries through the hosts file in its now-empty config directory. Ralphie does not claim to block these, and a determined
   yolo session could still use them. What it guarantees is that it never hands
   a token to a session, that the checkout's push URL is disabled, and that its
   own delivery push is verified against the remote. To close the gap, run

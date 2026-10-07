@@ -140,6 +140,7 @@ credentials; Ralphie stores none.
 | `harnesses.<name>.model` | harness default | Model passed to the harness. |
 | `harnesses.<name>.effort` | harness default | Reasoning effort passed to the harness. |
 | `harnesses.<name>.approval` | top-level `approval` | Approval mode for editing roles that run on this harness. |
+| `harnesses.<name>.experimental` | `false` | Opt in to a harness whose adapter has not been verified against a live model. Currently only `opencode` needs it: startup refuses any role assigned to OpenCode until `harnesses.opencode.experimental: true` is set. Other harnesses ignore it. |
 
 `roles` assigns a harness to each role. A value is a harness name, or a
 mapping `{ harness, model, effort }` whose `model` and `effort` override the

@@ -4,7 +4,7 @@ import type { GitHubIssue } from "../../src/github/domain.ts";
 import type { GitRepositoryInvariantService } from "../../src/git/ports.ts";
 import { makeTriageService } from "../../src/issues/app/triage.ts";
 import type { ResolutionVerificationService } from "../../src/issues/app/resolution-verification.ts";
-import type { IssueExecutionContext } from "../../src/issues/app/execution.ts";
+import type { IssueExecutionContext } from "../../src/issues/app/execution-model.ts";
 import {
     HandOffReason,
     IssueResolutionStatus,

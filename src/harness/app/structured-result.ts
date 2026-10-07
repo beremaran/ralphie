@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import type { JsonSchema } from "../ports.ts";
+import { errorMessage } from "../../shared/error.ts";
 
 /** Why a reply did not carry a valid result; fed back to the session. */
 type ResultProblem = { readonly problem: string };
@@ -90,7 +91,7 @@ export const parseFallbackResult = <T>(
     try {
         candidate = JSON.parse(block);
     } catch (cause) {
-        const detail = cause instanceof Error ? cause.message : String(cause);
+        const detail = errorMessage(cause);
         return {
             ok: false,
             problem: `The JSON block could not be parsed: ${detail}`,

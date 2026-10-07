@@ -20,7 +20,7 @@ import {
     IssueExecutionOutcomeKind,
     type IssueExecutionContext,
     type IssueExecutionOutcome,
-} from "./execution.ts";
+} from "./execution-model.ts";
 import type { IssueRecoveryService } from "./recovery.ts";
 
 export type HandOffRouteInput = {

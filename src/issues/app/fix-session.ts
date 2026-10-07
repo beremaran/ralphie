@@ -9,6 +9,7 @@ import {
     type AgentTaskRequest,
     type AgentTaskResult,
 } from "../../agent/task-session.ts";
+import { errorMessage } from "../../shared/error.ts";
 
 /**
  * Prompt plus reply characters after which a fix session counts as near its
@@ -75,9 +76,6 @@ const resumeBlocker = (
     return undefined;
 };
 
-const failureText = (error: unknown): string =>
-    error instanceof Error ? error.message : String(error);
-
 /** Resume the session quietly: a failed resume is not a failed stage. */
 const tryResume = async (
     sessions: AgentSessions,
@@ -113,7 +111,7 @@ const tryResume = async (
         ) {
             throw error;
         }
-        return { failure: failureText(error) };
+        return { failure: errorMessage(error) };
     }
 };
 

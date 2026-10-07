@@ -3,6 +3,7 @@ import {
     type CommandRunnerService,
 } from "../../process/ports.ts";
 import type { HarnessAdapter, HarnessProbe, ProbeResult } from "../ports.ts";
+import { errorMessage } from "../../shared/error.ts";
 
 /** Startup probes must answer within seconds, never wait on a model. */
 export const PROBE_TIMEOUT_MS = 15_000;
@@ -60,9 +61,6 @@ const versionResult = (executable: string, output: string): ProbeResult => {
         : { ok: true };
 };
 
-const reasonOf = (error: unknown): string =>
-    error instanceof Error ? error.message : String(error);
-
 const installed = async (
     runner: CommandRunnerService,
     executable: string,
@@ -79,7 +77,7 @@ const installed = async (
                   message: `${executable} --version exited with code ${result.exitCode}`,
               };
     } catch (error) {
-        return { ok: false, message: reasonOf(error) };
+        return { ok: false, message: errorMessage(error) };
     }
 };
 
@@ -142,7 +140,7 @@ const claudeSafeAccess = async (
         );
     } catch (error) {
         if (!(error instanceof CommandAbortedError)) {
-            return { ok: false, message: reasonOf(error) };
+            return { ok: false, message: errorMessage(error) };
         }
     }
     if (granted === "auto") return { ok: true };

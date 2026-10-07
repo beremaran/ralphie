@@ -1,24 +1,19 @@
 import { readFile } from "node:fs/promises";
 
-import { RalphieError } from "../../shared/error.ts";
+import {
+    errorMessage,
+    hasErrorCode,
+    RalphieError,
+} from "../../shared/error.ts";
 import type { ConfigDocument, ConfigDocumentReader } from "../ports.ts";
-
-const isMissingFile = (error: unknown): boolean =>
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    error.code === "ENOENT";
-
-const messageOf = (error: unknown): string =>
-    error instanceof Error ? error.message : String(error);
 
 const readText = async (path: string): Promise<string | undefined> => {
     try {
         return await readFile(path, "utf8");
     } catch (cause) {
-        if (isMissingFile(cause)) return undefined;
+        if (hasErrorCode(cause, "ENOENT")) return undefined;
         throw new RalphieError({
-            message: `Could not read configuration file ${path}: ${messageOf(cause)}`,
+            message: `Could not read configuration file ${path}: ${errorMessage(cause)}`,
             cause,
         });
     }
@@ -33,7 +28,7 @@ export const yamlConfigDocumentReader: ConfigDocumentReader = {
             return { found: true, content: Bun.YAML.parse(text) };
         } catch (cause) {
             throw new RalphieError({
-                message: `Configuration file ${path} is not valid YAML: ${messageOf(cause)}`,
+                message: `Configuration file ${path} is not valid YAML: ${errorMessage(cause)}`,
                 cause,
             });
         }

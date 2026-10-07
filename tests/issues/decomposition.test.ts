@@ -20,7 +20,7 @@ import { makeDecompositionExecutorService } from "../../src/issues/app/decomposi
 import {
     IssueExecutionOutcomeKind,
     type IssueExecutionContext,
-} from "../../src/issues/app/execution.ts";
+} from "../../src/issues/app/execution-model.ts";
 import type { IssueBreakdownDecision } from "../../src/issues/domain/decisions.ts";
 import { sessionsFor } from "../shared/agent-sessions.ts";
 import { makeTestProgressRecorder } from "../shared/progress-recorder.ts";

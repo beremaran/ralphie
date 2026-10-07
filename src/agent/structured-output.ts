@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import type { HarnessRole, SessionAccess } from "../harness/ports.ts";
-import { RalphieError } from "../shared/error.ts";
+import { RalphieError, errorMessage } from "../shared/error.ts";
 import {
     type AgentSessions,
     sessionFailure,
@@ -74,9 +74,6 @@ const verifyStructuredOutputRequest = async <Output>(
     }
 };
 
-const describeFailureCause = (cause: unknown): string =>
-    cause instanceof Error ? cause.message : String(cause);
-
 const runStructuredSession = async <Output>(
     sessions: AgentSessions,
     request: StructuredOutputRequest<Output>,
@@ -110,7 +107,7 @@ export const requestStructuredOutput = async <Output>(
             cause instanceof RalphieError
                 ? cause
                 : new RalphieError({
-                      message: `Failed to get structured output from the ${request.role} session. Cause: ${describeFailureCause(cause)}`,
+                      message: `Failed to get structured output from the ${request.role} session. Cause: ${errorMessage(cause)}`,
                       cause,
                   });
         await reportAgentFailure(request, error);

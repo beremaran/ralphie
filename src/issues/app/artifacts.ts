@@ -6,7 +6,7 @@ import {
     handOffRequestSchema,
     type HandOffRequest,
 } from "../../agent/task-session.ts";
-import { RalphieError } from "../../shared/error.ts";
+import { hasErrorCode, RalphieError } from "../../shared/error.ts";
 import type { IdGenerator, RunLayout } from "../../run/ports.ts";
 import {
     commitMessageDecisionSchema,
@@ -654,8 +654,7 @@ const loadPersistedState = async (
     try {
         encoded = await fileSystem.readFile(filePath, "utf8");
     } catch (cause) {
-        if ((cause as NodeJS.ErrnoException).code === "ENOENT")
-            return undefined;
+        if (hasErrorCode(cause, "ENOENT")) return undefined;
         throw new RalphieError({
             message: `Failed to load issue artifacts at ${filePath}.`,
             cause,

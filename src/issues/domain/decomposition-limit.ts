@@ -3,7 +3,7 @@ import { HandOffReason } from "./decisions.ts";
 import {
     IssueExecutionOutcomeKind,
     type IssueExecutionOutcome,
-} from "../app/execution.ts";
+} from "../app/execution-model.ts";
 
 /** Turn the configured recursion ceiling into a controlled, non-halting route. */
 export const decompositionLimitOutcome = (

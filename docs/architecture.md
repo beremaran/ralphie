@@ -31,7 +31,7 @@ that binds concrete adapters into the runtime bundle.
 
 | Context | Location | Responsibility |
 | --- | --- | --- |
-| `agent` | `src/agent/` | Prompts, structured-output and text-task helpers, and the role-to-session mapping (access mode, timeouts) over the harness port. |
+| `agent` | `src/agent/` | Prompts, structured-output and text-task helpers, and the role-to-session mapping (access mode, timeouts) over the harness port. Kept apart from `harness` on purpose: `agent` holds Ralphie's own prompts and role policy, while `harness` stays provider-neutral session plumbing that knows nothing about issues. |
 | `config` | `src/config/` | YAML configuration: the zod schema (`settings.ts`), layering and `--set` overrides (`load.ts`, `overrides.ts`), and the file-reader port with its Bun YAML adapter. |
 | `harness` | `src/harness/` | Provider-neutral harness port (session request, events, typed failures, structured results), the service that runs sessions and repairs invalid results, and one CLI adapter per harness (Claude Code, Codex, pi and OpenCode). Every workflow session runs through it, wrapped by session isolation, the read-only fingerprint guard and skill injection; `app/roles.ts` resolves the configured role assignments. The vendored skills live in `vendor/mattpocock-skills/` (see [Development](development.md#vendored-skills)). |
 | `github` | `src/github/` | Issue value objects, repository slug parsing, and the Octokit/`gh` adapters. |
@@ -46,8 +46,9 @@ that binds concrete adapters into the runtime bundle.
 | Composition root | `src/runtime.ts` | Builds concrete adapters and exposes them as the workflow runtime bundle. |
 | Shared kernel | `src/shared/` | Errors and terminal-control sanitization used by every context. |
 
-Dependency direction is one-way. Contexts import each other's `ports.ts` and
-domain modules, never another context's `adapters/`; only the composition root
+Dependency direction is one-way. Contexts import each other's `ports.ts`,
+domain modules and pure `app/` helpers (no I/O, no process or vendor imports),
+never another context's `adapters/`; only the composition root
 (`runtime.ts`, `command.ts`) instantiates adapters. Non-adapter code imports no
 `node:fs`, `node:child_process`, vendor SDK, or process stream. The `issues`
 context defines its file-system ports (`IssueArtifactFileSystem`,
@@ -75,6 +76,19 @@ behavioral suites that both the in-memory fakes and the live adapters pass: the
 every `HarnessAdapter` must pass (`harness-adapter.contract.ts`), and the
 harness service suite (`harness-service.contract.ts`).
 
+## Skill injection
+
+For each session, skill injection copies the pinned skills into the harness's
+project skills location (`SKILL_SUPPORT` in `src/harness/app/skill-injection.ts`),
+shadows any same-named repository skill until the session ends, and adds the
+copies to `.git/info/exclude`. The spec also allows a per-invocation skills
+option where a harness has one. Of the four, only pi does (`--skill <path>`).
+Claude Code's `--plugin-dir` would load the skills as a plugin and rename them
+`plugin:name`, and Codex and OpenCode have no such flag. Ralphie therefore uses
+the project location for every harness, so shadowing and exclusion live in one
+place. A new harness adds one `SKILL_SUPPORT` entry, its location and invocation
+syntax together.
+
 ## OpenCode adapter findings
 
 Spike against OpenCode v2.0.22 (the published docs mostly describe v1). The recorded streams live in `tests/harness/fixtures/opencode/`.
@@ -87,7 +101,7 @@ Spike against OpenCode v2.0.22 (the published docs mostly describe v1). The reco
 - **Access**: there is no sandbox. Read-only uses `--agent plan`, which denies edit tools but still allows shell commands, so it is not a hard guarantee. `--auto` approves every permission that is not denied and is the only editing mode; `safe` is refused with an `access` failure before anything runs. Without `--auto` a headless run cannot answer approval prompts.
 - **Structured output**: none native. The service falls back to the fenced JSON block protocol.
 - **Skills**: a skill under `.opencode/skills/<name>/` is loaded headlessly through the `skill` tool (recorded in `skill.jsonl`). Skills hidden from the model (user-only) were not tested.
-- **Not verified live**: the spike had no usable model credits, so a successful read-only `--agent plan` run, resuming with `--session`, and user-only skills headlessly are untested against the real CLI. The recorded success streams come from earlier notes; only the error streams were recorded fresh. Run [the live smoke script](development.md#live-smoke-script) with `--harness opencode` before relying on it.
+- **Not verified live**: the spike had no usable model credits, so a successful read-only `--agent plan` run, resuming with `--session`, and user-only skills headlessly are untested against the real CLI. The recorded success streams come from earlier notes; only the error streams were recorded fresh. Until that run passes, startup refuses OpenCode unless the configuration sets `harnesses.opencode.experimental: true` (`UNVERIFIED_HARNESSES` in `src/harness/ports.ts`). Run [the live smoke script](development.md#live-smoke-script) with `--harness opencode` to verify it, and drop it from that list once it passes. The smoke script opts in on its own.
 
 ## Dependency and side-effect rules
 
@@ -132,10 +146,10 @@ the normal check gate.
 | Public trigger and flags | `index.ts`, `src/cli.ts`, `src/command.ts`, `src/options.ts` |
 | Runtime dependency assembly | `src/runtime.ts` |
 | Run orchestration, queue, state transitions | `src/workflow/workflow.ts`, `src/issues/domain/queue.ts` |
-| Pre-flight routing | `src/issues/app/executor.ts`, `src/issues/app/preflight.ts` |
+| Pre-flight routing | `src/issues/app/issue-routing.ts`, `src/issues/app/execution-model.ts` (outcomes and execution context), `src/issues/app/preflight.ts` |
 | Hand-offs | `src/issues/domain/hand-off.ts`, `src/issues/app/hand-off.ts`, `src/github/adapters/hand-off.ts` |
 | AFK triage | `src/workflow/triage-phase.ts`, `src/issues/app/triage.ts`, `src/github/adapters/triage.ts` |
-| Implementation/review/delivery | `src/issues/app/implementation-executor.ts`, `src/issues/app/verification.ts`, `src/git/adapters/issue-operations.ts`, `src/git/adapters/remote-safety.ts` |
+| Implementation/review/delivery | `src/issues/app/implementation-executor.ts` (attempts and delivery), `src/issues/app/implementation-attempt.ts` (prompt, result, retry policy), `src/issues/app/candidate-review.ts` (candidate commits and the two-axis review gate), `src/issues/app/verification.ts`, `src/git/adapters/issue-operations.ts`, `src/git/adapters/remote-safety.ts` |
 | Decomposition and GitHub mutations | `src/issues/app/decomposition-executor.ts`, `src/github/adapters/issue-mutations.ts`, `src/github/adapters/issue-relationships.ts` |
 | Role assignments, session requests, and structured results | `src/harness/app/roles.ts`, `src/agent/` |
 | Harness sessions, structured results, and the harness adapters | `src/harness/ports.ts`, `src/harness/app/`, `src/harness/adapters/` |

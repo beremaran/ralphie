@@ -1,4 +1,4 @@
-import { RalphieError } from "../shared/error.ts";
+import { RalphieError, errorMessage } from "../shared/error.ts";
 
 export type ConfigMapping = Readonly<Record<string, unknown>>;
 
@@ -81,7 +81,7 @@ export const parseSetOverride = (
     try {
         value = parseValue(assignment.value);
     } catch (cause) {
-        const reason = cause instanceof Error ? cause.message : String(cause);
+        const reason = errorMessage(cause);
         throw invalidSet(text, `the value is not valid YAML (${reason})`);
     }
     return { text, path, value };

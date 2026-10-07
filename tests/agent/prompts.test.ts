@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import {
     buildImplementationPrompt,
+    buildReviewFixPrompt,
     buildTriagePrompt,
     PROMPT_ISSUE_COMMENT_BODY_LIMIT,
     PROMPT_ISSUE_COMMENT_COUNT_LIMIT,
@@ -10,6 +11,10 @@ import type {
     GitHubIssue,
     GitHubIssueComment,
 } from "../../src/github/domain.ts";
+import {
+    ReviewFindingSeverity,
+    ReviewVerdict,
+} from "../../src/issues/domain/decisions.ts";
 
 const comment = (id: number, body: string): GitHubIssueComment => ({
     id,
@@ -112,5 +117,31 @@ describe("triage prompt", () => {
 
     test("offers no way to apply wontfix", () => {
         expect(prompt).toMatch(/never apply or recommend\s+"wontfix"/i);
+    });
+});
+describe("review fix prompt", () => {
+    test("hands a fresh fixer the candidate diff, not a staged diff", () => {
+        const prompt = buildReviewFixPrompt({
+            issue: issueWith([]),
+            repositoryPath: "/work/repo",
+            targetBranch: "main",
+            candidateDiff: "diff --git a/x.ts b/x.ts\n+CANDIDATE-LINE",
+            review: {
+                verdict: ReviewVerdict.ChangesRequested,
+                summary: "Needs a guard.",
+                findings: [
+                    {
+                        severity: ReviewFindingSeverity.Blocking,
+                        description: "Missing null check.",
+                    },
+                ],
+            },
+        });
+        expect(prompt).toContain(
+            "<candidate-diff>\ndiff --git a/x.ts b/x.ts\n+CANDIDATE-LINE\n</candidate-diff>",
+        );
+        expect(prompt).toMatch(/issue checkpoint to the reviewed candidate/);
+        expect(prompt).not.toContain("staged-diff");
+        expect(prompt).toContain("Missing null check.");
     });
 });

@@ -25,11 +25,11 @@ import {
     type IssueExecutionContext,
     type IssueExecutionOutcome,
     IssueExecutionOutcomeKind,
-} from "../src/issues/app/execution.ts";
+} from "../src/issues/app/execution-model.ts";
 import {
     makeIssueExecutorService,
     type IssueExecutorService,
-} from "../src/issues/app/executor.ts";
+} from "../src/issues/app/issue-routing.ts";
 import {
     IssueArtifactKind,
     type IssueArtifactStoreService,

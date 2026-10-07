@@ -2,7 +2,7 @@ import {
     CommandAbortedError,
     CommandTimeoutError,
 } from "../../process/ports.ts";
-import { RalphieError } from "../../shared/error.ts";
+import { RalphieError, errorMessage } from "../../shared/error.ts";
 import type { HarnessFailure, TurnOutcome } from "../ports.ts";
 
 /**
@@ -34,7 +34,7 @@ export const classifyThrown = (error: unknown): TurnOutcome => {
     if (error instanceof CommandAbortedError) {
         return failure("aborted", error.message);
     }
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorMessage(error);
     return failure(
         error instanceof RalphieError ? "unavailable" : "harness",
         message,

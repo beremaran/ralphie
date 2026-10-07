@@ -1,5 +1,5 @@
 import { type ProgressReporterService } from "../../progress/ports.ts";
-import { RalphieError } from "../../shared/error.ts";
+import { RalphieError, errorMessage } from "../../shared/error.ts";
 import {
     haltingFailure,
     isAbortedSession,
@@ -22,8 +22,8 @@ import {
 import type {
     IssueExecutionContext,
     IssueExecutionOutcome,
-} from "./execution.ts";
-import { IssueExecutionOutcomeKind } from "./execution.ts";
+} from "./execution-model.ts";
+import { IssueExecutionOutcomeKind } from "./execution-model.ts";
 import type { DecompositionExecutorService } from "./decomposition-executor.ts";
 import type { ImplementationExecutorService } from "./implementation-executor.ts";
 import type { PreflightAssessmentService } from "./preflight.ts";
@@ -106,7 +106,7 @@ export const makeIssueExecutorService = (
             }
             return {
                 kind: IssueExecutionOutcomeKind.Failed,
-                message: `Fresh resolution verification failed: ${error instanceof Error ? error.message : String(error)}`,
+                message: `Fresh resolution verification failed: ${errorMessage(error)}`,
             };
         }
     };
