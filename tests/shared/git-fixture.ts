@@ -17,16 +17,41 @@ export type GitFixture = {
     readonly cleanup: () => Promise<void>;
 };
 
+const runGit = async (
+    repositoryPath: string,
+    args: ReadonlyArray<string>,
+    runner: CommandRunnerService,
+): Promise<string> => {
+    const result = await runner.run("git", ["-C", repositoryPath, ...args]);
+    if (result.exitCode !== 0) {
+        throw new Error(`git ${args.join(" ")} failed: ${result.stderr}`);
+    }
+    return result.stdout;
+};
+
+/** Configure an initialized test repository and commit its clean base file. */
+export const commitCleanGitBase = async (
+    repositoryPath: string,
+    runner: CommandRunnerService = CommandRunnerLive,
+    branch?: string,
+): Promise<string> => {
+    const run = async (args: ReadonlyArray<string>) =>
+        await runGit(repositoryPath, args, runner);
+    await run(["config", "user.email", "t@test.local"]);
+    await run(["config", "user.name", "T"]);
+    if (branch !== undefined) await run(["checkout", "-q", "-b", branch]);
+    await writeFile(join(repositoryPath, "a.txt"), "a\n");
+    await run(["add", "."]);
+    await run(["commit", "-q", "-m", "base"]);
+    return (await run(["rev-parse", "HEAD"])).trim();
+};
+
 export const makeGitFixture = async (
     runner: CommandRunnerService = CommandRunnerLive,
 ): Promise<GitFixture> => {
     const repositoryPath = await mkdtemp(join(tmpdir(), "ralphie-git-"));
     const run = async (args: ReadonlyArray<string>): Promise<string> => {
-        const result = await runner.run("git", ["-C", repositoryPath, ...args]);
-        if (result.exitCode !== 0) {
-            throw new Error(`git ${args.join(" ")} failed: ${result.stderr}`);
-        }
-        return result.stdout;
+        return await runGit(repositoryPath, args, runner);
     };
     try {
         await run(["init", "-q"]);
