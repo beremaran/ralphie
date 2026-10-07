@@ -17,12 +17,22 @@ import {
     smokeVerdict,
     type SmokeChild,
     parseSmokeOptions,
+    requireLiveOptIn,
     requireScratchRepository,
+    ALLOW_LIVE_ENV,
     SCRATCH_ENV,
     smokeConfig,
 } from "../scripts/live-smoke.ts";
 
 describe("live smoke guard", () => {
+    test("bans live runs unless a human opts in", () => {
+        expect(() => requireLiveOptIn({})).toThrow("banned");
+        expect(() => requireLiveOptIn({ [ALLOW_LIVE_ENV]: "true" })).toThrow(
+            "banned",
+        );
+        expect(() => requireLiveOptIn({ [ALLOW_LIVE_ENV]: "1" })).not.toThrow();
+    });
+
     test("requires the repository to be named in flag and environment", () => {
         expect(() => requireScratchRepository(undefined, {})).toThrow(
             "required",

@@ -26,6 +26,8 @@ const HARNESS_FAILURE_COMMENT =
     /agent session failed|session limit|usage limit|rate[ _-]?limit|overloaded|quota/i;
 
 export const SCRATCH_ENV = "RALPHIE_SMOKE_SCRATCH_REPO";
+/** Live runs spend model quota, so they are banned unless a human sets this. */
+export const ALLOW_LIVE_ENV = "RALPHIE_ALLOW_LIVE_SMOKE";
 export const READY_LABEL = "ready-for-agent";
 const PROTECTED_REPOSITORIES = ["beremaran/ralphie"];
 const SLUG = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
@@ -44,6 +46,15 @@ export type SmokeOptions = {
 };
 
 type Environment = Readonly<Record<string, string | undefined>>;
+
+/** Throws unless a human opted in to spending model quota. */
+export const requireLiveOptIn = (environment: Environment): void => {
+    if (environment[ALLOW_LIVE_ENV] !== "1") {
+        throw new Error(
+            `Live smoke runs are banned: they burn model quota. A human may opt in by setting ${ALLOW_LIVE_ENV}=1.`,
+        );
+    }
+};
 
 /** Throws unless the operator explicitly named the same scratch repository twice. */
 export const requireScratchRepository = (
@@ -734,6 +745,7 @@ const smokeOne = async (
 const main = async (): Promise<number> => {
     let options: SmokeOptions;
     try {
+        requireLiveOptIn(process.env);
         options = parseSmokeOptions(process.argv.slice(2), process.env);
     } catch (error) {
         console.error(describeError(error));

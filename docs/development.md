@@ -81,8 +81,12 @@ It is never run by `bun run test`, `bun run check`, or CI: it needs live
 harness logins, model spend, and GitHub credentials. Run it by hand before a
 release or after changing an adapter, prompt, or hand-off path:
 
+Live runs are banned by default because they burn model quota: the script
+exits `2` unless `RALPHIE_ALLOW_LIVE_SMOKE=1` is set. Only a human sets it;
+agents must never do so.
+
 ```bash
-RALPHIE_SMOKE_SCRATCH_REPO=you/ralphie-scratch \
+RALPHIE_ALLOW_LIVE_SMOKE=1 RALPHIE_SMOKE_SCRATCH_REPO=you/ralphie-scratch \
   bun run smoke:live -- --scratch-repo you/ralphie-scratch --harness claude,codex
 ```
 
