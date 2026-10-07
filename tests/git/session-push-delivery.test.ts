@@ -8,6 +8,7 @@ import { makeGitRemoteSafetyService } from "../../src/git/adapters/remote-safety
 import { makeGitRepositoryService } from "../../src/git/adapters/repository.ts";
 import { CommandRunnerLive } from "../../src/process/adapters/command-runner.ts";
 import type { CommandRunnerService } from "../../src/process/ports.ts";
+import { commitCleanGitBase } from "../shared/git-fixture.ts";
 
 const ORIGIN_URL = "https://github.com/owner/repository.git";
 
@@ -25,13 +26,11 @@ const prepareLocalRemote = async () => {
     try {
         await run(root, "init", "-q", "--bare", remote);
         await run(root, "clone", "-q", remote, work);
-        await run(work, "config", "user.email", "t@test.local");
-        await run(work, "config", "user.name", "T");
-        await run(work, "checkout", "-q", "-b", "main");
-        await writeFile(join(work, "a.txt"), "a\n");
-        await run(work, "add", ".");
-        await run(work, "commit", "-q", "-m", "base");
-        const baseSha = await run(work, "rev-parse", "HEAD");
+        const baseSha = await commitCleanGitBase(
+            work,
+            CommandRunnerLive,
+            "main",
+        );
         await run(work, "push", "-q", "origin", "main");
 
         const runner: CommandRunnerService = {

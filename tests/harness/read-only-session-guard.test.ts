@@ -11,6 +11,7 @@ import type {
 import { makeGitWorkingTreeService } from "../../src/git/adapters/working-tree.ts";
 import { CommandRunnerLive } from "../../src/process/adapters/command-runner.ts";
 import { makeFakeHarness } from "../shared/fake-harness.ts";
+import { commitCleanGitBase } from "../shared/git-fixture.ts";
 
 const request = (overrides: Partial<SessionRequest> = {}): SessionRequest => ({
     role: "implementer",
@@ -27,21 +28,15 @@ describe("read-only session guard", () => {
         body: (path: string) => Promise<void>,
     ): Promise<void> => {
         const path = await mkdtemp(join(tmpdir(), "ralphie-guard-"));
-        const git = async (...args: string[]) => {
-            const result = await CommandRunnerLive.run("git", [
+        try {
+            const initialized = await CommandRunnerLive.run("git", [
                 "-C",
                 path,
-                ...args,
+                "init",
+                "-q",
             ]);
-            if (result.exitCode !== 0) throw new Error(result.stderr);
-        };
-        try {
-            await git("init", "-q");
-            await git("config", "user.email", "t@test.local");
-            await git("config", "user.name", "T");
-            await writeFile(join(path, "a.txt"), "a\n");
-            await git("add", ".");
-            await git("commit", "-q", "-m", "base");
+            if (initialized.exitCode !== 0) throw new Error(initialized.stderr);
+            await commitCleanGitBase(path, CommandRunnerLive);
             await body(path);
         } finally {
             await rm(path, { recursive: true, force: true });
